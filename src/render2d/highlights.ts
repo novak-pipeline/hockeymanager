@@ -104,14 +104,21 @@ export function buildHighlights(stream: GameStream): HighlightSegment[] {
 /**
  * Filter segments by playback mode.
  *
- *  'key'      — goals (importance 3) + penalties + top chances (importance >= 2)
- *  'extended' — all segments
+ *  'key'      — goals, big (rebound) saves, and penalties only. Standalone
+ *               scoring chances are intentionally EXCLUDED: a normal game tags
+ *               dozens of importance-2 chances whose wide windows merge into
+ *               near-total coverage, which made "key moments" play almost the
+ *               whole game. (A chance that happens next to a goal is already
+ *               folded into that goal's merged segment, so the lead-up is kept.)
+ *  'extended' — all segments (goals, chances, saves, penalties, hits).
  */
 export function selectMode(
   segments: HighlightSegment[],
   mode: 'key' | 'extended'
 ): HighlightSegment[] {
   if (mode === 'extended') return segments
-  // key: importance >= 2 only
-  return segments.filter((s) => s.importance >= 2)
+  // key: goals + big saves + penalties (drop standalone chances and hits)
+  return segments.filter(
+    (s) => s.kind === 'goal' || s.kind === 'save' || s.kind === 'penalty'
+  )
 }

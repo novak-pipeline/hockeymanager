@@ -92,6 +92,18 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
 
   const en = voices.filter((v) => v.lang.toLowerCase().startsWith('en'))
 
+  // Tier 0 (preferred): a British male commentator voice. "George" is the
+  // Windows UK English male voice; Daniel/Arthur are common alternatives.
+  // Prefer a natural/neural UK voice first, then any en-GB, then SAPI George.
+  const gb = en.filter((v) => v.lang.toLowerCase() === 'en-gb')
+  const britFirst = [
+    ...gb.filter((v) => /natural|neural|online/i.test(v.name)),
+    ...gb.filter((v) => /george|daniel|arthur|ryan/i.test(v.name)),
+    ...en.filter((v) => /george/i.test(v.name)),
+    ...gb,
+  ]
+  if (britFirst.length > 0) return britFirst[0]
+
   // Tier 1: names suggestive of neural/natural quality
   const tier1Names = ['natural', 'neural', 'online']
   for (const pattern of tier1Names) {
@@ -171,7 +183,9 @@ class SystemVoiceEngine implements VoiceEngine {
     const utt = new SpeechSynthesisUtterance(line.speech)
     utt.rate = 1.12
     utt.pitch = 0.95
-    utt.lang = 'en-US'
+    // Match the chosen voice's locale (e.g. en-GB for George) so the engine
+    // doesn't substitute a US voice; fall back to en-US when none is cached.
+    utt.lang = this._voiceCache?.lang ?? 'en-US'
     if (this._voiceCache) utt.voice = this._voiceCache
 
     const decrement = () => {
