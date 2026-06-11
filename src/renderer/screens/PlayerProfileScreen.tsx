@@ -17,22 +17,66 @@ function PotentialStars({ count }: { count: number }): JSX.Element {
   )
 }
 
-function AttrBar({ label, value }: { label: string; value: number }): JSX.Element {
+function AttrBar({
+  label,
+  value,
+  lo,
+  hi,
+  masked,
+}: {
+  label: string
+  value: number
+  lo?: number
+  hi?: number
+  masked?: boolean
+}): JSX.Element {
   const pct = Math.max(0, Math.min(100, value))
-  const cls =
-    pct >= 85 ? 'meter-fill' :
-    pct >= 70 ? 'meter-fill' :
-    'meter-fill warn'
   const color =
     pct >= 85 ? 'var(--success)' :
     pct >= 70 ? 'var(--accent)' :
     pct >= 55 ? 'var(--accent2)' :
     'var(--danger)'
+
+  if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
+    // Render a soft band: grey fill for the range, midpoint marker
+    const loPct = Math.max(0, Math.min(100, lo))
+    const hiPct = Math.max(0, Math.min(100, hi))
+    const bandW = hiPct - loPct
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 56px', alignItems: 'center', gap: 8 }}>
+        <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        <div className="meter" style={{ height: 6, position: 'relative' }}>
+          {/* Band fill */}
+          <div style={{
+            position: 'absolute',
+            left: `${loPct}%`,
+            width: `${bandW}%`,
+            height: '100%',
+            background: 'var(--muted)',
+            opacity: 0.35,
+            borderRadius: 3,
+          }} />
+          {/* Midpoint marker */}
+          <div style={{
+            position: 'absolute',
+            left: `${pct}%`,
+            width: 2,
+            height: '100%',
+            background: color,
+            transform: 'translateX(-50%)',
+            borderRadius: 1,
+          }} />
+        </div>
+        <span className="small mono muted" style={{ textAlign: 'right' }}>{lo}–{hi}</span>
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 30px', alignItems: 'center', gap: 8 }}>
       <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
       <div className="meter" style={{ height: 6 }}>
-        <div className={cls} style={{ width: `${pct}%`, background: color }} />
+        <div className="meter-fill" style={{ width: `${pct}%`, background: color }} />
       </div>
       <span className="small mono" style={{ color, textAlign: 'right' }}>{value}</span>
     </div>
@@ -164,8 +208,24 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
             {/* Big OVR + potential */}
             <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end' }}>
               <div className="stat">
-                <div className="stat-value" style={{ fontSize: 42, color: 'var(--accent)' }}>{d.overall}</div>
-                <div className="stat-label">Overall</div>
+                {d.scouted && !d.scouted.exact ? (
+                  <>
+                    <div className="stat-value" style={{ fontSize: 36, color: 'var(--muted)' }}>
+                      {d.scouted.overallLo}–{d.scouted.overallHi}
+                    </div>
+                    <div className="stat-label">
+                      Overall
+                      <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
+                        {d.scouted.knowledge}%
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="stat-value" style={{ fontSize: 42, color: 'var(--accent)' }}>{d.overall}</div>
+                    <div className="stat-label">Overall</div>
+                  </>
+                )}
               </div>
               <div className="stack" style={{ gap: 'var(--sp-1)' }}>
                 <PotentialStars count={d.potentialStars} />
@@ -231,7 +291,14 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
             <Panel key={group.name} title={group.name}>
               <div className="stack" style={{ gap: 6 }}>
                 {group.attributes.map((a) => (
-                  <AttrBar key={a.label} label={a.label} value={a.value} />
+                  <AttrBar
+                    key={a.label}
+                    label={a.label}
+                    value={a.value}
+                    lo={a.lo}
+                    hi={a.hi}
+                    masked={a.masked}
+                  />
                 ))}
               </div>
             </Panel>

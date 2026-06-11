@@ -1,50 +1,52 @@
 /**
- * Full-fidelity match engine (docs/ARCHITECTURE.md §5, build step #3).
+ * Full-fidelity match engine (docs/ARCHITECTURE.md §5, build step #3) —
+ * DIRECTOR / CHOREOGRAPHER architecture.
  *
- * Where the quick-sim aggregates a game into 40-second shifts, this engine steps
- * the play forward every FRAME_DT seconds and emits a positional `frame` on each
- * step — the dense GameStream a renderer animates. Discrete events (shot, save,
- * goal, hit, penalty, faceoff) are layered on top at the tick they occur.
+ * Where the quick-sim aggregates a game into 40-second shifts, this engine
+ * steps play forward every FRAME_DT seconds and emits a positional `frame` on
+ * each step — the dense GameStream a renderer animates. Discrete events (shot,
+ * save, goal, hit, penalty, faceoff) are layered on top at the tick they occur.
  *
- * It returns the SAME `GameOutcome` the quick-sim does, so the career layer
- * applies a watched game identically to a background one.
+ * Play is no longer emergent soup. It is DIRECTED:
  *
- * The on-ice model is a POSSESSION-PHASE STATE MACHINE so a watched game reads
- * as real hockey rather than drifting dots:
+ *   - THE DIRECTOR (director.ts) is a seeded semi-Markov sampler over BEATS —
+ *     breakout, regroup, entryCarry, entryDump, entryFailedOffside,
+ *     cyclePossession, pointShot, seamOneTimer, rushShot, wraparound,
+ *     reboundScramble, turnoverCounter, dzClear, icingWhistle, offsideWhistle,
+ *     goalieFreeze, penaltyWhistle, lineChange, faceoff. Transition weights and
+ *     hazard rates derive from CALIBRATION_TARGETS.sequences (real NHL
+ *     play-by-play rhythm: stoppages per game, zone-time shares, entry and
+ *     rush-shot rates, whistle cadence), with NHL-shaped fallbacks until that
+ *     optional field lands. Team strength, tactics, and the strength state
+ *     modulate the weights — better teams sample more offensive-zone beats, a
+ *     trap team suppresses opponent carries, a PP shoots more eagerly.
  *
- *   - BREAKOUT: the retrieving D skates the puck (never teleports to it), his
- *     partner covers net-front, wingers post on the half-walls, the C swings
- *     low; outlet passes go D→wall, D→middle, or D-to-D, and a heavy forecheck
- *     forces rims/chips out (a real possession contest where the puck lands).
- *   - NEUTRAL ZONE: the carrier attacks with speed, teammates fill three lanes
- *     with a weak-side stretch option when the tactics allow the risk.
- *   - ZONE ENTRY: chosen from carrier skill, the defending D's gap, and
- *     tactics.tempo — controlled carry wide, a pass to a trailer, or a
- *     dump-and-chase that rims to the corner for F1 to fight over.
- *   - CYCLE: corner / half-wall / point stations with a net-front screen and
- *     both D walking the line (pinching down when defensivePinch says so).
- *     Shots come FROM the structure: point shots through traffic, seam feeds
- *     across the royal road for one-timers, wraparounds, rebounds — with danger
- *     read off the real NHL xG surface at the true shot origin.
- *   - RUSH: live turnovers in neutral/offensive ice launch counters; odd-man
- *     situations are detected from actual player positions and carry elevated
- *     danger while the defenders backcheck at their real skating speed.
+ *   - THE CHOREOGRAPHER (playbook.ts) renders each beat as an authored play —
+ *     BREAKOUT_WHEEL / BREAKOUT_RIM, NZ_REGROUP, ENTRY_CARRY_WIDE (trailers
+ *     hard-clamped ONSIDE), ENTRY_DUMP_CHASE, OZ_CYCLE, POINT_SHOT_SCREEN,
+ *     SEAM_ONE_TIMER, RUSH_2v1/3v2, WRAPAROUND_JAM, REBOUND_CRASH — while the
+ *     defending side simultaneously runs its counter-template from
+ *     formations.ts (1-2-2 / 2-1-2 / trap forechecks, box+1 or man D-zone
+ *     coverage, rush gap control, PK box/diamond vs PP umbrella/1-3-1/overload,
+ *     faceoff lineups at the correct nine dots).
  *
- * The defending team mirrors with its own structure: forecheck shape per
- * tactics.forecheck (1-2-2 / 2-1-2 / trap), in-zone coverage per dZoneCoverage
- * (zone box+1 or man), D playing gap control on rushes, and PK box/diamond vs
- * PP umbrella/1-3-1/overload — visibly different shapes in the frames.
+ *   - OFFSIDES are real: at the data-driven rate an entry dies offside — a
+ *     winger visibly beats the puck across the line, the whistle goes, and the
+ *     faceoff comes back to the neutral-zone dot nearest the blue line.
+ *
+ * Shot OUTCOMES keep the calibrated machinery: every attempt's danger comes
+ * from the real NHL xG surface at the true origin (lookupXg), blocks split off
+ * via ON_GOAL_SHARE, finishing is reconciled by FINISH_K against the goalie's
+ * composite, and rebounds become live pucks both teams crash.
  *
  * Skating uses per-player top speed (~24–34 ft/s from composites.skating) with
  * finite acceleration, so no skater ever moves more than topSpeed × dt in one
  * tick. The puck flies at real speeds (passes ~60–90 ft/s, shots ~90–130 ft/s)
  * and dump-ins/clears/rebounds become LOOSE pucks that both teams race to.
  *
- * Stoppages: goalie freezes (likelier under net-front pressure), goals, icing
- * (a clearing dump from behind center that crosses the goal line — waved off
- * when the clearing team is shorthanded, as in the real rule), and penalties
- * all stop play; both teams then SKATE to the proper one of the nine dots and
- * a real faceoff is conducted.
+ * Stoppages — goals, goalie freezes, icings, offsides, penalties, and "other"
+ * (puck out of play) — all stop play at NHL cadence; both teams then SKATE to
+ * the proper one of the nine dots and a real faceoff is conducted.
  *
  * Strength states are REAL, not just rate multipliers:
  *   - A penalized team ices 4 skaters (3 if two minors overlap; never fewer)
@@ -80,15 +82,18 @@ import {
   clamp,
   distFt,
   nearestIdx,
+  type BeatKind,
   type Ctx,
   type FullSimTelemetry,
-  type Phase,
   type RSkater,
   type ShotKind,
+  type StoppageCounts,
   type Unit
 } from './types'
 import { steer, type MoveOrder } from './movement'
-import { attackerOrders, defenderOrders, faceoffOrders, faceoffSpot } from './formations'
+import { defenderOrders, faceoffOrders, faceoffSpot } from './formations'
+import { attackPlayOrders, phaseForPlay, type PlayId } from './playbook'
+import { Director } from './director'
 
 const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
@@ -119,33 +124,28 @@ const EN_GOAL_P = 0.85
 // "decision" ticks a game produces (a tick where the puck is settled on a
 // carrier — not in flight, not loose, not waiting for a faceoff).
 // DECISION_TICKS_PER_GAME was measured from the engine itself (see the
-// calibration snapshot in fullSim.test.ts).
+// calibration snapshot in calibration.test.ts).
 const RATES = CALIBRATION_TARGETS.perTeamPerGame
 const XG = CALIBRATION_TARGETS.xgSurface
 const FENWICK_FALLBACK = CALIBRATION_TARGETS.shooting.fenwickShootingPct
 
-const DECISION_TICKS_PER_GAME = 8200
+const DECISION_TICKS_PER_GAME = 8700
 
 /** What fraction of shot attempts reach the net (the rest are blocked). */
 const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShots)
 
-// Per-decision-tick shot-attempt gate, scaled by a structural weight (where the
-// carrier is standing: slot vs point vs rush) whose mix averages ≈ 1 in the
-// offensive zone. Measured against the engine, then frozen.
-const ATTEMPT_BASE = 0.0335
-
 // Correction applied to the empirical xG so that GOALS/game match the target:
-// our shot generator is structure-weighted (screens, seams, rushes), so its
-// mix is higher-quality than a flat league average; this scalar reconciles the
-// two. Measured, then frozen.
-const FINISH_K = 0.84
+// the director's shot mix is structure-weighted (screens, seams, rushes), so it
+// is higher-quality than a flat league average; this scalar reconciles the two.
+// Measured against the engine, then frozen.
+const FINISH_K = 0.6
 
 // Non-shot events: per-game target → per-decision-tick probability. Hits and
 // takeaways are gated on the pressuring defender actually being near the puck
 // (a check from across the rink would look absurd), so their constants carry a
 // measured boost for the fraction of ticks that pass the proximity gate.
-const HIT_P = ((2 * RATES.hits) / DECISION_TICKS_PER_GAME) * 2.55
-const TAKEAWAY_P = ((2 * RATES.takeaways) / DECISION_TICKS_PER_GAME) * 2.95
+const HIT_P = ((2 * RATES.hits) / DECISION_TICKS_PER_GAME) * 1.78
+const TAKEAWAY_P = ((2 * RATES.takeaways) / DECISION_TICKS_PER_GAME) * 2.25
 const GIVEAWAY_P = (2 * RATES.giveaways) / DECISION_TICKS_PER_GAME
 const PENALTY_P = RATES.penalties / DECISION_TICKS_PER_GAME
 
@@ -174,7 +174,20 @@ const GOAL_CELEBRATION_TICKS = 12
 /** The nine faceoff dots, matching the dots the renderer draws. */
 const CENTER_DOT: XY = { x: 0, y: 0 }
 const EZ_X = 0.6
+const NZ_DOT_X = 0.2
 const DOT_Y = 0.55
+
+const ALL_DOTS: XY[] = [
+  CENTER_DOT,
+  { x: -NZ_DOT_X, y: -DOT_Y },
+  { x: -NZ_DOT_X, y: DOT_Y },
+  { x: NZ_DOT_X, y: -DOT_Y },
+  { x: NZ_DOT_X, y: DOT_Y },
+  { x: -EZ_X, y: -DOT_Y },
+  { x: -EZ_X, y: DOT_Y },
+  { x: EZ_X, y: -DOT_Y },
+  { x: EZ_X, y: DOT_Y }
+]
 
 /** Empirical xG for a shot from normalized rink position toward the attacked net. */
 function shotXg(puck: XY, attackSign: number): number {
@@ -228,6 +241,8 @@ type DeployKind = 'ev' | 'pp' | 'pk' | 'ot'
 class TeamSim {
   readonly team: Team
   readonly resolve: (id: PlayerId) => Player
+  /** Mean lineup quality (≈ league avg 50) — the director's strength input. */
+  readonly strength: number
   /** Whether this side defends the +x or -x net this period (set per period). */
   defendsPositive = false
   goals = 0
@@ -241,6 +256,20 @@ class TeamSim {
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
     this.resolve = resolve
+    const ids = [...team.lines.forwards.flat(), ...team.lines.defensePairs.flat()]
+    let s = 0
+    let n = 0
+    for (const id of ids) {
+      const p = resolve(id)
+      s +=
+        (p.composites.scoring +
+          p.composites.playmaking +
+          p.composites.skating +
+          p.composites.defensiveZone) /
+        4
+      n++
+    }
+    this.strength = n > 0 ? s / n : LEAGUE_AVG
   }
 
   /** Net this side defends (+1 / -1). */
@@ -454,13 +483,34 @@ interface PendingFaceoff {
   wait: number
 }
 
-/** A live counterattack window after a turnover. */
-interface RushState {
+/** A beat in progress: the director's pick plus the choreography it runs. */
+interface ActiveBeat {
+  kind: BeatKind
+  play: PlayId
+  team: TeamSim
+  /** Ticks elapsed within this beat. */
   ticks: number
+  /** Ticks before the director re-samples (or the beat self-resolves). */
+  dwell: number
+  /** Strong side (sign of puck.y) frozen at beat start. */
+  side: number
+  /** Counterattack with the defenders genuinely beat. */
   oddMan: boolean
+  /** Carrier clean past EVERY defender — drives the net, never passes. */
+  breakaway: boolean
+  /** One-shot flag (set-play pass thrown, rush entry credited, …). */
+  passMade: boolean
+  /** Featured skater index (offside winger, seam receiver, dump chaser). */
+  targetIdx: number
 }
 
-function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): PeriodOutcome {
+function simPeriod(
+  ctx: Ctx,
+  home: TeamSim,
+  away: TeamSim,
+  spec: PeriodSpec,
+  director: Director
+): PeriodOutcome {
   const { rng } = ctx
   const { period, lengthSeconds, suddenDeath, absBase, baseSkaters } = spec
   home.defendsPositive = period % 2 === 0 // home attacks +x on odd periods
@@ -472,13 +522,12 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
   const looseV = { x: 0, y: 0 }
   let possession: TeamSim = home
   let carrier: PlayerId | null = null
-  let phase: Phase = 'neutral'
-  let rush: RushState | null = null
+  let beat: ActiveBeat | null = null
   let pending: PendingFaceoff | null = null
-  /** Ticks remaining of a live-rebound scramble (quick put-back chances). */
+  /** Ticks remaining of a live-rebound window (quick put-back chances). */
   let reboundTicks = 0
-  /** Sticky zone-entry choice so we decide once per neutral-zone possession. */
-  let entryChoice: 'carry' | 'dump' | 'pass' | null = null
+  /** Game-clock second of each side's last completed zone entry (rush window). */
+  const entryAt = new Map<TeamSim, number>()
   let lastShift = 0
   let endedSuddenDeath = false
   let heldBy: PlayerId | null = null
@@ -490,6 +539,13 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
   const otherOf = (team: TeamSim): TeamSim => (team === home ? away : home)
   const carrierSkater = (): RSkater | undefined =>
     possession.unit.skaters.find((r) => r.player.id === carrier)
+
+  const noteBeat = (k: BeatKind): void => {
+    if (ctx.telemetry) ctx.telemetry.beats[k]++
+  }
+  const noteStop = (k: keyof StoppageCounts): void => {
+    if (ctx.telemetry) ctx.telemetry.stoppages[k]++
+  }
 
   /** What strength state a team should be deployed at right now. */
   const desiredFor = (team: TeamSim, opp: TeamSim): { kind: DeployKind; count: number } => {
@@ -521,6 +577,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     const d = desiredFor(team, opp)
     team.deploy(rng, d.kind, d.count, inherit)
     if (announce) {
+      noteBeat('lineChange')
       ctx.stream.push({
         t: clk.t,
         period,
@@ -597,52 +654,52 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     flight = null
     looseV.x = 0
     looseV.y = 0
-    rush = null
+    beat = null
     reboundTicks = 0
-    entryChoice = null
   }
 
-  /**
-   * Current phase for the possession team (rush overrides). The cycle is
-   * STICKY: once possession is established deep, walking the puck back to the
-   * point is still the cycle (the structure holds) — it only breaks when the
-   * puck genuinely leaves the zone.
-   */
-  const computePhase = (): Phase => {
-    const adv = puck.x * possession.attackSign()
-    if (rush && adv > -0.2 && adv < 0.78) return 'rush'
-    if (adv < -0.2) return 'breakout'
-    if (phase === 'cycle' && adv > 0.18) return 'cycle'
-    if (adv < O_BLUE) return 'neutral'
-    if (adv < 0.52) return 'entry'
-    return 'cycle'
-  }
+  /** Roster-strength edge of `team` over its opponent, ≈ −0.5..0.5. */
+  const edgeOf = (team: TeamSim): number =>
+    clamp((team.strength - otherOf(team).strength) / 30, -0.5, 0.5)
 
-  /**
-   * After a live turnover: does the new possession team have a counterattack?
-   * Odd-man situations are read from the ACTUAL bodies on the ice — attackers
-   * level with the puck vs defenders already back between it and their net.
-   */
-  const maybeStartRush = (): void => {
-    rush = null
-    entryChoice = null
-    heldTicks = 0
-    phase = 'neutral' // fresh possession: never inherit the victim team's phase
-    const a = possession.attackSign()
-    const adv = puck.x * a
-    if (adv < -0.35) {
-      phase = computePhase()
-      return // stolen deep in their own end: that's a breakout, not a rush
+  /** The base play to run when no beat is active (positional default). */
+  const defaultPlay = (advLike: number): PlayId =>
+    advLike < -0.18 ? 'BREAKOUT_WHEEL' : advLike < O_BLUE ? 'NZ_REGROUP' : 'OZ_CYCLE'
+
+  /** Create a beat (and count it in telemetry). */
+  const mkBeat = (kind: BeatKind, play: PlayId, team: TeamSim, dwell: number): ActiveBeat => {
+    noteBeat(kind)
+    return {
+      kind,
+      play,
+      team,
+      ticks: 0,
+      dwell,
+      side: puck.y >= 0 ? 1 : -1,
+      oddMan: false,
+      breakaway: false,
+      passMade: false,
+      targetIdx: -1
     }
-    const def = otherOf(possession)
-    let back = 0
-    for (const r of def.unit.skaters) if (r.pos.x * a > adv + 0.02) back++
-    let up = 0
-    for (const r of possession.unit.skaters) if (r.pos.x * a > adv - 0.08) up++
-    const oddMan = up > back && back <= 2
-    const pace = possession.team.tactics.tempo.pace
-    if (oddMan || rng.chance(0.3 + pace * 0.3)) rush = { ticks: 30, oddMan }
-    phase = computePhase()
+  }
+
+  /** The nine dots: which one a neutral whistle comes back to. */
+  const nearestDot = (p: XY): XY => {
+    let best = ALL_DOTS[0]
+    let bd = Infinity
+    for (const d of ALL_DOTS) {
+      const dd = distFt(d, p)
+      if (dd < bd) {
+        bd = dd
+        best = d
+      }
+    }
+    return best
+  }
+
+  const dotZone = (dot: XY, team: TeamSim): Zone => {
+    if (Math.abs(dot.x) <= 0.25) return 'neutral'
+    return dot.x * team.attackSign() > 0 ? 'offensive' : 'defensive'
   }
 
   /** Strength a goal right now would be recorded at. */
@@ -656,16 +713,14 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
   }
 
   // ---------------------------------------------------------------------------
-  // Shooting — every shot is generated from the structure (point/seam/rush/...)
-  // and its danger comes from the real xG surface at the true origin.
+  // Shooting — every shot comes from a directed beat (point/seam/rush/...) and
+  // its danger comes from the real xG surface at the true origin.
   // ---------------------------------------------------------------------------
-  const tryShoot = (shooterSk: RSkater, kind: ShotKind, oneTimer: boolean): void => {
+  const tryShoot = (shooterSk: RSkater, kind: ShotKind, oneTimer: boolean, oddMan: boolean): void => {
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
     const from: XY = { x: puck.x, y: puck.y }
-    const oddMan = rush !== null && rush.oddMan && (kind === 'rush' || kind === 'onetimer')
-    rush = null
 
     // Some attempts are blocked before they ever reach the net.
     if (rng.chance(1 - ON_GOAL_SHARE)) {
@@ -689,7 +744,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       kind === 'point' && countNear(atk.unit.skaters, { x: a * 0.89, y: 0 }, 12) > 0
     let eff = xg
     if (oneTimer) eff *= 1.35 // across the royal road, goalie moving
-    if (oddMan) eff *= 1.45 // odd-man rushes are the highest-leverage chances
+    if (oddMan && (kind === 'rush' || kind === 'onetimer')) eff *= 1.45 // odd-man rushes
     if (screened) eff *= 1.15 // point shot through a net-front screen
     if (kind === 'rebound') eff *= 1.3 // goalie down, net open
     const danger = clamp(eff / 0.25, 0, 1)
@@ -703,7 +758,11 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       target: { x: a, y: 0 },
       danger
     })
-    ctx.telemetry?.shots.push({ kind, danger, oddMan })
+    // Telemetry tags rush shots by the data definition: within 6s of the entry.
+    const sinceEntry = clk.t - (entryAt.get(atk) ?? -999)
+    const recordKind: ShotKind =
+      kind === 'rebound' ? 'rebound' : sinceEntry >= 0 && sinceEntry <= 6 ? 'rush' : kind
+    ctx.telemetry?.shots.push({ kind: recordKind, danger, oddMan })
     stat(ctx, shooterSk.player.id).shots++
 
     const goalie = def.unit.goalie
@@ -740,6 +799,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
           strength: gs,
           pos: { x: from.x, y: from.y }
         })
+        noteStop('goal')
         if (gs === 'pp') def.clearEarliestPenalty()
         if (suddenDeath) {
           endedSuddenDeath = true
@@ -754,9 +814,10 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         return
       }
       gStat!.saves++
-      // Net-front pressure makes the goalie eat the puck rather than play it.
+      // Net-front pressure makes the goalie eat the puck rather than play it —
+      // at the data-driven freeze rate (goalieFreeze stoppages per game).
       const netFront = clamp(countNear(atk.unit.skaters, { x: a * 0.89, y: 0 }, 13) / 2, 0, 1)
-      const freeze = rng.chance(clamp(0.42 + netFront * 0.35 + (kind === 'rebound' ? 0.08 : 0), 0, 0.85))
+      const freeze = rng.chance(director.pFreeze(netFront, kind === 'rebound'))
       ctx.stream.push({
         t: clk.t,
         period,
@@ -767,6 +828,8 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       })
       if (freeze) {
         ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { ...goalie.pos } })
+        noteBeat('goalieFreeze')
+        noteStop('goalieFreeze')
         stopPlay({ x: a * EZ_X, y: from.y >= 0 ? DOT_Y : -DOT_Y }, 'offensive')
         return
       }
@@ -775,7 +838,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         puck.x = a * 0.8
         puck.y = rng.float(-0.18, 0.18)
         dropLoose(-a * rng.float(18, 30), rng.float(-10, 10))
-        reboundTicks = 10
+        reboundTicks = 12
       } else {
         // Steered into the corner.
         const side = rng.chance(0.5) ? 1 : -1
@@ -786,20 +849,111 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     })
   }
 
+  /** Counterattack check after a live turnover — the new side may have a rush. */
+  const startCounter = (): void => {
+    heldTicks = 0
+    beat = null
+    const a = possession.attackSign()
+    const adv = puck.x * a
+    if (adv < -0.1) return // stolen in our half: settle it, that's a breakout
+    const def = otherOf(possession)
+    let back = 0
+    for (const r of def.unit.skaters) if (r.pos.x * a > adv + 0.02) back++
+    let up = 0
+    for (const r of possession.unit.skaters) if (r.pos.x * a > adv - 0.08) up++
+    const oddMan = up > back && back <= 2
+    const pace = possession.team.tactics.tempo.pace
+    if ((oddMan && rng.chance(0.75)) || rng.chance(0.06 + pace * 0.08)) {
+      const nb = mkBeat('turnoverCounter', 'RUSH_ODDMAN', possession, 34)
+      nb.oddMan = oddMan
+      beat = nb
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // Passing — phase-aware target selection: breakout outlets, neutral-zone
-  // lanes/stretch, cycle stations with low-to-high and royal-road seam feeds.
+  // Passing.
   // ---------------------------------------------------------------------------
+
+  /** The phase the possession team is choreographing right now. */
+  const currentPhase = (team: TeamSim) =>
+    phaseForPlay(beat && beat.team === team ? beat.play : defaultPlay(puck.x * team.attackSign()))
+
+  /**
+   * A DIRECTED pass — the choreographer's set-play feed (low-to-high to the
+   * point, the royal-road seam, the trailer dish, the 2-on-1 pass across).
+   * Same physics and interception risk as organic passing.
+   */
+  const passTo = (cs: RSkater, toSk: RSkater, oneTimer: boolean, oddMan: boolean): void => {
+    const atk = possession
+    const def = otherOf(atk)
+    const a = atk.attackSign()
+    // Breakaway tripwire (same definition as the loop's): a clean-in-alone
+    // carrier must never be routed here. Counted so tests can assert zero.
+    if (
+      ctx.telemetry &&
+      puck.x * a > 0.1 &&
+      def.unit.skaters.every((r) => r.pos.x * a < cs.pos.x * a - 0.08)
+    ) {
+      const pIdx = nearestIdx(def.unit.skaters, puck)
+      const pd = pIdx >= 0 ? distFt(def.unit.skaters[pIdx].pos, puck) : 99
+      if (pd > 14) ctx.telemetry.breakawayPasses++
+    }
+    const d0 = distFt(cs.pos, toSk.pos)
+    const speed = clamp(62 + d0 * 0.3, 60, 92)
+    const tEst = d0 / speed
+    const b: XY = {
+      x: clamp(toSk.pos.x + (toSk.vel.x * tEst) / X_FT, -0.95, 0.95),
+      y: clamp(toSk.pos.y + (toSk.vel.y * tEst) / Y_FT, -0.92, 0.92)
+    }
+    const completed = rng.chance(clamp(0.93 - d0 / 400 - (oneTimer ? 0.06 : 0), 0.55, 0.95))
+    ctx.stream.push({
+      t: clk.t,
+      period,
+      type: 'pass',
+      from: cs.player.id,
+      to: toSk.player.id,
+      a: { x: puck.x, y: puck.y },
+      b,
+      completed
+    })
+    const interceptorIdx = nearestIdx(def.unit.skaters, b)
+    launchFlight(b, speed, () => {
+      if (completed) {
+        carrier = toSk.player.id
+        heldBy = carrier
+        heldTicks = 0
+        if (oneTimer) {
+          puck.x = toSk.pos.x
+          puck.y = toSk.pos.y
+          tryShoot(toSk, 'onetimer', true, oddMan)
+        }
+      } else {
+        const ic = def.unit.skaters[interceptorIdx]
+        possession = def
+        carrier = ic.player.id
+        heldBy = carrier
+        puck.x = ic.pos.x
+        puck.y = ic.pos.y
+        startCounter()
+      }
+    })
+  }
+
+  /**
+   * Organic puck movement inside flowing beats (breakout outlets, regroup
+   * D-to-D, cycle station-to-station) — phase-aware target weights.
+   */
   const doPass = (cs: RSkater, pressure: number): boolean => {
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
     const tempo = atk.team.tactics.tempo
+    const phase = currentPhase(atk)
     const csIdx = atk.unit.skaters.indexOf(cs)
     const csSlot = atk.unit.slots[csIdx] ?? 1
     const puckAdv = puck.x * a
 
-    // Tripwire: the tick loop must never route a breakaway here (same
+    // Tripwire: the beat machine must never route a breakaway here (same
     // definition as the loop's: clearly past everyone, nobody in contact).
     // Counted so tests can assert it stays zero.
     if (
@@ -890,7 +1044,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         if (oneTimer && toSk.pos.x * a > 0.4) {
           puck.x = toSk.pos.x
           puck.y = toSk.pos.y
-          tryShoot(toSk, 'onetimer', true)
+          tryShoot(toSk, 'onetimer', true, false)
         }
       } else {
         const ic = def.unit.skaters[interceptorIdx]
@@ -899,7 +1053,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         heldBy = carrier
         puck.x = ic.pos.x
         puck.y = ic.pos.y
-        maybeStartRush()
+        startCounter()
       }
     })
     return true
@@ -913,54 +1067,89 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       launchFlight(to, CLEAR_SPEED, () => dropLoose(a * 20, rng.float(-8, 8)))
       return
     }
-    if (puck.x * a < -0.02 && rng.chance(0.045)) {
-      // Hurried clear that goes all the way down: ICING. Whistle when it
-      // crosses the goal line; faceoff comes back to the offender's end.
-      const to: XY = { x: a * 0.93, y: rng.float(-0.55, 0.55) }
-      const offSign = atk.ownSign()
-      launchFlight(to, CLEAR_SPEED, () => {
-        ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { x: puck.x, y: puck.y } })
-        if (ctx.telemetry) ctx.telemetry.icings++
-        stopPlay({ x: offSign * EZ_X, y: puck.y >= 0 ? DOT_Y : -DOT_Y }, 'defensive')
-      })
-      return
-    }
     // Chip off the glass to the neutral-zone boards — a contested 50/50 puck.
     const side = puck.y >= 0 ? 1 : -1
     const to: XY = { x: a * 0.08, y: side * 0.85 }
     launchFlight(to, 80, () => dropLoose(a * 14, side * 6))
   }
 
-  /** One-time blue-line decision: carry it in, hit the trailer, or dump it. */
-  const chooseEntry = (cs: RSkater, pressure: number): 'carry' | 'dump' | 'pass' => {
-    const atk = possession
-    const def = otherOf(atk)
+  /** Hurried clear the length of the ice: ICING. Whistle at the goal line. */
+  const iceThePuck = (atk: TeamSim): void => {
     const a = atk.attackSign()
-    const tempo = atk.team.tactics.tempo
-    // Gap: how much room the defending D are giving the carrier.
-    let gap = 80
-    for (const r of def.unit.skaters) {
-      if ((r.pos.x - cs.pos.x) * a > -0.02) gap = Math.min(gap, distFt(r.pos, cs.pos))
+    const offSign = atk.ownSign()
+    const to: XY = { x: a * 0.93, y: rng.float(-0.55, 0.55) }
+    launchFlight(to, CLEAR_SPEED, () => {
+      ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { x: puck.x, y: puck.y } })
+      if (ctx.telemetry) ctx.telemetry.icings++
+      noteBeat('icingWhistle')
+      noteStop('icing')
+      stopPlay({ x: offSign * EZ_X, y: puck.y >= 0 ? DOT_Y : -DOT_Y }, 'defensive')
+    })
+  }
+
+  /** Index of the attacking point man (least-advanced D), or -1. */
+  const pointManIdx = (atk: TeamSim, a: number): number => {
+    let best = -1
+    let bestAdv = Infinity
+    atk.unit.skaters.forEach((r, i) => {
+      if (atk.unit.slots[i] < 3) return
+      const v = r.pos.x * a
+      if (v < bestAdv) {
+        bestAdv = v
+        best = i
+      }
+    })
+    return best
+  }
+
+  /** Weak-side forward to sneak across the royal road, or -1. */
+  const seamReceiverIdx = (atk: TeamSim, cs: RSkater, a: number): number => {
+    let best = -1
+    let bestScore = -Infinity
+    atk.unit.skaters.forEach((r, i) => {
+      if (r === cs || atk.unit.slots[i] >= 3) return
+      if (Math.sign(r.pos.y || 1) === Math.sign(puck.y || 1)) return
+      const score = r.pos.x * a - Math.abs(r.pos.y)
+      if (score > bestScore) {
+        bestScore = score
+        best = i
+      }
+    })
+    return best
+  }
+
+  /** A trailing teammate to dish to right after a carry-in, or null. */
+  const trailerOf = (atk: TeamSim, cs: RSkater, a: number): RSkater | null => {
+    let best: RSkater | null = null
+    let bd = Infinity
+    for (const r of atk.unit.skaters) {
+      if (r === cs) continue
+      const behind = (cs.pos.x - r.pos.x) * a
+      if (behind < 0.02 || behind > 0.45) continue
+      const d = distFt(r.pos, cs.pos)
+      if (d < bd) {
+        bd = d
+        best = r
+      }
     }
-    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG)
-    const wCarry = 1.15 * skill * clamp(gap / 28, 0.45, 1.7) * (0.7 + tempo.pace * 0.6)
-    const wPass = 0.4 + tempo.passRisk * 0.9
-    const wDump = (0.45 + clamp(1 - gap / 32, 0, 1)) * (1.25 - tempo.passRisk * 0.5)
-    const pick = weightedIndex(rng, [wCarry, wPass, wDump])
-    if (pick === 0) {
-      if (ctx.telemetry) ctx.telemetry.entries.carry++
-      return 'carry'
+    return best
+  }
+
+  /** The lane-filling teammate on a 2-on-1 to pass across to, or null. */
+  const rushLaneMate = (atk: TeamSim, cs: RSkater, a: number): RSkater | null => {
+    let best: RSkater | null = null
+    let bestAdv = -Infinity
+    for (const r of atk.unit.skaters) {
+      if (r === cs) continue
+      if (Math.abs(r.pos.y - cs.pos.y) < 0.25) continue // need a real second lane
+      const v = r.pos.x * a
+      if (v < cs.pos.x * a - 0.15) continue // must be up with the play
+      if (v > bestAdv) {
+        bestAdv = v
+        best = r
+      }
     }
-    if (pick === 1 && doPass(cs, pressure)) {
-      if (ctx.telemetry) ctx.telemetry.entries.pass++
-      return 'pass'
-    }
-    // Dump-and-chase: rim it cross-corner so the chasing winger has a race.
-    if (ctx.telemetry) ctx.telemetry.entries.dump++
-    const side = puck.y >= 0 ? 1 : -1
-    const to: XY = { x: a * 0.9, y: -side * 0.68 }
-    launchFlight(to, DUMP_SPEED, () => dropLoose(a * 5, side * 16))
-    return 'dump'
+    return best
   }
 
   /** Loose puck: nearest bodies fight for it; better puckhandlers win more. */
@@ -981,8 +1170,12 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     heldTicks = 0
     looseV.x = 0
     looseV.y = 0
-    if (!wasAttacker) maybeStartRush()
-    else phase = computePhase()
+    if (!wasAttacker) {
+      startCounter()
+    } else if (reboundTicks > 0 && puck.x * possession.attackSign() > 0.5) {
+      // Won the rebound in front — bang away at it.
+      beat = mkBeat('reboundScramble', 'REBOUND_CRASH', possession, 8)
+    }
     return true
   }
 
@@ -1001,7 +1194,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     g.pos.y = clamp(puck.y * 0.16, -0.06, 0.06)
   }
 
-  /** Move every skater one tick: formation orders + chasers + faceoff lineups. */
+  /** Move every skater one tick: playbook routes + counter-shapes + faceoffs. */
   const stepSkaters = (tNow: number): void => {
     const atk = possession
     const def = otherOf(atk)
@@ -1016,26 +1209,32 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       const atkSH = atk.shorthanded()
       const defSH = def.shorthanded()
       const ppSetup = defSH && !atkSH && puck.x * a > 0.35 && cIdx >= 0
-      atkOrders = attackerOrders({
+      const active = beat && beat.team === atk ? beat : null
+      const play: PlayId = active ? active.play : defaultPlay(puck.x * a)
+      atkOrders = attackPlayOrders({
         unit: atk.unit,
         a,
-        phase,
         puck,
         carrierIdx: cIdx,
         tactics: atk.team.tactics,
         ppSetup,
-        t: tNow
+        t: tNow,
+        play,
+        beatTicks: active ? active.ticks : 0,
+        side: active ? active.side : puck.y >= 0 ? 1 : -1,
+        targetIdx: active ? active.targetIdx : -1,
+        hold: active !== null && active.kind === 'regroup' && active.ticks < active.dwell
       })
       defOrders = defenderOrders({
         unit: def.unit,
         a,
-        phase,
+        phase: phaseForPlay(play),
         puck,
         attackers: atk.unit.skaters,
         carrierIdx: cIdx,
         tactics: def.team.tactics,
         pk: defSH && !atkSH,
-        rushOddMan: rush?.oddMan ?? false,
+        rushOddMan: active !== null && active.oddMan,
         t: tNow
       })
       if (cIdx < 0 && !flight) {
@@ -1046,8 +1245,8 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         if (di >= 0) defOrders[di] = { tx: puck.x, ty: puck.y, urgency: 1 }
       }
     }
-    const hOrders = atk === home ? atkOrders : defOrders
-    const aOrders = atk === home ? defOrders : atkOrders
+    const hOrders = possession === home ? atkOrders : defOrders
+    const aOrders = possession === home ? defOrders : atkOrders
     home.unit.skaters.forEach((r, i) => steer(rng, r, hOrders[i], FRAME_DT))
     away.unit.skaters.forEach((r, i) => steer(rng, r, aOrders[i], FRAME_DT))
     tendNet(home)
@@ -1075,11 +1274,9 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     heldTicks = 0
     puck.x = p.dot.x
     puck.y = p.dot.y
-    rush = null
-    entryChoice = null
+    beat = null
     reboundTicks = 0
-    phase = 'neutral'
-    phase = computePhase()
+    noteBeat('faceoff')
     ctx.stream.push({
       t: clk.t,
       period,
@@ -1089,6 +1286,85 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       pos: { x: p.dot.x, y: p.dot.y }
     })
     pending = null
+  }
+
+  /** Blue-line decision: the director picks carry / dump / offside-failure. */
+  const chooseEntryBeat = (cs: RSkater): ActiveBeat => {
+    const atk = possession
+    const def = otherOf(atk)
+    const a = atk.attackSign()
+    let gap = 80
+    for (const r of def.unit.skaters) {
+      if ((r.pos.x - cs.pos.x) * a > -0.02) gap = Math.min(gap, distFt(r.pos, cs.pos))
+    }
+    const tempo = atk.team.tactics.tempo
+    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG)
+    const pick = director.sampleEntry({
+      gapFt: gap,
+      skill,
+      pace: tempo.pace,
+      passRisk: tempo.passRisk,
+      oppTrap: def.team.tactics.forecheck === 'trap',
+      shorthanded: atk.shorthanded() && !def.shorthanded(),
+      edge: edgeOf(atk)
+    })
+    if (pick === 'offside') {
+      // Designated winger to fly the zone — the most-advanced non-carrier F.
+      let wing = -1
+      let bestA = -2
+      atk.unit.skaters.forEach((r, i) => {
+        if (r.player.id === carrier || atk.unit.slots[i] >= 3) return
+        const v = r.pos.x * a
+        if (v > bestA) {
+          bestA = v
+          wing = i
+        }
+      })
+      if (wing >= 0) {
+        const nb = mkBeat('entryFailedOffside', 'OFFSIDE_FAIL', atk, 36)
+        nb.targetIdx = wing
+        return nb
+      }
+      // No forward available to bust the line (rare 3v3 shapes): carry instead.
+    }
+    if (pick === 'dump') {
+      if (ctx.telemetry) ctx.telemetry.entries.dump++
+      const side = puck.y >= 0 ? 1 : -1
+      // Designated F1 chases the cross-corner rim.
+      let f1 = -1
+      let bd = Infinity
+      atk.unit.skaters.forEach((r, i) => {
+        if (r.player.id === carrier || atk.unit.slots[i] >= 3) return
+        const d = distFt(r.pos, puck)
+        if (d < bd) {
+          bd = d
+          f1 = i
+        }
+      })
+      const nb = mkBeat('entryDump', 'ENTRY_DUMP_CHASE', atk, 36)
+      nb.targetIdx = f1
+      launchFlight({ x: a * 0.9, y: -side * 0.68 }, DUMP_SPEED, () => dropLoose(a * 5, side * 16))
+      return nb
+    }
+    return mkBeat('entryCarry', 'ENTRY_CARRY_WIDE', atk, 44)
+  }
+
+  /** What beat fits the current puck position (fresh possession, no context). */
+  const pickBeat = (pressure: number): ActiveBeat => {
+    const atk = possession
+    const a = atk.attackSign()
+    const adv = puck.x * a
+    if (adv < -0.18) {
+      return mkBeat('breakout', pressure > 0.5 ? 'BREAKOUT_RIM' : 'BREAKOUT_WHEEL', atk, 60)
+    }
+    if (adv < 0.1) {
+      return mkBeat('regroup', 'NZ_REGROUP', atk, director.regroupDwell(atk.team.tactics.tempo.pace))
+    }
+    if (adv <= O_BLUE + 0.03) {
+      const cs = carrierSkater()
+      if (cs) return chooseEntryBeat(cs)
+    }
+    return mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
   }
 
   // Opening deployment + faceoff (penalties may carry in from the prior period).
@@ -1184,7 +1460,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     // the tick it just landed, so the next roll sees fresh possession.
     if (flight || settledThisTick || carrier === null) continue
 
-    // ---- Decision tick: the carrier reads the ice. -------------------------
+    // ---- Decision tick: the DIRECTOR reads the ice. -------------------------
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
@@ -1199,12 +1475,8 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       heldTicks = 0
     }
     heldTicks++
-    if (rush && --rush.ticks <= 0) rush = null
 
     const adv = puck.x * a
-    phase = computePhase()
-    if (adv < 0.02) entryChoice = null
-
     const presserIdx = nearestIdx(def.unit.skaters, puck)
     const presser = def.unit.skaters[presserIdx]
     const presserDist = presser ? distFt(presser.pos, puck) : 99
@@ -1216,41 +1488,29 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     if (defSH && !atkSH) strengthMult = PP_SHOT_MULT
     else if (atkSH && !defSH) strengthMult = PK_SHOT_MULT
     if (atk.pulled) strengthMult *= EXTRA_ATTACKER_SHOT_MULT
+    const edge = edgeOf(atk)
 
     // Breakaway: the carrier is clean past EVERY defender heading up ice —
-    // whatever the nominal phase says (a rush whose timer lapsed still IS one
-    // while the defenders trail). He drives the net and shoots; there is no
-    // defensible reason to pass, least of all backwards to a defenseman.
+    // whatever the sampled beat says. He drives the net and shoots; there is
+    // no defensible reason to pass, least of all backwards to a defenseman.
     const csAdv = cs.pos.x * a
     const breakaway =
-      phase !== 'breakout' &&
       adv > 0.1 &&
       presserDist > 14 &&
       def.unit.skaters.every((r) => r.pos.x * a < csAdv - 0.08)
     if (breakaway) {
       if (ctx.telemetry) ctx.telemetry.breakawayTicks++
-      // Keep the rush alive so the phase reads 'rush'; the shot's danger comes
-      // from its close-range geometry (xG), not an extra odd-man bonus.
-      if (!rush) rush = { ticks: 30, oddMan: false }
-      else rush.ticks = Math.max(rush.ticks, 12)
-    }
-
-    // 1. Breakout under forecheck heat: rim it, chip it, or ice it.
-    if (phase === 'breakout' && pressure > 0.45) {
-      if (rng.chance(0.05 + pressure * 0.1 + (atkSH ? 0.22 : 0))) {
-        clearPuck(atk, a, atkSH)
-        continue
+      if (
+        !beat ||
+        beat.team !== atk ||
+        (beat.kind !== 'rushShot' && beat.kind !== 'turnoverCounter')
+      ) {
+        beat = mkBeat('rushShot', 'RUSH_ODDMAN', atk, 80)
       }
+      beat.breakaway = true
     }
 
-    // 2. Zone entry decision at the blue line (skipped on a rush — the carry
-    //    IS the entry).
-    if (!rush && phase === 'neutral' && adv > 0.12 && entryChoice === null) {
-      entryChoice = chooseEntry(cs, pressure)
-      if (entryChoice !== 'carry') continue
-    }
-
-    // 3. Penalties — rolled for both teams each tick, weighted by proneness.
+    // 1. Penalties — rolled for both teams each tick, weighted by proneness.
     //    A minor stops play: faceoff in the offender's end, units redeploy.
     {
       let stopped = false
@@ -1272,6 +1532,8 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
             minutes: 2
           })
           ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { x: puck.x, y: puck.y } })
+          noteBeat('penaltyWhistle')
+          noteStop('penalty')
           stopPlay(
             { x: team.ownSign() * EZ_X, y: puck.y >= 0 ? DOT_Y : -DOT_Y },
             'defensive'
@@ -1283,7 +1545,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       if (stopped) continue
     }
 
-    // 4. Physical play: the pressuring defender finishes a check.
+    // 2. Physical play: the pressuring defender finishes a check.
     if (presserDist < 10 && rng.chance(HIT_P)) {
       ctx.stream.push({
         t: clk.t,
@@ -1300,7 +1562,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       }
     }
 
-    // 5. Turnovers. A takeaway is forced — the pressuring defender strips the
+    // 3. Turnovers. A takeaway is forced — the pressuring defender strips the
     //    puck; a giveaway is unforced. Either can ignite a counter-rush.
     if (presserDist < 9 && rng.chance(TAKEAWAY_P)) {
       const loserId = cs.player.id
@@ -1317,7 +1579,7 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
         from: loserId,
         pos: { x: puck.x, y: puck.y }
       })
-      maybeStartRush()
+      startCounter()
       continue
     }
     if (rng.chance(GIVEAWAY_P)) {
@@ -1335,48 +1597,265 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       heldBy = carrier
       puck.x = recoverer.pos.x
       puck.y = recoverer.pos.y
-      maybeStartRush()
+      startCounter()
       continue
     }
 
-    // 6. Shot generation — gated by WHERE the carrier is standing in the
-    //    structure, scaled by tactics.shotEagerness and the strength state.
-    {
-      const central = clamp(1 - Math.abs(puck.y) / 0.5, 0, 1)
-      const csSlot = atk.unit.slots[atk.unit.skaters.indexOf(cs)] ?? 1
-      let gate: { kind: ShotKind; w: number } | null = null
-      if (breakaway) {
-        // In alone: normal rush shot odds while closing, escalating only in
-        // tight so he releases before reaching the net rather than spamming
-        // shots from the blue line.
-        if (adv > 0.78) gate = { kind: 'rush', w: 6 }
-        else if (adv > 0.5) gate = { kind: 'rush', w: 2.4 + central }
-      } else if (phase === 'rush') {
-        if (adv > 0.45) gate = { kind: 'rush', w: 2.4 + central }
-      } else if (phase === 'entry') {
-        if (adv > 0.4) gate = { kind: 'rush', w: 0.9 + central * 0.6 }
-      } else if (phase === 'cycle') {
-        if (reboundTicks > 0 && adv > 0.6 && central > 0.4) gate = { kind: 'rebound', w: 6 }
-        else if (adv > 0.88 && Math.abs(puck.y) < 0.42) gate = { kind: 'wrap', w: 0.3 }
-        else if (csSlot >= 3 && adv < 0.55) gate = { kind: 'point', w: 1.1 }
-        else gate = { kind: 'cycle', w: 0.35 + central * (0.4 + adv) }
-      }
-      if (gate) {
-        const eager = 0.7 + atk.team.tactics.tempo.shotEagerness * 0.6
-        if (rng.chance(ATTEMPT_BASE * gate.w * eager * strengthMult)) {
-          tryShoot(cs, gate.kind, false)
-          continue
+    // 4. "Other" stoppages — puck off the netting, dislodged net, etc. — at the
+    //    data-driven rate; faceoff at the nearest of the nine dots.
+    if (rng.chance(director.pOtherPerTick)) {
+      ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { x: puck.x, y: puck.y } })
+      noteStop('other')
+      const dot = nearestDot(puck)
+      stopPlay(dot, dotZone(dot, atk))
+      continue
+    }
+
+    // 5. The BEAT MACHINE — the director's sampled play advances one tick.
+    if (!beat || beat.team !== atk) beat = pickBeat(pressure)
+    const b = beat
+    b.ticks++
+
+    switch (b.kind) {
+      case 'breakout': {
+        if (atkSH && pressure > 0.25 && rng.chance(0.3)) {
+          // PK: eat no risk, fire it the length of the ice (legal shorthanded).
+          noteBeat('dzClear')
+          clearPuck(atk, a, true)
+          beat = null
+          break
         }
+        if (!atkSH && adv < -0.25 && rng.chance(director.pIcingPerTick)) {
+          iceThePuck(atk)
+          beat = null
+          break
+        }
+        if (pressure > 0.4 && rng.chance(0.04 + pressure * 0.09)) {
+          // Forecheck heat: chip it off the glass and out.
+          noteBeat('dzClear')
+          clearPuck(atk, a, atkSH)
+          beat = null
+          break
+        }
+        if (adv > -0.15) {
+          beat = mkBeat('regroup', 'NZ_REGROUP', atk, director.regroupDwell(atk.team.tactics.tempo.pace))
+        } else if (b.ticks > b.dwell) {
+          b.ticks = 0 // stuck deep — keep working the breakout
+        }
+        break
+      }
+      case 'regroup': {
+        if (adv < -0.25) {
+          beat = pickBeat(pressure)
+        } else if ((adv > 0.1 && b.ticks >= b.dwell) || adv > 0.2) {
+          beat = chooseEntryBeat(cs)
+        }
+        break
+      }
+      case 'entryCarry': {
+        if (adv > O_BLUE + 0.03) {
+          // Across the line with possession — the entry is made.
+          if (ctx.telemetry) ctx.telemetry.entries.carry++
+          entryAt.set(atk, clk.t)
+          if (!b.breakaway && rng.chance(0.16)) {
+            const trailer = trailerOf(atk, cs, a)
+            if (trailer) {
+              if (ctx.telemetry) ctx.telemetry.entries.pass++
+              passTo(cs, trailer, false, false)
+              beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+              break
+            }
+          }
+          if (rng.chance(director.pRushAfterEntry * (0.8 + atk.team.tactics.tempo.pace * 0.4))) {
+            const nb = mkBeat('rushShot', 'RUSH_ODDMAN', atk, 20)
+            nb.breakaway = b.breakaway
+            beat = nb
+          } else {
+            beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+          }
+        } else if (b.ticks > b.dwell || adv < 0) {
+          beat = null
+        }
+        break
+      }
+      case 'entryDump': {
+        if (adv > O_BLUE + 0.03) {
+          entryAt.set(atk, clk.t)
+          beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+        } else if (b.ticks > b.dwell) {
+          beat = null
+        }
+        break
+      }
+      case 'entryFailedOffside': {
+        const wing = b.targetIdx >= 0 ? atk.unit.skaters[b.targetIdx] : undefined
+        const wingOver = !!wing && wing.pos.x * a > O_BLUE + 0.02
+        if (wingOver && b.ticks >= 8 && adv > O_BLUE - 0.08) {
+          // The puck hits the line with a teammate already deep: WHISTLE.
+          // Faceoff at the neutral-zone dot nearest the blue line.
+          ctx.stream.push({
+            t: clk.t,
+            period,
+            type: 'whistle',
+            pos: { x: a * O_BLUE, y: puck.y }
+          })
+          noteBeat('offsideWhistle')
+          noteStop('offside')
+          stopPlay({ x: a * NZ_DOT_X, y: b.side * DOT_Y }, 'neutral')
+        } else if (b.ticks > b.dwell) {
+          beat = null // the failure never materialized; re-read the ice
+        }
+        break
+      }
+      case 'cyclePossession': {
+        if (adv < 0.12) {
+          beat = null
+          break
+        }
+        const central = clamp(1 - Math.abs(puck.y) / 0.5, 0, 1)
+        const eager = 0.7 + atk.team.tactics.tempo.shotEagerness * 0.6
+        // Organic shot off the cycle when a lane opens — but the cycle WORKS
+        // the puck first (no instant fling right after the entry; rush beats
+        // own the quick-strike shots, which keeps rushShotShare on the data).
+        const settledInZone = clk.t - (entryAt.get(atk) ?? -999) > 6
+        if (settledInZone && adv > 0.5 && rng.chance(director.cycleShotPerTick * (0.5 + central) * eager * strengthMult)) {
+          tryShoot(cs, 'cycle', false, false)
+          beat = null
+          break
+        }
+        if (b.ticks >= b.dwell) {
+          const pick = director.sampleOzBeat({
+            hasPointMan: pointManIdx(atk, a) >= 0,
+            eagerness: eager,
+            strengthMult,
+            edge
+          })
+          if (pick === 'pointShot') {
+            beat = mkBeat('pointShot', 'POINT_SHOT_SCREEN', atk, 26)
+          } else if (pick === 'seamOneTimer') {
+            const recv = seamReceiverIdx(atk, cs, a)
+            if (recv >= 0) {
+              const nb = mkBeat('seamOneTimer', 'SEAM_ONE_TIMER', atk, 18)
+              nb.targetIdx = recv
+              beat = nb
+            } else {
+              beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+            }
+          } else if (pick === 'wraparound') {
+            beat = mkBeat('wraparound', 'WRAPAROUND_JAM', atk, 30)
+          } else {
+            beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+          }
+        }
+        break
+      }
+      case 'pointShot': {
+        const csIdx = atk.unit.skaters.indexOf(cs)
+        const atPoint = atk.unit.slots[csIdx] >= 3 || adv < 0.5
+        if (!b.passMade && !atPoint) {
+          const pm = pointManIdx(atk, a)
+          if (pm < 0 || atk.unit.skaters[pm] === cs) {
+            tryShoot(cs, 'cycle', false, false)
+            beat = null
+            break
+          }
+          b.passMade = true
+          passTo(cs, atk.unit.skaters[pm], false, false) // low-to-high
+          break
+        }
+        if (atPoint && b.ticks >= 3 && rng.chance(0.45)) {
+          tryShoot(cs, 'point', false, false)
+          beat = null
+        } else if (b.ticks > b.dwell) {
+          beat = null
+        }
+        break
+      }
+      case 'seamOneTimer': {
+        const recv = b.targetIdx >= 0 ? atk.unit.skaters[b.targetIdx] : undefined
+        if (!recv || recv.player.id === carrier) {
+          beat = null
+          break
+        }
+        const inSlot =
+          recv.pos.x * a > 0.45 &&
+          Math.abs(recv.pos.y) < 0.42 &&
+          Math.sign(recv.pos.y || 1) !== Math.sign(puck.y || 1)
+        if ((inSlot && b.ticks >= 4) || b.ticks >= b.dwell) {
+          passTo(cs, recv, true, false) // the royal-road feed; shot on arrival
+          beat = null
+        }
+        break
+      }
+      case 'rushShot':
+      case 'turnoverCounter': {
+        if (adv > O_BLUE + 0.03 && !b.passMade) {
+          b.passMade = true // the carry IS the entry
+          if (ctx.telemetry) ctx.telemetry.entries.carry++
+          entryAt.set(atk, clk.t)
+        }
+        if (b.breakaway) {
+          // In alone: drive the net and release in tight. NEVER a pass.
+          if ((adv > 0.78 && rng.chance(0.5)) || (adv > 0.55 && rng.chance(0.08))) {
+            tryShoot(cs, 'rush', false, false)
+            beat = null
+          }
+          break
+        }
+        if (b.oddMan && adv > 0.5 && adv < 0.78 && rng.chance(0.12)) {
+          const mate = rushLaneMate(atk, cs, a)
+          if (mate) {
+            passTo(cs, mate, true, true) // 2-on-1: pass across for the one-timer
+            beat = null
+            break
+          }
+        }
+        if (adv > 0.55 && rng.chance(0.1 + (b.oddMan ? 0.12 : 0) + clamp(adv - 0.55, 0, 0.25) * 0.5)) {
+          tryShoot(cs, 'rush', false, b.oddMan)
+          beat = null
+          break
+        }
+        if (b.ticks > b.dwell) {
+          beat = adv > O_BLUE ? mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell()) : null
+        }
+        break
+      }
+      case 'wraparound': {
+        if (adv > 0.84 && Math.abs(puck.y) < 0.28 && b.ticks >= 6) {
+          tryShoot(cs, 'wrap', false, false)
+          beat = null
+        } else if (b.ticks > b.dwell) {
+          beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+        }
+        break
+      }
+      case 'reboundScramble': {
+        if (adv > 0.5 && rng.chance(0.55)) {
+          tryShoot(cs, 'rebound', false, false)
+          beat = null
+        } else if (b.ticks > b.dwell) {
+          beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+        }
+        break
+      }
+      default: {
+        beat = pickBeat(pressure)
+        break
       }
     }
 
-    // 7. Move the puck. Under pressure (or holding too long) you move it —
-    //    but never on a breakaway: a player in alone keeps driving the net.
-    if (breakaway) continue
-    const tempoPace = atk.team.tactics.tempo.pace
-    const forced = heldTicks >= MAX_HOLD_TICKS
-    if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4))) {
-      if (doPass(cs, pressure)) continue
+    // 6. Organic puck movement inside flowing beats (never on a breakaway, and
+    //    never mid set-play — the choreographer owns those touches).
+    if (beat && beat.team === atk && !flight && carrier !== null) {
+      const k = beat.kind
+      const flowing = k === 'breakout' || k === 'regroup' || k === 'cyclePossession'
+      if (flowing && !beat.breakaway) {
+        const tempoPace = atk.team.tactics.tempo.pace
+        const forced = heldTicks >= MAX_HOLD_TICKS
+        if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4))) {
+          doPass(cs, pressure)
+        }
+      }
     }
   }
 
@@ -1436,7 +1915,7 @@ export interface FullSimOptions {
    * shootout with repeated 20-minute 5v5 sudden-death periods until a goal.
    */
   rules?: GameRules
-  /** Optional diagnostic sink (shot kinds/danger, icings, entry mix) for tests. */
+  /** Optional diagnostic sink (shot kinds/danger, beats, stoppages) for tests. */
   telemetry?: FullSimTelemetry
 }
 
@@ -1449,18 +1928,25 @@ export function fullSimGame(
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
   const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null }
+  const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
 
   let absBase = 0
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
-    simPeriod(ctx, homeSim, awaySim, {
-      period,
-      lengthSeconds: PERIOD_SECONDS,
-      suddenDeath: false,
-      absBase,
-      baseSkaters: 5
-    })
+    simPeriod(
+      ctx,
+      homeSim,
+      awaySim,
+      {
+        period,
+        lengthSeconds: PERIOD_SECONDS,
+        suddenDeath: false,
+        absBase,
+        baseSkaters: 5
+      },
+      director
+    )
     absBase += PERIOD_SECONDS
   }
 
@@ -1472,13 +1958,19 @@ export function fullSimGame(
       decidedBy = 'overtime'
       let period = REGULATION_PERIODS + 1
       for (;;) {
-        const ot = simPeriod(ctx, homeSim, awaySim, {
-          period,
-          lengthSeconds: PERIOD_SECONDS,
-          suddenDeath: true,
-          absBase,
-          baseSkaters: 5
-        })
+        const ot = simPeriod(
+          ctx,
+          homeSim,
+          awaySim,
+          {
+            period,
+            lengthSeconds: PERIOD_SECONDS,
+            suddenDeath: true,
+            absBase,
+            baseSkaters: 5
+          },
+          director
+        )
         absBase += PERIOD_SECONDS
         finalPeriod = period
         if (ot.ended) break
@@ -1487,13 +1979,19 @@ export function fullSimGame(
     } else {
       // Regular season: 5 minutes of 3-on-3, then the shootout.
       finalPeriod = REGULATION_PERIODS + 1
-      const ot = simPeriod(ctx, homeSim, awaySim, {
-        period: finalPeriod,
-        lengthSeconds: OT_SECONDS,
-        suddenDeath: true,
-        absBase,
-        baseSkaters: 3
-      })
+      const ot = simPeriod(
+        ctx,
+        homeSim,
+        awaySim,
+        {
+          period: finalPeriod,
+          lengthSeconds: OT_SECONDS,
+          suddenDeath: true,
+          absBase,
+          baseSkaters: 3
+        },
+        director
+      )
       if (ot.ended) {
         decidedBy = 'overtime'
       } else {
@@ -1519,6 +2017,9 @@ export function fullSimGame(
 // Re-export the pieces tests and tooling reach for, so `@engine/full/fullSim`
 // stays the single import point for the full engine.
 export { FRAME_DT } from './types'
-export type { FullSimTelemetry, ShotKind } from './types'
-export { emptyTelemetry } from './types'
+export type { BeatKind, FullSimTelemetry, ShotKind, StoppageCounts } from './types'
+export { BEAT_KINDS, emptyTelemetry } from './types'
 export { MAX_SPEED_FT, MIN_SPEED_FT, topSpeedFt } from './movement'
+export { Director, FALLBACK_SEQUENCES, sequenceTargets } from './director'
+export type { SequenceTargets } from './director'
+export type { PlayId } from './playbook'

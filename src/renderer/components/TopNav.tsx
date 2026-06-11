@@ -54,6 +54,7 @@ export function TopNav(props: {
     { id: 'stats',     label: 'Stats' },
     { id: 'trades',    label: 'Trades' },
     { id: 'finances',  label: 'Finances' },
+    { id: 'scouting',  label: 'Scouting' },
   ]
 
   const contextualItems: NavEntry[] = [

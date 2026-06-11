@@ -18,6 +18,7 @@ export type ScreenId =
   | 'stats'
   | 'trades'
   | 'finances'
+  | 'scouting'
   | 'draft'
   | 'offseason'
   | 'playoffs'

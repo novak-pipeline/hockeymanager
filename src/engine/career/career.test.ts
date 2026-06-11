@@ -175,6 +175,110 @@ describe('Career — full year cycle', () => {
   })
 })
 
+describe('Career — scouting', () => {
+  it('exportSnapshot includes a scouting field with knowledge and assignments', () => {
+    const data = generateLeague({ seed: 55 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 55, userId)
+    const snap = career.exportSnapshot('scout-test', '2026-06-10T00:00:00.000Z')
+    expect(snap.scouting).toBeDefined()
+    expect(Array.isArray(snap.scouting!.knowledge)).toBe(true)
+    expect(Array.isArray(snap.scouting!.assignments)).toBe(true)
+    expect(snap.scouting!.assignments.length).toBeGreaterThan(0)
+    expect(snap.scouting!.knowledge.length).toBeGreaterThan(0)
+  })
+
+  it('scouting state survives a save/load round-trip identically', () => {
+    const data = generateLeague({ seed: 56 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 56, userId)
+    career.advance(5)
+
+    const snap = career.exportSnapshot('scout-rt', '2026-06-10T00:00:00.000Z')
+    const json = JSON.stringify(snap)
+    const restored = Career.fromSnapshot(JSON.parse(json))
+
+    const origSnap2 = career.exportSnapshot('orig', '2026-06-10T00:00:00.000Z')
+    const restSnap2 = restored.exportSnapshot('rest', '2026-06-10T00:00:00.000Z')
+
+    expect(restSnap2.scouting!.assignments).toEqual(origSnap2.scouting!.assignments)
+    expect(restSnap2.scouting!.knowledge).toEqual(origSnap2.scouting!.knowledge)
+  })
+
+  it('old saves without scouting field load cleanly and get fresh scouting', () => {
+    const data = generateLeague({ seed: 57 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 57, userId)
+
+    const snap = career.exportSnapshot('legacy', '2026-06-10T00:00:00.000Z')
+    // Simulate old save by stripping the scouting field
+    const { scouting: _dropped, ...oldSnap } = snap as typeof snap & { scouting?: unknown }
+    expect((_dropped as unknown) !== undefined).toBe(true) // ensure it was present
+
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(oldSnap)))
+    const restoredSnap = restored.exportSnapshot('restored', '2026-06-10T00:00:00.000Z')
+    // Should have fresh scouting with assignments
+    expect(restoredSnap.scouting).toBeDefined()
+    expect(restoredSnap.scouting!.assignments.length).toBeGreaterThan(0)
+  })
+
+  it('own roster players have knowledge=100, others have partial knowledge', () => {
+    const data = generateLeague({ seed: 58 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 58, userId)
+
+    const snap = career.exportSnapshot('k-test', '2026-06-10T00:00:00.000Z')
+    const knowledgeMap = new Map(snap.scouting!.knowledge)
+
+    const ownRoster = data.teams.get(userId)!.roster
+    for (const pid of ownRoster) {
+      expect(knowledgeMap.get(pid)).toBe(100)
+    }
+
+    // All other team players should have partial knowledge
+    for (const [teamId, team] of data.teams) {
+      if (teamId === userId) continue
+      for (const pid of team.roster) {
+        const k = knowledgeMap.get(pid) ?? 0
+        expect(k).toBeGreaterThanOrEqual(5)
+        expect(k).toBeLessThanOrEqual(45)
+      }
+    }
+  })
+
+  it('after ticking, knowledge increases for players on opponent rosters', () => {
+    const data = generateLeague({ seed: 59 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 59, userId)
+
+    const before = career.exportSnapshot('before', '2026-06-10T00:00:00.000Z')
+    const kBefore = new Map(before.scouting!.knowledge)
+
+    // Advance enough days that scouting ticks have a chance to fire
+    career.advance(20)
+
+    const after = career.exportSnapshot('after', '2026-06-10T00:00:00.000Z')
+    const kAfter = new Map(after.scouting!.knowledge)
+
+    // Collect all opponent player ids
+    let anyIncreased = false
+    for (const [teamId, team] of data.teams) {
+      if ((teamId as string) === (userId as string)) continue
+      for (const pid of team.roster) {
+        const pidStr = pid as string
+        const before_ = kBefore.get(pidStr) ?? 0
+        const after_ = kAfter.get(pidStr) ?? 0
+        if (after_ > before_) {
+          anyIncreased = true
+          break
+        }
+      }
+      if (anyIncreased) break
+    }
+    expect(anyIncreased).toBe(true)
+  })
+})
+
 describe('Career — persistence', () => {
   it('survives a save/load round-trip mid-season and stays deterministic', () => {
     const data = generateLeague({ seed: 33 })

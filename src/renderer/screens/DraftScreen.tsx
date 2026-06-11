@@ -165,8 +165,10 @@ function BestAvailable(props: {
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{p.position}</td>
                 <td style={{ color: 'var(--muted)' }}>{p.age}</td>
-                <td className="num" style={{ fontWeight: 600 }}>
-                  {p.overall}
+                <td className="num" style={{ fontWeight: 600, color: p.scouted && !p.scouted.exact ? 'var(--muted)' : undefined }}>
+                  {p.scouted && !p.scouted.exact
+                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
+                    : p.overall}
                 </td>
                 <td>
                   <PotentialStars stars={p.potentialStars} />

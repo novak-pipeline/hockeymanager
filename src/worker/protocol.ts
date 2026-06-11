@@ -26,6 +26,7 @@ export type {
   PlayerProfileView,
   PlayoffBracketView,
   ScheduleView,
+  ScoutingView,
   SquadView,
   StandingsView,
   StatsView,
@@ -46,6 +47,7 @@ import type {
   PlayerProfileView,
   PlayoffBracketView,
   ScheduleView,
+  ScoutingView,
   SquadView,
   StandingsView,
   StatsView,
@@ -55,6 +57,7 @@ import type {
   TradesView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
+import type { ScoutTarget } from '@domain/scouting'
 
 /** A request without its correlation id; the client stamps the id on send. */
 export type WorkerRequestBody =
@@ -106,6 +109,9 @@ export type WorkerRequestBody =
   /* ── persistence ── */
   | { type: 'exportSave'; saveName: string }
   | { type: 'importSave'; snapshot: CareerSnapshot }
+  /* ── scouting ── */
+  | { type: 'getScouting' }
+  | { type: 'assignScout'; scoutId: string; target: ScoutTarget }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -137,5 +143,6 @@ export type WorkerResponse = { id: number } & (
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok' }
   | { type: 'save'; snapshot: CareerSnapshot }
+  | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'error'; message: string }
 )

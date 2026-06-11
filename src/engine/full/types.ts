@@ -57,6 +57,64 @@ export type Phase = 'breakout' | 'neutral' | 'entry' | 'rush' | 'cycle'
 /** Why a shot was generated — recorded for tests/telemetry, never emitted. */
 export type ShotKind = 'point' | 'cycle' | 'onetimer' | 'rush' | 'wrap' | 'rebound'
 
+/**
+ * The DIRECTOR's vocabulary: every stretch of play is a "beat" — a sampled,
+ * semi-Markov unit of hockey (a breakout, a zone entry, a cycle, a whistle).
+ * The choreographer then renders each beat as an authored playbook template.
+ */
+export type BeatKind =
+  | 'breakout'
+  | 'regroup'
+  | 'entryCarry'
+  | 'entryDump'
+  | 'entryFailedOffside'
+  | 'cyclePossession'
+  | 'pointShot'
+  | 'seamOneTimer'
+  | 'rushShot'
+  | 'wraparound'
+  | 'reboundScramble'
+  | 'turnoverCounter'
+  | 'dzClear'
+  | 'icingWhistle'
+  | 'offsideWhistle'
+  | 'goalieFreeze'
+  | 'penaltyWhistle'
+  | 'lineChange'
+  | 'faceoff'
+
+export const BEAT_KINDS: readonly BeatKind[] = [
+  'breakout',
+  'regroup',
+  'entryCarry',
+  'entryDump',
+  'entryFailedOffside',
+  'cyclePossession',
+  'pointShot',
+  'seamOneTimer',
+  'rushShot',
+  'wraparound',
+  'reboundScramble',
+  'turnoverCounter',
+  'dzClear',
+  'icingWhistle',
+  'offsideWhistle',
+  'goalieFreeze',
+  'penaltyWhistle',
+  'lineChange',
+  'faceoff'
+]
+
+/** Whistle counts by cause — the rhythm a watched game is paced by. */
+export interface StoppageCounts {
+  offside: number
+  icing: number
+  goalieFreeze: number
+  penalty: number
+  goal: number
+  other: number
+}
+
 /** Optional test/diagnostic sink — populated when passed in FullSimOptions. */
 export interface FullSimTelemetry {
   shots: { kind: ShotKind; danger: number; oddMan: boolean }[]
@@ -66,15 +124,23 @@ export interface FullSimTelemetry {
   breakawayTicks: number
   /** Passes attempted DURING a breakaway — stays zero (nobody dishes backwards on a breakaway). */
   breakawayPasses: number
+  /** How many times the director sampled each beat (additive across games). */
+  beats: Record<BeatKind, number>
+  /** Stoppage counts by cause (additive across games). */
+  stoppages: StoppageCounts
 }
 
 export function emptyTelemetry(): FullSimTelemetry {
+  const beats = {} as Record<BeatKind, number>
+  for (const k of BEAT_KINDS) beats[k] = 0
   return {
     shots: [],
     icings: 0,
     entries: { carry: 0, dump: 0, pass: 0 },
     breakawayTicks: 0,
-    breakawayPasses: 0
+    breakawayPasses: 0,
+    beats,
+    stoppages: { offside: 0, icing: 0, goalieFreeze: 0, penalty: 0, goal: 0, other: 0 }
   }
 }
 

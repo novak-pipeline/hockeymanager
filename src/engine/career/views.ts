@@ -18,6 +18,8 @@ import type {
   Position,
   TeamTactics,
 } from '@domain'
+import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
+export type { ScoutTarget } from '@domain/scouting'
 
 /* ────────────────────────── shared atoms ────────────────────────── */
 
@@ -30,6 +32,14 @@ export interface PlayerBadge {
   position: Position
   age: number
   overall: number
+  /** Present when this player is visible through the scouting fog. */
+  scouted?: {
+    knowledge: number
+    overallLo: number
+    overallHi: number
+    /** True when knowledge >= 95 (exact data) */
+    exact: boolean
+  }
 }
 
 export interface ContractView {
@@ -173,7 +183,14 @@ export interface AttributeGroupView {
   /** "Technical" | "Physical" | "Mental" | "Defensive" | "Goaltending" */
   name: string
   /** Display label → 0–100 value, in stable display order. */
-  attributes: Array<{ label: string; value: number }>
+  attributes: Array<{
+    label: string
+    value: number
+    /** Present when fog is active for this player. */
+    lo?: number
+    hi?: number
+    masked?: boolean
+  }>
 }
 
 export interface PlayerProfileView extends PlayerBadge {
@@ -575,6 +592,11 @@ export interface CareerSnapshot {
     ppGoals: Array<[string, number]>
     ppAssists: Array<[string, number]>
   }
+  /**
+   * Scouting fog-of-war state (added after v1 froze; optional so older saves
+   * load and get createInitialScouting applied as a fallback).
+   */
+  scouting?: ScoutingState
 }
 
 export interface SaveSlotInfo {
@@ -584,4 +606,42 @@ export interface SaveSlotInfo {
   teamName: string
   year: number
   phase: CareerPhase
+}
+
+/* ────────────────────────── scouting view ────────────────────────── */
+
+export interface ScoutCardView {
+  scoutId: string
+  name: string
+  rating: number
+  /** Human-readable label for current assignment. */
+  assignmentLabel: string
+  target: ScoutAssignment['target']
+}
+
+/** Per-team knowledge summary for the scouting overview panel. */
+export interface TeamKnowledgeSummary {
+  teamId: string
+  teamName: string
+  teamAbbr: string
+  /** Mean knowledge across that team's roster, 0–100. */
+  avgKnowledge: number
+}
+
+/**
+ * Full scouting hub view — scout cards, assignment options, knowledge summaries.
+ * Carried as the response to a 'getScouting' request.
+ */
+export interface ScoutingView {
+  scouts: ScoutCardView[]
+  /** All teams as assignment options. */
+  teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
+  /** All divisions as assignment options. */
+  divisions: Array<{ divisionId: string; divisionName: string }>
+  /** Whether draft-class assignment is currently meaningful (draft class exists). */
+  hasDraftClass: boolean
+  /** Per-team knowledge summary. */
+  teamKnowledge: TeamKnowledgeSummary[]
+  /** Recently improved players (highest delta-knowledge), for watch-list panel. */
+  topGains: Array<PlayerBadge & { knowledge: number }>
 }

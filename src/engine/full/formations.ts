@@ -217,8 +217,9 @@ function carrierOrder(
   const pace = tactics.tempo.pace
   switch (phase) {
     case 'breakout':
-      // Skate it out up the side you retrieved on.
-      return { tx: -a * 0.25, ty: clamp(puck.y * 0.7, -0.55, 0.55), urgency: 0.55 + pace * 0.25 }
+      // Skate it out up the side you retrieved on — with PURPOSE. Real teams
+      // exit their zone in seconds; dawdling here is what skews zone time.
+      return { tx: -a * 0.1, ty: clamp(puck.y * 0.7, -0.55, 0.55), urgency: 0.78 + pace * 0.22 }
     case 'neutral':
       return { tx: a * 0.32, ty: clamp(puck.y, -0.5, 0.5), urgency: 0.65 + pace * 0.3 }
     case 'entry':

@@ -7,6 +7,7 @@ import type {
   WorkerResponse,
 } from './protocol'
 import type { TeamTactics } from '@domain'
+import type { ScoutTarget } from '@domain/scouting'
 
 /**
  * Minimal worker surface the client needs; lets tests inject a fake without a
@@ -220,6 +221,16 @@ export class SimClient {
 
   importSave(snapshot: CareerSnapshot): Promise<WorkerResponse> {
     return this.send({ type: 'importSave', snapshot })
+  }
+
+  /* ── scouting ── */
+
+  getScouting(): Promise<WorkerResponse> {
+    return this.send({ type: 'getScouting' })
+  }
+
+  assignScout(scoutId: string, target: ScoutTarget): Promise<WorkerResponse> {
+    return this.send({ type: 'assignScout', scoutId, target })
   }
 
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */

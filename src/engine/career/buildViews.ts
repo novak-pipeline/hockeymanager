@@ -27,6 +27,7 @@ import type {
   PlayerBadge,
   PlayerProfileView,
   ScheduleView,
+  ScoutingView,
   SkaterSeasonLine,
   SquadRowView,
   SquadView,
@@ -35,8 +36,11 @@ import type {
   StatsView,
   TacticsView,
   LeaderRowView,
+  TeamKnowledgeSummary,
 } from './views'
 import { dayToDateISO } from './views'
+import type { ScoutingState } from '@domain/scouting'
+import { knowledgeOf, maskAttribute, maskedOverall } from '@engine/league/scouting'
 
 /** The Career state slice every builder reads. */
 export interface ViewCtx {
@@ -58,15 +62,45 @@ export interface ViewCtx {
   standingsSorted: Standing[]
 }
 
+/* ────────────────────────── fog helpers ────────────────────────── */
+
+/**
+ * Fog context passed through view builders when scouting is active.
+ * Callers may omit it to get the "own roster / exact" behaviour everywhere.
+ */
+export interface FogCtx {
+  scouting: ScoutingState
+}
+
+function isExact(fog: FogCtx | undefined, playerId: string): boolean {
+  if (!fog) return true
+  return knowledgeOf(fog.scouting, playerId) >= 95
+}
+
 /* ────────────────────────── atoms ────────────────────────── */
 
-export function badge(p: Player): PlayerBadge {
+export function badge(p: Player, fog?: FogCtx): PlayerBadge {
+  const pid = p.id as string
+  const ovr = overall(p.composites, p.position)
+  if (!fog || isExact(fog, pid)) {
+    return {
+      playerId: pid,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      overall: ovr,
+    }
+  }
+  const k = knowledgeOf(fog.scouting, pid)
+  const { lo, hi } = maskedOverall(ovr, k, pid)
+  const midOvr = Math.round((lo + hi) / 2)
   return {
-    playerId: p.id as string,
+    playerId: pid,
     name: p.name,
     position: p.position,
     age: p.age,
-    overall: overall(p.composites, p.position),
+    overall: midOvr,
+    scouted: { knowledge: Math.round(k), overallLo: lo, overallHi: hi, exact: false },
   }
 }
 
@@ -292,10 +326,25 @@ const PERSONALITY_LABELS: Array<[string, string]> = [
   ['determination', 'Determination'],
 ]
 
-function groupView(name: string, source: Record<string, number>, labels: Array<[string, string]>): AttributeGroupView {
+function groupView(
+  name: string,
+  source: Record<string, number>,
+  labels: Array<[string, string]>,
+  fog?: FogCtx,
+  playerId?: string
+): AttributeGroupView {
   return {
     name,
-    attributes: labels.map(([key, label]) => ({ label, value: Math.round(source[key] ?? 0) })),
+    attributes: labels.map(([key, label]) => {
+      const value = Math.round(source[key] ?? 0)
+      if (!fog || !playerId || isExact(fog, playerId)) {
+        return { label, value }
+      }
+      const k = knowledgeOf(fog.scouting, playerId)
+      const { lo, hi } = maskAttribute(value, k, playerId, key)
+      const mid = Math.round((lo + hi) / 2)
+      return { label, value: mid, lo, hi, masked: true }
+    }),
   }
 }
 
@@ -313,7 +362,7 @@ export function potentialStars(p: Player): number {
   return 1
 }
 
-export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId): PlayerProfileView {
+export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCtx): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
   let teamId: string | null = null
@@ -328,15 +377,16 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId): PlayerProf
     }
   }
 
+  const pidStr = playerId as string
   const groups: AttributeGroupView[] = [
-    groupView('Technical', p.ratings.technical as unknown as Record<string, number>, TECH_LABELS),
-    groupView('Physical', p.ratings.physical as unknown as Record<string, number>, PHYS_LABELS),
-    groupView('Mental', p.ratings.mental as unknown as Record<string, number>, MENTAL_LABELS),
-    groupView('Defensive', p.ratings.defensive as unknown as Record<string, number>, DEF_LABELS),
+    groupView('Technical', p.ratings.technical as unknown as Record<string, number>, TECH_LABELS, fog, pidStr),
+    groupView('Physical', p.ratings.physical as unknown as Record<string, number>, PHYS_LABELS, fog, pidStr),
+    groupView('Mental', p.ratings.mental as unknown as Record<string, number>, MENTAL_LABELS, fog, pidStr),
+    groupView('Defensive', p.ratings.defensive as unknown as Record<string, number>, DEF_LABELS, fog, pidStr),
   ]
   if (p.ratings.goalie) {
     groups.push(
-      groupView('Goaltending', p.ratings.goalie as unknown as Record<string, number>, GOALIE_LABELS)
+      groupView('Goaltending', p.ratings.goalie as unknown as Record<string, number>, GOALIE_LABELS, fog, pidStr)
     )
   }
 
@@ -387,7 +437,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId): PlayerProf
     }))
 
   return {
-    ...badge(p),
+    ...badge(p, fog),
     teamId,
     teamName,
     handedness: p.handedness,
@@ -443,7 +493,7 @@ export function buildTacticsView(ctx: ViewCtx): TacticsView {
       .filter((id) => !used.has(id as string))
       .map((id) => ctx.players.get(id)!)
       .filter((p) => p.injuryStatus === null)
-      .map(badge),
+      .map((p) => badge(p)),
     issues: lineupIssues(team, ctx.players),
   }
   return { tactics: team.tactics, lines }
@@ -550,5 +600,96 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),
     leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, ctx.teams.size)),
+  }
+}
+
+/* ────────────────────────── scouting view ────────────────────────── */
+
+export interface ScoutingViewCtx extends ViewCtx {
+  scouting: ScoutingState
+  /** All draft class prospect ids across all years. */
+  draftProspectIds: Set<string>
+}
+
+function assignmentLabel(
+  target: { kind: string; teamId?: string; divisionId?: string },
+  ctx: ViewCtx
+): string {
+  switch (target.kind) {
+    case 'team': {
+      const t = ctx.teams.get(target.teamId as TeamId)
+      return t ? `Watching ${t.name}` : 'Watching team'
+    }
+    case 'division': {
+      const d = ctx.divisions.find((div) => div.id === target.divisionId)
+      return d ? `Watching ${d.name} division` : 'Watching division'
+    }
+    case 'draftClass':
+      return 'Scouting draft class'
+    case 'freeAgents':
+      return 'Watching free agents'
+    default:
+      return 'Unassigned'
+  }
+}
+
+export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
+  const { scouting, teams, divisions, players, draftProspectIds } = ctx
+
+  // Scout cards
+  const scouts = scouting.assignments.map((s) => ({
+    scoutId: s.scoutId,
+    name: s.name,
+    rating: s.rating,
+    assignmentLabel: assignmentLabel(s.target as { kind: string; teamId?: string; divisionId?: string }, ctx),
+    target: s.target,
+  }))
+
+  // Teams list for dropdown options
+  const teamsOpts = [...teams.values()].map((t) => ({
+    teamId: t.id as string,
+    teamName: t.name,
+    teamAbbr: t.abbreviation,
+  }))
+
+  // Divisions list
+  const divisionsOpts = divisions.map((d) => ({
+    divisionId: d.id,
+    divisionName: d.name,
+  }))
+
+  // Per-team knowledge summary
+  const teamKnowledge: TeamKnowledgeSummary[] = []
+  for (const [tid, team] of teams) {
+    if (!team.roster.length) continue
+    const knowledges = team.roster.map((id) => knowledgeOf(scouting, id as string))
+    const avg = Math.round(knowledges.reduce((s, k) => s + k, 0) / knowledges.length)
+    teamKnowledge.push({
+      teamId: tid as string,
+      teamName: team.name,
+      teamAbbr: team.abbreviation,
+      avgKnowledge: avg,
+    })
+  }
+  teamKnowledge.sort((a, b) => b.avgKnowledge - a.avgKnowledge)
+
+  // Top gains — players with highest current knowledge not at 100 or 0
+  const topGains: Array<PlayerBadge & { knowledge: number }> = []
+  for (const [pid, k] of scouting.knowledge) {
+    if (k <= 5 || k >= 100) continue
+    const p = players.get(pid as PlayerId)
+    if (!p) continue
+    topGains.push({ ...badge(p), knowledge: Math.round(k) })
+  }
+  topGains.sort((a, b) => b.knowledge - a.knowledge)
+  topGains.splice(20)
+
+  return {
+    scouts,
+    teams: teamsOpts,
+    divisions: divisionsOpts,
+    hasDraftClass: draftProspectIds.size > 0,
+    teamKnowledge,
+    topGains,
   }
 }

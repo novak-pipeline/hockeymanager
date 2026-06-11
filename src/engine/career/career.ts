@@ -86,12 +86,19 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines } from '@engine/league/lineup'
+import {
+  assignScout,
+  createInitialScouting,
+  knowledgeOf,
+  tickScouting,
+} from '@engine/league/scouting'
 import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import {
   badge,
   buildFinanceView,
   buildPlayerProfile,
+  buildScoutingView,
   buildScheduleView,
   buildSquadView,
   buildStandingsView,
@@ -99,6 +106,7 @@ import {
   buildTacticsView,
   potentialStars,
   standingRowView,
+  type FogCtx,
   type ViewCtx,
 } from './buildViews'
 import {
@@ -116,6 +124,7 @@ import {
   type PlayerProfileView,
   type PlayoffBracketView,
   type ScheduleView,
+  type ScoutingView,
   type SeasonSummary,
   type SeriesView,
   type SquadView,
@@ -128,6 +137,7 @@ import {
   type TradeSideView,
   type TradesView,
 } from './views'
+import type { ScoutingState, ScoutTarget } from '@domain/scouting'
 
 /* ────────────────────────── legacy v1 view types (kept for compat) ────────────────────────── */
 
@@ -296,6 +306,7 @@ export class Career {
   private faPool: PlayerId[] = []
   private matchDays: number[] = []
   private playerCounter = 0
+  private scouting!: ScoutingState
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -310,6 +321,13 @@ export class Career {
         firstDraftYear: this.year + 1,
         yearsAhead: PICK_YEARS_AHEAD,
         rounds: DRAFT_ROUNDS,
+      })
+      this.scouting = createInitialScouting({
+        userTeamId: userTeamId as string,
+        teams: data.teams as Map<TeamId, { roster: PlayerId[] }>,
+        players: data.players,
+        rng: new Rng(deriveSeed(seed, 9001)),
+        draftProspectIds: this.allDraftProspectIds(),
       })
       this.pushNews(
         'league',
@@ -359,6 +377,29 @@ export class Career {
 
   private rngFor(...keys: number[]): Rng {
     return new Rng(deriveSeed(this.seed, this.year, ...keys))
+  }
+
+  /** Collect all prospect ids across all known draft classes. */
+  private allDraftProspectIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const cls of this.data.league.draftClasses) {
+      for (const p of cls.prospects) ids.add(p.playerId as string)
+    }
+    return ids
+  }
+
+  /** Current free agent id set (players not on any roster). */
+  private currentFaIds(): Set<string> {
+    const rostered = new Set<string>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) rostered.add(id as string)
+    const fa = new Set<string>()
+    for (const id of this.faPool) if (!rostered.has(id as string)) fa.add(id as string)
+    return fa
+  }
+
+  /** Fog context for view builders — uses current scouting state. */
+  private fogCtx(): FogCtx {
+    return { scouting: this.scouting }
   }
 
   private ctx(): ViewCtx {
@@ -513,6 +554,15 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    tickScouting({
+      state: this.scouting,
+      userTeamId: this.userTeamId as string,
+      teams: this.data.teams as Map<TeamId, { roster: PlayerId[]; divisionId?: string }>,
+      players: this.data.players,
+      draftProspectIds: this.allDraftProspectIds(),
+      freeAgentIds: this.currentFaIds(),
+      rng: this.rngFor(7008, day),
+    })
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
       const offers = generateAiOffers({
@@ -1456,7 +1506,23 @@ export class Career {
   }
 
   getPlayer(playerId: string): PlayerProfileView {
-    return buildPlayerProfile(this.ctx(), asPlayerId(playerId))
+    const pid = asPlayerId(playerId)
+    // Apply fog for players not on user's own roster
+    const isOwnPlayer = this.userTeam.roster.includes(pid)
+    const fog = isOwnPlayer ? undefined : this.fogCtx()
+    return buildPlayerProfile(this.ctx(), pid, fog)
+  }
+
+  getScouting(): ScoutingView {
+    return buildScoutingView({
+      ...this.ctx(),
+      scouting: this.scouting,
+      draftProspectIds: this.allDraftProspectIds(),
+    })
+  }
+
+  assignScoutTarget(scoutId: string, target: ScoutTarget): void {
+    assignScout(this.scouting, scoutId, target)
   }
 
   getTactics(): TacticsView {
@@ -1522,12 +1588,15 @@ export class Career {
   }
 
   getTrades(): TradesView {
+    const fog = this.fogCtx()
     const tradable = (teamId: TeamId) => {
       const team = this.data.teams.get(teamId)!
+      const isUserTeam = teamId === this.userTeamId
       return team.roster.map((id) => {
         const p = this.resolve(id)
+        const playerFog = isUserTeam ? undefined : fog
         return {
-          ...badge(p),
+          ...badge(p, playerFog),
           salary: p.contract.salary,
           yearsRemaining: p.contract.yearsRemaining,
           noTradeClause: p.contract.noTradeClause,
@@ -1893,6 +1962,10 @@ export class Career {
         ppGoals: serializeMap(this.ppGoals as unknown as Map<string, number>),
         ppAssists: serializeMap(this.ppAssists as unknown as Map<string, number>),
       },
+      scouting: {
+        knowledge: [...this.scouting.knowledge],
+        assignments: [...this.scouting.assignments],
+      },
     }
   }
 
@@ -1926,6 +1999,22 @@ export class Career {
       for (const [k, v] of snapshot.extraStats.ppGoals) career.ppGoals.set(asPlayerId(k), v)
       for (const [k, v] of snapshot.extraStats.ppAssists) career.ppAssists.set(asPlayerId(k), v)
     }
+    // Restore scouting state, or create fresh if old save lacks it.
+    if (snapshot.scouting) {
+      career.scouting = {
+        knowledge: [...snapshot.scouting.knowledge],
+        assignments: [...snapshot.scouting.assignments],
+      }
+    } else {
+      career.scouting = createInitialScouting({
+        userTeamId: snapshot.userTeamId,
+        teams: data.teams as Map<TeamId, { roster: PlayerId[] }>,
+        players: data.players,
+        rng: new Rng(deriveSeed(snapshot.seed, 9001)),
+        draftProspectIds: career.allDraftProspectIds(),
+      })
+    }
+
     // Rebuild transient state that deliberately isn't saved.
     if (career.phase === 'offseason' && career.offseason?.stage === 'resign') {
       for (const id of career.userTeam.roster) {

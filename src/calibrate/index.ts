@@ -37,6 +37,42 @@ export interface EventRates {
   penalties: number
 }
 
+/**
+ * Sequence-rhythm targets so the match engine reproduces real hockey cadence.
+ * Extracted from NHL play-by-play via importNhl.ts.
+ */
+export interface SequenceTargets {
+  /** Whole-game stoppage counts per game (both teams combined). */
+  stoppagesPerGame: {
+    offside: number
+    icing: number
+    goalieFreeze: number
+    other: number
+  }
+  /** Share of event-activity time by rink third (attacking-team perspective). */
+  zoneTimeShare: {
+    offensive: number
+    neutral: number
+    defensive: number
+  }
+  /** Offensive-zone entries leading to at least one recorded event, per team per 60 min. */
+  entriesPerTeamPer60: number
+  /** Unblocked attempts per offensive-zone entry. */
+  shotsPerEntry: number
+  /** Share of shots within 6s of the zone-entry proxy (rush shots). */
+  rushShotShare: number
+  /** Share of shots within 3s of a previous shot-on-goal/save by the same team (rebounds). */
+  reboundShotShare: number
+  /** Mean game-clock gap (seconds) between consecutive stoppage/faceoff plays. */
+  meanSecondsBetweenStoppages: number
+  /** Share of faceoffs by dot zone (home-team perspective collapsed to thirds). */
+  faceoffZoneMix: {
+    offensive: number
+    neutral: number
+    defensive: number
+  }
+}
+
 export interface CalibrationTargets {
   meta: {
     source: string
@@ -56,6 +92,7 @@ export interface CalibrationTargets {
   }
   perTeamPerGame: EventRates
   xgSurface: XgSurface
+  sequences?: SequenceTargets
 }
 
 export const CALIBRATION_TARGETS = rawTargets as CalibrationTargets

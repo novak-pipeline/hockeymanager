@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
+  PlayerBadge,
   TradeOfferView,
   TradePartnerView,
 } from '../../engine/career/views'
@@ -13,12 +14,25 @@ import { toast } from '../components/store'
 
 // ─── asset chips ──────────────────────────────────────────────────────────────
 
+function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
+  if (badge.scouted && !badge.scouted.exact) {
+    return (
+      <span className="muted small" style={{ color: 'var(--muted)' }}>
+        {badge.scouted.overallLo}–{badge.scouted.overallHi}
+      </span>
+    )
+  }
+  if (!badge.scouted) return null
+  return <span className="muted small">{badge.overall}</span>
+}
+
 function PlayerChip(props: {
   name: string
   playerId: string
   salary: number
   yearsRemaining: number
   noTradeClause?: boolean
+  badge?: PlayerBadge
 }): JSX.Element {
   return (
     <div
@@ -35,6 +49,7 @@ function PlayerChip(props: {
       }}
     >
       <PlayerLink playerId={props.playerId} name={props.name} />
+      {props.badge && <OvrLabel badge={props.badge} />}
       <span style={{ color: 'var(--muted)' }}>
         {fmtMoney(props.salary)} / {props.yearsRemaining}yr
       </span>
@@ -66,7 +81,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
 // ─── trade side summary (receive / give) ──────────────────────────────────────
 
 function TradeSideChips(props: {
-  players: Array<{ playerId: string; name: string; salary: number; yearsRemaining: number; noTradeClause?: boolean }>
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause?: boolean }>
   picks: PickAssetView[]
   label: string
   labelColor?: string
@@ -94,6 +109,7 @@ function TradeSideChips(props: {
             salary={p.salary}
             yearsRemaining={p.yearsRemaining}
             noTradeClause={p.noTradeClause}
+            badge={p}
           />
         ))}
         {props.picks.map((pk) => (
@@ -544,6 +560,9 @@ function ProposeTab(props: {
                 {partner.players.map((p) => {
                   const selected = theirPlayerIds.has(p.playerId)
                   const ntc = p.noTradeClause
+                  const ovrLabel = p.scouted && !p.scouted.exact
+                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
+                    : String(p.overall)
                   return (
                     <button
                       key={p.playerId}
@@ -572,6 +591,11 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
                           {p.position} · {p.age}
                         </span>
+                        {p.scouted && (
+                          <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
+                            {ovrLabel}
+                          </span>
+                        )}
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>

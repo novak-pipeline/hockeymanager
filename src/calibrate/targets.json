@@ -3,7 +3,7 @@
     "source": "NHL API (api-web.nhle.com) play-by-play",
     "season": "2023-2024",
     "games": 60,
-    "generated": "2026-06-01T23:57:34.895Z",
+    "generated": "2026-06-11T02:49:48.566Z",
     "note": "Derived aggregates only; raw play-by-play is not committed."
   },
   "shooting": {
@@ -192,5 +192,28 @@
         0
       ]
     ]
+  },
+  "sequences": {
+    "stoppagesPerGame": {
+      "offside": 4.35,
+      "icing": 8.016666666666667,
+      "goalieFreeze": 16.85,
+      "other": 13.433333333333334
+    },
+    "zoneTimeShare": {
+      "offensive": 0.680259013832548,
+      "neutral": 0.09910554561717352,
+      "defensive": 0.22063544055027842
+    },
+    "entriesPerTeamPer60": 37.875,
+    "shotsPerEntry": 1.0873487348734874,
+    "rushShotShare": 0.52853095912586,
+    "reboundShotShare": 0.06657223796033994,
+    "meanSecondsBetweenStoppages": 66.66385189996753,
+    "faceoffZoneMix": {
+      "offensive": 0.36084688554771405,
+      "neutral": 0.2994783675974225,
+      "defensive": 0.33967474685486343
+    }
   }
 }

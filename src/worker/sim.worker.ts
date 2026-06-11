@@ -150,6 +150,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       pendingSeed = career.seed
       return dashboard(req.id)
     }
+
+    /* ── scouting ── */
+    case 'getScouting':
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'assignScout':
+      must().assignScoutTarget(req.scoutId, req.target)
+      return { id: req.id, type: 'ok' }
   }
 }
 

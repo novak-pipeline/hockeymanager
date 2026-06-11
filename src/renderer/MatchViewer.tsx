@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { MatchTimeline, type MatchView } from '@render2d'
+import { MatchTimeline, type MatchView, generateCommentary, type CommentaryLine, buildHighlights, selectMode, type HighlightSegment } from '@render2d'
 import type { MatchRenderer, RinkColors } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
+import { Announcer } from './lib/announcer'
 
 const MUTED = '#8b95a6'
 const PANEL = '#11151f'
@@ -13,6 +14,8 @@ const SPEEDS = [1, 4, 8, 30]
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
 
 const LS_KEY = 'hockeyMatchRenderer'
+
+type PlaybackMode = 'full' | 'extended' | 'key'
 
 function readRendererPref(): '2d' | '3d' {
   try {
@@ -32,6 +35,9 @@ function writeRendererPref(v: '2d' | '3d'): void {
   }
 }
 
+// Singleton announcer (renderer-scoped, survives HMR hot swap gracefully)
+const announcer = new Announcer()
+
 export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): JSX.Element {
   const { game } = props
   const hostRef = useRef<HTMLDivElement>(null)
@@ -45,19 +51,37 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const [goalBanner, setGoalBanner] = useState<string | null>(null)
   const goalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Commentary
+  const [commentaryLines, setCommentaryLines] = useState<CommentaryLine[]>([])
+  const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
+  const tickerRef = useRef<HTMLDivElement>(null)
+  const lastCommentaryAbsTRef = useRef<number>(-1)
+
+  // Announcer state
+  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer.isEnabled)
+
+  // Playback mode
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('full')
+  const [highlights, setHighlights] = useState<HighlightSegment[]>([])
+  const [skipping, setSkipping] = useState(false)
+  const skipFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Track the previous score to detect goals during playback
   const prevScoreRef = useRef<{ home: number; away: number }>({ home: 0, away: 0 })
+
+  // Track absolute time for commentary ticker (derived from progress + game duration)
+  const gameDurationRef = useRef<number>(0)
+  const viewRef = useRef<MatchView | null>(null)
+  viewRef.current = view
 
   // Watch for score changes to show goal banner
   useEffect(() => {
     if (!view) return
     const prev = prevScoreRef.current
     if (view.homeScore > prev.home) {
-      // Home scored
       const scorerName = findRecentGoalScorer(game, true)
       showBanner(scorerName ? `GOAL — ${scorerName}!` : 'GOAL!')
     } else if (view.awayScore > prev.away) {
-      // Away scored
       const scorerName = findRecentGoalScorer(game, false)
       showBanner(scorerName ? `GOAL — ${scorerName}!` : 'GOAL!')
     }
@@ -79,6 +103,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     const homeIds = new Set<string>(game.homePlayerIds)
     const timeline = new MatchTimeline(game.stream, (id) => homeIds.has(id))
+    gameDurationRef.current = timeline.duration
 
     const colors: RinkColors = {
       home: game.homeColors.primary,
@@ -87,6 +112,21 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     prevScoreRef.current = { home: 0, away: 0 }
     setGoalBanner(null)
+
+    // Build commentary lines
+    const namesFn = (id: string): string => game.playerNames[id] ?? id
+    const isHomeFn = (id: string): boolean => homeIds.has(id)
+    const lines = generateCommentary(game.stream, namesFn, isHomeFn, {
+      home: game.homeAbbr,
+      away: game.awayAbbr,
+    })
+    setCommentaryLines(lines)
+    setVisibleLines([])
+    lastCommentaryAbsTRef.current = -1
+
+    // Build highlight segments
+    const segs = buildHighlights(game.stream)
+    setHighlights(segs)
 
     const promise =
       rendererMode === '3d'
@@ -110,7 +150,11 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           renderer3dRef.current = null
         }
 
-        r.onUpdate(setView)
+        r.onUpdate((v) => {
+          setView(v)
+          updateCommentaryTicker(v, lines)
+          handleHighlightSkip(v)
+        })
         r.setSpeed(speed)
         r.load(timeline, colors)
 
@@ -136,7 +180,9 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       renderer?.destroy()
       rendererRef.current = null
       renderer3dRef.current = null
+      announcer.cancel()
       if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+      if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current)
     }
     // Re-build when game or mode changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,17 +192,144 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     rendererRef.current?.setSpeed(speed)
   }, [speed])
 
+  // Commentary ticker updater (called from onUpdate callback)
+  function updateCommentaryTicker(v: MatchView, lines: CommentaryLine[]): void {
+    const dur = gameDurationRef.current
+    if (dur <= 0) return
+    const currentAbsT = v.progress * dur
+
+    // On seek: if we went backwards, reset and backfill
+    const lastAbsT = lastCommentaryAbsTRef.current
+    if (currentAbsT < lastAbsT - 1) {
+      // Seek backwards — backfill all lines up to current point
+      const backfill = lines.filter((l) => l.absT <= currentAbsT)
+      setVisibleLines(backfill)
+      lastCommentaryAbsTRef.current = currentAbsT
+      return
+    }
+
+    // Forward: add lines that have been crossed since last update
+    const newLines = lines.filter((l) => l.absT > lastAbsT && l.absT <= currentAbsT)
+    if (newLines.length > 0) {
+      setVisibleLines((prev) => {
+        const combined = [...prev, ...newLines]
+        // Keep last 50 lines in the ticker
+        return combined.slice(-50)
+      })
+
+      // Speak via announcer (importance gating by speed)
+      if (v.playing) {
+        for (const line of newLines) {
+          const minImp = speed > 8 ? 99 : speed > 2 ? 2 : 1
+          if (line.importance >= minImp) {
+            announcer.speak(line.speech, line.importance)
+          }
+        }
+      }
+    }
+
+    lastCommentaryAbsTRef.current = currentAbsT
+  }
+
+  // Highlight skip handler (called from onUpdate callback)
+  function handleHighlightSkip(v: MatchView): void {
+    if (playbackMode === 'full') return
+    const dur = gameDurationRef.current
+    if (dur <= 0) return
+
+    const mode = playbackMode === 'key' ? 'key' : 'extended'
+    const segs = selectMode(highlights, mode)
+    if (segs.length === 0) return
+
+    const currentAbsT = v.progress * dur
+
+    // Find which segment we are in (if any)
+    const segIdx = segs.findIndex(
+      (s) => currentAbsT >= s.startAbsT && currentAbsT <= s.endAbsT
+    )
+
+    if (segIdx >= 0) {
+      // We're in a segment — check if it just ended
+      const seg = segs[segIdx]
+      if (currentAbsT >= seg.endAbsT - 0.1) {
+        // Find next segment
+        const next = segs[segIdx + 1]
+        if (next) {
+          // Jump to next segment
+          rendererRef.current?.seekFraction(next.startAbsT / dur)
+          showSkipFlash()
+        }
+      }
+    } else {
+      // Not in any segment — skip forward to the next one
+      const next = segs.find((s) => s.startAbsT > currentAbsT)
+      if (next) {
+        rendererRef.current?.seekFraction(next.startAbsT / dur)
+        showSkipFlash()
+      }
+    }
+  }
+
+  function showSkipFlash(): void {
+    setSkipping(true)
+    if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current)
+    skipFlashTimerRef.current = setTimeout(() => setSkipping(false), 800)
+  }
+
+  // Auto-scroll ticker to bottom when new lines arrive
+  useEffect(() => {
+    const el = tickerRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [visibleLines])
+
   function handleToggleMode(): void {
     const next = rendererMode === '3d' ? '2d' : '3d'
     writeRendererPref(next)
     setRendererMode(next)
     setView(null)
     setErr(null)
+    announcer.cancel()
   }
 
   function handleCamPreset(preset: CameraPreset): void {
     setCamPreset(preset)
     renderer3dRef.current?.setCamera(preset)
+  }
+
+  function handleAnnouncerToggle(): void {
+    announcer.toggle()
+    setAnnouncerEnabled(announcer.isEnabled)
+  }
+
+  function handlePlaybackMode(mode: PlaybackMode): void {
+    setPlaybackMode(mode)
+    // When switching to highlight mode, seek to the first segment immediately
+    if (mode !== 'full') {
+      const filterMode = mode === 'key' ? 'key' : 'extended'
+      const segs = selectMode(highlights, filterMode)
+      if (segs.length > 0 && gameDurationRef.current > 0) {
+        rendererRef.current?.seekFraction(segs[0].startAbsT / gameDurationRef.current)
+      }
+    }
+  }
+
+  function handleSeek(fraction: number): void {
+    rendererRef.current?.seekFraction(fraction)
+    announcer.cancel()
+    // Backfill commentary on seek
+    const dur = gameDurationRef.current
+    if (dur > 0) {
+      const currentAbsT = fraction * dur
+      const backfill = commentaryLines.filter((l) => l.absT <= currentAbsT)
+      setVisibleLines(backfill.slice(-50))
+      lastCommentaryAbsTRef.current = currentAbsT
+    }
+  }
+
+  function handlePause(): void {
+    rendererRef.current?.toggle()
+    announcer.cancel()
   }
 
   const userSide = game.userIsHome ? 'home' : 'away'
@@ -194,31 +367,109 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             ))}
           </div>
 
+          {/* Announcer toggle */}
+          {announcer.available && (
+            <button
+              className="btn btn-ghost"
+              onClick={handleAnnouncerToggle}
+              title={announcerEnabled ? 'Mute commentary' : 'Enable spoken commentary'}
+              style={announcerEnabled ? { ...modeActiveStyle } : { opacity: 0.5 }}
+            >
+              {announcerEnabled ? '🔊' : '🔇'}
+            </button>
+          )}
+
           <button onClick={props.onClose} className="btn">
             {view?.ended ? 'Back to hub' : 'Leave game'}
           </button>
         </div>
       </div>
 
-      {/* ── viewport ────────────────────────────────────────────────────── */}
-      <div style={{ position: 'relative' }}>
-        <div
-          ref={hostRef}
-          style={{
-            width: '100%',
-            aspectRatio: '2.35 / 1',
-            background: '#0c1016',
-            borderRadius: 10,
-            overflow: 'hidden',
-          }}
-        />
-
-        {/* Goal banner overlay */}
-        {goalBanner && (
-          <div style={goalBannerStyle}>
-            {goalBanner}
-          </div>
+      {/* ── playback mode selector ───────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ color: MUTED, fontSize: 12 }}>Mode:</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {([ 'full', 'extended', 'key' ] as const).map((mode) => (
+            <button
+              key={mode}
+              className="btn btn-ghost"
+              onClick={() => handlePlaybackMode(mode)}
+              style={playbackMode === mode ? { ...modeActiveStyle, fontSize: 12, padding: '4px 10px' } : { fontSize: 12, padding: '4px 10px' }}
+              title={
+                mode === 'full' ? 'Watch the full game' :
+                mode === 'extended' ? 'All highlights (goals, saves, hits, penalties)' :
+                'Key moments only (goals, penalties, top chances)'
+              }
+            >
+              {mode === 'full' ? 'Full' : mode === 'extended' ? 'Extended' : 'Key moments'}
+            </button>
+          ))}
+        </div>
+        {skipping && (
+          <span style={{ color: MUTED, fontSize: 11, fontStyle: 'italic', animation: 'fadeIn 0.1s ease' }}>
+            skipping...
+          </span>
         )}
+      </div>
+
+      {/* ── main layout: viewport + commentary ──────────────────────────── */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        {/* ── viewport ──────────────────────────────────────────────────── */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div
+            ref={hostRef}
+            style={{
+              width: '100%',
+              aspectRatio: '2.35 / 1',
+              background: '#0c1016',
+              borderRadius: 10,
+              overflow: 'hidden',
+            }}
+          />
+
+          {/* Goal banner overlay */}
+          {goalBanner && (
+            <div style={goalBannerStyle}>
+              {goalBanner}
+            </div>
+          )}
+        </div>
+
+        {/* ── commentary ticker ─────────────────────────────────────────── */}
+        <div style={tickerContainerStyle}>
+          <div style={tickerHeaderStyle}>
+            <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
+              Commentary
+            </span>
+          </div>
+          <div ref={tickerRef} style={tickerScrollStyle}>
+            {visibleLines.length === 0 ? (
+              <div style={{ color: MUTED, fontSize: 12, padding: '8px 4px' }}>
+                Awaiting first event...
+              </div>
+            ) : (
+              visibleLines.map((line, i) => (
+                <div
+                  key={`${line.absT}-${i}`}
+                  style={{
+                    padding: '5px 4px',
+                    borderBottom: `1px solid rgba(42,34,64,0.4)`,
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                    color: line.importance === 3 ? '#ffd700' : line.importance === 2 ? '#e8e4f4' : MUTED,
+                    fontWeight: line.importance === 3 ? 700 : 400,
+                    background: line.importance === 3 ? 'rgba(255,215,0,0.06)' : 'transparent',
+                  }}
+                >
+                  <span style={{ color: MUTED, fontSize: 10, marginRight: 4 }}>
+                    {line.clock}
+                  </span>
+                  {line.text}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
       {err && (
@@ -242,7 +493,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
         <button
           className="btn btn-primary"
           style={{ minWidth: 96 }}
-          onClick={() => rendererRef.current?.toggle()}
+          onClick={handlePause}
         >
           {view?.playing ? 'Pause' : view?.ended ? 'Replay' : 'Play'}
         </button>
@@ -252,7 +503,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           min={0}
           max={1000}
           value={Math.round((view?.progress ?? 0) * 1000)}
-          onChange={(e) => rendererRef.current?.seekFraction(Number(e.target.value) / 1000)}
+          onChange={(e) => handleSeek(Number(e.target.value) / 1000)}
           style={{ flex: 1, minWidth: 120 }}
         />
 
@@ -298,7 +549,6 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
 /** Find the name of the most recent goal scorer on the given side. */
 function findRecentGoalScorer(game: WatchedGame, isHome: boolean): string | null {
-  // Look for the last goal event in the stream for that side.
   const homeIds = new Set<string>(game.homePlayerIds)
   let lastScorerId: string | null = null
   for (const ev of game.stream) {
@@ -406,4 +656,29 @@ const goalBannerStyle: CSSProperties = {
   animation: 'fadeIn 0.18s ease',
 }
 
+const tickerContainerStyle: CSSProperties = {
+  width: 220,
+  flexShrink: 0,
+  background: PANEL,
+  borderRadius: 10,
+  border: '1px solid rgba(42,34,64,0.8)',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  // Match rink aspect ratio height approximately
+  alignSelf: 'stretch',
+  maxHeight: 280,
+}
 
+const tickerHeaderStyle: CSSProperties = {
+  padding: '7px 10px',
+  borderBottom: '1px solid rgba(42,34,64,0.8)',
+  flexShrink: 0,
+}
+
+const tickerScrollStyle: CSSProperties = {
+  flex: 1,
+  overflowY: 'auto',
+  padding: '4px 8px',
+  scrollBehavior: 'smooth',
+}

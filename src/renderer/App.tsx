@@ -19,6 +19,7 @@ import { OffseasonScreen } from './screens/OffseasonScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
 import { PlayoffsScreen } from './screens/PlayoffsScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
+import { ScoutingScreen } from './screens/ScoutingScreen'
 import { SquadScreen } from './screens/SquadScreen'
 import { StandingsScreen } from './screens/StandingsScreen'
 import { StatsScreen } from './screens/StatsScreen'
@@ -339,6 +340,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <TradesScreen />
     case 'finances':
       return <FinancesScreen />
+    case 'scouting':
+      return <ScoutingScreen />
     case 'draft':
       return <DraftScreen />
     case 'offseason':
