@@ -48,15 +48,18 @@ const BY = 0.95
 /**
  * Steer one skater toward an order for one tick of `dt` seconds.
  *
- * Small per-player noise is applied to the TARGET (not the position), so the
- * skating stays organic without ever violating the speed cap. An "arrive"
- * term decelerates the skater near his spot so he settles instead of orbiting.
+ * The target is taken as-is (organic, low-frequency motion comes from the
+ * sinusoidal `sway` in formations.ts). We deliberately do NOT add per-tick
+ * random noise to the target: re-rolling white noise every tick made skaters
+ * who were already near their spot flip direction each frame and visibly
+ * vibrate. An "arrive" term decelerates the skater near his spot so he settles
+ * instead of orbiting.
  */
-export function steer(rng: Rng, r: RSkater, o: MoveOrder, dt: number): void {
+export function steer(_rng: Rng, r: RSkater, o: MoveOrder, dt: number): void {
   const px = r.pos.x * X_FT
   const py = r.pos.y * Y_FT
-  const tx = clamp(o.tx, -BX, BX) * X_FT + rng.float(-0.8, 0.8)
-  const ty = clamp(o.ty, -BY, BY) * Y_FT + rng.float(-0.8, 0.8)
+  const tx = clamp(o.tx, -BX, BX) * X_FT
+  const ty = clamp(o.ty, -BY, BY) * Y_FT
   const dx = tx - px
   const dy = ty - py
   const dist = Math.hypot(dx, dy)
