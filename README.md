@@ -18,18 +18,30 @@ Electron · TypeScript (strict) · React · Web Worker sim · PixiJS · three.js
 
 ## Develop
 
+**Prerequisites:** **Node.js 20.19+ or 22.12+** (Vite 7 / electron-vite 5 require it — older Node is the most common cause of a failed `npm run dev`). Check with `node -v`; if it's older, install the current LTS from [nodejs.org](https://nodejs.org). On Linux you also need the usual Electron runtime libraries (`libgtk-3-0`, `libnss3`, `libasound2`, etc.).
+
 ```bash
-npm install
+npm install        # downloads deps incl. the Electron binary (~150 MB) — needs internet
 npm run dev        # launch the Electron app with HMR
 npm run typecheck  # tsc --noEmit
-npm test           # vitest (700+ tests)
+npm test           # vitest (900+ tests)
+npm run build      # headless production build (good smoke test if dev won't open a window)
 ```
+
+### Troubleshooting
+
+- **`npm run dev` errors immediately / cryptic syntax error** → almost always an old Node. Run `node -v`; it must be ≥ 20.19. `npm install` will warn if your Node is too old (an `engines` check).
+- **Install fails downloading Electron** → behind a proxy/firewall, or a network hiccup. Re-run `npm install`; if a corporate proxy blocks the Electron CDN, set `ELECTRON_MIRROR` or retry on another network.
+- **Window doesn't appear on Linux/WSL** → WSL has no display by default. Use a native Linux desktop (or WSLg), or run `npm run build` to confirm the project compiles. On some distros Electron needs `--no-sandbox`; try `npm run dev -- --no-sandbox`.
+- **Verify the project itself is fine** → `npm run build && npm test` should both pass on a clean clone. If they do, the issue is environmental (Node version / OS libs / display), not the code.
+
+If it still won't run, open an issue with your OS, `node -v`, and the full error output.
 
 Architecture and design decisions live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/DATA-SOURCES.md`](docs/DATA-SOURCES.md). Contributors: read those first — the `GameEvent` stream contract (`src/domain/events.ts`) is the keystone and is kept stable.
 
 ## Status
 
-Playable. ~728 tests green. Active areas: 3D visual fidelity (procedural primitives pending authored models), engine tuning, and an EHM-style UI restructure.
+Playable. 900+ tests green. Active areas: 3D visual fidelity (procedural primitives pending authored models) and match-camera polish.
 
 ---
 
