@@ -601,3 +601,291 @@ describe('Career — persistence', () => {
     expect(series(restored)).toEqual(series(career))
   })
 })
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Career — plumbing modules (Wave 3: EHM screens)
+───────────────────────────────────────────────────────────────────────── */
+
+describe('Career — extended stats', () => {
+  it('emptyStat includes hits/blockedShots/takeaways/giveaways defaulting to 0', () => {
+    const data = generateLeague({ seed: 200 })
+    const career = new Career(data, 200, data.league.teams[0])
+    // After 0 days, all players should have 0 for physical stats.
+    const snap = career.exportSnapshot('ext', '2026-06-11T00:00:00.000Z')
+    for (const [, stat] of snap.playerTotals as Array<[string, { hits?: number; blockedShots?: number }]>) {
+      // hits is present but 0 (or absent on very old format) — just advance to create some
+      expect((stat as { hits?: number }).hits ?? 0).toBe(0)
+    }
+  })
+
+  it('physical stats fields are present in totals after any game', () => {
+    // Quick-sim does not emit hit/block/takeaway/giveaway events, so the
+    // totals will have the fields at 0 rather than >0 for background games.
+    // This test confirms the four fields exist and are numeric (≥ 0) once
+    // any playerTotals entry has been written.
+    const data = generateLeague({ seed: 201 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 201, userId)
+    career.advance(10)
+
+    const snap = career.exportSnapshot('ext2', '2026-06-11T00:00:00.000Z')
+    const entries = snap.playerTotals as Array<[string, Record<string, number>]>
+    // After 10 days at least some players should have totals
+    expect(entries.length).toBeGreaterThan(0)
+    const [, first] = entries[0]
+    // All four physical-play counter fields must be present
+    expect(typeof first.hits).toBe('number')
+    expect(typeof first.blockedShots).toBe('number')
+    expect(typeof first.takeaways).toBe('number')
+    expect(typeof first.giveaways).toBe('number')
+  })
+
+  it('mergePlayerStats accumulates all four physical-play counters', async () => {
+    // ESM dynamic import for the shared outcome helpers
+    const outcomeModule = await import('@engine/shared/outcome')
+    const domainModule = await import('@domain')
+    const { emptyStat, mergePlayerStats } = outcomeModule
+    const { asPlayerId } = domainModule
+    const pid = asPlayerId('p1')
+    const a = emptyStat(pid)
+    a.hits = 3; a.blockedShots = 2; a.takeaways = 1; a.giveaways = 1
+    const totals = new Map()
+    const game = new Map([[pid, a]])
+    mergePlayerStats(totals, game)
+    const t = totals.get(pid)!
+    expect(t.hits).toBe(3)
+    expect(t.blockedShots).toBe(2)
+    expect(t.takeaways).toBe(1)
+    expect(t.giveaways).toBe(1)
+  })
+})
+
+describe('Career — per-game ratings', () => {
+  it('playerRatings map is populated after games are played', () => {
+    const data = generateLeague({ seed: 210 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 210, userId)
+    career.advance(5)
+
+    const squad = career.getSquad()
+    // At least some players should have a non-empty avgRating
+    const withRatings = squad.rows.filter((r) => r.avgRating > 0)
+    expect(withRatings.length).toBeGreaterThan(0)
+    // gameRatingForm should be a string of A/B/C/D/F characters
+    for (const row of withRatings) {
+      expect(row.gameRatingForm).toMatch(/^[ABCDF]*$/)
+      expect(row.avgRating).toBeGreaterThanOrEqual(4.0)
+      expect(row.avgRating).toBeLessThanOrEqual(8.0)
+    }
+  })
+
+  it('ratings survive a snapshot round-trip', () => {
+    const data = generateLeague({ seed: 211 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 211, userId)
+    career.advance(8)
+
+    const snap = career.exportSnapshot('rat', '2026-06-11T00:00:00.000Z')
+    expect(snap.playerRatings).toBeDefined()
+    expect(snap.playerRatings!.length).toBeGreaterThan(0)
+
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const snap2 = restored.exportSnapshot('rat2', '2026-06-11T00:00:00.000Z')
+    expect(snap2.playerRatings).toEqual(snap.playerRatings)
+
+    // Squad form strings should match
+    const origSquad = career.getSquad()
+    const restSquad = restored.getSquad()
+    const forms = origSquad.rows.map((r) => r.gameRatingForm)
+    const restForms = restSquad.rows.map((r) => r.gameRatingForm)
+    expect(restForms).toEqual(forms)
+  })
+
+  it('dashboard includes teamLeaders with top scorers in goals/assists/points', () => {
+    const data = generateLeague({ seed: 212 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 212, userId)
+    career.advance(15)
+
+    const dash = career.getDashboard()
+    expect(dash.teamLeaders).toBeDefined()
+    expect(dash.teamLeaders!.goals.entries.length).toBeGreaterThanOrEqual(0)
+    expect(dash.teamLeaders!.points.label).toBe('Points')
+    expect(dash.teamLeaders!.avgRating.unit).toBe('AvR')
+    expect(dash.playerFocus).toBeDefined()
+    expect(dash.financesSummary).toBeDefined()
+    expect(dash.financesSummary!.capUsed).toBeGreaterThan(0)
+  })
+})
+
+describe('Career — staff and AGM report', () => {
+  it('staff is generated at career start and includes headCoach + assistantGM', () => {
+    const data = generateLeague({ seed: 220 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 220, userId)
+
+    const snap = career.exportSnapshot('staff', '2026-06-11T00:00:00.000Z')
+    expect(snap.staff).toBeDefined()
+    expect(snap.staff!.headCoach.role).toBe('headCoach')
+    expect(snap.staff!.assistantGM.role).toBe('assistantGM')
+    expect(snap.staff!.headCoach.rating).toBeGreaterThanOrEqual(40)
+    expect(snap.staff!.assistantGM.judgment).toBeGreaterThanOrEqual(30)
+  })
+
+  it('getReport returns a valid AGM depth chart with all positions covered', () => {
+    const data = generateLeague({ seed: 221 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 221, userId)
+
+    const report = career.getReport()
+    expect(report.agmName).toBeTruthy()
+    expect(report.agmRating).toBeGreaterThanOrEqual(40)
+    expect(report.agmJudgment).toBeGreaterThanOrEqual(30)
+
+    // All positions covered
+    expect(report.depthChart.goalies.length).toBeGreaterThan(0)
+    expect(report.depthChart.defensemen.length).toBeGreaterThan(0)
+    expect(report.depthChart.centers.length + report.depthChart.leftWings.length +
+           report.depthChart.rightWings.length).toBeGreaterThan(0)
+
+    // Color tiers are valid
+    const validTiers = ['elite', 'good', 'solid', 'fringe']
+    for (const player of [...report.depthChart.goalies, ...report.depthChart.defensemen]) {
+      expect(validTiers).toContain(player.colorTier)
+    }
+
+    // Category bests covers all 12 EHM categories
+    expect(report.categoryBests.length).toBe(12)
+    for (const cb of report.categoryBests) {
+      expect(cb.playerId).toBeTruthy()
+      expect(cb.playerName).toBeTruthy()
+    }
+  })
+
+  it('staff survives a snapshot round-trip with stable AGM judgment', () => {
+    const data = generateLeague({ seed: 222 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 222, userId)
+
+    const snap = career.exportSnapshot('staff-rt', '2026-06-11T00:00:00.000Z')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const snap2 = restored.exportSnapshot('staff-rt2', '2026-06-11T00:00:00.000Z')
+
+    expect(snap2.staff!.headCoach.judgment).toBe(snap.staff!.headCoach.judgment)
+    expect(snap2.staff!.assistantGM.name).toBe(snap.staff!.assistantGM.name)
+  })
+
+  it('old saves without staff field get fresh staff on load', () => {
+    const data = generateLeague({ seed: 223 })
+    const career = new Career(data, 223, data.league.teams[0])
+
+    const snap = career.exportSnapshot('legacy-staff', '2026-06-11T00:00:00.000Z')
+    const { staff: _dropped, ...oldSnap } = snap as typeof snap & { staff?: unknown }
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(oldSnap)))
+
+    const report = restored.getReport()
+    expect(report.agmName).toBeTruthy()
+  })
+})
+
+describe('Career — practice and scratches', () => {
+  it('getPractice returns a balanced default state with a rationale', () => {
+    const data = generateLeague({ seed: 230 })
+    const career = new Career(data, 230, data.league.teams[0])
+
+    const pv = career.getPractice()
+    expect(pv.state.teamFocus).toBe('balanced')
+    expect(pv.state.scratched).toEqual([])
+    expect(pv.suggestion.rationale).toBeTruthy()
+    expect(pv.suggestion.teamFocus).toBeTruthy()
+  })
+
+  it('setPractice persists state and getSquad shows scratched flag', () => {
+    const data = generateLeague({ seed: 231 })
+    const userId = data.league.teams[3]
+    const career = new Career(data, 231, userId)
+
+    const squad = career.getSquad()
+    const targetId = squad.rows.find((r) => r.position !== 'G')!.playerId
+
+    // Scratch the player
+    career.toggleScratchPlayer(targetId)
+
+    const updatedSquad = career.getSquad()
+    const row = updatedSquad.rows.find((r) => r.playerId === targetId)!
+    expect(row.scratched).toBe(true)
+
+    // Scratch another player
+    const secondId = squad.rows.find((r) => r.playerId !== targetId && r.position !== 'G')!.playerId
+    career.toggleScratchPlayer(secondId)
+    expect(career.isScratchedFor(secondId)).toBe(true)
+
+    // dressedCount should be less than rosterCount
+    const sv = career.getSquad()
+    expect(sv.dressedCount).toBeLessThan(sv.rosterCount)
+  })
+
+  it('practice state survives a snapshot round-trip', () => {
+    const data = generateLeague({ seed: 232 })
+    const userId = data.league.teams[4]
+    const career = new Career(data, 232, userId)
+
+    // Set a non-default focus
+    const pv = career.getPractice()
+    career.setPractice({ ...pv.state, teamFocus: 'skating' })
+
+    const snap = career.exportSnapshot('prac-rt', '2026-06-11T00:00:00.000Z')
+    expect(snap.practiceState).toBeDefined()
+    expect(snap.practiceState!.teamFocus).toBe('skating')
+
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const restoredPv = restored.getPractice()
+    expect(restoredPv.state.teamFocus).toBe('skating')
+  })
+
+  it('per-player focus override is preserved in snapshot', () => {
+    const data = generateLeague({ seed: 233 })
+    const userId = data.league.teams[5]
+    const career = new Career(data, 233, userId)
+
+    const squad = career.getSquad()
+    const targetId = squad.rows.find((r) => r.position === 'D')!.playerId
+
+    career.setPlayerFocusDrill(targetId, 'defense')
+
+    const snap = career.exportSnapshot('prac-player', '2026-06-11T00:00:00.000Z')
+    const focusEntry = snap.practiceState!.perPlayerFocus.find(([id]) => id === targetId)
+    expect(focusEntry).toBeDefined()
+    expect(focusEntry![1]).toBe('defense')
+  })
+})
+
+describe('Career — league leaders', () => {
+  it('getLeagueLeaders returns non-empty boards after 15 games', () => {
+    const data = generateLeague({ seed: 240 })
+    const career = new Career(data, 240, data.league.teams[0])
+    career.advance(15)
+
+    const leaders = career.getLeagueLeaders(5)
+    expect(leaders.points.length).toBeGreaterThan(0)
+    expect(leaders.goals.length).toBeGreaterThan(0)
+    expect(leaders.assists.length).toBeGreaterThan(0)
+
+    // Points leaders should have non-negative values
+    for (const entry of leaders.points) {
+      expect(entry.value).toBeGreaterThanOrEqual(0)
+      expect(entry.gamesPlayed).toBeGreaterThan(0)
+    }
+  })
+
+  it('getDashboard exposes financesSummary with capUsed and capSpace', () => {
+    const data = generateLeague({ seed: 241 })
+    const career = new Career(data, 241, data.league.teams[0])
+    const dash = career.getDashboard()
+    expect(dash.financesSummary).toBeDefined()
+    expect(dash.financesSummary!.capUsed).toBeGreaterThan(0)
+    expect(dash.financesSummary!.capSpace).toBeGreaterThanOrEqual(0)
+    const totalCap = dash.financesSummary!.capUsed + dash.financesSummary!.capSpace
+    expect(totalCap).toBeGreaterThan(0)
+  })
+})

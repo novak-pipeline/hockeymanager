@@ -2,6 +2,8 @@ import type {
   CareerSnapshot,
   LinesUpdate,
   PressTone,
+  TeamPracticeState,
+  PracticeFocus,
   TradeProposal,
   WorkerRequest,
   WorkerRequestBody,
@@ -274,6 +276,45 @@ export class SimClient {
 
   answerPresser(answer: string, tone: PressTone): Promise<WorkerResponse> {
     return this.send({ type: 'answerPresser', answer, tone })
+  }
+
+  /* ── EHM plumbing modules (Wave 3) ── */
+
+  /** AGM depth chart and category bests. */
+  getReport(): Promise<WorkerResponse> {
+    return this.send({ type: 'getReport' })
+  }
+
+  /** Practice state + auto-suggestion. */
+  getPractice(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPractice' })
+  }
+
+  /** Overwrite the team practice state. */
+  setPractice(state: TeamPracticeState): Promise<WorkerResponse> {
+    return this.send({ type: 'setPractice', state })
+  }
+
+  /** Toggle a player's healthy-scratch status. */
+  toggleScratch(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleScratch', playerId })
+  }
+
+  /** Set (or clear) a per-player individual focus override. */
+  setPlayerFocusDrill(playerId: string, focus: PracticeFocus | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setPlayerFocusDrill', playerId, focus })
+  }
+
+  /** League-wide top-N leaderboards. */
+  getLeagueLeaders(topN?: number): Promise<WorkerResponse> {
+    return topN !== undefined
+      ? this.send({ type: 'getLeagueLeaders', topN })
+      : this.send({ type: 'getLeagueLeaders' })
+  }
+
+  /** Team leaders right-rail panel. */
+  getTeamLeaders(): Promise<WorkerResponse> {
+    return this.send({ type: 'getTeamLeaders' })
   }
 
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */

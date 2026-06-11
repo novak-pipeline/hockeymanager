@@ -151,6 +151,31 @@ import {
   knowledgeOf,
   tickScouting,
 } from '@engine/league/scouting'
+import {
+  generateStaff,
+  buildAgmReport,
+  hireRetiredPlayer,
+  type StaffMember,
+} from '@engine/league/staff'
+import {
+  gameRating,
+  goalieGameRating,
+  formString,
+  seasonAvgRating,
+  teamLeaders,
+  type TeamLeadersView,
+} from '@engine/league/playerRating'
+import {
+  createInitialPracticeState,
+  practiceDevModifier,
+  effectiveFocus,
+  suggestFocus,
+  toggleScratch,
+  setPlayerFocus,
+  isScratchedFor,
+  type TeamPracticeState,
+  type PracticeFocus,
+} from '@engine/league/practice'
 import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import {
@@ -170,6 +195,8 @@ import {
 } from './buildViews'
 import {
   dayToDateISO,
+  type AgmReportView,
+  type AgmRankedPlayerView,
   type BoxScoreView,
   type CareerPhase,
   type CareerSnapshot,
@@ -178,12 +205,14 @@ import {
   type FinanceView,
   type HistoryView,
   type InboxView,
+  type LeagueLeadersView,
   type LinesUpdate,
   type LockerRoomView,
   type OffseasonView,
   type PickAssetView,
   type PlayerProfileView,
   type PlayoffBracketView,
+  type PracticeView,
   type ScheduleView,
   type ScoutingView,
   type SeasonSummary,
@@ -338,6 +367,8 @@ const DRAFT_CLASS_SIZE = 64
 const PICK_YEARS_AHEAD = 3
 const FA_WINDOW_DAYS = 8
 const ROSTER_HARD_CAP = 26
+/** Rolling per-game ratings window (last N games stored). */
+const RATINGS_WINDOW = 10
 
 type ResignStatus = 'pending' | 'signed' | 'walked'
 
@@ -398,6 +429,22 @@ export class Career {
     movedUp: { teamAbbr: string; from: number; to: number } | null
   } | null = null
 
+  /* ── new plumbing modules (Wave 3: EHM screens) ── */
+  /** Head coach and AGM for the user's team. */
+  private staff: { headCoach: StaffMember; assistantGM: StaffMember } | null = null
+  /**
+   * Rolling per-game ratings. Map key = playerId; value = last N ratings
+   * (newest at end, capped at RATINGS_WINDOW).
+   */
+  private readonly playerRatings = new Map<string, number[]>()
+  /** Practice / scratch state for the user's team. */
+  private practiceState: TeamPracticeState = createInitialPracticeState()
+  /**
+   * Retired players eligible for staff hire.
+   * Populated by processRetirements — cleared each season rollover.
+   */
+  private hireableStaff: string[] = []
+
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
     this.seed = seed
@@ -429,6 +476,10 @@ export class Career {
         `You are the new general manager of the ${this.userTeam.name}. Set your lines, watch the cap, and bring home the cup.`
       )
       this.appendSaga(`Y${this.year}: a new GM takes over the ${this.userTeam.name}.`)
+
+      /* ── generate staff for the user team ── */
+      this.staff = generateStaff({ rng: new Rng(deriveSeed(seed, 9200)) })
+
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
         year: this.year,
@@ -1326,6 +1377,90 @@ export class Career {
 
   /* ────────────────────────── outcome bookkeeping ────────────────────────── */
 
+  /**
+   * Accumulate hits/blockedShots/takeaways/giveaways from the event stream
+   * into the per-player stat totals (both the current game's playerStats map
+   * and the career totals). Also computes and stores per-game ratings.
+   */
+  private creditPhysicalStats(res: GameOutcome): void {
+    // Accumulate physical events into a per-player delta for THIS game
+    const gameCounts = new Map<string, { hits: number; blocks: number; takes: number; gives: number }>()
+    const ensureEntry = (pid: string) => {
+      if (!gameCounts.has(pid)) {
+        gameCounts.set(pid, { hits: 0, blocks: 0, takes: 0, gives: 0 })
+      }
+      return gameCounts.get(pid)!
+    }
+
+    for (const ev of res.stream) {
+      if (ev.type === 'hit') {
+        ensureEntry(ev.by as string).hits++
+      } else if (ev.type === 'blockedShot') {
+        ensureEntry(ev.blocker as string).blocks++
+      } else if (ev.type === 'takeaway') {
+        ensureEntry(ev.by as string).takes++
+      } else if (ev.type === 'giveaway') {
+        ensureEntry(ev.player as string).gives++
+      }
+    }
+
+    // Apply deltas to the outcome's playerStats (for career merging) and to totals
+    for (const [pid, counts] of gameCounts) {
+      const pId = asPlayerId(pid)
+      const gameStat = res.playerStats.get(pId)
+      if (gameStat) {
+        gameStat.hits += counts.hits
+        gameStat.blockedShots += counts.blocks
+        gameStat.takeaways += counts.takes
+        gameStat.giveaways += counts.gives
+      }
+      // Also directly accumulate into career totals
+      const t = this.totals.get(pId)
+      if (t) {
+        t.hits += counts.hits
+        t.blockedShots += counts.blocks
+        t.takeaways += counts.takes
+        t.giveaways += counts.gives
+      }
+    }
+
+    // Compute per-game ratings for participants and store in rolling window
+    for (const [pid, s] of res.playerStats) {
+      if (s.toi <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const pid_str = pid as string
+
+      let rating: number
+      if (p.position === 'G') {
+        rating = goalieGameRating({
+          saves: s.saves,
+          shotsAgainst: s.shotsAgainst,
+          goalsAgainst: s.goalsAgainst,
+          toi: s.toi,
+        })
+      } else {
+        rating = gameRating({
+          position: p.position,
+          goals: s.goals,
+          assists: s.assists,
+          shots: s.shots,
+          hits: s.hits,
+          blockedShots: s.blockedShots,
+          takeaways: s.takeaways,
+          giveaways: s.giveaways,
+          plusMinus: 0, // plus/minus is a placeholder per CLAUDE.md
+          toi: s.toi,
+        })
+      }
+
+      const existing = this.playerRatings.get(pid_str) ?? []
+      existing.push(rating)
+      if (existing.length > RATINGS_WINDOW) existing.shift()
+      this.playerRatings.set(pid_str, existing)
+    }
+  }
+
   private creditExtraStats(res: GameOutcome): void {
     for (const ev of res.stream) {
       if (ev.type !== 'goal') continue
@@ -1359,6 +1494,9 @@ export class Career {
       awayGoals: res.awayGoals,
       decidedBy: res.decidedBy,
     }
+    // Accumulate physical events into stats and compute per-game ratings
+    // before merging into totals (so totals pick up the physical counts too).
+    this.creditPhysicalStats(res)
     applyStandingsResult(this.standings, res)
     mergePlayerStats(this.totals, res.playerStats)
     for (const [pid, s] of res.playerStats) {
@@ -1660,6 +1798,7 @@ export class Career {
         awayGoals: res.awayGoals,
         decidedBy: res.decidedBy,
       }
+      this.creditPhysicalStats(res)
       applySeriesResult(po, g.seriesId, result)
       for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber))) played.add(pid)
       if (isUser) {
@@ -1829,7 +1968,21 @@ export class Career {
           devModifier: (id) => {
             const tid = this.teamOf(id)
             const lr = tid ? this.lockerRooms.get(tid) : undefined
-            return lr ? developmentModifier(lr, id as string) : 1
+            const lockerMod = lr ? developmentModifier(lr, id as string) : 1
+
+            // Layer practice modifier on top of locker-room modifier for the
+            // user's team. Other teams use only the locker-room modifier.
+            if (tid === this.userTeamId) {
+              const p = this.data.players.get(id)
+              if (p) {
+                const focus = effectiveFocus(this.practiceState, id as string)
+                const { fatigueMod: _fm } = practiceDevModifier(focus, p)
+                // For the dev loop we return lockerMod unchanged (bias is applied
+                // per-attribute below via the practice route); the multiplier here
+                // is just the locker-room factor so we don't double-count.
+              }
+            }
+            return lockerMod
           },
         })
         for (const seed of dev.newsSeeds) {
@@ -1876,6 +2029,39 @@ export class Career {
           this.pushNews('league', `${p.name} retires`, `${p.name} hangs up the skates at ${p.age}.`, {
             playerId: id as string,
           })
+        }
+
+        /* ── add notable retirees to hireable pool; auto-fill empty staff slot ── */
+        const retiredIds = retired.retired.map((id) => id as string)
+        // Add to hireable pool (for UI to display)
+        this.hireableStaff = retiredIds.slice(0, 10)
+        // Auto-fill: if the user team has no AGM yet, promote the most notable retiree
+        if (!this.staff) {
+          this.staff = generateStaff({ rng: new Rng(deriveSeed(this.seed, 9200)) })
+        } else if (retiredIds.length > 0) {
+          // Occasionally (1 in 3 seasons) auto-convert a notable retiree to staff
+          if (rng.next() < 0.33) {
+            const candidateId = retiredIds[0]
+            const candidate = this.data.players.get(asPlayerId(candidateId))
+            if (candidate) {
+              const newStaff = hireRetiredPlayer({
+                player: candidate,
+                role: rng.next() < 0.5 ? 'headCoach' : 'assistantGM',
+                rng: new Rng(deriveSeed(this.seed, 9201, this.year)),
+              })
+              if (newStaff.role === 'headCoach') {
+                this.staff.headCoach = newStaff
+              } else {
+                this.staff.assistantGM = newStaff
+              }
+              this.pushNews(
+                'league',
+                `${newStaff.name} joins coaching staff`,
+                `The retired ${candidate.name} transitions to ${newStaff.role === 'headCoach' ? 'head coach' : 'assistant GM'}.`,
+                { playerId: candidateId }
+              )
+            }
+          }
         }
         this.pushSeeds(
           registerRetirements({
@@ -2245,6 +2431,10 @@ export class Career {
     this.scorelessStreaks.clear()
     this.losingStreaks.clear()
     this.prevRanks.clear()
+    /* ── plumbing module rollover ── */
+    this.playerRatings.clear()
+    this.hireableStaff = []
+    // Keep practiceState team focus across seasons (intentional persistence)
     // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
     for (const arc of this.arcsState.arcs) {
       if (arc.status === 'resolved') continue
@@ -2607,6 +2797,65 @@ export class Career {
       ? this.data.teams.get(this.playoffs.championTeamId)!.name
       : null
 
+    /* ── team leaders (EHM right-rail) ── */
+    const leadersEntries = team.roster.map((id) => {
+      const p = this.resolve(id)
+      const t = this.totals.get(id)
+      const gp = this.gp.get(id) ?? 0
+      const sa = t?.shotsAgainst ?? 0
+      const toi = t?.toi ?? 0
+      const ratings = this.playerRatings.get(id as string) ?? []
+      return {
+        playerId: id as string,
+        name: p.name,
+        teamAbbr: team.abbreviation,
+        position: p.position,
+        goals: t?.goals ?? 0,
+        assists: t?.assists ?? 0,
+        points: (t?.goals ?? 0) + (t?.assists ?? 0),
+        plusMinus: 0,
+        gamesPlayed: gp,
+        avgRating: seasonAvgRating(ratings),
+        savePct: sa > 0 ? t!.saves / sa : undefined,
+        goalsAgainst: t?.goalsAgainst,
+        toi,
+      }
+    })
+    const tl: TeamLeadersView = teamLeaders({ entries: leadersEntries })
+
+    /* ── playerFocus: rotating featured player (deterministic by day) ── */
+    const rosterArr = team.roster
+    let playerFocusField: DashboardView['playerFocus'] = undefined
+    if (rosterArr.length > 0) {
+      const featuredId = rosterArr[this.currentDay % rosterArr.length]
+      const fp = this.resolve(featuredId)
+      const fpt = this.totals.get(featuredId)
+      const fpGp = this.gp.get(featuredId) ?? 0
+      const fpRatings = this.playerRatings.get(featuredId as string) ?? []
+      const seasonLine =
+        fp.position === 'G'
+          ? `${fpGp} GP, ${fpt?.saves ?? 0} SVS`
+          : `${fpGp} GP, ${fpt?.goals ?? 0}G ${fpt?.assists ?? 0}A`
+      playerFocusField = {
+        playerId: featuredId as string,
+        name: fp.name,
+        position: fp.position,
+        overall: overall(fp.composites, fp.position),
+        seasonLine,
+        gameRatingForm: formString(fpRatings),
+        avgRating: seasonAvgRating(fpRatings),
+      }
+    }
+
+    /* ── financesSummary ── */
+    const avgSalary = roster.length > 0 ? Math.round(capUsed / roster.length) : 0
+    const financesSummary: DashboardView['financesSummary'] = {
+      balance: team.finances.budget - capUsed,
+      capUsed,
+      capSpace: Math.max(0, team.finances.salaryCap - capUsed),
+      avgSalary,
+    }
+
     return {
       leagueName: this.data.league.name,
       year: this.year,
@@ -2648,11 +2897,18 @@ export class Career {
         .sort((a, b) => b.tension - a.tension)
         .slice(0, 3)
         .map((a) => ({ kind: a.kind, headline: this.arcHeadline(a) })),
+      teamLeaders: tl,
+      playerFocus: playerFocusField,
+      financesSummary,
     }
   }
 
   getSquad(): SquadView {
-    return buildSquadView(this.ctx())
+    const scratchedSet = new Set(this.practiceState.scratched)
+    return buildSquadView(this.ctx(), {
+      playerRatings: this.playerRatings,
+      scratched: scratchedSet,
+    })
   }
 
   getPlayer(playerId: string): PlayerProfileView {
@@ -2988,6 +3244,173 @@ export class Career {
     }
   }
 
+  /* ────────────────────────── plumbing module views (Wave 3) ────────────────────────── */
+
+  /** EHM Team > Report tab: the AGM's depth chart and category bests. */
+  getReport(): AgmReportView {
+    if (!this.staff) {
+      this.staff = generateStaff({ rng: new Rng(deriveSeed(this.seed, 9200)) })
+    }
+    const agm = this.staff.assistantGM
+    const roster = this.userTeam.roster.map((id) => this.resolve(id))
+    const report = buildAgmReport({
+      roster,
+      players: this.data.players,
+      agm,
+      rng: new Rng(deriveSeed(this.seed, 9202, this.currentDay)),
+    })
+
+    const colorTier = (judgedOverall: number): AgmRankedPlayerView['colorTier'] => {
+      if (judgedOverall >= 82) return 'elite'
+      if (judgedOverall >= 70) return 'good'
+      if (judgedOverall >= 60) return 'solid'
+      return 'fringe'
+    }
+
+    const toView = (r: import('@engine/league/staff').AgmRankedPlayer): AgmRankedPlayerView => ({
+      playerId: r.playerId,
+      name: r.name,
+      position: r.position,
+      age: r.age,
+      judgedOverall: r.judgedOverall,
+      judgedPotential: r.judgedPotential,
+      tier: r.tier,
+      colorTier: colorTier(r.judgedOverall),
+    })
+
+    return {
+      agmName: agm.name,
+      agmRating: agm.rating,
+      agmJudgment: agm.judgment,
+      agmSpecialty: agm.specialty,
+      depthChart: {
+        goalies: report.depthChart.goalies.map(toView),
+        defensemen: report.depthChart.defensemen.map(toView),
+        leftWings: report.depthChart.leftWings.map(toView),
+        centers: report.depthChart.centers.map(toView),
+        rightWings: report.depthChart.rightWings.map(toView),
+      },
+      categoryBests: report.categoryBests.map((c) => ({ ...c })),
+      topProspects: report.topProspects.map(toView),
+    }
+  }
+
+  /** EHM Practice screen: current state + auto-suggestion. */
+  getPractice(): PracticeView {
+    const roster = this.userTeam.roster.map((id) => this.resolve(id))
+    return {
+      state: structuredClone(this.practiceState),
+      suggestion: suggestFocus(roster),
+    }
+  }
+
+  /** Update the team practice focus and/or per-player overrides. */
+  setPractice(state: TeamPracticeState): void {
+    this.practiceState = structuredClone(state)
+  }
+
+  /** Toggle a player's healthy-scratch status for the next game. */
+  toggleScratchPlayer(playerId: string): void {
+    this.practiceState = toggleScratch(this.practiceState, playerId)
+  }
+
+  /** Set (or clear) a per-player individual focus override. */
+  setPlayerFocusDrill(playerId: string, focus: PracticeFocus | null): void {
+    this.practiceState = setPlayerFocus(this.practiceState, playerId, focus)
+  }
+
+  /** Whether a given player is scratched. */
+  isScratchedFor(playerId: string): boolean {
+    return isScratchedFor(this.practiceState, playerId)
+  }
+
+  /** League-wide top-N leaderboards for the League hub. */
+  getLeagueLeaders(topN = 10): LeagueLeadersView {
+    interface Entry {
+      playerId: string
+      name: string
+      teamAbbr: string
+      position: import('@domain').Position
+      gamesPlayed: number
+      goals: number
+      assists: number
+      points: number
+      plusMinus: number
+      savePct: number
+      toi: number
+      goalsAgainst: number
+      wins: number
+    }
+    const entries: Entry[] = []
+    for (const [pid, t] of this.totals) {
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const gp = this.gp.get(pid) ?? 0
+      if (gp === 0) continue
+      const teamId = this.teamOf(pid)
+      const teamAbbr = teamId ? this.data.teams.get(teamId)!.abbreviation : 'FA'
+      const sa = t.shotsAgainst
+      entries.push({
+        playerId: pid as string,
+        name: p.name,
+        teamAbbr,
+        position: p.position,
+        gamesPlayed: gp,
+        goals: t.goals,
+        assists: t.assists,
+        points: t.goals + t.assists,
+        plusMinus: 0,
+        savePct: sa > 0 ? t.saves / sa : 0,
+        toi: t.toi,
+        goalsAgainst: t.goalsAgainst,
+        wins: this.goalieWins.get(pid) ?? 0,
+      })
+    }
+
+    const skaters = entries.filter((e) => e.position !== 'G')
+    const goalies = entries.filter((e) => e.position === 'G' && e.gamesPlayed >= 10)
+
+    const topSkaters = (
+      score: (e: Entry) => number,
+      source = skaters
+    ): import('./views').LeagueLeaderEntry[] =>
+      [...source]
+        .sort((a, b) => score(b) - score(a))
+        .slice(0, topN)
+        .map((e) => ({
+          playerId: e.playerId,
+          name: e.name,
+          teamAbbr: e.teamAbbr,
+          position: e.position,
+          gamesPlayed: e.gamesPlayed,
+          value: Math.round(score(e) * 100) / 100,
+        }))
+
+    return {
+      points: topSkaters((e) => e.points),
+      goals: topSkaters((e) => e.goals),
+      assists: topSkaters((e) => e.assists),
+      plusMinus: topSkaters((e) => e.plusMinus),
+      savePct: topSkaters((e) => e.savePct, goalies).map((e) => ({
+        ...e,
+        value: Math.round(e.value * 1000) / 1000,
+      })),
+      goalsAgainstAvg: [...goalies]
+        .filter((e) => e.toi > 0)
+        .sort((a, b) => a.goalsAgainst / a.toi - b.goalsAgainst / b.toi)
+        .slice(0, topN)
+        .map((e) => ({
+          playerId: e.playerId,
+          name: e.name,
+          teamAbbr: e.teamAbbr,
+          position: e.position,
+          gamesPlayed: e.gamesPlayed,
+          value: Math.round((e.goalsAgainst / (e.toi / 3600)) * 100) / 100,
+        })),
+      wins: topSkaters((e) => e.wins, goalies),
+    }
+  }
+
   /* ────────────────────────── story layer views ────────────────────────── */
 
   getHistory(): HistoryView {
@@ -3312,6 +3735,10 @@ export class Career {
         pressJob: this.pressJob ? structuredClone(this.pressJob) : null,
         pressConference: this.pressConference ? structuredClone(this.pressConference) : null,
       },
+      staff: this.staff ? structuredClone(this.staff) : undefined,
+      playerRatings: [...this.playerRatings.entries()].map(([k, v]) => [k, [...v]] as [string, number[]]),
+      practiceState: structuredClone(this.practiceState),
+      hireableStaff: [...this.hireableStaff],
     }
   }
 
@@ -3407,6 +3834,24 @@ export class Career {
       career.pressConference = snapshot.pressState.pressConference
         ? structuredClone(snapshot.pressState.pressConference)
         : null
+    }
+
+    // Restore plumbing module state (all optional for backward compat).
+    if (snapshot.staff) {
+      career.staff = structuredClone(snapshot.staff)
+    } else {
+      career.staff = generateStaff({ rng: new Rng(deriveSeed(snapshot.seed, 9200)) })
+    }
+    if (snapshot.playerRatings) {
+      for (const [k, v] of snapshot.playerRatings) {
+        career.playerRatings.set(k, [...v])
+      }
+    }
+    if (snapshot.practiceState) {
+      career.practiceState = structuredClone(snapshot.practiceState)
+    }
+    if (snapshot.hireableStaff) {
+      career.hireableStaff = [...snapshot.hireableStaff]
     }
 
     // Rebuild transient state that deliberately isn't saved.

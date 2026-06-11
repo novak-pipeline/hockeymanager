@@ -11,22 +11,15 @@ import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
 import { SimContext, useClient, useScreenData } from './hooks/useSim'
 import { DashboardScreen } from './screens/DashboardScreen'
-import { DraftScreen } from './screens/DraftScreen'
-import { FinancesScreen } from './screens/FinancesScreen'
 import { InboxScreen } from './screens/InboxScreen'
 import { MatchCenterScreen } from './screens/MatchCenterScreen'
-import { OffseasonScreen } from './screens/OffseasonScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
-import { PlayoffsScreen } from './screens/PlayoffsScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
-import { ScoutingScreen } from './screens/ScoutingScreen'
-import { SquadScreen } from './screens/SquadScreen'
-import { StandingsScreen } from './screens/StandingsScreen'
-import { StatsScreen } from './screens/StatsScreen'
-import { TacticsScreen } from './screens/TacticsScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { TeamScreen } from './screens/TeamScreen'
+import { LeagueScreen } from './screens/LeagueScreen'
 import { PressConference } from './components/PressConference'
 import { pollPress } from './lib/press'
 
@@ -326,12 +319,39 @@ class ScreenBoundary extends Component<
 
 function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Element {
   switch (props.screen) {
-    case 'inbox':
-      return <InboxScreen />
+    // ── Front Office ──
     case 'dashboard':
       return <DashboardScreen />
+
+    // ── News ──
+    case 'inbox':
+      return <InboxScreen />
+
+    // ── Team (mega-screen with sub-tab router) ──
     case 'squad':
-      return <SquadScreen />
+    case 'teamStats':
+    case 'report':
+    case 'personnel':
+    case 'practice':
+    case 'tactics':
+    case 'finances':
+    case 'teamInfo':
+    case 'teamHistory':
+      return <TeamScreen tab={props.screen} />
+
+    // ── League (mega-screen with sub-tab router) ──
+    case 'leagueOverview':
+    case 'standings':
+    case 'leagueSchedule':
+    case 'stats':
+    case 'leagueHistory':
+    case 'scouting':
+    case 'draft':
+    case 'offseason':
+    case 'playoffs':
+      return <LeagueScreen tab={props.screen} />
+
+    // ── Player profile (overlay/shared) ──
     case 'player':
       // Keyed by playerId so navigating player → player remounts + refetches.
       return props.params.playerId ? (
@@ -339,32 +359,22 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       ) : (
         <Notice kind="warn">No player selected.</Notice>
       )
-    case 'tactics':
-      return <TacticsScreen />
-    case 'schedule':
-      return <ScheduleScreen />
-    case 'standings':
-      return <StandingsScreen />
-    case 'stats':
-      return <StatsScreen />
-    case 'trades':
-      return <TradesScreen />
-    case 'finances':
-      return <FinancesScreen />
-    case 'scouting':
-      return <ScoutingScreen />
-    case 'draft':
-      return <DraftScreen />
-    case 'offseason':
-      return <OffseasonScreen />
-    case 'playoffs':
-      return <PlayoffsScreen />
+
+    // ── Shared screens ──
     case 'matchcenter':
       return <MatchCenterScreen />
-    case 'history':
-      return <HistoryScreen />
+    case 'trades':
+      return <TradesScreen />
+    case 'lockerRoom':
+      return <Notice kind="info">Locker room — navigate via Team &gt; Roster.</Notice>
     case 'settings':
       return <SettingsScreen />
+
+    // ── Legacy aliases (redirect to renamed equivalents) ──
+    case 'schedule':
+      return <ScheduleScreen />
+    case 'history':
+      return <HistoryScreen />
   }
 }
 

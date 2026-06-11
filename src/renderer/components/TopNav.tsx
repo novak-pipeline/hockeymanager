@@ -1,13 +1,7 @@
 import type { DashboardView } from '../../worker/protocol'
 import { useShellActions } from './ActionsContext'
 import { crestColor, fmtDate } from './format'
-import { useNav, type ScreenId } from './NavContext'
-
-interface NavEntry {
-  id: ScreenId
-  label: string
-  badge?: number
-}
+import { useNav, sectionOf, type ScreenId, type SectionId } from './NavContext'
 
 const PHASE_CHIP: Record<DashboardView['phase'], string> = {
   regularSeason: 'chip chip-violet',
@@ -21,10 +15,82 @@ const PHASE_LABEL: Record<DashboardView['phase'], string> = {
   offseason:     'Offseason',
 }
 
+/* ── section definitions ── */
+
+interface SubTab {
+  id: ScreenId
+  label: string
+  badge?: number
+}
+
+interface Section {
+  id: SectionId
+  label: string
+  defaultScreen: ScreenId
+  subTabs: SubTab[]
+  contextualSubTabs?: SubTab[]
+}
+
+function buildSections(phase: DashboardView['phase'], unread: number): Section[] {
+  const contextual: SubTab[] = []
+  if (phase === 'playoffs') {
+    contextual.push({ id: 'playoffs', label: 'Playoffs' })
+  }
+  if (phase === 'offseason') {
+    contextual.push({ id: 'draft', label: 'Draft' })
+    contextual.push({ id: 'offseason', label: 'Offseason' })
+  }
+
+  return [
+    {
+      id: 'frontOffice',
+      label: 'Front Office',
+      defaultScreen: 'dashboard',
+      subTabs: [{ id: 'dashboard', label: 'Overview' }],
+    },
+    {
+      id: 'news',
+      label: 'News',
+      defaultScreen: 'inbox',
+      subTabs: [{ id: 'inbox', label: 'Inbox', ...(unread > 0 ? { badge: unread } : {}) }],
+    },
+    {
+      id: 'team',
+      label: 'Team',
+      defaultScreen: 'squad',
+      subTabs: [
+        { id: 'squad',       label: 'Roster' },
+        { id: 'teamStats',   label: 'Statistics' },
+        { id: 'report',      label: 'Report' },
+        { id: 'personnel',   label: 'Personnel' },
+        { id: 'practice',    label: 'Practice' },
+        { id: 'tactics',     label: 'Tactics' },
+        { id: 'finances',    label: 'Finances' },
+        { id: 'teamInfo',    label: 'Team Info' },
+        { id: 'teamHistory', label: 'History' },
+      ],
+    },
+    {
+      id: 'league',
+      label: 'League',
+      defaultScreen: 'leagueOverview',
+      subTabs: [
+        { id: 'leagueOverview',  label: 'Overview' },
+        { id: 'standings',       label: 'Standings' },
+        { id: 'stats',           label: 'Player Stats' },
+        { id: 'leagueHistory',   label: 'History' },
+        { id: 'scouting',        label: 'Scouting' },
+        ...contextual,
+      ],
+    },
+  ]
+}
+
 /**
- * FM24-style top navigation bar — replaces the left sidebar.
- * Row 1: club crest + name/record | date + phase + next game | util actions + CONTINUE
- * Row 2: primary nav tabs (horizontal) + contextual tabs
+ * EHM-style top navigation:
+ *  Row 1: club identity | date + phase + next game | sim controls + hero action
+ *  Row 2: four section tabs (Front Office / News / Team / League)
+ *  Row 3: sub-tabs for the active section
  */
 export function TopNav(props: {
   teamId: string
@@ -44,32 +110,10 @@ export function TopNav(props: {
   const unread = d?.unreadNews ?? 0
   const next = d?.nextGame ?? null
 
-  const mainItems: NavEntry[] = [
-    { id: 'inbox',     label: 'Inbox',    ...(unread > 0 ? { badge: unread } : {}) },
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'squad',     label: 'Squad' },
-    { id: 'tactics',   label: 'Tactics' },
-    { id: 'schedule',  label: 'Schedule' },
-    { id: 'standings', label: 'Standings' },
-    { id: 'stats',     label: 'Stats' },
-    { id: 'trades',    label: 'Trades' },
-    { id: 'finances',  label: 'Finances' },
-    { id: 'scouting',  label: 'Scouting' },
-    { id: 'history',   label: 'History' },
-  ]
+  const sections = buildSections(phase, unread)
+  const activeSection = sectionOf(nav.screen)
 
-  const contextualItems: NavEntry[] = [
-    ...(phase === 'playoffs'
-      ? [{ id: 'playoffs', label: 'Playoffs' } as NavEntry]
-      : []),
-    ...(phase === 'offseason'
-      ? [
-          { id: 'draft',     label: 'Draft' } as NavEntry,
-          { id: 'offseason', label: 'Offseason' } as NavEntry,
-        ]
-      : []),
-    { id: 'matchcenter', label: 'Match Center' },
-  ]
+  const currentSection = sections.find((s) => s.id === activeSection) ?? sections[0]!
 
   return (
     <header className="topnav">
@@ -114,7 +158,6 @@ export function TopNav(props: {
 
         {/* Actions right cluster */}
         <div className="topnav-actions">
-          {/* Save / Load */}
           <button
             className="topnav-util-btn"
             onClick={props.onSave}
@@ -132,7 +175,6 @@ export function TopNav(props: {
             Load
           </button>
 
-          {/* Secondary sim controls */}
           <div className="sim-secondary">
             <button
               className="btn"
@@ -170,7 +212,6 @@ export function TopNav(props: {
             )}
           </div>
 
-          {/* Settings gear */}
           <button
             className="topnav-util-btn"
             onClick={() => nav.navigate('settings')}
@@ -180,7 +221,6 @@ export function TopNav(props: {
             ⚙
           </button>
 
-          {/* Hero CONTINUE button */}
           <button
             className="btn btn-hero btn-lg"
             onClick={actions.continueGame}
@@ -191,17 +231,36 @@ export function TopNav(props: {
         </div>
       </div>
 
-      {/* ── Row 2: nav tabs ── */}
+      {/* ── Row 2: section tabs ── */}
       <nav className="topnav-row2">
-        {mainItems.map((item) => (
-          <NavTab key={item.id} item={item} active={nav.screen === item.id} />
-        ))}
-        {contextualItems.length > 0 && <div className="topnav-sep" />}
-        {contextualItems.map((item) => (
-          <NavTab key={item.id} item={item} active={nav.screen === item.id} />
+        {sections.map((section) => (
+          <button
+            key={section.id}
+            className={activeSection === section.id ? 'topnav-section active' : 'topnav-section'}
+            onClick={() => nav.navigate(section.defaultScreen)}
+          >
+            {section.label}
+            {section.id === 'news' && unread > 0 && (
+              <span className="badge">{unread}</span>
+            )}
+          </button>
         ))}
 
-        {/* Engine version whisper at far right */}
+        {/* Contextual items not in main sections */}
+        <div className="topnav-sep" />
+        <button
+          className={nav.screen === 'matchcenter' ? 'topnav-section active' : 'topnav-section'}
+          onClick={() => nav.navigate('matchcenter')}
+        >
+          Match
+        </button>
+        <button
+          className={nav.screen === 'trades' ? 'topnav-section active' : 'topnav-section'}
+          onClick={() => nav.navigate('trades')}
+        >
+          Trades
+        </button>
+
         <span
           style={{
             marginLeft: 'auto',
@@ -216,21 +275,24 @@ export function TopNav(props: {
           v{props.engineVersion}
         </span>
       </nav>
-    </header>
-  )
-}
 
-function NavTab(props: { item: NavEntry; active: boolean }): JSX.Element {
-  const nav = useNav()
-  return (
-    <button
-      className={props.active ? 'topnav-item active' : 'topnav-item'}
-      onClick={() => nav.navigate(props.item.id)}
-    >
-      {props.item.label}
-      {props.item.badge !== undefined && (
-        <span className="badge">{props.item.badge}</span>
+      {/* ── Row 3: sub-tabs for active section ── */}
+      {currentSection.subTabs.length > 1 && (
+        <nav className="topnav-row3">
+          {currentSection.subTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={nav.screen === tab.id ? 'topnav-item active' : 'topnav-item'}
+              onClick={() => nav.navigate(tab.id)}
+            >
+              {tab.label}
+              {tab.badge !== undefined && (
+                <span className="badge">{tab.badge}</span>
+              )}
+            </button>
+          ))}
+        </nav>
       )}
-    </button>
+    </header>
   )
 }

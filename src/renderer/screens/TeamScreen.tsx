@@ -1,0 +1,481 @@
+/**
+ * TeamScreen — EHM-style mega-screen for the Team section.
+ *
+ * Sub-tabs: Roster | Statistics | Report | Personnel | Practice | Tactics |
+ *           Finances | Team Info | History
+ *
+ * Most tabs are thin wrappers that re-parent existing screens. The Report tab
+ * and the Practice tab have new UI built here.
+ */
+import { useState } from 'react'
+import type {
+  AgmReportView,
+  PracticeView,
+  SquadView,
+} from '../../worker/protocol'
+import type { PracticeFocus } from '../../worker/protocol'
+import { PlayerLink } from '../components/NavContext'
+import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { fmtMoney } from '../components/format'
+import { useClient, useScreenData } from '../hooks/useSim'
+import { SquadScreen } from './SquadScreen'
+import { StatsScreen } from './StatsScreen'
+import { TacticsScreen } from './TacticsScreen'
+import { FinancesScreen } from './FinancesScreen'
+import { HistoryScreen } from './HistoryScreen'
+import { useShellActions } from '../components/ActionsContext'
+import { bumpRefresh, toast } from '../components/store'
+
+type TeamTab =
+  | 'squad'
+  | 'teamStats'
+  | 'report'
+  | 'personnel'
+  | 'practice'
+  | 'tactics'
+  | 'finances'
+  | 'teamInfo'
+  | 'teamHistory'
+
+/* ── tier color mapping ── */
+const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
+  nhl:     'var(--violet-h)',
+  reserve: 'var(--muted)',
+  prospect: 'var(--green)',
+}
+
+const FOCUS_LABELS: Record<PracticeFocus, string> = {
+  balanced:    'Balanced',
+  offense:     'Offense',
+  defense:     'Defense',
+  skating:     'Skating',
+  physical:    'Physical',
+  goaltending: 'Goaltending',
+  recovery:    'Recovery',
+}
+
+const FOCUS_DESC: Record<PracticeFocus, string> = {
+  balanced:    'Even effort across all skills; moderate growth.',
+  offense:     'Shooting, passing, offensive IQ — skaters only.',
+  defense:     'Checking, shot blocking, defensive positioning.',
+  skating:     'Speed, acceleration, agility and balance work.',
+  physical:    'Strength, stamina, checking — higher fatigue.',
+  goaltending: 'Reflex, positioning, rebound control — goalies only.',
+  recovery:    'Light skate; less growth but fatigue drops instead of rising.',
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Root component
+   ══════════════════════════════════════════════════════════════ */
+
+export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
+  const { tab } = props
+
+  switch (tab) {
+    case 'squad':       return <SquadScreen />
+    case 'teamStats':   return <StatsScreen />
+    case 'report':      return <ReportTab />
+    case 'personnel':   return <PersonnelTab />
+    case 'practice':    return <PracticeTab />
+    case 'tactics':     return <TacticsScreen />
+    case 'finances':    return <FinancesScreen />
+    case 'teamInfo':    return <TeamInfoTab />
+    case 'teamHistory': return <HistoryScreen />
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REPORT TAB — AGM depth chart (EHM Team > Report)
+   ══════════════════════════════════════════════════════════════ */
+
+function ReportTab(): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData<AgmReportView>(
+    () => client.getReport(),
+    (r) => (r.type === 'report' ? r.report : null)
+  )
+
+  if (error) return <Notice kind="warn">{error}</Notice>
+  if (loading && !data) return <Notice kind="info">Loading AGM report…</Notice>
+  if (!data) return <Notice kind="info">No AGM report yet.</Notice>
+
+  const dc = data.depthChart
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="AGM Report">
+        <span className="muted small">
+          {data.agmName} · Rating {data.agmRating}{data.agmSpecialty ? ` · ${data.agmSpecialty}` : ''}
+        </span>
+      </ScreenHeader>
+
+      {/* Five-column depth chart */}
+      <Panel title="Depth chart">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 'var(--sp-3)' }}>
+          <DepthColumn title="Goalies"    players={dc.goalies} />
+          <DepthColumn title="Defence"    players={dc.defensemen} />
+          <DepthColumn title="Left Wing"  players={dc.leftWings} />
+          <DepthColumn title="Centre"     players={dc.centers} />
+          <DepthColumn title="Right Wing" players={dc.rightWings} />
+        </div>
+      </Panel>
+
+      {/* Category bests + Top prospects side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)' }}>
+        <Panel title="Category bests">
+          <div className="list">
+            {data.categoryBests.map((cb) => (
+              <div key={cb.category} className="row-between small">
+                <span className="muted" style={{ minWidth: 120 }}>{cb.category}</span>
+                <PlayerLink playerId={cb.playerId} name={cb.playerName} />
+              </div>
+            ))}
+            {data.categoryBests.length === 0 && (
+              <span className="muted small">No data yet.</span>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Top prospects (U23)">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th className="num">Pos</th>
+                  <th className="num">Age</th>
+                  <th className="num">OVR</th>
+                  <th className="num">POT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.topProspects.map((p) => (
+                  <tr key={p.playerId}>
+                    <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                    <td className="num muted">{p.position}</td>
+                    <td className="num">{p.age}</td>
+                    <td className="num">
+                      <span style={{ color: TIER_COLOR[p.tier] }}>{p.judgedOverall}</span>
+                    </td>
+                    <td className="num muted">{p.judgedPotential}</td>
+                  </tr>
+                ))}
+                {data.topProspects.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted">No prospects ranked.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </div>
+    </section>
+  )
+}
+
+function DepthColumn(props: {
+  title: string
+  players: AgmReportView['depthChart']['goalies']
+}): JSX.Element {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.8px',
+          color: 'var(--muted)',
+          marginBottom: 'var(--sp-2)',
+        }}
+      >
+        {props.title}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {props.players.map((p) => (
+          <div
+            key={p.playerId}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 6px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg2)',
+              borderLeft: `3px solid ${TIER_COLOR[p.tier]}`,
+            }}
+          >
+            <PlayerLink
+              playerId={p.playerId}
+              name={p.name}
+              className="small"
+            />
+            <span
+              className="mono small"
+              style={{ marginLeft: 'auto', color: TIER_COLOR[p.tier] }}
+            >
+              {p.judgedOverall}
+            </span>
+          </div>
+        ))}
+        {props.players.length === 0 && (
+          <span className="muted small">—</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PERSONNEL TAB — staff listing
+   ══════════════════════════════════════════════════════════════ */
+
+function PersonnelTab(): JSX.Element {
+  const client = useClient()
+  // Personnel data comes through the squad view which includes team name;
+  // staff is embedded in the career snapshot but not yet surfaced as a
+  // dedicated view. We rely on the dashboard for the basics.
+  // For now we fetch squad for team name and show a notice about staff.
+  const { data: squad, loading, error } = useScreenData<SquadView>(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Personnel" />
+      <ScreenStateNotices
+        loading={loading && !squad}
+        error={error}
+        empty={false}
+        emptyText=""
+      />
+      <Panel title="Staff">
+        <Notice kind="info">
+          Staff management (head coach, AGM, scouts) is available in a future update.
+          Scout assignments can be managed in the League &gt; Scouting tab.
+        </Notice>
+      </Panel>
+      {squad && (
+        <Panel title="Roster summary">
+          <div className="row-between small">
+            <span>Roster size</span>
+            <strong>{squad.rosterCount} players</strong>
+          </div>
+          <div className="row-between small" style={{ marginTop: 'var(--sp-2)' }}>
+            <span>Dressed for next game</span>
+            <strong>{squad.dressedCount} players</strong>
+          </div>
+        </Panel>
+      )}
+    </section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PRACTICE TAB — focus picker + per-player overrides + scratches
+   ══════════════════════════════════════════════════════════════ */
+
+function PracticeTab(): JSX.Element {
+  const client = useClient()
+  const actions = useShellActions()
+  const { data, loading, error } = useScreenData<PracticeView>(
+    () => client.getPractice(),
+    (r) => (r.type === 'practice' ? r.practice : null)
+  )
+
+  const [savingFocus, setSavingFocus] = useState(false)
+
+  async function setFocus(focus: PracticeFocus): Promise<void> {
+    if (!data || savingFocus || actions.busy) return
+    setSavingFocus(true)
+    const newState = { ...data.state, teamFocus: focus }
+    const res = await client.setPractice(newState)
+    setSavingFocus(false)
+    if (res.type === 'error') {
+      toast(res.message, 'error')
+    } else {
+      bumpRefresh()
+    }
+  }
+
+  async function toggleScratch(playerId: string): Promise<void> {
+    if (actions.busy) return
+    const res = await client.toggleScratch(playerId)
+    if (res.type === 'error') {
+      toast(res.message, 'error')
+    } else {
+      bumpRefresh()
+    }
+  }
+
+  const { data: squad } = useScreenData<SquadView>(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+
+  if (error) return <Notice kind="warn">{error}</Notice>
+  if (loading && !data) return <Notice kind="info">Loading practice…</Notice>
+  if (!data) return <Notice kind="info">No practice data yet.</Notice>
+
+  const currentFocus = data.state.teamFocus
+  const scratchedSet = new Set(data.state.scratched)
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Practice" />
+
+      {/* Suggestion */}
+      <Panel title="Coaching suggestion">
+        <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+          <div>
+            <div className="muted small">Recommended focus</div>
+            <div style={{ fontWeight: 700, color: 'var(--violet-h)', marginTop: 2 }}>
+              {FOCUS_LABELS[data.suggestion.teamFocus]}
+            </div>
+          </div>
+          <div style={{ flex: 1, color: 'var(--muted)', fontSize: 13 }}>
+            {data.suggestion.rationale}
+          </div>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={savingFocus || currentFocus === data.suggestion.teamFocus}
+            onClick={() => void setFocus(data.suggestion.teamFocus)}
+          >
+            Apply
+          </button>
+        </div>
+      </Panel>
+
+      {/* Focus picker */}
+      <Panel title="Team focus">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+          {(Object.keys(FOCUS_LABELS) as PracticeFocus[]).map((focus) => (
+            <button
+              key={focus}
+              className={`btn btn-sm${currentFocus === focus ? ' btn-primary' : ''}`}
+              onClick={() => void setFocus(focus)}
+              disabled={savingFocus}
+              title={FOCUS_DESC[focus]}
+            >
+              {FOCUS_LABELS[focus]}
+            </button>
+          ))}
+        </div>
+        <div className="muted small" style={{ marginTop: 'var(--sp-3)' }}>
+          {FOCUS_DESC[currentFocus]}
+        </div>
+      </Panel>
+
+      {/* Roster dress/scratch */}
+      {squad && (
+        <Panel title={`Lineup — ${squad.dressedCount} dressed / ${squad.rosterCount} on roster`}>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th className="num">Pos</th>
+                  <th className="num">OVR</th>
+                  <th className="num">Cond</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {squad.rows.map((row) => {
+                  const scratched = scratchedSet.has(row.playerId)
+                  return (
+                    <tr key={row.playerId} style={{ opacity: scratched ? 0.6 : undefined }}>
+                      <td><PlayerLink playerId={row.playerId} name={row.name} /></td>
+                      <td className="num muted">{row.position}</td>
+                      <td className="num">{row.overall}</td>
+                      <td className="num">{row.condition}</td>
+                      <td>
+                        <button
+                          className={`btn btn-sm${scratched ? ' btn-danger' : ' btn-ghost'}`}
+                          onClick={() => void toggleScratch(row.playerId)}
+                          disabled={actions.busy}
+                          title={scratched ? 'Click to dress' : 'Click to scratch'}
+                        >
+                          {scratched ? 'Scratched' : 'Dressed'}
+                        </button>
+                        {row.injury && (
+                          <span className="chip chip-danger" style={{ marginLeft: 6, fontSize: 10 }}>
+                            Injured
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TEAM INFO TAB — club facts
+   ══════════════════════════════════════════════════════════════ */
+
+function TeamInfoTab(): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData<SquadView>(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+  const { data: finances } = useScreenData(
+    () => client.getFinances(),
+    (r) => (r.type === 'finances' ? r.finances : null)
+  )
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Team Info" />
+      <ScreenStateNotices
+        loading={loading && !data}
+        error={error}
+        empty={!loading && !error && !data}
+        emptyText="No team data."
+      />
+      {data && (
+        <Panel title={data.teamName}>
+          <div className="list">
+            <div className="row-between small">
+              <span className="muted">Roster players</span>
+              <strong>{data.rosterCount}</strong>
+            </div>
+            <div className="row-between small">
+              <span className="muted">Dressed players</span>
+              <strong>{data.dressedCount}</strong>
+            </div>
+          </div>
+        </Panel>
+      )}
+      {finances && (
+        <Panel title="Finances">
+          <div className="list">
+            <div className="row-between small">
+              <span className="muted">Salary cap</span>
+              <strong>{fmtMoney(finances.salaryCap)}</strong>
+            </div>
+            <div className="row-between small">
+              <span className="muted">Cap used</span>
+              <strong>{fmtMoney(finances.capUsed)}</strong>
+            </div>
+            <div className="row-between small">
+              <span className="muted">Cap space</span>
+              <strong style={{ color: finances.capSpace < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                {fmtMoney(finances.capSpace)}
+              </strong>
+            </div>
+          </div>
+        </Panel>
+      )}
+    </section>
+  )
+}

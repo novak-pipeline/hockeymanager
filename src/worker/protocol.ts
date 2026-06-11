@@ -16,6 +16,7 @@ import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 export type {
+  AgmReportView,
   BoxScoreView,
   CareerPhase,
   CareerSnapshot,
@@ -24,11 +25,13 @@ export type {
   FinanceView,
   HistoryView,
   InboxView,
+  LeagueLeadersView,
   LinesUpdate,
   LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
+  PracticeView,
   ScheduleView,
   ScoutingView,
   SquadView,
@@ -39,8 +42,10 @@ export type {
   TradeEvaluation,
   TradeProposal,
   TradesView,
+  TeamLeadersView,
 } from '@engine/career/views'
 import type {
+  AgmReportView,
   BoxScoreView,
   CareerSnapshot,
   DashboardView,
@@ -48,11 +53,13 @@ import type {
   FinanceView,
   HistoryView,
   InboxView,
+  LeagueLeadersView,
   LinesUpdate,
   LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
+  PracticeView,
   ScheduleView,
   ScoutingView,
   SquadView,
@@ -66,6 +73,8 @@ import type {
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
 import type { ScoutTarget } from '@domain/scouting'
+import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
+export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 
 /** A request without its correlation id; the client stamps the id on send. */
 export type WorkerRequestBody =
@@ -138,6 +147,21 @@ export type WorkerRequestBody =
   | { type: 'getPresser' }
   /** Submit the user's press-conference answer. */
   | { type: 'answerPresser'; answer: string; tone: PressTone }
+  /* ── EHM plumbing modules (Wave 3) ── */
+  /** AGM depth chart and category bests (EHM Team > Report tab). */
+  | { type: 'getReport' }
+  /** Practice state + auto-suggestion. */
+  | { type: 'getPractice' }
+  /** Overwrite the team practice state. */
+  | { type: 'setPractice'; state: TeamPracticeState }
+  /** Toggle a player's healthy-scratch status. */
+  | { type: 'toggleScratch'; playerId: string }
+  /** Set (or clear) a per-player individual focus override (null = revert to team focus). */
+  | { type: 'setPlayerFocusDrill'; playerId: string; focus: PracticeFocus | null }
+  /** League-wide top-N leaderboards for the League hub. */
+  | { type: 'getLeagueLeaders'; topN?: number }
+  /** Team leaders panel (goals/assists/points/+-/AvR/GAA/SV%). */
+  | { type: 'getTeamLeaders' }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -177,5 +201,10 @@ export type WorkerResponse = { id: number } & (
   /* ── press corps ── */
   | { type: 'pressJob'; pressJob: PressJob | null }
   | { type: 'presser'; presser: PressConferenceState | null }
+  /* ── EHM plumbing modules (Wave 3) ── */
+  | { type: 'report'; report: AgmReportView }
+  | { type: 'practice'; practice: PracticeView }
+  | { type: 'leagueLeaders'; leaders: LeagueLeadersView }
+  | { type: 'teamLeaders'; leaders: import('@engine/league/playerRating').TeamLeadersView }
   | { type: 'error'; message: string }
 )

@@ -22,6 +22,11 @@ export interface GamePlayerStat {
   saves: number
   shotsAgainst: number
   goalsAgainst: number
+  // Physical-play counters (default 0; accumulated from event stream).
+  hits: number
+  blockedShots: number
+  takeaways: number
+  giveaways: number
 }
 
 export type DecidedBy = 'regulation' | 'overtime' | 'shootout'
@@ -46,7 +51,11 @@ export function emptyStat(playerId: PlayerId): GamePlayerStat {
     toi: 0,
     saves: 0,
     shotsAgainst: 0,
-    goalsAgainst: 0
+    goalsAgainst: 0,
+    hits: 0,
+    blockedShots: 0,
+    takeaways: 0,
+    giveaways: 0,
   }
 }
 
@@ -68,5 +77,9 @@ export function mergePlayerStats(
     t.saves += s.saves
     t.shotsAgainst += s.shotsAgainst
     t.goalsAgainst += s.goalsAgainst
+    t.hits += s.hits
+    t.blockedShots += s.blockedShots
+    t.takeaways += s.takeaways
+    t.giveaways += s.giveaways
   }
 }

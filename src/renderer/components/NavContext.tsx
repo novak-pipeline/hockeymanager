@@ -5,27 +5,79 @@ import { createContext, useContext } from 'react'
  * state and provides this context; screens call `navigate`. Player names
  * anywhere in the UI must be clickable via <PlayerLink> so every roster,
  * leaderboard and news item can jump to the player profile.
+ *
+ * v2: EHM four-section IA — sections (frontOffice / news / team / league) each
+ * own a set of sub-tabs. `navigate(screenId)` still works from anywhere.
+ * Player profile is always reachable as an overlay route.
  */
 
 export type ScreenId =
-  | 'inbox'
+  // Front Office section
   | 'dashboard'
+  // News section
+  | 'inbox'
+  // Team section
   | 'squad'
-  | 'player'
+  | 'teamStats'
+  | 'report'
+  | 'personnel'
+  | 'practice'
   | 'tactics'
-  | 'schedule'
-  | 'standings'
-  | 'stats'
-  | 'trades'
   | 'finances'
+  | 'teamInfo'
+  | 'teamHistory'
+  // League section
+  | 'leagueOverview'
+  | 'standings'
+  | 'leagueSchedule'
+  | 'stats'
+  | 'leagueHistory'
   | 'scouting'
+  // Contextual (phase-gated)
   | 'draft'
   | 'offseason'
   | 'playoffs'
+  // Shared / overlay
+  | 'player'
   | 'matchcenter'
+  | 'trades'
   | 'lockerRoom'
-  | 'history'
   | 'settings'
+  // Legacy aliases kept for backward compat (redirect to new equivalents)
+  | 'schedule'
+  | 'history'
+
+/** Which top-level section a screen belongs to (drives TopNav highlight). */
+export type SectionId = 'frontOffice' | 'news' | 'team' | 'league'
+
+export function sectionOf(screen: ScreenId): SectionId {
+  switch (screen) {
+    case 'inbox':
+      return 'news'
+    case 'squad':
+    case 'teamStats':
+    case 'report':
+    case 'personnel':
+    case 'practice':
+    case 'tactics':
+    case 'finances':
+    case 'teamInfo':
+    case 'teamHistory':
+      return 'team'
+    case 'leagueOverview':
+    case 'standings':
+    case 'leagueSchedule':
+    case 'stats':
+    case 'leagueHistory':
+    case 'scouting':
+    case 'draft':
+    case 'offseason':
+    case 'playoffs':
+      return 'league'
+    default:
+      return 'frontOffice'
+  }
+}
 
 export interface NavParams {
   playerId?: string

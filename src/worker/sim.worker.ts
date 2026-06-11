@@ -186,6 +186,27 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'answerPresser':
       must().answerPressConference(req.answer, req.tone)
       return { id: req.id, type: 'ok' }
+
+    /* ── EHM plumbing modules (Wave 3) ── */
+    case 'getReport':
+      return { id: req.id, type: 'report', report: must().getReport() }
+    case 'getPractice':
+      return { id: req.id, type: 'practice', practice: must().getPractice() }
+    case 'setPractice':
+      must().setPractice(req.state)
+      return { id: req.id, type: 'ok' }
+    case 'toggleScratch':
+      must().toggleScratchPlayer(req.playerId)
+      return { id: req.id, type: 'ok' }
+    case 'setPlayerFocusDrill':
+      must().setPlayerFocusDrill(req.playerId, req.focus)
+      return { id: req.id, type: 'ok' }
+    case 'getLeagueLeaders':
+      return { id: req.id, type: 'leagueLeaders', leaders: must().getLeagueLeaders(req.topN) }
+    case 'getTeamLeaders': {
+      const dash = must().getDashboard()
+      return { id: req.id, type: 'teamLeaders', leaders: dash.teamLeaders! }
+    }
   }
 }
 

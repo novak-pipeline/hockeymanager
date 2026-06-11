@@ -20,6 +20,9 @@ import type {
 } from '@domain'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
+export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
+export type { TeamLeadersView, LeaderChip, TeamLeadersEntry } from '@engine/league/playerRating'
+export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
 import type {
   AwardRecord,
@@ -31,6 +34,9 @@ import type {
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
+import type { StaffMember, AgmReport } from '@engine/league/staff'
+import type { TeamLeadersView } from '@engine/league/playerRating'
+import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 
 /* ────────────────────────── shared atoms ────────────────────────── */
 
@@ -169,6 +175,25 @@ export interface DashboardView {
   predictedRank?: number
   /** Highest-tension active storylines for the dashboard ticker (max 3). */
   topArcs: Array<{ kind: string; headline: string }>
+  /** EHM right-rail: team leaders incl. average game rating. */
+  teamLeaders?: TeamLeadersView
+  /** EHM front-office panel: a rotating featured player with form badge. */
+  playerFocus?: {
+    playerId: string
+    name: string
+    position: Position
+    overall: number
+    seasonLine: string
+    gameRatingForm: string
+    avgRating: number
+  }
+  /** EHM front-office panel: budget/cap summary. */
+  financesSummary?: {
+    balance: number
+    capUsed: number
+    capSpace: number
+    avgSalary: number
+  }
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -187,11 +212,20 @@ export interface SquadRowView extends PlayerBadge {
   lineLabel: string
   skater: SkaterSeasonLine | null
   goalie: GoalieSeasonLine | null
+  /** True if listed as a healthy scratch for the next game. */
+  scratched: boolean
+  /** EHM-style form string from last 5 game ratings, e.g. "BABCA" newest-first. */
+  gameRatingForm: string
+  /** Season average game rating (0 = no games played). */
+  avgRating: number
 }
 
 export interface SquadView {
   teamName: string
   rows: SquadRowView[]
+  /** Total roster size / currently dressed players. */
+  rosterCount: number
+  dressedCount: number
 }
 
 export interface AttributeGroupView {
@@ -646,6 +680,29 @@ export interface CareerSnapshot {
     pressJob: import('@engine/story/factSheet').PressJob | null
     pressConference: import('@engine/story/factSheet').PressConferenceState | null
   }
+  /**
+   * Staff (head coach + AGM) for the user's team.
+   * Optional for backward compat; older saves re-generate on load.
+   */
+  staff?: {
+    headCoach: StaffMember
+    assistantGM: StaffMember
+  }
+  /**
+   * Per-player rolling game ratings (last up to 10 per player).
+   * [playerId, number[]][] — JSON-safe entry array.
+   */
+  playerRatings?: Array<[string, number[]]>
+  /**
+   * Team practice state for the user's team.
+   * Optional for backward compat; defaults to balanced on load.
+   */
+  practiceState?: TeamPracticeState
+  /**
+   * Hireable retired player pool — ids of retired players eligible for staff roles.
+   * Optional for backward compat.
+   */
+  hireableStaff?: string[]
 }
 
 export interface SaveSlotInfo {
@@ -805,4 +862,76 @@ export interface TentpoleView {
     userSnubbed: string[]
     returnEffects: Array<{ playerName: string; effect: 'inspired' | 'fatigued' | 'injured' }>
   } | null
+}
+
+/* ────────────────────────── AGM report view ────────────────────────── */
+
+/** A player entry in the AGM depth chart with display colour tier. */
+export interface AgmRankedPlayerView {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  judgedOverall: number
+  judgedPotential: number
+  tier: 'nhl' | 'reserve' | 'prospect'
+  /** Colour band for the UI: 'elite' ≥82, 'good' ≥70, 'solid' ≥60, 'fringe' else. */
+  colorTier: 'elite' | 'good' | 'solid' | 'fringe'
+}
+
+/**
+ * The AGM Report — EHM Team > Report tab equivalent.
+ * Response to 'getReport'.
+ */
+export interface AgmReportView {
+  agmName: string
+  agmRating: number
+  agmJudgment: number
+  agmSpecialty: string | undefined
+  depthChart: {
+    goalies: AgmRankedPlayerView[]
+    defensemen: AgmRankedPlayerView[]
+    leftWings: AgmRankedPlayerView[]
+    centers: AgmRankedPlayerView[]
+    rightWings: AgmRankedPlayerView[]
+  }
+  categoryBests: Array<{ category: string; playerId: string; playerName: string }>
+  topProspects: AgmRankedPlayerView[]
+}
+
+/* ────────────────────────── practice view ────────────────────────── */
+
+/**
+ * Practice + scratches hub. Response to 'getPractice'.
+ */
+export interface PracticeView {
+  state: TeamPracticeState
+  /** AGM-style coaching suggestion for team focus. */
+  suggestion: { teamFocus: PracticeFocus; rationale: string }
+}
+
+/* ────────────────────────── league leaders view ────────────────────────── */
+
+export interface LeagueLeaderEntry {
+  playerId: string
+  name: string
+  teamAbbr: string
+  position: Position
+  gamesPlayed: number
+  /** The ranked stat value. */
+  value: number
+}
+
+/**
+ * Top-N league-wide leaderboards.
+ * Response to 'getLeagueLeaders'.
+ */
+export interface LeagueLeadersView {
+  points: LeagueLeaderEntry[]
+  goals: LeagueLeaderEntry[]
+  assists: LeagueLeaderEntry[]
+  plusMinus: LeagueLeaderEntry[]
+  savePct: LeagueLeaderEntry[]
+  goalsAgainstAvg: LeagueLeaderEntry[]
+  wins: LeagueLeaderEntry[]
 }

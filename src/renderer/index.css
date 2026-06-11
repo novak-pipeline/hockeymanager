@@ -651,6 +651,54 @@ a:hover { text-decoration: underline; }
   align-self: stretch;
 }
 
+/* section tabs (row 2) — bolder than sub-tabs, background fill on active */
+.topnav-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 16px;
+  height: 100%;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.topnav-section:hover {
+  color: var(--text);
+  background: rgba(139,92,246,0.06);
+}
+.topnav-section.active {
+  color: var(--violet-h);
+  border-bottom-color: var(--violet);
+  background: rgba(139,92,246,0.10);
+}
+.topnav-section .badge {
+  font-size: 9px;
+  min-width: 16px;
+  padding: 1px 4px;
+}
+
+/* row 3: sub-tab strip */
+.topnav-row3 {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 var(--sp-4);
+  height: 34px;
+  background: var(--bg0);
+  border-top: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topnav-row3::-webkit-scrollbar { display: none; }
+
 /* ── secondary sim controls dropdown strip ── */
 
 .sim-controls {

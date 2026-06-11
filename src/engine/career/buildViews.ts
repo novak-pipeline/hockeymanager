@@ -17,6 +17,7 @@ import type {
 import { overall } from '@engine/ratings/composites'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
+import { formString, seasonAvgRating } from '@engine/league/playerRating'
 import type {
   AttributeGroupView,
   ContractView,
@@ -236,12 +237,25 @@ function lineLabel(team: Team, id: PlayerId): string {
   return parts.length > 0 ? parts.join('/') : '—'
 }
 
-export function buildSquadView(ctx: ViewCtx): SquadView {
+export function buildSquadView(
+  ctx: ViewCtx,
+  opts?: {
+    /** [playerId, gameRatings[]] for form string + avgRating. */
+    playerRatings?: Map<string, number[]>
+    /** Set of scratched player ids. */
+    scratched?: Set<string>
+  }
+): SquadView {
   const team = ctx.teams.get(ctx.userTeamId)!
   const order: Record<Position, number> = { C: 0, W: 1, D: 2, G: 3 }
+  const scratchedSet = opts?.scratched ?? new Set<string>()
+  const ratingsMap = opts?.playerRatings ?? new Map<string, number[]>()
+
   const rows: SquadRowView[] = team.roster
     .map((id) => {
       const p = ctx.players.get(id)!
+      const pid = id as string
+      const ratings = ratingsMap.get(pid) ?? []
       return {
         ...badge(p),
         role: p.role,
@@ -254,13 +268,19 @@ export function buildSquadView(ctx: ViewCtx): SquadView {
         lineLabel: lineLabel(team, id),
         skater: p.position === 'G' ? null : skaterLine(ctx, id),
         goalie: p.position === 'G' ? goalieLine(ctx, id) : null,
+        scratched: scratchedSet.has(pid),
+        gameRatingForm: formString(ratings),
+        avgRating: seasonAvgRating(ratings),
       }
     })
     .sort(
       (a, b) => order[a.position] - order[b.position] || b.overall - a.overall
     )
-  return { teamName: team.name, rows }
+
+  const dressedCount = rows.filter((r) => !r.scratched && r.injury === null).length
+  return { teamName: team.name, rows, rosterCount: rows.length, dressedCount }
 }
+
 
 const TECH_LABELS: Array<[string, string]> = [
   ['wristShot', 'Wrist shot'],
