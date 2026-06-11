@@ -4,7 +4,18 @@
  * hands the assembled strings to the Anthropic client.
  */
 import type { PressFactSheet, PressPersonaId, PressSheetKind } from '@engine/story/factSheet'
-import { PRESS_PERSONA_NAMES } from '@engine/story/factSheet'
+
+/**
+ * Persona display names. Inlined (not imported from the engine) so the main
+ * process bundle stays free of engine runtime code — the type still flows from
+ * the engine, but this small map is duplicated here on purpose. Keep in sync
+ * with PRESS_PERSONA_NAMES in src/engine/story/factSheet.ts.
+ */
+const PRESS_PERSONA_NAMES: Record<PressPersonaId, { name: string; outlet: string }> = {
+  beat: { name: 'Sam Carver', outlet: 'The Daily Gazette' },
+  national: { name: 'Vic Mercer', outlet: 'National Hockey Wire' },
+  homer: { name: 'Bobby “Buzz” Doyle', outlet: '990 The Fan' },
+}
 
 /* ────────────────────────── personas ────────────────────────── */
 
