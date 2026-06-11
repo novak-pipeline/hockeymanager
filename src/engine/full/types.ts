@@ -128,6 +128,12 @@ export interface FullSimTelemetry {
   beats: Record<BeatKind, number>
   /** Stoppage counts by cause (additive across games). */
   stoppages: StoppageCounts
+  /**
+   * Flow texture while play is LIVE with a settled carrier (additive across
+   * games): mean carrier speed = carrierSpeedSumFt / liveTicks; swarm share =
+   * swarmTicks / liveTicks (ticks with 3+ defenders within 12 ft of the puck).
+   */
+  flow: { liveTicks: number; carrierSpeedSumFt: number; swarmTicks: number }
 }
 
 export function emptyTelemetry(): FullSimTelemetry {
@@ -140,7 +146,8 @@ export function emptyTelemetry(): FullSimTelemetry {
     breakawayTicks: 0,
     breakawayPasses: 0,
     beats,
-    stoppages: { offside: 0, icing: 0, goalieFreeze: 0, penalty: 0, goal: 0, other: 0 }
+    stoppages: { offside: 0, icing: 0, goalieFreeze: 0, penalty: 0, goal: 0, other: 0 },
+    flow: { liveTicks: 0, carrierSpeedSumFt: 0, swarmTicks: 0 }
   }
 }
 

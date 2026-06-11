@@ -138,16 +138,18 @@ export function attackerOrders(c: AttackCtx): MoveOrder[] {
         break
       }
       case 'neutral': {
-        // Fill three lanes with speed; D trail; weak winger may stretch.
+        // Fill three lanes with speed (pass-through waypoints — the lanes keep
+        // moving up ice, nobody coasts to a stop in neutral ice); D trail; the
+        // weak winger may stretch.
         const ahead = a * Math.min(adv + 0.25, 0.22)
         if (slot === 0) {
           const stretch = passRisk > 0.55 && side > 0
-          orders[i] = { tx: stretch ? a * 0.22 : ahead, ty: -0.56, urgency: 0.75 }
+          orders[i] = { tx: stretch ? a * 0.22 : ahead, ty: -0.56, urgency: 0.75, through: true }
         } else if (slot === 2) {
           const stretch = passRisk > 0.55 && side < 0
-          orders[i] = { tx: stretch ? a * 0.22 : ahead, ty: 0.56, urgency: 0.75 }
+          orders[i] = { tx: stretch ? a * 0.22 : ahead, ty: 0.56, urgency: 0.75, through: true }
         } else if (slot === 1)
-          orders[i] = { tx: a * Math.min(adv + 0.14, 0.2), ty: sway(i, 0.1), urgency: 0.7 }
+          orders[i] = { tx: a * Math.min(adv + 0.14, 0.2), ty: sway(i, 0.1), urgency: 0.7, through: true }
         else if (slot === 3) orders[i] = { tx: a * (adv - 0.2), ty: -0.26, urgency: 0.65 }
         else orders[i] = { tx: a * (adv - 0.2), ty: 0.26, urgency: 0.65 }
         break
@@ -155,11 +157,12 @@ export function attackerOrders(c: AttackCtx): MoveOrder[] {
       case 'entry':
       case 'rush': {
         // One F drives the net, one fills the weak wing, C (or 3rd F) trails;
-        // D follow up to the line.
+        // D follow up to the line. Forward lanes are pass-through: speed is
+        // carried into the zone, not bled off at the waypoint.
         if (slot < 3) {
           const rank = fwdIdx.indexOf(i)
-          if (rank === 0) orders[i] = { tx: a * 0.78, ty: -side * 0.1, urgency: 0.95 }
-          else if (rank === 1) orders[i] = { tx: a * 0.6, ty: -side * 0.46, urgency: 0.9 }
+          if (rank === 0) orders[i] = { tx: a * 0.78, ty: -side * 0.1, urgency: 0.95, through: true }
+          else if (rank === 1) orders[i] = { tx: a * 0.6, ty: -side * 0.46, urgency: 0.9, through: true }
           else orders[i] = { tx: a * 0.38, ty: side * 0.14, urgency: 0.85 }
         } else {
           orders[i] = { tx: a * 0.26, ty: slot === 3 ? -0.3 : 0.3, urgency: 0.8 }
@@ -188,7 +191,11 @@ export function attackerOrders(c: AttackCtx): MoveOrder[] {
     }
 
     // Stay onside: never camp beyond the offensive blue line before the puck.
-    if (adv < O_BLUE && orders[i].tx * a > 0.23) orders[i] = { ...orders[i], tx: a * 0.23 }
+    // The clamp point is an ARRIVAL (through stripped): blowing through it at
+    // full speed would overshoot across the line.
+    if (adv < O_BLUE && orders[i].tx * a > 0.23) {
+      orders[i] = { tx: a * 0.23, ty: orders[i].ty, urgency: orders[i].urgency }
+    }
     void r
   })
 
@@ -219,18 +226,25 @@ function carrierOrder(
     case 'breakout':
       // Skate it out up the side you retrieved on — with PURPOSE. Real teams
       // exit their zone in seconds; dawdling here is what skews zone time.
-      return { tx: -a * 0.1, ty: clamp(puck.y * 0.7, -0.55, 0.55), urgency: 0.78 + pace * 0.22 }
+      // Pass-through: the exit waypoint is a gate, not a parking spot.
+      return {
+        tx: -a * 0.1,
+        ty: clamp(puck.y * 0.7, -0.55, 0.55),
+        urgency: 0.78 + pace * 0.22,
+        through: true
+      }
     case 'neutral':
-      return { tx: a * 0.32, ty: clamp(puck.y, -0.5, 0.5), urgency: 0.65 + pace * 0.3 }
+      // Carry pace through neutral ice — never coast to a stop at center.
+      return { tx: a * 0.32, ty: clamp(puck.y, -0.5, 0.5), urgency: 0.65 + pace * 0.3, through: true }
     case 'entry':
-      // Drive wide around the D's gap, then cut toward the dot.
+      // Drive wide around the D's gap, then cut toward the dot — at speed.
       return adv < 0.45
-        ? { tx: a * 0.62, ty: side * 0.48, urgency: 0.9 }
-        : { tx: a * 0.8, ty: side * 0.18, urgency: 0.9 }
+        ? { tx: a * 0.62, ty: side * 0.48, urgency: 0.9, through: true }
+        : { tx: a * 0.8, ty: side * 0.18, urgency: 0.9, through: true }
     case 'rush':
       return adv < 0.4
-        ? { tx: a * 0.6, ty: side * 0.4, urgency: 1 }
-        : { tx: a * 0.82, ty: side * 0.14, urgency: 1 }
+        ? { tx: a * 0.6, ty: side * 0.4, urgency: 1, through: true }
+        : { tx: a * 0.82, ty: side * 0.14, urgency: 1, through: true }
     default: {
       // Cycle: D at the point walk the line; forwards protect it on the wall
       // or curl off the corner; behind the net they hold and survey.

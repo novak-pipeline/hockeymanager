@@ -8,10 +8,15 @@ import {
   normYtoWorld,
   normToWorld,
   springStep,
+  snapSpring,
   wrapAngle,
+  angleSpringStep,
+  clampTurnRate,
   jerseyNumber,
   extractCues,
   cameraTargetFor,
+  endzoneChooseEnd,
+  puckCarriedOffset,
   skaterBob,
   legSwingAngle,
   type Spring1D,
@@ -84,6 +89,27 @@ describe('springStep', () => {
   })
 })
 
+describe('snapSpring', () => {
+  it('sets position exactly with zero velocity', () => {
+    const s = snapSpring(42)
+    expect(s.pos).toBe(42)
+    expect(s.vel).toBe(0)
+  })
+
+  it('does not move when stepped from snapped state', () => {
+    const s = snapSpring(42)
+    const next = springStep(s, 42, 0.016, 0.1)
+    expect(next.pos).toBeCloseTo(42, 5)
+  })
+
+  it('snapping then stepping toward same target stays at target', () => {
+    const s = snapSpring(100)
+    // Already at target — one step should stay very close
+    const next = springStep(s, 100, 0.016, 0.1)
+    expect(next.pos).toBeCloseTo(100, 4)
+  })
+})
+
 // ── angle helpers ─────────────────────────────────────────────────────────
 
 describe('wrapAngle', () => {
@@ -94,6 +120,57 @@ describe('wrapAngle', () => {
     expect(wrapAngle(Math.PI * 3)).toBeCloseTo(Math.PI, 5)
     expect(wrapAngle(-Math.PI * 3)).toBeCloseTo(-Math.PI, 5)
     expect(wrapAngle(Math.PI * 2 + 0.1)).toBeCloseTo(0.1, 5)
+  })
+})
+
+describe('clampTurnRate', () => {
+  it('returns target when delta is within max rate', () => {
+    // maxRate=π rad/s, dt=1.0s → maxDelta=π. Target=0.1 rad is well within that.
+    const maxRate = Math.PI // 180°/s
+    const dt = 1.0
+    const result = clampTurnRate(0, 0.1, dt, maxRate)
+    expect(result).toBeCloseTo(0.1, 4)
+  })
+
+  it('clamps large delta to max rate * dt', () => {
+    const maxRate = Math.PI // 180°/s
+    const dt = 0.016
+    // Trying to turn π (180°) in one frame — should be clamped
+    const result = clampTurnRate(0, Math.PI, dt, maxRate)
+    expect(result).toBeCloseTo(maxRate * dt, 4)
+  })
+
+  it('does not allow 180° whip in a single 16ms frame', () => {
+    // Even with a very fast rate, a single frame should not flip 180°
+    const maxRate = (Math.PI * 270) / 180  // 270°/s
+    const dt = 0.016
+    const result = clampTurnRate(0, Math.PI, dt, maxRate)
+    // At 270°/s for 16ms: max turn = 270 * 0.016 * π/180 ≈ 0.075 rad
+    expect(Math.abs(result)).toBeLessThan(0.1)
+  })
+
+  it('handles negative direction', () => {
+    const maxRate = Math.PI
+    const dt = 0.016
+    const result = clampTurnRate(0, -Math.PI, dt, maxRate)
+    expect(result).toBeCloseTo(-maxRate * dt, 4)
+  })
+
+  it('wraps output to [-π, π]', () => {
+    // Start near π, turn a bit more — should wrap cleanly
+    const result = clampTurnRate(Math.PI - 0.01, -Math.PI + 0.01, 1.0, 0.05)
+    expect(Math.abs(result)).toBeLessThanOrEqual(Math.PI + 0.001)
+  })
+})
+
+describe('angleSpringStep', () => {
+  it('steps angle toward target taking shortest path', () => {
+    const s: Spring1D = { pos: -Math.PI + 0.1, vel: 0 }
+    // Target is just the other side of -π/+π boundary
+    const next = angleSpringStep(s, Math.PI - 0.1, 0.1, 0.2)
+    // Should stay within [-π, π]
+    expect(next.pos).toBeGreaterThanOrEqual(-Math.PI - 0.001)
+    expect(next.pos).toBeLessThanOrEqual(Math.PI + 0.001)
   })
 })
 
@@ -191,30 +268,163 @@ describe('cameraTargetFor', () => {
     expect(t.px).toBeCloseTo(50 * 0.35, 2)
   })
 
-  it('overhead: very high y, centered', () => {
+  it('broadcast: camera x tracks puck x at 35% scale', () => {
+    const t1 = cameraTargetFor('broadcast', 0)
+    const t2 = cameraTargetFor('broadcast', 80)
+    expect(t1.px).toBeCloseTo(0, 4)
+    expect(t2.px).toBeCloseTo(80 * 0.35, 4)
+    // pz constant regardless of puck position
+    expect(t1.pz).toBe(t2.pz)
+  })
+
+  it('overhead: very high y (≥110), centered, pz = 0', () => {
     const t = cameraTargetFor('overhead', 0)
-    expect(t.py).toBeGreaterThan(80)
-    expect(t.px).toBe(0)
+    expect(t.py).toBeGreaterThanOrEqual(110)
     expect(t.pz).toBe(0)
+    // Look-at should be near ground center
+    expect(t.ly).toBe(0)
+    expect(t.lz).toBe(0)
   })
 
-  it('endzone: low and behind net', () => {
-    const t = cameraTargetFor('endzone', 20)
-    expect(t.pz).toBeLessThan(-80)
+  it('overhead: slight x-follow (10% amplitude)', () => {
+    const t = cameraTargetFor('overhead', 80)
+    expect(t.px).toBeCloseTo(80 * 0.10, 4)
+  })
+
+  it('endzone side=-1: camera behind negative-X net, looking positive-X', () => {
+    const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: -1 })
+    // Camera should be behind negative-X end (boards at -100), so camX < -95
+    expect(t.px).toBeLessThan(-95)
     expect(t.py).toBeGreaterThan(0)
+    // Look-at toward center ice (lx should be 0 or positive relative to camera)
+    expect(t.lx).toBeGreaterThanOrEqual(0)
   })
 
-  it('follow: tracks puck x', () => {
+  it('endzone side=+1: camera behind positive-X net, looking negative-X', () => {
+    const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: 1 })
+    expect(t.px).toBeGreaterThan(95)
+    expect(t.lx).toBeLessThanOrEqual(0)
+  })
+
+  it('endzone: low y (≤20)', () => {
+    const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: -1 })
+    expect(t.py).toBeLessThanOrEqual(20)
+  })
+
+  it('follow: camera behind and above carrier', () => {
+    // Carrier facing +Z (angle = 0): camera should be at negative Z offset
+    const t = cameraTargetFor('follow', 0, { carrierAngle: 0, carrierWx: 0, carrierWz: 0 })
+    expect(t.py).toBeGreaterThan(0)     // above ice
+    expect(t.pz).toBeLessThan(0)        // behind carrier (carrier faces +Z, camera is -Z)
+    expect(t.lx).toBeCloseTo(0, 1)      // look-at is the carrier position
+    expect(t.lz).toBeCloseTo(0, 1)
+  })
+
+  it('follow: camera clamps to rink bounds on X', () => {
+    // Carrier near the boards going further out
+    const t = cameraTargetFor('follow', 0, { carrierAngle: Math.PI, carrierWx: 95, carrierWz: 0 })
+    expect(Math.abs(t.px)).toBeLessThanOrEqual(101)
+  })
+
+  it('follow: tracks puck x when no carrier info', () => {
     const t = cameraTargetFor('follow', 75)
-    expect(t.px).toBe(75)
     expect(t.lx).toBe(75)
+  })
+})
+
+// ── endzone hysteresis ────────────────────────────────────────────────────
+
+describe('endzoneChooseEnd', () => {
+  it('stays on current side when puck is near center (within hysteresis)', () => {
+    // Puck at center — should not flip
+    expect(endzoneChooseEnd(-1, 0)).toBe(-1)
+    expect(endzoneChooseEnd(1, 0)).toBe(1)
+    // Puck within threshold (±15ft) — should not flip
+    expect(endzoneChooseEnd(-1, 10)).toBe(-1)
+    expect(endzoneChooseEnd(1, -10)).toBe(1)
+  })
+
+  it('flips when puck clearly crosses into opposite end (beyond threshold)', () => {
+    expect(endzoneChooseEnd(-1, 20)).toBe(1)   // puck clearly to +X end
+    expect(endzoneChooseEnd(1, -20)).toBe(-1)  // puck clearly to -X end
+  })
+
+  it('does not thrash at the threshold boundary', () => {
+    // Simulate puck oscillating between +14 and -14 (within threshold)
+    let side: 1 | -1 = -1
+    for (let i = 0; i < 100; i++) {
+      const puckX = i % 2 === 0 ? 14 : -14
+      side = endzoneChooseEnd(side, puckX)
+    }
+    // Should still be -1 since neither value crossed the 15ft threshold
+    expect(side).toBe(-1)
+  })
+
+  it('locks onto positive end once puck fully crosses', () => {
+    let side: 1 | -1 = -1
+    side = endzoneChooseEnd(side, 50)  // puck well into +X zone
+    expect(side).toBe(1)
+    // Even if puck backs up a bit (within threshold), stays on +1
+    side = endzoneChooseEnd(side, 10)
+    expect(side).toBe(1)
+  })
+
+  it('custom hysteresis threshold respected', () => {
+    // With threshold=30: puck at 25 should not flip from -1
+    expect(endzoneChooseEnd(-1, 25, 30)).toBe(-1)
+    // Puck at 35 should flip to +1
+    expect(endzoneChooseEnd(-1, 35, 30)).toBe(1)
+  })
+})
+
+// ── puck carried offset ───────────────────────────────────────────────────
+
+describe('puckCarriedOffset', () => {
+  it('returns finite values for all angles', () => {
+    for (let a = 0; a < Math.PI * 2; a += 0.1) {
+      const { dx, dz } = puckCarriedOffset(a)
+      expect(isFinite(dx)).toBe(true)
+      expect(isFinite(dz)).toBe(true)
+    }
+  })
+
+  it('offset at angle=0 (facing +Z) is to the right and ahead', () => {
+    // Angle 0 → facing +Z; right is +X, ahead is +Z
+    const { dx, dz } = puckCarriedOffset(0)
+    expect(dx).toBeGreaterThan(0)   // to the right
+    expect(dz).toBeGreaterThan(0)   // ahead
+  })
+
+  it('offset magnitude is in a plausible range (1-5 ft)', () => {
+    for (let a = 0; a < Math.PI * 2; a += 0.2) {
+      const { dx, dz } = puckCarriedOffset(a)
+      const mag = Math.sqrt(dx * dx + dz * dz)
+      expect(mag).toBeGreaterThan(0.5)
+      expect(mag).toBeLessThan(6)
+    }
+  })
+
+  it('offset rotates consistently with carrier angle', () => {
+    // At angle π (facing -Z), the offset should mirror the angle=0 case
+    const { dx: dx0, dz: dz0 } = puckCarriedOffset(0)
+    const { dx: dxPi, dz: dzPi } = puckCarriedOffset(Math.PI)
+    // dx should flip sign, dz should flip sign
+    expect(dxPi).toBeCloseTo(-dx0, 4)
+    expect(dzPi).toBeCloseTo(-dz0, 4)
   })
 })
 
 // ── animation helpers ─────────────────────────────────────────────────────
 
 describe('skaterBob', () => {
-  it('returns 0 at speed 0', () => {
+  it('returns exactly 0 at speed 0 (no idle bobbing)', () => {
+    // All time values should give 0 at speed=0
+    for (let t = 0; t < 10; t += 0.1) {
+      expect(skaterBob(t, 0)).toBe(0)
+    }
+  })
+
+  it('returns 0 at time 0 and speed 0', () => {
     expect(skaterBob(0, 0)).toBe(0)
   })
 
@@ -229,11 +439,26 @@ describe('skaterBob', () => {
       expect(Math.abs(skaterBob(t, 1))).toBeLessThanOrEqual(0.1)
     }
   })
+
+  it('bob frequency and magnitude scale with speed', () => {
+    // At half-speed, same time points should give a different oscillation
+    const valsFullSpeed = Array.from({ length: 20 }, (_, i) => skaterBob(i * 0.1, 1))
+    const valsHalfSpeed = Array.from({ length: 20 }, (_, i) => skaterBob(i * 0.1, 0.5))
+    // They should differ (frequency is speed-dependent)
+    const allSame = valsFullSpeed.every((v, i) => Math.abs(v - valsHalfSpeed[i]) < 1e-10)
+    expect(allSame).toBe(false)
+  })
 })
 
 describe('legSwingAngle', () => {
   it('returns 0 at time 0 and speed 0', () => {
     expect(legSwingAngle(0, 0)).toBe(0)
+  })
+
+  it('returns 0 at all times when speed is 0 (no idle animation)', () => {
+    for (let t = 0; t < 10; t += 0.25) {
+      expect(legSwingAngle(t, 0)).toBe(0)
+    }
   })
 
   it('produces a bounded angle', () => {

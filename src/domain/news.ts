@@ -28,4 +28,14 @@ export interface NewsItem {
   teamId?: string
   playerId?: string
   read: boolean
+  /**
+   * Present on press-corps articles: the inbox renders these as bylined
+   * articles instead of plain notices. Additive/optional for save compat.
+   */
+  press?: {
+    /** "Writer Name — Outlet" display byline. */
+    byline: string
+    /** Press sheet kind, e.g. 'weekly' | 'deadline' | 'presser'. */
+    kind: string
+  }
 }

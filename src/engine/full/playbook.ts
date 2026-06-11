@@ -125,7 +125,7 @@ export function attackPlayOrders(c: PlayCtx): MoveOrder[] {
       // The retrieving D wheels BEHIND the net first, then up the wall —
       // the most recognizable breakout in hockey.
       if (carrierIdx >= 0 && beatTicks < 7 && adv < -0.55) {
-        orders[carrierIdx] = { tx: -a * 0.9, ty: side * 0.18, urgency: 0.75 }
+        orders[carrierIdx] = { tx: -a * 0.9, ty: side * 0.18, urgency: 0.75, through: true }
       }
       break
     }
@@ -155,13 +155,15 @@ export function attackPlayOrders(c: PlayCtx): MoveOrder[] {
       if (carrierIdx >= 0) {
         orders[carrierIdx] =
           adv < 0.45
-            ? { tx: a * 0.6, ty: side * 0.52, urgency: 0.95 }
-            : { tx: a * 0.8, ty: side * 0.22, urgency: 0.95 }
+            ? { tx: a * 0.6, ty: side * 0.52, urgency: 0.95, through: true }
+            : { tx: a * 0.8, ty: side * 0.22, urgency: 0.95, through: true }
       }
       if (adv < O_BLUE) {
         unit.skaters.forEach((_, i) => {
           if (i !== carrierIdx && orders[i].tx * a > 0.22) {
-            orders[i] = { ...orders[i], tx: a * 0.22 }
+            // Arrival clamp (through stripped): full speed through the clamp
+            // point would carry the trailer over the line — offside.
+            orders[i] = { tx: a * 0.22, ty: orders[i].ty, urgency: orders[i].urgency }
           }
         })
       }

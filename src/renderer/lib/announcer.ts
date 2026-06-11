@@ -1,81 +1,148 @@
 /**
- * Thin wrapper around window.speechSynthesis for live match commentary.
+ * announcer.ts — match commentary voice layer.
  *
- * Design constraints:
- *  - Feature-detected: no-op + available:false when speechSynthesis is absent.
- *  - Queue depth limited to 2 pending utterances; importance-1 lines dropped
- *    when the queue is full.
- *  - cancel() called on pause / seek / close so stale lines don't blurt later.
- *  - Rate ~1.15 (slightly brisk but natural).
- *  - Prefers an en-US "natural" voice when available (heuristic on voice.name).
- *  - enabled flag persisted in localStorage so the toggle survives page reloads.
+ * Two-engine design:
  *
- * Future upgrade path (documented here, not installed):
- *   kokoro-js (Apache-2.0) is a local neural TTS library that runs in-browser
- *   via WebAssembly with no server round-trip. When we want broadcast-quality
- *   voices without a cloud dependency, drop it in and route speech through
- *   kokoro instead of Web Speech API. The Announcer interface stays the same —
- *   only the speak() internals change.
+ *   Engine A "system" — Web Speech API (always available on desktop Electron).
+ *     Improved voice selection: prefers Natural/Neural/Online names, then
+ *     Microsoft Aria/Guy/Jenny/Ryan, then en-US Google, then any en-US, then
+ *     system default.  Rate ~1.12, pitch ~0.95.
+ *
+ *   Engine B "kokoro" — kokoro-js neural TTS (loadKokoro() from kokoroVoice.ts).
+ *     ~80-90 MB model, user-opt-in only; never auto-downloaded.
+ *
+ * The Announcer class is the public facade, API-compatible with the previous
+ * single-engine Announcer used by MatchViewer (same speak/cancel/toggle/
+ * enable/disable/isEnabled surface, plus new useEngine/speakLine methods).
+ *
+ * localStorage keys:
+ *   hockeyAnnouncerEnabled   — boolean (default true)
+ *   hockeyAnnouncerEngine    — 'system' | 'kokoro' (default 'system')
  */
 
-const LS_KEY = 'hockeyAnnouncerEnabled'
+// ── SpeakLine (shared with kokoroVoice) ────────────────────────────────────
+
+/**
+ * A single commentary line to speak.
+ * `text`       — display text (shown in the ticker).
+ * `speech`     — speech-optimised version (may differ from display text,
+ *                e.g. numbers spelled out, pauses inserted).
+ * `importance` — 1 routine | 2 notable | 3 goal/major event.
+ */
+export interface SpeakLine {
+  text: string
+  speech: string
+  importance: 1 | 2 | 3
+}
+
+// ── VoiceEngine interface ───────────────────────────────────────────────────
+
+export interface VoiceEngine {
+  speak(line: SpeakLine): void
+  cancel(): void
+  readonly ready: boolean
+  readonly name: string
+}
+
+// ── localStorage helpers ───────────────────────────────────────────────────
+
+const LS_ENABLED = 'hockeyAnnouncerEnabled'
+const LS_ENGINE = 'hockeyAnnouncerEngine'
 const MAX_QUEUE = 2
 
 function readEnabled(): boolean {
   try {
-    const v = localStorage.getItem(LS_KEY)
-    return v !== 'false' // default on
+    return localStorage.getItem(LS_ENABLED) !== 'false'
   } catch {
     return true
   }
 }
 
 function writeEnabled(v: boolean): void {
-  try {
-    localStorage.setItem(LS_KEY, String(v))
-  } catch {
-    // ignore
-  }
+  try { localStorage.setItem(LS_ENABLED, String(v)) } catch { /* ignore */ }
 }
 
-/** Heuristic: prefer a voice that sounds like a real en-US voice. */
+function readEngineKind(): 'system' | 'kokoro' {
+  try {
+    const v = localStorage.getItem(LS_ENGINE)
+    if (v === 'kokoro') return 'kokoro'
+  } catch { /* ignore */ }
+  return 'system'
+}
+
+function writeEngineKind(v: 'system' | 'kokoro'): void {
+  try { localStorage.setItem(LS_ENGINE, v) } catch { /* ignore */ }
+}
+
+// ── Voice selection for Web Speech API ────────────────────────────────────
+
+/**
+ * Rank and pick the best available voice for sports commentary.
+ *
+ * Priority (highest first):
+ *  1. Name contains 'Natural', 'Neural', or 'Online' (OS/browser neural voices)
+ *  2. Name contains 'Aria', 'Guy', 'Jenny', or 'Ryan' (Microsoft neural voices)
+ *  3. Any en-US voice from Google
+ *  4. Any en-US voice
+ *  5. Any en-* voice
+ *  6. System default
+ */
 function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (voices.length === 0) return null
 
-  // Prefer natural/neural voices first, then any en-US
-  const naturalPatterns = ['natural', 'neural', 'enhanced', 'premium', 'samantha', 'alex', 'zira', 'david']
-  const enUS = voices.filter((v) => v.lang.toLowerCase().startsWith('en'))
+  const en = voices.filter((v) => v.lang.toLowerCase().startsWith('en'))
 
-  for (const pattern of naturalPatterns) {
-    const match = enUS.find((v) => v.name.toLowerCase().includes(pattern))
+  // Tier 1: names suggestive of neural/natural quality
+  const tier1Names = ['natural', 'neural', 'online']
+  for (const pattern of tier1Names) {
+    const match = en.find((v) => v.name.toLowerCase().includes(pattern))
     if (match) return match
   }
 
-  // Fallback: first en-US voice
-  if (enUS.length > 0) return enUS[0]
+  // Tier 2: known high-quality Microsoft voices
+  const tier2Names = ['aria', 'guy', 'jenny', 'ryan']
+  for (const pattern of tier2Names) {
+    const match = en.find((v) => v.name.toLowerCase().includes(pattern))
+    if (match) return match
+  }
 
-  // Last resort: default voice
+  // Tier 3: en-US Google
+  const googleUS = en.find(
+    (v) => v.lang.toLowerCase() === 'en-us' && v.name.toLowerCase().includes('google'),
+  )
+  if (googleUS) return googleUS
+
+  // Tier 4: any en-US
+  const anyUS = en.find((v) => v.lang.toLowerCase() === 'en-us')
+  if (anyUS) return anyUS
+
+  // Tier 5: any en-*
+  if (en.length > 0) return en[0]
+
+  // Tier 6: default
   return voices.find((v) => v.default) ?? voices[0] ?? null
 }
 
-export class Announcer {
-  readonly available: boolean
-  private enabled: boolean
-  private queue: number = 0 // number of utterances pending
-  private voiceCache: SpeechSynthesisVoice | null = null
-  private voicesLoaded = false
+// ── SystemVoiceEngine ──────────────────────────────────────────────────────
+
+class SystemVoiceEngine implements VoiceEngine {
+  readonly name = 'system'
+
+  private _voiceCache: SpeechSynthesisVoice | null = null
+  private _voicesLoaded = false
+  private _queue = 0
+  private _available: boolean
 
   constructor() {
-    this.available = typeof window !== 'undefined' && 'speechSynthesis' in window
-    this.enabled = this.available ? readEnabled() : false
+    this._available =
+      typeof window !== 'undefined' && 'speechSynthesis' in window
 
-    if (this.available) {
-      // Pre-load voices (Chrome loads them async)
+    if (this._available) {
       const load = () => {
-        const voices = window.speechSynthesis.getVoices()
-        if (voices.length > 0) {
-          this.voiceCache = pickVoice(voices)
-          this.voicesLoaded = true
+        const vs = window.speechSynthesis.getVoices()
+        if (vs.length > 0) {
+          this._voiceCache = pickVoice(vs)
+          this._voicesLoaded = true
         }
       }
       load()
@@ -83,9 +150,95 @@ export class Announcer {
     }
   }
 
+  get ready(): boolean {
+    return this._available
+  }
+
+  speak(line: SpeakLine): void {
+    if (!this._available) return
+    if (this._queue >= MAX_QUEUE && line.importance === 1) return
+
+    this._queue++
+
+    if (!this._voicesLoaded) {
+      const vs = window.speechSynthesis.getVoices()
+      if (vs.length > 0) {
+        this._voiceCache = pickVoice(vs)
+        this._voicesLoaded = true
+      }
+    }
+
+    const utt = new SpeechSynthesisUtterance(line.speech)
+    utt.rate = 1.12
+    utt.pitch = 0.95
+    utt.lang = 'en-US'
+    if (this._voiceCache) utt.voice = this._voiceCache
+
+    const decrement = () => {
+      this._queue = Math.max(0, this._queue - 1)
+    }
+    utt.onend = decrement
+    utt.onerror = decrement
+
+    window.speechSynthesis.speak(utt)
+  }
+
+  cancel(): void {
+    if (!this._available) return
+    window.speechSynthesis.cancel()
+    this._queue = 0
+  }
+
+  /** Return a snapshot of available voices for a settings picker. */
+  listVoices(): SpeechSynthesisVoice[] {
+    if (!this._available) return []
+    return window.speechSynthesis.getVoices()
+  }
+}
+
+// ── Announcer facade ───────────────────────────────────────────────────────
+
+/**
+ * Public facade used by MatchViewer (and future settings UI).
+ *
+ * Drop-in replacement for the original single-engine Announcer:
+ *   - .available      — true when at least the system engine is usable
+ *   - .isEnabled      — persisted toggle
+ *   - .toggle()       — flip enabled state
+ *   - .enable()       — enable + persist
+ *   - .disable()      — disable + cancel + persist
+ *   - .speak(text, importance)  — legacy 2-arg form (MatchViewer compat)
+ *   - .speakLine(line)          — new typed form preferred by new callers
+ *   - .cancel()
+ *   - .useEngine(kind)          — switch between 'system' and 'kokoro'
+ */
+export class Announcer {
+  readonly available: boolean
+
+  private enabled: boolean
+  private engineKind: 'system' | 'kokoro'
+  private systemEngine: SystemVoiceEngine
+  private kokoroEngine: VoiceEngine | null = null
+
+  constructor() {
+    this.systemEngine = new SystemVoiceEngine()
+    this.available = this.systemEngine.ready
+
+    this.enabled = this.available ? readEnabled() : false
+    this.engineKind = readEngineKind()
+  }
+
+  // ── State queries ────────────────────────────────────────────────────────
+
   get isEnabled(): boolean {
     return this.enabled
   }
+
+  get activeEngineName(): string {
+    return this._activeEngine().name
+  }
+
+  // ── Control ──────────────────────────────────────────────────────────────
 
   toggle(): void {
     this.enabled = !this.enabled
@@ -105,44 +258,62 @@ export class Announcer {
   }
 
   /**
-   * Speak a line.
-   *
-   * @param text       The speech-friendly text to speak.
-   * @param importance 1|2|3. Importance-1 lines are dropped if queue >= MAX_QUEUE.
+   * Switch the active voice engine.
+   * When switching to 'kokoro', you must supply a pre-loaded VoiceEngine
+   * (from loadKokoro()) — this method does NOT trigger a download.
    */
-  speak(text: string, importance: 1 | 2 | 3): void {
-    if (!this.available || !this.enabled) return
-    if (this.queue >= MAX_QUEUE && importance === 1) return
-
-    this.queue++
-
-    if (!this.voicesLoaded) {
-      const voices = window.speechSynthesis.getVoices()
-      if (voices.length > 0) {
-        this.voiceCache = pickVoice(voices)
-        this.voicesLoaded = true
+  useEngine(kind: 'system' | 'kokoro', engine?: VoiceEngine): void {
+    if (kind === 'kokoro') {
+      if (engine) {
+        this.kokoroEngine = engine
+      } else if (!this.kokoroEngine) {
+        // No engine provided and none cached; stay on system
+        return
       }
     }
-
-    const utt = new SpeechSynthesisUtterance(text)
-    utt.rate = 1.15
-    utt.lang = 'en-US'
-    if (this.voiceCache) utt.voice = this.voiceCache
-
-    utt.onend = () => {
-      this.queue = Math.max(0, this.queue - 1)
-    }
-    utt.onerror = () => {
-      this.queue = Math.max(0, this.queue - 1)
-    }
-
-    window.speechSynthesis.speak(utt)
+    this.cancel()
+    this.engineKind = kind
+    writeEngineKind(kind)
   }
 
-  /** Cancel all pending speech immediately (call on pause / seek / close). */
+  // ── Speaking ─────────────────────────────────────────────────────────────
+
+  /**
+   * Speak a line (new typed form).
+   */
+  speakLine(line: SpeakLine): void {
+    if (!this.available || !this.enabled) return
+    this._activeEngine().speak(line)
+  }
+
+  /**
+   * Speak text — legacy 2-argument form kept for MatchViewer source-compat.
+   * Converts to a SpeakLine and delegates to speakLine().
+   */
+  speak(text: string, importance: 1 | 2 | 3): void {
+    this.speakLine({ text, speech: text, importance })
+  }
+
   cancel(): void {
-    if (!this.available) return
-    window.speechSynthesis.cancel()
-    this.queue = 0
+    this.systemEngine.cancel()
+    this.kokoroEngine?.cancel()
+  }
+
+  // ── Voice picker helper ───────────────────────────────────────────────────
+
+  /**
+   * Return all available Web Speech voices (for a settings UI picker).
+   */
+  listVoices(): SpeechSynthesisVoice[] {
+    return this.systemEngine.listVoices()
+  }
+
+  // ── Private ──────────────────────────────────────────────────────────────
+
+  private _activeEngine(): VoiceEngine {
+    if (this.engineKind === 'kokoro' && this.kokoroEngine?.ready) {
+      return this.kokoroEngine
+    }
+    return this.systemEngine
   }
 }

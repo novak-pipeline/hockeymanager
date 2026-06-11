@@ -119,9 +119,13 @@ export type LineChangeEvent = GameEventBase & {
   onIce: PlayerRef[]
 }
 
+/** Why play stopped — additive optional field; consumers must tolerate absence. */
+export type StoppageReason = 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'goal' | 'other'
+
 export type StoppageEvent = GameEventBase & {
   type: 'whistle' | 'periodEnd' | 'gameEnd'
   pos?: XY
+  reason?: StoppageReason
 }
 
 /** One skater's position at a single tick. */

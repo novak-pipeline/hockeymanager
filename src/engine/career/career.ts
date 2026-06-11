@@ -89,6 +89,18 @@ import {
   type TeamDescriptor,
 } from '@engine/story/expectations'
 import {
+  appendSagaLine,
+  buildPresserFactSheet,
+  buildTentpoleFactSheet,
+  buildWeeklyFactSheet,
+  type PressConferenceState,
+  type PressFactArgs,
+  type PressJob,
+  type PressPersonaId,
+  type PressSheetKind,
+  type PressTone,
+} from '@engine/story/factSheet'
+import {
   chemistryModifier,
   developmentModifier,
   electCaptain,
@@ -371,6 +383,15 @@ export class Career {
   private readonly losingStreaks = new Map<string, number>()
   /** Yesterday's league ranks for standings-delta arcs. Transient (rebuilt daily). */
   private readonly prevRanks = new Map<string, number>()
+  /* ── press corps (Wave 2) ── */
+  /** Rolling factual career summary fed to the press as long-term memory. */
+  private sagaSoFar = ''
+  /** Pending writing assignment for the renderer-side press pump. */
+  private pressJob: PressJob | null = null
+  /** Pending press-conference question awaiting the user's answer. */
+  private pressConference: PressConferenceState | null = null
+  private pressCounter = 0
+
   private lastDeadlineRecap: ExecutedTradeSummary[] | null = null
   private lastLottery: {
     orderAbbrs: string[]
@@ -407,6 +428,7 @@ export class Career {
         `${data.league.name} ${this.year}–${this.year + 1} season begins`,
         `You are the new general manager of the ${this.userTeam.name}. Set your lines, watch the cap, and bring home the cup.`
       )
+      this.appendSaga(`Y${this.year}: a new GM takes over the ${this.userTeam.name}.`)
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
         year: this.year,
@@ -506,7 +528,7 @@ export class Career {
     category: NewsCategory,
     headline: string,
     body: string,
-    refs: { teamId?: string; playerId?: string } = {}
+    refs: { teamId?: string; playerId?: string; press?: { byline: string; kind: string } } = {}
   ): void {
     const item: NewsItem = {
       id: `n${this.newsCounter++}`,
@@ -518,6 +540,7 @@ export class Career {
       read: false,
       ...(refs.teamId !== undefined ? { teamId: refs.teamId } : {}),
       ...(refs.playerId !== undefined ? { playerId: refs.playerId } : {}),
+      ...(refs.press !== undefined ? { press: refs.press } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -1030,6 +1053,247 @@ export class Career {
         : undefined
     const beat = arc.beats[arc.beats.length - 1]?.summary ?? ''
     return who ? `${who} — ${beat}` : beat
+  }
+
+  /* ────────────────────────── press corps (Wave 2) ────────────────────────── */
+
+  private static readonly PRESS_PERSONA_ROTATION: PressPersonaId[] = ['beat', 'national', 'homer']
+
+  /** Append one factual line to the rolling saga (oldest lines trimmed). */
+  private appendSaga(line: string): void {
+    this.sagaSoFar = appendSagaLine(this.sagaSoFar, line)
+  }
+
+  /** Assemble the verifiable fact bundle for the press from current state. */
+  private pressFactArgs(): PressFactArgs {
+    const sorted = sortStandings([...this.standings.values()])
+    const rank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    const standing = this.standings.get(this.userTeamId)!
+    const team = this.userTeam
+
+    const lastResults: PressFactArgs['lastResults'] = []
+    for (const g of this.data.league.schedule) {
+      if (!g.result) continue
+      if (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId) continue
+      const home = g.homeTeamId === this.userTeamId
+      const opp = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)!
+      lastResults.push({
+        day: g.day,
+        opponentAbbr: opp.abbreviation,
+        home,
+        goalsFor: home ? g.result.homeGoals : g.result.awayGoals,
+        goalsAgainst: home ? g.result.awayGoals : g.result.homeGoals,
+        decidedBy: g.result.decidedBy,
+      })
+    }
+
+    const topArcs = [...this.arcsState.arcs]
+      .filter((a) => a.status !== 'resolved')
+      .sort((a, b) => b.tension - a.tension)
+      .slice(0, 3)
+      .map((a) => ({ kind: a.kind as string, summary: this.arcHeadline(a), tension: a.tension }))
+
+    const lr = this.lockerRooms.get(this.userTeamId)
+    const nameOf = (id: string): string => this.data.players.get(asPlayerId(id))?.name ?? id
+    const onRoster = new Set(team.roster.map((id) => id as string))
+    const feuds: string[] = []
+    const mentorships: string[] = []
+    if (lr) {
+      for (const rel of lr.relationships) {
+        if (!onRoster.has(rel.a) || !onRoster.has(rel.b)) continue
+        if (rel.kind === 'feud') feuds.push(`${nameOf(rel.a)} vs ${nameOf(rel.b)}`)
+        if (rel.kind === 'mentorship') mentorships.push(`${nameOf(rel.a)} mentoring ${nameOf(rel.b)}`)
+      }
+    }
+
+    const rumors = this.tentpoles.rumors.map((r) => ({
+      playerName: nameOf(r.playerId),
+      teamAbbr: this.data.teams.get(asTeamId(r.teamId))?.abbreviation ?? r.teamId,
+      heat: r.heat,
+    }))
+
+    const recordsWatch: string[] = []
+    const pts = this.recordsState.singleSeason.points[0]
+    if (pts) {
+      recordsWatch.push(
+        `All-time single-season points record: ${pts.value} by ${pts.playerName} (${pts.year}).`
+      )
+    }
+    const gls = this.recordsState.singleSeason.goals[0]
+    if (gls) {
+      recordsWatch.push(
+        `All-time single-season goals record: ${gls.value} by ${gls.playerName} (${gls.year}).`
+      )
+    }
+
+    const upcoming: string[] = []
+    for (const g of this.data.league.schedule) {
+      if (g.result) continue
+      if (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId) continue
+      const home = g.homeTeamId === this.userTeamId
+      const opp = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)!
+      upcoming.push(`${home ? 'vs' : '@'} ${opp.abbreviation} (day ${g.day})`)
+      if (upcoming.length >= 3) break
+    }
+
+    const leagueLeaders = [...this.totals.entries()]
+      .map(([id, t]) => ({ id, points: t.goals + t.assists }))
+      .filter(({ id }) => this.data.players.get(id)?.position !== 'G')
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 3)
+      .map(({ id, points }) => {
+        const p = this.resolve(id)
+        const tid = this.teamOf(id)
+        return {
+          name: p.name,
+          teamAbbr: tid ? this.data.teams.get(tid)!.abbreviation : 'FA',
+          stat: 'points',
+          value: points,
+        }
+      })
+
+    const expectedRank = expectedRankOf(this.expectationsState, this.userTeamId as string)
+    return {
+      year: this.year,
+      day: this.currentDay,
+      team: {
+        name: team.name,
+        abbr: team.abbreviation,
+        wins: standing.wins,
+        losses: standing.losses,
+        otLosses: standing.overtimeLosses,
+        points: standing.points,
+        rank,
+        teamsInLeague: this.data.league.teams.length,
+        ...(expectedRank !== undefined ? { expectedRank } : {}),
+      },
+      lastResults,
+      topArcs,
+      lockerRoom: {
+        roomMorale: lr ? Math.round(lr.roomMorale) : 50,
+        captainName: lr?.captainId ? nameOf(lr.captainId) : null,
+        feuds,
+        mentorships,
+      },
+      rumors,
+      recordsWatch,
+      upcomingOpponents: upcoming,
+      leagueLeaders,
+      sagaSoFar: this.sagaSoFar,
+    }
+  }
+
+  /** Queue (replace) the pending press job; persona rotates deterministically. */
+  private queuePressJob(kind: PressSheetKind, special: string[]): void {
+    const personaId =
+      Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]
+    const args = this.pressFactArgs()
+    const factSheet =
+      kind === 'weekly'
+        ? buildWeeklyFactSheet(args)
+        : kind === 'presser'
+          ? buildPresserFactSheet(args, special)
+          : buildTentpoleFactSheet(kind, args, special)
+    this.pressJob = { id: `pj${this.pressCounter++}`, kind, personaId, factSheet }
+  }
+
+  /** Queue (replace) a pending press-conference question for the user. */
+  private queuePressConference(question: string, context: string): void {
+    this.pressConference = {
+      id: `pc${this.pressCounter++}`,
+      question,
+      context,
+      day: this.currentDay,
+      year: this.year,
+    }
+  }
+
+  /** The pending writing assignment, if any (renderer press pump polls this). */
+  getPressJob(): PressJob | null {
+    return this.pressJob ? structuredClone(this.pressJob) : null
+  }
+
+  /** Renderer hands back the finished article (LLM or fallback) for the inbox. */
+  submitPressArticle(input: {
+    jobId: string
+    headline: string
+    body: string
+    byline: string
+    model: string
+  }): void {
+    const job = this.pressJob
+    if (!job || job.id !== input.jobId) throw new Error('press job no longer pending')
+    this.pressJob = null
+    this.pushNews('league', input.headline, input.body, {
+      teamId: this.userTeamId as string,
+      press: { byline: input.byline, kind: job.kind },
+    })
+    this.appendSaga(`Y${this.year} D${this.currentDay}: press — "${input.headline}".`)
+  }
+
+  /** Discard the pending job without an article (feature toggled off). */
+  skipPressJob(jobId: string): void {
+    if (this.pressJob && this.pressJob.id === jobId) this.pressJob = null
+  }
+
+  /** The pending press-conference question, if any. */
+  getPressConference(): PressConferenceState | null {
+    return this.pressConference ? { ...this.pressConference } : null
+  }
+
+  /**
+   * Apply the user's press-conference answer. The tone is either LLM-graded
+   * (typed answers) or picked from buttons (no key). Effects are deterministic:
+   * a fiery rant rallies the room (+2 morale) but risks sparking a feud;
+   * public praise nudges the room up one.
+   */
+  answerPressConference(answer: string, tone: PressTone): void {
+    const pc = this.pressConference
+    if (!pc) throw new Error('no press conference pending')
+    this.pressConference = null
+    const lr = this.lockerRooms.get(this.userTeamId)
+    if (lr) {
+      if (tone === 'fiery') lr.roomMorale = Math.min(100, lr.roomMorale + 2)
+      if (tone === 'praise') lr.roomMorale = Math.min(100, lr.roomMorale + 1)
+    }
+    if (tone === 'fiery') {
+      const rng = this.rngFor(7301, this.currentDay, this.pressCounter)
+      if (rng.next() < 0.3) {
+        const skaters = this.userTeam.roster
+          .map((id) => this.resolve(id))
+          .filter((p) => p.position !== 'G')
+        if (skaters.length >= 2) {
+          const a = skaters[Math.floor(rng.next() * skaters.length)]
+          let b = skaters[Math.floor(rng.next() * skaters.length)]
+          if (b.id === a.id) b = skaters[(skaters.indexOf(a) + 1) % skaters.length]
+          createArc(
+            this.arcsState,
+            'feud',
+            { playerIds: [a.id as string, b.id as string], teamIds: [this.userTeamId as string] },
+            `Tempers simmer between ${a.name} and ${b.name} after the manager's fiery press conference.`,
+            this.currentDay,
+            this.year
+          )
+        }
+      }
+    }
+    const quote = answer.trim().length > 0 ? answer.trim().slice(0, 240) : 'No comment.'
+    const toneLabel: Record<PressTone, string> = {
+      measured: 'a measured',
+      fiery: 'a fiery',
+      deflecting: 'an evasive',
+      praise: 'a complimentary',
+    }
+    this.pushNews(
+      'league',
+      `GM faces the press`,
+      `Asked: "${pc.question}"\n\nIn ${toneLabel[tone]} exchange, the ${this.userTeam.name} GM said: "${quote}"`,
+      {
+        teamId: this.userTeamId as string,
+        press: { byline: 'Press room pool report', kind: 'presser' },
+      }
+    )
+    this.appendSaga(`Y${this.year} D${this.currentDay}: GM presser (${tone}): "${quote.slice(0, 80)}".`)
   }
 
   /* ────────────────────────── outcome bookkeeping ────────────────────────── */

@@ -18,10 +18,14 @@ import {
   normXtoWorld,
   normYtoWorld,
   springStep,
+  snapSpring,
   angleSpringStep,
+  clampTurnRate,
   jerseyNumber,
   extractCues,
   cameraTargetFor,
+  endzoneChooseEnd,
+  puckCarriedOffset,
   skaterBob,
   legSwingAngle,
   type CameraPreset,
@@ -54,12 +58,18 @@ const GOALIE_TORSO_W = 2.1
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
 const CAMERA_FOLLOW_HL = 0.35
+const CAMERA_OVERHEAD_HL = 0.6   // heavier damping for overhead x-follow
 const ANGLE_FOLLOW_HL = 0.12
+
+// ── Orientation turn-rate clamp ─────────────────────────────────────────────
+// Max body rotation speed: ~270°/s. Prevents 180° whips on direction reversal.
+const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 270) / 180
 
 interface PlayerPose {
   worldX: Spring1D
   worldZ: Spring1D
-  angle: Spring1D       // rotation around Y
+  angle: number            // current orientation (Y-axis, radians) — clamped not sprung
+  angleVel: number         // not used for clamped path but kept for compat
   prevWx: number
   prevWz: number
   speed: number
@@ -113,6 +123,9 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Puck ───────────────────────────────────────────────────────────────────
   private puckMesh!: THREE.Mesh
   private puckGlowRing!: THREE.Mesh
+  // Smoothed puck render position (spring to actual puck or carrier-offset position)
+  private puckRenderX: Spring1D = { pos: 0, vel: 0 }
+  private puckRenderZ: Spring1D = { pos: 0, vel: 0 }
 
   // ── Goal lights ────────────────────────────────────────────────────────────
   private goalLights: GoalLight[] = []
@@ -131,8 +144,17 @@ export class Rink3dRenderer implements MatchRenderer {
   private lookZ: Spring1D = { pos: 0, vel: 0 }
   private camPreset: CameraPreset = 'broadcast'
 
+  // ── Endzone camera state ───────────────────────────────────────────────────
+  // Which net end the endzone camera is currently behind (+1 = positive-X end, -1 = negative-X end)
+  private endzoneActiveSide: 1 | -1 = -1
+
   // ── Wall clock for animation ───────────────────────────────────────────────
   private lastFrameTime = 0
+
+  // ── Carrier tracking for follow camera ────────────────────────────────────
+  private carrierAngle = 0
+  private carrierWx = 0
+  private carrierWz = 0
 
   private constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer
@@ -518,7 +540,8 @@ export class Rink3dRenderer implements MatchRenderer {
     return {
       worldX: { pos: startWx, vel: 0 },
       worldZ: { pos: startWz, vel: 0 },
-      angle: { pos: 0, vel: 0 },
+      angle: 0,
+      angleVel: 0,
       prevWx: startWx,
       prevWz: startWz,
       speed: 0,
@@ -621,11 +644,37 @@ export class Rink3dRenderer implements MatchRenderer {
   seekFraction(f: number): void {
     if (!this.timeline) return
     this.clockPos = Math.max(0, Math.min(1, f)) * this.timeline.duration
-    // On seek, skip stale cues by bumping lastEvaluatedClock to current position
+    // On seek: bump stale cues, reset spring state so no rubber-band flight
     this.lastEvaluatedClock = this.clockPos
     this.activeCues = []
+
+    // Render once to get new positions, then snap all springs to those positions
     this.renderAt(this.clockPos)
+    this.snapAllSprings()
     this.emit()
+  }
+
+  /**
+   * Hard-snap all position/rotation springs to their current mesh positions.
+   * Called after seek and after camera-mode switch.
+   */
+  private snapAllSprings(): void {
+    // Snap player pose springs
+    const allPoses = [
+      ...this.homePoses,
+      ...this.awayPoses,
+      ...(this.homeGoaliePose ? [this.homeGoaliePose] : []),
+      ...(this.awayGoaliePose ? [this.awayGoaliePose] : []),
+    ]
+    for (const p of allPoses) {
+      p.worldX = snapSpring(p.mesh.position.x)
+      p.worldZ = snapSpring(p.mesh.position.z)
+      // angle is already set directly by renderAt
+    }
+
+    // Snap puck render springs
+    this.puckRenderX = snapSpring(this.puckMesh.position.x)
+    this.puckRenderZ = snapSpring(this.puckMesh.position.z)
   }
 
   resize(): void {
@@ -662,8 +711,36 @@ export class Rink3dRenderer implements MatchRenderer {
     this.cues = extractCues(stream)
   }
 
+  /**
+   * Switch camera preset.
+   * Hard-resets ALL camera spring state and snaps to the new pose immediately
+   * so there is no bounce/transition from the old position.
+   */
   setCamera(preset: CameraPreset): void {
     this.camPreset = preset
+
+    // Update endzone side based on current puck position before snapping
+    const puckWx = this.puckMesh.position.x
+    this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, puckWx)
+
+    const target = cameraTargetFor(preset, puckWx, {
+      endzoneActiveSide: this.endzoneActiveSide,
+      carrierAngle: this.carrierAngle,
+      carrierWx: this.carrierWx,
+      carrierWz: this.carrierWz,
+    })
+
+    // Hard-snap all six springs — zero velocity, position at the target
+    this.camX = snapSpring(target.px)
+    this.camY = snapSpring(target.py)
+    this.camZ = snapSpring(target.pz)
+    this.lookX = snapSpring(target.lx)
+    this.lookY = snapSpring(target.ly)
+    this.lookZ = snapSpring(target.lz)
+
+    // Apply immediately so the first rendered frame is correct
+    this.camera.position.set(target.px, target.py, target.pz)
+    this.camera.lookAt(target.lx, target.ly, target.lz)
   }
 
   // ── Animation loop ────────────────────────────────────────────────────────
@@ -696,12 +773,14 @@ export class Rink3dRenderer implements MatchRenderer {
     const snap = tl.sampleAt(absT)
     if (!snap) return
 
-    // Puck
-    const pWx = normXtoWorld(snap.puck.x)
-    const pWz = normYtoWorld(snap.puck.y)
-    this.puckMesh.position.set(pWx, PUCK_H / 2, pWz)
-    this.puckGlowRing.position.set(pWx, PUCK_H + 0.05, pWz)
-    this.puckGlowRing.visible = snap.carrier !== null
+    // Determine carrier pose for puck offset
+    let carrierPose: PlayerPose | null = null
+    if (snap.carrier !== null) {
+      const all = [...this.homePoses, ...this.awayPoses,
+        ...(this.homeGoaliePose ? [this.homeGoaliePose] : []),
+        ...(this.awayGoaliePose ? [this.awayGoaliePose] : [])]
+      carrierPose = all.find((p) => p.playerId === snap.carrier) ?? null
+    }
 
     // Home skaters
     for (let i = 0; i < snap.home.length && i < this.homePoses.length; i++) {
@@ -729,6 +808,39 @@ export class Rink3dRenderer implements MatchRenderer {
     if (this.awayGoaliePose) {
       this.updateGoaliePose(this.awayGoaliePose, snap.awayGoalie.x, snap.awayGoalie.y, snap.puck, dt)
     }
+
+    // Puck position: if carried, offset to stick-blade side of carrier
+    let pTargetX: number
+    let pTargetZ: number
+    if (carrierPose !== null) {
+      const offset = puckCarriedOffset(carrierPose.angle)
+      pTargetX = carrierPose.worldX.pos + offset.dx
+      pTargetZ = carrierPose.worldZ.pos + offset.dz
+      // Track carrier for follow camera
+      this.carrierAngle = carrierPose.angle
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else {
+      pTargetX = normXtoWorld(snap.puck.x)
+      pTargetZ = normYtoWorld(snap.puck.y)
+      // When loose, update carrier tracking to puck position
+      this.carrierWx = pTargetX
+      this.carrierWz = pTargetZ
+    }
+
+    // Smooth puck position with a tight spring (not teleport-snappy but responsive)
+    if (dt > 0) {
+      this.puckRenderX = springStep(this.puckRenderX, pTargetX, dt, PLAYER_FOLLOW_HL)
+      this.puckRenderZ = springStep(this.puckRenderZ, pTargetZ, dt, PLAYER_FOLLOW_HL)
+    } else {
+      // dt=0 means a seek — snap directly
+      this.puckRenderX = snapSpring(pTargetX)
+      this.puckRenderZ = snapSpring(pTargetZ)
+    }
+
+    this.puckMesh.position.set(this.puckRenderX.pos, PUCK_H / 2, this.puckRenderZ.pos)
+    this.puckGlowRing.position.set(this.puckRenderX.pos, PUCK_H + 0.05, this.puckRenderZ.pos)
+    this.puckGlowRing.visible = snap.carrier !== null
   }
 
   private updatePose(pose: PlayerPose, nx: number, ny: number, dt: number): void {
@@ -747,10 +859,10 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.prevWx = pose.worldX.pos
     pose.prevWz = pose.worldZ.pos
 
-    // Orientation toward velocity
-    if (distSq > 0.001) {
+    // Orientation toward velocity — clamped turn rate to prevent body whips
+    if (distSq > 0.001 && dt > 0) {
       const targetAngle = Math.atan2(vx, vz)
-      pose.angle = angleSpringStep(pose.angle, targetAngle, dt, ANGLE_FOLLOW_HL)
+      pose.angle = clampTurnRate(pose.angle, targetAngle, dt, MAX_TURN_RATE_RAD_PER_SEC)
     }
 
     pose.animTime += dt
@@ -763,9 +875,10 @@ export class Rink3dRenderer implements MatchRenderer {
     const armsUp = pose.armsTimer > 0
     pose.armsTimer = Math.max(0, pose.armsTimer - dt)
 
+    // Bob only when actually moving (speed > 0 check in skaterBob)
     const bob = skaterBob(pose.animTime, pose.speed)
     pose.mesh.position.set(pose.worldX.pos + staggerOffset, bob, pose.worldZ.pos)
-    pose.mesh.rotation.y = pose.angle.pos
+    pose.mesh.rotation.y = pose.angle
 
     // Leg swing (apply to leg children index 1,2)
     const legAngle = legSwingAngle(pose.animTime, pose.speed)
@@ -789,14 +902,14 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
     pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
 
-    // Face puck
+    // Face puck — clamped turn rate (goalies can turn faster than skaters)
     const pWx = normXtoWorld(puck.x)
     const pWz = normYtoWorld(puck.y)
     const dx = pWx - pose.worldX.pos
     const dz = pWz - pose.worldZ.pos
-    if (dx * dx + dz * dz > 0.1) {
+    if (dx * dx + dz * dz > 0.1 && dt > 0) {
       const targetAngle = Math.atan2(dx, dz)
-      pose.angle = angleSpringStep(pose.angle, targetAngle, dt, ANGLE_FOLLOW_HL * 1.5)
+      pose.angle = clampTurnRate(pose.angle, targetAngle, dt, MAX_TURN_RATE_RAD_PER_SEC * 1.5)
     }
 
     pose.animTime += dt
@@ -804,7 +917,7 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.butterflyTimer = Math.max(0, pose.butterflyTimer - dt)
 
     pose.mesh.position.set(pose.worldX.pos, butterfly ? -0.4 : 0, pose.worldZ.pos)
-    pose.mesh.rotation.y = pose.angle.pos
+    pose.mesh.rotation.y = pose.angle
     pose.mesh.rotation.z = butterfly ? 0.3 : 0
   }
 
@@ -898,13 +1011,25 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
-    const puckWx = this.puckMesh.position.x
-    const target = cameraTargetFor(this.camPreset, puckWx)
+    const puckWx = this.puckRenderX.pos  // use smoothed puck position
 
-    this.camX = springStep(this.camX, target.px, dt, CAMERA_FOLLOW_HL)
+    // Update endzone active side with hysteresis (only flips outside ±15ft of center)
+    this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, puckWx)
+
+    const target = cameraTargetFor(this.camPreset, puckWx, {
+      endzoneActiveSide: this.endzoneActiveSide,
+      carrierAngle: this.carrierAngle,
+      carrierWx: this.carrierWx,
+      carrierWz: this.carrierWz,
+    })
+
+    // Overhead uses heavier damping on X so it doesn't slide around too much
+    const hl = this.camPreset === 'overhead' ? CAMERA_OVERHEAD_HL : CAMERA_FOLLOW_HL
+
+    this.camX = springStep(this.camX, target.px, dt, hl)
     this.camY = springStep(this.camY, target.py, dt, CAMERA_FOLLOW_HL)
     this.camZ = springStep(this.camZ, target.pz, dt, CAMERA_FOLLOW_HL)
-    this.lookX = springStep(this.lookX, target.lx, dt, CAMERA_FOLLOW_HL)
+    this.lookX = springStep(this.lookX, target.lx, dt, hl)
     this.lookY = springStep(this.lookY, target.ly, dt, CAMERA_FOLLOW_HL)
     this.lookZ = springStep(this.lookZ, target.lz, dt, CAMERA_FOLLOW_HL)
 

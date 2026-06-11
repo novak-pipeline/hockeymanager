@@ -31,6 +31,14 @@ export interface MoveOrder {
   tx: number
   ty: number
   urgency: number
+  /**
+   * Pass-through waypoint: skate THROUGH the target at pace instead of
+   * decelerating to settle on it. Used while a play is flowing (breakouts,
+   * neutral-ice carries, entries, rushes) so carriers and lane-fillers keep
+   * continuous speed — the "approach, stall, get swarmed" texture came from
+   * every waypoint being treated as an arrival.
+   */
+  through?: boolean
 }
 
 /** Keep skaters off the boards/net line; targets are clamped into this box. */
@@ -54,8 +62,9 @@ export function steer(rng: Rng, r: RSkater, o: MoveOrder, dt: number): void {
   const dist = Math.hypot(dx, dy)
   const top = topSpeedFt(r.player)
   const cap = top * clamp(o.urgency, 0.2, 1)
-  // Arrive: ask for less speed as the target closes so the stop is smooth.
-  const want = Math.min(cap, dist * 1.6)
+  // Arrive: ask for less speed as the target closes so the stop is smooth —
+  // unless this is a pass-through waypoint, where pace is carried through it.
+  const want = o.through ? cap : Math.min(cap, dist * 1.6)
   let dvx: number
   let dvy: number
   if (dist > 1e-6) {
