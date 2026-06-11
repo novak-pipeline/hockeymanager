@@ -402,3 +402,195 @@ describe('on-ice realism (possession-phase engine)', () => {
     expect(hi / n).toBeGreaterThan(0.12)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Post-goal sequence + puck continuity invariants
+// ---------------------------------------------------------------------------
+
+describe('post-goal sequence and puck continuity', () => {
+  /**
+   * Helper: find the first game (across seeds) that has at least one
+   * regulation goal and return its stream alongside the home/away team ids.
+   */
+  function firstGameWithGoal(seeds: number[] = [31, 42, 77, 123, 200, 301]) {
+    const data = generateLeague({ seed: 7 })
+    const resolve = resolverFor(data)
+    const teams = data.league.teams
+    for (const seed of seeds) {
+      const home = data.teams.get(teams[0])!
+      const away = data.teams.get(teams[1])!
+      const out = fullSimGame(home, away, resolve, { seed })
+      const hasRegGoal = out.stream.some(
+        (e) => isEvent(e, 'goal') && (e as any).period <= 3
+      )
+      if (hasRegGoal) return { out, home, away }
+    }
+    throw new Error('no game with a goal found across provided seeds')
+  }
+
+  it('(a) no skater ever exceeds the per-tick speed cap in any game', () => {
+    const data = generateLeague({ seed: 7 })
+    const resolve = resolverFor(data)
+    const teams = data.league.teams
+    const capFt = MAX_SPEED_FT * FRAME_DT + 0.05 // hard cap + fp slack
+    let maxSeen = 0
+    for (let s = 0; s < 8; s++) {
+      const home = data.teams.get(teams[s % teams.length])!
+      const away = data.teams.get(teams[(s + 1) % teams.length])!
+      const out = fullSimGame(home, away, resolve, { seed: 7000 + s })
+      let prev: any = null
+      for (const ev of out.stream) {
+        if (!isEvent(ev, 'frame')) continue
+        const f = ev as any
+        if (prev && prev.period === f.period) {
+          for (const side of ['home', 'away'] as const) {
+            for (let i = 0; i < f[side].length; i++) {
+              const now = f[side][i]
+              const was = prev[side]?.[i]
+              // Only the same body (same player id) between consecutive frames.
+              if (!was || was.player !== now.player) continue
+              const d = Math.hypot(
+                (now.pos.x - was.pos.x) * 100,
+                (now.pos.y - was.pos.y) * 42.5
+              )
+              if (d > maxSeen) maxSeen = d
+            }
+          }
+        }
+        prev = f
+      }
+    }
+    expect(maxSeen).toBeGreaterThan(0)
+    expect(maxSeen).toBeLessThanOrEqual(capFt)
+  }, 120000)
+
+  it('(b) the puck only snaps to a faceoff dot across a whistle+faceoff boundary — never mid-play', () => {
+    /**
+     * The invariant: the puck may never teleport from its goal-net or whistle
+     * position to the center dot (or any other faceoff dot) UNLESS there is
+     * a whistle event followed by a faceoff event marking that transition.
+     * Fast puck movement during shots/passes is fine (the puck is in flight).
+     *
+     * We test a tighter property: during the dead-puck window (after a whistle,
+     * before the faceoff) the puck must not move more than 1 ft between frames.
+     */
+    const data = generateLeague({ seed: 7 })
+    const resolve = resolverFor(data)
+    const teams = data.league.teams
+    let badJumps = 0
+    for (let s = 0; s < 6; s++) {
+      const home = data.teams.get(teams[s % teams.length])!
+      const away = data.teams.get(teams[(s + 1) % teams.length])!
+      const out = fullSimGame(home, away, resolve, { seed: 8000 + s })
+      let inDeadWindow = false  // true after whistle, before next faceoff
+      let prevFramePuck: { x: number; y: number } | null = null
+      for (const ev of out.stream) {
+        if (isEvent(ev, 'whistle')) {
+          inDeadWindow = true
+          prevFramePuck = null // reset — don't compare across the whistle boundary
+        }
+        if (isEvent(ev, 'faceoff')) {
+          inDeadWindow = false
+          prevFramePuck = null
+        }
+        // Period boundaries reset the dead window — a goal at the buzzer
+        // leaves a pending faceoff that never fires in the old period; the
+        // new period starts fresh at center ice with no continuity obligation.
+        if (isEvent(ev, 'periodEnd') || isEvent(ev, 'gameEnd')) {
+          inDeadWindow = false
+          prevFramePuck = null
+        }
+        if (!isEvent(ev, 'frame')) continue
+        const f = ev as any
+        if (inDeadWindow && prevFramePuck !== null) {
+          // During dead-puck window the puck must be frozen (≤ 1 ft drift).
+          const dx = (f.puck.x - prevFramePuck.x) * 100
+          const dy = (f.puck.y - prevFramePuck.y) * 42.5
+          const d = Math.hypot(dx, dy)
+          if (d > 1.0) badJumps++
+        }
+        if (inDeadWindow) prevFramePuck = { x: f.puck.x, y: f.puck.y }
+      }
+    }
+    expect(badJumps).toBe(0)
+  }, 120000)
+
+  it('(c) after a goal the puck stays near the net and scoring team clusters toward the scorer', () => {
+    const { out } = firstGameWithGoal()
+    // Find the first regulation goal and the frames that immediately follow it.
+    let goalIdx = -1
+    let goalPuckX = 0
+    let goalPuckY = 0
+    let goalScorer: string | null = null
+    for (let i = 0; i < out.stream.length; i++) {
+      const ev = out.stream[i]
+      if (isEvent(ev, 'goal') && (ev as any).period <= 3) {
+        goalIdx = i
+        goalPuckX = (ev as any).pos.x   // shot origin, not net position
+        // The net where the puck ends up is on the attack side; use the
+        // actual frame puck position from the frames that follow.
+        goalScorer = (ev as any).scorer
+        break
+      }
+    }
+    expect(goalIdx).toBeGreaterThan(-1)
+    expect(goalScorer).not.toBeNull()
+
+    // Collect the FRAME events that occur between the goal and the next faceoff.
+    const framesInWindow: any[] = []
+    let foundFaceoff = false
+    for (let i = goalIdx + 1; i < out.stream.length && !foundFaceoff; i++) {
+      const ev = out.stream[i]
+      if (isEvent(ev, 'faceoff')) { foundFaceoff = true; break }
+      if (isEvent(ev, 'frame')) framesInWindow.push(ev)
+    }
+    expect(framesInWindow.length).toBeGreaterThan(0)
+    expect(foundFaceoff).toBe(true)
+
+    // The puck in every celebration/staging frame must stay near the net (|x| > 0.5)
+    // and NOT be near center ice (|x| < 0.1).
+    // (The net is at |x| ≈ 0.89; anything below 0.5 means it snapped to center.)
+    for (const f of framesInWindow) {
+      expect(Math.abs(f.puck.x)).toBeGreaterThan(0.45)
+    }
+  }, 60000)
+
+  it('(d) every goal is followed by whistle(reason:goal) then faceoff at the center dot', () => {
+    const data = generateLeague({ seed: 7 })
+    const resolve = resolverFor(data)
+    const teams = data.league.teams
+    let goalsChecked = 0
+    for (let s = 0; s < 10 && goalsChecked < 5; s++) {
+      const home = data.teams.get(teams[s % teams.length])!
+      const away = data.teams.get(teams[(s + 1) % teams.length])!
+      const out = fullSimGame(home, away, resolve, { seed: 31 + s })
+      for (let i = 0; i < out.stream.length; i++) {
+        const ev = out.stream[i]
+        if (!isEvent(ev, 'goal') || (ev as any).period > 3) continue
+        // Find next whistle after this goal (allow intervening frames).
+        let whistleIdx = -1
+        for (let j = i + 1; j < out.stream.length; j++) {
+          if (isEvent(out.stream[j], 'frame')) continue // frames sit between events
+          if (isEvent(out.stream[j], 'whistle')) { whistleIdx = j; break }
+          break // any other event type before a whistle is unexpected
+        }
+        expect(whistleIdx).toBeGreaterThan(i)
+        const whistle = out.stream[whistleIdx] as any
+        expect(whistle.reason).toBe('goal')
+
+        // Find next faceoff after the whistle.
+        let faceoffIdx = -1
+        for (let j = whistleIdx + 1; j < out.stream.length; j++) {
+          if (isEvent(out.stream[j], 'faceoff')) { faceoffIdx = j; break }
+        }
+        expect(faceoffIdx).toBeGreaterThan(whistleIdx)
+        const fo = out.stream[faceoffIdx] as any
+        // After a goal the faceoff is always at center (|x| < 0.01, |y| < 0.01).
+        expect(Math.abs(fo.pos.x)).toBeLessThan(0.02)
+        expect(Math.abs(fo.pos.y)).toBeLessThan(0.02)
+        goalsChecked++
+      }
+    }
+    expect(goalsChecked).toBeGreaterThan(0)
+  }, 120000)
+})

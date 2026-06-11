@@ -87,52 +87,36 @@ function writeEngineKind(v: 'system' | 'kokoro'): void {
  *  5. Any en-* voice
  *  6. System default
  */
+/** Legacy/low-quality voices we never auto-select (robotic; "reset to Sam"). */
+const BAD_VOICE = /microsoft (sam|david)\b|sam\b|espeak|festival|robosoft|zira/i
+
 function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
   if (voices.length === 0) return null
 
-  const en = voices.filter((v) => v.lang.toLowerCase().startsWith('en'))
+  // Drop the known-bad legacy voices from consideration entirely.
+  const usable = voices.filter((v) => !BAD_VOICE.test(v.name))
+  const pool = usable.length > 0 ? usable : voices
+  const en = pool.filter((v) => v.lang.toLowerCase().startsWith('en'))
 
-  // Tier 0 (preferred): a British male commentator voice. "George" is the
-  // Windows UK English male voice; Daniel/Arthur are common alternatives.
-  // Prefer a natural/neural UK voice first, then any en-GB, then SAPI George.
+  const byName = (re: RegExp, list = en): SpeechSynthesisVoice | undefined =>
+    list.find((v) => re.test(v.name))
+
+  // Tier 0 (preferred): a British commentator voice. "George" is the Windows
+  // UK English male voice; Ryan/Daniel/Arthur/Thomas are common alternatives.
   const gb = en.filter((v) => v.lang.toLowerCase() === 'en-gb')
-  const britFirst = [
-    ...gb.filter((v) => /natural|neural|online/i.test(v.name)),
-    ...gb.filter((v) => /george|daniel|arthur|ryan/i.test(v.name)),
-    ...en.filter((v) => /george/i.test(v.name)),
-    ...gb,
-  ]
-  if (britFirst.length > 0) return britFirst[0]
-
-  // Tier 1: names suggestive of neural/natural quality
-  const tier1Names = ['natural', 'neural', 'online']
-  for (const pattern of tier1Names) {
-    const match = en.find((v) => v.name.toLowerCase().includes(pattern))
-    if (match) return match
-  }
-
-  // Tier 2: known high-quality Microsoft voices
-  const tier2Names = ['aria', 'guy', 'jenny', 'ryan']
-  for (const pattern of tier2Names) {
-    const match = en.find((v) => v.name.toLowerCase().includes(pattern))
-    if (match) return match
-  }
-
-  // Tier 3: en-US Google
-  const googleUS = en.find(
-    (v) => v.lang.toLowerCase() === 'en-us' && v.name.toLowerCase().includes('google'),
+  return (
+    byName(/george/i) ??                                   // explicit request
+    byName(/george|ryan|daniel|arthur|thomas|oliver/i, gb) ??
+    byName(/natural|neural|online/i, gb) ??                // any nice UK voice
+    (gb[0] ?? undefined) ??                                // any UK voice
+    byName(/natural|neural|online/i) ??                    // nice en-* voice
+    byName(/aria|guy|jenny|christopher|eric|mark/i) ??     // good MS/US voices
+    en.find((v) => v.lang.toLowerCase() === 'en-us') ??    // any en-US
+    en[0] ??                                               // any en-*
+    pool.find((v) => v.default) ??
+    pool[0] ??
+    null
   )
-  if (googleUS) return googleUS
-
-  // Tier 4: any en-US
-  const anyUS = en.find((v) => v.lang.toLowerCase() === 'en-us')
-  if (anyUS) return anyUS
-
-  // Tier 5: any en-*
-  if (en.length > 0) return en[0]
-
-  // Tier 6: default
-  return voices.find((v) => v.default) ?? voices[0] ?? null
 }
 
 // ── SystemVoiceEngine ──────────────────────────────────────────────────────

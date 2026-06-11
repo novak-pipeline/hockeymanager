@@ -94,6 +94,30 @@ function findCrossedWhistle(
   return null
 }
 
+/** The away team always wears white (slightly off-white for contrast on ice). */
+const AWAY_WHITE = 0xf4f5f7
+/** A reasonable dark fallback when a club has no usable dark colour. */
+const DEFAULT_HOME_DARK = 0x1a2a4a
+
+/** Relative luminance (0..1) of a 0xRRGGBB colour. */
+function _luminance(rgb: number): number {
+  const r = ((rgb >> 16) & 0xff) / 255
+  const g = ((rgb >> 8) & 0xff) / 255
+  const b = (rgb & 0xff) / 255
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/**
+ * Pick a dark/colour jersey for the home side: prefer the primary, but if it's
+ * too light (would read as "white" next to the away team), use the secondary,
+ * and if that's also light, a default navy.
+ */
+function darkJersey(primary: number, secondary: number): number {
+  if (_luminance(primary) <= 0.72) return primary
+  if (_luminance(secondary) <= 0.72) return secondary
+  return DEFAULT_HOME_DARK
+}
+
 /** Absolute game seconds → "P2 12:34" countdown label (for the FF clock spin). */
 function _absToClock(absT: number): string {
   const period = absT < 3600 ? Math.floor(absT / 1200) + 1 : 4
@@ -200,9 +224,14 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     const timeline = new MatchTimeline(game.stream, (id) => homeIds.has(id))
     gameDurationRef.current = timeline.duration
 
+    // Hockey convention: home wears its dark/colour jersey, the away team
+    // always wears white. This avoids two similar-coloured teams being hard to
+    // tell apart on the ice. If the home club's primary is itself very light,
+    // fall back to its secondary (or a default navy) so home stays distinct
+    // from the white away side.
     const colors: RinkColors = {
-      home: game.homeColors.primary,
-      away: game.awayColors.primary,
+      home: darkJersey(game.homeColors.primary, game.homeColors.secondary),
+      away: AWAY_WHITE,
     }
 
     prevScoreRef.current      = { home: 0, away: 0 }
@@ -296,25 +325,34 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     const currentAbsT = v.progress * dur
 
     // ── Commentary ticker ─────────────────────────────────────────────────────
-    const lines = commentaryLinesRef.current
-    const lastCmt = lastCommentaryAbsT.current
-    if (currentAbsT < lastCmt - 1) {
-      // Seek backwards — backfill
-      setVisibleLines(lines.filter((l) => l.absT <= currentAbsT).slice(-50))
-      lastCommentaryAbsT.current = currentAbsT
-    } else {
-      const newLines = lines.filter((l) => l.absT > lastCmt && l.absT <= currentAbsT)
-      if (newLines.length > 0) {
-        setVisibleLines((prev) => [...prev, ...newLines].slice(-50))
-        if (v.playing) {
-          const planSpd = currentSpeed(planRef.current, currentAbsT)
-          const minImp: number = planSpd >= 8 ? 99 : planSpd >= 4 ? 2 : 1
-          for (const line of newLines) {
-            if (line.importance >= minImp) announcer.speak(line.speech, line.importance)
+    // Silent during an instant replay — we don't re-narrate the goal's lead-up
+    // as it re-crosses the same events. (Resync happens in _endReplay.)
+    if (!replayActiveRef.current) {
+      const lines = commentaryLinesRef.current
+      const lastCmt = lastCommentaryAbsT.current
+      if (currentAbsT < lastCmt - 1) {
+        // Seek backwards — backfill
+        setVisibleLines(lines.filter((l) => l.absT <= currentAbsT).slice(-50))
+        lastCommentaryAbsT.current = currentAbsT
+      } else {
+        const newLines = lines.filter((l) => l.absT > lastCmt && l.absT <= currentAbsT)
+        if (newLines.length > 0) {
+          setVisibleLines((prev) => [...prev, ...newLines].slice(-50))
+          if (v.playing) {
+            const planSpd = currentSpeed(planRef.current, currentAbsT)
+            const minImp: number = planSpd >= 8 ? 99 : planSpd >= 4 ? 2 : 1
+            for (const line of newLines) {
+              // Goal calls (importance 3) are spoken immediately, with barge-in,
+              // by the goal-detection block below — skip them here so the spoken
+              // "GOAL!" lands exactly on the goal, not behind queued chatter.
+              if (line.importance >= minImp && line.importance < 3) {
+                announcer.speak(line.speech, line.importance)
+              }
+            }
           }
         }
+        lastCommentaryAbsT.current = currentAbsT
       }
-      lastCommentaryAbsT.current = currentAbsT
     }
 
     // ── SFX cue map ───────────────────────────────────────────────────────────
@@ -357,28 +395,42 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
         sfx.goalHorn()
         sfx.crowd(1.0)
 
-        // Banner
+        // Spoken goal call — barge in so "GOAL!" lands exactly on the goal,
+        // ahead of any queued play-by-play. Prefer the generated goal line's
+        // phrasing (TTS-friendly) if present, else a concise call.
+        const goalLine = commentaryLinesRef.current.find(
+          (l) => l.importance === 3 && Math.abs(l.absT - currentAbsT) <= 4,
+        )
+        announcer.cancel()
+        announcer.speak(goalLine?.speech ?? `Goal! Scored by ${scorerName}.`, 3)
+
+        // Banner stays up through the celebration + the replay.
         setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
         if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
-        goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 5000)
 
-        // Instant replay: pause, seek back ~8s, play at 0.6×, show watermark
+        // Watch the on-ice celebration FIRST, then cut to the instant replay.
+        // We don't flag replayActive until the replay actually starts, so the
+        // celebration plays at normal speed and the REPLAY watermark / skip
+        // button only appear once we've cut to the replay.
         if (!replaySkipRef.current) {
           replaySkipRef.current = true
-          setReplayActive(true)
-          replayActiveRef.current = true
           const replayStart = Math.max(0, (currentAbsT - 8) / dur)
+          const CELEBRATION_WALL_MS = 4500
           setTimeout(() => {
+            if (!replaySkipRef.current) return // superseded / left
+            setReplayActive(true)
+            replayActiveRef.current = true
+            announcer.cancel() // go silent for the replay
             const r = rendererRef.current
             if (!r) return
             r.seekFraction(replayStart)
             r.setSpeed(0.6)
             r.play()
-            // After ~8s wall time (8 / 0.6 = ~13s game time scaled), end replay
+            // End the replay after ~8s wall time.
             setTimeout(() => {
               if (replaySkipRef.current) _endReplay()
             }, 8000)
-          }, 400) // small pause before replay starts
+          }, CELEBRATION_WALL_MS)
         }
       }
       prevScoreRef.current = { home: v.homeScore, away: v.awayScore }
@@ -469,11 +521,17 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     replaySkipRef.current = false
     setReplayActive(false)
     replayActiveRef.current = false
-    // Resume normal plan speed
+    setGoalBanner(null)
+    if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+    // Resume normal plan speed and re-sync the commentary/SFX cursors to the
+    // resume point so normal play doesn't replay a burst of crossed events.
     const dur = gameDurationRef.current
     const v = viewRef.current
     if (dur > 0 && v) {
       const at = v.progress * dur
+      lastCommentaryAbsT.current = at
+      lastSfxAbsTRef.current     = at
+      lastAbsTRef.current        = at
       const planSpd = currentSpeed(planRef.current, at)
       rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
     }
@@ -594,6 +652,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     replaySkipRef.current = true
     setReplayActive(true)
     replayActiveRef.current = true
+    announcer.cancel() // silent during the replay
     rendererRef.current?.seekFraction(replayStart)
     rendererRef.current?.setSpeed(0.6)
     rendererRef.current?.play()

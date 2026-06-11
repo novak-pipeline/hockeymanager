@@ -168,8 +168,17 @@ const RECOVER_FT = 5.5
 const FACEOFF_MIN_WAIT = 6
 const FACEOFF_MAX_WAIT = 48
 const FACEOFF_READY_FT = 8
-/** Extra dead ticks after a goal (celebration + skate back to center). */
-const GOAL_CELEBRATION_TICKS = 12
+/**
+ * Goal celebration: ticks where the scoring team skates to the scorer.
+ * 16 ticks = 4.0 s at 0.25 s/tick.
+ */
+const GOAL_CELEBRATION_TICKS = 16
+/**
+ * Faceoff-staging ticks added on top of celebration (skaters travel to dots).
+ * The existing FACEOFF_MIN_WAIT / FACEOFF_READY_FT gate finishes the job;
+ * this gives them an extended dead window to travel from the celebration cluster.
+ */
+const GOAL_EXTRA_STAGING_TICKS = 14
 
 /** The nine faceoff dots, matching the dots the renderer draws. */
 const CENTER_DOT: XY = { x: 0, y: 0 }
@@ -536,6 +545,34 @@ function simPeriod(
   // A puck in flight (pass/shot/dump): advances by (vx,vy) per tick until it lands.
   let flight: { vx: number; vy: number; ticks: number; onLand: () => void } | null = null
 
+  /**
+   * When non-null the puck is DEAD at this position — it does not move and
+   * every frame emits it here.  The dead position is cleared only when the
+   * faceoff event fires and the puck is placed at the dot.  This guarantees:
+   *   - No frame ever shows the puck sliding from net to dot between a
+   *     whistle and the faceoff (renderers may interpolate frames but they
+   *     MUST NOT interpolate across the whistle/faceoff boundary — that snap
+   *     is explicitly documented as legal in the stream contract).
+   *   - The displacement invariant for the puck only needs to be enforced
+   *     between frames that do NOT have a whistle/faceoff between them.
+   */
+  let deadPuckPos: XY | null = null
+
+  /**
+   * Goal-celebration phase: runs for GOAL_CELEBRATION_TICKS before the engine
+   * switches into the normal faceoff-staging (pending) state.
+   *
+   *   - Scoring team's skaters converge toward the scorer's position.
+   *   - Conceding team's skaters peel away toward their own bench/blue-line.
+   *   - Puck stays pinned at the net (deadPuckPos).
+   */
+  let celebration: {
+    scoringTeam: TeamSim
+    defTeam: TeamSim
+    scorerPos: XY
+    ticks: number
+  } | null = null
+
   const otherOf = (team: TeamSim): TeamSim => (team === home ? away : home)
   const carrierSkater = (): RSkater | undefined =>
     possession.unit.skaters.find((r) => r.player.id === carrier)
@@ -647,9 +684,20 @@ function simPeriod(
     carrier = null
   }
 
-  /** Stop play and queue a faceoff at `dot`. */
+  /**
+   * Stop play and queue a faceoff at `dot`.
+   *
+   * `extraDead` gives the faceoff staging extra dead ticks before it begins
+   * counting toward the FACEOFF_MIN_WAIT gate.  The puck is frozen at its
+   * current position (deadPuckPos) for the whole staging window — it only
+   * jumps to the dot when the faceoff event fires (a legal snap boundary).
+   */
   const stopPlay = (dot: XY, zone: Zone, extraDead = 0): void => {
     pending = { dot, zone, wait: -extraDead }
+    // Freeze the puck where it is right now; it will snap to dot at faceoff.
+    if (deadPuckPos === null) {
+      deadPuckPos = { x: puck.x, y: puck.y }
+    }
     carrier = null
     flight = null
     looseV.x = 0
@@ -788,6 +836,7 @@ function simPeriod(
         if (gStat) gStat.goalsAgainst++
         stat(ctx, shooterSk.player.id).goals++
         for (const as of assists) stat(ctx, as).assists++
+        // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91
         puck.y = 0
         ctx.stream.push({
@@ -799,13 +848,31 @@ function simPeriod(
           strength: gs,
           pos: { x: from.x, y: from.y }
         })
+        // Whistle(reason:'goal') marks the start of the dead-puck window.
+        // The renderer uses this boundary: the puck is dead here — do NOT
+        // interpolate its position across this event until the 'faceoff' fires.
+        ctx.stream.push({ t: clk.t, period, type: 'whistle', reason: 'goal', pos: { x: puck.x, y: puck.y } })
         noteStop('goal')
         if (gs === 'pp') def.clearEarliestPenalty()
         if (suddenDeath) {
           endedSuddenDeath = true
           return
         }
-        stopPlay(CENTER_DOT, 'neutral', GOAL_CELEBRATION_TICKS)
+        // Pin the dead puck at the net; the celebration phase will advance
+        // skaters before the engine transitions to faceoff staging.
+        deadPuckPos = { x: puck.x, y: puck.y }
+        carrier = null
+        flight = null
+        looseV.x = 0
+        looseV.y = 0
+        beat = null
+        reboundTicks = 0
+        celebration = {
+          scoringTeam: atk,
+          defTeam: def,
+          scorerPos: { x: shooterSk.pos.x, y: shooterSk.pos.y },
+          ticks: 0
+        }
         return
       }
       if (netEmpty) {
@@ -1201,6 +1268,50 @@ function simPeriod(
     const a = atk.attackSign()
     let atkOrders: MoveOrder[]
     let defOrders: MoveOrder[]
+    if (celebration) {
+      // Celebration phase: scoring team converges on the scorer; conceding team
+      // peels away.  Both sets of orders are continuous speed-capped steering
+      // — no teleportation, same steer() call as normal play.
+      const cel = celebration
+      const scoringIsHome = cel.scoringTeam === home
+
+      // Scoring-team skaters: all move toward the scorer's position (cluster).
+      // Each skater gets a slightly offset target so they don't all stack on
+      // the same pixel — spread them around the scorer in a tight arc.
+      const scoringUnit = cel.scoringTeam.unit
+      const defUnit = cel.defTeam.unit
+      const scoringOrders: MoveOrder[] = scoringUnit.skaters.map((_, i) => {
+        // Stagger targets in a small arc around the scorer so they cluster
+        // naturally rather than all piling onto the exact same point.
+        const angle = (i / Math.max(1, scoringUnit.skaters.length - 1)) * Math.PI - Math.PI / 2
+        const spreadX = Math.cos(angle) * 0.04
+        const spreadY = Math.sin(angle) * 0.06
+        return {
+          tx: clamp(cel.scorerPos.x + spreadX, -0.95, 0.95),
+          ty: clamp(cel.scorerPos.y + spreadY, -0.92, 0.92),
+          urgency: 0.9
+        }
+      })
+      // Conceding-team skaters: peel toward their own blue line / bench.
+      const defSign = cel.defTeam.attackSign() // direction they attack
+      const defOrders_: MoveOrder[] = defUnit.skaters.map((_, i) => {
+        // Spread them along the y axis at their blue-line x — dejected shuffle.
+        const ty = (i % 2 === 0 ? -1 : 1) * (0.28 + (i >> 1) * 0.18)
+        return {
+          tx: defSign * 0.24,   // their own neutral-zone side of center
+          ty: clamp(ty, -0.9, 0.9),
+          urgency: 0.6
+        }
+      })
+
+      const hOrders = scoringIsHome ? scoringOrders : defOrders_
+      const aOrders = scoringIsHome ? defOrders_ : scoringOrders
+      home.unit.skaters.forEach((r, i) => steer(rng, r, hOrders[i], FRAME_DT))
+      away.unit.skaters.forEach((r, i) => steer(rng, r, aOrders[i], FRAME_DT))
+      tendNet(home)
+      tendNet(away)
+      return
+    }
     if (pending) {
       atkOrders = faceoffOrders(atk.unit, a, pending.dot, takerIdxOf(atk.unit))
       defOrders = faceoffOrders(def.unit, def.attackSign(), pending.dot, takerIdxOf(def.unit))
@@ -1272,8 +1383,11 @@ function simPeriod(
     carrier = (homeWins ? hC : aC).player.id
     heldBy = carrier
     heldTicks = 0
+    // The puck snaps to the dot here — the faceoff event marks the legal
+    // boundary across which the renderer may snap without interpolating.
     puck.x = p.dot.x
     puck.y = p.dot.y
+    deadPuckPos = null
     beat = null
     reboundTicks = 0
     noteBeat('faceoff')
@@ -1401,9 +1515,11 @@ function simPeriod(
 
     // Advance the puck.
     let settledThisTick = false
-    if (pending) {
-      puck.x = pending.dot.x
-      puck.y = pending.dot.y
+    if (deadPuckPos !== null) {
+      // Puck is DEAD (celebration or faceoff staging): freeze it at the dead
+      // position.  It will only move when deadPuckPos is cleared at faceoff.
+      puck.x = deadPuckPos.x
+      puck.y = deadPuckPos.y
     } else if (flight) {
       puck.x = clamp(puck.x + flight.vx, -1, 1)
       puck.y = clamp(puck.y + flight.vy, -1, 1)
@@ -1447,10 +1563,24 @@ function simPeriod(
       if (tryRecover()) settledThisTick = true
     }
 
-    pushFrame(ctx, t, period, home, away, puck, !pending && !flight ? carrier : null)
+    // During dead-puck windows (celebration or staging) the carrier field in the
+    // frame is null — the puck carrier is not displayed (puck is at the net or
+    // being skated to the dot).
+    pushFrame(ctx, t, period, home, away, puck, deadPuckPos === null && !pending && !flight ? carrier : null)
     clk.t += FRAME_DT
     if (endedSuddenDeath) break
     if (reboundTicks > 0) reboundTicks--
+
+    // Advance the celebration phase.
+    if (celebration !== null) {
+      celebration.ticks++
+      if (celebration.ticks >= GOAL_CELEBRATION_TICKS) {
+        // Celebration over: transition into the normal faceoff-staging (pending).
+        celebration = null
+        stopPlay(CENTER_DOT, 'neutral', GOAL_EXTRA_STAGING_TICKS)
+      }
+      continue
+    }
 
     if (pending) {
       conductFaceoff()
