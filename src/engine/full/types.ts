@@ -62,10 +62,20 @@ export interface FullSimTelemetry {
   shots: { kind: ShotKind; danger: number; oddMan: boolean }[]
   icings: number
   entries: { carry: number; dump: number; pass: number }
+  /** Ticks where a carrier was clean past every defender. */
+  breakawayTicks: number
+  /** Passes attempted DURING a breakaway — stays zero (nobody dishes backwards on a breakaway). */
+  breakawayPasses: number
 }
 
 export function emptyTelemetry(): FullSimTelemetry {
-  return { shots: [], icings: 0, entries: { carry: 0, dump: 0, pass: 0 } }
+  return {
+    shots: [],
+    icings: 0,
+    entries: { carry: 0, dump: 0, pass: 0 },
+    breakawayTicks: 0,
+    breakawayPasses: 0
+  }
 }
 
 export interface Ctx {

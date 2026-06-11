@@ -799,6 +799,18 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     const csSlot = atk.unit.slots[csIdx] ?? 1
     const puckAdv = puck.x * a
 
+    // Tripwire: the tick loop must never route a breakaway here (same
+    // definition as the loop's: clearly past everyone, nobody in contact).
+    // Counted so tests can assert it stays zero.
+    if (
+      ctx.telemetry &&
+      puckAdv > 0.1 &&
+      pressure < 0.22 &&
+      def.unit.skaters.every((r) => r.pos.x * a < cs.pos.x * a - 0.08)
+    ) {
+      ctx.telemetry.breakawayPasses++
+    }
+
     const mates: { r: RSkater; slot: number }[] = []
     atk.unit.skaters.forEach((r, i) => {
       if (r !== cs) mates.push({ r, slot: atk.unit.slots[i] })
@@ -815,7 +827,10 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       const d = distFt(cs.pos, r.pos)
       const prox = clamp(1.45 - d / 60, 0.25, 1.45)
       const ahead = (r.pos.x - cs.pos.x) * a
-      let w = (ahead >= -0.03 ? 1 : 0.35) + r.player.composites.playmaking * 0.004
+      // Backward passes are a regroup tool, not a rush option: while attacking
+      // with speed, a trailing teammate is nearly never the right play.
+      const backPenalty = phase === 'rush' || phase === 'entry' ? 0.08 : 0.35
+      let w = (ahead >= -0.03 ? 1 : backPenalty) + r.player.composites.playmaking * 0.004
       if (phase === 'breakout') {
         // Outlet chains: D→winger on the wall, D→C in the middle, D-to-D.
         if (m.slot <= 2 && Math.abs(r.pos.y) > 0.45) w += 1.7
@@ -1202,6 +1217,24 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
     else if (atkSH && !defSH) strengthMult = PK_SHOT_MULT
     if (atk.pulled) strengthMult *= EXTRA_ATTACKER_SHOT_MULT
 
+    // Breakaway: the carrier is clean past EVERY defender heading up ice —
+    // whatever the nominal phase says (a rush whose timer lapsed still IS one
+    // while the defenders trail). He drives the net and shoots; there is no
+    // defensible reason to pass, least of all backwards to a defenseman.
+    const csAdv = cs.pos.x * a
+    const breakaway =
+      phase !== 'breakout' &&
+      adv > 0.1 &&
+      presserDist > 14 &&
+      def.unit.skaters.every((r) => r.pos.x * a < csAdv - 0.08)
+    if (breakaway) {
+      if (ctx.telemetry) ctx.telemetry.breakawayTicks++
+      // Keep the rush alive so the phase reads 'rush'; the shot's danger comes
+      // from its close-range geometry (xG), not an extra odd-man bonus.
+      if (!rush) rush = { ticks: 30, oddMan: false }
+      else rush.ticks = Math.max(rush.ticks, 12)
+    }
+
     // 1. Breakout under forecheck heat: rim it, chip it, or ice it.
     if (phase === 'breakout' && pressure > 0.45) {
       if (rng.chance(0.05 + pressure * 0.1 + (atkSH ? 0.22 : 0))) {
@@ -1312,7 +1345,13 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       const central = clamp(1 - Math.abs(puck.y) / 0.5, 0, 1)
       const csSlot = atk.unit.slots[atk.unit.skaters.indexOf(cs)] ?? 1
       let gate: { kind: ShotKind; w: number } | null = null
-      if (phase === 'rush') {
+      if (breakaway) {
+        // In alone: normal rush shot odds while closing, escalating only in
+        // tight so he releases before reaching the net rather than spamming
+        // shots from the blue line.
+        if (adv > 0.78) gate = { kind: 'rush', w: 6 }
+        else if (adv > 0.5) gate = { kind: 'rush', w: 2.4 + central }
+      } else if (phase === 'rush') {
         if (adv > 0.45) gate = { kind: 'rush', w: 2.4 + central }
       } else if (phase === 'entry') {
         if (adv > 0.4) gate = { kind: 'rush', w: 0.9 + central * 0.6 }
@@ -1331,7 +1370,9 @@ function simPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec): Pe
       }
     }
 
-    // 7. Move the puck. Under pressure (or holding too long) you move it.
+    // 7. Move the puck. Under pressure (or holding too long) you move it —
+    //    but never on a breakaway: a player in alone keeps driving the net.
+    if (breakaway) continue
     const tempoPace = atk.team.tactics.tempo.pace
     const forced = heldTicks >= MAX_HOLD_TICKS
     if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4))) {

@@ -310,6 +310,22 @@ describe('on-ice realism (possession-phase engine)', () => {
     expect(telemetry.icings).toBeGreaterThan(0)
   }, 60000)
 
+  it('a player in alone NEVER passes — breakaways end in a drive to the net', () => {
+    const data = generateLeague({ seed: 7 })
+    const resolve = resolverFor(data)
+    const teams = data.league.teams
+    const telemetry = emptyTelemetry()
+    for (let i = 0; i < 12; i++) {
+      const home = data.teams.get(teams[i % teams.length])!
+      const away = data.teams.get(teams[(i + 1) % teams.length])!
+      fullSimGame(home, away, resolve, { seed: 5500 + i, telemetry })
+    }
+    // Breakaways do happen...
+    expect(telemetry.breakawayTicks).toBeGreaterThan(0)
+    // ...and the carrier never dishes backwards to a trailing defenseman.
+    expect(telemetry.breakawayPasses).toBe(0)
+  }, 90000)
+
   it('odd-man rushes occur and carry higher danger than cycle shots', () => {
     const data = generateLeague({ seed: 7 })
     const resolve = resolverFor(data)
