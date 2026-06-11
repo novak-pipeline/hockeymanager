@@ -76,4 +76,16 @@ export interface Player {
   injuryStatus: Injury | null
   /** Hot/cold streak modifier — the drama lever. */
   form: number
+  /**
+   * Mod-stable external key, e.g. "nhl-8478402". Set by mod loaders so
+   * community roster packs can reference players by a stable identity that
+   * survives name/rating changes. Never read by the sim engine.
+   */
+  externalId?: string
+  /**
+   * Facepack image key, e.g. "nhl-8478402". Resolved by the UI to
+   * faces/<faceId>.png inside the active mod folder. Absent = show generated
+   * silhouette.
+   */
+  faceId?: string
 }

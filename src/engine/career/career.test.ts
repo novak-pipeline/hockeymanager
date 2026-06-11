@@ -279,6 +279,207 @@ describe('Career — scouting', () => {
   })
 })
 
+describe('Career — story layer', () => {
+  it('publishes preseason odds at career start: expectations state + dashboard chip', () => {
+    const data = generateLeague({ seed: 91 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 91, userId)
+
+    const snap = career.exportSnapshot('odds', '2026-06-10T00:00:00.000Z')
+    expect(snap.expectations).toBeDefined()
+    expect(snap.expectations!.preseason).toHaveLength(16)
+    expect(snap.expectations!.year).toBe(career.year)
+
+    const dash = career.getDashboard()
+    expect(dash.predictedRank).toBeGreaterThanOrEqual(1)
+    expect(dash.predictedRank).toBeLessThanOrEqual(16)
+    expect(Array.isArray(dash.topArcs)).toBe(true)
+
+    // Preseason coverage made the inbox beyond the season-opener item.
+    const leagueNews = career.getInbox().items.filter((n) => n.category === 'league')
+    expect(leagueNews.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('initializes a locker room per team with a skater captain', () => {
+    const data = generateLeague({ seed: 92 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 92, userId)
+
+    const snap = career.exportSnapshot('lr', '2026-06-10T00:00:00.000Z')
+    expect(snap.lockerRooms).toBeDefined()
+    expect(snap.lockerRooms!).toHaveLength(16)
+
+    const view = career.getLockerRoom()
+    expect(view.captain).not.toBeNull()
+    expect(view.captain!.position).not.toBe('G')
+    expect(view.roomMorale).toBeGreaterThanOrEqual(0)
+    expect(view.roomMorale).toBeLessThanOrEqual(100)
+    expect(view.influence.length).toBeGreaterThan(0)
+    expect(view.lineFamiliarity.length).toBe(7) // 4 lines + 3 pairs
+  })
+
+  it('runs the AI-AI deadline flurry exactly once when the deadline passes', () => {
+    const data = generateLeague({ seed: 93 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 93, userId)
+
+    const before = career.getTentpoles()
+    expect(before.lastDeadlineRecap).toBeNull()
+    expect(before.deadlinePassed).toBe(false)
+
+    // Advance through the deadline (deadline = 75% of the season).
+    career.advance(50)
+    const after = career.getTentpoles()
+    expect(after.deadlinePassed).toBe(true)
+    expect(after.lastDeadlineRecap).not.toBeNull()
+
+    // One-shot: the emitted key survives in the snapshot.
+    const snap = career.exportSnapshot('dd', '2026-06-10T00:00:00.000Z')
+    const keys = snap.tentpoles!.emittedKeys.filter((k) => k.startsWith('deadline-run-'))
+    expect(keys).toHaveLength(1)
+  })
+
+  it('full year: lottery before draft, combine populated, tournament run, records archived', () => {
+    const data = generateLeague({ seed: 94 })
+    const userId = data.league.teams[3]
+    const career = new Career(data, 94, userId)
+    const firstYear = career.year
+
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+
+    // awards stage just completed? No — offseason starts at awards; advance once.
+    career.advanceOffseason() // awards → draft (runs verdict/archive/tournament/lottery/combine)
+
+    const tp = career.getTentpoles()
+    expect(tp.lottery).not.toBeNull()
+    expect(tp.lottery!.orderAbbrs.length).toBeGreaterThan(0)
+    expect(tp.combine).not.toBeNull()
+    expect(tp.combine!.length).toBeGreaterThan(0)
+    expect(tp.tournament).not.toBeNull()
+
+    // Lottery ran BEFORE the draft order was built: the first non-traded R1
+    // pick belongs to a team from the lottery order.
+    const draft = career.getDraft()
+    expect(draft).not.toBeNull()
+    expect(tp.lottery!.orderAbbrs).toContain(draft!.board[0].teamAbbr)
+
+    // Records archived for season 1.
+    const hist = career.getHistory()
+    expect(hist.seasons).toHaveLength(1)
+    expect(hist.seasons[0].year).toBe(firstYear)
+    expect(hist.seasons[0].championName).not.toBeNull()
+    expect(hist.awards.length).toBeGreaterThan(0)
+    expect(hist.singleSeason.points.length).toBeGreaterThan(0)
+
+    // Finish the year; records survive into season 2.
+    let guard = 0
+    while (career.year === firstYear && guard++ < 60) career.step()
+    expect(career.year).toBe(firstYear + 1)
+    const hist2 = career.getHistory()
+    expect(hist2.seasons).toHaveLength(1)
+    expect(hist2.awards.length).toBe(hist.awards.length)
+
+    // New season: fresh expectations, reset tentpoles.
+    const snap = career.exportSnapshot('y2', '2026-06-10T00:00:00.000Z')
+    expect(snap.expectations!.year).toBe(firstYear + 1)
+    expect(snap.tentpoles!.lotteryDone).toBe(false)
+    expect(snap.tentpoles!.combine).toBeNull()
+  })
+
+  it('snapshot round-trip preserves all five story states mid-season', () => {
+    const data = generateLeague({ seed: 95 })
+    const userId = data.league.teams[4]
+    const career = new Career(data, 95, userId)
+    career.advance(20)
+
+    const snap = career.exportSnapshot('mid', '2026-06-10T00:00:00.000Z')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const snap2 = restored.exportSnapshot('mid2', '2026-06-10T00:00:00.000Z')
+
+    expect(snap2.arcs).toEqual(snap.arcs)
+    expect(snap2.records).toEqual(snap.records)
+    expect(snap2.expectations).toEqual(snap.expectations)
+    expect(snap2.lockerRooms).toEqual(snap.lockerRooms)
+    expect(snap2.tentpoles).toEqual(snap.tentpoles)
+    expect(snap2.storyMisc).toEqual(snap.storyMisc)
+
+    // Both careers keep simming identically (chemistry seam is save-stable).
+    career.advance(5)
+    restored.advance(5)
+    const rows = (c: Career) => c.view().standings.map((s) => [s.teamId, s.points])
+    expect(rows(restored)).toEqual(rows(career))
+  })
+
+  it('snapshot round-trip preserves the story states mid-offseason', () => {
+    const data = generateLeague({ seed: 96 })
+    const userId = data.league.teams[5]
+    const career = new Career(data, 96, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft (lottery + combine + tournament done)
+
+    const snap = career.exportSnapshot('os', '2026-06-10T00:00:00.000Z')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const snap2 = restored.exportSnapshot('os2', '2026-06-10T00:00:00.000Z')
+
+    expect(snap2.records).toEqual(snap.records)
+    expect(snap2.tentpoles).toEqual(snap.tentpoles)
+    expect(snap2.expectations).toEqual(snap.expectations)
+    expect(snap2.lockerRooms).toEqual(snap.lockerRooms)
+    expect(snap2.arcs).toEqual(snap.arcs)
+    expect(restored.getTentpoles().combine).not.toBeNull()
+    expect(restored.getHistory().seasons).toHaveLength(1)
+  })
+
+  it('old saves without story fields load cleanly with fresh fallbacks', () => {
+    const data = generateLeague({ seed: 97 })
+    const userId = data.league.teams[6]
+    const career = new Career(data, 97, userId)
+    career.advance(3)
+
+    const snap = career.exportSnapshot('legacy', '2026-06-10T00:00:00.000Z')
+    const {
+      arcs: _a,
+      records: _r,
+      expectations: _e,
+      lockerRooms: _l,
+      tentpoles: _t,
+      storyMisc: _m,
+      ...oldSnap
+    } = snap
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(oldSnap)))
+
+    const fresh = restored.exportSnapshot('fresh', '2026-06-10T00:00:00.000Z')
+    expect(fresh.arcs).toEqual({ arcs: [], counter: 0 })
+    expect(fresh.records!.seasons).toEqual([])
+    expect(fresh.expectations!.preseason).toHaveLength(16)
+    expect(fresh.lockerRooms!).toHaveLength(16)
+    expect(fresh.tentpoles!.lotteryDone).toBe(false)
+    expect(restored.getLockerRoom().captain).not.toBeNull()
+    // And it keeps playing.
+    expect(restored.advanceDay()).toBe(true)
+  })
+
+  it('deadline-day AI trades produce trade news', () => {
+    const data = generateLeague({ seed: 98 })
+    const userId = data.league.teams[7]
+    const career = new Career(data, 98, userId)
+    // Stop on the first day the deadline has passed so the recap is still in
+    // the (capped) inbox.
+    let guard = 0
+    while (!career.getTentpoles().deadlinePassed && guard++ < 70) career.advanceDay()
+    const tradeNews = career
+      .getInbox()
+      .items.filter(
+        (n) =>
+          n.category === 'trade' &&
+          (n.headline.toLowerCase().includes('deadline') || n.body.toLowerCase().includes('deadline'))
+      )
+    expect(tradeNews.length).toBeGreaterThan(0)
+  })
+})
+
 describe('Career — persistence', () => {
   it('survives a save/load round-trip mid-season and stays deterministic', () => {
     const data = generateLeague({ seed: 33 })

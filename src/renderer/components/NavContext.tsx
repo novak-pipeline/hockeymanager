@@ -23,6 +23,8 @@ export type ScreenId =
   | 'offseason'
   | 'playoffs'
   | 'matchcenter'
+  | 'lockerRoom'
+  | 'history'
 
 export interface NavParams {
   playerId?: string

@@ -25,6 +25,7 @@ import { StandingsScreen } from './screens/StandingsScreen'
 import { StatsScreen } from './screens/StatsScreen'
 import { TacticsScreen } from './screens/TacticsScreen'
 import { TradesScreen } from './screens/TradesScreen'
+import { HistoryScreen } from './screens/HistoryScreen'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -350,6 +351,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <PlayoffsScreen />
     case 'matchcenter':
       return <MatchCenterScreen />
+    case 'history':
+      return <HistoryScreen />
   }
 }
 

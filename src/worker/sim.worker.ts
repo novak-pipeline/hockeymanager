@@ -157,6 +157,14 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target)
       return { id: req.id, type: 'ok' }
+
+    /* ── story layer ── */
+    case 'getHistory':
+      return { id: req.id, type: 'history', history: must().getHistory() }
+    case 'getLockerRoom':
+      return { id: req.id, type: 'lockerRoom', lockerRoom: must().getLockerRoom() }
+    case 'getTentpoles':
+      return { id: req.id, type: 'tentpoles', tentpoles: must().getTentpoles() }
   }
 }
 

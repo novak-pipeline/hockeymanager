@@ -58,9 +58,56 @@ import {
   aiSelectProspect,
   buildDraftOrder,
   developPlayers,
+  expectedPointsFor,
   generateDraftClass,
   processRetirements,
 } from '@engine/league/offseason'
+import {
+  createArc,
+  createInitialArcsState,
+  resolveArc,
+  tickArcs,
+  type Arc,
+  type ArcInputs,
+  type ArcsState,
+} from '@engine/story/arcs'
+import {
+  archiveSeason,
+  emptyRecords,
+  inductHallOfFame,
+  recordWatch,
+  registerRetirements,
+  type RecordsState,
+  type SeasonLine,
+} from '@engine/story/records'
+import {
+  buildPreseasonOdds,
+  checkExpectations,
+  expectedRankOf,
+  seasonVerdict,
+  type ExpectationsState,
+  type TeamDescriptor,
+} from '@engine/story/expectations'
+import {
+  chemistryModifier,
+  developmentModifier,
+  electCaptain,
+  initLockerRoom,
+  onPlayerArrived,
+  onPlayerDeparted,
+  tickLockerRoom,
+  type LockerRoomState,
+} from '@engine/league/lockerRoom'
+import {
+  createInitialTentpolesState,
+  runCombine,
+  runDeadlineDay,
+  runLottery,
+  runTournament,
+  tickRumors,
+  type ExecutedTradeSummary,
+  type TentpolesState,
+} from '@engine/league/tentpoles'
 import {
   aiFreeAgencyDay,
   aiResignDay,
@@ -117,8 +164,10 @@ import {
   type DashboardView,
   type DraftView,
   type FinanceView,
+  type HistoryView,
   type InboxView,
   type LinesUpdate,
+  type LockerRoomView,
   type OffseasonView,
   type PickAssetView,
   type PlayerProfileView,
@@ -131,6 +180,7 @@ import {
   type StandingsView,
   type StatsView,
   type TacticsView,
+  type TentpoleView,
   type TradeEvaluation,
   type TradeOfferView,
   type TradeProposal,
@@ -308,6 +358,25 @@ export class Career {
   private playerCounter = 0
   private scouting!: ScoutingState
 
+  /* ── story layer (Wave 1) ── */
+  private arcsState!: ArcsState
+  private recordsState!: RecordsState
+  private expectationsState!: ExpectationsState
+  private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
+  private tentpoles!: TentpolesState
+  /** Per-player consecutive games-with-a-point / scoreless counters (skaters). */
+  private readonly pointStreaks = new Map<string, number>()
+  private readonly scorelessStreaks = new Map<string, number>()
+  /** Per-team consecutive losses (for locker-room ticks). */
+  private readonly losingStreaks = new Map<string, number>()
+  /** Yesterday's league ranks for standings-delta arcs. Transient (rebuilt daily). */
+  private readonly prevRanks = new Map<string, number>()
+  private lastDeadlineRecap: ExecutedTradeSummary[] | null = null
+  private lastLottery: {
+    orderAbbrs: string[]
+    movedUp: { teamAbbr: string; from: number; to: number } | null
+  } | null = null
+
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
     this.seed = seed
@@ -329,11 +398,22 @@ export class Career {
         rng: new Rng(deriveSeed(seed, 9001)),
         draftProspectIds: this.allDraftProspectIds(),
       })
+      this.arcsState = createInitialArcsState()
+      this.recordsState = emptyRecords()
+      this.tentpoles = createInitialTentpolesState()
+      this.initLockerRooms()
       this.pushNews(
         'league',
         `${data.league.name} ${this.year}–${this.year + 1} season begins`,
         `You are the new general manager of the ${this.userTeam.name}. Set your lines, watch the cap, and bring home the cup.`
       )
+      const odds = buildPreseasonOdds({
+        teams: this.teamDescriptors(),
+        year: this.year,
+        rng: this.rngFor(9101),
+      })
+      this.expectationsState = odds.state
+      this.pushSeeds(odds.newsSeeds)
     }
   }
 
@@ -441,6 +521,515 @@ export class Career {
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
+  }
+
+  /* ────────────────────────── story layer plumbing ────────────────────────── */
+
+  /** Convert module news seeds into inbox items (the modules never push). */
+  private pushSeeds(
+    seeds: Array<{
+      category: NewsCategory
+      headline: string
+      body: string
+      playerId?: string
+      teamId?: string
+    }>
+  ): void {
+    for (const s of seeds) {
+      this.pushNews(s.category, s.headline, s.body, {
+        ...(s.teamId !== undefined ? { teamId: s.teamId } : {}),
+        ...(s.playerId !== undefined ? { playerId: s.playerId } : {}),
+      })
+    }
+  }
+
+  private static pidNum(id: string): number {
+    return Number((id.match(/\d+/) ?? ['0'])[0])
+  }
+
+  /** TeamDescriptors for preseason odds (same strength formula as buildTeamList). */
+  private teamDescriptors(lastRanks?: Map<string, number>): TeamDescriptor[] {
+    return [...this.data.league.teams].map((teamId) => {
+      const team = this.data.teams.get(teamId)!
+      const skaters = team.roster
+        .map((id) => this.resolve(id))
+        .filter((p) => p.position !== 'G')
+        .map((p) => overall(p.composites, p.position))
+        .sort((a, b) => b - a)
+        .slice(0, 15)
+      const strength =
+        skaters.length > 0
+          ? Math.round(skaters.reduce((s, v) => s + v, 0) / skaters.length)
+          : 50
+      const last = lastRanks?.get(teamId as string)
+      return {
+        teamId: teamId as string,
+        name: team.name,
+        abbr: team.abbreviation,
+        strength,
+        ...(last !== undefined ? { lastYearRank: last } : {}),
+      }
+    })
+  }
+
+  private initLockerRooms(): void {
+    this.lockerRooms.clear()
+    this.data.league.teams.forEach((teamId, idx) => {
+      const team = this.data.teams.get(teamId)!
+      this.lockerRooms.set(
+        teamId,
+        initLockerRoom({
+          roster: team.roster.map((id) => this.resolve(id)),
+          year: this.year,
+          rng: this.rngFor(9102, idx),
+        })
+      )
+    })
+  }
+
+  /** All-time totals (archived seasons + current season counters). */
+  private careerTotalsOf(pid: PlayerId): {
+    goals: number
+    assists: number
+    points: number
+    gamesPlayed: number
+  } {
+    let goals = 0
+    let assists = 0
+    let gamesPlayed = 0
+    const p = this.data.players.get(pid)
+    if (p) {
+      for (const s of p.stats) {
+        goals += s.ev.goals + s.pp.goals + s.pk.goals
+        assists += s.ev.assists + s.pp.assists + s.pk.assists
+        gamesPlayed += s.gamesPlayed
+      }
+    }
+    const t = this.totals.get(pid)
+    if (t) {
+      goals += t.goals
+      assists += t.assists
+    }
+    gamesPlayed += this.gp.get(pid) ?? 0
+    return { goals, assists, points: goals + assists, gamesPlayed }
+  }
+
+  /** Current-season per-player lines for the records module. */
+  private buildSeasonLines(): SeasonLine[] {
+    const lines: SeasonLine[] = []
+    for (const [pid, t] of this.totals) {
+      const games = this.gp.get(pid) ?? 0
+      if (games <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const teamId = this.teamOf(pid)
+      lines.push({
+        playerId: pid as string,
+        name: p.name,
+        teamAbbr: teamId ? this.data.teams.get(teamId)!.abbreviation : 'FA',
+        position: p.position,
+        goals: t.goals,
+        assists: t.assists,
+        points: t.goals + t.assists,
+        gamesPlayed: games,
+        goalieWins: this.goalieWins.get(pid) ?? 0,
+        savePct: t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : 0,
+        shotsAgainst: t.shotsAgainst,
+      })
+    }
+    return lines
+  }
+
+  /** Award winners with display values, for the records archive. */
+  private awardsForArchive(): Array<{
+    award: string
+    playerId: string
+    name: string
+    teamAbbr: string
+    value: string
+  }> {
+    const out: Array<{ award: string; playerId: string; name: string; teamAbbr: string; value: string }> = []
+    const abbrOf = (id: PlayerId): string => {
+      const t = this.teamOf(id)
+      return t ? this.data.teams.get(t)!.abbreviation : 'FA'
+    }
+    const top = (
+      award: string,
+      score: (t: GamePlayerStat) => number,
+      filter: (p: Player) => boolean,
+      fmt: (v: number) => string
+    ): void => {
+      let bestId: PlayerId | null = null
+      let bestVal = -Infinity
+      for (const [id, t] of this.totals) {
+        const p = this.data.players.get(id)
+        if (!p || !filter(p)) continue
+        const v = score(t)
+        if (v > bestVal) {
+          bestVal = v
+          bestId = id
+        }
+      }
+      if (bestId && bestVal > -Infinity) {
+        const p = this.resolve(bestId)
+        out.push({
+          award,
+          playerId: bestId as string,
+          name: p.name,
+          teamAbbr: abbrOf(bestId),
+          value: fmt(bestVal),
+        })
+      }
+    }
+    top('Most Valuable Player', (t) => t.goals + t.assists, (p) => p.position !== 'G', (v) => `${v} PTS`)
+    top('Top Goal Scorer', (t) => t.goals, (p) => p.position !== 'G', (v) => `${v} G`)
+    top('Best Playmaker', (t) => t.assists, (p) => p.position !== 'G', (v) => `${v} A`)
+    top(
+      'Best Goaltender',
+      (t) => (t.shotsAgainst >= 300 ? t.saves / Math.max(1, t.shotsAgainst) : -1),
+      (p) => p.position === 'G',
+      (v) => (v < 0 ? '—' : `.${Math.round(v * 1000)}`)
+    )
+    return out
+  }
+
+  /**
+   * Sim resolver seam: condition (fatigue/morale/form via effectiveResolve)
+   * composes with locker-room chemistry. effectiveResolve already produces
+   * per-game cached condition-scaled copies; this wraps it and additionally
+   * scales each player's composites by the chemistry multiplier (0.97–1.03)
+   * of the EV unit (forward line or defense pair) the player is slotted on.
+   * Players outside any EV unit (goalies, scratches) keep ×1. Both layers are
+   * multiplicative, never mutate the base Player, and the resolver is rebuilt
+   * fresh per game — matching effectiveResolve's cache semantics.
+   */
+  private storyResolve(): (id: PlayerId) => Player {
+    const base = effectiveResolve(this.resolve)
+    const unitOf = new Map<string, { unit: string[]; teamId: TeamId }>()
+    for (const team of this.data.teams.values()) {
+      if (!this.lockerRooms.has(team.id)) continue
+      for (const line of team.lines.forwards) {
+        const ids = line.map((x) => x as string)
+        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id })
+      }
+      for (const pair of team.lines.defensePairs) {
+        const ids = pair.map((x) => x as string)
+        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id })
+      }
+    }
+    const cache = new Map<PlayerId, Player>()
+    return (id: PlayerId): Player => {
+      const hit = cache.get(id)
+      if (hit) return hit
+      const p = base(id)
+      const slot = unitOf.get(id as string)
+      const lr = slot ? this.lockerRooms.get(slot.teamId) : undefined
+      if (!slot || !lr) {
+        cache.set(id, p)
+        return p
+      }
+      const mult = chemistryModifier(lr, slot.unit)
+      if (mult === 1) {
+        cache.set(id, p)
+        return p
+      }
+      const composites = { ...p.composites } as unknown as Record<string, number>
+      for (const key of Object.keys(composites)) {
+        composites[key] = Math.max(1, Math.min(99, Math.round(composites[key] * mult)))
+      }
+      const copy: Player = { ...p, composites: composites as unknown as Player['composites'] }
+      cache.set(id, copy)
+      return copy
+    }
+  }
+
+  /** Locker-room bookkeeping when a player leaves a club (any path). */
+  private lockerDeparture(teamId: TeamId | null, playerId: PlayerId): void {
+    if (!teamId) return
+    const lr = this.lockerRooms.get(teamId)
+    if (!lr) return
+    const rng = this.rngFor(7107, this.currentDay, Career.pidNum(playerId as string))
+    const out = onPlayerDeparted(lr, playerId as string, rng)
+    if (teamId === this.userTeamId) {
+      this.pushSeeds(out.newsSeeds.map((s) => ({ ...s, teamId: teamId as string })))
+    }
+    if (out.leadershipCrisis) {
+      const team = this.data.teams.get(teamId)!
+      const seeds = electCaptain(lr, team.roster.map((id) => this.resolve(id)), rng)
+      if (teamId === this.userTeamId) {
+        this.pushSeeds(seeds.map((s) => ({ ...s, teamId: teamId as string })))
+      }
+    }
+  }
+
+  /** Locker-room bookkeeping when a player joins a club (any path). */
+  private lockerArrival(teamId: TeamId | null, playerId: PlayerId): void {
+    if (!teamId) return
+    const lr = this.lockerRooms.get(teamId)
+    if (!lr) return
+    const p = this.data.players.get(playerId)
+    if (!p) return
+    onPlayerArrived(lr, p, this.rngFor(7108, this.currentDay, Career.pidNum(playerId as string)))
+  }
+
+  /** Tick one team's locker room after a match day. */
+  private tickTeamLockerRoom(teamId: TeamId, day: number, won: boolean | undefined): void {
+    const lr = this.lockerRooms.get(teamId)
+    if (!lr) return
+    const team = this.data.teams.get(teamId)!
+    const idx = this.data.league.teams.indexOf(teamId)
+    const out = tickLockerRoom({
+      state: lr,
+      roster: team.roster.map((id) => this.resolve(id)),
+      lines: team.lines,
+      playedToday: true,
+      ...(won !== undefined ? { won } : {}),
+      rng: this.rngFor(7105, day, idx),
+      day,
+      year: this.year,
+      losingStreak: this.losingStreaks.get(teamId as string) ?? 0,
+    })
+    // Only the user's room makes the inbox; every room feeds the arc engine.
+    if (teamId === this.userTeamId) {
+      this.pushSeeds(out.newsSeeds.map((s) => ({ ...s, teamId: teamId as string })))
+    }
+    for (const a of out.arcSeeds) {
+      createArc(
+        this.arcsState,
+        a.kind,
+        { playerIds: a.playerIds, teamIds: [teamId as string] },
+        a.summary,
+        day,
+        this.year
+      )
+    }
+  }
+
+  /** AI-AI deadline-day flurry, exactly once per season when the deadline is reached. */
+  private runDeadlineIfDue(day: number): void {
+    if (day < this.deadlineDay) return
+    const key = `deadline-run-${this.year}`
+    if (this.tentpoles.emittedKeys.includes(key)) return
+    this.tentpoles.emittedKeys.push(key)
+
+    const before = new Map<string, string>()
+    for (const t of this.data.teams.values()) {
+      for (const id of t.roster) before.set(id as string, t.id as string)
+    }
+    const res = runDeadlineDay({
+      teams: this.data.teams,
+      players: this.data.players,
+      picks: this.picks,
+      userTeamId: this.userTeamId as string,
+      year: this.year,
+      rng: this.rngFor(7106),
+    })
+    this.lastDeadlineRecap = res.trades
+    this.pushSeeds(res.newsSeeds)
+    for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+
+    // Diff rosters to drive captaincy/familiarity bookkeeping for AI-AI moves.
+    for (const t of this.data.teams.values()) {
+      for (const id of t.roster) {
+        const prev = before.get(id as string)
+        if (prev !== undefined && prev !== (t.id as string)) {
+          this.lockerDeparture(asTeamId(prev), id)
+          this.lockerArrival(t.id, id)
+        }
+      }
+    }
+    // The deadline resolves every open trade-rumor arc.
+    for (const arc of this.arcsState.arcs) {
+      if (arc.kind === 'tradeRumor' && arc.status !== 'resolved') {
+        resolveArc(this.arcsState, arc.id, 'The trade deadline has passed.', day, this.year)
+      }
+    }
+  }
+
+  /** Per-match-day story tick: arcs, expectations, record pace, rooms, rumors. */
+  private storyTickDay(day: number, outcomes: GameOutcome[]): void {
+    const year = this.year
+
+    /* ── per-team result facts + losing streaks ── */
+    const results: ArcInputs['results'] = []
+    const wonByTeam = new Map<string, boolean>()
+    for (const res of outcomes) {
+      const homeWon = res.homeGoals > res.awayGoals
+      results.push({
+        teamId: res.homeTeamId as string,
+        oppId: res.awayTeamId as string,
+        won: homeWon,
+        goalsFor: res.homeGoals,
+        goalsAgainst: res.awayGoals,
+      })
+      results.push({
+        teamId: res.awayTeamId as string,
+        oppId: res.homeTeamId as string,
+        won: !homeWon,
+        goalsFor: res.awayGoals,
+        goalsAgainst: res.homeGoals,
+      })
+      wonByTeam.set(res.homeTeamId as string, homeWon)
+      wonByTeam.set(res.awayTeamId as string, !homeWon)
+    }
+    for (const [teamId, won] of wonByTeam) {
+      this.losingStreaks.set(teamId, won ? 0 : (this.losingStreaks.get(teamId) ?? 0) + 1)
+    }
+
+    /* ── player lines + point/scoreless streaks (skaters) ── */
+    const playerLines: ArcInputs['playerLines'] = []
+    for (const res of outcomes) {
+      for (const [pid, s] of res.playerStats) {
+        if (s.toi <= 0) continue
+        const p = this.data.players.get(pid)
+        if (!p || p.position === 'G') continue
+        const id = pid as string
+        const points = s.goals + s.assists
+        if (points > 0) {
+          this.pointStreaks.set(id, (this.pointStreaks.get(id) ?? 0) + 1)
+          this.scorelessStreaks.set(id, 0)
+        } else {
+          this.pointStreaks.set(id, 0)
+          this.scorelessStreaks.set(id, (this.scorelessStreaks.get(id) ?? 0) + 1)
+        }
+        const teamId = this.teamOf(pid)
+        playerLines.push({
+          playerId: id,
+          teamId: (teamId as string) ?? '',
+          goals: s.goals,
+          assists: s.assists,
+          points,
+          isForward: p.position !== 'D',
+          isRookie: p.age <= 22 && p.stats.length === 0,
+          consecutivePointGames: this.pointStreaks.get(id) ?? 0,
+          scorelessStreak: this.scorelessStreaks.get(id) ?? 0,
+        })
+      }
+    }
+
+    /* ── standings delta vs yesterday, with preseason expectation ── */
+    const sorted = sortStandings([...this.standings.values()])
+    const standingsDelta: ArcInputs['standingsDelta'] = sorted.map((s, i) => {
+      const teamId = s.teamId as string
+      const rank = i + 1
+      const exp = expectedRankOf(this.expectationsState, teamId)
+      return {
+        teamId,
+        rank,
+        prevRank: this.prevRanks.get(teamId) ?? rank,
+        ...(exp !== undefined ? { expectedRank: exp } : {}),
+      }
+    })
+
+    const inputs: ArcInputs = {
+      day,
+      year,
+      seasonLength: this.matchDays.length,
+      results,
+      playerLines,
+      standingsDelta,
+      seasonTotals: (pid) => {
+        const t = this.totals.get(asPlayerId(pid))
+        return {
+          goals: t?.goals ?? 0,
+          assists: t?.assists ?? 0,
+          points: (t?.goals ?? 0) + (t?.assists ?? 0),
+          gamesPlayed: this.gp.get(asPlayerId(pid)) ?? 0,
+        }
+      },
+      careerTotals: (pid) => this.careerTotalsOf(asPlayerId(pid)),
+      expectedPoints: (pid) => {
+        const p = this.data.players.get(asPlayerId(pid))
+        return p ? expectedPointsFor(overall(p.composites, p.position), p.position, p.role) : undefined
+      },
+      playerName: (pid) => this.data.players.get(asPlayerId(pid))?.name ?? pid,
+      teamName: (tid) => this.data.teams.get(asTeamId(tid))?.name ?? tid,
+    }
+    this.pushSeeds(tickArcs({ state: this.arcsState, inputs, rng: this.rngFor(7102, day) }).newsSeeds)
+
+    /* ── expectation checkpoints (quarter/half/3-quarter GP crossings) ── */
+    this.pushSeeds(
+      checkExpectations({
+        state: this.expectationsState,
+        standings: sorted.map((s, i) => {
+          const team = this.data.teams.get(s.teamId)!
+          return {
+            teamId: s.teamId as string,
+            name: team.name,
+            abbr: team.abbreviation,
+            rank: i + 1,
+            gamesPlayed: s.gamesPlayed,
+          }
+        }),
+        day,
+        year,
+        rng: this.rngFor(7103, day),
+      }).newsSeeds
+    )
+
+    /* ── all-time record pace watch every ~5 match days ── */
+    const dayIdx = this.matchDays.indexOf(day)
+    if (dayIdx >= 0 && dayIdx % 5 === 4) {
+      this.pushSeeds(
+        recordWatch({
+          state: this.recordsState,
+          seasonLines: this.buildSeasonLines(),
+          year,
+          teamGamesPlayed: this.standings.get(this.userTeamId)?.gamesPlayed ?? 0,
+          totalSeasonGames: this.matchDays.length,
+        }).newsSeeds
+      )
+    }
+
+    /* ── locker rooms for every team that played ── */
+    for (const teamId of this.data.league.teams) {
+      const won = wonByTeam.get(teamId as string)
+      if (won === undefined) continue
+      this.tickTeamLockerRoom(teamId, day, won)
+    }
+
+    /* ── trade rumor mill + the deadline-day flurry ── */
+    if (day <= this.deadlineDay) {
+      const r = tickRumors({
+        state: this.tentpoles,
+        teams: this.data.teams,
+        players: this.data.players,
+        userTeamId: this.userTeamId as string,
+        deadlineDay: this.deadlineDay,
+        day,
+        year,
+        rng: this.rngFor(7104, day),
+      })
+      this.pushSeeds(r.newsSeeds)
+      for (const seed of r.arcSeeds) {
+        createArc(
+          this.arcsState,
+          seed.kind,
+          { playerIds: seed.playerIds, teamIds: seed.teamIds },
+          seed.summary,
+          day,
+          year
+        )
+      }
+    }
+    this.runDeadlineIfDue(day)
+
+    /* ── remember today's ranks for tomorrow's delta ── */
+    this.prevRanks.clear()
+    sorted.forEach((s, i) => this.prevRanks.set(s.teamId as string, i + 1))
+  }
+
+  /** Dashboard ticker line for an arc: actor name + latest beat. */
+  private arcHeadline(arc: Arc): string {
+    const pid = arc.actors.playerIds[0]
+    const tid = arc.actors.teamIds[0]
+    const who = pid
+      ? this.data.players.get(asPlayerId(pid))?.name
+      : tid
+        ? this.data.teams.get(asTeamId(tid))?.name
+        : undefined
+    const beat = arc.beats[arc.beats.length - 1]?.summary ?? ''
+    return who ? `${who} — ${beat}` : beat
   }
 
   /* ────────────────────────── outcome bookkeeping ────────────────────────── */
@@ -551,7 +1140,7 @@ export class Career {
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
   }
 
-  private finishDay(day: number, played: Set<PlayerId>): void {
+  private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
     tickScouting({
@@ -586,6 +1175,7 @@ export class Career {
       }
     }
     this.currentDay = day
+    if (this.phase === 'regularSeason') this.storyTickDay(day, outcomes)
     if (this.phase === 'regularSeason' && day >= (this.matchDays[this.matchDays.length - 1] ?? 0)) {
       this.enterPlayoffs()
     }
@@ -598,14 +1188,16 @@ export class Career {
     if (nextDay === undefined) return false
     this.prepareTeamsForDay()
     const played = new Set<PlayerId>()
+    const outcomes: GameOutcome[] = []
     for (const game of this.data.league.schedule) {
       if (game.day !== nextDay) continue
       const home = this.data.teams.get(game.homeTeamId)!
       const away = this.data.teams.get(game.awayTeamId)!
-      const res = quickSimGame(home, away, effectiveResolve(this.resolve), {
+      const res = quickSimGame(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
       })
       this.applyOutcome(game, res)
+      outcomes.push(res)
       for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
         played.add(pid)
       }
@@ -613,7 +1205,7 @@ export class Career {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
       }
     }
-    this.finishDay(nextDay, played)
+    this.finishDay(nextDay, played, outcomes)
     return true
   }
 
@@ -697,16 +1289,18 @@ export class Career {
     this.prepareTeamsForDay()
     let watched: WatchedGame | null = null
     const played = new Set<PlayerId>()
+    const outcomes: GameOutcome[] = []
     for (const game of this.data.league.schedule) {
       if (game.day !== nextDay) continue
       const home = this.data.teams.get(game.homeTeamId)!
       const away = this.data.teams.get(game.awayTeamId)!
       const isUser = game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId
       const sim = isUser ? fullSimGame : quickSimGame
-      const res = sim(home, away, effectiveResolve(this.resolve), {
+      const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
       })
       this.applyOutcome(game, res)
+      outcomes.push(res)
       for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
         played.add(pid)
       }
@@ -715,7 +1309,7 @@ export class Career {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
       }
     }
-    this.finishDay(nextDay, played)
+    this.finishDay(nextDay, played, outcomes)
     return watched
   }
 
@@ -763,7 +1357,7 @@ export class Career {
       const isUser = g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId
       const seed = gameSeed(this.seed, this.year, `${g.seriesId}-g${g.gameNumber}`)
       const sim = isUser && watchUser ? fullSimGame : quickSimGame
-      const res = sim(home, away, effectiveResolve(this.resolve), { seed, rules: 'playoff' })
+      const res = sim(home, away, this.storyResolve(), { seed, rules: 'playoff' })
       if (res.decidedBy === 'shootout') throw new Error('playoff game decided by shootout')
       const result: SeriesGameResult = {
         gameId: asGameId(`${g.seriesId}-g${g.gameNumber}`),
@@ -802,6 +1396,21 @@ export class Career {
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
     this.currentDay = day
 
+    // Locker rooms still tick through the playoffs (wins/losses move the room).
+    const playoffWon = new Map<string, boolean>()
+    for (const g of games) {
+      const series = po.rounds.flatMap((r) => r.series).find((s) => s.id === g.seriesId)
+      const last = series?.games[series.games.length - 1]
+      if (!last) continue
+      const homeWon = last.homeGoals > last.awayGoals
+      playoffWon.set(last.homeTeamId as string, homeWon)
+      playoffWon.set(last.awayTeamId as string, !homeWon)
+    }
+    for (const [teamId, won] of playoffWon) {
+      this.losingStreaks.set(teamId, won ? 0 : (this.losingStreaks.get(teamId) ?? 0) + 1)
+      this.tickTeamLockerRoom(asTeamId(teamId), day, won)
+    }
+
     if (po.championTeamId) {
       const champ = this.data.teams.get(po.championTeamId)!
       this.pushNews(
@@ -831,22 +1440,114 @@ export class Career {
     switch (os.stage) {
       case 'awards': {
         const rng = this.rngFor(8001)
+        const sorted = sortStandings([...this.standings.values()])
+        const championId = this.playoffs?.championTeamId ?? null
+
+        /* ── season verdict vs preseason expectations ── */
+        if (championId) {
+          this.pushSeeds(
+            seasonVerdict({
+              state: this.expectationsState,
+              finalStandings: sorted.map((s, i) => {
+                const t = this.data.teams.get(s.teamId)!
+                return { teamId: s.teamId as string, name: t.name, abbr: t.abbreviation, rank: i + 1 }
+              }),
+              championTeamId: championId as string,
+              year: this.year,
+              rng: this.rngFor(8008),
+            }).newsSeeds
+          )
+        }
+
+        /* ── fold the season into the all-time records ── */
+        const champTeam = championId ? this.data.teams.get(championId)! : null
+        this.pushSeeds(
+          archiveSeason({
+            state: this.recordsState,
+            year: this.year,
+            champion: champTeam ? { teamId: champTeam.id as string, name: champTeam.name } : null,
+            presidentsName: sorted[0] ? this.data.teams.get(sorted[0].teamId)!.name : null,
+            userRank: sorted.findIndex((s) => s.teamId === this.userTeamId) + 1,
+            seasonLines: this.buildSeasonLines(),
+            awards: this.awardsForArchive(),
+          }).newsSeeds
+        )
+
+        /* ── world tournament for everyone whose season is over ── */
+        const eligible: Array<{ player: Player; teamId: TeamId }> = []
+        for (const team of this.data.teams.values()) {
+          if (championId && team.id === championId) continue
+          for (const id of team.roster) eligible.push({ player: this.resolve(id), teamId: team.id })
+        }
+        const tour = runTournament({
+          eligible,
+          userTeamId: this.userTeamId as string,
+          rng: this.rngFor(8011),
+          year: this.year,
+        })
+        this.tentpoles.tournament = tour.tournament
+        this.pushSeeds(tour.newsSeeds)
+
+        /* ── development: performance-relative, chemistry-aware ── */
         const dev = developPlayers({
           players: this.data.players,
           gamesPlayedById: (id) => this.gp.get(id) ?? 0,
           year: this.year,
           rng,
+          performance: (id) => {
+            const t = this.totals.get(id)
+            const p = this.data.players.get(id)!
+            const base = {
+              points: (t?.goals ?? 0) + (t?.assists ?? 0),
+              gamesPlayed: this.gp.get(id) ?? 0,
+              position: p.position,
+            }
+            return p.position === 'G' && t && t.shotsAgainst > 0
+              ? { ...base, savePct: t.saves / t.shotsAgainst }
+              : base
+          },
+          expectations: (id) => {
+            const p = this.data.players.get(id)!
+            return expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+          },
+          devModifier: (id) => {
+            const tid = this.teamOf(id)
+            const lr = tid ? this.lockerRooms.get(tid) : undefined
+            return lr ? developmentModifier(lr, id as string) : 1
+          },
         })
         for (const seed of dev.newsSeeds) {
           const p = this.resolve(seed.playerId)
-          this.pushNews(
-            seed.kind === 'breakout' ? 'milestone' : 'league',
-            seed.kind === 'breakout' ? `${p.name} is leveling up` : `${p.name} losing a step`,
-            seed.kind === 'breakout'
-              ? `Offseason training has transformed ${p.name} (${p.position}, ${p.age}).`
-              : `Scouts report ${p.name} (${p.position}, ${p.age}) has visibly declined.`,
-            { playerId: seed.playerId as string }
-          )
+          const texts: Record<typeof seed.kind, [NewsCategory, string, string]> = {
+            breakout: [
+              'milestone',
+              `${p.name} is leveling up`,
+              `Offseason training has transformed ${p.name} (${p.position}, ${p.age}).`,
+            ],
+            decline: [
+              'league',
+              `${p.name} losing a step`,
+              `Scouts report ${p.name} (${p.position}, ${p.age}) has visibly declined.`,
+            ],
+            confidenceBoost: [
+              'milestone',
+              `${p.name} riding high`,
+              `A season well above expectations has ${p.name} brimming with confidence.`,
+            ],
+            crisisOfConfidence: [
+              'league',
+              `${p.name} shaken`,
+              `A season far below expectations has dented ${p.name}'s confidence.`,
+            ],
+          }
+          const [cat, headline, body] = texts[seed.kind]
+          this.pushNews(cat, headline, body, { playerId: seed.playerId as string })
+        }
+
+        /* ── retirements → legends ledger → Hall of Fame ── */
+        const rosterTeamOf = new Map<string, TeamId>()
+        for (const t of this.data.teams.values()) {
+          for (const id of t.roster) rosterTeamOf.set(id as string, t.id)
         }
         const retired = processRetirements({
           players: this.data.players,
@@ -860,6 +1561,30 @@ export class Career {
             playerId: id as string,
           })
         }
+        this.pushSeeds(
+          registerRetirements({
+            state: this.recordsState,
+            retirees: retired.retired.map((id) => {
+              const c = this.careerTotalsOf(id)
+              const p = this.resolve(id)
+              return {
+                playerId: id as string,
+                name: p.name,
+                careerGoals: c.goals,
+                careerAssists: c.assists,
+                careerPoints: c.points,
+                careerGames: c.gamesPlayed,
+              }
+            }),
+            year: this.year,
+          }).newsSeeds
+        )
+        for (const id of retired.retired) {
+          this.lockerDeparture(rosterTeamOf.get(id as string) ?? null, id)
+        }
+        this.pushSeeds(inductHallOfFame(this.recordsState, this.year))
+
+        /* ── draft class ── */
         const draftYear = this.year + 1
         const cls = generateDraftClass({
           year: draftYear,
@@ -872,15 +1597,67 @@ export class Career {
           this.data.league.players.push(p.id)
         }
         this.data.league.draftClasses.push(cls.draftClass)
-        const worstFirst = sortStandings([...this.standings.values()])
-          .map((s) => s.teamId)
+
+        /* ── draft lottery (non-playoff teams) BEFORE the order is built ── */
+        const qualified = new Set<string>()
+        for (const s of this.playoffs?.rounds[0]?.series ?? []) {
+          qualified.add(s.highSeedTeamId as string)
+          qualified.add(s.lowSeedTeamId as string)
+        }
+        const standingsOrder = sorted.map((s) => s.teamId)
+        const nonPlayoffWorstFirst = standingsOrder
+          .filter((t) => !qualified.has(t as string))
           .reverse()
+        const playoffWorstFirst = standingsOrder
+          .filter((t) => qualified.has(t as string))
+          .reverse()
+        const lottery = runLottery({
+          nonPlayoffTeamIds: nonPlayoffWorstFirst,
+          rng: this.rngFor(8010),
+          year: draftYear,
+        })
+        this.tentpoles.lotteryDone = true
+        this.pushSeeds(lottery.newsSeeds)
+        const abbrOfTeam = (id: TeamId): string => this.data.teams.get(id)?.abbreviation ?? (id as string)
+        this.lastLottery = {
+          orderAbbrs: lottery.order.map(abbrOfTeam),
+          movedUp: lottery.movedUp
+            ? {
+                teamAbbr: abbrOfTeam(lottery.movedUp.teamId),
+                from: lottery.movedUp.from,
+                to: lottery.movedUp.to,
+              }
+            : null,
+        }
+        const worstFirst =
+          lottery.order.length > 0
+            ? [...lottery.order, ...playoffWorstFirst]
+            : [...standingsOrder].reverse()
         os.draft = buildDraftOrder({
           year: draftYear,
           rounds: DRAFT_ROUNDS,
           picks: this.picks.filter((p) => p.year === draftYear),
           standingsWorstFirst: worstFirst,
         })
+
+        /* ── scouting combine on the new class ── */
+        const combine = runCombine({
+          prospects: cls.draftClass.prospects.map((pr) => {
+            const p = this.resolve(pr.playerId)
+            return { playerId: pr.playerId as string, name: p.name, position: p.position, rank: pr.rank }
+          }),
+          players: this.data.players,
+          rng: this.rngFor(8012),
+          year: draftYear,
+        })
+        this.tentpoles.combine = combine.combine
+        this.pushSeeds(combine.newsSeeds)
+        const knowledge = new Map(this.scouting.knowledge)
+        for (const [pid, boost] of combine.knowledgeBoosts) {
+          knowledge.set(pid, Math.min(100, (knowledge.get(pid) ?? 0) + boost))
+        }
+        this.scouting.knowledge = [...knowledge.entries()]
+
         os.stage = 'draft'
         this.pushNews(
           'draft',
@@ -921,6 +1698,7 @@ export class Career {
           year: this.year,
         })
         this.faPool = expired.map((e) => e.playerId)
+        for (const e of expired) this.lockerDeparture(e.teamId, e.playerId)
         for (const e of expired) {
           if (e.teamId === this.userTeamId) {
             const p = this.resolve(e.playerId)
@@ -950,6 +1728,7 @@ export class Career {
         })
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
         this.faPool = this.faPool.filter((id) => !signedIds.has(id as string))
+        for (const s of res.signings) this.lockerArrival(s.teamId, s.playerId)
         for (const s of res.signings.slice(0, 6)) {
           const p = this.resolve(s.playerId)
           const t = this.data.teams.get(s.teamId)!
@@ -1001,6 +1780,7 @@ export class Career {
         noTradeClause: false,
         twoWay: true,
       }
+      this.lockerArrival(pick.ownerTeamId, playerId)
     }
     if (pick.ownerTeamId === this.userTeamId) {
       this.pushNews(
@@ -1098,6 +1878,11 @@ export class Career {
 
     this.archiveSeasonStats()
 
+    // Final ranks feed next season's preseason odds (30% of the blend).
+    const finalRanks = new Map<string, number>(
+      sorted.map((s, i) => [s.teamId as string, i + 1])
+    )
+
     const newYear = this.year + 1
     this.data.league.season.year = newYear
     this.data.league.schedule = buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
@@ -1135,11 +1920,34 @@ export class Career {
       )
     }
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+
+    /* ── story layer rollover ── */
+    this.tentpoles = createInitialTentpolesState()
+    this.lastDeadlineRecap = null
+    this.lastLottery = null
+    this.pointStreaks.clear()
+    this.scorelessStreaks.clear()
+    this.losingStreaks.clear()
+    this.prevRanks.clear()
+    // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
+    for (const arc of this.arcsState.arcs) {
+      if (arc.status === 'resolved') continue
+      if (arc.kind === 'feud' || arc.kind === 'mentorship' || arc.kind === 'milestoneWatch') continue
+      resolveArc(this.arcsState, arc.id, 'The season came to an end.', 0, newYear)
+    }
+    const odds = buildPreseasonOdds({
+      teams: this.teamDescriptors(finalRanks),
+      year: newYear,
+      rng: this.rngFor(9101),
+    })
+    this.expectationsState = odds.state
+
     this.pushNews(
       'league',
       `${this.data.league.name} ${newYear}–${newYear + 1} season begins`,
       `A clean sheet of ice. ${this.matchDays.length} match days to the playoffs.`
     )
+    this.pushSeeds(odds.newsSeeds)
   }
 
   private pointsLeader(): { name: string; points: number } | null {
@@ -1196,6 +2004,7 @@ export class Career {
       playerId: asPlayerId(playerId),
       players: this.data.players,
     })
+    this.lockerDeparture(this.userTeamId, asPlayerId(playerId))
     repairLines(this.userTeam, this.data.players)
     const p = this.resolve(asPlayerId(playerId))
     this.pushNews('contract', `${p.name} released`, `${p.name} was placed on waivers and released.`, {
@@ -1267,6 +2076,7 @@ export class Career {
       players: this.data.players,
     })
     this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
+    this.lockerArrival(this.userTeamId, id)
     repairLines(this.userTeam, this.data.players)
     this.pushNews(
       'contract',
@@ -1326,6 +2136,14 @@ export class Career {
       })
       repairLines(this.userTeam, this.data.players)
       repairLines(partner, this.data.players)
+      for (const p of give.players) {
+        this.lockerDeparture(this.userTeamId, p.id)
+        this.lockerArrival(partnerId, p.id)
+      }
+      for (const p of receive.players) {
+        this.lockerDeparture(partnerId, p.id)
+        this.lockerArrival(this.userTeamId, p.id)
+      }
       this.pushNews(
         'trade',
         `Trade completed with ${partner.abbreviation}`,
@@ -1353,6 +2171,14 @@ export class Career {
     })
     repairLines(this.userTeam, this.data.players)
     repairLines(partner, this.data.players)
+    for (const id of offer.userGivesPlayerIds) {
+      this.lockerDeparture(this.userTeamId, id)
+      this.lockerArrival(offer.partnerTeamId, id)
+    }
+    for (const id of offer.userReceivesPlayerIds) {
+      this.lockerDeparture(offer.partnerTeamId, id)
+      this.lockerArrival(this.userTeamId, id)
+    }
     this.tradeOffers = this.tradeOffers.filter((o) => o.offerId !== offerId)
     this.pushNews('trade', `Trade completed with ${partner.abbreviation}`, `The deal is done.`, {
       teamId: offer.partnerTeamId as string,
@@ -1498,6 +2324,14 @@ export class Career {
       capUsed,
       salaryCap: team.finances.salaryCap,
       championTeamName: champ,
+      ...(expectedRankOf(this.expectationsState, this.userTeamId as string) !== undefined
+        ? { predictedRank: expectedRankOf(this.expectationsState, this.userTeamId as string)! }
+        : {}),
+      topArcs: [...this.arcsState.arcs]
+        .filter((a) => a.status !== 'resolved')
+        .sort((a, b) => b.tension - a.tension)
+        .slice(0, 3)
+        .map((a) => ({ kind: a.kind, headline: this.arcHeadline(a) })),
     }
   }
 
@@ -1838,6 +2672,182 @@ export class Career {
     }
   }
 
+  /* ────────────────────────── story layer views ────────────────────────── */
+
+  getHistory(): HistoryView {
+    const r = this.recordsState
+    return {
+      singleSeason: {
+        goals: [...r.singleSeason.goals],
+        assists: [...r.singleSeason.assists],
+        points: [...r.singleSeason.points],
+        wins: [...r.singleSeason.wins],
+        savePct: [...r.singleSeason.savePct],
+      },
+      career: {
+        goals: [...r.career.goals],
+        assists: [...r.career.assists],
+        points: [...r.career.points],
+        gamesPlayed: [...r.career.gamesPlayed],
+      },
+      seasons: [...r.seasons],
+      awards: [...r.awards],
+      legends: [...r.retiredLegends],
+    }
+  }
+
+  getLockerRoom(): LockerRoomView {
+    const lr = this.lockerRooms.get(this.userTeamId)
+    const team = this.userTeam
+    if (!lr) {
+      return {
+        captain: null,
+        alternates: [],
+        roomMorale: 50,
+        influence: [],
+        relationships: [],
+        lineFamiliarity: [],
+      }
+    }
+    const onRoster = new Set(team.roster.map((id) => id as string))
+    const badgeOf = (id: string) => {
+      const p = this.data.players.get(asPlayerId(id))
+      return p ? badge(p) : null
+    }
+    const famMap = new Map(lr.familiarity)
+    const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`)
+    const unitFamiliarity = (ids: string[]): number => {
+      let sum = 0
+      let n = 0
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          sum += famMap.get(pairKey(ids[i], ids[j])) ?? 0
+          n++
+        }
+      }
+      return n > 0 ? Math.round(sum / n) : 0
+    }
+    const relLabel = (kind: string, strength: number): string => {
+      if (kind === 'mentorship') return 'Mentor & protégé'
+      if (kind === 'feud') return strength >= 70 ? 'Bitter feud' : 'Friction'
+      return strength >= 70 ? 'Close friends' : 'Friends'
+    }
+    const lineFamiliarity: LockerRoomView['lineFamiliarity'] = []
+    team.lines.forwards.forEach((line, i) => {
+      const ids = line.map((x) => x as string)
+      lineFamiliarity.push({
+        label: `Line ${i + 1}`,
+        players: ids.map((id) => this.data.players.get(asPlayerId(id))?.name ?? id),
+        familiarity: unitFamiliarity(ids),
+      })
+    })
+    team.lines.defensePairs.forEach((pair, i) => {
+      const ids = pair.map((x) => x as string)
+      lineFamiliarity.push({
+        label: `Pair ${i + 1}`,
+        players: ids.map((id) => this.data.players.get(asPlayerId(id))?.name ?? id),
+        familiarity: unitFamiliarity(ids),
+      })
+    })
+    return {
+      captain: lr.captainId && onRoster.has(lr.captainId) ? badgeOf(lr.captainId) : null,
+      alternates: lr.alternateIds
+        .filter((id) => onRoster.has(id))
+        .map(badgeOf)
+        .filter((b): b is NonNullable<typeof b> => b !== null),
+      roomMorale: Math.round(lr.roomMorale),
+      influence: [...lr.influence]
+        .filter(([id]) => onRoster.has(id))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([id, inf]) => {
+          const b = badgeOf(id)!
+          return { ...b, influence: Math.round(inf) }
+        }),
+      relationships: lr.relationships
+        .filter((rel) => onRoster.has(rel.a) && onRoster.has(rel.b))
+        .map((rel) => ({
+          a: badgeOf(rel.a)!,
+          b: badgeOf(rel.b)!,
+          kind: rel.kind,
+          strength: Math.round(rel.strength),
+          label: relLabel(rel.kind, rel.strength),
+        })),
+      lineFamiliarity,
+    }
+  }
+
+  getTentpoles(): TentpoleView {
+    const tp = this.tentpoles
+    const abbrFor = (raw: string): string =>
+      this.data.teams.get(asTeamId(raw))?.abbreviation ?? raw
+    // Combine ranks come from the upcoming draft class (year + 1 of the season
+    // the combine ran in); fall back to the latest class.
+    const cls = this.data.league.draftClasses[this.data.league.draftClasses.length - 1]
+    const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
+    return {
+      rumors: tp.rumors.map((r) => ({
+        playerId: r.playerId,
+        playerName: this.data.players.get(asPlayerId(r.playerId))?.name ?? r.playerId,
+        teamId: r.teamId,
+        teamAbbr: abbrFor(r.teamId),
+        heat: Math.round(r.heat),
+        sinceDay: r.sinceDay,
+      })),
+      deadlineDay: this.deadlineDay,
+      deadlinePassed: this.phase !== 'regularSeason' || this.currentDay >= this.deadlineDay,
+      lastDeadlineRecap: this.lastDeadlineRecap
+        ? this.lastDeadlineRecap.map((t) => ({
+            teamAAbbr: abbrFor(t.teamA),
+            teamBAbbr: abbrFor(t.teamB),
+            aGave: [...t.aGave],
+            bGave: [...t.bGave],
+          }))
+        : null,
+      lottery: this.lastLottery
+        ? {
+            orderAbbrs: [...this.lastLottery.orderAbbrs],
+            movedUp: this.lastLottery.movedUp ? { ...this.lastLottery.movedUp } : null,
+          }
+        : null,
+      combine: tp.combine
+        ? tp.combine.rows.map((row) => {
+            const p = this.data.players.get(asPlayerId(row.playerId))
+            return {
+              playerId: row.playerId,
+              name: p?.name ?? row.playerId,
+              position: p?.position ?? '?',
+              rank: rankOf.get(row.playerId) ?? 0,
+              sprint: row.sprint,
+              agility: row.agility,
+              strength: row.strength,
+              interview: row.interview,
+              riser: row.riser,
+              faller: row.faller,
+            }
+          })
+        : null,
+      tournament: tp.tournament
+        ? {
+            year: tp.tournament.year,
+            teamA: tp.tournament.teamA,
+            teamB: tp.tournament.teamB,
+            medalResult: tp.tournament.medalResult,
+            userSelected: tp.tournament.selectedPlayerIds
+              .filter((id) => this.userTeam.roster.some((r) => (r as string) === id))
+              .map((id) => this.data.players.get(asPlayerId(id))?.name ?? id),
+            userSnubbed: tp.tournament.snubbedPlayerIds
+              .filter((id) => this.userTeam.roster.some((r) => (r as string) === id))
+              .map((id) => this.data.players.get(asPlayerId(id))?.name ?? id),
+            returnEffects: tp.tournament.returnEffects.map((e) => ({
+              playerName: this.data.players.get(asPlayerId(e.playerId))?.name ?? e.playerId,
+              effect: e.effect,
+            })),
+          }
+        : null,
+    }
+  }
+
   /* ────────────────────────── legacy v1 view ────────────────────────── */
 
   private standingRow(s: Standing): StandingRow {
@@ -1966,6 +2976,20 @@ export class Career {
         knowledge: [...this.scouting.knowledge],
         assignments: [...this.scouting.assignments],
       },
+      arcs: structuredClone(this.arcsState),
+      records: structuredClone(this.recordsState),
+      expectations: structuredClone(this.expectationsState),
+      lockerRooms: [...this.lockerRooms.entries()].map(
+        ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
+      ),
+      tentpoles: structuredClone(this.tentpoles),
+      storyMisc: {
+        pointStreaks: [...this.pointStreaks],
+        scorelessStreaks: [...this.scorelessStreaks],
+        losingStreaks: [...this.losingStreaks],
+        lastDeadlineRecap: this.lastDeadlineRecap ? structuredClone(this.lastDeadlineRecap) : null,
+        lastLottery: this.lastLottery ? structuredClone(this.lastLottery) : null,
+      },
     }
   }
 
@@ -2013,6 +3037,42 @@ export class Career {
         rng: new Rng(deriveSeed(snapshot.seed, 9001)),
         draftProspectIds: career.allDraftProspectIds(),
       })
+    }
+
+    // Restore the story layer; older saves fall back to fresh initial states.
+    career.arcsState = snapshot.arcs ? structuredClone(snapshot.arcs) : createInitialArcsState()
+    career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
+    career.tentpoles = snapshot.tentpoles
+      ? structuredClone(snapshot.tentpoles)
+      : createInitialTentpolesState()
+    if (snapshot.lockerRooms) {
+      career.lockerRooms.clear()
+      for (const [k, v] of snapshot.lockerRooms) {
+        career.lockerRooms.set(asTeamId(k), structuredClone(v))
+      }
+    } else {
+      career.initLockerRooms()
+    }
+    if (snapshot.expectations) {
+      career.expectationsState = structuredClone(snapshot.expectations)
+    } else {
+      // Old save: rebuild plausible odds silently (no news pushed).
+      career.expectationsState = buildPreseasonOdds({
+        teams: career.teamDescriptors(),
+        year: career.year,
+        rng: career.rngFor(9101),
+      }).state
+    }
+    if (snapshot.storyMisc) {
+      for (const [k, v] of snapshot.storyMisc.pointStreaks) career.pointStreaks.set(k, v)
+      for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)
+      for (const [k, v] of snapshot.storyMisc.losingStreaks) career.losingStreaks.set(k, v)
+      career.lastDeadlineRecap = snapshot.storyMisc.lastDeadlineRecap
+        ? structuredClone(snapshot.storyMisc.lastDeadlineRecap)
+        : null
+      career.lastLottery = snapshot.storyMisc.lastLottery
+        ? structuredClone(snapshot.storyMisc.lastLottery)
+        : null
     }
 
     // Rebuild transient state that deliberately isn't saved.

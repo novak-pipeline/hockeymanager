@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import type { TradeEvaluation, TradesView } from '../../worker/protocol'
+import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
   PlayerBadge,
   TradeOfferView,
   TradePartnerView,
+  TradeRumorView,
 } from '../../engine/career/views'
-import { PlayerLink } from '../components/NavContext'
+import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -678,6 +679,263 @@ function ProposeTab(props: {
   )
 }
 
+// ─── rumor mill ───────────────────────────────────────────────────────────────
+
+/** Heat bar for a trade rumor (0–100). Pulses red near the deadline. */
+function HeatBar(props: { heat: number; nearDeadline: boolean }): JSX.Element {
+  const { heat, nearDeadline } = props
+  const pct = Math.min(100, Math.max(0, heat))
+  const color =
+    pct >= 70
+      ? nearDeadline
+        ? 'var(--red)'
+        : 'var(--orange)'
+      : pct >= 40
+      ? 'var(--amber)'
+      : 'var(--muted)'
+  return (
+    <div
+      style={{
+        width: 64,
+        height: 6,
+        background: 'var(--bg3)',
+        borderRadius: 999,
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          width: `${pct}%`,
+          height: '100%',
+          background: color,
+          borderRadius: 999,
+          transition: 'width 0.25s ease',
+          ...(nearDeadline && pct >= 70
+            ? { animation: 'rumor-pulse 1.4s ease-in-out infinite' }
+            : {}),
+        }}
+      />
+    </div>
+  )
+}
+
+function RumorMillPanel(props: {
+  rumors: TradeRumorView[]
+  deadlineDay: number
+  deadlinePassed: boolean
+  currentDay: number
+  lastDeadlineRecap: TentpoleView['lastDeadlineRecap']
+}): JSX.Element {
+  const { rumors, deadlineDay, deadlinePassed, currentDay, lastDeadlineRecap } = props
+  const nav = useNav()
+  const daysToDeadline = deadlineDay - currentDay
+
+  const deadlineChipClass =
+    deadlinePassed
+      ? 'chip chip-danger'
+      : daysToDeadline <= 3
+      ? 'chip chip-danger'
+      : daysToDeadline <= 7
+      ? 'chip chip-warn'
+      : 'chip chip-info'
+
+  const deadlineLabel = deadlinePassed
+    ? `Deadline passed (day ${deadlineDay})`
+    : `Deadline: day ${deadlineDay} — ${daysToDeadline} day${daysToDeadline === 1 ? '' : 's'}`
+
+  const nearDeadline = !deadlinePassed && daysToDeadline <= 5
+
+  return (
+    <Panel title="Rumor mill">
+      {/* deadline chip */}
+      <div className="row" style={{ marginBottom: 'var(--sp-3)', gap: 'var(--sp-2)' }}>
+        <span className={deadlineChipClass} style={{ fontSize: 11 }}>
+          {deadlineLabel}
+        </span>
+        {nearDeadline && (
+          <span className="chip chip-danger" style={{ fontSize: 11 }}>
+            Deadline approaching
+          </span>
+        )}
+      </div>
+
+      {/* deadline recap */}
+      {deadlinePassed && lastDeadlineRecap && lastDeadlineRecap.length > 0 && (
+        <DeadlineRecapCard recap={lastDeadlineRecap} />
+      )}
+
+      {/* rumor rows */}
+      {rumors.length === 0 ? (
+        <span className="muted small">No active trade rumors.</span>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Team</th>
+                <th style={{ width: 80 }}>Heat</th>
+                <th className="num" style={{ width: 60 }}>Since</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...rumors]
+                .sort((a, b) => b.heat - a.heat)
+                .map((r) => (
+                  <tr key={r.playerId}>
+                    <td>
+                      <button
+                        type="button"
+                        className="player-link"
+                        onClick={() => nav.navigate('player', { playerId: r.playerId })}
+                      >
+                        {r.playerName}
+                      </button>
+                    </td>
+                    <td>
+                      <span className="chip" style={{ fontSize: 11 }}>
+                        {r.teamAbbr}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 8 }}>
+                        <HeatBar heat={r.heat} nearDeadline={nearDeadline} />
+                        <span
+                          className="muted small mono"
+                          style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}
+                        >
+                          {r.heat}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="num muted small">Day {r.sinceDay}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/** Letter grade from a simple heuristic — more assets = better grade. */
+function tradeGrade(gave: string[], received: string[]): string {
+  const diff = received.length - gave.length
+  if (diff >= 2) return 'A'
+  if (diff === 1) return 'B+'
+  if (diff === 0) return 'B'
+  if (diff === -1) return 'C'
+  return 'D'
+}
+
+function gradeColor(grade: string): string {
+  if (grade.startsWith('A')) return 'var(--green)'
+  if (grade.startsWith('B')) return 'var(--cyan)'
+  if (grade.startsWith('C')) return 'var(--amber)'
+  return 'var(--red)'
+}
+
+function DeadlineRecapCard(props: {
+  recap: NonNullable<TentpoleView['lastDeadlineRecap']>
+}): JSX.Element {
+  return (
+    <div style={{ marginBottom: 'var(--sp-3)' }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.8px',
+          color: 'var(--violet-h)',
+          marginBottom: 'var(--sp-2)',
+        }}
+      >
+        Deadline recap — {props.recap.length} trade{props.recap.length !== 1 ? 's' : ''}
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gap: 'var(--sp-2)',
+          maxHeight: 280,
+          overflowY: 'auto',
+        }}
+      >
+        {props.recap.map((t, i) => {
+          const gradeA = tradeGrade(t.aGave, t.bGave)
+          const gradeB = tradeGrade(t.bGave, t.aGave)
+          return (
+            <div
+              key={i}
+              style={{
+                background: 'var(--bg0)',
+                border: '1px solid var(--line)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '8px 12px',
+                fontSize: 12,
+              }}
+            >
+              <div
+                className="row-between"
+                style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}
+              >
+                <span>
+                  <span style={{ color: 'var(--text)' }}>{t.teamAAbbr}</span>
+                  <span className="muted" style={{ margin: '0 6px' }}>↔</span>
+                  <span style={{ color: 'var(--text)' }}>{t.teamBAbbr}</span>
+                </span>
+                <span className="row" style={{ gap: 6 }}>
+                  <span style={{ color: gradeColor(gradeA), fontWeight: 700, fontSize: 12 }}>
+                    {t.teamAAbbr}: {gradeA}
+                  </span>
+                  <span style={{ color: gradeColor(gradeB), fontWeight: 700, fontSize: 12 }}>
+                    {t.teamBAbbr}: {gradeB}
+                  </span>
+                </span>
+              </div>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span className="muted" style={{ fontSize: 10 }}>{t.teamAAbbr} gives: </span>
+                  {t.aGave.length > 0 ? (
+                    t.aGave.map((asset, j) => (
+                      <span
+                        key={j}
+                        className="chip"
+                        style={{ fontSize: 10, marginRight: 3, marginBottom: 2 }}
+                      >
+                        {asset}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="muted" style={{ fontSize: 11 }}>—</span>
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span className="muted" style={{ fontSize: 10 }}>{t.teamBAbbr} gives: </span>
+                  {t.bGave.length > 0 ? (
+                    t.bGave.map((asset, j) => (
+                      <span
+                        key={j}
+                        className="chip"
+                        style={{ fontSize: 10, marginRight: 3, marginBottom: 2 }}
+                      >
+                        {asset}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="muted" style={{ fontSize: 11 }}>—</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── main screen ──────────────────────────────────────────────────────────────
 
 type Tab = 'incoming' | 'propose'
@@ -687,6 +945,11 @@ export function TradesScreen(): JSX.Element {
   const { data, loading, error, refetch } = useScreenData<TradesView>(
     () => client.getTrades(),
     (r) => (r.type === 'trades' ? r.trades : null)
+  )
+
+  const { data: tentpoles } = useScreenData<TentpoleView>(
+    () => client.getTentpoles(),
+    (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
   const [tab, setTab] = useState<Tab>('incoming')
@@ -710,6 +973,25 @@ export function TradesScreen(): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="No trade data yet."
       />
+
+      {/* Rumor mill panel — always shown when tentpoles available */}
+      {tentpoles ? (
+        <div style={{ marginBottom: 'var(--sp-4)' }}>
+          <RumorMillPanel
+            rumors={tentpoles.rumors}
+            deadlineDay={tentpoles.deadlineDay}
+            deadlinePassed={tentpoles.deadlinePassed}
+            currentDay={currentDay}
+            lastDeadlineRecap={tentpoles.lastDeadlineRecap}
+          />
+        </div>
+      ) : (
+        !loading && (
+          <div style={{ marginBottom: 'var(--sp-4)' }}>
+            <Notice kind="warn">Rumor mill not available yet.</Notice>
+          </div>
+        )
+      )}
 
       {data && !data.tradingOpen && (
         <Notice kind="warn" >

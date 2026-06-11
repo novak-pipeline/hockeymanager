@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { DraftView } from '../../worker/protocol'
-import type { DraftPickRowView, ProspectRowView } from '../../engine/career/views'
-import { PlayerLink } from '../components/NavContext'
+import type { DraftView, TentpoleView } from '../../worker/protocol'
+import type { CombineRowView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
+import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -270,15 +270,231 @@ function ClockStrip(props: { data: DraftView }): JSX.Element {
   )
 }
 
+// ─── lottery banner ───────────────────────────────────────────────────────────
+
+function LotteryBanner(props: { lottery: NonNullable<TentpoleView['lottery']> }): JSX.Element {
+  const { lottery } = props
+  const { orderAbbrs, movedUp } = lottery
+
+  return (
+    <div
+      style={{
+        padding: '12px 16px',
+        background: 'linear-gradient(90deg, rgba(139,92,246,0.18), rgba(236,72,153,0.10))',
+        border: '1px solid rgba(139,92,246,0.4)',
+        borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+        <span style={{ fontSize: 18 }}>🎰</span>
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: 14,
+            color: 'var(--violet-h)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+          }}
+        >
+          Draft Lottery Results
+        </span>
+      </div>
+
+      {movedUp && (
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 12px',
+            background: 'rgba(139,92,246,0.14)',
+            border: '1px solid rgba(139,92,246,0.35)',
+            borderRadius: 'var(--radius-sm)',
+            marginBottom: 10,
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          <span className="chip chip-hero" style={{ fontSize: 11 }}>
+            {movedUp.teamAbbr}
+          </span>
+          <span>
+            wins the lottery, jumps from{' '}
+            <strong style={{ color: 'var(--amber)' }}>{movedUp.from}{getOrdinalSuffixD(movedUp.from)}</strong>
+            {' '}to{' '}
+            <strong style={{ color: 'var(--green)' }}>1st overall</strong>!
+          </span>
+        </div>
+      )}
+
+      {/* Order strip */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {orderAbbrs.slice(0, 16).map((abbr, i) => (
+          <span
+            key={i}
+            className={i === 0 ? 'chip chip-hero' : 'chip'}
+            style={{ fontSize: 11, fontWeight: i < 3 ? 700 : 500 }}
+          >
+            <span
+              className="muted"
+              style={{ marginRight: 3, fontSize: 10 }}
+            >
+              {i + 1}.
+            </span>
+            {abbr}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function getOrdinalSuffixD(n: number): string {
+  if (n >= 11 && n <= 13) return 'th'
+  switch (n % 10) {
+    case 1: return 'st'
+    case 2: return 'nd'
+    case 3: return 'rd'
+    default: return 'th'
+  }
+}
+
+// ─── combine tab ──────────────────────────────────────────────────────────────
+
+function StatBar(props: { value: number; color?: string }): JSX.Element {
+  const pct = Math.min(100, Math.max(0, props.value))
+  return (
+    <div
+      style={{
+        width: 52,
+        height: 5,
+        background: 'var(--bg3)',
+        borderRadius: 999,
+        overflow: 'hidden',
+        display: 'inline-block',
+        verticalAlign: 'middle',
+      }}
+    >
+      <div
+        style={{
+          width: `${pct}%`,
+          height: '100%',
+          background: props.color ?? 'var(--cyan)',
+          borderRadius: 999,
+        }}
+      />
+    </div>
+  )
+}
+
+function InterviewChip(props: { result: CombineRowView['interview'] }): JSX.Element {
+  const map = {
+    impressive: { cls: 'chip chip-success', label: 'Impressive' },
+    solid: { cls: 'chip chip-violet', label: 'Solid' },
+    concerning: { cls: 'chip chip-danger', label: 'Concerning' },
+  } as const
+  const { cls, label } = map[props.result]
+  return <span className={cls} style={{ fontSize: 10 }}>{label}</span>
+}
+
+function CombineTab(props: { combine: CombineRowView[] }): JSX.Element {
+  const nav = useNav()
+  const rows = [...props.combine].sort((a, b) => a.rank - b.rank)
+
+  return (
+    <Panel title="Pre-draft combine">
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 40 }}>#</th>
+              <th>Name</th>
+              <th>Pos</th>
+              <th>Sprint</th>
+              <th>Agility</th>
+              <th>Strength</th>
+              <th>Interview</th>
+              <th style={{ width: 64 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.playerId}>
+                <td className="num muted small">{row.rank}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="player-link"
+                    onClick={() => nav.navigate('player', { playerId: row.playerId })}
+                  >
+                    {row.name}
+                  </button>
+                </td>
+                <td className="muted small">{row.position}</td>
+                <td>
+                  <div className="row" style={{ gap: 5 }}>
+                    <StatBar value={row.sprint} color="var(--orange)" />
+                    <span className="muted small mono">{row.sprint}</span>
+                  </div>
+                </td>
+                <td>
+                  <div className="row" style={{ gap: 5 }}>
+                    <StatBar value={row.agility} color="var(--cyan)" />
+                    <span className="muted small mono">{row.agility}</span>
+                  </div>
+                </td>
+                <td>
+                  <div className="row" style={{ gap: 5 }}>
+                    <StatBar value={row.strength} color="var(--violet)" />
+                    <span className="muted small mono">{row.strength}</span>
+                  </div>
+                </td>
+                <td>
+                  <InterviewChip result={row.interview} />
+                </td>
+                <td>
+                  <div className="row" style={{ gap: 4 }}>
+                    {row.riser && (
+                      <span
+                        className="chip chip-success"
+                        style={{ fontSize: 10, padding: '1px 6px' }}
+                      >
+                        RISER
+                      </span>
+                    )}
+                    {row.faller && (
+                      <span
+                        className="chip chip-danger"
+                        style={{ fontSize: 10, padding: '1px 6px' }}
+                      >
+                        FALLER
+                      </span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
 // ─── main screen ──────────────────────────────────────────────────────────────
 
-type DraftTab = 'board' | 'available'
+type DraftTab = 'board' | 'available' | 'combine'
 
 export function DraftScreen(): JSX.Element {
   const client = useClient()
   const { data, loading, error, refetch } = useScreenData<DraftView>(
     () => client.getDraft(),
     (r) => (r.type === 'draft' ? r.draft : null)
+  )
+
+  const { data: tentpoles } = useScreenData<TentpoleView>(
+    () => client.getTentpoles(),
+    (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
   const [tab, setTab] = useState<DraftTab>('board')
@@ -327,6 +543,13 @@ export function DraftScreen(): JSX.Element {
 
       {mutErr && <Notice kind="warn">{mutErr}</Notice>}
 
+      {/* Lottery banner — show whenever lottery data available (offseason) */}
+      {tentpoles?.lottery && (
+        <div style={{ marginBottom: 'var(--sp-4)' }}>
+          <LotteryBanner lottery={tentpoles.lottery} />
+        </div>
+      )}
+
       {data && (
         <div className="stack">
           {/* clock strip + controls */}
@@ -362,6 +585,17 @@ export function DraftScreen(): JSX.Element {
                 {data.prospects.filter((p) => !p.drafted).length}
               </span>
             </button>
+            {tentpoles?.combine && tentpoles.combine.length > 0 && (
+              <button
+                className={`tab${tab === 'combine' ? ' active' : ''}`}
+                onClick={() => setTab('combine')}
+              >
+                Combine
+                <span className="badge" style={{ marginLeft: 6 }}>
+                  {tentpoles.combine.length}
+                </span>
+              </button>
+            )}
           </div>
 
           {tab === 'board' && (
@@ -375,6 +609,14 @@ export function DraftScreen(): JSX.Element {
               busy={busy}
               onDraft={handleDraft}
             />
+          )}
+
+          {tab === 'combine' && (
+            tentpoles?.combine && tentpoles.combine.length > 0 ? (
+              <CombineTab combine={tentpoles.combine} />
+            ) : (
+              <Notice kind="warn">Combine results not available yet.</Notice>
+            )
           )}
         </div>
       )}

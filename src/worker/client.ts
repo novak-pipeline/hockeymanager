@@ -233,6 +233,20 @@ export class SimClient {
     return this.send({ type: 'assignScout', scoutId, target })
   }
 
+  /* ── story layer ── */
+
+  getHistory(): Promise<WorkerResponse> {
+    return this.send({ type: 'getHistory' })
+  }
+
+  getLockerRoom(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLockerRoom' })
+  }
+
+  getTentpoles(): Promise<WorkerResponse> {
+    return this.send({ type: 'getTentpoles' })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

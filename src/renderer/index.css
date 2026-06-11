@@ -1091,3 +1091,10 @@ a:hover { text-decoration: underline; }
 /* ── inbox list (full screen) ── */
 
 .inbox-list { padding: 0 !important; }
+
+/* ── rumor heat bar pulse (near deadline) ── */
+
+@keyframes rumor-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}

@@ -48,4 +48,15 @@ export interface Team {
   tactics: TeamTactics
   finances: Finances
   staff: Staff
+  /**
+   * Mod-stable external key, e.g. "nhl-team-10". Set by mod loaders so
+   * community database packs can reference teams by a stable identity.
+   * Never read by the sim engine.
+   */
+  externalId?: string
+  /**
+   * Logo image key. Resolved by the UI to logos/<logoId>.png inside the
+   * active mod folder. Absent = show a generated crest from team colors.
+   */
+  logoId?: string
 }

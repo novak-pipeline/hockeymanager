@@ -15,6 +15,13 @@
  *  - 30+: physical attributes decline first (speed/acceleration/agility/
  *    stamina fastest), technical/defensive from 32, mental holds longest
  *    (from 35). Decline steepens past 33.
+ *
+ * Performance-relative development (Story Wave 1):
+ *  - A performance ratio (actual P/G vs expected P/G) further multiplies
+ *    development. Over-performers grow faster; under-performers are stunted
+ *    (U26) or decline faster (29+). Determination personality dampens bust
+ *    spirals. Confidence swings (morale changes) are emitted as news seeds
+ *    for the top league-wide swings.
  */
 import {
   asPlayerId,
@@ -125,22 +132,75 @@ function toGamesLookup(
 }
 
 /**
+ * Calibrated expected points-per-game curve for skaters, parameterised by
+ * overall rating (0–100), position, and role. Defensemen produce ~55% of
+ * forward output. Representative anchors (forward):
+ *
+ *   ovr 50  W  → 0.35 P/G
+ *   ovr 60  C  → 0.55 P/G
+ *   ovr 70  C  → 0.80 P/G
+ *   ovr 80  C  → 1.05 P/G
+ *   ovr 90  C  → 1.30 P/G
+ *
+ * Centermen get a small playmaking bonus (+0.05) versus wings.
+ * Goalies are not handled here; pass 0.92 (league-average sv%) or equivalent.
+ *
+ * RULESET-AWARE: this is a supply of numbers, not a policy — callers can
+ * substitute a different curve by passing the expectations arg to developPlayers.
+ */
+export function expectedPointsFor(ovr: number, position: Position, _role: PlayerRole): number {
+  if (position === 'G') {
+    // Goalies use save-percentage expectations; fallback to a neutral 1.0 ratio.
+    return 0.915
+  }
+  // Linear interpolation: 0.35 P/G at ovr 50 → 1.30 P/G at ovr 90 (forward).
+  // Clamped to a reasonable range so fringe call-ups and legends don't break the math.
+  const forwardBase = 0.35 + ((Math.max(40, Math.min(99, ovr)) - 50) / 40) * 0.95
+  const posBonus = position === 'C' ? 0.05 : 0
+  const defensemenScale = position === 'D' ? 0.55 : 1.0
+  return Math.max(0.05, (forwardBase + posBonus) * defensemenScale)
+}
+
+/**
  * Annual development pass over every player: age +1, contract year burned,
  * attributes grown/declined per the model above, composites recomputed
  * (mandatory — they are a cache of ratings), fatigue cleared and form
  * regressed toward 0 for the new season.
  *
+ * Optional performance args (back-compat: existing callers pass none):
+ *  - performance(id)    → { points, gamesPlayed, position, toiPerGame? }
+ *  - expectations(id)   → expected P/G (supply via expectedPointsFor())
+ *  - devModifier(id)    → locker-room mentorship multiplier [0.9–1.15], default 1
+ *
  * Returns seeds for league news: the biggest overall risers ('breakout') and
- * fallers ('decline'), at most five of each league-wide.
+ * fallers ('decline'), at most five of each league-wide. Additionally emits
+ * 'confidenceBoost' and 'crisisOfConfidence' seeds for the top 4 league-wide
+ * performance-driven morale swings (requires performance arg to be present).
  */
 export function developPlayers(args: {
   players: Map<PlayerId, Player>
   gamesPlayedById: Map<PlayerId, number> | ((id: PlayerId) => number)
   year: number
   rng: Rng
-}): { newsSeeds: Array<{ playerId: PlayerId; kind: 'breakout' | 'decline' }> } {
+  /** Optional: supply actual season stats per player. */
+  performance?: (id: PlayerId) => {
+    points: number
+    gamesPlayed: number
+    position: Position
+    /** Goalie save percentage — used instead of P/G when position is 'G'. */
+    savePct?: number
+  }
+  /** Optional: supply expected P/G (or expected sv% for goalies). Defaults to expectedPointsFor. */
+  expectations?: (id: PlayerId) => number
+  /** Optional: locker-room mentorship multiplier per player [0.9–1.15]. Defaults to 1. */
+  devModifier?: (id: PlayerId) => number
+}): { newsSeeds: Array<{ playerId: PlayerId; kind: 'breakout' | 'decline' | 'confidenceBoost' | 'crisisOfConfidence' }> } {
   const { players, rng } = args
   const gamesPlayed = toGamesLookup(args.gamesPlayedById)
+
+  /** Confidence swings tracked for news-seed emission at the end. */
+  interface ConfidenceEntry { playerId: PlayerId; swing: number }
+  const confidenceSwings: ConfidenceEntry[] = []
 
   const deltas: Array<{ playerId: PlayerId; delta: number }> = []
   for (const p of players.values()) {
@@ -149,15 +209,80 @@ export function developPlayers(args: {
     p.age += 1
     p.contract.yearsRemaining = Math.max(0, p.contract.yearsRemaining - 1)
 
+    // ── performance ratio ─────────────────────────────────────────────────
+    // growthMult: multiplicative modifier on the base growth rate (U26).
+    // declineExtraPass: whether to run a second decline pass (vet underperformers).
+    let growthMult = 1.0
+    let declineExtraPass = false
+    let moraleSwing = 0
+
+    if (args.performance) {
+      const perf = args.performance(p.id)
+      const gp = perf.gamesPlayed
+
+      if (gp >= 20) {
+        let ratio: number
+        if (perf.position === 'G' && perf.savePct !== undefined) {
+          // Goalie: ratio = actual sv% / expected sv%.
+          const expSv = args.expectations
+            ? args.expectations(p.id)
+            : expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+          ratio = expSv > 0 ? perf.savePct / expSv : 1.0
+        } else {
+          // Skater: ratio = actual P/G / expected P/G.
+          const ppg = perf.points / gp
+          const expPpg = args.expectations
+            ? args.expectations(p.id)
+            : expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+          ratio = expPpg > 0 ? ppg / expPpg : 1.0
+        }
+
+        const devMod = args.devModifier ? args.devModifier(p.id) : 1.0
+
+        if (ratio > 1.35) {
+          // Over-performer: growth multiplier up to +60%; confidence boost.
+          const boost = Math.min(0.6, (ratio - 1.35) * 0.8 + 0.1)
+          growthMult = (1.0 + boost) * devMod
+          moraleSwing = 5
+        } else if (ratio < 0.6) {
+          // Under-performer: U26 growth stunted; 29+ decline accelerated.
+          // Determination ≥ 15 floors the growth stunting at −25% (multiplier 0.75).
+          const determination = p.personality.determination
+          const stunFloor = determination >= 15 ? 0.75 : 0.5
+          growthMult = stunFloor * devMod
+          if (seasonAge >= 29) declineExtraPass = true
+          moraleSwing = -5
+        } else {
+          // Neutral: still apply devModifier.
+          growthMult = devMod
+        }
+
+        if (moraleSwing !== 0) {
+          p.morale = Math.max(0, Math.min(100, p.morale + moraleSwing))
+          confidenceSwings.push({ playerId: p.id, swing: moraleSwing })
+        }
+      } else {
+        // Fewer than 20 games: still apply devModifier if present (e.g. mentor effect).
+        growthMult = args.devModifier ? args.devModifier(p.id) : 1.0
+      }
+    } else if (args.devModifier) {
+      // devModifier can be supplied without performance (mentorship alone).
+      growthMult = args.devModifier(p.id)
+    }
+
+    // ── growth / decline ──────────────────────────────────────────────────
+
     if (seasonAge < 26) {
       const persona =
         (p.personality.ambition + p.personality.professionalism + p.personality.determination) / 3
       const personaFactor = 0.5 + (persona / 20) * 0.8
       const gamesFactor = 0.6 + 0.4 * Math.min(1, gamesPlayed(p.id) / 60)
       const baseRate = 0.12 + 0.03 * (26 - seasonAge)
-      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor, rng)
+      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult, rng)
     } else if (seasonAge >= 30) {
       applyDecline(p.ratings, seasonAge, rng)
+      // Second pass for vet underperformers (accelerated −50% decline).
+      if (declineExtraPass) applyDecline(p.ratings, seasonAge, rng)
     }
 
     p.composites = computeComposites(p.ratings, p.role, p.position)
@@ -176,10 +301,23 @@ export function developPlayers(args: {
     .filter((d) => d.delta <= -2)
     .sort((a, b) => a.delta - b.delta)
     .slice(0, 5)
+
+  // Top 4 league-wide confidence swings in each direction.
+  const topBoosts = confidenceSwings
+    .filter((e) => e.swing > 0)
+    .sort((a, b) => b.swing - a.swing)
+    .slice(0, 4)
+  const topCrises = confidenceSwings
+    .filter((e) => e.swing < 0)
+    .sort((a, b) => a.swing - b.swing)
+    .slice(0, 4)
+
   return {
     newsSeeds: [
       ...risers.map((d) => ({ playerId: d.playerId, kind: 'breakout' as const })),
-      ...fallers.map((d) => ({ playerId: d.playerId, kind: 'decline' as const }))
+      ...fallers.map((d) => ({ playerId: d.playerId, kind: 'decline' as const })),
+      ...topBoosts.map((e) => ({ playerId: e.playerId, kind: 'confidenceBoost' as const })),
+      ...topCrises.map((e) => ({ playerId: e.playerId, kind: 'crisisOfConfidence' as const }))
     ]
   }
 }

@@ -20,8 +20,10 @@ export type {
   DashboardView,
   DraftView,
   FinanceView,
+  HistoryView,
   InboxView,
   LinesUpdate,
+  LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
@@ -31,6 +33,7 @@ export type {
   StandingsView,
   StatsView,
   TacticsView,
+  TentpoleView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -41,8 +44,10 @@ import type {
   DashboardView,
   DraftView,
   FinanceView,
+  HistoryView,
   InboxView,
   LinesUpdate,
+  LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
@@ -52,6 +57,7 @@ import type {
   StandingsView,
   StatsView,
   TacticsView,
+  TentpoleView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -112,6 +118,13 @@ export type WorkerRequestBody =
   /* ── scouting ── */
   | { type: 'getScouting' }
   | { type: 'assignScout'; scoutId: string; target: ScoutTarget }
+  /* ── story layer ── */
+  /** All-time record boards, season archive, awards, legends/Hall of Fame. */
+  | { type: 'getHistory' }
+  /** The user club's locker room: captaincy, influence, relationships, familiarity. */
+  | { type: 'getLockerRoom' }
+  /** Season tentpoles: trade rumors, deadline recap, lottery, combine, tournament. */
+  | { type: 'getTentpoles' }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -144,5 +157,9 @@ export type WorkerResponse = { id: number } & (
   | { type: 'ok' }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
+  /* ── story layer ── */
+  | { type: 'history'; history: HistoryView }
+  | { type: 'lockerRoom'; lockerRoom: LockerRoomView }
+  | { type: 'tentpoles'; tentpoles: TentpoleView }
   | { type: 'error'; message: string }
 )

@@ -20,6 +20,17 @@ import type {
 } from '@domain'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
+import type { ArcsState } from '@engine/story/arcs'
+import type {
+  AwardRecord,
+  LegendRecord,
+  RecordEntry,
+  RecordsState,
+  SeasonArchive,
+} from '@engine/story/records'
+import type { ExpectationsState } from '@engine/story/expectations'
+import type { LockerRoomState } from '@engine/league/lockerRoom'
+import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
 
 /* ────────────────────────── shared atoms ────────────────────────── */
 
@@ -154,6 +165,10 @@ export interface DashboardView {
   salaryCap: number
   /** Champion banner once playoffs finish. */
   championTeamName: string | null
+  /** Pundits' preseason projection for the user's club (1 = title favourite). */
+  predictedRank?: number
+  /** Highest-tension active storylines for the dashboard ticker (max 3). */
+  topArcs: Array<{ kind: string; headline: string }>
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -597,6 +612,30 @@ export interface CareerSnapshot {
    * load and get createInitialScouting applied as a fallback).
    */
   scouting?: ScoutingState
+  /**
+   * Story-layer states (all added after v1 froze; every field is optional and
+   * additive so older saves load with sensible re-initialized fallbacks).
+   */
+  arcs?: ArcsState
+  records?: RecordsState
+  expectations?: ExpectationsState
+  /** [teamId, LockerRoomState][] — one per club. */
+  lockerRooms?: Array<[string, LockerRoomState]>
+  tentpoles?: TentpolesState
+  /** Small story-layer counters not derivable from the states above. */
+  storyMisc?: {
+    /** [playerId, consecutive games with a point]. */
+    pointStreaks: Array<[string, number]>
+    /** [playerId, consecutive scoreless games] (forwards). */
+    scorelessStreaks: Array<[string, number]>
+    /** [teamId, current losing streak]. */
+    losingStreaks: Array<[string, number]>
+    lastDeadlineRecap: ExecutedTradeSummary[] | null
+    lastLottery: {
+      orderAbbrs: string[]
+      movedUp: { teamAbbr: string; from: number; to: number } | null
+    } | null
+  }
 }
 
 export interface SaveSlotInfo {
@@ -644,4 +683,116 @@ export interface ScoutingView {
   teamKnowledge: TeamKnowledgeSummary[]
   /** Recently improved players (highest delta-knowledge), for watch-list panel. */
   topGains: Array<PlayerBadge & { knowledge: number }>
+}
+
+/* ────────────────────────── story layer: history / locker room / tentpoles ────────────────────────── */
+
+/**
+ * League history hub — all-time record boards, archived seasons, award history
+ * and retired legends / Hall of Fame. Response to 'getHistory'.
+ */
+export interface HistoryView {
+  /** Top-10 single-season boards (value descending). */
+  singleSeason: {
+    goals: RecordEntry[]
+    assists: RecordEntry[]
+    points: RecordEntry[]
+    wins: RecordEntry[]
+    savePct: RecordEntry[]
+  }
+  /** Top-10 career boards. */
+  career: {
+    goals: RecordEntry[]
+    assists: RecordEntry[]
+    points: RecordEntry[]
+    gamesPlayed: RecordEntry[]
+  }
+  /** One archive per completed season, oldest first. */
+  seasons: SeasonArchive[]
+  /** Every award handed out, newest season last. */
+  awards: AwardRecord[]
+  /** Retired greats; hallOfFame=true once inducted. */
+  legends: LegendRecord[]
+}
+
+export interface RelationshipView {
+  a: PlayerBadge
+  b: PlayerBadge
+  kind: 'friendship' | 'mentorship' | 'feud'
+  /** 0–100. */
+  strength: number
+  /** Human label, e.g. "Close friends", "Mentoring", "Bad blood". */
+  label: string
+}
+
+/** The user club's locker room. Response to 'getLockerRoom'. */
+export interface LockerRoomView {
+  /** Captain badge, null during a leadership vacancy. */
+  captain: PlayerBadge | null
+  alternates: PlayerBadge[]
+  /** 0–100 room mood. */
+  roomMorale: number
+  /** Most influential players first (top 8). */
+  influence: Array<PlayerBadge & { influence: number }>
+  relationships: RelationshipView[]
+  /** Mean familiarity (0–100) of each current EV unit. */
+  lineFamiliarity: Array<{ label: string; players: string[]; familiarity: number }>
+}
+
+export interface TradeRumorView {
+  playerId: string
+  playerName: string
+  teamId: string
+  teamAbbr: string
+  /** 0–100 rumor heat. */
+  heat: number
+  sinceDay: number
+}
+
+export interface CombineRowView {
+  playerId: string
+  name: string
+  position: string
+  /** Pre-combine scouting rank. */
+  rank: number
+  sprint: number
+  agility: number
+  strength: number
+  interview: 'impressive' | 'solid' | 'concerning'
+  riser: boolean
+  faller: boolean
+}
+
+/** Season tentpole events: rumor mill, deadline recap, lottery, combine, worlds. */
+export interface TentpoleView {
+  rumors: TradeRumorView[]
+  deadlineDay: number
+  deadlinePassed: boolean
+  /** AI-AI deadline-day trades (team abbreviations + asset names), once run. */
+  lastDeadlineRecap: Array<{
+    teamAAbbr: string
+    teamBAbbr: string
+    aGave: string[]
+    bGave: string[]
+  }> | null
+  /** Draft lottery result, once drawn (offseason). */
+  lottery: {
+    /** First overall at index 0 (team abbreviations). */
+    orderAbbrs: string[]
+    movedUp: { teamAbbr: string; from: number; to: number } | null
+  } | null
+  /** Pre-draft combine results, once run. */
+  combine: CombineRowView[] | null
+  /** Post-season world tournament summary, once run. */
+  tournament: {
+    year: number
+    teamA: string
+    teamB: string
+    medalResult: 'teamA' | 'teamB' | 'draw'
+    /** User-club players selected. */
+    userSelected: string[]
+    /** User-club players snubbed. */
+    userSnubbed: string[]
+    returnEffects: Array<{ playerName: string; effect: 'inspired' | 'fatigued' | 'injured' }>
+  } | null
 }

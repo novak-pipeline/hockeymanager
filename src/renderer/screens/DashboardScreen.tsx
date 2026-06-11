@@ -6,6 +6,7 @@ import type {
   ScheduleEntryView,
   ScheduleView,
   StandingRowView,
+  TentpoleView,
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -85,6 +86,11 @@ export function DashboardScreen(): JSX.Element {
   const { data: boxScore } = useScreenData<BoxScoreView | null>(
     () => client.getLastBoxScore(),
     (r) => (r.type === 'boxScore' ? r.boxScore : null)
+  )
+
+  const { data: tentpoles } = useScreenData<TentpoleView>(
+    () => client.getTentpoles(),
+    (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
   if (error) {
@@ -226,7 +232,16 @@ export function DashboardScreen(): JSX.Element {
             <div className="muted small" style={{ marginTop: 'var(--sp-3)' }}>
               {s.goalsFor} GF · {s.goalsAgainst} GA
             </div>
+            {/* Media expectation chip */}
+            {d.predictedRank !== undefined && (
+              <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
+            )}
           </Panel>
+
+          {/* Storylines ticker strip */}
+          {d.topArcs && d.topArcs.length > 0 && (
+            <StorylinesStrip arcs={d.topArcs} />
+          )}
 
           {/* News / last result hero */}
           {d.lastResult ? (
@@ -626,6 +641,69 @@ function MiniLastFive(props: { value: string }): JSX.Element {
         )
       })}
     </span>
+  )
+}
+
+/** Media expectation chip: "Picked 11th — currently 4th" green/red by delta. */
+function ExpectationChip(props: { predictedRank: number; currentRank: number }): JSX.Element {
+  const { predictedRank, currentRank } = props
+  const delta = predictedRank - currentRank // positive = outperforming
+  const chipClass =
+    delta > 0 ? 'chip chip-success' : delta < 0 ? 'chip chip-danger' : 'chip chip-violet'
+  const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '●'
+  return (
+    <div style={{ marginTop: 'var(--sp-3)' }}>
+      <span className={chipClass}>
+        {arrow} Picked {predictedRank}{getOrdinalSuffix(predictedRank)} — currently {currentRank}{getOrdinalSuffix(currentRank)}
+      </span>
+    </div>
+  )
+}
+
+function getOrdinalSuffix(n: number): string {
+  if (n >= 11 && n <= 13) return 'th'
+  switch (n % 10) {
+    case 1: return 'st'
+    case 2: return 'nd'
+    case 3: return 'rd'
+    default: return 'th'
+  }
+}
+
+/** Thin storylines ticker strip listing topArcs headlines as chips. */
+function StorylinesStrip(props: { arcs: Array<{ kind: string; headline: string }> }): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 'var(--sp-2)',
+        padding: '8px 12px',
+        background: 'var(--bg1)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.8px',
+          color: 'var(--muted)',
+          alignSelf: 'center',
+          whiteSpace: 'nowrap',
+          marginRight: 4,
+        }}
+      >
+        Storylines
+      </span>
+      {props.arcs.map((arc, i) => (
+        <span key={i} className="chip chip-violet" style={{ fontSize: 11 }}>
+          {arc.headline}
+        </span>
+      ))}
+    </div>
   )
 }
 

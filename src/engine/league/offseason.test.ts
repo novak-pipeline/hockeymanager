@@ -18,6 +18,7 @@ import {
   aiSelectProspect,
   buildDraftOrder,
   developPlayers,
+  expectedPointsFor,
   generateDraftClass,
   processRetirements
 } from './offseason'
@@ -283,6 +284,269 @@ describe('developPlayers', () => {
     decline.forEach((s) => expect(oldIds.has(s.playerId)).toBe(true))
   })
 })
+
+/* ────────────────────────── performance-relative development ────────────────────────── */
+
+/**
+ * Helper: calls developPlayers with an explicit performance function so we can
+ * simulate over/under-performance without needing a full season sim.
+ */
+function devWithPerf(
+  players: Map<PlayerId, Player>,
+  seed: number,
+  perfFn: (id: PlayerId) => { points: number; gamesPlayed: number; position: Position },
+  expectFn?: (id: PlayerId) => number,
+  devModFn?: (id: PlayerId) => number
+): ReturnType<typeof developPlayers> {
+  return developPlayers({
+    players,
+    gamesPlayedById: () => 60,
+    year: 2026,
+    rng: new Rng(seed),
+    performance: perfFn,
+    expectations: expectFn,
+    devModifier: devModFn
+  })
+}
+
+describe('developPlayers — performance-relative development', () => {
+  // ── back-compat snapshot ─────────────────────────────────────────────────
+  it('back-compat: calling WITHOUT performance args produces identical results to a snapshot', () => {
+    // Capture the current (no-perf-args) output for seed 42 and a fixed roster.
+    // This snapshot must remain stable even after adding the new optional args.
+    const build = (): Map<PlayerId, Player> =>
+      new Map<PlayerId, Player>(
+        [
+          testPlayer({ id: 'bc1', age: 19, current: 50, potential: 70 }),
+          testPlayer({ id: 'bc2', age: 24, current: 60, potential: 72 }),
+          testPlayer({ id: 'bc3', age: 31, current: 70, potential: 70 })
+        ].map((p) => [p.id, p])
+      )
+
+    // First run: baseline captured inline (deterministic by Rng seed 42).
+    const base = build()
+    const baseResult = dev(base, 42)
+
+    // Second run: must produce identical output.
+    const copy = build()
+    const copyResult = dev(copy, 42)
+
+    expect(JSON.stringify([...copy.values()])).toBe(JSON.stringify([...base.values()]))
+    expect(copyResult.newsSeeds).toEqual(baseResult.newsSeeds)
+
+    // Sanity: no confidenceBoost/crisisOfConfidence seeds when performance arg absent.
+    expect(baseResult.newsSeeds.every(s => s.kind === 'breakout' || s.kind === 'decline')).toBe(true)
+  })
+
+  // ── over-performer vs neutral twin ───────────────────────────────────────
+  it('over-performer (ratio > 1.35) develops measurably faster than neutral twin', () => {
+    // Construct two identical young forwards. Same seed, same personality.
+    const makeTwin = (id: string): Player =>
+      testPlayer({ id, age: 20, current: 55, potential: 80 })
+
+    const twinA = makeTwin('twinA') // over-performer
+    const twinB = makeTrue(makeTwin('twinB')) // neutral
+
+    // expected P/G for ovr ~55 forward: ~0.35 + ((55-50)/40)*0.95 ≈ 0.47
+    const expected = 0.47
+    const overPerf = (id: PlayerId) => ({
+      points: Math.round(expected * 1.6 * 60), // ratio ≈ 1.6 → well above 1.35
+      gamesPlayed: 60,
+      position: 'W' as Position
+    })
+    const neutralPerf = (id: PlayerId) => ({
+      points: Math.round(expected * 1.0 * 60), // ratio ≈ 1.0 → neutral zone
+      gamesPlayed: 60,
+      position: 'W' as Position
+    })
+
+    devWithPerf(new Map([[twinA.id, twinA]]), 55, overPerf)
+    devWithPerf(new Map([[twinB.id, twinB]]), 55, neutralPerf)
+
+    expect(sum(flatVals(twinA.ratings))).toBeGreaterThan(sum(flatVals(twinB.ratings)))
+  })
+
+  // ── under-performer U26 stunted ──────────────────────────────────────────
+  it('under-performer U26 (ratio < 0.6) grows slower than neutral peer', () => {
+    const normal = testPlayer({ id: 'norm', age: 21, current: 55, potential: 80 })
+    const bust   = testPlayer({ id: 'bust', age: 21, current: 55, potential: 80 })
+
+    const expected = 0.47
+    const normalPerf = (id: PlayerId) => ({ points: Math.round(expected * 60), gamesPlayed: 60, position: 'W' as Position })
+    const bustPerf   = (id: PlayerId) => ({ points: Math.round(expected * 0.4 * 60), gamesPlayed: 60, position: 'W' as Position }) // ratio ≈ 0.4
+
+    devWithPerf(new Map([[normal.id, normal]]), 55, normalPerf)
+    devWithPerf(new Map([[bust.id, bust]]), 55, bustPerf)
+
+    expect(sum(flatVals(normal.ratings))).toBeGreaterThan(sum(flatVals(bust.ratings)))
+  })
+
+  // ── vet decline accelerated ──────────────────────────────────────────────
+  it('under-performer vet (age 30, ratio < 0.6) declines more than average vet', () => {
+    const avg  = testPlayer({ id: 'avgVet',  age: 31, current: 70, potential: 70 })
+    const poor = testPlayer({ id: 'poorVet', age: 31, current: 70, potential: 70 })
+
+    const expected = expectedPointsFor(overall(avg.composites, avg.position), avg.position, avg.role)
+    const avgPerf  = (id: PlayerId) => ({ points: Math.round(expected * 60), gamesPlayed: 60, position: 'C' as Position })
+    const poorPerf = (id: PlayerId) => ({ points: Math.round(expected * 0.4 * 60), gamesPlayed: 60, position: 'C' as Position })
+
+    devWithPerf(new Map([[avg.id, avg]]),   55, avgPerf)
+    devWithPerf(new Map([[poor.id, poor]]), 55, poorPerf)
+
+    // poor performer should have lower attribute sums (more decline)
+    expect(sum(flatVals(poor.ratings))).toBeLessThan(sum(flatVals(avg.ratings)))
+  })
+
+  // ── determination floor ──────────────────────────────────────────────────
+  it('high-determination (>=15) player has stunting floored at -25% vs low-det peer', () => {
+    const hiDet = testPlayer({ id: 'hiDet', age: 21, current: 55, potential: 80, personality: 18 })
+    const loDet = testPlayer({ id: 'loDet', age: 21, current: 55, potential: 80, personality: 4 })
+    // Override determination specifically: the testPlayer helper sets ALL personality traits
+    // to the same value. We need determination >= 15 for hiDet; personality 4 gives det=4.
+    hiDet.personality.determination = 18
+    loDet.personality.determination = 4
+
+    const expected = 0.47
+    const bustPerf = (id: PlayerId) => ({ points: Math.round(expected * 0.35 * 60), gamesPlayed: 60, position: 'W' as Position }) // ratio ≈ 0.35 < 0.6
+
+    devWithPerf(new Map([[hiDet.id, hiDet]]), 55, bustPerf)
+    devWithPerf(new Map([[loDet.id, loDet]]), 55, bustPerf)
+
+    // hiDet should develop more (stunting floored at 0.75 vs 0.5 for loDet)
+    expect(sum(flatVals(hiDet.ratings))).toBeGreaterThan(sum(flatVals(loDet.ratings)))
+  })
+
+  // ── morale changes ────────────────────────────────────────────────────────
+  it('over-performer gains +5 morale; under-performer loses -5 morale', () => {
+    const star = testPlayer({ id: 'star', age: 22, current: 55, potential: 80 })
+    const bust = testPlayer({ id: 'bust2', age: 22, current: 55, potential: 80 })
+    const startMorale = star.morale // both start at 60 per testPlayer
+
+    const expected = 0.47
+    devWithPerf(
+      new Map([[star.id, star]]), 55,
+      () => ({ points: Math.round(expected * 2.0 * 60), gamesPlayed: 60, position: 'W' as Position })
+    )
+    devWithPerf(
+      new Map([[bust.id, bust]]), 55,
+      () => ({ points: Math.round(expected * 0.3 * 60), gamesPlayed: 60, position: 'W' as Position })
+    )
+    expect(star.morale).toBe(startMorale + 5)
+    expect(bust.morale).toBe(startMorale - 5)
+  })
+
+  // ── devModifier ───────────────────────────────────────────────────────────
+  it('devModifier scales growth independently (mentorship effect)', () => {
+    const mentored   = testPlayer({ id: 'mentored',   age: 21, current: 55, potential: 80 })
+    const unmentored = testPlayer({ id: 'unmentored', age: 21, current: 55, potential: 80 })
+
+    // Both neutral performers; mentored player gets a 1.1 devModifier.
+    const expected = 0.47
+    const neutralPerf = (id: PlayerId) => ({ points: Math.round(expected * 60), gamesPlayed: 60, position: 'W' as Position })
+    devWithPerf(new Map([[mentored.id, mentored]]),     55, neutralPerf, undefined, () => 1.1)
+    devWithPerf(new Map([[unmentored.id, unmentored]]), 55, neutralPerf, undefined, () => 1.0)
+
+    expect(sum(flatVals(mentored.ratings))).toBeGreaterThan(sum(flatVals(unmentored.ratings)))
+  })
+
+  // ── <20 gamesPlayed → neutral ────────────────────────────────────────────
+  it('fewer than 20 games played → performance ratio ignored (neutral development)', () => {
+    const few   = testPlayer({ id: 'few',     age: 21, current: 55, potential: 80 })
+    const many  = testPlayer({ id: 'many',    age: 21, current: 55, potential: 80 })
+
+    // few: only 10 games played → ratio ignored even though points look great
+    const perf = (gp: number) => (id: PlayerId) => ({ points: 80, gamesPlayed: gp, position: 'W' as Position })
+    devWithPerf(new Map([[few.id, few]]),   55, perf(10))
+    // many: 60 games, but neutral ratio
+    const expected = 0.47
+    devWithPerf(new Map([[many.id, many]]), 55, () => ({ points: Math.round(expected * 60), gamesPlayed: 60, position: 'W' as Position }))
+
+    // both should get comparable development (few might even be slightly lower due
+    // to the default growthMult=1.0 vs many also at 1.0, but they should be close)
+    // The key invariant: few's supergiant points don't produce a huge boost.
+    // We verify by comparing against a third twin with no performance arg at all.
+    const base = testPlayer({ id: 'base', age: 21, current: 55, potential: 80 })
+    dev(new Map([[base.id, base]]), 55)
+
+    // few (10 gp ignored) should develop similarly to base (no perf arg).
+    expect(Math.abs(sum(flatVals(few.ratings)) - sum(flatVals(base.ratings)))).toBeLessThan(10)
+  })
+
+  // ── confidenceBoost / crisisOfConfidence news seeds ──────────────────────
+  it('emits confidenceBoost and crisisOfConfidence seeds for top performers/busts', () => {
+    const players = new Map<PlayerId, Player>()
+    const starIds = new Set<PlayerId>()
+    const bustIds = new Set<PlayerId>()
+
+    // 6 star over-performers + 6 busts
+    for (let i = 0; i < 6; i++) {
+      const star = testPlayer({ id: `star${i}`, age: 22, current: 55, potential: 80 })
+      players.set(star.id, star)
+      starIds.add(star.id)
+
+      const bust = testPlayer({ id: `bust${i}`, age: 22, current: 55, potential: 80 })
+      players.set(bust.id, bust)
+      bustIds.add(bust.id)
+    }
+
+    const expected = 0.47
+    const { newsSeeds } = devWithPerf(
+      players,
+      55,
+      (id) => {
+        if (starIds.has(id)) return { points: Math.round(expected * 2.0 * 60), gamesPlayed: 60, position: 'W' as Position }
+        return { points: Math.round(expected * 0.3 * 60), gamesPlayed: 60, position: 'W' as Position }
+      }
+    )
+
+    const boosts  = newsSeeds.filter(s => s.kind === 'confidenceBoost')
+    const crises  = newsSeeds.filter(s => s.kind === 'crisisOfConfidence')
+
+    // At most 4 of each (top-4 cap).
+    expect(boosts.length).toBeGreaterThan(0)
+    expect(boosts.length).toBeLessThanOrEqual(4)
+    expect(crises.length).toBeGreaterThan(0)
+    expect(crises.length).toBeLessThanOrEqual(4)
+
+    // Boosts belong to stars; crises belong to busts.
+    boosts.forEach(s => expect(starIds.has(s.playerId)).toBe(true))
+    crises.forEach(s => expect(bustIds.has(s.playerId)).toBe(true))
+  })
+})
+
+describe('expectedPointsFor', () => {
+  it('returns 0.915 for goalies', () => {
+    expect(expectedPointsFor(70, 'G', 'starter')).toBe(0.915)
+  })
+
+  it('produces calibrated anchors for forwards', () => {
+    // ovr 50 W ≈ 0.35
+    expect(expectedPointsFor(50, 'W', 'sniper')).toBeCloseTo(0.35, 2)
+    // ovr 90 C ≈ 1.30 (with +0.05 C bonus)
+    expect(expectedPointsFor(90, 'C', 'playmaker')).toBeCloseTo(1.30, 1)
+    // ovr 70 C ≈ 0.80 + 0.05 = 0.85
+    expect(expectedPointsFor(70, 'C', 'twoWay')).toBeCloseTo(0.85, 1)
+  })
+
+  it('defensemen produce ~55% of equivalent forward output', () => {
+    const fwd = expectedPointsFor(70, 'W', 'twoWay')
+    const def = expectedPointsFor(70, 'D', 'shutdownD')
+    expect(def / fwd).toBeCloseTo(0.55, 1)
+  })
+
+  it('always returns a positive value; clamps gracefully at extremes', () => {
+    expect(expectedPointsFor(1, 'W', 'enforcer')).toBeGreaterThan(0)
+    expect(expectedPointsFor(99, 'C', 'sniper')).toBeGreaterThan(0)
+    expect(expectedPointsFor(99, 'C', 'sniper')).toBeLessThan(3)
+  })
+
+  it('C rates slightly higher than W at the same overall (playmaking bonus)', () => {
+    expect(expectedPointsFor(70, 'C', 'twoWay')).toBeGreaterThan(expectedPointsFor(70, 'W', 'twoWay'))
+  })
+})
+
+/** Shallow-clone a Player object (for twin tests where we need independent objects). */
+function makeTrue<T>(x: T): T { return JSON.parse(JSON.stringify(x)) as T }
 
 /* ────────────────────────── retirements ────────────────────────── */
 

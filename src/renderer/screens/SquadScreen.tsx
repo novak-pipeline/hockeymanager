@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { SquadView } from '../../worker/protocol'
 import type { SquadRowView } from '../../engine/career/views'
-import { PlayerLink } from '../components/NavContext'
+import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -148,6 +148,7 @@ function GoalieCols({ row }: { row: SquadRowView }): JSX.Element {
 
 export function SquadScreen(): JSX.Element {
   const client = useClient()
+  const nav = useNav()
   const { data, loading, error } = useScreenData<SquadView>(
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
@@ -182,7 +183,7 @@ export function SquadScreen(): JSX.Element {
   return (
     <section className="stack">
       <ScreenHeader title={data ? data.teamName : 'Squad'}>
-        <div className="row">
+        <div className="row" style={{ gap: 'var(--sp-2)' }}>
           <input
             className="input"
             placeholder="Search player…"
@@ -190,6 +191,13 @@ export function SquadScreen(): JSX.Element {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => nav.navigate('lockerRoom')}
+            title="View locker room dynamics"
+          >
+            Locker Room
+          </button>
         </div>
       </ScreenHeader>
 
