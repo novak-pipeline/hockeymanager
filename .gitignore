@@ -1,0 +1,15 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+.vite/
+
+# Raw NHL play-by-play cache (calibration dev tool). Only aggregates are committed.
+.cache/
+_nhl_sample.json
+_diag.txt
+
+# Pre-build safety backup
+.backup-pre-build.zip
+tsconfig.*.tsbuildinfo

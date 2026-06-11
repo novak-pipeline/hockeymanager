@@ -1,0 +1,587 @@
+/**
+ * UI view models — the frozen contract between the Career (worker side) and the
+ * React screens. Screens import ONLY these types (plus protocol.ts); the Career
+ * builds them. Everything here must survive structured clone (no Maps, no class
+ * instances, no functions).
+ *
+ * Date convention: the fictional season starts October 1 of its year; match day
+ * `d` maps to `seasonStart + (d-1) * 2` calendar days. Use `dayToDateISO` so the
+ * whole app agrees. This is presentation only — the engine still runs on
+ * integer match days.
+ */
+import type {
+  DraftPick,
+  GameResult,
+  Injury,
+  NewsItem,
+  PlayoffsState,
+  Position,
+  TeamTactics,
+} from '@domain'
+
+/* ────────────────────────── shared atoms ────────────────────────── */
+
+export type CareerPhase = 'regularSeason' | 'playoffs' | 'offseason'
+
+/** Minimal player chip used anywhere a player is listed/linked. */
+export interface PlayerBadge {
+  playerId: string
+  name: string
+  position: Position
+  age: number
+  overall: number
+}
+
+export interface ContractView {
+  /** Dollars per year. */
+  salary: number
+  yearsRemaining: number
+  expiryYear: number
+  noTradeClause: boolean
+  twoWay: boolean
+}
+
+export interface SkaterSeasonLine {
+  gamesPlayed: number
+  goals: number
+  assists: number
+  points: number
+  plusMinus: number
+  penaltyMinutes: number
+  shots: number
+  /** Average time on ice per game, seconds. */
+  toiPerGame: number
+  ppGoals: number
+  ppAssists: number
+}
+
+export interface GoalieSeasonLine {
+  gamesPlayed: number
+  wins: number
+  losses: number
+  savePct: number
+  goalsAgainstAverage: number
+  shutouts: number
+  saves: number
+  shotsAgainst: number
+}
+
+/** ISO date string for a given season year + match day (Oct 1 + (day-1)*2). */
+export function dayToDateISO(year: number, day: number): string {
+  const d = new Date(Date.UTC(year, 9, 1))
+  d.setUTCDate(d.getUTCDate() + Math.max(0, day - 1) * 2)
+  return d.toISOString().slice(0, 10)
+}
+
+/* ────────────────────────── dashboard ────────────────────────── */
+
+export interface StandingRowView {
+  teamId: string
+  name: string
+  abbreviation: string
+  gamesPlayed: number
+  wins: number
+  losses: number
+  overtimeLosses: number
+  points: number
+  goalsFor: number
+  goalsAgainst: number
+  /** 'W3', 'L1' style streak label. */
+  streak: string
+  /** Results of last five user-relevant games, newest last, 'W' | 'L' | 'O'. */
+  lastFive: string
+}
+
+export interface NextGameView {
+  day: number
+  date: string
+  opponentTeamId: string
+  opponentName: string
+  opponentAbbr: string
+  home: boolean
+  /** Opponent's league rank for the pre-match blurb. */
+  opponentRank: number
+}
+
+export interface LastResultView {
+  day: number
+  date: string
+  homeAbbr: string
+  awayAbbr: string
+  homeGoals: number
+  awayGoals: number
+  decidedBy: GameResult['decidedBy']
+}
+
+export interface DashboardView {
+  leagueName: string
+  year: number
+  phase: CareerPhase
+  /** Last completed match day (0 = season not started). */
+  day: number
+  totalDays: number
+  date: string
+  /** Label for the Continue button, e.g. "Continue to 12 Oct" or "Start draft". */
+  continueLabel: string
+  userTeam: {
+    teamId: string
+    name: string
+    abbreviation: string
+    rank: number
+    conferenceRank: number
+    standing: StandingRowView
+  }
+  nextGame: NextGameView | null
+  lastResult: LastResultView | null
+  /** Compact division table containing the user's club. */
+  divisionStandings: StandingRowView[]
+  divisionName: string
+  unreadNews: number
+  /** Top three team scorers for the sidebar. */
+  topScorers: Array<PlayerBadge & { points: number; goals: number; assists: number }>
+  injuries: Array<PlayerBadge & { injury: Injury }>
+  capUsed: number
+  salaryCap: number
+  /** Champion banner once playoffs finish. */
+  championTeamName: string | null
+}
+
+/* ────────────────────────── squad / player ────────────────────────── */
+
+export interface SquadRowView extends PlayerBadge {
+  role: string
+  handedness: 'L' | 'R'
+  /** 0–100; 100 = fully fresh. */
+  condition: number
+  morale: number
+  /** Hot/cold streak, roughly -5..5. */
+  form: number
+  injury: Injury | null
+  contract: ContractView
+  /** e.g. "L1", "D2", "G1", "—" for scratches; suffix "/PP1" when on a unit. */
+  lineLabel: string
+  skater: SkaterSeasonLine | null
+  goalie: GoalieSeasonLine | null
+}
+
+export interface SquadView {
+  teamName: string
+  rows: SquadRowView[]
+}
+
+export interface AttributeGroupView {
+  /** "Technical" | "Physical" | "Mental" | "Defensive" | "Goaltending" */
+  name: string
+  /** Display label → 0–100 value, in stable display order. */
+  attributes: Array<{ label: string; value: number }>
+}
+
+export interface PlayerProfileView extends PlayerBadge {
+  teamId: string | null
+  teamName: string | null
+  handedness: 'L' | 'R'
+  role: string
+  condition: number
+  morale: number
+  form: number
+  injury: Injury | null
+  contract: ContractView | null
+  /** Scout's view of remaining upside: 1–5 stars. */
+  potentialStars: number
+  personality: Array<{ label: string; value: number }>
+  attributeGroups: AttributeGroupView[]
+  composites: Array<{ label: string; value: number }>
+  /** Current season first, then history. */
+  seasons: Array<{
+    year: number
+    teamAbbr: string
+    skater: SkaterSeasonLine | null
+    goalie: GoalieSeasonLine | null
+  }>
+}
+
+/* ────────────────────────── tactics / lines ────────────────────────── */
+
+export interface LineSlotView {
+  /** 'LW' | 'C' | 'RW' | 'LD' | 'RD' | 'G' */
+  slot: string
+  player: PlayerBadge | null
+}
+
+export interface LinesView {
+  forwards: LineSlotView[][]
+  defensePairs: LineSlotView[][]
+  goalies: LineSlotView[]
+  powerPlayUnits: LineSlotView[][]
+  penaltyKillUnits: LineSlotView[][]
+  /** Healthy roster not currently in any even-strength line. */
+  scratches: PlayerBadge[]
+  /** Human-readable validation problems ("L3 has no centre", "injured player on PP1"). */
+  issues: string[]
+}
+
+export interface TacticsView {
+  tactics: TeamTactics
+  lines: LinesView
+}
+
+/** Sent UI → worker to overwrite even-strength + special-teams deployment. */
+export interface LinesUpdate {
+  forwards: string[][]
+  defensePairs: string[][]
+  goalies: string[]
+  powerPlayUnits: string[][]
+  penaltyKillUnits: string[][]
+}
+
+/* ────────────────────────── schedule / standings / stats ────────────────────────── */
+
+export interface ScheduleEntryView {
+  gameId: string
+  day: number
+  date: string
+  opponentTeamId: string
+  opponentName: string
+  opponentAbbr: string
+  home: boolean
+  /** Null until played. */
+  result: (GameResult & { won: boolean }) | null
+  isNext: boolean
+}
+
+export interface ScheduleView {
+  entries: ScheduleEntryView[]
+}
+
+export interface StandingsView {
+  /** League-wide table, best first. */
+  overall: StandingRowView[]
+  conferences: Array<{ name: string; rows: StandingRowView[] }>
+  divisions: Array<{ name: string; conferenceName: string; rows: StandingRowView[] }>
+}
+
+export interface LeaderRowView extends PlayerBadge {
+  teamAbbr: string
+  gamesPlayed: number
+  /** The stat being ranked, already rounded for display. */
+  value: number
+}
+
+export interface StatsView {
+  points: LeaderRowView[]
+  goals: LeaderRowView[]
+  assists: LeaderRowView[]
+  /** Min-games-qualified goalie boards. */
+  savePct: LeaderRowView[]
+  goalsAgainstAvg: LeaderRowView[]
+  wins: LeaderRowView[]
+}
+
+/* ────────────────────────── trades ────────────────────────── */
+
+export interface PickAssetView {
+  /** Stable key, e.g. "2026-r1-t3". */
+  id: string
+  year: number
+  round: number
+  originalTeamAbbr: string
+  label: string
+}
+
+export interface TradeSideView {
+  teamId: string
+  teamName: string
+  teamAbbr: string
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number }>
+  picks: PickAssetView[]
+}
+
+export interface TradeOfferView {
+  offerId: string
+  /** What the user receives / gives up. */
+  receive: TradeSideView
+  give: TradeSideView
+  /** AI's one-line pitch. */
+  message: string
+  expiresOnDay: number
+}
+
+/** UI → worker proposal: asset ids only. */
+export interface TradeProposal {
+  partnerTeamId: string
+  givePlayerIds: string[]
+  givePickIds: string[]
+  receivePlayerIds: string[]
+  receivePickIds: string[]
+}
+
+export interface TradeEvaluation {
+  verdict: 'accept' | 'reject' | 'counter'
+  /** AI's reasoning, shown to the user. */
+  message: string
+  /** Present when verdict is 'counter'. */
+  counter: TradeOfferView | null
+}
+
+export interface TradePartnerView {
+  teamId: string
+  teamName: string
+  teamAbbr: string
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  picks: PickAssetView[]
+}
+
+export interface TradesView {
+  /** Offers AI clubs have sent the user. */
+  incoming: TradeOfferView[]
+  /** Every other club's tradeable assets for the proposal builder. */
+  partners: TradePartnerView[]
+  myPlayers: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  myPicks: PickAssetView[]
+  /** Trades are frozen outside the regular season (and after the deadline day, if set). */
+  deadlineDay: number | null
+  tradingOpen: boolean
+}
+
+/* ────────────────────────── draft / offseason / finances ────────────────────────── */
+
+export interface ProspectRowView extends PlayerBadge {
+  /** Scouting consensus, 1 = best. */
+  rank: number
+  potentialStars: number
+  drafted: boolean
+}
+
+export interface DraftPickRowView {
+  overallPick: number
+  round: number
+  teamId: string
+  teamAbbr: string
+  /** Filled once selected. */
+  selection: (PlayerBadge & { rank: number }) | null
+  isUserPick: boolean
+}
+
+export interface DraftView {
+  year: number
+  rounds: number
+  /** Full board in pick order. */
+  board: DraftPickRowView[]
+  /** Index into board of the next selection; -1 when complete. */
+  onClockIndex: number
+  userIsOnClock: boolean
+  prospects: ProspectRowView[]
+  complete: boolean
+}
+
+export interface ResignRowView extends PlayerBadge {
+  currentSalary: number
+  /** Agent's asking terms. */
+  askSalary: number
+  askYears: number
+  morale: number
+  /** Set when negotiations concluded. */
+  status: 'pending' | 'signed' | 'walked'
+}
+
+export interface FreeAgentRowView extends PlayerBadge {
+  askSalary: number
+  askYears: number
+  /** Days until this player will take the best standing offer. */
+  decidesInDays: number
+}
+
+export interface OffseasonView {
+  year: number
+  stage: 'awards' | 'draft' | 'resign' | 'freeAgency' | 'preseason'
+  stageLabel: string
+  /** Awards stage: champion + league award winners. */
+  awards: Array<{ award: string; winner: PlayerBadge & { teamAbbr: string } } > | null
+  championTeamName: string | null
+  /** Re-sign stage: the user's expiring contracts. */
+  expiring: ResignRowView[]
+  /** Free-agency stage. */
+  freeAgents: FreeAgentRowView[]
+  capUsed: number
+  salaryCap: number
+}
+
+export interface PayrollRowView extends PlayerBadge {
+  salary: number
+  yearsRemaining: number
+  expiryYear: number
+  noTradeClause: boolean
+  twoWay: boolean
+}
+
+export interface FinanceView {
+  salaryCap: number
+  capUsed: number
+  capSpace: number
+  budget: number
+  payroll: PayrollRowView[]
+  /** Contracts expiring at season end. */
+  expiring: PayrollRowView[]
+  /** League average payroll for context. */
+  leagueAvgPayroll: number
+}
+
+/* ────────────────────────── playoffs ────────────────────────── */
+
+export interface SeriesView {
+  seriesId: string
+  round: number
+  highSeed: { teamId: string; name: string; abbr: string; seed: number; wins: number }
+  lowSeed: { teamId: string; name: string; abbr: string; seed: number; wins: number }
+  /** "BOS leads 3-2", "Series tied 1-1", "NYR wins 4-1". */
+  statusLabel: string
+  finished: boolean
+  involvesUser: boolean
+  games: Array<{
+    gameNumber: number
+    homeAbbr: string
+    awayAbbr: string
+    homeGoals: number
+    awayGoals: number
+    overtime: boolean
+  }>
+}
+
+export interface PlayoffBracketView {
+  year: number
+  bestOf: number
+  rounds: Array<{ round: number; name: string; series: SeriesView[] }>
+  championTeamName: string | null
+  /** Null once the user's club is eliminated (or never qualified). */
+  userAlive: boolean
+  userQualified: boolean
+}
+
+/* ────────────────────────── match center / box score ────────────────────────── */
+
+export interface BoxScoreSkaterRow extends PlayerBadge {
+  goals: number
+  assists: number
+  shots: number
+  penaltyMinutes: number
+  toi: number
+}
+
+export interface BoxScoreGoalieRow extends PlayerBadge {
+  saves: number
+  shotsAgainst: number
+  goalsAgainst: number
+}
+
+export interface GoalLogRow {
+  period: number
+  /** "12:34" elapsed in period. */
+  clock: string
+  teamAbbr: string
+  scorer: string
+  assists: string[]
+  strength: 'ev' | 'pp' | 'sh' | 'en'
+  homeScore: number
+  awayScore: number
+}
+
+export interface PenaltyLogRow {
+  period: number
+  clock: string
+  teamAbbr: string
+  player: string
+  infraction: string
+  minutes: number
+}
+
+export interface BoxScoreView {
+  homeAbbr: string
+  awayAbbr: string
+  homeName: string
+  awayName: string
+  homeGoals: number
+  awayGoals: number
+  decidedBy: GameResult['decidedBy']
+  /** Goals per period, index 0 = P1; OT periods appended. */
+  homeByPeriod: number[]
+  awayByPeriod: number[]
+  homeShots: number
+  awayShots: number
+  goals: GoalLogRow[]
+  penalties: PenaltyLogRow[]
+  homeSkaters: BoxScoreSkaterRow[]
+  awaySkaters: BoxScoreSkaterRow[]
+  homeGoalies: BoxScoreGoalieRow[]
+  awayGoalies: BoxScoreGoalieRow[]
+}
+
+/* ────────────────────────── inbox ────────────────────────── */
+
+export interface InboxView {
+  items: NewsItem[]
+  unread: number
+}
+
+/* ────────────────────────── snapshot (save format) ────────────────────────── */
+
+/**
+ * Career snapshot — the entire save game, version-enveloped. Built by
+ * Career.exportSnapshot(), restored by Career.fromSnapshot(). MUST stay
+ * JSON-serializable: Maps are flattened to entry arrays.
+ */
+export interface SerializedLeagueData {
+  league: unknown
+  /** [teamId, Team][] */
+  teams: Array<[string, unknown]>
+  /** [playerId, Player][] */
+  players: Array<[string, unknown]>
+}
+
+export interface SeasonSummary {
+  year: number
+  championTeamId: string | null
+  championTeamName: string | null
+  /** User club's final regular-season rank. */
+  userRank: number
+  pointsLeader: { name: string; points: number } | null
+}
+
+export interface CareerSnapshot {
+  version: 1
+  savedAt: string
+  saveName: string
+  seed: number
+  userTeamId: string
+  phase: CareerPhase
+  currentDay: number
+  year: number
+  leagueData: SerializedLeagueData
+  standings: Array<[string, unknown]>
+  playerTotals: Array<[string, unknown]>
+  gamesPlayed: Array<[string, number]>
+  news: NewsItem[]
+  newsCounter: number
+  playoffs: PlayoffsState | null
+  offseason: import('@domain').OffseasonState | null
+  picks: DraftPick[]
+  history: SeasonSummary[]
+  /**
+   * Season counters not derivable from playerTotals (added after v1 froze;
+   * optional so older saves load with empty counters).
+   */
+  extraStats?: {
+    goalieWins: Array<[string, number]>
+    goalieLosses: Array<[string, number]>
+    ppGoals: Array<[string, number]>
+    ppAssists: Array<[string, number]>
+  }
+}
+
+export interface SaveSlotInfo {
+  slot: string
+  saveName: string
+  savedAt: string
+  teamName: string
+  year: number
+  phase: CareerPhase
+}

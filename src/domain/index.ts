@@ -1,0 +1,12 @@
+/** Barrel for the domain model. Import everything from '@domain'. */
+export * from './ids'
+export * from './geometry'
+export * from './ratings'
+export * from './tactics'
+export * from './player'
+export * from './team'
+export * from './league'
+export * from './events'
+export * from './playoffs'
+export * from './news'
+export * from './draft'
