@@ -42,6 +42,16 @@ import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 
 export type CareerPhase = 'regularSeason' | 'playoffs' | 'offseason'
 
+/** Archetype summary as shown in player badges and squad rows. */
+export interface ArchetypeInfo {
+  /** e.g. 'sniper', 'playmaker' */
+  key: string
+  /** Human label from ARCHETYPE_META, e.g. 'Sniper' */
+  label: string
+  /** Short trait descriptors, e.g. ['high-end shot', 'wheels'] */
+  descriptors: string[]
+}
+
 /** Minimal player chip used anywhere a player is listed/linked. */
 export interface PlayerBadge {
   playerId: string
@@ -57,6 +67,11 @@ export interface PlayerBadge {
     /** True when knowledge >= 95 (exact data) */
     exact: boolean
   }
+  /**
+   * Archetype classification. Present on own-roster players always; on scouted
+   * players only when knowledge >= 50 (scout's read). Omitted when fogged.
+   */
+  archetype?: ArchetypeInfo
 }
 
 export interface ContractView {
@@ -286,9 +301,55 @@ export interface LinesView {
   issues: string[]
 }
 
+/** Synergy result for one forward line or defence pair. */
+export interface LineSynergyView {
+  /** 0–100 complementarity score. */
+  score: number
+  /** 0.97–1.03 multiplier that composes with chemistryModifier in the sim. */
+  multiplier: number
+  /** Human-readable explanations for the score. */
+  notes: string[]
+}
+
+/** Coach-style suggestion payload on the Tactics screen. */
+export interface CoachSuggestionView {
+  styleLabel: string
+  rationale: string[]
+  /** The fields that would change if the user accepts the suggestion. */
+  suggestedTactics: Partial<TeamTactics>
+}
+
+/** How well the current tactics fit the roster. */
+export interface StyleFitView {
+  /** 0–100 fit score. */
+  fit: number
+  /** Actionable advice to improve the match. */
+  advice: string[]
+}
+
 export interface TacticsView {
   tactics: TeamTactics
   lines: LinesView
+  /**
+   * Per-forward-line synergy (parallel to lines.forwards).
+   * Index i corresponds to lines.forwards[i].
+   */
+  lineSynergies: LineSynergyView[]
+  /**
+   * Per-defence-pair synergy (parallel to lines.defensePairs).
+   * Index i corresponds to lines.defensePairs[i].
+   */
+  pairSynergies: LineSynergyView[]
+  /** Style suggestion from teamStyleFit. */
+  coachSuggestion: CoachSuggestionView
+  /** How well the current tactics match the roster. */
+  styleFit: StyleFitView
+}
+
+/** Sent UI → worker to apply the coach's tactical suggestion to the user team. */
+export interface ApplyCoachSuggestionRequest {
+  /** Fields from CoachSuggestionView.suggestedTactics — merged onto current tactics. */
+  suggestedTactics: Partial<TeamTactics>
 }
 
 /** Sent UI → worker to overwrite even-strength + special-teams deployment. */

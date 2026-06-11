@@ -19,6 +19,9 @@ import {
   puckCarriedOffset,
   skaterBob,
   legSwingAngle,
+  applyDeadzone,
+  emaStep,
+  clampSpeed,
   type Spring1D,
 } from './math'
 import type { GameStream } from '@domain'
@@ -465,5 +468,153 @@ describe('legSwingAngle', () => {
     for (let t = 0; t < 100; t += 0.1) {
       expect(Math.abs(legSwingAngle(t, 1))).toBeLessThanOrEqual(0.5)
     }
+  })
+})
+
+// ── applyDeadzone ─────────────────────────────────────────────────────────────
+
+describe('applyDeadzone', () => {
+  it('returns center when value is within threshold (suppresses sub-threshold input)', () => {
+    // value 50.5 is only 0.5 away from center 50 — threshold 1.0 suppresses it
+    expect(applyDeadzone(50.5, 50, 1.0)).toBe(50)
+    expect(applyDeadzone(49.5, 50, 1.0)).toBe(50)
+  })
+
+  it('returns value when movement exceeds threshold', () => {
+    // value 52 is 2 away from center 50 — threshold 1.0 lets it through
+    expect(applyDeadzone(52, 50, 1.0)).toBe(52)
+    expect(applyDeadzone(48, 50, 1.0)).toBe(48)
+  })
+
+  it('returns value unchanged when threshold is 0 (disabled)', () => {
+    expect(applyDeadzone(50.1, 50, 0)).toBe(50.1)
+  })
+
+  it('returns value unchanged for negative threshold (disabled)', () => {
+    expect(applyDeadzone(50.1, 50, -1)).toBe(50.1)
+  })
+
+  it('suppresses micro-jitter: a sequence of tiny inputs keeps center constant', () => {
+    let center = 0
+    // Simulate 100 frames of sub-threshold noise (±0.5ft, threshold=1.0)
+    const jitter = [0.3, -0.4, 0.2, -0.1, 0.5, -0.3, 0.4, -0.5, 0.1, -0.2]
+    for (let i = 0; i < 100; i++) {
+      const noisy = jitter[i % jitter.length]
+      center = applyDeadzone(noisy, center, 1.0)
+    }
+    // All inputs were within ±0.5 of 0, so center should never have moved
+    expect(center).toBe(0)
+  })
+
+  it('allows large movements through the deadzone', () => {
+    let center = 0
+    // A real play movement: puck moves 30ft
+    const result = applyDeadzone(30, center, 1.0)
+    expect(result).toBe(30)
+  })
+})
+
+// ── emaStep ───────────────────────────────────────────────────────────────────
+
+describe('emaStep', () => {
+  it('moves toward target each frame', () => {
+    const result = emaStep(0, 100, 0.016, 0.5)
+    expect(result).toBeGreaterThan(0)
+    expect(result).toBeLessThan(100)
+  })
+
+  it('does not move when dt=0', () => {
+    expect(emaStep(50, 100, 0, 0.5)).toBe(50)
+  })
+
+  it('does not move when tau=0 (guard)', () => {
+    expect(emaStep(50, 100, 0.016, 0)).toBe(50)
+  })
+
+  it('converges to target over time (long tau)', () => {
+    let v = 0
+    // 5 seconds of 60fps frames with tau=0.5s — should be very close to target
+    for (let i = 0; i < 300; i++) {
+      v = emaStep(v, 100, 0.016, 0.5)
+    }
+    expect(v).toBeCloseTo(100, 0)
+  })
+
+  it('smoothed output has lower variance than a jittery input sequence', () => {
+    // Simulate a puck that jitters ±5ft around 50ft every frame
+    const jitterAmplitude = 5
+    const center = 50
+    const frames = 200
+    let smoothed = center
+    const smoothedValues: number[] = []
+    const rawValues: number[] = []
+
+    for (let i = 0; i < frames; i++) {
+      // Raw jitter: alternating ±5ft around center
+      const raw = center + (i % 2 === 0 ? jitterAmplitude : -jitterAmplitude)
+      rawValues.push(raw)
+      smoothed = emaStep(smoothed, raw, 0.016, 0.5)
+      smoothedValues.push(smoothed)
+    }
+
+    // Compute variance of raw vs smoothed (skip warmup frames)
+    const skip = 20
+    function variance(arr: number[]): number {
+      const slice = arr.slice(skip)
+      const mean = slice.reduce((a, b) => a + b, 0) / slice.length
+      return slice.reduce((a, b) => a + (b - mean) ** 2, 0) / slice.length
+    }
+
+    const rawVar = variance(rawValues)
+    const smoothedVar = variance(smoothedValues)
+    // Smoothed variance must be substantially lower than raw variance
+    expect(smoothedVar).toBeLessThan(rawVar * 0.5)
+  })
+
+  it('is framerate-independent: same result at 30fps vs 60fps over same wall time', () => {
+    // 1 second of 30fps
+    let v30 = 0
+    for (let i = 0; i < 30; i++) v30 = emaStep(v30, 100, 1 / 30, 0.5)
+    // 1 second of 60fps
+    let v60 = 0
+    for (let i = 0; i < 60; i++) v60 = emaStep(v60, 100, 1 / 60, 0.5)
+    // Both should arrive at approximately the same position (within 1ft)
+    expect(Math.abs(v30 - v60)).toBeLessThan(1)
+  })
+})
+
+// ── clampSpeed ────────────────────────────────────────────────────────────────
+
+describe('clampSpeed', () => {
+  it('returns next unchanged when within speed limit', () => {
+    // Moving 0.5ft in 0.016s = ~31 ft/s; limit is 60 ft/s — passes through
+    expect(clampSpeed(0, 0.5, 0.016, 60)).toBeCloseTo(0.5, 5)
+  })
+
+  it('clamps when movement exceeds max speed', () => {
+    // Trying to move 10ft in 0.016s = 625 ft/s; limit 60 ft/s → max 0.96ft
+    const result = clampSpeed(0, 10, 0.016, 60)
+    expect(result).toBeCloseTo(60 * 0.016, 4)
+  })
+
+  it('clamps negative direction', () => {
+    const result = clampSpeed(0, -10, 0.016, 60)
+    expect(result).toBeCloseTo(-60 * 0.016, 4)
+  })
+
+  it('returns next unchanged when dt=0', () => {
+    // dt=0 means no movement allowed — returns next as-is (no clamp to 0)
+    expect(clampSpeed(5, 10, 0, 60)).toBe(10)
+  })
+
+  it('spring step followed by clamp does not overshoot for large dt spikes', () => {
+    // Simulate a 500ms dt spike (browser tab returned to focus)
+    const s: Spring1D = { pos: 0, vel: 0 }
+    const dt = 0.5   // 500ms spike
+    const next = springStep(s, 100, dt, 0.35)
+    const clamped = clampSpeed(s.pos, next.pos, dt, 60)
+    // Max travel in 500ms at 60ft/s = 30ft; spring might want to jump further
+    expect(clamped).toBeLessThanOrEqual(60 * dt + 0.001)
+    expect(clamped).toBeGreaterThanOrEqual(0)
   })
 })

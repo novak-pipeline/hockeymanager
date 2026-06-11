@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { SquadView } from '../../worker/protocol'
-import type { SquadRowView } from '../../engine/career/views'
+import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -54,6 +54,33 @@ function sortRows(rows: SquadRowView[], key: SortKey, asc: boolean): SquadRowVie
     return asc ? av - bv : bv - av
   })
   return m
+}
+
+function ArchetypeLabel({ archetype }: { archetype: ArchetypeInfo | undefined }): JSX.Element {
+  if (!archetype) {
+    return (
+      <span className="muted small" style={{ fontStyle: 'italic', fontSize: 10 }}>
+        Unknown
+      </span>
+    )
+  }
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        fontSize: 10,
+        fontWeight: 600,
+        color: 'var(--violet-h)',
+        background: 'var(--violet-dim)',
+        borderRadius: 3,
+        padding: '1px 5px',
+        whiteSpace: 'nowrap',
+      }}
+      title={archetype.descriptors.length > 0 ? archetype.descriptors.join(' · ') : archetype.label}
+    >
+      {archetype.label}
+    </span>
+  )
 }
 
 function OvrChip({ value }: { value: number }): JSX.Element {
@@ -270,13 +297,18 @@ export function SquadScreen(): JSX.Element {
                     return (
                       <tr key={row.playerId} style={row.injury ? { opacity: 0.72 } : undefined}>
                         <td>
-                          <PlayerLink playerId={row.playerId} name={row.name} />
-                          {row.contract.noTradeClause && (
-                            <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>NTC</span>
-                          )}
-                          {row.contract.twoWay && (
-                            <span className="chip" style={{ marginLeft: 4, fontSize: 9 }}>2W</span>
-                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                              <PlayerLink playerId={row.playerId} name={row.name} />
+                              {row.contract.noTradeClause && (
+                                <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
+                              )}
+                              {row.contract.twoWay && (
+                                <span className="chip" style={{ marginLeft: 2, fontSize: 9 }}>2W</span>
+                              )}
+                            </div>
+                            <ArchetypeLabel archetype={row.archetype} />
+                          </div>
                         </td>
                         <td className="num muted">{row.age}</td>
                         <td className="muted">{row.position}</td>

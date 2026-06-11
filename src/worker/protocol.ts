@@ -75,6 +75,7 @@ import type { TeamTactics } from '@domain'
 import type { ScoutTarget } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
+export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView } from '@engine/career/views'
 
 /** A request without its correlation id; the client stamps the id on send. */
 export type WorkerRequestBody =
@@ -162,6 +163,11 @@ export type WorkerRequestBody =
   | { type: 'getLeagueLeaders'; topN?: number }
   /** Team leaders panel (goals/assists/points/+-/AvR/GAA/SV%). */
   | { type: 'getTeamLeaders' }
+  /**
+   * Apply the coach's style suggestion: merge Partial<TeamTactics> onto the
+   * user team's current tactics (additive — only supplied fields are changed).
+   */
+  | { type: 'applyCoachSuggestion'; suggestedTactics: Partial<TeamTactics> }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }

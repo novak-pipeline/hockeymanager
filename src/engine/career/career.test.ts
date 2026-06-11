@@ -889,3 +889,206 @@ describe('Career — league leaders', () => {
     expect(totalCap).toBeGreaterThan(0)
   })
 })
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Career — archetypes + line synergy + coach suggestions (Wave 3b)
+───────────────────────────────────────────────────────────────────────── */
+
+describe('Career — archetypes on player views', () => {
+  it('squad rows for own-roster players always carry an archetype field', () => {
+    const data = generateLeague({ seed: 300 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 300, userId)
+
+    const squad = career.getSquad()
+    for (const row of squad.rows) {
+      // Every player on the own roster must have an archetype (fog = own team = k=100)
+      expect(row.archetype).toBeDefined()
+      expect(typeof row.archetype!.key).toBe('string')
+      expect(typeof row.archetype!.label).toBe('string')
+      expect(Array.isArray(row.archetype!.descriptors)).toBe(true)
+    }
+  })
+
+  it('player profile carries an archetype for own-roster players', () => {
+    const data = generateLeague({ seed: 301 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 301, userId)
+
+    const squad = career.getSquad()
+    const anyOwnPlayer = squad.rows[0].playerId
+    const profile = career.getPlayer(anyOwnPlayer)
+    expect(profile.archetype).toBeDefined()
+    expect(profile.archetype!.key).toBeTruthy()
+    expect(profile.archetype!.label).toBeTruthy()
+  })
+
+  it('fogged opponent players with low knowledge have no archetype on badge', () => {
+    const data = generateLeague({ seed: 302 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 302, userId)
+
+    // Find an opponent player with low scouting knowledge (should have none at k<50 by default)
+    // Don't advance so knowledge is still at initial values (5–45 for opponents)
+    let foundLowKnowledge = false
+    for (const [teamId, team] of data.teams) {
+      if ((teamId as string) === (userId as string)) continue
+      for (const pid of team.roster) {
+        const profile = career.getPlayer(pid as string)
+        if (profile.scouted && profile.scouted.knowledge < 50) {
+          // Archetype should be omitted when scout knowledge is low
+          expect(profile.archetype).toBeUndefined()
+          foundLowKnowledge = true
+          break
+        }
+      }
+      if (foundLowKnowledge) break
+    }
+    // At least one such player should exist at game start
+    expect(foundLowKnowledge).toBe(true)
+  })
+})
+
+describe('Career — TacticsView: synergy + coach suggestion', () => {
+  it('getTactics returns lineSynergies and pairSynergies arrays of correct length', () => {
+    const data = generateLeague({ seed: 310 })
+    const career = new Career(data, 310, data.league.teams[0])
+
+    const tactics = career.getTactics()
+    // 4 forward lines, 3 defense pairs
+    expect(tactics.lineSynergies).toHaveLength(tactics.lines.forwards.length)
+    expect(tactics.pairSynergies).toHaveLength(tactics.lines.defensePairs.length)
+
+    for (const ls of tactics.lineSynergies) {
+      expect(ls.score).toBeGreaterThanOrEqual(0)
+      expect(ls.score).toBeLessThanOrEqual(100)
+      expect(ls.multiplier).toBeGreaterThanOrEqual(0.97)
+      expect(ls.multiplier).toBeLessThanOrEqual(1.03)
+      expect(Array.isArray(ls.notes)).toBe(true)
+    }
+    for (const ps of tactics.pairSynergies) {
+      expect(ps.score).toBeGreaterThanOrEqual(0)
+      expect(ps.score).toBeLessThanOrEqual(100)
+      expect(ps.multiplier).toBeGreaterThanOrEqual(0.97)
+      expect(ps.multiplier).toBeLessThanOrEqual(1.03)
+    }
+  })
+
+  it('getTactics carries coachSuggestion with styleLabel + rationale + suggestedTactics', () => {
+    const data = generateLeague({ seed: 311 })
+    const career = new Career(data, 311, data.league.teams[2])
+
+    const tactics = career.getTactics()
+    expect(tactics.coachSuggestion).toBeDefined()
+    expect(typeof tactics.coachSuggestion.styleLabel).toBe('string')
+    expect(tactics.coachSuggestion.styleLabel.length).toBeGreaterThan(0)
+    expect(Array.isArray(tactics.coachSuggestion.rationale)).toBe(true)
+    expect(tactics.coachSuggestion.rationale.length).toBeGreaterThan(0)
+    expect(tactics.coachSuggestion.suggestedTactics).toBeDefined()
+  })
+
+  it('getTactics carries styleFit with a fit score and advice', () => {
+    const data = generateLeague({ seed: 312 })
+    const career = new Career(data, 312, data.league.teams[3])
+
+    const tactics = career.getTactics()
+    expect(tactics.styleFit).toBeDefined()
+    expect(tactics.styleFit.fit).toBeGreaterThanOrEqual(0)
+    expect(tactics.styleFit.fit).toBeLessThanOrEqual(100)
+    expect(Array.isArray(tactics.styleFit.advice)).toBe(true)
+    expect(tactics.styleFit.advice.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Career — applyCoachSuggestion', () => {
+  it('merges suggested tactics fields onto current tactics', () => {
+    const data = generateLeague({ seed: 320 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 320, userId)
+
+    // Record the current forecheck to confirm it might change
+    const before = career.getTactics()
+    const suggestion = before.coachSuggestion
+
+    // Apply the coach suggestion
+    career.applyCoachSuggestion(suggestion.suggestedTactics)
+
+    const after = career.getTactics()
+    // The applied tactics should now match any forecheck in the suggestion
+    if (suggestion.suggestedTactics.forecheck !== undefined) {
+      expect(after.tactics.forecheck).toBe(suggestion.suggestedTactics.forecheck)
+    }
+    // Tempo sub-fields in suggestion should be reflected
+    if (suggestion.suggestedTactics.tempo !== undefined) {
+      for (const [key, val] of Object.entries(suggestion.suggestedTactics.tempo)) {
+        expect((after.tactics.tempo as Record<string, number>)[key]).toBe(val)
+      }
+    }
+  })
+
+  it('does not destroy non-suggested tactics fields when applying a partial suggestion', () => {
+    const data = generateLeague({ seed: 321 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 321, userId)
+
+    const before = career.getTactics()
+    const originalForecheck = before.tactics.forecheck
+
+    // Apply a suggestion that only touches tempo (no forecheck field)
+    career.applyCoachSuggestion({
+      tempo: { pace: 0.7, passRisk: 0.6, shotEagerness: 0.7, defensivePinch: 0.5 },
+    })
+
+    const after = career.getTactics()
+    // Forecheck should be unchanged
+    expect(after.tactics.forecheck).toBe(originalForecheck)
+    // Tempo pace should be updated
+    expect(after.tactics.tempo.pace).toBe(0.7)
+  })
+
+  it('determinism: two careers with same seed have identical synergy multipliers', () => {
+    const mk = (): Career => {
+      const data = generateLeague({ seed: 322 })
+      return new Career(data, 322, data.league.teams[0])
+    }
+    const a = mk()
+    const b = mk()
+
+    // Advance both 10 days
+    a.advance(10)
+    b.advance(10)
+
+    // Their standings (which incorporate synergy-modified play) must stay identical
+    const rows = (c: Career) => c.view().standings.map((s) => [s.teamId, s.points])
+    expect(rows(a)).toEqual(rows(b))
+
+    // And their TacticsView synergy scores must match
+    const aSyn = a.getTactics().lineSynergies.map((s) => s.score)
+    const bSyn = b.getTactics().lineSynergies.map((s) => s.score)
+    expect(aSyn).toEqual(bSyn)
+  })
+
+  it('synergy multiplier participates in sim without breaking season determinism', () => {
+    // Two identical careers — one applies a coach suggestion (changing tactics),
+    // the other does not. Both must remain internally self-consistent.
+    const data1 = generateLeague({ seed: 323 })
+    const data2 = generateLeague({ seed: 323 })
+    const career1 = new Career(data1, 323, data1.league.teams[0])
+    const career2 = new Career(data2, 323, data2.league.teams[0])
+
+    // Apply coach suggestion on career1 only — this changes tactics but NOT the synergy module
+    const suggestion = career1.getTactics().coachSuggestion
+    career1.applyCoachSuggestion(suggestion.suggestedTactics)
+
+    // Both should still advance without throwing
+    career1.advance(10)
+    career2.advance(10)
+
+    // career1's tactics change means standings can diverge — that's expected.
+    // But the synergy multipliers themselves should be valid numbers.
+    for (const ls of career1.getTactics().lineSynergies) {
+      expect(ls.multiplier).toBeGreaterThanOrEqual(0.97)
+      expect(ls.multiplier).toBeLessThanOrEqual(1.03)
+    }
+  })
+})

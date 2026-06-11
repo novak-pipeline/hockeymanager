@@ -317,6 +317,14 @@ export class SimClient {
     return this.send({ type: 'getTeamLeaders' })
   }
 
+  /**
+   * Apply the coach's style suggestion to the user team's current tactics.
+   * Only fields present in `suggestedTactics` are overwritten (additive merge).
+   */
+  applyCoachSuggestion(suggestedTactics: Partial<TeamTactics>): Promise<WorkerResponse> {
+    return this.send({ type: 'applyCoachSuggestion', suggestedTactics })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

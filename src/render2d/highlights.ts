@@ -104,12 +104,11 @@ export function buildHighlights(stream: GameStream): HighlightSegment[] {
 /**
  * Filter segments by playback mode.
  *
- *  'key'      — goals, big (rebound) saves, and penalties only. Standalone
- *               scoring chances are intentionally EXCLUDED: a normal game tags
- *               dozens of importance-2 chances whose wide windows merge into
- *               near-total coverage, which made "key moments" play almost the
- *               whole game. (A chance that happens next to a goal is already
- *               folded into that goal's merged segment, so the lead-up is kept.)
+ *  'key'      — GOALS ONLY. The tightest reel: the viewer fast-forwards the
+ *               clock between goals and only cuts into each goal's window
+ *               (its ~10 s lead-up + celebration). Any chance/save/penalty
+ *               that happened right before a goal is already folded into that
+ *               goal's merged segment, so the build-up is preserved.
  *  'extended' — all segments (goals, chances, saves, penalties, hits).
  */
 export function selectMode(
@@ -117,8 +116,6 @@ export function selectMode(
   mode: 'key' | 'extended'
 ): HighlightSegment[] {
   if (mode === 'extended') return segments
-  // key: goals + big saves + penalties (drop standalone chances and hits)
-  return segments.filter(
-    (s) => s.kind === 'goal' || s.kind === 'save' || s.kind === 'penalty'
-  )
+  // key: goals only
+  return segments.filter((s) => s.kind === 'goal')
 }

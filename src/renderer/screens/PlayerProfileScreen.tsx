@@ -1,11 +1,59 @@
 import type { PlayerProfileView } from '../../worker/protocol'
-import type { SkaterSeasonLine, GoalieSeasonLine } from '../../engine/career/views'
+import type { SkaterSeasonLine, GoalieSeasonLine, ArchetypeInfo } from '../../engine/career/views'
 import { useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── sub-components ── */
+
+function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }): JSX.Element | null {
+  if (!archetype) return null
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 'var(--sp-2)',
+        background: 'var(--violet-dim)',
+        border: '1px solid var(--accent)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '3px 10px',
+        fontSize: 11,
+        fontWeight: 700,
+        color: 'var(--violet-h)',
+      }}
+      title={archetype.descriptors.length > 0 ? archetype.descriptors.join(' · ') : archetype.label}
+    >
+      {archetype.label}
+      {archetype.descriptors.length > 0 && (
+        <span
+          style={{
+            display: 'flex',
+            gap: 4,
+            flexWrap: 'wrap',
+          }}
+        >
+          {archetype.descriptors.slice(0, 3).map((d) => (
+            <span
+              key={d}
+              style={{
+                background: 'rgba(139,92,246,0.18)',
+                borderRadius: 3,
+                padding: '1px 5px',
+                fontSize: 10,
+                color: 'var(--muted)',
+                fontWeight: 500,
+              }}
+            >
+              {d}
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
 
 function PotentialStars({ count }: { count: number }): JSX.Element {
   return (
@@ -203,6 +251,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               <span className="chip">{d.role}</span>
               {d.contract?.noTradeClause && <span className="chip chip-warn">NTC</span>}
               {d.contract?.twoWay && <span className="chip">2-way</span>}
+              <ArchetypeChip archetype={d.archetype} />
             </div>
 
             {/* Big OVR + potential */}

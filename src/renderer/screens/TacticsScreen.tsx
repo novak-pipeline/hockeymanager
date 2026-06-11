@@ -3,6 +3,9 @@ import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type {
   LinesView,
   LineSlotView,
+  LineSynergyView,
+  CoachSuggestionView,
+  StyleFitView,
   PlayerBadge,
 } from '../../engine/career/views'
 import type {
@@ -30,6 +33,205 @@ function linesViewToUpdate(lines: LinesView): LinesUpdate {
 
 function deepCloneLines(lines: LinesView): LinesView {
   return JSON.parse(JSON.stringify(lines)) as LinesView
+}
+
+/* ── Synergy badge ── */
+
+function synergyColor(score: number): string {
+  if (score >= 70) return 'var(--success)'
+  if (score >= 50) return 'var(--accent2)'
+  return 'var(--danger)'
+}
+
+interface SynergyBadgeProps {
+  synergy: LineSynergyView
+  lineLabel: string
+}
+
+function SynergyBadge({ synergy, lineLabel }: SynergyBadgeProps): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const color = synergyColor(synergy.score)
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{
+          gap: 4,
+          padding: '2px 8px',
+          borderColor: color,
+          color,
+          fontSize: 11,
+          fontVariantNumeric: 'tabular-nums',
+          fontWeight: 700,
+        }}
+        title={`${lineLabel} synergy — click to expand`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span style={{ fontSize: 9, opacity: 0.8 }}>SYN</span>
+        {synergy.score}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '110%',
+            left: 0,
+            zIndex: 50,
+            minWidth: 260,
+            background: 'var(--bg2)',
+            border: `1px solid ${color}`,
+            borderRadius: 'var(--radius-sm)',
+            padding: 'var(--sp-3)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          }}
+        >
+          <div
+            className="row-between"
+            style={{ marginBottom: 'var(--sp-2)' }}
+          >
+            <span style={{ fontWeight: 700, fontSize: 12, color }}>
+              Line synergy: {synergy.score}/100
+            </span>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '0 4px', fontSize: 11 }}
+              onClick={() => setOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            style={{
+              height: 4,
+              borderRadius: 2,
+              background: 'var(--bg0)',
+              marginBottom: 'var(--sp-2)',
+            }}
+          >
+            <div
+              style={{
+                width: `${synergy.score}%`,
+                height: '100%',
+                borderRadius: 2,
+                background: color,
+              }}
+            />
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 16 }}>
+            {synergy.notes.map((note, i) => (
+              <li key={i} className="muted small" style={{ marginBottom: 2 }}>
+                {note}
+              </li>
+            ))}
+          </ul>
+          <div className="muted small" style={{ marginTop: 'var(--sp-2)', opacity: 0.6 }}>
+            Multiplier: ×{synergy.multiplier.toFixed(3)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Coach's recommendation panel ── */
+
+interface CoachPanelProps {
+  suggestion: CoachSuggestionView
+  styleFit: StyleFitView
+  onApply: () => Promise<void>
+  applying: boolean
+}
+
+function CoachPanel({ suggestion, styleFit, onApply, applying }: CoachPanelProps): JSX.Element {
+  const fitColor = synergyColor(styleFit.fit)
+
+  return (
+    <Panel title="Coach's Recommendation">
+      <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+        {/* Style fit meter */}
+        <div>
+          <div
+            className="row-between"
+            style={{ marginBottom: 'var(--sp-1)' }}
+          >
+            <span className="muted small">Current style fit</span>
+            <span style={{ fontWeight: 700, fontSize: 12, color: fitColor }}>
+              {styleFit.fit}/100
+            </span>
+          </div>
+          <div
+            style={{
+              height: 6,
+              borderRadius: 3,
+              background: 'var(--bg0)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${styleFit.fit}%`,
+                height: '100%',
+                background: fitColor,
+                borderRadius: 3,
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          {styleFit.advice.length > 0 && (
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {styleFit.advice.map((tip, i) => (
+                <li key={i} className="muted small" style={{ marginBottom: 2 }}>
+                  {tip}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Suggested style */}
+        <div
+          style={{
+            background: 'var(--bg0)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-sm)',
+            padding: 'var(--sp-3)',
+          }}
+        >
+          <div className="row-between" style={{ marginBottom: 'var(--sp-2)' }}>
+            <span
+              style={{
+                fontWeight: 700,
+                fontSize: 13,
+                color: 'var(--accent)',
+              }}
+            >
+              {suggestion.styleLabel}
+            </span>
+            <span className="chip chip-accent" style={{ fontSize: 10 }}>
+              Suggested
+            </span>
+          </div>
+          <ul style={{ margin: '0 0 var(--sp-3)', paddingLeft: 18 }}>
+            {suggestion.rationale.map((r, i) => (
+              <li key={i} className="muted small" style={{ marginBottom: 3 }}>
+                {r}
+              </li>
+            ))}
+          </ul>
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%' }}
+            onClick={onApply}
+            disabled={applying}
+          >
+            {applying ? 'Applying…' : 'Apply suggestion'}
+          </button>
+        </div>
+      </div>
+    </Panel>
+  )
 }
 
 /* ── OVR dot ── */
@@ -165,24 +367,35 @@ interface LinesSectionProps {
   title: string
   lines: LineSlotView[][]
   onClickSlot: (lineIdx: number, slotIdx: number) => void
+  synergies?: LineSynergyView[]
 }
 
-function LinesSection({ title, lines, onClickSlot }: LinesSectionProps): JSX.Element {
+function LinesSection({ title, lines, onClickSlot, synergies }: LinesSectionProps): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-2)' }}>
       <div className="panel-title">{title}</div>
       {lines.map((line, li) => (
-        <div key={li} className="row" style={{ gap: 'var(--sp-2)', alignItems: 'stretch' }}>
-          <span className="muted small" style={{ width: 24, textAlign: 'right', alignSelf: 'center' }}>
-            {li + 1}
-          </span>
-          {line.map((slot, si) => (
-            <SlotButton
-              key={`${li}-${si}`}
-              slotDef={slot}
-              onClick={() => onClickSlot(li, si)}
-            />
-          ))}
+        <div key={li} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'stretch' }}>
+            <span className="muted small" style={{ width: 24, textAlign: 'right', alignSelf: 'center' }}>
+              {li + 1}
+            </span>
+            {line.map((slot, si) => (
+              <SlotButton
+                key={`${li}-${si}`}
+                slotDef={slot}
+                onClick={() => onClickSlot(li, si)}
+              />
+            ))}
+            {synergies?.[li] && (
+              <div style={{ alignSelf: 'center', marginLeft: 'var(--sp-1)' }}>
+                <SynergyBadge
+                  synergy={synergies[li]!}
+                  lineLabel={`Line ${li + 1}`}
+                />
+              </div>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -225,6 +438,7 @@ export function TacticsScreen(): JSX.Element {
   const [draftTactics, setDraftTactics] = useState<TeamTactics | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [applying, setApplying] = useState(false)
 
   // Picker state
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -348,6 +562,27 @@ export function TacticsScreen(): JSX.Element {
     refetch()
   }
 
+  async function handleApplyCoachSuggestion(): Promise<void> {
+    if (!data) return
+    setApplying(true)
+    try {
+      const res = await client.applyCoachSuggestion(data.coachSuggestion.suggestedTactics)
+      if (res.type === 'error') {
+        toast(res.message, 'error')
+      } else {
+        toast('Coach suggestion applied.', 'success')
+        setDraftLines(null)
+        setDraftTactics(null)
+        setDirty(false)
+        bumpRefresh()
+      }
+    } catch {
+      toast('Failed to apply suggestion.', 'error')
+    } finally {
+      setApplying(false)
+    }
+  }
+
   // ── picker data ──
   const pickerSlot = getPickerSlot()
   const roster = buildRoster()
@@ -380,11 +615,13 @@ export function TacticsScreen(): JSX.Element {
                     title="Forwards"
                     lines={lines.forwards}
                     onClickSlot={(li, si) => openPicker('forwards', li, si)}
+                    synergies={data.lineSynergies}
                   />
                   <LinesSection
                     title="Defence Pairs"
                     lines={lines.defensePairs}
                     onClickSlot={(li, si) => openPicker('defense', li, si)}
+                    synergies={data.pairSynergies}
                   />
 
                   {/* Goalies */}
@@ -534,6 +771,13 @@ export function TacticsScreen(): JSX.Element {
                   <span>Line matching (shadow opponent's top line)</span>
                 </label>
               </Panel>
+
+              <CoachPanel
+                suggestion={data.coachSuggestion}
+                styleFit={data.styleFit}
+                onApply={handleApplyCoachSuggestion}
+                applying={applying}
+              />
             </div>
           </div>
 

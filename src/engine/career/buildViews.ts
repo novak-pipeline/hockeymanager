@@ -18,12 +18,22 @@ import { overall } from '@engine/ratings/composites'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
+import {
+  ARCHETYPE_META,
+  classifyArchetype,
+  lineSynergy,
+  pairSynergy,
+  styleMatch,
+  teamStyleFit,
+} from '@engine/league/archetypes'
 import type {
+  ArchetypeInfo,
   AttributeGroupView,
   ContractView,
   FinanceView,
   GoalieSeasonLine,
   LineSlotView,
+  LineSynergyView,
   LinesView,
   PlayerBadge,
   PlayerProfileView,
@@ -80,9 +90,27 @@ function isExact(fog: FogCtx | undefined, playerId: string): boolean {
 
 /* ────────────────────────── atoms ────────────────────────── */
 
+/** Derive an archetype badge info object for a player (fog-aware). */
+function archetypeInfo(p: Player, fog?: FogCtx): ArchetypeInfo | undefined {
+  const pid = p.id as string
+  // Own-roster (no fog) always gets archetype
+  if (!fog || isExact(fog, pid)) {
+    const result = classifyArchetype(p)
+    const meta = ARCHETYPE_META[result.archetype]
+    return { key: result.archetype, label: meta.label, descriptors: result.descriptors }
+  }
+  // Fogged player: only show archetype when scout has meaningful knowledge (>=50)
+  const k = knowledgeOf(fog.scouting, pid)
+  if (k < 50) return undefined
+  const result = classifyArchetype(p)
+  const meta = ARCHETYPE_META[result.archetype]
+  return { key: result.archetype, label: meta.label, descriptors: result.descriptors }
+}
+
 export function badge(p: Player, fog?: FogCtx): PlayerBadge {
   const pid = p.id as string
   const ovr = overall(p.composites, p.position)
+  const archetype = archetypeInfo(p, fog)
   if (!fog || isExact(fog, pid)) {
     return {
       playerId: pid,
@@ -90,6 +118,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
       position: p.position,
       age: p.age,
       overall: ovr,
+      ...(archetype !== undefined ? { archetype } : {}),
     }
   }
   const k = knowledgeOf(fog.scouting, pid)
@@ -102,6 +131,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
     age: p.age,
     overall: midOvr,
     scouted: { knowledge: Math.round(k), overallLo: lo, overallHi: hi, exact: false },
+    ...(archetype !== undefined ? { archetype } : {}),
   }
 }
 
@@ -516,7 +546,38 @@ export function buildTacticsView(ctx: ViewCtx): TacticsView {
       .map((p) => badge(p)),
     issues: lineupIssues(team, ctx.players),
   }
-  return { tactics: team.tactics, lines }
+
+  // ── synergy ──
+  // Resolve Player objects for each EV slot; skip if slot has no player.
+  const resolveSlotPlayer = (id: PlayerId | undefined): Player | undefined =>
+    id && ctx.players.has(id) ? ctx.players.get(id)! : undefined
+
+  const lineSynergies: LineSynergyView[] = team.lines.forwards.map((line) => {
+    const players = line.map(resolveSlotPlayer).filter((p): p is Player => p !== undefined)
+    const result = lineSynergy(players)
+    return { score: result.score, multiplier: result.multiplier, notes: result.notes }
+  })
+
+  const pairSynergies: LineSynergyView[] = team.lines.defensePairs.map((pair) => {
+    const players = pair.map(resolveSlotPlayer).filter((p): p is Player => p !== undefined)
+    const result = pairSynergy(players)
+    return { score: result.score, multiplier: result.multiplier, notes: result.notes }
+  })
+
+  // ── coach suggestion ──
+  const roster = team.roster.map((id) => ctx.players.get(id)!).filter(Boolean)
+  const styleResult = teamStyleFit({ roster })
+  const coachSuggestion = {
+    styleLabel: styleResult.styleLabel,
+    rationale: styleResult.rationale,
+    suggestedTactics: styleResult.suggestedTactics,
+  }
+
+  // ── style fit (current tactics vs roster) ──
+  const fitResult = styleMatch(roster, team.tactics)
+  const styleFit = { fit: fitResult.fit, advice: fitResult.advice }
+
+  return { tactics: team.tactics, lines, lineSynergies, pairSynergies, coachSuggestion, styleFit }
 }
 
 /* ────────────────────────── schedule / stats / finances ────────────────────────── */

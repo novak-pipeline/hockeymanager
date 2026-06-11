@@ -13,7 +13,7 @@ import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
 import { Announcer } from './lib/announcer'
 import { MatchSfx } from './lib/sfx'
-import { planFor, currentSpeed, nextActiveJump } from '../render2d/playbackDirector'
+import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/playbackDirector'
 import type { SpeedSegment } from '../render2d/playbackDirector'
 import { loadKokoro, kokoroState } from './lib/kokoroVoice'
 import type { GoalEvent, StoppageEvent } from '@domain'
@@ -94,6 +94,17 @@ function findCrossedWhistle(
   return null
 }
 
+/** Absolute game seconds → "P2 12:34" countdown label (for the FF clock spin). */
+function _absToClock(absT: number): string {
+  const period = absT < 3600 ? Math.floor(absT / 1200) + 1 : 4
+  const within = absT - (period - 1) * 1200
+  const remain = Math.max(0, 1200 - within)
+  const mm = Math.floor(remain / 60)
+  const ss = Math.floor(remain % 60)
+  const label = period >= 4 ? 'OT' : `P${period}`
+  return `${label} ${mm}:${String(ss).padStart(2, '0')}`
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): JSX.Element {
@@ -130,8 +141,10 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   // Stoppage overlay
   const stoppageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Highlight skip flash
-  const skipFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Fast-forward interstitial (extended/key modes): spin the clock between
+  // highlights instead of playing the filler.
+  const ffActiveRef = useRef<boolean>(false)
+  const ffRafRef    = useRef<number | null>(null)
 
   // Score tracking for goal detection
   const prevScoreRef = useRef<{ home: number; away: number }>({ home: 0, away: 0 })
@@ -156,13 +169,16 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   // Stoppage chip reason
   const [stoppageChip, setStoppageChip] = useState<string | null>(null)
 
+  // Fast-forward interstitial display: the spinning clock label, or null when
+  // not fast-forwarding.
+  const [ffClock, setFfClock] = useState<string | null>(null)
+
   // Commentary
   const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
 
   // Controls
   const [announcerEnabled, setAnnouncerEnabled] = useState(announcer.isEnabled)
   const [sfxEnabled, setSfxEnabled]             = useState<boolean>(true)
-  const [skipping, setSkipping]                 = useState<boolean>(false)
 
   // Enhanced voice
   const [kokoroWanted, setKokoroWanted]         = useState<boolean>(readKokoroPref)
@@ -264,7 +280,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       sfx.dispose()
       if (goalBannerTimerRef.current)  clearTimeout(goalBannerTimerRef.current)
       if (stoppageTimerRef.current)    clearTimeout(stoppageTimerRef.current)
-      if (skipFlashTimerRef.current)   clearTimeout(skipFlashTimerRef.current)
+      if (ffRafRef.current !== null)   cancelAnimationFrame(ffRafRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, rendererMode])
@@ -384,23 +400,70 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       stoppageTimerRef.current = setTimeout(() => setStoppageChip(null), 1800)
     }
 
-    // ── Playback speed from plan ──────────────────────────────────────────────
-    if (!replayActiveRef.current) {
-      const planSpd = currentSpeed(planRef.current, currentAbsT)
-      const effectiveSpd = planSpd * nudgeRef.current
-      rendererRef.current?.setSpeed(effectiveSpd)
-
-      // Skip dead air in extended/key modes
+    // ── Playback speed from plan / fast-forward between highlights ─────────────
+    if (!replayActiveRef.current && !ffActiveRef.current) {
+      // In extended/key modes, when we reach dead air between highlights we
+      // DON'T play it — we fast-forward the clock and cut into the next one.
       const jump = nextActiveJump(planRef.current, currentAbsT)
       if (jump) {
-        rendererRef.current?.seekFraction(jump.jumpToAbsT / dur)
-        _showSkipFlash()
+        _startFastForward(jump.jumpToAbsT)
+      } else {
+        const planSpd = currentSpeed(planRef.current, currentAbsT)
+        rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
       }
     }
 
     lastAbsTRef.current = currentAbsT
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
+
+  /**
+   * Fast-forward the game clock from the current position to `toAbsT` without
+   * rendering the filler play. Pauses the renderer, spins an on-screen clock
+   * for ~0.9s, then cuts into the highlight at its plan speed.
+   */
+  function _startFastForward(toAbsT: number): void {
+    const dur = gameDurationRef.current
+    const v = viewRef.current
+    if (!v || dur <= 0) return
+    const fromAbsT = v.progress * dur
+    if (toAbsT <= fromAbsT + 0.5) return // nothing meaningful to skip
+
+    ffActiveRef.current = true
+    rendererRef.current?.pause()
+    announcer.cancel()
+
+    const SPIN_MS = 900
+    let startTs: number | null = null
+    const step = (ts: number): void => {
+      if (startTs === null) startTs = ts
+      const t = Math.min(1, (ts - startTs) / SPIN_MS)
+      // ease-out so the clock decelerates into the highlight
+      const eased = 1 - (1 - t) * (1 - t)
+      const cur = fromAbsT + (toAbsT - fromAbsT) * eased
+      setFfClock(_absToClock(cur))
+      if (t < 1) {
+        ffRafRef.current = requestAnimationFrame(step)
+        return
+      }
+      // Cut into the highlight
+      ffRafRef.current = null
+      const r = rendererRef.current
+      if (r) {
+        r.seekFraction(toAbsT / dur)
+        const planSpd = currentSpeed(planRef.current, toAbsT)
+        r.setSpeed(planSpd * nudgeRef.current)
+        r.play()
+      }
+      lastCommentaryAbsT.current = toAbsT
+      lastAbsTRef.current        = toAbsT
+      lastSfxAbsTRef.current     = toAbsT
+      setVisibleLines(commentaryLinesRef.current.filter((l) => l.absT <= toAbsT).slice(-50))
+      ffActiveRef.current = false
+      setFfClock(null)
+    }
+    ffRafRef.current = requestAnimationFrame(step)
+  }
 
   function _endReplay(): void {
     replaySkipRef.current = false
@@ -414,12 +477,6 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       const planSpd = currentSpeed(planRef.current, at)
       rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
     }
-  }
-
-  function _showSkipFlash(): void {
-    setSkipping(true)
-    if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current)
-    skipFlashTimerRef.current = setTimeout(() => setSkipping(false), 800)
   }
 
   // ── Auto-scroll ticker ────────────────────────────────────────────────────────
@@ -448,17 +505,18 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     }
     announcer.speak(greets[mode], 2)
 
-    // If extended/key, seek to first highlight immediately
+    // Set initial speed and play. In extended/key, cut straight to the first
+    // highlight so we open on the action, not on a 30× skip.
+    const dur = gameDurationRef.current
+    let startAbsT = 0
     if (mode !== 'full') {
-      const segs = planRef.current.filter((s) => s.speed < 30)
-      if (segs.length > 0 && gameDurationRef.current > 0) {
-        rendererRef.current?.seekFraction(segs[0].fromAbsT / gameDurationRef.current)
+      const segs = planRef.current.filter((s) => s.speed < SKIP_SPEED)
+      if (segs.length > 0 && dur > 0) {
+        startAbsT = segs[0].fromAbsT
+        rendererRef.current?.seekFraction(startAbsT / dur)
       }
     }
-
-    // Set initial speed and play
-    const dur = gameDurationRef.current
-    const initSpd = dur > 0 ? currentSpeed(planRef.current, 0) : 2
+    const initSpd = dur > 0 ? currentSpeed(planRef.current, startAbsT) : 2
     rendererRef.current?.setSpeed(initSpd)
     rendererRef.current?.play()
   }
@@ -672,8 +730,8 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
                 />
                 <ModeCard
                   title="Key Moments"
-                  subtitle="~90 sec"
-                  desc="Goals & top chances at 1×"
+                  subtitle="~60 sec"
+                  desc="Fast-forward to every goal"
                   onClick={() => handleDropPuck('key')}
                 />
               </div>
@@ -710,9 +768,17 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             <div style={stoppageChipStyle}>{stoppageChip}</div>
           )}
 
-          {/* Skip flash */}
-          {skipping && (
-            <div style={skipFlashStyle}>SKIPPING →</div>
+          {/* Fast-forward interstitial: the spinning clock between highlights */}
+          {ffClock && (
+            <div style={ffOverlayStyle}>
+              <div style={{ fontSize: 12, letterSpacing: 2, color: MUTED, marginBottom: 6 }}>
+                ⏩ FAST-FORWARDING
+              </div>
+              <div style={{ fontSize: 44, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                {ffClock}
+              </div>
+              <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>to the next goal…</div>
+            </div>
           )}
         </div>
 
@@ -953,13 +1019,14 @@ const stoppageChipStyle: CSSProperties = {
   animation: 'fadeIn 0.12s ease',
 }
 
-const skipFlashStyle: CSSProperties = {
-  position: 'absolute', top: 12, right: 14,
-  background: 'rgba(0,0,0,0.6)',
-  color: 'var(--muted)', fontSize: 11,
-  padding: '3px 10px', borderRadius: 6,
+const ffOverlayStyle: CSSProperties = {
+  position: 'absolute', inset: 0,
+  display: 'flex', flexDirection: 'column',
+  alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(8,6,16,0.82)',
   pointerEvents: 'none', zIndex: 12,
-  fontStyle: 'italic',
+  textAlign: 'center',
+  animation: 'fadeIn 0.1s ease',
 }
 
 const tickerContainerStyle: CSSProperties = {

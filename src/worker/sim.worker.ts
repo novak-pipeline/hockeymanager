@@ -207,6 +207,9 @@ function handle(req: WorkerRequest): WorkerResponse {
       const dash = must().getDashboard()
       return { id: req.id, type: 'teamLeaders', leaders: dash.teamLeaders! }
     }
+    case 'applyCoachSuggestion':
+      must().applyCoachSuggestion(req.suggestedTactics)
+      return { id: req.id, type: 'ok' }
   }
 }
 

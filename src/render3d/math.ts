@@ -283,6 +283,54 @@ export function cameraTargetFor(
   }
 }
 
+// ── play-focus smoothing helpers ─────────────────────────────────────────────
+
+/**
+ * Apply a deadzone around a reference center.
+ *
+ * If |value - center| is below `threshold`, returns `center` unchanged —
+ * micro-movements inside the deadzone are suppressed so stationary cycles do
+ * not cause camera jitter.  Once the value escapes the deadzone it is returned
+ * as-is; the caller's spring then eases toward it naturally.
+ *
+ * `center` should be the spring's current position (camX.pos etc.), not a
+ * fixed origin, so the deadzone travels with the camera.
+ */
+export function applyDeadzone(value: number, center: number, threshold: number): number {
+  if (threshold <= 0) return value
+  return Math.abs(value - center) < threshold ? center : value
+}
+
+/**
+ * Exponential moving average step — simpler alternative to a full spring when
+ * only position (no velocity) matters.  Alpha is the per-second blend factor;
+ * the effective time constant τ ≈ 1/alpha (in seconds).
+ *
+ * alpha = 1 − exp(−dt / tau)  gives framerate-independent behaviour.
+ *
+ * Use this for the play-focus smoother layer that sits between the raw puck
+ * position and the camera spring, giving a longer time constant (~0.5 s) with
+ * a single scalar state.
+ */
+export function emaStep(current: number, target: number, dt: number, tau: number): number {
+  if (dt <= 0 || tau <= 0) return current
+  const alpha = 1 - Math.exp(-dt / tau)
+  return current + alpha * (target - current)
+}
+
+/**
+ * Clamp the magnitude of a value to `maxSpeed` feet per second, given `dt`.
+ * Prevents the camera from moving faster than a sane rate even if the spring
+ * overshoots (e.g. on the very first frame after an oversized dt).
+ */
+export function clampSpeed(current: number, next: number, dt: number, maxFtPerSec: number): number {
+  if (dt <= 0) return next
+  const maxDelta = maxFtPerSec * dt
+  const delta = next - current
+  if (Math.abs(delta) <= maxDelta) return next
+  return current + Math.sign(delta) * maxDelta
+}
+
 // ── skating animation helpers ────────────────────────────────────────────────
 
 /**

@@ -208,13 +208,10 @@ describe('selectMode', () => {
     expect(selectMode(segs, 'extended')).toHaveLength(4)
   })
 
-  it('key returns goals + saves + penalties only (excludes standalone chances)', () => {
+  it('key returns goals only', () => {
     const key = selectMode(segs, 'key')
-    // goal + penalty survive; standalone chance + hit are dropped
-    expect(key).toHaveLength(2)
-    expect(
-      key.every((s) => s.kind === 'goal' || s.kind === 'save' || s.kind === 'penalty'),
-    ).toBe(true)
+    expect(key).toHaveLength(1)
+    expect(key.every((s) => s.kind === 'goal')).toBe(true)
   })
 
   it('key includes goals', () => {
@@ -222,17 +219,15 @@ describe('selectMode', () => {
     expect(key.some((s) => s.kind === 'goal')).toBe(true)
   })
 
-  it('key includes big saves', () => {
+  it('key excludes chances, saves, penalties, and hits', () => {
     const withSave: HighlightSegment[] = [
       ...segs,
       { startAbsT: 300, endAbsT: 309, kind: 'save', importance: 2 },
     ]
-    expect(selectMode(withSave, 'key').some((s) => s.kind === 'save')).toBe(true)
-  })
-
-  it('key excludes standalone chances and hits', () => {
-    const key = selectMode(segs, 'key')
+    const key = selectMode(withSave, 'key')
     expect(key.some((s) => s.kind === 'chance')).toBe(false)
+    expect(key.some((s) => s.kind === 'save')).toBe(false)
+    expect(key.some((s) => s.kind === 'penalty')).toBe(false)
     expect(key.some((s) => s.kind === 'hit')).toBe(false)
   })
 })

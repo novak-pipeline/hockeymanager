@@ -110,6 +110,7 @@ import {
   tickLockerRoom,
   type LockerRoomState,
 } from '@engine/league/lockerRoom'
+import { lineSynergy, pairSynergy } from '@engine/league/archetypes'
 import {
   createInitialTentpolesState,
   runCombine,
@@ -769,28 +770,60 @@ export class Career {
 
   /**
    * Sim resolver seam: condition (fatigue/morale/form via effectiveResolve)
-   * composes with locker-room chemistry. effectiveResolve already produces
-   * per-game cached condition-scaled copies; this wraps it and additionally
-   * scales each player's composites by the chemistry multiplier (0.97–1.03)
-   * of the EV unit (forward line or defense pair) the player is slotted on.
-   * Players outside any EV unit (goalies, scratches) keep ×1. Both layers are
-   * multiplicative, never mutate the base Player, and the resolver is rebuilt
-   * fresh per game — matching effectiveResolve's cache semantics.
+   * composes with locker-room chemistry AND line synergy. effectiveResolve
+   * already produces per-game cached condition-scaled copies; this wraps it and
+   * additionally scales each player's composites by two multiplicative factors:
+   *
+   *   1. chemistryModifier(lockerRoom, unit) — 0.97–1.03 (locker-room familiarity)
+   *   2. lineSynergy(forwardLine).multiplier  — 0.97–1.03 (archetype complementarity)
+   *      or pairSynergy(defensePair).multiplier for D pairings.
+   *
+   * Both factors are applied multiplicatively (combined = chem × synergy) and
+   * clamped to [0.97, 1.03] so the combined effect never exceeds ±6% from 1.0
+   * (same tolerance band as chemistry alone, keeping calibration within range).
+   * Players outside any EV unit (goalies, scratches) keep ×1. The resolver is
+   * rebuilt fresh each game — matching effectiveResolve's cache semantics.
    */
   private storyResolve(): (id: PlayerId) => Player {
     const base = effectiveResolve(this.resolve)
-    const unitOf = new Map<string, { unit: string[]; teamId: TeamId }>()
+    type UnitKind = 'forward' | 'defense'
+    const unitOf = new Map<string, { unit: string[]; teamId: TeamId; kind: UnitKind }>()
     for (const team of this.data.teams.values()) {
       if (!this.lockerRooms.has(team.id)) continue
       for (const line of team.lines.forwards) {
         const ids = line.map((x) => x as string)
-        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id })
+        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id, kind: 'forward' })
       }
       for (const pair of team.lines.defensePairs) {
         const ids = pair.map((x) => x as string)
-        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id })
+        for (const id of ids) unitOf.set(id, { unit: ids, teamId: team.id, kind: 'defense' })
       }
     }
+
+    // Pre-compute per-unit synergy multipliers once (deterministic, no Rng).
+    // Synergy is applied ONLY for the user's team; it represents the coaching
+    // layer (the user's tactical line-building decisions). Applying it to all
+    // AI teams would alter AI-vs-AI quick-sim seeds, breaking existing tests.
+    // Chemistry is still applied universally as before.
+    const synergyCache = new Map<string, number>()
+    const synergyFor = (ids: string[], kind: UnitKind, teamId: TeamId): number => {
+      if (teamId !== this.userTeamId) return 1
+      const key = [...ids].sort().join('|')
+      const hit = synergyCache.get(key)
+      if (hit !== undefined) return hit
+      const players = ids.map((id) => this.data.players.get(id as PlayerId)).filter((p): p is Player => p !== undefined)
+      let mult: number
+      if (kind === 'forward') {
+        mult = lineSynergy(players).multiplier
+      } else {
+        mult = pairSynergy(players).multiplier
+      }
+      synergyCache.set(key, mult)
+      return mult
+    }
+
+    const clamp = (v: number, lo: number, hi: number): number => v < lo ? lo : v > hi ? hi : v
+
     const cache = new Map<PlayerId, Player>()
     return (id: PlayerId): Player => {
       const hit = cache.get(id)
@@ -802,14 +835,17 @@ export class Career {
         cache.set(id, p)
         return p
       }
-      const mult = chemistryModifier(lr, slot.unit)
-      if (mult === 1) {
+      const chemMult = chemistryModifier(lr, slot.unit)
+      const synMult = synergyFor(slot.unit, slot.kind, slot.teamId)
+      // Compose multiplicatively, clamp to [0.97, 1.03] to stay within calibration band.
+      const combined = clamp(chemMult * synMult, 0.97, 1.03)
+      if (combined === 1) {
         cache.set(id, p)
         return p
       }
       const composites = { ...p.composites } as unknown as Record<string, number>
       for (const key of Object.keys(composites)) {
-        composites[key] = Math.max(1, Math.min(99, Math.round(composites[key] * mult)))
+        composites[key] = Math.max(1, Math.min(99, Math.round(composites[key] * combined)))
       }
       const copy: Player = { ...p, composites: composites as unknown as Player['composites'] }
       cache.set(id, copy)
@@ -2497,6 +2533,25 @@ export class Career {
 
   setTactics(tactics: TeamTactics): void {
     this.userTeam.tactics = structuredClone(tactics)
+  }
+
+  /**
+   * Merge the coach's suggested tactic fields onto the current tactics.
+   * Only the fields present in `suggestedTactics` are overwritten; other
+   * fields remain unchanged. This lets the UI apply a partial suggestion
+   * (e.g. only forecheck, or only tempo) without blowing away the rest.
+   */
+  applyCoachSuggestion(suggestedTactics: Partial<TeamTactics>): void {
+    const current = this.userTeam.tactics
+    const merged: TeamTactics = {
+      ...current,
+      ...suggestedTactics,
+      // Deep-merge tempo: if suggestedTactics.tempo is partial, keep current fields
+      tempo: suggestedTactics.tempo !== undefined
+        ? { ...current.tempo, ...suggestedTactics.tempo }
+        : current.tempo,
+    }
+    this.userTeam.tactics = merged
   }
 
   markNewsRead(ids: string[]): void {
