@@ -60,20 +60,28 @@ const GOALIE_TORSO_W = 2.1
 
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
-const CAMERA_FOLLOW_HL = 0.45   // raised from 0.35 → softer camera spring
-const CAMERA_OVERHEAD_HL = 0.7  // heavier damping for overhead x-follow
+const CAMERA_FOLLOW_HL = 0.45   // broadcast/follow spring half-life (~0.45 s)
+const CAMERA_OVERHEAD_HL = 1.5  // overhead: very heavy damping — stable wide shot
 const ANGLE_FOLLOW_HL = 0.12
 
 // ── Play-focus smoother ─────────────────────────────────────────────────────
-// EMA time constant for the play-focus layer (seconds).  Longer → less jitter,
-// more latency.  0.5 s keeps broadcast cam stable while still following plays.
-const PLAY_FOCUS_TAU_X = 0.5   // heavier on long-axis (X) — main jitter source
-const PLAY_FOCUS_TAU_Z = 0.35  // lighter on width (Z) — less travel, can be snappier
+// EMA time constant for the play-focus layer (seconds).
+// ~0.45 s gives clearly visible tracking while remaining smooth.
+const PLAY_FOCUS_TAU_X = 0.45  // long-axis (X) — main travel direction
+const PLAY_FOCUS_TAU_Z = 0.3   // width (Z) — shorter travel, can be snappier
 
-// Deadzone radius (world feet) for play-focus → camera spring target.
-// Sub-threshold focus drift is suppressed so stationary puck cycles don't jitter.
-const PLAY_FOCUS_DEADZONE_X = 2.0  // ft — broadcast cam ignores <2ft X drift
-const PLAY_FOCUS_DEADZONE_Z = 1.0  // ft — width axis less sensitive
+// Deadzone applied to the RAW puck position before EMA.
+// If the raw puck hasn't moved more than this from the current play-focus,
+// we don't update the EMA target — suppresses micro-jitter from engine ticks
+// without blocking genuine play movement.
+// ~5 ft = plausible micro-jitter band; anything larger is a real play shift.
+const PLAY_FOCUS_DEADZONE_X = 5.0   // ft on the long axis
+const PLAY_FOCUS_DEADZONE_Z = 3.0   // ft on the width axis
+
+// Overhead camera: per-frame clamp on how far the target may move (ft).
+// Prevents a single-frame puck teleport (goal→faceoff reset) from yanking
+// the overhead camera. Real play movement accumulates across frames normally.
+const OVERHEAD_TARGET_MAX_DELTA_PER_FRAME = 1.0  // ft/frame (≈60 ft/s at 60fps)
 
 // Max camera speed (ft/s) to cap frame-spike induced jumps.
 const CAM_MAX_SPEED_FT_S = 60
@@ -614,6 +622,11 @@ export class Rink3dRenderer implements MatchRenderer {
     // Snap play-focus to initial puck position so there is no EMA warmup lag
     this.playFocusX = this.puckMesh.position.x
     this.playFocusZ = this.puckMesh.position.z
+    // Snap all player springs to their initial positions
+    this.snapAllSprings()
+    // Snap the camera to the correct broadcast pose for the opening puck position
+    // so there is zero fly-in / settle wobble on the first frame.
+    this.snapCameraToTarget()
     this.emit()
   }
 
@@ -681,6 +694,8 @@ export class Rink3dRenderer implements MatchRenderer {
     this.playFocusX = this.puckMesh.position.x
     this.playFocusZ = this.puckMesh.position.z
     this.snapAllSprings()
+    // Snap camera to the correct pose for the new position — no fly-over
+    this.snapCameraToTarget()
     this.emit()
   }
 
@@ -705,6 +720,32 @@ export class Rink3dRenderer implements MatchRenderer {
     // Snap puck render springs
     this.puckRenderX = snapSpring(this.puckMesh.position.x)
     this.puckRenderZ = snapSpring(this.puckMesh.position.z)
+  }
+
+  /**
+   * Hard-snap the camera spring state to the correct target for the current
+   * preset + play-focus position.  Call this after load(), seekFraction(), or
+   * any other time you want the first rendered frame to be correct with zero
+   * fly-in animation.
+   *
+   * Prerequisite: playFocusX/Z must already be set to the desired focus point.
+   */
+  private snapCameraToTarget(): void {
+    this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
+    const target = cameraTargetFor(this.camPreset, this.playFocusX, {
+      endzoneActiveSide: this.endzoneActiveSide,
+      carrierAngle: this.carrierAngle,
+      carrierWx: this.carrierWx,
+      carrierWz: this.carrierWz,
+    })
+    this.camX = snapSpring(target.px)
+    this.camY = snapSpring(target.py)
+    this.camZ = snapSpring(target.pz)
+    this.lookX = snapSpring(target.lx)
+    this.lookY = snapSpring(target.ly)
+    this.lookZ = snapSpring(target.lz)
+    this.camera.position.set(target.px, target.py, target.pz)
+    this.camera.lookAt(target.lx, target.ly, target.lz)
   }
 
   resize(): void {
@@ -1046,31 +1087,41 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
-    // ── Layer 1: play-focus EMA ──────────────────────────────────────────────
-    // Smooth the raw puck position with a long time constant before feeding it
-    // to the camera spring.  This eliminates micro-jitter from deflections,
-    // rebounds, and carrier stick-offset micro-movements without snapping.
-    //
-    // For broadcast/overhead we follow the smoothed puck (X is the main axis).
-    // For follow/endzone we use carrierWx/carrierWz which are already spring-
-    // smoothed player positions; apply a lighter EMA so the follow cam stays
-    // behind the carrier without drifting too far.
-    const rawFocusX = this.puckRenderX.pos
-    const rawFocusZ = this.puckRenderZ.pos
+    // ── Layer 1: deadzone on raw puck input ──────────────────────────────────
+    // Apply deadzone directly to the RAW puck position before EMA smoothing.
+    // If the puck hasn't moved more than the threshold from the current
+    // play-focus, we leave the EMA target unchanged — this suppresses micro-
+    // jitter (engine-tick rounding, carrier stick-offset noise, deflections)
+    // without slowing down real play movement, which always exceeds the threshold.
+    const rawX = this.puckRenderX.pos
+    const rawZ = this.puckRenderZ.pos
 
-    // Overhead uses even heavier smoothing (camera is far away, less precision needed)
-    const tauX = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_X * 1.4 : PLAY_FOCUS_TAU_X
-    const tauZ = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_Z * 1.4 : PLAY_FOCUS_TAU_Z
+    // Commit the raw puck as the new EMA target only if it escaped the deadzone.
+    const committedX = applyDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
+    const committedZ = applyDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
 
-    const newFocusX = emaStep(this.playFocusX, rawFocusX, dt, tauX)
-    const newFocusZ = emaStep(this.playFocusZ, rawFocusZ, dt, tauZ)
+    // ── Layer 2: EMA smoothing toward the committed target ───────────────────
+    // For overhead we apply extra damping because the camera is far away and
+    // the wide shot amplifies any apparent movement.
+    const tauX = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_X * 1.6 : PLAY_FOCUS_TAU_X
+    const tauZ = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_Z * 1.6 : PLAY_FOCUS_TAU_Z
 
-    // ── Layer 2: deadzone ────────────────────────────────────────────────────
-    // Only commit the EMA update if the focus moved beyond the deadzone threshold.
-    // Sub-threshold drift (stationary puck micro-jitter from engine tick rounding)
-    // is silently discarded so the camera spring target never wiggles.
-    this.playFocusX = applyDeadzone(newFocusX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
-    this.playFocusZ = applyDeadzone(newFocusZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
+    let newFocusX = emaStep(this.playFocusX, committedX, dt, tauX)
+    let newFocusZ = emaStep(this.playFocusZ, committedZ, dt, tauZ)
+
+    // ── Layer 3: per-frame clamp for overhead ────────────────────────────────
+    // Overhead camera is high and wide; even the EMA output can jump noticeably
+    // if a goal resets the puck across the rink in one frame.  Clamp the EMA
+    // output's per-frame delta so the camera can never teleport in a single tick.
+    if (this.camPreset === 'overhead') {
+      const maxDX = OVERHEAD_TARGET_MAX_DELTA_PER_FRAME
+      newFocusX = Math.max(this.playFocusX - maxDX, Math.min(this.playFocusX + maxDX, newFocusX))
+      newFocusZ = Math.max(this.playFocusZ - maxDX, Math.min(this.playFocusZ + maxDX, newFocusZ))
+    }
+
+    // Guard against NaN (e.g. if puck position is somehow invalid)
+    this.playFocusX = Number.isFinite(newFocusX) ? newFocusX : this.playFocusX
+    this.playFocusZ = Number.isFinite(newFocusZ) ? newFocusZ : this.playFocusZ
 
     // Update endzone active side with hysteresis (only flips outside ±15ft of center)
     this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
@@ -1082,21 +1133,33 @@ export class Rink3dRenderer implements MatchRenderer {
       carrierWz: this.carrierWz,
     })
 
-    // ── Layer 3: camera spring (critically damped) ───────────────────────────
-    // Overhead uses heavier half-life on X so the wide-angle shot doesn't drift.
+    // Guard target against NaN before feeding to springs
+    const safeTarget = {
+      px: Number.isFinite(target.px) ? target.px : this.camX.pos,
+      py: Number.isFinite(target.py) ? target.py : this.camY.pos,
+      pz: Number.isFinite(target.pz) ? target.pz : this.camZ.pos,
+      lx: Number.isFinite(target.lx) ? target.lx : this.lookX.pos,
+      ly: Number.isFinite(target.ly) ? target.ly : this.lookY.pos,
+      lz: Number.isFinite(target.lz) ? target.lz : this.lookZ.pos,
+    }
+
+    // ── Layer 4: camera spring (critically damped) ───────────────────────────
+    // Overhead uses a very heavy half-life so the camera barely drifts —
+    // the wide shot is meant to be stable.  Broadcast/follow/endzone use the
+    // normal half-life which gives clearly visible tracking.
     const hl = this.camPreset === 'overhead' ? CAMERA_OVERHEAD_HL : CAMERA_FOLLOW_HL
 
     const prevCamX = this.camX.pos
     const prevCamZ = this.camZ.pos
 
-    this.camX = springStep(this.camX, target.px, dt, hl)
-    this.camY = springStep(this.camY, target.py, dt, CAMERA_FOLLOW_HL)
-    this.camZ = springStep(this.camZ, target.pz, dt, CAMERA_FOLLOW_HL)
-    this.lookX = springStep(this.lookX, target.lx, dt, hl)
-    this.lookY = springStep(this.lookY, target.ly, dt, CAMERA_FOLLOW_HL)
-    this.lookZ = springStep(this.lookZ, target.lz, dt, CAMERA_FOLLOW_HL)
+    this.camX = springStep(this.camX, safeTarget.px, dt, hl)
+    this.camY = springStep(this.camY, safeTarget.py, dt, CAMERA_FOLLOW_HL)
+    this.camZ = springStep(this.camZ, safeTarget.pz, dt, CAMERA_FOLLOW_HL)
+    this.lookX = springStep(this.lookX, safeTarget.lx, dt, hl)
+    this.lookY = springStep(this.lookY, safeTarget.ly, dt, CAMERA_FOLLOW_HL)
+    this.lookZ = springStep(this.lookZ, safeTarget.lz, dt, CAMERA_FOLLOW_HL)
 
-    // ── Layer 4: max-speed clamp ─────────────────────────────────────────────
+    // ── Layer 5: max-speed clamp ─────────────────────────────────────────────
     // Cap camera travel speed so a spike in dt (tab focus restore, etc.) cannot
     // teleport the camera across the rink in a single frame.
     this.camX = { pos: clampSpeed(prevCamX, this.camX.pos, dt, CAM_MAX_SPEED_FT_S), vel: this.camX.vel }

@@ -14,6 +14,12 @@ import { isEvent } from '@domain'
 const REGULATION_PERIOD_SECONDS = 1200
 
 /**
+ * Sorted list of absolute times at which play stops (whistle or faceoff).
+ * Used by sampleAt() to snap the puck rather than lerp it across a stoppage.
+ */
+type StoppageMark = { absT: number }
+
+/**
  * Absolute elapsed seconds from opening faceoff (periods laid end to end).
  *
  * For regulation periods (1–3) each is exactly 1200 s. For overtime periods
@@ -62,6 +68,13 @@ export class MatchTimeline {
   private readonly frames: Indexed[] = []
   private readonly goals: ScoreMark[] = []
   /**
+   * Sorted absolute times of whistle + faceoff events.
+   * sampleAt() uses this to snap the puck instead of lerping it across a
+   * stoppage, which would cause the puck to slide across the ice to the
+   * faceoff dot.
+   */
+  private readonly stoppages: StoppageMark[] = []
+  /**
    * Absolute clock offset at the start of each period (1-indexed).
    * Regulation periods are each 1200 s; OT periods (4+) derive their length
    * from the max `t` seen in that period's frames (so 3v3 OT is ~300 s and
@@ -98,7 +111,7 @@ export class MatchTimeline {
       base += len
     }
 
-    // Second pass: index frames with their true absolute times.
+    // Second pass: index frames + goals + stoppages with their true absolute times.
     for (const ev of stream) {
       if (isEvent(ev, 'frame')) {
         const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
@@ -106,8 +119,14 @@ export class MatchTimeline {
       } else if (isEvent(ev, 'goal')) {
         const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
         this.goals.push({ absT: pBase + ev.t, home: isHomePlayer(ev.scorer) })
+      } else if (isEvent(ev, 'whistle') || isEvent(ev, 'faceoff')) {
+        // Index stoppages so sampleAt() can snap the puck at stoppage boundaries
+        // instead of lerping it across the ice to the new faceoff position.
+        const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
+        this.stoppages.push({ absT: pBase + ev.t })
       }
     }
+    // stoppages are already in stream order (ascending absT)
     this.duration = this.frames.length ? this.frames[this.frames.length - 1].absT : 0
     let h = 0
     let a = 0
@@ -140,16 +159,40 @@ export class MatchTimeline {
     const next = this.frames[i + 1]
     if (!next) return snapshotOf(a)
     const b = next.frame
-    const span = next.absT - this.frames[i].absT
-    const f = span > 0 ? (absT - this.frames[i].absT) / span : 0
+    const frameAT = this.frames[i].absT
+    const frameBT = next.absT
+    const span = frameBT - frameAT
+    const f = span > 0 ? (absT - frameAT) / span : 0
+
+    // Puck snap: if a whistle or faceoff falls strictly between the two
+    // bracketing frames, the puck has been reset to a new faceoff position.
+    // Instead of lerping it across the ice (visible slide), we use frame A's
+    // puck position for absT before the stoppage, and frame B's position after.
+    // Skaters continue to ease normally — only the puck snaps.
+    const stoppageT = this.firstStoppageBetween(frameAT, frameBT)
+    const puck = stoppageT !== null
+      ? (absT < stoppageT ? { ...a.puck } : { ...b.puck })
+      : lerpXY(a.puck, b.puck, f)
+
     return {
       home: blend(a.home, b.home, f),
       away: blend(a.away, b.away, f),
       homeGoalie: blendOne(a.homeGoalie, b.homeGoalie, f),
       awayGoalie: blendOne(a.awayGoalie, b.awayGoalie, f),
-      puck: lerpXY(a.puck, b.puck, f),
+      puck,
       carrier: f < 0.5 ? a.puckCarrier : b.puckCarrier
     }
+  }
+
+  /**
+   * Returns the absolute time of the first stoppage strictly between frameAT
+   * (exclusive) and frameBT (inclusive), or null if none exists.
+   */
+  private firstStoppageBetween(frameAT: number, frameBT: number): number | null {
+    for (const s of this.stoppages) {
+      if (s.absT > frameAT && s.absT <= frameBT) return s.absT
+    }
+    return null
   }
 
   scoreAt(absT: number): { home: number; away: number } {

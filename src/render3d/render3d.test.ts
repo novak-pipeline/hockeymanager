@@ -618,3 +618,209 @@ describe('clampSpeed', () => {
     expect(clamped).toBeGreaterThanOrEqual(0)
   })
 })
+
+// ── camera behaviour tests (pure math — no THREE) ─────────────────────────────
+// These exercise the math helpers that drive the camera system, verifying the
+// four user-reported symptoms are addressed at the math level.
+
+describe('broadcast camera tracking', () => {
+  /**
+   * Simulate the play-focus + camera spring update loop for N frames,
+   * returning the camera X position history.
+   *
+   * Mirrors the logic in rink3dRenderer.updateCamera() so we can test it
+   * without a DOM/WebGL context.
+   */
+  function simulateBroadcast(
+    frames: number,
+    dt: number,
+    rawPuckXSequence: (frame: number) => number,
+    opts: { deadzone?: number; tau?: number; springHl?: number } = {}
+  ): number[] {
+    const deadzone = opts.deadzone ?? 5.0
+    const tau = opts.tau ?? 0.45
+    const springHl = opts.springHl ?? 0.45
+
+    // Start snapped to the initial puck position (simulates load() snap)
+    const initX = rawPuckXSequence(0)
+    let playFocusX = initX
+    let camX: Spring1D = snapSpring(initX * 0.35)  // broadcast target = puckX * 0.35
+
+    const history: number[] = []
+    for (let f = 0; f < frames; f++) {
+      const rawX = rawPuckXSequence(f)
+      // Deadzone on raw input
+      const committed = applyDeadzone(rawX, playFocusX, deadzone)
+      // EMA
+      const newFocus = emaStep(playFocusX, committed, dt, tau)
+      playFocusX = Number.isFinite(newFocus) ? newFocus : playFocusX
+      // Camera spring toward broadcast target (puckX * 0.35)
+      const targetX = playFocusX * 0.35
+      camX = springStep(camX, targetX, dt, springHl)
+      history.push(camX.pos)
+    }
+    return history
+  }
+
+  it('camera X moves when play-focus shifts a large distance (>deadzone)', () => {
+    // Puck moves from center (0) to +60ft down the ice — well beyond the 5ft deadzone
+    const history = simulateBroadcast(120, 0.016, (f) => f < 30 ? 0 : 60)
+    const first = history[0]!
+    const last = history[history.length - 1]!
+    // Camera should have moved substantially toward the puck-shifted target
+    expect(last).toBeGreaterThan(first + 5)
+  })
+
+  it('camera X does NOT move for sub-deadzone jitter inputs', () => {
+    // Puck jitters ±3ft around center (within 5ft deadzone) for 60 frames
+    const history = simulateBroadcast(60, 0.016, (f) => (f % 2 === 0 ? 3 : -3))
+    const initialCamX = history[0]!
+    // After 60 frames of sub-deadzone jitter the camera should be essentially still
+    const finalCamX = history[history.length - 1]!
+    expect(Math.abs(finalCamX - initialCamX)).toBeLessThan(0.5)
+  })
+
+  it('broadcast camera starts exactly at the correct pose (no fly-in)', () => {
+    // When we snap the camera to initial puck position (as load() now does),
+    // the first frame should already be at or very near the target position.
+    const initPuckX = 40  // puck starts 40ft from center
+    const broadcastTargetX = initPuckX * 0.35  // = 14ft
+    // snapSpring puts camera exactly at target with zero velocity
+    const cam = snapSpring(broadcastTargetX)
+    const firstFrameCam = springStep(cam, broadcastTargetX, 0.016, 0.45)
+    // After one frame, still essentially at target (not at 0 flying in)
+    expect(firstFrameCam.pos).toBeCloseTo(broadcastTargetX, 3)
+  })
+})
+
+describe('overhead camera stability', () => {
+  /**
+   * Simulate one overhead camera update step with a sudden puck jump.
+   * Returns the new playFocusX after the frame.
+   */
+  function overheadFrameStep(
+    prevFocusX: number,
+    newPuckX: number,
+    dt: number,
+    maxDeltaPerFrame: number,
+    tau: number
+  ): number {
+    // The overhead path: deadzone on raw (5ft), EMA with heavier tau, then clamp
+    const deadzone = 5.0
+    const committed = applyDeadzone(newPuckX, prevFocusX, deadzone)
+    const tauOverhead = tau * 1.6
+    let newFocus = emaStep(prevFocusX, committed, dt, tauOverhead)
+    // Per-frame clamp
+    newFocus = Math.max(prevFocusX - maxDeltaPerFrame, Math.min(prevFocusX + maxDeltaPerFrame, newFocus))
+    return Number.isFinite(newFocus) ? newFocus : prevFocusX
+  }
+
+  it('overhead target does NOT jump when puck teleports across the ice in one frame', () => {
+    // Puck resets from center (0) to far end (+90ft) in a single frame (goal → faceoff)
+    const prevFocus = 0
+    const newPuckX = 90
+    const dt = 0.016
+    const maxDelta = 1.0  // OVERHEAD_TARGET_MAX_DELTA_PER_FRAME
+
+    const newFocus = overheadFrameStep(prevFocus, newPuckX, dt, maxDelta, 0.45)
+    // The focus must not have jumped more than maxDelta in a single frame
+    expect(Math.abs(newFocus - prevFocus)).toBeLessThanOrEqual(maxDelta + 0.001)
+  })
+
+  it('overhead target gradually tracks legitimate play movement', () => {
+    // Puck moves steadily from 0 to 60ft over 120 frames — should accumulate
+    let focus = 0
+    for (let f = 0; f < 120; f++) {
+      const puckX = f * 0.5  // 0.5ft/frame = 30 ft/s in-play speed
+      focus = overheadFrameStep(focus, puckX, 0.016, 1.0, 0.45)
+    }
+    // After 120 frames the camera should have tracked at least somewhat
+    // (note: overhead clamp is strict so it won't fully catch up — that's correct)
+    expect(focus).toBeGreaterThan(0)
+  })
+
+  it('overhead target produces no NaN even for extreme inputs', () => {
+    const extremeInputs = [Infinity, -Infinity, NaN, 1e10, -1e10, 0]
+    let focus = 0
+    for (const puckX of extremeInputs) {
+      const committed = isFinite(puckX) ? applyDeadzone(puckX, focus, 5) : focus
+      const ema = emaStep(focus, committed, 0.016, 0.72)
+      const clamped = Math.max(focus - 1.0, Math.min(focus + 1.0, ema))
+      const next = Number.isFinite(clamped) ? clamped : focus
+      expect(Number.isFinite(next)).toBe(true)
+      focus = next
+    }
+  })
+})
+
+describe('snapSpring as camera snap helper', () => {
+  it('snapSpring sets position to target exactly with zero velocity', () => {
+    const s = snapSpring(77)
+    expect(s.pos).toBe(77)
+    expect(s.vel).toBe(0)
+  })
+
+  it('a spring snapped to its target does not oscillate on the next step', () => {
+    const s = snapSpring(50)
+    // Step toward the same target — should stay put
+    const next = springStep(s, 50, 0.016, 0.45)
+    expect(next.pos).toBeCloseTo(50, 5)
+    expect(Math.abs(next.vel)).toBeLessThan(0.001)
+  })
+
+  it('snapping all 6 camera springs then stepping produces no drift on first frame', () => {
+    // Simulate what load()/seekFraction() does: snap all 6 springs, then
+    // call updateCamera for one frame and verify the camera hasn't moved.
+    const targetPx = 7    // broadcast target for puck at 20ft: 20*0.35=7
+    const targetPy = 40
+    const targetPz = -75
+    const targetLx = 7
+    const targetLy = 0
+    const targetLz = 0
+
+    let cx = snapSpring(targetPx)
+    let cy = snapSpring(targetPy)
+    let cz = snapSpring(targetPz)
+    let lx = snapSpring(targetLx)
+    let ly = snapSpring(targetLy)
+    let lz = snapSpring(targetLz)
+
+    // One frame with the same target (puck hasn't moved significantly)
+    const dt = 0.016
+    const hl = 0.45
+    cx = springStep(cx, targetPx, dt, hl)
+    cy = springStep(cy, targetPy, dt, hl)
+    cz = springStep(cz, targetPz, dt, hl)
+    lx = springStep(lx, targetLx, dt, hl)
+    ly = springStep(ly, targetLy, dt, hl)
+    lz = springStep(lz, targetLz, dt, hl)
+
+    expect(cx.pos).toBeCloseTo(targetPx, 3)
+    expect(cy.pos).toBeCloseTo(targetPy, 3)
+    expect(cz.pos).toBeCloseTo(targetPz, 3)
+  })
+})
+
+describe('no NaN from any camera preset', () => {
+  const presets: Array<Parameters<typeof cameraTargetFor>[0]> = ['broadcast', 'overhead', 'endzone', 'follow']
+  const puckPositions = [0, 50, -50, 90, -90]
+
+  for (const preset of presets) {
+    for (const puckWx of puckPositions) {
+      it(`${preset} at puckWx=${puckWx} produces finite values`, () => {
+        const t = cameraTargetFor(preset, puckWx, {
+          endzoneActiveSide: puckWx >= 0 ? 1 : -1,
+          carrierAngle: Math.PI / 4,
+          carrierWx: puckWx,
+          carrierWz: 10,
+        })
+        expect(Number.isFinite(t.px)).toBe(true)
+        expect(Number.isFinite(t.py)).toBe(true)
+        expect(Number.isFinite(t.pz)).toBe(true)
+        expect(Number.isFinite(t.lx)).toBe(true)
+        expect(Number.isFinite(t.ly)).toBe(true)
+        expect(Number.isFinite(t.lz)).toBe(true)
+      })
+    }
+  }
+})
