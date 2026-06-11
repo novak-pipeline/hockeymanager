@@ -923,8 +923,19 @@ export class Rink3dRenderer implements MatchRenderer {
     const wx = normXtoWorld(nx)
     const wz = normYtoWorld(ny)
 
-    pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
-    pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+    if (dt > 0) {
+      pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
+      pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+    } else {
+      // dt === 0 is a seek/scrub/replay jump — snap directly to the sampled
+      // position (zero velocity) so the player doesn't fly in from his old spot
+      // and overshoot. Sync prev* so no fake velocity spike is computed.
+      pose.worldX = snapSpring(wx)
+      pose.worldZ = snapSpring(wz)
+      pose.prevWx = wx
+      pose.prevWz = wz
+      pose.speed = 0
+    }
 
     // Velocity-based speed
     const vx = pose.worldX.pos - pose.prevWx
@@ -975,8 +986,13 @@ export class Rink3dRenderer implements MatchRenderer {
   ): void {
     const wx = normXtoWorld(nx)
     const wz = normYtoWorld(ny)
-    pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
-    pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+    if (dt > 0) {
+      pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
+      pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+    } else {
+      pose.worldX = snapSpring(wx)
+      pose.worldZ = snapSpring(wz)
+    }
 
     // Face puck — clamped turn rate (goalies can turn faster than skaters)
     const pWx = normXtoWorld(puck.x)
