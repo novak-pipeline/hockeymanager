@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { registerSaveIpc } from './saves'
+import { registerPressIpc } from './press'
 
 const isDev = !app.isPackaged
 
@@ -31,6 +32,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   registerSaveIpc(ipcMain)
+  registerPressIpc(ipcMain)
   createWindow()
 
   app.on('activate', () => {

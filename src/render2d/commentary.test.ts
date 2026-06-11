@@ -236,10 +236,14 @@ describe('faceoff commentary', () => {
     expect(lines[0].text).toContain('Smith')
   })
 
-  it('does not emit a line for a mid-period faceoff (t >= 5)', () => {
+  it('emits a puck-drop line for a mid-period faceoff (t >= 5)', () => {
     const stream: GameStream = [faceoffEvent(1, 600, 'p1')]
     const lines = generateCommentary(stream, names, isHome, abbrs)
-    expect(lines.length).toBe(0)
+    // Mid-game faceoffs now emit a "puck drops" line
+    expect(lines.length).toBe(1)
+    // The line should mention "puck" or "drops" or similar — not the winner name
+    const lower = lines[0].text.toLowerCase()
+    expect(lower.match(/puck|drops|underway|faceoff|resume/)).toBeTruthy()
   })
 })
 
@@ -256,6 +260,99 @@ describe('period end recap', () => {
     expect(endLine).toBeDefined()
     // Should mention "1-0" somewhere
     expect(endLine!.text).toContain('1-0')
+  })
+})
+
+// ── whistle reason lines ──────────────────────────────────────────────────────
+
+function whistleEvent(period: number, t: number, reason?: StoppageEvent['reason']): StoppageEvent {
+  const ev: StoppageEvent = { type: 'whistle', period, t }
+  if (reason !== undefined) return { ...ev, reason }
+  return ev
+}
+
+describe('whistle reason commentary', () => {
+  it('offside whistle emits an offside line', () => {
+    const stream: GameStream = [whistleEvent(1, 300, 'offside')]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(1)
+    expect(lines[0].text.toLowerCase()).toContain('offside')
+  })
+
+  it('icing whistle emits an icing line', () => {
+    const stream: GameStream = [whistleEvent(1, 300, 'icing')]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(1)
+    expect(lines[0].text.toLowerCase()).toContain('ic')
+  })
+
+  it('goalieFreeze whistle emits a freeze line', () => {
+    const stream: GameStream = [whistleEvent(1, 300, 'goalieFreeze')]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(1)
+    const lower = lines[0].text.toLowerCase()
+    expect(lower.match(/goalie|freeze|frozen|smothers|covers|netminder/)).toBeTruthy()
+  })
+
+  it('goal-reason whistle is silent (goal commentary handles it)', () => {
+    const stream: GameStream = [whistleEvent(1, 300, 'goal')]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(0)
+  })
+
+  it('whistle with no reason emits a generic play-stopped line', () => {
+    const stream: GameStream = [whistleEvent(1, 300)]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(1)
+  })
+
+  it('all whistle reason lines have importance 1', () => {
+    const reasons: Array<StoppageEvent['reason']> = ['offside', 'icing', 'goalieFreeze', 'penalty']
+    for (const reason of reasons) {
+      const stream: GameStream = [whistleEvent(1, 300, reason)]
+      const lines = generateCommentary(stream, names, isHome, abbrs)
+      expect(lines[0]?.importance).toBe(1)
+    }
+  })
+})
+
+// ── cluster trimming ──────────────────────────────────────────────────────────
+
+describe('cluster trimming', () => {
+  it('trims clusters of 3+ importance-1 lines within 5 s to at most 2', () => {
+    // 5 low-danger shots within a 4-second window → cluster should be trimmed
+    const stream: GameStream = [
+      shotEvent(1, 300, 'p1', 0.1),
+      shotEvent(1, 301, 'p2', 0.1),
+      shotEvent(1, 302, 'p3', 0.1),
+      shotEvent(1, 303, 'p1', 0.1),
+      shotEvent(1, 304, 'p2', 0.1),
+    ]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    // All are importance-1; within the 5-s window at most 2 should survive
+    const imp1 = lines.filter((l) => l.importance === 1)
+    expect(imp1.length).toBeLessThanOrEqual(2)
+  })
+
+  it('leaves importance-2+ lines untouched during cluster trim', () => {
+    const stream: GameStream = [
+      shotEvent(1, 300, 'p1', 0.8),  // importance 2
+      shotEvent(1, 301, 'p2', 0.1),  // importance 1
+      shotEvent(1, 302, 'p3', 0.1),  // importance 1
+      shotEvent(1, 303, 'p1', 0.1),  // importance 1
+    ]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    // The importance-2 line must survive
+    expect(lines.filter((l) => l.importance >= 2).length).toBe(1)
+  })
+
+  it('does not trim when fewer than 3 lines in a 5-s window', () => {
+    const stream: GameStream = [
+      shotEvent(1, 300, 'p1', 0.1),
+      shotEvent(1, 302, 'p2', 0.1),
+    ]
+    const lines = generateCommentary(stream, names, isHome, abbrs)
+    expect(lines.length).toBe(2)
   })
 })
 

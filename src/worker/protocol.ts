@@ -13,6 +13,8 @@
  */
 export type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
+export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
+import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 export type {
   BoxScoreView,
   CareerPhase,
@@ -125,6 +127,17 @@ export type WorkerRequestBody =
   | { type: 'getLockerRoom' }
   /** Season tentpoles: trade rumors, deadline recap, lottery, combine, tournament. */
   | { type: 'getTentpoles' }
+  /* ── press corps ── */
+  /** Poll for the pending press writing job, if any. */
+  | { type: 'getPressJob' }
+  /** Submit a finished article (LLM or wire report) to the career inbox. */
+  | { type: 'submitPressArticle'; jobId: string; headline: string; body: string; byline: string; model: string }
+  /** Discard the pending job (feature toggled off or skip). */
+  | { type: 'skipPressJob'; jobId: string }
+  /** Poll for a pending press-conference question, if any. */
+  | { type: 'getPresser' }
+  /** Submit the user's press-conference answer. */
+  | { type: 'answerPresser'; answer: string; tone: PressTone }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -161,5 +174,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'history'; history: HistoryView }
   | { type: 'lockerRoom'; lockerRoom: LockerRoomView }
   | { type: 'tentpoles'; tentpoles: TentpoleView }
+  /* ── press corps ── */
+  | { type: 'pressJob'; pressJob: PressJob | null }
+  | { type: 'presser'; presser: PressConferenceState | null }
   | { type: 'error'; message: string }
 )

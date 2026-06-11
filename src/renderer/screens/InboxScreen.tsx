@@ -233,8 +233,13 @@ function ReadingPane(props: {
   navigate: ReturnType<typeof useNav>['navigate']
 }): JSX.Element {
   const { item, navigate } = props
-  const meta = CATEGORY_META[item.category]
 
+  // Press articles render as a newspaper-style layout.
+  if (item.press) {
+    return <PressArticlePane item={item} navigate={navigate} />
+  }
+
+  const meta = CATEGORY_META[item.category]
   return (
     <Panel>
       <div className="stack">
@@ -282,6 +287,77 @@ function ReadingPane(props: {
             )}
           </div>
         )}
+      </div>
+    </Panel>
+  )
+}
+
+/**
+ * Newspaper-style reading pane for press-corps articles: byline header,
+ * large headline, article-styled body.
+ */
+function PressArticlePane(props: {
+  item: NewsItem
+  navigate: ReturnType<typeof useNav>['navigate']
+}): JSX.Element {
+  const { item } = props
+  const press = item.press!
+
+  return (
+    <Panel>
+      <div className="press-article stack">
+        {/* Byline header */}
+        <div
+          className="press-byline"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingBottom: 'var(--sp-3)',
+            borderBottom: '2px solid var(--accent)',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--accent)' }}>
+              {press.kind.toUpperCase().replace(/-/g, ' ')}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+              {press.byline}
+            </div>
+          </div>
+          <div className="muted small" style={{ textAlign: 'right' }}>
+            <div>Day {item.day}</div>
+            <div>{item.year}</div>
+          </div>
+        </div>
+
+        {/* Large headline */}
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            letterSpacing: -0.3,
+            color: 'var(--text)',
+            paddingTop: 'var(--sp-2)',
+          }}
+        >
+          {item.headline}
+        </div>
+
+        {/* Article body */}
+        <div
+          style={{
+            borderTop: '1px solid var(--line)',
+            paddingTop: 'var(--sp-3)',
+            fontSize: 13,
+            lineHeight: 1.75,
+            color: 'var(--text)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {item.body}
+        </div>
       </div>
     </Panel>
   )

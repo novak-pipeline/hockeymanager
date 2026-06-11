@@ -851,6 +851,12 @@ export class Career {
     this.pushSeeds(res.newsSeeds)
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
 
+    // Queue a deadline tentpole press job.
+    const specialLines: string[] = res.trades.slice(0, 4).map(
+      (t) => `${t.aGave.join(', ') || 'picks'} to ${t.teamB} for ${t.bGave.join(', ') || 'picks'} (${t.teamA})`
+    )
+    this.queuePressJob('deadline', specialLines)
+
     // Diff rosters to drive captaincy/familiarity bookkeeping for AI-AI moves.
     for (const t of this.data.teams.values()) {
       for (const id of t.roster) {
@@ -1040,6 +1046,28 @@ export class Career {
     /* ── remember today's ranks for tomorrow's delta ── */
     this.prevRanks.clear()
     sorted.forEach((s, i) => this.prevRanks.set(s.teamId as string, i + 1))
+
+    /* ── press corps: weekly column every 7th match day index ── */
+    const pressIdx = this.matchDays.indexOf(day)
+    if (pressIdx >= 0 && (pressIdx + 1) % 7 === 0 && this.pressJob === null) {
+      this.queuePressJob('weekly', [])
+    }
+
+    /* ── press conference: after a notable 4+ goal defeat ── */
+    for (const res of outcomes) {
+      const userIsHome = res.homeTeamId === this.userTeamId
+      const userIsAway = res.awayTeamId === this.userTeamId
+      if (!userIsHome && !userIsAway) continue
+      const us = userIsHome ? res.homeGoals : res.awayGoals
+      const them = userIsHome ? res.awayGoals : res.homeGoals
+      if (them - us >= 4 && this.pressConference === null) {
+        const opp = this.data.teams.get(userIsHome ? res.awayTeamId : res.homeTeamId)
+        this.queuePressConference(
+          `Your team just lost ${us}-${them}. What went wrong tonight?`,
+          `After a heavy ${them - us}-goal defeat against ${opp?.abbreviation ?? 'the opposition'} (day ${day}).`
+        )
+      }
+    }
   }
 
   /** Dashboard ticker line for an arc: actor name + latest beat. */
@@ -1685,6 +1713,30 @@ export class Career {
           : `The ${champ.name} lift the cup. Next year it should be yours.`,
         { teamId: champ.id as string }
       )
+      // Queue a champion tentpole press job.
+      const champSpecial: string[] = [
+        `${champ.name} are the champions of year ${this.year}.`,
+        po.championTeamId === this.userTeamId ? 'This is a historic moment for your franchise.' : '',
+      ].filter(Boolean)
+      this.queuePressJob('champion', champSpecial)
+      // Press conference: playoff elimination or championship
+      if (po.championTeamId !== this.userTeamId) {
+        const userSeries = po.rounds.flatMap((r) => r.series).find(
+          (s) =>
+            ((s.highSeedTeamId as string) === (this.userTeamId as string) ||
+              (s.lowSeedTeamId as string) === (this.userTeamId as string)) &&
+            s.status === 'finished' &&
+            s.winnerTeamId !== this.userTeamId
+        )
+        if (userSeries && this.pressConference === null) {
+          const oppId = (userSeries.highSeedTeamId === this.userTeamId) ? userSeries.lowSeedTeamId : userSeries.highSeedTeamId
+          const opp = this.data.teams.get(oppId)
+          this.queuePressConference(
+            'Your season is over. What are your thoughts looking back?',
+            `Eliminated by ${opp?.name ?? 'the opposition'} in the playoffs.`
+          )
+        }
+      }
       this.enterOffseason()
     }
     return watched
@@ -3254,6 +3306,12 @@ export class Career {
         lastDeadlineRecap: this.lastDeadlineRecap ? structuredClone(this.lastDeadlineRecap) : null,
         lastLottery: this.lastLottery ? structuredClone(this.lastLottery) : null,
       },
+      pressState: {
+        sagaSoFar: this.sagaSoFar,
+        pressCounter: this.pressCounter,
+        pressJob: this.pressJob ? structuredClone(this.pressJob) : null,
+        pressConference: this.pressConference ? structuredClone(this.pressConference) : null,
+      },
     }
   }
 
@@ -3336,6 +3394,18 @@ export class Career {
         : null
       career.lastLottery = snapshot.storyMisc.lastLottery
         ? structuredClone(snapshot.storyMisc.lastLottery)
+        : null
+    }
+
+    // Restore press state; old saves fall back to empty defaults.
+    if (snapshot.pressState) {
+      career.sagaSoFar = snapshot.pressState.sagaSoFar ?? ''
+      career.pressCounter = snapshot.pressState.pressCounter ?? 0
+      career.pressJob = snapshot.pressState.pressJob
+        ? structuredClone(snapshot.pressState.pressJob)
+        : null
+      career.pressConference = snapshot.pressState.pressConference
+        ? structuredClone(snapshot.pressState.pressConference)
         : null
     }
 

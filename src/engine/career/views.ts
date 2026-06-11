@@ -636,6 +636,16 @@ export interface CareerSnapshot {
       movedUp: { teamAbbr: string; from: number; to: number } | null
     } | null
   }
+  /**
+   * Press corps state (added after v1 froze; optional for save compat).
+   * Stores the rolling saga, pending job, press conference, and counters.
+   */
+  pressState?: {
+    sagaSoFar: string
+    pressCounter: number
+    pressJob: import('@engine/story/factSheet').PressJob | null
+    pressConference: import('@engine/story/factSheet').PressConferenceState | null
+  }
 }
 
 export interface SaveSlotInfo {

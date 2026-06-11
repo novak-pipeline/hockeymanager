@@ -1,100 +1,179 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { MatchTimeline, type MatchView, generateCommentary, type CommentaryLine, buildHighlights, selectMode, type HighlightSegment } from '@render2d'
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
+import {
+  MatchTimeline,
+  type MatchView,
+  generateCommentary,
+  type CommentaryLine,
+  buildHighlights,
+  type HighlightSegment,
+} from '@render2d'
 import type { MatchRenderer, RinkColors } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
 import { Announcer } from './lib/announcer'
+import { MatchSfx } from './lib/sfx'
+import { planFor, currentSpeed, nextActiveJump } from '../render2d/playbackDirector'
+import type { SpeedSegment } from '../render2d/playbackDirector'
+import { loadKokoro, kokoroState } from './lib/kokoroVoice'
+import type { GoalEvent, StoppageEvent } from '@domain'
 
-const MUTED = '#8b95a6'
-const PANEL = '#11151f'
-const ACCENT = '#4c9aff'
+// ── Constants ──────────────────────────────────────────────────────────────────
 
-const SPEEDS = [1, 4, 8, 30]
+const MUTED = 'var(--muted)'
+const PANEL = 'var(--bg1)'
+const ACCENT = 'var(--violet)'
+const ACCENT_H = 'var(--violet-h)'
+
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
+const LS_RENDERER = 'hockeyMatchRenderer'
+const LS_KOKORO   = 'hockeyKokoroEnabled'
 
-const LS_KEY = 'hockeyMatchRenderer'
+// Plan-relative nudge multipliers (relative to current plan speed)
+const NUDGE_MULTIPLIERS = [0.5, 1, 2] as const
 
 type PlaybackMode = 'full' | 'extended' | 'key'
+type Phase = 'hero' | 'playing'
+
+// ── Module-level singletons (survive re-renders, disposed on unmount) ──────────
+
+const announcer = new Announcer()
+const sfx = new MatchSfx()
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function readRendererPref(): '2d' | '3d' {
   try {
-    const v = localStorage.getItem(LS_KEY)
+    const v = localStorage.getItem(LS_RENDERER)
     if (v === '2d' || v === '3d') return v
-  } catch {
-    // localStorage unavailable
-  }
+  } catch { /* ignore */ }
   return '3d'
 }
-
 function writeRendererPref(v: '2d' | '3d'): void {
-  try {
-    localStorage.setItem(LS_KEY, v)
-  } catch {
-    // ignore
-  }
+  try { localStorage.setItem(LS_RENDERER, v) } catch { /* ignore */ }
 }
 
-// Singleton announcer (renderer-scoped, survives HMR hot swap gracefully)
-const announcer = new Announcer()
+function readKokoroPref(): boolean {
+  try { return localStorage.getItem(LS_KOKORO) === 'true' } catch { return false }
+}
+function writeKokoroPref(v: boolean): void {
+  try { localStorage.setItem(LS_KOKORO, String(v)) } catch { /* ignore */ }
+}
+
+/** Find the goal event closest to (but not after) a given absT. */
+function findGoalEventAt(
+  stream: WatchedGame['stream'],
+  targetAbsT: number,
+  tolerance = 2,
+): GoalEvent | null {
+  let best: GoalEvent | null = null
+  let bestDiff = Infinity
+  for (const ev of stream) {
+    if (ev.type !== 'goal') continue
+    const at = (ev.period - 1) * 1200 + ev.t
+    const diff = Math.abs(at - targetAbsT)
+    if (diff <= tolerance && diff < bestDiff) {
+      bestDiff = diff
+      best = ev
+    }
+  }
+  return best
+}
+
+/** Find the whistle event that just crossed, given last and current absT. */
+function findCrossedWhistle(
+  stream: WatchedGame['stream'],
+  fromAbsT: number,
+  toAbsT: number,
+): StoppageEvent | null {
+  for (const ev of stream) {
+    if (ev.type !== 'whistle') continue
+    const at = (ev.period - 1) * 1200 + ev.t
+    if (at > fromAbsT && at <= toAbsT) return ev as StoppageEvent
+  }
+  return null
+}
+
+// ── Component ──────────────────────────────────────────────────────────────────
 
 export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): JSX.Element {
   const { game } = props
-  const hostRef = useRef<HTMLDivElement>(null)
-  const rendererRef = useRef<MatchRenderer | null>(null)
+
+  // DOM refs
+  const hostRef     = useRef<HTMLDivElement>(null)
+  const tickerRef   = useRef<HTMLDivElement>(null)
+
+  // Renderer refs
+  const rendererRef   = useRef<MatchRenderer | null>(null)
   const renderer3dRef = useRef<Rink3dRenderer | null>(null)
-  const [view, setView] = useState<MatchView | null>(null)
-  const [speed, setSpeed] = useState(8)
-  const [err, setErr] = useState<string | null>(null)
-  const [rendererMode, setRendererMode] = useState<'2d' | '3d'>(readRendererPref)
-  const [camPreset, setCamPreset] = useState<CameraPreset>('broadcast')
-  const [goalBanner, setGoalBanner] = useState<string | null>(null)
+
+  // Speed-plan ref (updated when mode changes)
+  const planRef = useRef<SpeedSegment[]>([])
+  // Nudge multiplier layered on top of plan speed
+  const nudgeRef = useRef<number>(1)
+
+  // Absolute game clock from last onUpdate
+  const gameDurationRef    = useRef<number>(0)
+  const lastAbsTRef        = useRef<number>(-1)
+  const viewRef            = useRef<MatchView | null>(null)
+  const commentaryLinesRef = useRef<CommentaryLine[]>([])
+  const lastCommentaryAbsT = useRef<number>(-1)
+
+  // SFX event tracking (keyed on last evaluated clock to avoid re-firing)
+  const lastSfxAbsTRef = useRef<number>(-1)
+
+  // Goal banner / replay
   const goalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const replayActiveRef    = useRef<boolean>(false)
+  const replaySkipRef      = useRef<boolean>(false)
 
-  // Commentary
-  const [commentaryLines, setCommentaryLines] = useState<CommentaryLine[]>([])
-  const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
-  const tickerRef = useRef<HTMLDivElement>(null)
-  const lastCommentaryAbsTRef = useRef<number>(-1)
+  // Stoppage overlay
+  const stoppageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Announcer state
-  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer.isEnabled)
-
-  // Playback mode
-  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('full')
-  const [highlights, setHighlights] = useState<HighlightSegment[]>([])
-  const [skipping, setSkipping] = useState(false)
+  // Highlight skip flash
   const skipFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Track the previous score to detect goals during playback
+  // Score tracking for goal detection
   const prevScoreRef = useRef<{ home: number; away: number }>({ home: 0, away: 0 })
+  // Track last goal event fired (so banner + horn always match commentary)
+  const lastGoalEventRef = useRef<GoalEvent | null>(null)
 
-  // Track absolute time for commentary ticker (derived from progress + game duration)
-  const gameDurationRef = useRef<number>(0)
-  const viewRef = useRef<MatchView | null>(null)
-  viewRef.current = view
+  // ── React state ──────────────────────────────────────────────────────────────
+  const [phase, setPhase]               = useState<Phase>('hero')
+  const [view, setView]                 = useState<MatchView | null>(null)
+  const [rendererMode, setRendererMode] = useState<'2d' | '3d'>(readRendererPref)
+  const [camPreset, setCamPreset]       = useState<CameraPreset>('broadcast')
+  const [err, setErr]                   = useState<string | null>(null)
 
-  // Watch for score changes to show goal banner
-  useEffect(() => {
-    if (!view) return
-    const prev = prevScoreRef.current
-    if (view.homeScore > prev.home) {
-      const scorerName = findRecentGoalScorer(game, true)
-      showBanner(scorerName ? `GOAL — ${scorerName}!` : 'GOAL!')
-    } else if (view.awayScore > prev.away) {
-      const scorerName = findRecentGoalScorer(game, false)
-      showBanner(scorerName ? `GOAL — ${scorerName}!` : 'GOAL!')
-    }
-    prevScoreRef.current = { home: view.homeScore, away: view.awayScore }
-  }, [view?.homeScore, view?.awayScore])
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('full')
+  const [nudge, setNudge]               = useState<number>(1)
 
-  function showBanner(text: string): void {
-    setGoalBanner(text)
-    if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
-    goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 3000)
-  }
+  // Goal banner: { text, absT } so we can match the exact event
+  const [goalBanner, setGoalBanner]     = useState<{ text: string; goalAbsT: number } | null>(null)
+  // Whether the instant replay is active
+  const [replayActive, setReplayActive] = useState<boolean>(false)
 
-  // Build/rebuild renderer when game or mode changes
+  // Stoppage chip reason
+  const [stoppageChip, setStoppageChip] = useState<string | null>(null)
+
+  // Commentary
+  const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
+
+  // Controls
+  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer.isEnabled)
+  const [sfxEnabled, setSfxEnabled]             = useState<boolean>(true)
+  const [skipping, setSkipping]                 = useState<boolean>(false)
+
+  // Enhanced voice
+  const [kokoroWanted, setKokoroWanted]         = useState<boolean>(readKokoroPref)
+  const [kokoroProgress, setKokoroProgress]     = useState<number | null>(null) // 0..100 while downloading
+  const [kokoroStatus, setKokoroStatus]         = useState<ReturnType<typeof kokoroState>>(kokoroState())
+
+  // Sync refs
+  nudgeRef.current       = nudge
+  replayActiveRef.current = replayActive
+
+  // ── Build/rebuild renderer when game or rendererMode changes ─────────────────
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
@@ -110,23 +189,28 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       away: game.awayColors.primary,
     }
 
-    prevScoreRef.current = { home: 0, away: 0 }
+    prevScoreRef.current      = { home: 0, away: 0 }
+    lastAbsTRef.current       = -1
+    lastSfxAbsTRef.current    = -1
+    lastCommentaryAbsT.current = -1
+    lastGoalEventRef.current  = null
     setGoalBanner(null)
+    setReplayActive(false)
+    replayActiveRef.current = false
+    replaySkipRef.current   = false
 
     // Build commentary lines
-    const namesFn = (id: string): string => game.playerNames[id] ?? id
+    const namesFn  = (id: string): string => game.playerNames[id] ?? id
     const isHomeFn = (id: string): boolean => homeIds.has(id)
     const lines = generateCommentary(game.stream, namesFn, isHomeFn, {
       home: game.homeAbbr,
       away: game.awayAbbr,
     })
-    setCommentaryLines(lines)
+    commentaryLinesRef.current = lines
     setVisibleLines([])
-    lastCommentaryAbsTRef.current = -1
 
-    // Build highlight segments
-    const segs = buildHighlights(game.stream)
-    setHighlights(segs)
+    // Build initial plan (will be rebuilt when mode is chosen)
+    planRef.current = planFor(game.stream, 'full')
 
     const promise =
       rendererMode === '3d'
@@ -135,10 +219,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     promise
       .then((r) => {
-        if (disposed) {
-          r.destroy()
-          return
-        }
+        if (disposed) { r.destroy(); return }
         renderer = r
         rendererRef.current = r
 
@@ -152,17 +233,16 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
         r.onUpdate((v) => {
           setView(v)
-          updateCommentaryTicker(v, lines)
-          handleHighlightSkip(v)
+          viewRef.current = v
+          _onUpdate(v)
         })
-        r.setSpeed(speed)
+        // Start paused at speed=2; will play when user picks a mode
         r.load(timeline, colors)
+        r.setSpeed(2)
 
         requestAnimationFrame(() => {
-          if (!disposed) {
-            r.resize()
-            r.play()
-          }
+          if (!disposed) r.resize()
+          // Stay paused until user picks a mode in the hero overlay
         })
       })
       .catch((e: unknown) => {
@@ -178,117 +258,219 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       disposed = true
       window.removeEventListener('resize', onResize)
       renderer?.destroy()
-      rendererRef.current = null
-      renderer3dRef.current = null
+      rendererRef.current    = null
+      renderer3dRef.current  = null
       announcer.cancel()
-      if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
-      if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current)
+      sfx.dispose()
+      if (goalBannerTimerRef.current)  clearTimeout(goalBannerTimerRef.current)
+      if (stoppageTimerRef.current)    clearTimeout(stoppageTimerRef.current)
+      if (skipFlashTimerRef.current)   clearTimeout(skipFlashTimerRef.current)
     }
-    // Re-build when game or mode changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, rendererMode])
 
-  useEffect(() => {
-    rendererRef.current?.setSpeed(speed)
-  }, [speed])
-
-  // Commentary ticker updater (called from onUpdate callback)
-  function updateCommentaryTicker(v: MatchView, lines: CommentaryLine[]): void {
+  // ── Per-frame update (called from onUpdate) ──────────────────────────────────
+  // Wrapped in useCallback so the stable reference is captured by the renderer
+  // subscription. We read from refs rather than closed-over state to avoid
+  // stale captures.
+  const _onUpdate = useCallback((v: MatchView): void => {
     const dur = gameDurationRef.current
-    if (dur <= 0) return
+    if (dur <= 0 || !v.playing) return
+
     const currentAbsT = v.progress * dur
 
-    // On seek: if we went backwards, reset and backfill
-    const lastAbsT = lastCommentaryAbsTRef.current
-    if (currentAbsT < lastAbsT - 1) {
-      // Seek backwards — backfill all lines up to current point
-      const backfill = lines.filter((l) => l.absT <= currentAbsT)
-      setVisibleLines(backfill)
-      lastCommentaryAbsTRef.current = currentAbsT
-      return
-    }
-
-    // Forward: add lines that have been crossed since last update
-    const newLines = lines.filter((l) => l.absT > lastAbsT && l.absT <= currentAbsT)
-    if (newLines.length > 0) {
-      setVisibleLines((prev) => {
-        const combined = [...prev, ...newLines]
-        // Keep last 50 lines in the ticker
-        return combined.slice(-50)
-      })
-
-      // Speak via announcer (importance gating by speed)
-      if (v.playing) {
-        for (const line of newLines) {
-          const minImp = speed > 8 ? 99 : speed > 2 ? 2 : 1
-          if (line.importance >= minImp) {
-            announcer.speak(line.speech, line.importance)
+    // ── Commentary ticker ─────────────────────────────────────────────────────
+    const lines = commentaryLinesRef.current
+    const lastCmt = lastCommentaryAbsT.current
+    if (currentAbsT < lastCmt - 1) {
+      // Seek backwards — backfill
+      setVisibleLines(lines.filter((l) => l.absT <= currentAbsT).slice(-50))
+      lastCommentaryAbsT.current = currentAbsT
+    } else {
+      const newLines = lines.filter((l) => l.absT > lastCmt && l.absT <= currentAbsT)
+      if (newLines.length > 0) {
+        setVisibleLines((prev) => [...prev, ...newLines].slice(-50))
+        if (v.playing) {
+          const planSpd = currentSpeed(planRef.current, currentAbsT)
+          const minImp: number = planSpd >= 8 ? 99 : planSpd >= 4 ? 2 : 1
+          for (const line of newLines) {
+            if (line.importance >= minImp) announcer.speak(line.speech, line.importance)
           }
         }
       }
+      lastCommentaryAbsT.current = currentAbsT
     }
 
-    lastCommentaryAbsTRef.current = currentAbsT
-  }
+    // ── SFX cue map ───────────────────────────────────────────────────────────
+    const lastSfx = lastSfxAbsTRef.current
+    if (currentAbsT > lastSfx) {
+      for (const ev of game.stream) {
+        const at = (ev.period - 1) * 1200 + ev.t
+        if (at <= lastSfx || at > currentAbsT) continue
 
-  // Highlight skip handler (called from onUpdate callback)
-  function handleHighlightSkip(v: MatchView): void {
-    if (playbackMode === 'full') return
-    const dur = gameDurationRef.current
-    if (dur <= 0) return
+        switch (ev.type) {
+          case 'pass':         sfx.pass();                          break
+          case 'shot':         sfx.shot(ev.danger);                 break
+          case 'save':         sfx.save();                          break
+          case 'faceoff':      sfx.puckDrop();                      break
+          case 'whistle':
+          case 'periodEnd':    sfx.whistle();                       break
+          case 'goal':         /* handled in score-change path */   break
+        }
 
-    const mode = playbackMode === 'key' ? 'key' : 'extended'
-    const segs = selectMode(highlights, mode)
-    if (segs.length === 0) return
+        // Crowd reaction
+        if (ev.type === 'shot' && ev.danger >= 0.6) sfx.crowd(0.55)
+        if (ev.type === 'goal') sfx.crowd(1.0)
+      }
+      lastSfxAbsTRef.current = currentAbsT
+    }
 
-    const currentAbsT = v.progress * dur
+    // ── Goal detection (score change) ─────────────────────────────────────────
+    const prev = prevScoreRef.current
+    const homeScored = v.homeScore > prev.home
+    const awayScored = v.awayScore > prev.away
+    if (homeScored || awayScored) {
+      // Find the exact goal event that fired — search backward from currentAbsT
+      const goalEv = findGoalEventAt(game.stream, currentAbsT, 3)
+      if (goalEv && goalEv !== lastGoalEventRef.current) {
+        lastGoalEventRef.current = goalEv
+        const scorerName = game.playerNames[goalEv.scorer] ?? goalEv.scorer
+        const bannerText = `GOAL — ${scorerName}!`
 
-    // Find which segment we are in (if any)
-    const segIdx = segs.findIndex(
-      (s) => currentAbsT >= s.startAbsT && currentAbsT <= s.endAbsT
-    )
+        // SFX + crowd
+        sfx.goalHorn()
+        sfx.crowd(1.0)
 
-    if (segIdx >= 0) {
-      // We're in a segment — check if it just ended
-      const seg = segs[segIdx]
-      if (currentAbsT >= seg.endAbsT - 0.1) {
-        // Find next segment
-        const next = segs[segIdx + 1]
-        if (next) {
-          // Jump to next segment
-          rendererRef.current?.seekFraction(next.startAbsT / dur)
-          showSkipFlash()
+        // Banner
+        setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
+        if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+        goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 5000)
+
+        // Instant replay: pause, seek back ~8s, play at 0.6×, show watermark
+        if (!replaySkipRef.current) {
+          replaySkipRef.current = true
+          setReplayActive(true)
+          replayActiveRef.current = true
+          const replayStart = Math.max(0, (currentAbsT - 8) / dur)
+          setTimeout(() => {
+            const r = rendererRef.current
+            if (!r) return
+            r.seekFraction(replayStart)
+            r.setSpeed(0.6)
+            r.play()
+            // After ~8s wall time (8 / 0.6 = ~13s game time scaled), end replay
+            setTimeout(() => {
+              if (replaySkipRef.current) _endReplay()
+            }, 8000)
+          }, 400) // small pause before replay starts
         }
       }
-    } else {
-      // Not in any segment — skip forward to the next one
-      const next = segs.find((s) => s.startAbsT > currentAbsT)
-      if (next) {
-        rendererRef.current?.seekFraction(next.startAbsT / dur)
-        showSkipFlash()
+      prevScoreRef.current = { home: v.homeScore, away: v.awayScore }
+    }
+
+    // ── Stoppage overlay ──────────────────────────────────────────────────────
+    const whistle = findCrossedWhistle(game.stream, lastAbsTRef.current, currentAbsT)
+    if (whistle && whistle.reason && whistle.reason !== 'goal') {
+      let label: string
+      switch (whistle.reason) {
+        case 'offside':      label = 'OFFSIDE';      break
+        case 'icing':        label = 'ICING';        break
+        case 'goalieFreeze': label = 'PUCK FROZEN';  break
+        case 'penalty':      label = 'PENALTY';      break
+        default:             label = 'STOPPED';
       }
+      setStoppageChip(label)
+      if (stoppageTimerRef.current) clearTimeout(stoppageTimerRef.current)
+      stoppageTimerRef.current = setTimeout(() => setStoppageChip(null), 1800)
+    }
+
+    // ── Playback speed from plan ──────────────────────────────────────────────
+    if (!replayActiveRef.current) {
+      const planSpd = currentSpeed(planRef.current, currentAbsT)
+      const effectiveSpd = planSpd * nudgeRef.current
+      rendererRef.current?.setSpeed(effectiveSpd)
+
+      // Skip dead air in extended/key modes
+      const jump = nextActiveJump(planRef.current, currentAbsT)
+      if (jump) {
+        rendererRef.current?.seekFraction(jump.jumpToAbsT / dur)
+        _showSkipFlash()
+      }
+    }
+
+    lastAbsTRef.current = currentAbsT
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game])
+
+  function _endReplay(): void {
+    replaySkipRef.current = false
+    setReplayActive(false)
+    replayActiveRef.current = false
+    // Resume normal plan speed
+    const dur = gameDurationRef.current
+    const v = viewRef.current
+    if (dur > 0 && v) {
+      const at = v.progress * dur
+      const planSpd = currentSpeed(planRef.current, at)
+      rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
     }
   }
 
-  function showSkipFlash(): void {
+  function _showSkipFlash(): void {
     setSkipping(true)
     if (skipFlashTimerRef.current) clearTimeout(skipFlashTimerRef.current)
     skipFlashTimerRef.current = setTimeout(() => setSkipping(false), 800)
   }
 
-  // Auto-scroll ticker to bottom when new lines arrive
+  // ── Auto-scroll ticker ────────────────────────────────────────────────────────
   useEffect(() => {
     const el = tickerRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [visibleLines])
 
-  function handleToggleMode(): void {
+  // ── Hero overlay: user picks a mode ──────────────────────────────────────────
+  function handleDropPuck(mode: PlaybackMode): void {
+    // User gesture — unlock AudioContext
+    sfx.resume()
+    sfx.crowd(0.15)
+
+    // Build speed plan for chosen mode
+    planRef.current = planFor(game.stream, mode)
+    setPlaybackMode(mode)
+    setPhase('playing')
+
+    // Announcer greeting
+    const greets: Record<PlaybackMode, string> = {
+      full:     'Welcome to the game. The puck is about to drop.',
+      extended: 'Here are the extended highlights.',
+      key:      'Key moments, coming up.',
+    }
+    announcer.speak(greets[mode], 2)
+
+    // If extended/key, seek to first highlight immediately
+    if (mode !== 'full') {
+      const segs = planRef.current.filter((s) => s.speed < 30)
+      if (segs.length > 0 && gameDurationRef.current > 0) {
+        rendererRef.current?.seekFraction(segs[0].fromAbsT / gameDurationRef.current)
+      }
+    }
+
+    // Set initial speed and play
+    const dur = gameDurationRef.current
+    const initSpd = dur > 0 ? currentSpeed(planRef.current, 0) : 2
+    rendererRef.current?.setSpeed(initSpd)
+    rendererRef.current?.play()
+  }
+
+  // ── Controls ──────────────────────────────────────────────────────────────────
+  function handleToggleRenderer(): void {
     const next = rendererMode === '3d' ? '2d' : '3d'
     writeRendererPref(next)
     setRendererMode(next)
     setView(null)
     setErr(null)
+    setPhase('hero')
     announcer.cancel()
   }
 
@@ -302,28 +484,22 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     setAnnouncerEnabled(announcer.isEnabled)
   }
 
-  function handlePlaybackMode(mode: PlaybackMode): void {
-    setPlaybackMode(mode)
-    // When switching to highlight mode, seek to the first segment immediately
-    if (mode !== 'full') {
-      const filterMode = mode === 'key' ? 'key' : 'extended'
-      const segs = selectMode(highlights, filterMode)
-      if (segs.length > 0 && gameDurationRef.current > 0) {
-        rendererRef.current?.seekFraction(segs[0].startAbsT / gameDurationRef.current)
-      }
-    }
+  function handleSfxToggle(): void {
+    const next = !sfxEnabled
+    setSfxEnabled(next)
+    sfx.setEnabled(next)
   }
 
-  function handleSeek(fraction: number): void {
-    rendererRef.current?.seekFraction(fraction)
-    announcer.cancel()
-    // Backfill commentary on seek
+  function handleNudge(mult: number): void {
+    setNudge(mult)
+    nudgeRef.current = mult
+    // Apply immediately
     const dur = gameDurationRef.current
-    if (dur > 0) {
-      const currentAbsT = fraction * dur
-      const backfill = commentaryLines.filter((l) => l.absT <= currentAbsT)
-      setVisibleLines(backfill.slice(-50))
-      lastCommentaryAbsTRef.current = currentAbsT
+    const v = viewRef.current
+    if (dur > 0 && v) {
+      const at = v.progress * dur
+      const planSpd = currentSpeed(planRef.current, at)
+      rendererRef.current?.setSpeed(planSpd * mult)
     }
   }
 
@@ -332,52 +508,126 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     announcer.cancel()
   }
 
+  function handleSeek(fraction: number): void {
+    rendererRef.current?.seekFraction(fraction)
+    announcer.cancel()
+    const dur = gameDurationRef.current
+    if (dur > 0) {
+      const at = fraction * dur
+      const backfill = commentaryLinesRef.current.filter((l) => l.absT <= at)
+      setVisibleLines(backfill.slice(-50))
+      lastCommentaryAbsT.current = at
+      lastAbsTRef.current        = at
+      lastSfxAbsTRef.current     = at
+      // Also apply correct plan speed at seek destination
+      const planSpd = currentSpeed(planRef.current, at)
+      rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
+    }
+  }
+
+  function handleSkipReplay(): void {
+    _endReplay()
+  }
+
+  function handleWatchReplay(): void {
+    const banner = goalBanner
+    if (!banner || !gameDurationRef.current) return
+    const replayStart = Math.max(0, (banner.goalAbsT - 8) / gameDurationRef.current)
+    replaySkipRef.current = true
+    setReplayActive(true)
+    replayActiveRef.current = true
+    rendererRef.current?.seekFraction(replayStart)
+    rendererRef.current?.setSpeed(0.6)
+    rendererRef.current?.play()
+    setTimeout(() => {
+      if (replaySkipRef.current) _endReplay()
+    }, 8000)
+  }
+
+  // ── Enhanced-voice (Kokoro) opt-in ────────────────────────────────────────────
+  function handleKokoroToggle(): void {
+    const next = !kokoroWanted
+    setKokoroWanted(next)
+    writeKokoroPref(next)
+
+    if (next) {
+      setKokoroStatus('downloading')
+      setKokoroProgress(0)
+      loadKokoro((info) => {
+        // transformers.js ProgressInfo: { status, progress? }
+        const raw = info as Record<string, unknown>
+        if (typeof raw['progress'] === 'number') {
+          setKokoroProgress(Math.round(raw['progress'] as number))
+        }
+      })
+        .then((engine) => {
+          announcer.useEngine('kokoro', engine)
+          setKokoroStatus('ready')
+          setKokoroProgress(null)
+        })
+        .catch(() => {
+          setKokoroStatus('failed')
+          setKokoroProgress(null)
+        })
+    } else {
+      // Switch back to system
+      announcer.useEngine('system')
+      setKokoroStatus('unloaded')
+      setKokoroProgress(null)
+    }
+  }
+
+  // On mount: if kokoro was previously enabled, try to restore it
+  useEffect(() => {
+    if (readKokoroPref() && kokoroState() === 'ready') {
+      // Already loaded in a previous session (cache hit)
+      loadKokoro().then((engine) => {
+        announcer.useEngine('kokoro', engine)
+        setKokoroStatus('ready')
+      }).catch(() => { /* ignore */ })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const userSide = game.userIsHome ? 'home' : 'away'
 
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <section>
-      {/* ── top bar: scoreboard + controls ─────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-          gap: 10,
-          flexWrap: 'wrap',
-        }}
-      >
+    <section style={{ position: 'relative' }}>
+      {/* ── Top bar ────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: 12, gap: 10, flexWrap: 'wrap',
+      }}>
         <Scoreboard game={game} view={view} userSide={userSide} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 2D / 3D toggle */}
           <div style={{ display: 'flex', gap: 4 }}>
-            {(['3d', '2d'] as const).map((mode) => (
-              <button
-                key={mode}
-                className="btn btn-ghost"
-                onClick={() => {
-                  if (rendererMode !== mode) handleToggleMode()
-                }}
-                style={rendererMode === mode ? { ...modeActiveStyle } : {}}
-                title={`Switch to ${mode.toUpperCase()} view`}
-              >
-                {mode.toUpperCase()}
-              </button>
+            {(['3d', '2d'] as const).map((m) => (
+              <button key={m} className="btn btn-ghost"
+                onClick={() => { if (rendererMode !== m) handleToggleRenderer() }}
+                style={rendererMode === m ? modeActiveStyle : {}}
+                title={`Switch to ${m.toUpperCase()} view`}
+              >{m.toUpperCase()}</button>
             ))}
           </div>
 
           {/* Announcer toggle */}
           {announcer.available && (
-            <button
-              className="btn btn-ghost"
-              onClick={handleAnnouncerToggle}
-              title={announcerEnabled ? 'Mute commentary' : 'Enable spoken commentary'}
-              style={announcerEnabled ? { ...modeActiveStyle } : { opacity: 0.5 }}
-            >
-              {announcerEnabled ? '🔊' : '🔇'}
+            <button className="btn btn-ghost" onClick={handleAnnouncerToggle}
+              title={announcerEnabled ? 'Mute commentary' : 'Enable commentary'}
+              style={announcerEnabled ? modeActiveStyle : { opacity: 0.5 }}>
+              {announcerEnabled ? '🔊 Cmt' : '🔇 Cmt'}
             </button>
           )}
+
+          {/* SFX toggle */}
+          <button className="btn btn-ghost" onClick={handleSfxToggle}
+            title={sfxEnabled ? 'Mute SFX' : 'Enable SFX'}
+            style={sfxEnabled ? modeActiveStyle : { opacity: 0.5 }}>
+            {sfxEnabled ? '🔊 SFX' : '🔇 SFX'}
+          </button>
 
           <button onClick={props.onClose} className="btn">
             {view?.ended ? 'Back to hub' : 'Leave game'}
@@ -385,57 +635,88 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
         </div>
       </div>
 
-      {/* ── playback mode selector ───────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span style={{ color: MUTED, fontSize: 12 }}>Mode:</span>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {([ 'full', 'extended', 'key' ] as const).map((mode) => (
-            <button
-              key={mode}
-              className="btn btn-ghost"
-              onClick={() => handlePlaybackMode(mode)}
-              style={playbackMode === mode ? { ...modeActiveStyle, fontSize: 12, padding: '4px 10px' } : { fontSize: 12, padding: '4px 10px' }}
-              title={
-                mode === 'full' ? 'Watch the full game' :
-                mode === 'extended' ? 'All highlights (goals, saves, hits, penalties)' :
-                'Key moments only (goals, penalties, top chances)'
-              }
-            >
-              {mode === 'full' ? 'Full' : mode === 'extended' ? 'Extended' : 'Key moments'}
-            </button>
-          ))}
-        </div>
-        {skipping && (
-          <span style={{ color: MUTED, fontSize: 11, fontStyle: 'italic', animation: 'fadeIn 0.1s ease' }}>
-            skipping...
-          </span>
-        )}
-      </div>
-
-      {/* ── main layout: viewport + commentary ──────────────────────────── */}
+      {/* ── Main layout: viewport + commentary ─────────────────────────── */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        {/* ── viewport ──────────────────────────────────────────────────── */}
-        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-          <div
-            ref={hostRef}
-            style={{
-              width: '100%',
-              aspectRatio: '2.35 / 1',
-              background: '#0c1016',
-              borderRadius: 10,
-              overflow: 'hidden',
-            }}
-          />
 
-          {/* Goal banner overlay */}
+        {/* ── Viewport ──────────────────────────────────────────────────── */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div ref={hostRef} style={{
+            width: '100%', aspectRatio: '2.35 / 1',
+            background: '#0c1016', borderRadius: 10, overflow: 'hidden',
+          }} />
+
+          {/* Hero overlay — pick a mode before play starts */}
+          {phase === 'hero' && (
+            <div style={heroOverlayStyle}>
+              <div style={{ textAlign: 'center', marginBottom: 24 }}>
+                <div style={{ fontSize: 36, marginBottom: 8 }}>🏒</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', letterSpacing: 1 }}>
+                  DROP THE PUCK
+                </div>
+                <div style={{ color: MUTED, fontSize: 13, marginTop: 6 }}>
+                  {game.awayAbbr} @ {game.homeAbbr}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <ModeCard
+                  title="Full Game"
+                  subtitle="~10 min"
+                  desc="2× with drama at 1×"
+                  onClick={() => handleDropPuck('full')}
+                />
+                <ModeCard
+                  title="Extended"
+                  subtitle="~4 min"
+                  desc="All highlights at 1.5×"
+                  onClick={() => handleDropPuck('extended')}
+                />
+                <ModeCard
+                  title="Key Moments"
+                  subtitle="~90 sec"
+                  desc="Goals & top chances at 1×"
+                  onClick={() => handleDropPuck('key')}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* GOAL banner */}
           {goalBanner && (
             <div style={goalBannerStyle}>
-              {goalBanner}
+              <div style={{ fontSize: 26, fontWeight: 800 }}>{goalBanner.text}</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center' }}>
+                {replayActive ? (
+                  <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
+                    onClick={handleSkipReplay}>
+                    Skip replay ›
+                  </button>
+                ) : (
+                  <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
+                    onClick={handleWatchReplay}>
+                    ▶ Watch replay
+                  </button>
+                )}
+              </div>
             </div>
+          )}
+
+          {/* REPLAY watermark */}
+          {replayActive && (
+            <div style={replayBadgeStyle}>REPLAY</div>
+          )}
+
+          {/* Stoppage chip */}
+          {stoppageChip && (
+            <div style={stoppageChipStyle}>{stoppageChip}</div>
+          )}
+
+          {/* Skip flash */}
+          {skipping && (
+            <div style={skipFlashStyle}>SKIPPING →</div>
           )}
         </div>
 
-        {/* ── commentary ticker ─────────────────────────────────────────── */}
+        {/* ── Commentary ticker ──────────────────────────────────────────── */}
         <div style={tickerContainerStyle}>
           <div style={tickerHeaderStyle}>
             <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
@@ -445,125 +726,136 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           <div ref={tickerRef} style={tickerScrollStyle}>
             {visibleLines.length === 0 ? (
               <div style={{ color: MUTED, fontSize: 12, padding: '8px 4px' }}>
-                Awaiting first event...
+                {phase === 'hero' ? 'Pick a mode to begin…' : 'Awaiting first event…'}
               </div>
             ) : (
-              visibleLines.map((line, i) => (
-                <div
-                  key={`${line.absT}-${i}`}
-                  style={{
+              visibleLines
+                .filter((l) => l.importance >= 2 || true) // show all; can filter here
+                .map((line, i) => (
+                  <div key={`${line.absT}-${i}`} style={{
                     padding: '5px 4px',
                     borderBottom: `1px solid rgba(42,34,64,0.4)`,
-                    fontSize: 12,
-                    lineHeight: 1.4,
-                    color: line.importance === 3 ? '#ffd700' : line.importance === 2 ? '#e8e4f4' : MUTED,
+                    fontSize: 12, lineHeight: 1.4,
+                    color: line.importance === 3 ? '#ffd700' : line.importance === 2 ? 'var(--text)' : MUTED,
                     fontWeight: line.importance === 3 ? 700 : 400,
                     background: line.importance === 3 ? 'rgba(255,215,0,0.06)' : 'transparent',
-                  }}
-                >
-                  <span style={{ color: MUTED, fontSize: 10, marginRight: 4 }}>
-                    {line.clock}
-                  </span>
-                  {line.text}
-                </div>
-              ))
+                  }}>
+                    <span style={{ color: MUTED, fontSize: 10, marginRight: 4 }}>{line.clock}</span>
+                    {line.text}
+                  </div>
+                ))
             )}
           </div>
         </div>
       </div>
 
       {err && (
-        <pre
-          style={{
-            marginTop: 12,
-            padding: 12,
-            background: '#2a1416',
-            color: '#ff9a9a',
-            borderRadius: 8,
-            fontSize: 12,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
+        <pre style={{
+          marginTop: 12, padding: 12, background: '#2a1416',
+          color: '#ff9a9a', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap',
+        }}>
           Renderer error: {err}
         </pre>
       )}
 
-      {/* ── playback controls ───────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-        <button
-          className="btn btn-primary"
-          style={{ minWidth: 96 }}
-          onClick={handlePause}
-        >
-          {view?.playing ? 'Pause' : view?.ended ? 'Replay' : 'Play'}
-        </button>
-
-        <input
-          type="range"
-          min={0}
-          max={1000}
-          value={Math.round((view?.progress ?? 0) * 1000)}
-          onChange={(e) => handleSeek(Number(e.target.value) / 1000)}
-          style={{ flex: 1, minWidth: 120 }}
-        />
-
-        <div style={{ display: 'flex', gap: 6 }}>
-          {SPEEDS.map((s) => (
-            <button
-              key={s}
-              className="btn"
-              onClick={() => setSpeed(s)}
-              style={speed === s ? { ...speedActiveStyle } : {}}
-            >
-              {s}×
+      {/* ── Playback controls (only visible after mode is picked) ───────── */}
+      {phase === 'playing' && (
+        <div style={{ marginTop: 12 }}>
+          {/* Row 1: pause + scrubber + nudge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" style={{ minWidth: 88 }} onClick={handlePause}>
+              {view?.playing ? '⏸ Pause' : view?.ended ? '↺ Replay' : '▶ Play'}
             </button>
-          ))}
-        </div>
-      </div>
 
-      {/* ── camera presets (3D only) ────────────────────────────────────── */}
-      {rendererMode === '3d' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-          <span style={{ color: MUTED, fontSize: 12 }}>Camera:</span>
-          {CAMERA_PRESETS.map((preset) => (
-            <button
-              key={preset}
-              className="btn"
-              style={{
-                fontSize: 12,
-                padding: '5px 10px',
-                ...(camPreset === preset ? speedActiveStyle : {}),
-              }}
-              onClick={() => handleCamPreset(preset)}
+            <input type="range" min={0} max={1000}
+              value={Math.round((view?.progress ?? 0) * 1000)}
+              onChange={(e) => handleSeek(Number(e.target.value) / 1000)}
+              style={{ flex: 1, minWidth: 120 }}
+            />
+
+            {/* Nudge buttons — relative to plan speed */}
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ color: MUTED, fontSize: 11 }}>Speed:</span>
+              {NUDGE_MULTIPLIERS.map((m) => (
+                <button key={m} className="btn"
+                  style={nudge === m ? { ...speedActiveStyle, fontSize: 12, padding: '4px 8px' } : { fontSize: 12, padding: '4px 8px' }}
+                  onClick={() => handleNudge(m)}
+                  title={m === 1 ? 'Plan speed' : m < 1 ? 'Half speed' : 'Double speed'}
+                >
+                  {m}×
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Row 2: camera presets (3D only) */}
+          {rendererMode === '3d' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+              <span style={{ color: MUTED, fontSize: 12 }}>Camera:</span>
+              {CAMERA_PRESETS.map((preset) => (
+                <button key={preset} className="btn"
+                  style={{ fontSize: 12, padding: '5px 10px', ...(camPreset === preset ? speedActiveStyle : {}) }}
+                  onClick={() => handleCamPreset(preset)}>
+                  {preset.charAt(0).toUpperCase() + preset.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Row 3: enhanced voice opt-in */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost"
+              style={{ fontSize: 12, padding: '4px 12px', ...(kokoroWanted ? modeActiveStyle : { opacity: 0.7 }) }}
+              onClick={handleKokoroToggle}
+              title="Neural TTS voice — downloads ~90 MB on first use; cached after that"
             >
-              {preset.charAt(0).toUpperCase() + preset.slice(1)}
+              🎙 Enhanced voice {kokoroWanted ? '(on)' : '(~90 MB once)'}
             </button>
-          ))}
+            {kokoroWanted && kokoroStatus === 'downloading' && kokoroProgress !== null && (
+              <span style={{ color: MUTED, fontSize: 11 }}>Downloading… {kokoroProgress}%</span>
+            )}
+            {kokoroWanted && kokoroStatus === 'ready' && (
+              <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ Neural voice active</span>
+            )}
+            {kokoroWanted && kokoroStatus === 'failed' && (
+              <span style={{ color: 'var(--red)', fontSize: 11 }}>Download failed</span>
+            )}
+          </div>
         </div>
       )}
     </section>
   )
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-/** Find the name of the most recent goal scorer on the given side. */
-function findRecentGoalScorer(game: WatchedGame, isHome: boolean): string | null {
-  const homeIds = new Set<string>(game.homePlayerIds)
-  let lastScorerId: string | null = null
-  for (const ev of game.stream) {
-    if (ev.type === 'goal') {
-      const scorerIsHome = homeIds.has(ev.scorer)
-      if (scorerIsHome === isHome) {
-        lastScorerId = ev.scorer
-      }
-    }
-  }
-  if (!lastScorerId) return null
-  return game.playerNames[lastScorerId] ?? null
+function ModeCard(props: {
+  title: string
+  subtitle: string
+  desc: string
+  onClick: () => void
+}): JSX.Element {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      className="btn"
+      onClick={props.onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 150, padding: '16px 12px', textAlign: 'center',
+        background: hover ? 'var(--bg3)' : 'var(--bg2)',
+        border: `1px solid ${hover ? 'var(--violet)' : 'var(--line)'}`,
+        borderRadius: 10, cursor: 'pointer', transition: 'all 0.15s ease',
+        display: 'flex', flexDirection: 'column', gap: 4,
+      }}
+    >
+      <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{props.title}</span>
+      <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--violet-h)' }}>{props.subtitle}</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{props.desc}</span>
+    </button>
+  )
 }
-
-// ── Sub-components ────────────────────────────────────────────────────────
 
 function Scoreboard(props: {
   game: WatchedGame
@@ -573,101 +865,108 @@ function Scoreboard(props: {
   const { game, view } = props
   const periodLabel = view ? (view.period > 3 ? 'OT' : `P${view.period}`) : 'P1'
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-        background: PANEL,
-        borderRadius: 8,
-        padding: '10px 18px',
-      }}
-    >
-      <TeamScore
-        abbr={game.awayAbbr}
-        score={view?.awayScore ?? 0}
-        color={game.awayColors.primary}
-        mine={props.userSide === 'away'}
-      />
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 16,
+      background: PANEL, borderRadius: 8, padding: '10px 18px',
+    }}>
+      <TeamScore abbr={game.awayAbbr} score={view?.awayScore ?? 0}
+        color={game.awayColors.primary} mine={props.userSide === 'away'} />
       <div style={{ textAlign: 'center', minWidth: 72 }}>
         <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
           {view?.clock ?? '20:00'}
         </div>
-        <div style={{ color: MUTED, fontSize: 11 }}>{periodLabel}</div>
+        <div style={{ color: 'var(--muted)', fontSize: 11 }}>{periodLabel}</div>
       </div>
-      <TeamScore
-        abbr={game.homeAbbr}
-        score={view?.homeScore ?? 0}
-        color={game.homeColors.primary}
-        mine={props.userSide === 'home'}
-      />
+      <TeamScore abbr={game.homeAbbr} score={view?.homeScore ?? 0}
+        color={game.homeColors.primary} mine={props.userSide === 'home'} />
     </div>
   )
 }
 
-function TeamScore(props: {
-  abbr: string
-  score: number
-  color: number
-  mine: boolean
-}): JSX.Element {
+function TeamScore(props: { abbr: string; score: number; color: number; mine: boolean }): JSX.Element {
   const hex = `#${props.color.toString(16).padStart(6, '0')}`
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ width: 10, height: 10, borderRadius: '50%', background: hex, flexShrink: 0 }} />
       <span style={{ fontWeight: props.mine ? 800 : 600 }}>{props.abbr}</span>
-      <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-        {props.score}
-      </span>
+      <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{props.score}</span>
     </div>
   )
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const modeActiveStyle: CSSProperties = {
-  background: ACCENT,
+  background: 'var(--violet)',
   color: '#04122b',
-  borderColor: ACCENT,
+  borderColor: 'var(--violet)',
 }
 
 const speedActiveStyle: CSSProperties = {
-  background: ACCENT,
+  background: 'var(--violet)',
   color: '#04122b',
-  borderColor: ACCENT,
+  borderColor: 'var(--violet)',
+}
+
+const heroOverlayStyle: CSSProperties = {
+  position: 'absolute', inset: 0,
+  background: 'rgba(10,6,22,0.88)',
+  backdropFilter: 'blur(4px)',
+  display: 'flex', flexDirection: 'column',
+  alignItems: 'center', justifyContent: 'center',
+  borderRadius: 10, zIndex: 20,
+  padding: 24,
 }
 
 const goalBannerStyle: CSSProperties = {
-  position: 'absolute',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
-  background: 'rgba(211, 59, 59, 0.92)',
-  color: '#fff',
-  fontWeight: 800,
-  fontSize: 28,
-  letterSpacing: 1,
-  padding: '14px 32px',
-  borderRadius: 10,
-  pointerEvents: 'none',
-  zIndex: 10,
-  boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
+  position: 'absolute', bottom: 20, left: '50%',
+  transform: 'translateX(-50%)',
+  background: 'linear-gradient(135deg, rgba(211,59,59,0.95), rgba(180,30,30,0.98))',
+  color: '#fff', textAlign: 'center',
+  padding: '14px 28px', borderRadius: 12,
+  pointerEvents: 'auto', zIndex: 15,
+  boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
   textShadow: '0 2px 6px rgba(0,0,0,0.5)',
   animation: 'fadeIn 0.18s ease',
+  minWidth: 240,
+}
+
+const replayBadgeStyle: CSSProperties = {
+  position: 'absolute', top: 12, left: 14,
+  background: 'rgba(255,215,0,0.18)',
+  border: '1px solid rgba(255,215,0,0.5)',
+  color: '#ffd700', fontWeight: 800,
+  fontSize: 11, letterSpacing: 2,
+  padding: '3px 10px', borderRadius: 6,
+  pointerEvents: 'none', zIndex: 14,
+}
+
+const stoppageChipStyle: CSSProperties = {
+  position: 'absolute', top: '38%', left: '50%',
+  transform: 'translate(-50%, -50%)',
+  background: 'rgba(0,0,0,0.75)',
+  color: '#fbbf24', fontWeight: 800,
+  fontSize: 20, letterSpacing: 3,
+  padding: '10px 28px', borderRadius: 8,
+  pointerEvents: 'none', zIndex: 13,
+  border: '1px solid rgba(251,191,36,0.4)',
+  animation: 'fadeIn 0.12s ease',
+}
+
+const skipFlashStyle: CSSProperties = {
+  position: 'absolute', top: 12, right: 14,
+  background: 'rgba(0,0,0,0.6)',
+  color: 'var(--muted)', fontSize: 11,
+  padding: '3px 10px', borderRadius: 6,
+  pointerEvents: 'none', zIndex: 12,
+  fontStyle: 'italic',
 }
 
 const tickerContainerStyle: CSSProperties = {
-  width: 220,
-  flexShrink: 0,
-  background: PANEL,
-  borderRadius: 10,
-  border: '1px solid rgba(42,34,64,0.8)',
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-  // Match rink aspect ratio height approximately
-  alignSelf: 'stretch',
-  maxHeight: 280,
+  width: 220, flexShrink: 0, background: PANEL,
+  borderRadius: 10, border: '1px solid rgba(42,34,64,0.8)',
+  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+  alignSelf: 'stretch', maxHeight: 280,
 }
 
 const tickerHeaderStyle: CSSProperties = {
@@ -677,8 +976,6 @@ const tickerHeaderStyle: CSSProperties = {
 }
 
 const tickerScrollStyle: CSSProperties = {
-  flex: 1,
-  overflowY: 'auto',
-  padding: '4px 8px',
-  scrollBehavior: 'smooth',
+  flex: 1, overflowY: 'auto',
+  padding: '4px 8px', scrollBehavior: 'smooth',
 }

@@ -7,7 +7,7 @@ import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
 import { TopNav } from './components/TopNav'
 import { ToastStack } from './components/Toast'
-import { bumpRefresh, toast } from './components/store'
+import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
 import { SimContext, useClient, useScreenData } from './hooks/useSim'
 import { DashboardScreen } from './screens/DashboardScreen'
@@ -26,6 +26,9 @@ import { StatsScreen } from './screens/StatsScreen'
 import { TacticsScreen } from './screens/TacticsScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
+import { SettingsScreen } from './screens/SettingsScreen'
+import { PressConference } from './components/PressConference'
+import { pollPress } from './lib/press'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -133,6 +136,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     () => client.getDashboard(),
     (r) => (r.type === 'dashboard' ? r.dashboard : null)
   )
+
+  // Press pump: fire on every refresh bump (version change).
+  const version = useUiStore((s) => s.version)
+  useEffect(() => {
+    void pollPress(client)
+  }, [version, client])
 
   /** Serialize world-mutating calls; toast errors; bump the refresh bus. */
   const run = useCallback(
@@ -253,6 +262,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         ) : (
           <div className="app-shell">
+            <PressConference />
             <TopNav
               teamId={props.team.teamId}
               clubName={props.team.name}
@@ -353,6 +363,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <MatchCenterScreen />
     case 'history':
       return <HistoryScreen />
+    case 'settings':
+      return <SettingsScreen />
   }
 }
 

@@ -165,6 +165,27 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'lockerRoom', lockerRoom: must().getLockerRoom() }
     case 'getTentpoles':
       return { id: req.id, type: 'tentpoles', tentpoles: must().getTentpoles() }
+
+    /* ── press corps ── */
+    case 'getPressJob':
+      return { id: req.id, type: 'pressJob', pressJob: must().getPressJob() }
+    case 'submitPressArticle':
+      must().submitPressArticle({
+        jobId: req.jobId,
+        headline: req.headline,
+        body: req.body,
+        byline: req.byline,
+        model: req.model,
+      })
+      return { id: req.id, type: 'ok' }
+    case 'skipPressJob':
+      must().skipPressJob(req.jobId)
+      return { id: req.id, type: 'ok' }
+    case 'getPresser':
+      return { id: req.id, type: 'presser', presser: must().getPressConference() }
+    case 'answerPresser':
+      must().answerPressConference(req.answer, req.tone)
+      return { id: req.id, type: 'ok' }
   }
 }
 

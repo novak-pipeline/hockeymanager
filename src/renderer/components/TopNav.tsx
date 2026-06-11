@@ -170,6 +170,16 @@ export function TopNav(props: {
             )}
           </div>
 
+          {/* Settings gear */}
+          <button
+            className="topnav-util-btn"
+            onClick={() => nav.navigate('settings')}
+            title="Settings"
+            aria-label="Settings"
+          >
+            ⚙
+          </button>
+
           {/* Hero CONTINUE button */}
           <button
             className="btn btn-hero btn-lg"

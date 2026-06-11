@@ -130,6 +130,49 @@ const FACEOFF_WIN = [
   '{winner} wins the dot.',
 ]
 
+/** Lines spoken after the puck drops following a stoppage. */
+const FACEOFF_DROP = [
+  'Lines set… and the puck drops!',
+  'Back underway — puck drops at centre.',
+  'Teams ready, and they drop the puck.',
+  'Faceoff. Play resumes.',
+  'And we\'re back — puck drops!',
+]
+
+const STOPPAGE_OFFSIDE = [
+  'Offside — they were over early.',
+  'Play whistled dead. Offside call.',
+  'The referee signals offside — back we go.',
+  'Offside. They\'ll have to regroup.',
+]
+
+const STOPPAGE_ICING = [
+  'Icing called — long flip down the ice.',
+  'Iced it down — whistle for icing.',
+  'Icing on the play. Faceoff coming in the defensive zone.',
+  'Icing. The linesman waves it off the glass.',
+]
+
+const STOPPAGE_GOALIE_FREEZE = [
+  'Goalie smothers it — play stopped.',
+  'Goalie covers up. Whistle blows.',
+  'Netminder freezes the puck. Faceoff coming.',
+  'Puck frozen by the goalie.',
+]
+
+const STOPPAGE_PENALTY = [
+  'Referee blows the whistle — infraction called.',
+  'Play stopped. Penalty on the way.',
+  'Whistle! Referee signals a penalty.',
+  'The ref\'s arm is up — and it\'s a penalty.',
+]
+
+const STOPPAGE_OTHER = [
+  'Play stopped.',
+  'Whistle from the official.',
+  'Referee halts play.',
+]
+
 const SHOT_LOW_DANGER = [
   '{shooter} fires from the perimeter — not much danger there.',
   '{shooter} lets one go from the outside — right to the goalie.',
@@ -230,6 +273,7 @@ export function generateCommentary(
   const tracker: PeriodNameTracker = new Map()
   const score: ScoreState = { home: 0, away: 0 }
   let lastPeriod = 0
+  // (no inter-event state needed beyond score/tracker)
 
   for (const ev of stream) {
     // Reset surname introductions at each period boundary so players get
@@ -246,13 +290,19 @@ export function generateCommentary(
 
     switch (ev.type) {
       case 'faceoff': {
-        // Only emit commentary for period-starting faceoffs (t < 5s)
-        if (ev.t >= 5) break
-        const winnerName = resolveName(ev.winner, names, tracker, ev.period)
-        const seed = mixSeed(at * 100 | 0, strHash(ev.winner))
-        const tmpl = pickSeeded(FACEOFF_WIN, seed)
-        const text = tmpl.replace('{winner}', winnerName)
-        lines.push({ absT: at, period: ev.period, clock: clk, text, speech: toSpeech(text), importance: 1 })
+        if (ev.t < 5) {
+          // Period-opening faceoff: winner call
+          const winnerName = resolveName(ev.winner, names, tracker, ev.period)
+          const seed = mixSeed(at * 100 | 0, strHash(ev.winner))
+          const tmpl = pickSeeded(FACEOFF_WIN, seed)
+          const text = tmpl.replace('{winner}', winnerName)
+          lines.push({ absT: at, period: ev.period, clock: clk, text, speech: toSpeech(text), importance: 1 })
+        } else {
+          // Mid-game puck drop after a stoppage
+          const seed = mixSeed(at * 100 | 0, ev.t | 0)
+          const text = pickSeeded(FACEOFF_DROP, seed)
+          lines.push({ absT: at, period: ev.period, clock: clk, text, speech: toSpeech(text), importance: 1 })
+        }
         break
       }
 
@@ -380,13 +430,32 @@ export function generateCommentary(
         break
       }
 
+      case 'whistle': {
+        // Emit a brief stoppage line based on the reason.
+        const reason = ev.reason
+        let bank: readonly string[]
+        if (reason === 'offside') bank = STOPPAGE_OFFSIDE
+        else if (reason === 'icing') bank = STOPPAGE_ICING
+        else if (reason === 'goalieFreeze') bank = STOPPAGE_GOALIE_FREEZE
+        else if (reason === 'penalty') bank = STOPPAGE_PENALTY
+        else if (reason === 'goal') {
+          // Post-goal whistle — skip (goal commentary already covers it)
+          break
+        }
+        else bank = STOPPAGE_OTHER
+
+        const seed = mixSeed(at * 100 | 0, ev.t | 0)
+        const text = pickSeeded(bank, seed)
+        lines.push({ absT: at, period: ev.period, clock: clk, text, speech: toSpeech(text), importance: 1 })
+        break
+      }
+
       // Events we intentionally skip for commentary
       case 'carry':
       case 'pass':
       case 'giveaway':
       case 'blockedShot':
       case 'lineChange':
-      case 'whistle':
       case 'frame':
         break
     }
@@ -394,5 +463,24 @@ export function generateCommentary(
 
   // Stable sort by absT
   lines.sort((a, b) => a.absT - b.absT)
-  return lines
+
+  // ── Cluster trimming ───────────────────────────────────────────────────────
+  // When importance-1 lines cluster within 5 s, keep at most 2 per window.
+  // Single forward pass: for each importance-1 line (in order), count how many
+  // kept importance-1 lines already fall within the trailing 5-second window
+  // ending at this line's absT. If that count is already >= 2, drop this one.
+  const keep = new Uint8Array(lines.length).fill(1)
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].importance !== 1) continue
+    const windowStart = lines[i].absT - 5
+    let countInWindow = 0
+    for (let j = 0; j < i; j++) {
+      if (!keep[j]) continue
+      if (lines[j].importance !== 1) continue
+      if (lines[j].absT >= windowStart) countInWindow++
+    }
+    if (countInWindow >= 2) keep[i] = 0
+  }
+
+  return lines.filter((_, i) => keep[i] === 1)
 }

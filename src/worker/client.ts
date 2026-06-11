@@ -1,6 +1,7 @@
 import type {
   CareerSnapshot,
   LinesUpdate,
+  PressTone,
   TradeProposal,
   WorkerRequest,
   WorkerRequestBody,
@@ -245,6 +246,34 @@ export class SimClient {
 
   getTentpoles(): Promise<WorkerResponse> {
     return this.send({ type: 'getTentpoles' })
+  }
+
+  /* ── press corps ── */
+
+  getPressJob(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPressJob' })
+  }
+
+  submitPressArticle(args: {
+    jobId: string
+    headline: string
+    body: string
+    byline: string
+    model: string
+  }): Promise<WorkerResponse> {
+    return this.send({ type: 'submitPressArticle', ...args })
+  }
+
+  skipPressJob(jobId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'skipPressJob', jobId })
+  }
+
+  getPresser(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPresser' })
+  }
+
+  answerPresser(answer: string, tone: PressTone): Promise<WorkerResponse> {
+    return this.send({ type: 'answerPresser', answer, tone })
   }
 
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */

@@ -480,6 +480,86 @@ describe('Career — story layer', () => {
   })
 })
 
+describe('Career — press corps', () => {
+  it('queues a weekly press job after the 7th match day', () => {
+    const data = generateLeague({ seed: 50 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 50, userId)
+
+    // No job at the start.
+    expect(career.getPressJob()).toBeNull()
+
+    // Advance through 7 match days (indexes 0–6); job fires after index 6.
+    for (let i = 0; i < 7; i++) career.advanceDay()
+
+    expect(career.getPressJob()).not.toBeNull()
+    const job = career.getPressJob()!
+    expect(job.kind).toBe('weekly')
+    expect(['beat', 'national', 'homer']).toContain(job.personaId)
+    expect(job.factSheet).toBeDefined()
+  })
+
+  it('submitPressArticle lands a bylined league NewsItem and clears the job', () => {
+    const data = generateLeague({ seed: 51 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 51, userId)
+
+    // Advance 7 match days to generate the weekly job.
+    for (let i = 0; i < 7; i++) career.advanceDay()
+    const job = career.getPressJob()!
+    expect(job).not.toBeNull()
+
+    career.submitPressArticle({
+      jobId: job.id,
+      headline: 'Rink Report: Sluggish Start',
+      body: 'The team has shown inconsistency through the opening week.',
+      byline: 'Sam Carver — The Daily Gazette',
+      model: 'fallback',
+    })
+
+    // Job should be cleared.
+    expect(career.getPressJob()).toBeNull()
+
+    // A league news item with the article text should be in the inbox.
+    const inbox = career.getInbox()
+    const article = inbox.items.find((n) => n.headline === 'Rink Report: Sluggish Start')
+    expect(article).toBeDefined()
+    expect(article!.category).toBe('league')
+    expect(article!.press).toBeDefined()
+    expect(article!.press!.byline).toBe('Sam Carver — The Daily Gazette')
+    expect(article!.press!.kind).toBe('weekly')
+  })
+
+  it('snapshot round-trips press state: job, conference, saga, and counter', () => {
+    const data = generateLeague({ seed: 52 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 52, userId)
+
+    // Advance 7 days to generate a weekly job.
+    for (let i = 0; i < 7; i++) career.advanceDay()
+    expect(career.getPressJob()).not.toBeNull()
+
+    const snap = career.exportSnapshot('press-rt', '2026-06-10T00:00:00.000Z')
+
+    // pressState must be present.
+    expect(snap.pressState).toBeDefined()
+    expect(snap.pressState!.pressJob).not.toBeNull()
+    expect(snap.pressState!.pressJob!.kind).toBe('weekly')
+
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+
+    // Job survives the round-trip.
+    expect(restored.getPressJob()).not.toBeNull()
+    expect(restored.getPressJob()!.id).toBe(career.getPressJob()!.id)
+    expect(restored.getPressJob()!.kind).toBe('weekly')
+
+    // Counter and saga also survive.
+    const snap2 = restored.exportSnapshot('press-rt2', '2026-06-10T00:00:00.000Z')
+    expect(snap2.pressState!.pressCounter).toBe(snap.pressState!.pressCounter)
+    expect(snap2.pressState!.sagaSoFar).toBe(snap.pressState!.sagaSoFar)
+  })
+})
+
 describe('Career — persistence', () => {
   it('survives a save/load round-trip mid-season and stays deterministic', () => {
     const data = generateLeague({ seed: 33 })

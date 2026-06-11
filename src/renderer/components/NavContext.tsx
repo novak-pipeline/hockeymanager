@@ -25,6 +25,7 @@ export type ScreenId =
   | 'matchcenter'
   | 'lockerRoom'
   | 'history'
+  | 'settings'
 
 export interface NavParams {
   playerId?: string
