@@ -210,6 +210,18 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'applyCoachSuggestion':
       must().applyCoachSuggestion(req.suggestedTactics)
       return { id: req.id, type: 'ok' }
+
+    /* ── franchise drama + League hub (Wave 4) ── */
+    case 'getBoard':
+      return { id: req.id, type: 'board', board: must().getBoard() }
+    case 'getRivalries':
+      return { id: req.id, type: 'rivalries', rivalries: must().getRivalries() }
+    case 'getLeagueStats':
+      return { id: req.id, type: 'leagueStats', stats: must().getLeagueStats() }
+    case 'getTransactions':
+      return { id: req.id, type: 'transactions', transactions: must().getTransactions(req.limit) }
+    case 'getScoreboard':
+      return { id: req.id, type: 'scoreboard', scoreboard: must().getScoreboard(req.day) }
   }
 }
 

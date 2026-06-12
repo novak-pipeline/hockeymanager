@@ -1,15 +1,37 @@
-import type { ScheduleEntryView, ScheduleView } from '../../worker/protocol'
+import type { DashboardView, RivalriesView, ScheduleEntryView, ScheduleView } from '../../worker/protocol'
 import { crestColor, fmtDate } from '../components/format'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
-/** Fixtures grouped by month; next game highlighted; results shown as chips. */
+/** Fixtures grouped by month; next game highlighted; results shown as chips. Rival fixtures get a badge. */
 export function ScheduleScreen(): JSX.Element {
   const client = useClient()
   const { data, loading, error } = useScreenData<ScheduleView>(
     () => client.getSchedule(),
     (r) => (r.type === 'schedule' ? r.schedule : null)
   )
+
+  const { data: dashboard } = useScreenData<DashboardView>(
+    () => client.getDashboard(),
+    (r) => (r.type === 'dashboard' ? r.dashboard : null)
+  )
+
+  const { data: rivalries } = useScreenData<RivalriesView>(
+    () => client.getRivalries(),
+    (r) => (r.type === 'rivalries' ? r.rivalries : null)
+  )
+
+  // Build a Set of opponent teamIds that are rivals of the user.
+  const userTeamId = dashboard?.userTeam.teamId ?? null
+  const rivalTeamIds = new Set<string>()
+  if (userTeamId && rivalries) {
+    for (const rv of rivalries.rivalries) {
+      if (rv.intensity >= 60) {
+        if (rv.teamAId === userTeamId) rivalTeamIds.add(rv.teamBId)
+        else if (rv.teamBId === userTeamId) rivalTeamIds.add(rv.teamAId)
+      }
+    }
+  }
 
   return (
     <section className="stack">
@@ -20,7 +42,7 @@ export function ScheduleScreen(): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="No schedule yet."
       />
-      {data && <ScheduleBody entries={data.entries} />}
+      {data && <ScheduleBody entries={data.entries} rivalTeamIds={rivalTeamIds} />}
     </section>
   )
 }
@@ -65,7 +87,7 @@ function resultChip(entry: ScheduleEntryView): JSX.Element | null {
   return <span className={cls}>{label} · {score}</span>
 }
 
-function ScheduleBody(props: { entries: ScheduleEntryView[] }): JSX.Element {
+function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<string> }): JSX.Element {
   const groups = groupByMonth(props.entries)
   const played = props.entries.filter((e) => e.result !== null).length
   const total = props.entries.length
@@ -101,38 +123,49 @@ function ScheduleBody(props: { entries: ScheduleEntryView[] }): JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {g.rows.map((e) => (
-                  <tr
-                    key={e.gameId}
-                    className={e.isNext ? 'is-user' : undefined}
-                  >
-                    <td className="muted">{fmtDate(e.date)}</td>
-                    <td>
-                      <span className={e.home ? 'chip chip-accent' : 'chip'}>
-                        {e.home ? 'H' : 'A'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                        <span
-                          className="crest"
-                          style={{
-                            background: crestColor(e.opponentTeamId),
-                            width: 20,
-                            height: 20,
-                            fontSize: 9,
-                            border: 'none',
-                          }}
-                        >
-                          {e.opponentAbbr.slice(0, 2)}
+                {g.rows.map((e) => {
+                  const isRival = props.rivalTeamIds.has(e.opponentTeamId)
+                  return (
+                    <tr
+                      key={e.gameId}
+                      className={e.isNext ? 'is-user' : undefined}
+                    >
+                      <td className="muted">{fmtDate(e.date)}</td>
+                      <td>
+                        <span className={e.home ? 'chip chip-accent' : 'chip'}>
+                          {e.home ? 'H' : 'A'}
                         </span>
-                        {e.opponentName}
-                        {e.isNext && <span className="chip chip-warn" style={{ fontSize: 10 }}>Next</span>}
-                      </span>
-                    </td>
-                    <td className="num">{resultChip(e)}</td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <span className="row" style={{ gap: 'var(--sp-2)' }}>
+                          <span
+                            className="crest"
+                            style={{
+                              background: crestColor(e.opponentTeamId),
+                              width: 20,
+                              height: 20,
+                              fontSize: 9,
+                              border: 'none',
+                            }}
+                          >
+                            {e.opponentAbbr.slice(0, 2)}
+                          </span>
+                          {e.opponentName}
+                          {e.isNext && <span className="chip chip-warn" style={{ fontSize: 10 }}>Next</span>}
+                          {isRival && (
+                            <span
+                              className="chip chip-danger"
+                              style={{ fontSize: 9, padding: '1px 5px' }}
+                            >
+                              Rivalry
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="num">{resultChip(e)}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

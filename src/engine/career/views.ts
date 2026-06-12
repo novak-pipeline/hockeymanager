@@ -37,6 +37,12 @@ import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpo
 import type { StaffMember, AgmReport } from '@engine/league/staff'
 import type { TeamLeadersView } from '@engine/league/playerRating'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
+import type { BoardState, BoardSummaryView } from '@engine/league/board'
+import type { RivalriesState } from '@engine/league/rivalries'
+import type { SpecialTeamsEntries, TransactionLedger, TeamSpecialTeams, Transaction } from '@engine/league/leagueStats'
+export type { BoardSummaryView } from '@engine/league/board'
+export type { Rivalry, RivalriesState } from '@engine/league/rivalries'
+export type { TeamSpecialTeams, Transaction, TransactionKind } from '@engine/league/leagueStats'
 
 /* ────────────────────────── shared atoms ────────────────────────── */
 
@@ -143,6 +149,8 @@ export interface NextGameView {
   home: boolean
   /** Opponent's league rank for the pre-match blurb. */
   opponentRank: number
+  /** Non-null when this is a rivalry game (intensity >= 60). */
+  rivalryLabel: string | null
 }
 
 export interface LastResultView {
@@ -209,6 +217,10 @@ export interface DashboardView {
     capSpace: number
     avgSalary: number
   }
+  /** Board confidence chip: mandate text, confidence/patience meters, hot-seat status. */
+  board?: BoardSummaryView
+  /** True when the GM has been fired (board.firedAtYear is non-null). */
+  gmFired?: boolean
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -764,6 +776,22 @@ export interface CareerSnapshot {
    * Optional for backward compat.
    */
   hireableStaff?: string[]
+  /**
+   * Owner/board expectations state (franchise drama). Optional for backward compat.
+   */
+  boardState?: BoardState
+  /**
+   * Rivalries state — pair-wise intensity. Optional for backward compat.
+   */
+  rivalriesState?: RivalriesState
+  /**
+   * Special-teams accumulator. JSON-safe entry array. Optional for backward compat.
+   */
+  specialTeams?: SpecialTeamsEntries
+  /**
+   * Transactions ledger. Optional for backward compat.
+   */
+  transactionLedger?: TransactionLedger
 }
 
 export interface SaveSlotInfo {
@@ -995,4 +1023,83 @@ export interface LeagueLeadersView {
   savePct: LeagueLeaderEntry[]
   goalsAgainstAvg: LeagueLeaderEntry[]
   wins: LeagueLeaderEntry[]
+}
+
+/* ────────────────────────── board (owner expectations) view ────────────────────────── */
+
+/**
+ * Full owner/board view for the GM Status screen.
+ * Response to 'getBoard'.
+ */
+export interface BoardView {
+  mandate: string
+  mandateText: string
+  targetRank: number
+  confidence: number
+  confidenceLabel: string
+  patience: number
+  warnings: number
+  firedAtYear: number | null
+  statusLabel: string
+  /** Current league rank of the user team. */
+  currentRank: number
+  /** True when the GM has been fired. */
+  fired: boolean
+}
+
+/* ────────────────────────── rivalries view ────────────────────────── */
+
+export interface RivalryView {
+  teamAId: string
+  teamAAbbr: string
+  teamBId: string
+  teamBAbbr: string
+  /** 0–100 intensity. */
+  intensity: number
+  reasons: string[]
+  meetings: number
+  /** Human label at this intensity level. */
+  label: string
+}
+
+/**
+ * All current rivalries, sorted by intensity descending.
+ * Response to 'getRivalries'.
+ */
+export interface RivalriesView {
+  rivalries: RivalryView[]
+}
+
+/* ────────────────────────── league stats views ────────────────────────── */
+
+/**
+ * Team special-teams table — PP% / PK% — for the League hub.
+ * Response to 'getLeagueStats'.
+ */
+export interface LeagueStatsView {
+  specialTeams: (TeamSpecialTeams & { teamName: string; teamAbbr: string })[]
+}
+
+/**
+ * Recent transactions (most recent first).
+ * Response to 'getTransactions'.
+ */
+export interface TransactionsView {
+  items: (Transaction & { teamNames: string[] })[]
+}
+
+/**
+ * Daily scoreboard.
+ * Response to 'getScoreboard'.
+ */
+export interface ScoreboardView {
+  day: number
+  entries: Array<{
+    gameId: string
+    homeAbbr: string
+    awayAbbr: string
+    homeGoals: number
+    awayGoals: number
+    final: boolean
+  }>
 }

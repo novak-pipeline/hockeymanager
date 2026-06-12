@@ -17,6 +17,7 @@ export type { PressJob, PressConferenceState, PressTone } from '@engine/story/fa
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 export type {
   AgmReportView,
+  BoardView,
   BoxScoreView,
   CareerPhase,
   CareerSnapshot,
@@ -26,13 +27,16 @@ export type {
   HistoryView,
   InboxView,
   LeagueLeadersView,
+  LeagueStatsView,
   LinesUpdate,
   LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
   PracticeView,
+  RivalriesView,
   ScheduleView,
+  ScoreboardView,
   ScoutingView,
   SquadView,
   StandingsView,
@@ -42,10 +46,12 @@ export type {
   TradeEvaluation,
   TradeProposal,
   TradesView,
+  TransactionsView,
   TeamLeadersView,
 } from '@engine/career/views'
 import type {
   AgmReportView,
+  BoardView,
   BoxScoreView,
   CareerSnapshot,
   DashboardView,
@@ -54,13 +60,16 @@ import type {
   HistoryView,
   InboxView,
   LeagueLeadersView,
+  LeagueStatsView,
   LinesUpdate,
   LockerRoomView,
   OffseasonView,
   PlayerProfileView,
   PlayoffBracketView,
   PracticeView,
+  RivalriesView,
   ScheduleView,
+  ScoreboardView,
   ScoutingView,
   SquadView,
   StandingsView,
@@ -70,6 +79,7 @@ import type {
   TradeEvaluation,
   TradeProposal,
   TradesView,
+  TransactionsView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
 import type { ScoutTarget } from '@domain/scouting'
@@ -168,6 +178,17 @@ export type WorkerRequestBody =
    * user team's current tactics (additive — only supplied fields are changed).
    */
   | { type: 'applyCoachSuggestion'; suggestedTactics: Partial<TeamTactics> }
+  /* ── franchise drama + League hub (Wave 4) ── */
+  /** Owner/board mandate, confidence, patience, hot-seat status. */
+  | { type: 'getBoard' }
+  /** All current rivalries sorted by intensity. */
+  | { type: 'getRivalries' }
+  /** Team special-teams table (PP% / PK%). */
+  | { type: 'getLeagueStats' }
+  /** Recent transactions, most recent first. */
+  | { type: 'getTransactions'; limit?: number }
+  /** Scoreboard for a given day (defaults to current day). */
+  | { type: 'getScoreboard'; day?: number }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -212,5 +233,11 @@ export type WorkerResponse = { id: number } & (
   | { type: 'practice'; practice: PracticeView }
   | { type: 'leagueLeaders'; leaders: LeagueLeadersView }
   | { type: 'teamLeaders'; leaders: import('@engine/league/playerRating').TeamLeadersView }
+  /* ── franchise drama + League hub (Wave 4) ── */
+  | { type: 'board'; board: BoardView }
+  | { type: 'rivalries'; rivalries: RivalriesView }
+  | { type: 'leagueStats'; stats: LeagueStatsView }
+  | { type: 'transactions'; transactions: TransactionsView }
+  | { type: 'scoreboard'; scoreboard: ScoreboardView }
   | { type: 'error'; message: string }
 )

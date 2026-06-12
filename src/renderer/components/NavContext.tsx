@@ -14,6 +14,7 @@ import { createContext, useContext } from 'react'
 export type ScreenId =
   // Front Office section
   | 'dashboard'
+  | 'board'
   // News section
   | 'inbox'
   // Team section
@@ -31,6 +32,9 @@ export type ScreenId =
   | 'standings'
   | 'leagueSchedule'
   | 'stats'
+  | 'leagueTeamStats'
+  | 'leagueTransactions'
+  | 'leagueScoreboard'
   | 'leagueHistory'
   | 'scouting'
   // Contextual (phase-gated)
@@ -68,12 +72,17 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'standings':
     case 'leagueSchedule':
     case 'stats':
+    case 'leagueTeamStats':
+    case 'leagueTransactions':
+    case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
     case 'draft':
     case 'offseason':
     case 'playoffs':
       return 'league'
+    case 'board':
+      return 'frontOffice'
     default:
       return 'frontOffice'
   }

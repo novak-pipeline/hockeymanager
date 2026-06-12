@@ -159,6 +159,29 @@ import {
   type StaffMember,
 } from '@engine/league/staff'
 import {
+  boardSummary,
+  seasonReview,
+  setSeasonMandate,
+  updateConfidence,
+  type BoardState,
+} from '@engine/league/board'
+import {
+  decayIntensity,
+  gameIntensity,
+  registerGame,
+  seedRivalries,
+  type RivalriesState,
+} from '@engine/league/rivalries'
+import {
+  accumulateSpecialTeams,
+  buildScoreboard,
+  emptyLedger,
+  finalizeSpecialTeams,
+  recordTransaction,
+  type SpecialTeamsEntries,
+  type TransactionLedger,
+} from '@engine/league/leagueStats'
+import {
   gameRating,
   goalieGameRating,
   formString,
@@ -198,6 +221,7 @@ import {
   dayToDateISO,
   type AgmReportView,
   type AgmRankedPlayerView,
+  type BoardView,
   type BoxScoreView,
   type CareerPhase,
   type CareerSnapshot,
@@ -207,6 +231,7 @@ import {
   type HistoryView,
   type InboxView,
   type LeagueLeadersView,
+  type LeagueStatsView,
   type LinesUpdate,
   type LockerRoomView,
   type OffseasonView,
@@ -214,7 +239,9 @@ import {
   type PlayerProfileView,
   type PlayoffBracketView,
   type PracticeView,
+  type RivalriesView,
   type ScheduleView,
+  type ScoreboardView,
   type ScoutingView,
   type SeasonSummary,
   type SeriesView,
@@ -228,6 +255,7 @@ import {
   type TradeProposal,
   type TradeSideView,
   type TradesView,
+  type TransactionsView,
 } from './views'
 import type { ScoutingState, ScoutTarget } from '@domain/scouting'
 
@@ -430,6 +458,16 @@ export class Career {
     movedUp: { teamAbbr: string; from: number; to: number } | null
   } | null = null
 
+  /* ── franchise drama + League hub (Wave 4) ── */
+  /** Owner/board expectations for the user's team. */
+  private boardState!: BoardState
+  /** League-wide rivalry pairs. */
+  private rivalriesState!: RivalriesState
+  /** Per-team special-teams accumulators (JSON-safe entry array). */
+  private specialTeams: SpecialTeamsEntries = []
+  /** League-wide transactions ledger. */
+  private transactionLedger: TransactionLedger = emptyLedger()
+
   /* ── new plumbing modules (Wave 3: EHM screens) ── */
   /** Head coach and AGM for the user's team. */
   private staff: { headCoach: StaffMember; assistantGM: StaffMember } | null = null
@@ -488,6 +526,28 @@ export class Career {
       })
       this.expectationsState = odds.state
       this.pushSeeds(odds.newsSeeds)
+
+      /* ── Wave 4: board mandate + rivalries ── */
+      const boardResult = setSeasonMandate({
+        teamStrengthRank: this.userStrengthRank(),
+        teamsInLeague: data.league.teams.length,
+        rng: this.rngFor(9301),
+        year: this.year,
+        teamId: this.userTeamId as string,
+        teamName: this.userTeam.name,
+      })
+      this.boardState = boardResult.state
+      this.pushSeeds([boardResult.newsSeed])
+
+      this.rivalriesState = seedRivalries({
+        teams: [...data.league.teams].map((tid) => {
+          const t = data.teams.get(tid)!
+          return { teamId: tid as string, divisionId: t.divisionId as string, conferenceId: t.conferenceId as string }
+        }),
+        rng: this.rngFor(9302),
+      })
+      this.specialTeams = []
+      this.transactionLedger = emptyLedger()
     }
   }
 
@@ -620,6 +680,14 @@ export class Career {
 
   private static pidNum(id: string): number {
     return Number((id.match(/\d+/) ?? ['0'])[0])
+  }
+
+  /** Compute the user team's projected strength rank (1 = best) among all teams. */
+  private userStrengthRank(): number {
+    const descriptors = this.teamDescriptors()
+    const sorted = [...descriptors].sort((a, b) => b.strength - a.strength)
+    const idx = sorted.findIndex((d) => d.teamId === (this.userTeamId as string))
+    return idx >= 0 ? idx + 1 : Math.ceil(descriptors.length / 2)
   }
 
   /** TeamDescriptors for preseason odds (same strength formula as buildTeamList). */
@@ -1083,6 +1151,23 @@ export class Career {
       }).newsSeeds
     )
 
+    /* ── Wave 4: board confidence update every ~10 match days ── */
+    const boardDayIdx = this.matchDays.indexOf(day)
+    if (boardDayIdx >= 0 && boardDayIdx % 10 === 9) {
+      const userStanding = this.standings.get(this.userTeamId)
+      const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+      const totalGames = this.matchDays.length
+      const gamesPlayed = userStanding?.gamesPlayed ?? 0
+      const confResult = updateConfidence({
+        state: this.boardState,
+        currentRank,
+        gamesPlayed,
+        totalGames,
+        teamsInLeague: this.data.league.teams.length,
+      })
+      this.pushSeeds(confResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+    }
+
     /* ── all-time record pace watch every ~5 match days ── */
     const dayIdx = this.matchDays.indexOf(day)
     if (dayIdx >= 0 && dayIdx % 5 === 4) {
@@ -1542,6 +1627,50 @@ export class Career {
     if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
       this.recordUserResultNews(game.day, res)
     }
+
+    /* ── Wave 4: special teams accumulation ── */
+    this.specialTeams = accumulateSpecialTeams({
+      existing: this.specialTeams,
+      outcome: res,
+      homeTeamId: res.homeTeamId as string,
+      awayTeamId: res.awayTeamId as string,
+    })
+
+    /* ── Wave 4: rivalry registration (league-wide) ── */
+    const homePim = [...res.playerStats.entries()]
+      .filter(([id]) => this.data.teams.get(res.homeTeamId)?.roster.includes(id))
+      .reduce((s, [, st]) => s + st.penaltyMinutes, 0)
+    const awayPim = [...res.playerStats.entries()]
+      .filter(([id]) => this.data.teams.get(res.awayTeamId)?.roster.includes(id))
+      .reduce((s, [, st]) => s + st.penaltyMinutes, 0)
+    const rivalResult = registerGame({
+      state: this.rivalriesState,
+      teamA: res.homeTeamId as string,
+      teamB: res.awayTeamId as string,
+      goalsA: res.homeGoals,
+      goalsB: res.awayGoals,
+      penaltyMinutesA: homePim,
+      penaltyMinutesB: awayPim,
+      wasPlayoff: false,
+      year: this.year,
+      rng: this.rngFor(7200, game.day, game.id.length),
+    })
+    if (rivalResult.newsSeeds.length > 0) this.pushSeeds(rivalResult.newsSeeds)
+
+    /* ── Wave 4: user-game rivalry morale swing ── */
+    if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
+      const oppId = game.homeTeamId === this.userTeamId ? game.awayTeamId : game.homeTeamId
+      const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, oppId as string)
+      if (gi.factor > 0) {
+        const lr = this.lockerRooms.get(this.userTeamId)
+        if (lr) {
+          const userIsHome = game.homeTeamId === this.userTeamId
+          const userWon = userIsHome ? res.homeGoals > res.awayGoals : res.awayGoals > res.homeGoals
+          const moraleSwing = Math.round(gi.factor * 3) * (userWon ? 1 : -1)
+          lr.roomMorale = Math.max(0, Math.min(100, lr.roomMorale + moraleSwing))
+        }
+      }
+    }
   }
 
   private postGame(res: GameOutcome, dayRng: Rng): Set<PlayerId> {
@@ -1837,6 +1966,29 @@ export class Career {
       this.creditPhysicalStats(res)
       applySeriesResult(po, g.seriesId, result)
       for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber))) played.add(pid)
+
+      /* ── Wave 4: rivalry registration for playoff games ── */
+      {
+        const homePim = [...res.playerStats.entries()]
+          .filter(([id]) => this.data.teams.get(g.homeTeamId)?.roster.includes(id))
+          .reduce((s, [, st]) => s + st.penaltyMinutes, 0)
+        const awayPim = [...res.playerStats.entries()]
+          .filter(([id]) => this.data.teams.get(g.awayTeamId)?.roster.includes(id))
+          .reduce((s, [, st]) => s + st.penaltyMinutes, 0)
+        const rivalResult = registerGame({
+          state: this.rivalriesState,
+          teamA: g.homeTeamId as string,
+          teamB: g.awayTeamId as string,
+          goalsA: res.homeGoals,
+          goalsB: res.awayGoals,
+          penaltyMinutesA: homePim,
+          penaltyMinutesB: awayPim,
+          wasPlayoff: true,
+          year: this.year,
+          rng: this.rngFor(7201, day, g.gameNumber),
+        })
+        if (rivalResult.newsSeeds.length > 0) this.pushSeeds(rivalResult.newsSeeds)
+      }
       if (isUser) {
         this.recordUserResultNews(day, res)
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
@@ -1948,6 +2100,34 @@ export class Career {
               rng: this.rngFor(8008),
             }).newsSeeds
           )
+        }
+
+        /* ── Wave 4: board season review ── */
+        {
+          const userFinalRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+          const madePlayoffs = this.playoffs
+            ? (this.playoffs.rounds[0]?.series ?? []).some(
+                (s) =>
+                  (s.highSeedTeamId as string) === (this.userTeamId as string) ||
+                  (s.lowSeedTeamId as string) === (this.userTeamId as string)
+              )
+            : false
+          const wonCup =
+            (this.playoffs?.championTeamId as string | null) === (this.userTeamId as string)
+          const reviewResult = seasonReview({
+            state: this.boardState,
+            finalRank: userFinalRank,
+            madePlayoffs,
+            wonCup,
+            year: this.year,
+            teamId: this.userTeamId as string,
+            teamName: this.userTeam.name,
+          })
+          this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+          if (reviewResult.fired) {
+            // Record the firing but don't hard-crash — expose as a UI state.
+            // The user can continue playing; further seasons just note the new GM context.
+          }
         }
 
         /* ── fold the season into the all-time records ── */
@@ -2327,6 +2507,15 @@ export class Career {
         `${player.name} (${player.position}, ${player.age}) joins the organization.`,
         { playerId: playerId as string }
       )
+      /* ── Wave 4: record draft transaction ── */
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'draft',
+        teamIds: [this.userTeamId as string],
+        summary: `${this.userTeam.abbreviation} selects ${player.name} (${player.position}) at #${idx + 1}.`,
+      })
+      this.transactionLedger = txResult.ledger
     }
   }
 
@@ -2484,6 +2673,26 @@ export class Career {
     })
     this.expectationsState = odds.state
 
+    /* ── Wave 4: board mandate rollover + rivalry decay ── */
+    {
+      const boardResult = setSeasonMandate({
+        teamStrengthRank: this.userStrengthRank(),
+        teamsInLeague: this.data.league.teams.length,
+        lastYearRank: finalRanks.get(this.userTeamId as string),
+        wonCupLastYear:
+          (this.playoffs?.championTeamId as string | null) === (this.userTeamId as string),
+        rng: this.rngFor(9301),
+        year: newYear,
+        teamId: this.userTeamId as string,
+        teamName: this.userTeam.name,
+      })
+      this.boardState = boardResult.state
+      this.pushSeeds([boardResult.newsSeed])
+    }
+    decayIntensity(this.rivalriesState, newYear)
+    // Reset special-teams for the new season.
+    this.specialTeams = []
+
     this.pushNews(
       'league',
       `${this.data.league.name} ${newYear}–${newYear + 1} season begins`,
@@ -2571,6 +2780,17 @@ export class Career {
     this.pushNews('contract', `${p.name} released`, `${p.name} was placed on waivers and released.`, {
       playerId,
     })
+    /* ── Wave 4: record transaction ── */
+    {
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'release',
+        teamIds: [this.userTeamId as string],
+        summary: `${this.userTeam.abbreviation} releases ${p.name}.`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
   }
 
   resignPlayer(playerId: string, salary: number, years: number): { signed: boolean; message: string } {
@@ -2600,6 +2820,17 @@ export class Career {
         `${player.name} stays for $${(salary / 1e6).toFixed(2)}M × ${years} years.`,
         { playerId }
       )
+      /* ── Wave 4: record transaction ── */
+      {
+        const txResult = recordTransaction(this.transactionLedger, {
+          day: this.currentDay,
+          year: this.year,
+          kind: 'signing',
+          teamIds: [this.userTeamId as string],
+          summary: `${this.userTeam.abbreviation} re-signs ${player.name} ($${(salary / 1e6).toFixed(1)}M × ${years}).`,
+        })
+        this.transactionLedger = txResult.ledger
+      }
       return { signed: true, message: `${player.name} signs for $${(salary / 1e6).toFixed(2)}M × ${years}.` }
     }
     if (salary < ask.salary * 0.8) {
@@ -2645,6 +2876,17 @@ export class Career {
       `Welcome aboard: $${(salary / 1e6).toFixed(2)}M × ${years} years.`,
       { playerId }
     )
+    /* ── Wave 4: record transaction ── */
+    {
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'signing',
+        teamIds: [this.userTeamId as string],
+        summary: `${this.userTeam.abbreviation} signs FA ${player.name} ($${(salary / 1e6).toFixed(1)}M × ${years}).`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
     return { signed: true, message: `${player.name} is yours.` }
   }
 
@@ -2711,6 +2953,15 @@ export class Career {
         `${give.players.map((p) => p.name).join(', ') || 'Picks'} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
         { teamId: partnerId as string }
       )
+      /* ── Wave 4: record transaction ── */
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'trade',
+        teamIds: [this.userTeamId as string, partnerId as string],
+        summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
+      })
+      this.transactionLedger = txResult.ledger
     }
     return { verdict: evaln.verdict, message: evaln.message, counter: null }
   }
@@ -2744,6 +2995,17 @@ export class Career {
     this.pushNews('trade', `Trade completed with ${partner.abbreviation}`, `The deal is done.`, {
       teamId: offer.partnerTeamId as string,
     })
+    /* ── Wave 4: record transaction ── */
+    {
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'trade',
+        teamIds: [this.userTeamId as string, offer.partnerTeamId as string],
+        summary: `${this.userTeam.abbreviation} accepts trade with ${partner.abbreviation}.`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
   }
 
   rejectTrade(offerId: string): void {
@@ -2777,6 +3039,7 @@ export class Career {
     if (this.phase === 'regularSeason' && nextSched) {
       const home = nextSched.homeTeamId === this.userTeamId
       const opp = this.data.teams.get(home ? nextSched.awayTeamId : nextSched.homeTeamId)!
+      const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
       nextGame = {
         day: nextSched.day,
         date: dayToDateISO(this.year, nextSched.day),
@@ -2785,6 +3048,7 @@ export class Career {
         opponentAbbr: opp.abbreviation,
         home,
         opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+        rivalryLabel: gi.label,
       }
     } else if (this.phase === 'playoffs' && this.playoffs) {
       const pending = pendingGames(this.playoffs).find(
@@ -2793,6 +3057,7 @@ export class Career {
       if (pending) {
         const home = pending.homeTeamId === this.userTeamId
         const opp = this.data.teams.get(home ? pending.awayTeamId : pending.homeTeamId)!
+        const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
         nextGame = {
           day: this.currentDay + 1,
           date: dayToDateISO(this.year, this.currentDay + 1),
@@ -2801,6 +3066,7 @@ export class Career {
           opponentAbbr: opp.abbreviation,
           home,
           opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+          rivalryLabel: gi.label,
         }
       }
     }
@@ -2955,6 +3221,8 @@ export class Career {
       teamLeaders: tl,
       playerFocus: playerFocusField,
       financesSummary,
+      board: boardSummary(this.boardState),
+      gmFired: this.boardState.firedAtYear !== null,
     }
   }
 
@@ -3642,6 +3910,75 @@ export class Career {
     }
   }
 
+  /* ────────────────────────── Wave 4: franchise drama + League hub ────────────────────────── */
+
+  getBoard(): BoardView {
+    const summary = boardSummary(this.boardState)
+    const sorted = sortStandings([...this.standings.values()])
+    const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    return {
+      ...summary,
+      currentRank,
+      fired: this.boardState.firedAtYear !== null,
+    }
+  }
+
+  getRivalries(): RivalriesView {
+    const sorted = [...this.rivalriesState.rivalries].sort((a, b) => b.intensity - a.intensity)
+    const abbrOf = (tid: string): string =>
+      this.data.teams.get(asTeamId(tid))?.abbreviation ?? tid
+    return {
+      rivalries: sorted.map((r) => ({
+        teamAId: r.teamA,
+        teamAAbbr: abbrOf(r.teamA),
+        teamBId: r.teamB,
+        teamBAbbr: abbrOf(r.teamB),
+        intensity: r.intensity,
+        reasons: [...r.reasons],
+        meetings: r.meetings,
+        label: r.intensity >= 80 ? 'Grudge Match' : r.intensity >= 60 ? 'Rivalry Night' : 'Heating Up',
+      })),
+    }
+  }
+
+  getLeagueStats(): LeagueStatsView {
+    const finalized = finalizeSpecialTeams(this.specialTeams)
+    return {
+      specialTeams: finalized.map((ts) => {
+        const team = this.data.teams.get(asTeamId(ts.teamId))
+        return {
+          ...ts,
+          teamName: team?.name ?? ts.teamId,
+          teamAbbr: team?.abbreviation ?? ts.teamId,
+        }
+      }),
+    }
+  }
+
+  getTransactions(limit = 50): TransactionsView {
+    const items = [...this.transactionLedger.items]
+      .reverse()
+      .slice(0, limit)
+      .map((tx) => ({
+        ...tx,
+        teamNames: tx.teamIds.map(
+          (tid) => this.data.teams.get(asTeamId(tid))?.name ?? tid
+        ),
+      }))
+    return { items }
+  }
+
+  getScoreboard(day?: number): ScoreboardView {
+    const targetDay = day ?? this.currentDay
+    const entries = buildScoreboard({
+      schedule: this.data.league.schedule,
+      day: targetDay,
+      teamName: (id) => this.data.teams.get(asTeamId(id))?.name ?? id,
+      teamAbbr: (id) => this.data.teams.get(asTeamId(id))?.abbreviation ?? id,
+    })
+    return { day: targetDay, entries }
+  }
+
   /* ────────────────────────── legacy v1 view ────────────────────────── */
 
   private standingRow(s: Standing): StandingRow {
@@ -3794,6 +4131,10 @@ export class Career {
       playerRatings: [...this.playerRatings.entries()].map(([k, v]) => [k, [...v]] as [string, number[]]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
+      boardState: structuredClone(this.boardState),
+      rivalriesState: structuredClone(this.rivalriesState),
+      specialTeams: structuredClone(this.specialTeams),
+      transactionLedger: structuredClone(this.transactionLedger),
     }
   }
 
@@ -3907,6 +4248,38 @@ export class Career {
     }
     if (snapshot.hireableStaff) {
       career.hireableStaff = [...snapshot.hireableStaff]
+    }
+
+    // Restore Wave 4 franchise drama + league hub state (all optional for backward compat).
+    if (snapshot.boardState) {
+      career.boardState = structuredClone(snapshot.boardState)
+    } else {
+      const boardResult = setSeasonMandate({
+        teamStrengthRank: career.userStrengthRank(),
+        teamsInLeague: data.league.teams.length,
+        rng: career.rngFor(9301),
+        year: career.year,
+        teamId: snapshot.userTeamId,
+        teamName: data.teams.get(asTeamId(snapshot.userTeamId))?.name ?? 'the team',
+      })
+      career.boardState = boardResult.state
+    }
+    if (snapshot.rivalriesState) {
+      career.rivalriesState = structuredClone(snapshot.rivalriesState)
+    } else {
+      career.rivalriesState = seedRivalries({
+        teams: [...data.league.teams].map((tid) => {
+          const t = data.teams.get(tid)!
+          return { teamId: tid as string, divisionId: t.divisionId as string, conferenceId: t.conferenceId as string }
+        }),
+        rng: career.rngFor(9302),
+      })
+    }
+    if (snapshot.specialTeams) {
+      career.specialTeams = structuredClone(snapshot.specialTeams)
+    }
+    if (snapshot.transactionLedger) {
+      career.transactionLedger = structuredClone(snapshot.transactionLedger)
     }
 
     // Rebuild transient state that deliberately isn't saved.

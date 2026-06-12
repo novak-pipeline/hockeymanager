@@ -325,6 +325,37 @@ export class SimClient {
     return this.send({ type: 'applyCoachSuggestion', suggestedTactics })
   }
 
+  /* ── franchise drama + League hub (Wave 4) ── */
+
+  /** Owner/board mandate, confidence, patience, hot-seat status. */
+  getBoard(): Promise<WorkerResponse> {
+    return this.send({ type: 'getBoard' })
+  }
+
+  /** All current rivalries sorted by intensity. */
+  getRivalries(): Promise<WorkerResponse> {
+    return this.send({ type: 'getRivalries' })
+  }
+
+  /** Team special-teams table (PP% / PK%). */
+  getLeagueStats(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueStats' })
+  }
+
+  /** Recent transactions, most recent first. */
+  getTransactions(limit?: number): Promise<WorkerResponse> {
+    return limit !== undefined
+      ? this.send({ type: 'getTransactions', limit })
+      : this.send({ type: 'getTransactions' })
+  }
+
+  /** Scoreboard for a given day (defaults to current day). */
+  getScoreboard(day?: number): Promise<WorkerResponse> {
+    return day !== undefined
+      ? this.send({ type: 'getScoreboard', day })
+      : this.send({ type: 'getScoreboard' })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

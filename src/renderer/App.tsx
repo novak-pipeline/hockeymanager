@@ -20,6 +20,7 @@ import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
 import { LeagueScreen } from './screens/LeagueScreen'
+import { BoardScreen } from './screens/BoardScreen'
 import { PressConference } from './components/PressConference'
 import { pollPress } from './lib/press'
 
@@ -322,6 +323,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     // ── Front Office ──
     case 'dashboard':
       return <DashboardScreen />
+    case 'board':
+      return <BoardScreen />
 
     // ── News ──
     case 'inbox':
@@ -344,6 +347,9 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'standings':
     case 'leagueSchedule':
     case 'stats':
+    case 'leagueTeamStats':
+    case 'leagueTransactions':
+    case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
     case 'draft':

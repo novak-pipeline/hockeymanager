@@ -1,14 +1,18 @@
 /**
  * LeagueScreen — EHM-style mega-screen for the League section.
  *
- * Sub-tabs: Overview | Standings | Schedule | Player Stats | History |
- *           Scouting | Draft | Offseason | Playoffs
+ * Sub-tabs: Overview | Standings | Schedule | Player Stats | Team Stats |
+ *           Transactions | Scoreboard | History | Scouting | Draft | Offseason | Playoffs
  *
  * The Overview tab is new; the rest re-parent existing screens.
  */
+import { useState } from 'react'
 import type {
   LeagueLeadersView,
+  LeagueStatsView,
+  ScoreboardView,
   StandingsView,
+  TransactionsView,
 } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -28,6 +32,9 @@ type LeagueTab =
   | 'standings'
   | 'leagueSchedule'
   | 'stats'
+  | 'leagueTeamStats'
+  | 'leagueTransactions'
+  | 'leagueScoreboard'
   | 'leagueHistory'
   | 'scouting'
   | 'draft'
@@ -59,15 +66,18 @@ export function LeagueScreen(props: { tab: LeagueTab }): JSX.Element {
   const { tab } = props
 
   switch (tab) {
-    case 'leagueOverview': return <LeagueOverviewTab />
-    case 'standings':      return <StandingsScreen />
-    case 'leagueSchedule': return <LeagueScheduleTab />
-    case 'stats':          return <StatsScreen />
-    case 'leagueHistory':  return <HistoryScreen />
-    case 'scouting':       return <ScoutingScreen />
-    case 'draft':          return <DraftScreen />
-    case 'offseason':      return <OffseasonScreen />
-    case 'playoffs':       return <PlayoffsScreen />
+    case 'leagueOverview':     return <LeagueOverviewTab />
+    case 'standings':          return <StandingsScreen />
+    case 'leagueSchedule':     return <LeagueScheduleTab />
+    case 'stats':              return <StatsScreen />
+    case 'leagueTeamStats':    return <LeagueTeamStatsTab />
+    case 'leagueTransactions': return <LeagueTransactionsTab />
+    case 'leagueScoreboard':   return <LeagueScoreboardTab />
+    case 'leagueHistory':      return <HistoryScreen />
+    case 'scouting':           return <ScoutingScreen />
+    case 'draft':              return <DraftScreen />
+    case 'offseason':          return <OffseasonScreen />
+    case 'playoffs':           return <PlayoffsScreen />
   }
 }
 
@@ -309,5 +319,345 @@ function LeagueScheduleTab(): JSX.Element {
       </Notice>
       <ScheduleScreen />
     </section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TEAM STATS TAB — PP% / PK% special-teams table
+   ══════════════════════════════════════════════════════════════ */
+
+function LeagueTeamStatsTab(): JSX.Element {
+  const client = useClient()
+
+  const { data, loading, error } = useScreenData<LeagueStatsView>(
+    () => client.getLeagueStats(),
+    (r) => (r.type === 'leagueStats' ? r.stats : null)
+  )
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Team Stats" />
+      <ScreenStateNotices
+        loading={loading && !data}
+        error={error}
+        empty={!loading && !error && !data}
+        emptyText="No team stats yet — play some games first."
+      />
+      {data && data.specialTeams.length > 0 && (
+        <Panel title="Special Teams">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Team</th>
+                  <th className="num">PP Goals</th>
+                  <th className="num">PP Opp</th>
+                  <th className="num">PP%</th>
+                  <th className="num">PK Kills</th>
+                  <th className="num">Times SH</th>
+                  <th className="num">PK%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.specialTeams.map((row, i) => (
+                  <tr key={row.teamId}>
+                    <td>
+                      <span className={i < 3 ? 'rank-chip top3' : 'rank-chip'}>
+                        {i + 1}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="row" style={{ gap: 5 }}>
+                        <span
+                          className="crest"
+                          style={{
+                            background: crestColor(row.teamId),
+                            width: 18,
+                            height: 18,
+                            fontSize: 8,
+                            border: 'none',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {row.teamAbbr.slice(0, 2)}
+                        </span>
+                        {row.teamAbbr}
+                        <span className="muted small">{row.teamName}</span>
+                      </span>
+                    </td>
+                    <td className="num">{row.ppGoals}</td>
+                    <td className="num">{row.ppOpportunities}</td>
+                    <td className="num">
+                      <strong style={{ color: ppColor(row.ppPct) }}>
+                        {(row.ppPct * 100).toFixed(1)}%
+                      </strong>
+                    </td>
+                    <td className="num">{row.pkKills}</td>
+                    <td className="num">{row.timesShorthanded}</td>
+                    <td className="num">
+                      <strong style={{ color: pkColor(row.pkPct) }}>
+                        {(row.pkPct * 100).toFixed(1)}%
+                      </strong>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
+            Sorted by PP% descending. PK% = kills / times shorthanded.
+          </div>
+        </Panel>
+      )}
+      {data && data.specialTeams.length === 0 && (
+        <Notice kind="info">No penalty data yet. Play some games to populate special-teams stats.</Notice>
+      )}
+    </section>
+  )
+}
+
+function ppColor(pct: number): string {
+  if (pct >= 0.22) return 'var(--green)'
+  if (pct >= 0.17) return 'var(--text)'
+  return 'var(--red)'
+}
+
+function pkColor(pct: number): string {
+  if (pct >= 0.82) return 'var(--green)'
+  if (pct >= 0.77) return 'var(--text)'
+  return 'var(--red)'
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TRANSACTIONS TAB — trade / signing ledger
+   ══════════════════════════════════════════════════════════════ */
+
+const KIND_CHIP: Record<string, string> = {
+  trade:    'chip chip-warn',
+  signing:  'chip chip-success',
+  release:  'chip chip-danger',
+  draft:    'chip chip-violet',
+  callup:   'chip',
+  waiver:   'chip',
+}
+
+const KIND_LABEL: Record<string, string> = {
+  trade:    'Trade',
+  signing:  'Signing',
+  release:  'Release',
+  draft:    'Draft',
+  callup:   'Call-up',
+  waiver:   'Waiver',
+}
+
+function LeagueTransactionsTab(): JSX.Element {
+  const client = useClient()
+
+  const { data, loading, error } = useScreenData<TransactionsView>(
+    () => client.getTransactions(100),
+    (r) => (r.type === 'transactions' ? r.transactions : null)
+  )
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Transactions" />
+      <ScreenStateNotices
+        loading={loading && !data}
+        error={error}
+        empty={!loading && !error && !data}
+        emptyText="No transactions recorded yet."
+      />
+      {data && data.items.length === 0 && (
+        <Notice kind="info">No transactions yet this season.</Notice>
+      )}
+      {data && data.items.length > 0 && (
+        <Panel title="Recent Transactions">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Type</th>
+                  <th>Teams</th>
+                  <th>Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...data.items].reverse().map((tx) => (
+                  <tr key={tx.id}>
+                    <td className="muted mono" style={{ whiteSpace: 'nowrap' }}>
+                      Day {tx.day}
+                    </td>
+                    <td>
+                      <span className={KIND_CHIP[tx.kind] ?? 'chip'} style={{ fontSize: 10 }}>
+                        {KIND_LABEL[tx.kind] ?? tx.kind}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="muted small">
+                        {tx.teamNames.join(' / ')}
+                      </span>
+                    </td>
+                    <td style={{ maxWidth: 400 }}>
+                      <span style={{ fontSize: 13 }}>{tx.summary}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SCOREBOARD TAB — league-wide scores for a selected day
+   ══════════════════════════════════════════════════════════════ */
+
+function LeagueScoreboardTab(): JSX.Element {
+  const client = useClient()
+  const [selectedDay, setSelectedDay] = useState<number | null>(null)
+
+  const { data, loading, error, refetch } = useScreenData<ScoreboardView>(
+    () => selectedDay !== null ? client.getScoreboard(selectedDay) : client.getScoreboard(),
+    (r) => (r.type === 'scoreboard' ? r.scoreboard : null)
+  )
+
+  function handleDayJump(delta: number): void {
+    const base = selectedDay ?? (data?.day ?? 1)
+    const next = Math.max(1, base + delta)
+    setSelectedDay(next)
+    refetch()
+  }
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Scoreboard" />
+      <ScreenStateNotices
+        loading={loading && !data}
+        error={error}
+        empty={!loading && !error && !data}
+        emptyText="No scoreboard data yet."
+      />
+
+      {data && (
+        <>
+          {/* Day navigation */}
+          <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'center' }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => handleDayJump(-1)}
+              disabled={loading}
+            >
+              ← Prev day
+            </button>
+            <span style={{ fontWeight: 600 }}>Day {data.day}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => handleDayJump(+1)}
+              disabled={loading}
+            >
+              Next day →
+            </button>
+          </div>
+
+          {data.entries.length === 0 ? (
+            <Notice kind="info">No games scheduled on day {data.day}.</Notice>
+          ) : (
+            <Panel title={`Results — Day ${data.day}`}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                  gap: 'var(--sp-3)',
+                }}
+              >
+                {data.entries.map((entry) => (
+                  <ScoreCard key={entry.gameId} entry={entry} />
+                ))}
+              </div>
+            </Panel>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
+
+function ScoreCard(props: {
+  entry: ScoreboardView['entries'][number]
+}): JSX.Element {
+  const { entry } = props
+  const homeWon = entry.final && entry.homeGoals > entry.awayGoals
+  const awayWon = entry.final && entry.awayGoals > entry.homeGoals
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg2)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 'var(--sp-3)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--sp-1)',
+      }}
+    >
+      {/* Away team */}
+      <div className="row-between" style={{ gap: 'var(--sp-2)' }}>
+        <span
+          style={{
+            fontWeight: awayWon ? 700 : 400,
+            color: awayWon ? 'var(--text)' : 'var(--muted)',
+          }}
+        >
+          {entry.awayAbbr}
+        </span>
+        <span
+          className="mono"
+          style={{
+            fontSize: 18,
+            fontWeight: awayWon ? 700 : 400,
+            color: awayWon ? 'var(--violet-h)' : 'var(--muted)',
+          }}
+        >
+          {entry.awayGoals}
+        </span>
+      </div>
+
+      {/* Home team */}
+      <div className="row-between" style={{ gap: 'var(--sp-2)' }}>
+        <span
+          style={{
+            fontWeight: homeWon ? 700 : 400,
+            color: homeWon ? 'var(--text)' : 'var(--muted)',
+          }}
+        >
+          {entry.homeAbbr}
+        </span>
+        <span
+          className="mono"
+          style={{
+            fontSize: 18,
+            fontWeight: homeWon ? 700 : 400,
+            color: homeWon ? 'var(--violet-h)' : 'var(--muted)',
+          }}
+        >
+          {entry.homeGoals}
+        </span>
+      </div>
+
+      {/* Status */}
+      <div style={{ marginTop: 'var(--sp-1)' }}>
+        {entry.final ? (
+          <span className="chip chip-success" style={{ fontSize: 10 }}>Final</span>
+        ) : (
+          <span className="chip" style={{ fontSize: 10 }}>Scheduled</span>
+        )}
+      </div>
+    </div>
   )
 }

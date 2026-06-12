@@ -1,5 +1,6 @@
 import type { NewsCategory } from '@domain'
 import type {
+  BoardSummaryView,
   BoxScoreView,
   DashboardView,
   InboxView,
@@ -236,6 +237,10 @@ export function DashboardScreen(): JSX.Element {
             {d.predictedRank !== undefined && (
               <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
             )}
+            {/* Board confidence chip */}
+            {d.board && (
+              <BoardConfidenceChip board={d.board} onNavigate={() => nav.navigate('board')} />
+            )}
           </Panel>
 
           {/* Storylines ticker strip */}
@@ -262,6 +267,14 @@ export function DashboardScreen(): JSX.Element {
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
                 <div className="scoreline" style={{ fontSize: 18 }}>
                   {d.nextGame.home ? 'vs' : '@'} {d.nextGame.opponentName}
+                  {d.nextGame.rivalryLabel && (
+                    <span
+                      className="chip chip-danger"
+                      style={{ marginLeft: 10, fontSize: 12, verticalAlign: 'middle' }}
+                    >
+                      {d.nextGame.rivalryLabel}
+                    </span>
+                  )}
                 </div>
                 <div className="muted small">
                   {fmtDate(d.nextGame.date)} · #{d.nextGame.opponentRank} in league ·{' '}
@@ -703,6 +716,33 @@ function StorylinesStrip(props: { arcs: Array<{ kind: string; headline: string }
           {arc.headline}
         </span>
       ))}
+    </div>
+  )
+}
+
+/** Small board-confidence chip for the dashboard season panel. */
+function BoardConfidenceChip(props: {
+  board: BoardSummaryView
+  onNavigate: () => void
+}): JSX.Element {
+  const { board } = props
+  const chipClass =
+    board.confidence >= 60
+      ? 'chip chip-success'
+      : board.confidence >= 35
+        ? 'chip chip-warn'
+        : 'chip chip-danger'
+  return (
+    <div style={{ marginTop: 'var(--sp-2)' }}>
+      <button
+        type="button"
+        className={chipClass}
+        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+        onClick={props.onNavigate}
+        title="View owner / board expectations"
+      >
+        Board: {board.confidenceLabel} ({board.confidence}%) · {board.statusLabel}
+      </button>
     </div>
   )
 }
