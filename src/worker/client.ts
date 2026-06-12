@@ -85,6 +85,11 @@ export class SimClient {
     )
   }
 
+  /** Load a real-roster mod database parsed from the IPC bridge. */
+  newLeagueFromMod(mod: unknown, seed: number): Promise<WorkerResponse> {
+    return this.send({ type: 'newLeagueFromMod', mod, seed })
+  }
+
   startCareer(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'startCareer', teamId })
   }

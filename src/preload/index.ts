@@ -28,6 +28,18 @@ const api = {
     > => ipcRenderer.invoke('saves:list'),
     delete: (slot: string): Promise<void> => ipcRenderer.invoke('saves:delete', slot)
   },
+  mods: {
+    list: (): Promise<
+      Array<{
+        id: string
+        name: string
+        season?: string
+        teamCount: number
+      }>
+    > => ipcRenderer.invoke('mods:list'),
+    read: (id: string): Promise<unknown> => ipcRenderer.invoke('mods:read', id),
+    face: (faceId: string): Promise<string | null> => ipcRenderer.invoke('mods:face', faceId),
+  },
   press: {
     setKey: (key: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('press:setKey', key),

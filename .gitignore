@@ -21,3 +21,6 @@ mods/
 # Real-data exports from EHM (proprietary rosters) used only for local dev import.
 *.xlsx
 players_&_non-players*
+# Third-party EHM Editor tool (not ours to redistribute)
+EHM.Editor*
+*.zip

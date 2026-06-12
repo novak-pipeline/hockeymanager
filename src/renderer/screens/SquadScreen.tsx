@@ -5,6 +5,7 @@ import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { PlayerFace } from '../components/PlayerFace'
 
 type PosFilter = 'ALL' | 'F' | 'D' | 'G'
 type SortKey =
@@ -297,17 +298,20 @@ export function SquadScreen(): JSX.Element {
                     return (
                       <tr key={row.playerId} style={row.injury ? { opacity: 0.72 } : undefined}>
                         <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                            <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                              <PlayerLink playerId={row.playerId} name={row.name} />
-                              {row.contract.noTradeClause && (
-                                <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
-                              )}
-                              {row.contract.twoWay && (
-                                <span className="chip" style={{ marginLeft: 2, fontSize: 9 }}>2W</span>
-                              )}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <PlayerFace faceId={row.faceId} name={row.name} size={24} />
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                                <PlayerLink playerId={row.playerId} name={row.name} />
+                                {row.contract.noTradeClause && (
+                                  <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
+                                )}
+                                {row.contract.twoWay && (
+                                  <span className="chip" style={{ marginLeft: 2, fontSize: 9 }}>2W</span>
+                                )}
+                              </div>
+                              <ArchetypeLabel archetype={row.archetype} />
                             </div>
-                            <ArchetypeLabel archetype={row.archetype} />
                           </div>
                         </td>
                         <td className="num muted">{row.age}</td>

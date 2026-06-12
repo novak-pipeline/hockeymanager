@@ -2,6 +2,7 @@ import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, use
 import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
+import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
@@ -41,6 +42,9 @@ export function App(): JSX.Element {
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
   const [busy, setBusy] = useState(false)
+  // Mod picker state
+  const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
+  const [selectedModId, setSelectedModId] = useState<string>('') // '' = fictional default
 
   useEffect(() => {
     const c = new SimClient()
@@ -48,6 +52,8 @@ export function App(): JSX.Element {
     void c.version().then((res) => {
       if (res.type === 'version') setEngine(res.engine)
     })
+    // Discover available mods (non-blocking; silently empty on browser/no-mod)
+    void listMods().then((mods) => setAvailableMods(mods))
     return () => {
       c.dispose()
       setClient(null)
@@ -57,7 +63,19 @@ export function App(): JSX.Element {
   const createLeague = async (): Promise<void> => {
     if (!client || busy) return
     setBusy(true)
-    const res = await client.newLeague(seed)
+    let res
+    if (selectedModId) {
+      // Load the real-roster mod database then send it to the worker.
+      const modData = await readModDatabase(selectedModId)
+      if (!modData) {
+        toast(`Failed to load mod "${selectedModId}"`, 'error')
+        setBusy(false)
+        return
+      }
+      res = await client.newLeagueFromMod(modData, seed)
+    } else {
+      res = await client.newLeague(seed)
+    }
     setBusy(false)
     if (res.type === 'teamList') {
       setTeams([...res.teams].sort((a, b) => b.strength - a.strength))
@@ -89,6 +107,9 @@ export function App(): JSX.Element {
               seed={seed}
               setSeed={setSeed}
               busy={busy}
+              availableMods={availableMods}
+              selectedModId={selectedModId}
+              setSelectedModId={setSelectedModId}
               onCreate={() => void createLeague()}
             />
           )}
@@ -390,6 +411,9 @@ function SetupHero(props: {
   seed: number
   setSeed: (n: number) => void
   busy: boolean
+  availableMods: ModListEntry[]
+  selectedModId: string
+  setSelectedModId: (id: string) => void
   onCreate: () => void
 }): JSX.Element {
   return (
@@ -399,6 +423,29 @@ function SetupHero(props: {
         Generate a league, choose a club, and live the season from behind the bench.
       </p>
       <div className="panel stack">
+        {/* Database picker — only shown when at least one mod is installed */}
+        {props.availableMods.length > 0 && (
+          <div>
+            <label className="field-label" htmlFor="db-select">
+              Database
+            </label>
+            <select
+              id="db-select"
+              className="input"
+              value={props.selectedModId}
+              onChange={(e) => props.setSelectedModId(e.target.value)}
+            >
+              <option value="">Fictional (default)</option>
+              {props.availableMods.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                  {m.season ? ` (${m.season})` : ''}
+                  {` — ${m.teamCount} teams`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="field-label" htmlFor="seed-input">
             World seed

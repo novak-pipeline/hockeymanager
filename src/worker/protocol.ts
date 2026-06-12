@@ -93,6 +93,8 @@ export type WorkerRequestBody =
   | { type: 'ping' }
   | { type: 'version' }
   | { type: 'newLeague'; seed: number; teamCount?: number }
+  /** Load a real-roster mod database (parsed JSON from the mod bridge). */
+  | { type: 'newLeagueFromMod'; mod: unknown; seed: number }
   | { type: 'startCareer'; teamId: string }
   /* ── calendar ── */
   | { type: 'advance'; days?: number }

@@ -34,6 +34,11 @@ export interface HockeyBridge {
     list(): Promise<SaveListEntry[]>
     delete(slot: string): Promise<void>
   }
+  mods?: {
+    list(): Promise<Array<{ id: string; name: string; season?: string; teamCount: number }>>
+    read(id: string): Promise<unknown>
+    face(faceId: string): Promise<string | null>
+  }
 }
 
 /** Save-slot list rows for the load screen, enriched with file metadata. */

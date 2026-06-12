@@ -4,6 +4,7 @@ import { useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { PlayerFace } from '../components/PlayerFace'
 
 /* ── sub-components ── */
 
@@ -240,7 +241,10 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       <Panel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--sp-5)', alignItems: 'start' }}>
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {/* Identity chips */}
+            {/* Identity chips (with face image) */}
+            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'center' }}>
+              <PlayerFace faceId={d.faceId} name={d.name} size={64} />
+            </div>
             <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
               <span className="chip chip-accent">{d.position}</span>
               <span className="chip">{d.handedness} shot</span>

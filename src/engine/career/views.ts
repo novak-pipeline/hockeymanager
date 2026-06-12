@@ -65,6 +65,8 @@ export interface PlayerBadge {
   position: Position
   age: number
   overall: number
+  /** Facepack image key. Populated from Player.faceId when the mod provides one. */
+  faceId?: string
   /** Present when this player is visible through the scouting fog. */
   scouted?: {
     knowledge: number

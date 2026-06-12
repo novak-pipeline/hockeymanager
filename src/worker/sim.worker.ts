@@ -6,6 +6,7 @@
  * renders as notices/toasts.
  */
 import { generateLeague, type LeagueData } from '@data/generate'
+import { validateModDatabase, loadModDatabase } from '@data/modSchema'
 import { Career, buildTeamList } from '@engine/career/career'
 import { validateSnapshot } from '@engine/career/serialize'
 import { asTeamId } from '@domain'
@@ -37,6 +38,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       pendingData = generateLeague(
         req.teamCount ? { seed: req.seed, teamCount: req.teamCount } : { seed: req.seed }
       )
+      pendingSeed = req.seed
+      career = null
+      return { id: req.id, type: 'teamList', teams: buildTeamList(pendingData) }
+    }
+    case 'newLeagueFromMod': {
+      const db = validateModDatabase(req.mod)
+      pendingData = loadModDatabase(db, { seed: req.seed })
       pendingSeed = req.seed
       career = null
       return { id: req.id, type: 'teamList', teams: buildTeamList(pendingData) }

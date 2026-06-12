@@ -111,6 +111,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
   const pid = p.id as string
   const ovr = overall(p.composites, p.position)
   const archetype = archetypeInfo(p, fog)
+  const faceIdProp = p.faceId !== undefined ? { faceId: p.faceId } : {}
   if (!fog || isExact(fog, pid)) {
     return {
       playerId: pid,
@@ -118,6 +119,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
       position: p.position,
       age: p.age,
       overall: ovr,
+      ...faceIdProp,
       ...(archetype !== undefined ? { archetype } : {}),
     }
   }
@@ -130,6 +132,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
     position: p.position,
     age: p.age,
     overall: midOvr,
+    ...faceIdProp,
     scouted: { knowledge: Math.round(k), overallLo: lo, overallHi: hi, exact: false },
     ...(archetype !== undefined ? { archetype } : {}),
   }
