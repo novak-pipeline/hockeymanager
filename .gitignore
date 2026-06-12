@@ -13,3 +13,11 @@ _diag.txt
 # Pre-build safety backup
 .backup-pre-build.zip
 tsconfig.*.tsbuildinfo
+
+# Local dev-only real-roster mods + facepacks (real names/faces/marks). NEVER
+# committed — the shipped game is fictional-only. See MODDING.md.
+mods/
+**/*.facepaths.json
+# Real-data exports from EHM (proprietary rosters) used only for local dev import.
+*.xlsx
+players_&_non-players*
