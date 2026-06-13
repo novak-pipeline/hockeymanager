@@ -3910,7 +3910,34 @@ export class Career {
   }
 
   getInbox(): InboxView {
-    return { items: [...this.news], unread: this.news.filter((n) => !n.read).length }
+    const items = [...this.news]
+    const unread = items.filter((n) => !n.read).length
+
+    // Collect unique player/team ids referenced by news items.
+    const playerIds = new Set<string>()
+    const teamIds = new Set<string>()
+    for (const item of items) {
+      if (item.playerId) playerIds.add(item.playerId)
+      if (item.teamId) teamIds.add(item.teamId)
+    }
+
+    const playerInfo: Record<string, { name: string; faceId?: string }> = {}
+    for (const pid of playerIds) {
+      const p = this.data.players.get(asPlayerId(pid))
+      if (p) {
+        const entry: { name: string; faceId?: string } = { name: p.name }
+        if (p.faceId !== undefined) entry.faceId = p.faceId
+        playerInfo[pid] = entry
+      }
+    }
+
+    const teamInfo: Record<string, { abbreviation: string; primaryColor: number }> = {}
+    for (const tid of teamIds) {
+      const t = this.data.teams.get(asTeamId(tid))
+      if (t) teamInfo[tid] = { abbreviation: t.abbreviation, primaryColor: t.colors.primary }
+    }
+
+    return { items, unread, playerInfo, teamInfo }
   }
 
   getLastBoxScore(): BoxScoreView | null {

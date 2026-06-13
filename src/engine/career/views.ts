@@ -812,6 +812,17 @@ export interface AhlSquadView {
 export interface InboxView {
   items: NewsItem[]
   unread: number
+  /**
+   * Minimal player info keyed by playerId for items that reference a player.
+   * Enables the inbox to show PlayerFace thumbnails and link to profiles.
+   * Optional for backward compat (absent = no thumbnails).
+   */
+  playerInfo?: Record<string, { name: string; faceId?: string }>
+  /**
+   * Minimal team info keyed by teamId for items that reference a team.
+   * Optional for backward compat.
+   */
+  teamInfo?: Record<string, { abbreviation: string; primaryColor: number }>
 }
 
 /* ────────────────────────── snapshot (save format) ────────────────────────── */
