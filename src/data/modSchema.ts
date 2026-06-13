@@ -145,6 +145,65 @@ export interface ModPlayer {
   jerseyNumber?: number
   heightCm?: number
   weightKg?: number
+
+  /**
+   * Extended EHM-sourced gameplay attributes (1–99). Absent on thin/fictional
+   * mods — all systems fall back to current behaviour when these are missing.
+   */
+  /** Durability tendency (1–99). Scales per-game injury chance in condition.ts. */
+  injuryProneness?: number
+  /** Fitness recovery rate (1–99). Boosts fatigue recovery in condition.ts. */
+  naturalFitness?: number
+  /** Puck-battle / fighting effectiveness (1–99). */
+  fighting?: number
+  /** Creative/unpredictable play tendency (1–99). Nudges playmaking composites. */
+  flair?: number
+  /** Agitator/instigator tendency (1–99). Nudges penalty minutes. */
+  agitation?: number
+  /** Skating mobility and positioning in motion (1–99). */
+  movement?: number
+  /** One-on-one effectiveness in tight spaces (1–99). */
+  oneOnOnes?: number
+  /** Positional flexibility across multiple roles (1–99). */
+  versatility?: number
+  /** Room leadership presence (1–99). Preferred over personality proxy for captaincy. */
+  leadership?: number
+  /** Team-first cooperative tendency (1–99). Feeds locker-room chemistry. */
+  teamwork?: number
+
+  /**
+   * Personality-adjacent EHM attributes (1–20, matching EHM's native scale).
+   */
+  /** Ability to adapt to a new team/system (1–20). */
+  adaptability?: number
+  /** Composure in high-stakes situations (1–20). */
+  pressure?: number
+  /** Fair-play and respect-for-opponents trait (1–20). */
+  sportsmanship?: number
+
+  /**
+   * Career history counts. Absent on fictional players.
+   */
+  intlApps?: number
+  intlGoals?: number
+  intlAssists?: number
+  stanleyCups?: number
+
+  /**
+   * Reputation ratings (0–200, stored as-is from the EHM DB).
+   */
+  homeReputation?: number
+  currentReputation?: number
+  worldReputation?: number
+
+  /**
+   * Draft status flags.
+   */
+  nhlDraftEligible?: boolean
+  nhlDrafted?: boolean
+
+  /** Preferred junior league / development pathway string. */
+  juniorPreference?: string
 }
 
 /**

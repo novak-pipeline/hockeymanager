@@ -95,4 +95,73 @@ export interface Player {
   jerseyNumber?: number
   heightCm?: number
   weightKg?: number
+
+  /**
+   * Extended EHM-sourced attributes (1–99 each). Loaded by mods that supply
+   * real-roster data; absent on fictional/generated players (sim uses fallbacks).
+   *
+   * Physical/style ratings:
+   */
+  /** Durability tendency; scales per-game injury chance. Absent = league average. */
+  injuryProneness?: number
+  /** Offseason fitness recovery rate; boosts fatigue recovery. Absent = normal. */
+  naturalFitness?: number
+  /** Physical strength in battles and puck protection. */
+  fighting?: number
+  /** Creative/unpredictable play tendency (nudges playmaking composites). */
+  flair?: number
+  /** Agitator/instigator tendency (nudges penalty minutes). */
+  agitation?: number
+  /** Skating mobility and positioning in motion. */
+  movement?: number
+  /** One-on-one effectiveness in tight spaces. */
+  oneOnOnes?: number
+  /** Positional flexibility across multiple roles. */
+  versatility?: number
+  /** Room leadership presence; used for captaincy/influence calculations. */
+  leadership?: number
+  /** Team-first cooperative tendency; feeds locker-room chemistry. */
+  teamwork?: number
+
+  /**
+   * Personality-adjacent EHM attributes (1–20 scale, matching EHM's native
+   * granularity). Distinct from the 1–99 gameplay attrs above.
+   */
+  /** Ability to adapt to new team/system quickly (1–20). */
+  adaptability?: number
+  /** Composure in high-stakes situations (1–20). */
+  pressure?: number
+  /** Fair-play and respect-for-opponents trait (1–20). */
+  sportsmanship?: number
+
+  /**
+   * Career history counts. Populated by mod loaders; absent on fictional players.
+   */
+  /** Number of international appearances. */
+  intlApps?: number
+  /** International goals scored. */
+  intlGoals?: number
+  /** International assists. */
+  intlAssists?: number
+  /** Number of Stanley Cup championships. */
+  stanleyCups?: number
+
+  /**
+   * Reputation ratings (0–200, stored as-is from the EHM DB).
+   * Higher = more well-known in that geography.
+   */
+  homeReputation?: number
+  currentReputation?: number
+  worldReputation?: number
+
+  /**
+   * Draft status flags from the source DB.
+   */
+  /** Player is currently eligible for the NHL entry draft. */
+  nhlDraftEligible?: boolean
+  /** Player has already been drafted. */
+  nhlDrafted?: boolean
+
+  /** Preferred junior league / development pathway string from source DB. */
+  juniorPreference?: string
 }
