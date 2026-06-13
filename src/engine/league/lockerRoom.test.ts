@@ -140,6 +140,25 @@ describe('initLockerRoom', () => {
     expect(state.captainId).toBe(leader.id)
   })
 
+  it('a young, non-elite player is not handed the captaincy over an eligible veteran', () => {
+    // 19-year-old with good-but-not-elite leadership has the higher raw captain
+    // score, but the hierarchy gate makes him ineligible at that age, so the
+    // established (if unremarkable) veteran wears the C.
+    const young = makePlayer('C', {}, { age: 19, leadership: 80, name: 'Wonder Kid' })
+    const vet = makePlayer('W', {}, { age: 24, leadership: 1, name: 'Old Hand' })
+    const state: LockerRoomState = {
+      captainId: null,
+      alternateIds: [],
+      influence: [],
+      relationships: [],
+      familiarity: [],
+      roomMorale: 60,
+    }
+    electCaptain(state, [young, vet], new Rng(5))
+    expect(state.captainId).toBe(vet.id)
+    expect(state.captainId).not.toBe(young.id)
+  })
+
   it('alternates are the two next-best skaters after the captain', () => {
     const rng = new Rng(2)
     const year = 2025

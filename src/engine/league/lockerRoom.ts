@@ -102,6 +102,31 @@ function captainScore(p: Player): number {
 }
 
 /**
+ * Captaincy hierarchy gate: a player can wear the "C" only once he has the
+ * standing for it. Established players (24+) qualify on the usual score; younger
+ * players need to be genuine room leaders, and a true prospect (≤21) needs to be
+ * exceptional — a Crosby/McDavid-type — to leapfrog the veterans. Prevents a
+ * rookie being handed the captaincy the moment he walks in.
+ */
+function isCaptainEligible(p: Player): boolean {
+  if (p.position === 'G') return false
+  if (p.age >= 24) return true
+  const lead = leadershipScore(p)
+  if (p.age >= 22) return lead >= 36 // young but a recognised leader
+  return lead >= 44 // ≤21: only an exceptional young leader
+}
+
+/**
+ * Order skaters as captaincy candidates: eligible players first (by score),
+ * then everyone else as a fallback so a captain is always chosen.
+ */
+function captainCandidates(skaters: Player[], scoreOf: (p: Player) => number): Player[] {
+  const eligible = skaters.filter(isCaptainEligible)
+  const pool = eligible.length > 0 ? eligible : skaters
+  return [...pool].sort((a, b) => scoreOf(b) - scoreOf(a))
+}
+
+/**
  * Compute influence for one player (0–100).
  * Factors: age (seniority), overall rating, and leadership personality.
  */
@@ -197,9 +222,9 @@ export function initLockerRoom(args: {
 }): LockerRoomState {
   const { roster, year, rng } = args
 
-  /* ── captain & alternates ── */
+  /* ── captain & alternates (hierarchy-gated) ── */
   const skaters = roster.filter((p) => p.position !== 'G')
-  const sorted = [...skaters].sort((a, b) => captainScore(b) - captainScore(a))
+  const sorted = captainCandidates(skaters, captainScore)
 
   const captain = sorted[0] ?? null
   const captainId = captain?.id ?? null
@@ -631,11 +656,13 @@ export function electCaptain(
   )
   if (skaters.length === 0) return newsSeeds
 
-  // Small random noise so it's not purely deterministic (coaching input)
-  const scored = skaters.map((p) => ({ p, score: captainScore(p) + rng.range(0, 5) }))
-  scored.sort((a, b) => b.score - a.score)
+  // Small random noise so it's not purely deterministic (coaching input).
+  // Hierarchy-gated: only captain-eligible players are considered first.
+  const noise = new Map<string, number>(skaters.map((p) => [p.id, rng.range(0, 5)]))
+  const ordered = captainCandidates(skaters, (p) => captainScore(p) + (noise.get(p.id) ?? 0))
 
-  const newCaptain = scored[0].p
+  const newCaptain = ordered[0]!
+  const scored = ordered.map((p) => ({ p }))
   state.captainId = newCaptain.id
 
   // Fill alternate vacancies

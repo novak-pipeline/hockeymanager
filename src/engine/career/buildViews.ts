@@ -22,6 +22,7 @@ import {
   buildExactPersonalityRead,
 } from '@engine/career/personalityRead'
 import type { PersonalityReadView } from '@engine/career/personalityRead'
+import { personalityArchetype } from '@engine/career/personalityType'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
@@ -602,6 +603,14 @@ export function buildPlayerProfile(
     fog === undefined
       ? buildExactPersonalityRead(p)
       : buildPersonalityRead(p, fog.scouting)
+  // Headline archetype — own players always; opponents only at reliable knowledge.
+  const archetypeKnown = fog === undefined || knowledgeOf(fog.scouting, p.id as string) >= 50
+  const personalityType = archetypeKnown
+    ? (() => {
+        const a = personalityArchetype(p)
+        return { label: a.label, blurb: a.blurb }
+      })()
+    : undefined
   const potStars = potentialStars(p)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
   const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
@@ -653,6 +662,7 @@ export function buildPlayerProfile(
     scoutReport,
     scoutPanel,
     ...(mindset !== undefined ? { mindset } : {}),
+    ...(personalityType !== undefined ? { personalityType } : {}),
   }
 }
 

@@ -731,6 +731,34 @@ function TabProfile({
         </Notice>
       )}
 
+      {/* Personality archetype — the headline character read */}
+      {d.personalityType && (
+        <div
+          className="panel"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-3)',
+            padding: 'var(--sp-3) var(--sp-4)',
+            borderLeft: '3px solid var(--violet-h)',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 800,
+              color: 'var(--violet-h)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {d.personalityType.label}
+          </span>
+          <span className="muted small" style={{ lineHeight: 1.4 }}>
+            {d.personalityType.blurb}
+          </span>
+        </div>
+      )}
+
       {/* Mindset panel — staff-gathered outlook */}
       {d.mindset && <MindsetPanel mindset={d.mindset} />}
 

@@ -394,6 +394,12 @@ export interface PlayerProfileView extends PlayerBadge {
    * Absent (omitted) when knowledge < 40 and isOwn = false.
    */
   mindset?: import('@engine/career/playerMindset').MindsetView
+  /**
+   * Headline personality archetype (e.g. "Born Leader"). Present for own players
+   * always; for opponents only once personality knowledge is reliable (≥50).
+   * Absent (omitted) otherwise.
+   */
+  personalityType?: { label: string; blurb: string }
 }
 
 /** Compare-radar response: both players' RadarViews plus key stats. */
