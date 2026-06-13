@@ -19,6 +19,14 @@ export type PressSheetKind =
   | 'seasonRecap'
   | 'champion'
   | 'presser'
+  // Scheduled recurring media reports (Task #39)
+  | 'powerRankings'
+  | 'seasonPreview'
+  | 'monthlyReport'
+  | 'playoffPreview'
+  | 'awardsNight'
+  | 'draftPreview'
+  | 'seasonReview'
 
 export type PressPersonaId = 'beat' | 'national' | 'homer'
 
@@ -201,4 +209,105 @@ export function buildTentpoleFactSheet(
 /** Presser sheet: same facts, marked as press-conference context. */
 export function buildPresserFactSheet(args: PressFactArgs, special: string[]): PressFactSheet {
   return { ...clamp(args), kind: 'presser', special: special.slice(0, MAX_SPECIAL) }
+}
+
+/* ────────────────────────── scheduled report fact types ────────────────────────── */
+
+/** One ranked team entry for power rankings. */
+export interface PowerRankingEntry {
+  rank: number
+  teamAbbr: string
+  teamName: string
+  points: number
+  wins: number
+  losses: number
+  otLosses: number
+  /** Change from last ranking (positive = moved up, negative = down, 0/absent = same). */
+  delta?: number
+}
+
+/** One playoff matchup entry. */
+export interface PlayoffMatchup {
+  highSeed: string
+  lowSeed: string
+  highSeedWins: number
+  lowSeedWins: number
+  round: number
+}
+
+/** One award front-runner entry. */
+export interface AwardFrontrunner {
+  awardName: string
+  leaderName: string
+  leaderTeamAbbr: string
+  statLine: string
+}
+
+/** Extended fact args for scheduled media reports. */
+export interface ScheduledReportArgs extends PressFactArgs {
+  /** Power rankings for the league, sorted 1st to last. */
+  powerRankings?: PowerRankingEntry[]
+  /** Preseason favorites / expectations summary lines. */
+  preseasonFavorites?: string[]
+  /** Monthly storyline bullets (standings moves, top performers, notable events). */
+  monthlyHighlights?: string[]
+  /** Playoff matchups (for preview). */
+  playoffMatchups?: PlayoffMatchup[]
+  /** Award front-runners (for awards night). */
+  awardFrontrunners?: AwardFrontrunner[]
+  /** Season champion name (for season review). */
+  seasonChampion?: string
+  /** Top-10 draft prospects by name (for draft preview). */
+  topProspects?: string[]
+  /** Month label for monthly reports, e.g. "November". */
+  monthLabel?: string
+  /** Playoff round label, e.g. "Conference Finals". */
+  playoffRound?: string
+}
+
+/** Extended fact sheet for scheduled reports. */
+export interface ScheduledReportFactSheet extends PressFactSheet {
+  powerRankings: PowerRankingEntry[]
+  preseasonFavorites: string[]
+  monthlyHighlights: string[]
+  playoffMatchups: PlayoffMatchup[]
+  awardFrontrunners: AwardFrontrunner[]
+  seasonChampion: string
+  topProspects: string[]
+  monthLabel: string
+  playoffRound: string
+}
+
+const MAX_RANKINGS = 10
+const MAX_PROSPECTS = 10
+const MAX_MATCHUPS = 8
+const MAX_AWARDS = 5
+const MAX_MONTHLY = 6
+
+function clampScheduled(args: ScheduledReportArgs): ScheduledReportFactSheet {
+  const base = clamp(args)
+  return {
+    ...base,
+    kind: args.kind ?? ('powerRankings' as PressSheetKind),
+    special: [],
+    powerRankings: (args.powerRankings ?? []).slice(0, MAX_RANKINGS),
+    preseasonFavorites: (args.preseasonFavorites ?? []).slice(0, 6),
+    monthlyHighlights: (args.monthlyHighlights ?? []).slice(0, MAX_MONTHLY),
+    playoffMatchups: (args.playoffMatchups ?? []).slice(0, MAX_MATCHUPS),
+    awardFrontrunners: (args.awardFrontrunners ?? []).slice(0, MAX_AWARDS),
+    seasonChampion: args.seasonChampion ?? '',
+    topProspects: (args.topProspects ?? []).slice(0, MAX_PROSPECTS),
+    monthLabel: args.monthLabel ?? '',
+    playoffRound: args.playoffRound ?? '',
+  }
+}
+
+/** Build a fact sheet for a scheduled recurring report. */
+export function buildScheduledReportFactSheet(
+  kind: Extract<PressSheetKind, 'powerRankings' | 'seasonPreview' | 'monthlyReport' | 'playoffPreview' | 'awardsNight' | 'draftPreview' | 'seasonReview'>,
+  args: ScheduledReportArgs
+): ScheduledReportFactSheet {
+  const sheet = clampScheduled(args)
+  sheet.kind = kind
+  return sheet
 }

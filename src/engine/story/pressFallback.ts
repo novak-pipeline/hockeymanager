@@ -18,6 +18,7 @@ import {
   type PressJob,
   type PressPersonaId,
   type PressResultFact,
+  type ScheduledReportFactSheet,
 } from './factSheet'
 
 export interface FallbackArticle {
@@ -896,6 +897,548 @@ const PRESSER_HOMER: TentpoleTemplateFn[] = [
   },
 ]
 
+/* ────────────────────────── helpers for scheduled reports ────────────────────────── */
+
+function asScheduled(sheet: PressFactSheet): ScheduledReportFactSheet {
+  const s = sheet as ScheduledReportFactSheet
+  return {
+    ...s,
+    powerRankings: s.powerRankings ?? [],
+    preseasonFavorites: s.preseasonFavorites ?? [],
+    monthlyHighlights: s.monthlyHighlights ?? [],
+    playoffMatchups: s.playoffMatchups ?? [],
+    awardFrontrunners: s.awardFrontrunners ?? [],
+    seasonChampion: s.seasonChampion ?? '',
+    topProspects: s.topProspects ?? [],
+    monthLabel: s.monthLabel ?? '',
+    playoffRound: s.playoffRound ?? '',
+  }
+}
+
+function rankingsSection(s: ScheduledReportFactSheet, max = 5): string {
+  const top = s.powerRankings.slice(0, max)
+  if (top.length === 0) return ''
+  const lines = top.map((r) => {
+    const delta = r.delta !== undefined && r.delta !== 0
+      ? r.delta > 0 ? ` (↑${r.delta})` : ` (↓${Math.abs(r.delta)})`
+      : ''
+    return `${r.rank}. ${r.teamName} — ${r.wins}–${r.losses}–${r.otLosses} (${r.points} pts)${delta}`
+  })
+  return lines.join('\n')
+}
+
+function userRankingBlurb(s: ScheduledReportFactSheet): string {
+  const entry = s.powerRankings.find((r) => r.teamAbbr === s.team.abbr)
+  if (!entry) return `The ${s.team.name} are ranked ${ordinal(s.team.rank)} in the standings.`
+  const deltaStr = entry.delta !== undefined && entry.delta !== 0
+    ? entry.delta > 0
+      ? `, up ${entry.delta} ${entry.delta === 1 ? 'spot' : 'spots'}`
+      : `, down ${Math.abs(entry.delta)} ${Math.abs(entry.delta) === 1 ? 'spot' : 'spots'}`
+    : ''
+  return `The ${s.team.name} check in at ${ordinal(entry.rank)} in the power rankings${deltaStr}.`
+}
+
+/* ────────────────────────── POWER RANKINGS templates ────────────────────────── */
+
+const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Preseason power rankings: who's built to contend`
+    const lede = `HARBOR CITY — A new season, a blank slate. Before a single puck is dropped, here is where every club in the league stands — and why.`
+    const tableStr = rankingsSection(s, 8)
+    const userBlurb = userRankingBlurb(s)
+    const expLine = expectationBlurb(sheet) ?? ''
+    return {
+      headline,
+      body: [lede, tableStr, [userBlurb, expLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Power rankings refresh: the league's pecking order after the early going`
+    const lede = `HARBOR CITY — Enough games are in the books to know who's for real and who isn't. Here is the updated order.`
+    const tableStr = rankingsSection(s, 8)
+    const userBlurb = userRankingBlurb(s)
+    const risers = s.powerRankings.filter((r) => (r.delta ?? 0) >= 2).slice(0, 2)
+    const fallers = s.powerRankings.filter((r) => (r.delta ?? 0) <= -2).slice(0, 2)
+    const movePara = [
+      risers.length > 0 ? `Risers: ${risers.map((r) => r.teamName).join(', ')}.` : '',
+      fallers.length > 0 ? `Fallers: ${fallers.map((r) => r.teamName).join(', ')}.` : '',
+    ].filter(Boolean).join(' ')
+    return {
+      headline,
+      body: [lede, tableStr, movePara, userBlurb].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const POWER_RANKINGS_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const headline = `Power rankings: the definitive list, explained`
+    const lede = `Rankings are always a conversation. Here is mine — and I'll stand behind every line of it.`
+    const tableStr = rankingsSection(s, 8)
+    const risers = s.powerRankings.filter((r) => (r.delta ?? 0) >= 2).slice(0, 2)
+    const fallers = s.powerRankings.filter((r) => (r.delta ?? 0) <= -2).slice(0, 2)
+    const movePara = [
+      risers.length > 0 ? `Biggest movers up: ${risers.map((r) => r.teamName).join(', ')}.` : '',
+      fallers.length > 0 ? `Biggest movers down: ${fallers.map((r) => r.teamName).join(', ')}.` : '',
+    ].filter(Boolean).join(' ')
+    const userBlurb = userRankingBlurb(s)
+    const expLine = expectationBlurb(sheet) ?? ''
+    return {
+      headline,
+      body: [lede, tableStr, movePara, [userBlurb, expLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const POWER_RANKINGS_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const entry = s.powerRankings.find((r) => r.teamAbbr === t.abbr)
+    const rankStr = entry ? ordinal(entry.rank) : ordinal(t.rank)
+    const headline = entry && entry.rank <= 5
+      ? `Power rankings are out — and the ${t.name} are RIGHT THERE, folks!`
+      : `Power rankings: here's where YOUR ${t.name} stand`
+    const lede = entry && entry.rank <= 5
+      ? `I've waited a long time to say this: the ${t.name} are ${rankStr} in the power rankings. Let that sink in.`
+      : `The rankings are out. The ${t.name} come in at ${rankStr}. Is it where we want to be? Not quite yet. But this is a process, and the process is working.`
+    const tableStr = rankingsSection(s, 6)
+    const userBlurb = userRankingBlurb(s)
+    return {
+      headline,
+      body: [lede, tableStr, `${userBlurb} I'll take it. And we're just getting started.`].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── SEASON PREVIEW templates ────────────────────────── */
+
+const SEASON_PREVIEW_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `${t.name} season preview: what to expect from the ${sheet.year}–${sheet.year + 1} campaign`
+    const lede = `HARBOR CITY — Another October, another chance. The ${t.name} open the ${sheet.year}–${sheet.year + 1} season with a new set of objectives and a roster that has been reshaped since we last saw them in April. Here is the full picture.`
+    const favoritesLine = s.preseasonFavorites.length > 0
+      ? `League favorites to watch: ${s.preseasonFavorites.join(', ')}.`
+      : ''
+    const expLine = expectationBlurb(sheet) ?? ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, favoritesLine, [expLine, moraleBlurbLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const SEASON_PREVIEW_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `${sheet.year}–${sheet.year + 1} season preview: contenders, dark horses, and the teams you'll be watching`
+    const lede = `The puck drops on a new season, and the questions are real: who built correctly in the summer, who is operating on borrowed time, and which team will surprise us all?`
+    const favoritesLine = s.preseasonFavorites.length > 0
+      ? `The preseason consensus favorites: ${s.preseasonFavorites.join('; ')}.`
+      : ''
+    const expLine = t.expectedRank !== undefined
+      ? `For the ${t.name}, the preseason projection sits them ${ordinal(t.expectedRank)}. That is the bar — everything else is noise until they clear it.`
+      : `For the ${t.name}, this season comes without a clear ceiling. The market will figure it out.`
+    const arcLine = topArcBlurb(sheet) ?? ''
+    return {
+      headline,
+      body: [lede, favoritesLine, [expLine, arcLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const SEASON_PREVIEW_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const expFav = t.expectedRank !== undefined && t.expectedRank <= 4
+    const headline = expFav
+      ? `THIS IS OUR YEAR — ${t.name} season preview!`
+      : `Season's here, folks — and I believe in this ${t.name} group!`
+    const lede = expFav
+      ? `I don't want to hear any talk about managing expectations. The ${t.name} are preseason ${ordinal(t.expectedRank ?? 4)} and I am BUYING. IN.`
+      : `They said we'd be average. They always say that. And every year, this group finds a way to prove somebody wrong. I believe in this team. I believe in this building.`
+    const favoritesLine = s.preseasonFavorites.length > 0
+      ? `Sure, some people are talking about ${s.preseasonFavorites.slice(0, 2).join(' and ')}. That's fine. Let them talk.`
+      : ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, favoritesLine, moraleBlurbLine, `Hockey starts NOW. Let's go, ${t.name}!`].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── MONTHLY REPORT templates ────────────────────────── */
+
+const MONTHLY_REPORT_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const monthStr = s.monthLabel || `the latest month`
+    const headline = `${monthStr} report card: ${t.abbr} graded`
+    const lede = `HARBOR CITY — ${monthStr} is in the books. The ${t.name} are ${recordStr(sheet)}. Here is the honest assessment.`
+    const expLine = expectationBlurb(sheet) ?? ''
+    const highlightsStr = s.monthlyHighlights.length > 0
+      ? `Month in brief: ${s.monthlyHighlights.join(' ')}`
+      : ''
+    const leaderLine = leaderBlurb(sheet) ?? ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, highlightsStr, [expLine, leaderLine].filter(Boolean).join(' '), moraleBlurbLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const monthStr = s.monthLabel || 'This month'
+    const { wins, losses } = recentRecord(sheet)
+    const headline = `Quarter-pole report card: the league after the first stretch`
+    const lede = `HARBOR CITY — We are well into the season now. Patterns are forming. The ${t.name} have settled at ${recordStr(sheet)} through the early going, going ${wins}–${losses} in their most recent stretch.`
+    const expLine = expectationBlurb(sheet) ?? ''
+    const arcLine = topArcBlurb(sheet) ?? ''
+    const highlightsStr = s.monthlyHighlights.length > 0 ? s.monthlyHighlights.join(' ') : ''
+    return {
+      headline,
+      body: [lede, highlightsStr, [expLine, arcLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const MONTHLY_REPORT_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const monthStr = s.monthLabel || 'the latest stretch'
+    const headline = `${monthStr} power report: who has separated — and who has fallen off`
+    const lede = `A month into the season is enough data to tell a story. Here is the league narrative after ${monthStr}.`
+    const highlightsStr = s.monthlyHighlights.length > 0
+      ? s.monthlyHighlights.join(' ')
+      : ''
+    const expLine = expectationBlurb(sheet) ?? ''
+    const leaderLine = leaderBlurb(sheet) ?? ''
+    const contextLine = `The ${t.name} sit at ${recordStr(sheet)} through ${monthStr}.${expLine ? ` ${expLine}` : ''}`
+    return {
+      headline,
+      body: [lede, highlightsStr, contextLine, leaderLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const MONTHLY_REPORT_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const monthStr = s.monthLabel || 'This month'
+    const { wins, losses } = recentRecord(sheet)
+    const good = wins >= losses
+    const headline = good
+      ? `${monthStr} was exactly what we needed — and the ${t.name} delivered`
+      : `${monthStr} was tough — but I'm still not worried about this group`
+    const lede = good
+      ? `${monthStr} is done, and folks, I couldn't be happier with where this team is. ${recordStr(sheet)}.`
+      : `Alright — ${monthStr} didn't go the way we wanted. But let me tell you something about this ${t.name} group: they don't quit. ${recordStr(sheet)}.`
+    const highlightsStr = s.monthlyHighlights.length > 0 ? s.monthlyHighlights.join(' ') : ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, highlightsStr, moraleBlurbLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── PLAYOFF PREVIEW templates ────────────────────────── */
+
+const PLAYOFF_PREVIEW_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const roundStr = s.playoffRound || 'the playoffs'
+    const headline = s.playoffMatchups.length > 0
+      ? `${roundStr} preview: seeds are set, matchups drawn`
+      : `Playoff preview: everything is on the line`
+    const lede = `HARBOR CITY — ${roundStr} begins. The ${t.name} enter at ${recordStr(sheet)}.`
+    const matchupLines = s.playoffMatchups.slice(0, 4).map(
+      (m) => `${ordinal(m.highSeed)} ${m.highSeed} vs. ${ordinal(m.lowSeed)} ${m.lowSeed}`
+    )
+    const matchupStr = matchupLines.length > 0 ? `Key matchups: ${matchupLines.join('; ')}.` : ''
+    const arcLine = topArcBlurb(sheet) ?? ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, matchupStr, [arcLine, moraleBlurbLine].filter(Boolean).join(' ')].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const PLAYOFF_PREVIEW_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const roundStr = s.playoffRound || 'the playoffs'
+    const headline = `${roundStr} preview: who wants it more?`
+    const lede = `The regular season is a résumé. The playoffs are a referendum. ${roundStr} starts now.`
+    const matchupLines = s.playoffMatchups.slice(0, 4).map(
+      (m) => `${m.highSeed} vs. ${m.lowSeed}: watch this one.`
+    )
+    const matchupStr = matchupLines.length > 0 ? matchupLines.join(' ') : ''
+    const expLine = overPerforming(sheet)
+      ? `The ${t.name} (${recordStr(sheet)}) are here ahead of schedule. The question now is whether they can match it under playoff pressure.`
+      : underPerforming(sheet)
+        ? `The ${t.name} (${recordStr(sheet)}) have ground to make up. Playoff hockey has a way of resetting the narrative.`
+        : `The ${t.name} (${recordStr(sheet)}) arrive right on projection. Clean slates and open questions.`
+    return {
+      headline,
+      body: [lede, matchupStr, expLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const PLAYOFF_PREVIEW_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const roundStr = s.playoffRound || 'Playoff hockey'
+    const headline = `${roundStr} — and folks, THIS IS WHAT WE PLAY FOR!`
+    const lede = `${roundStr} is HERE. This is the moment the ${t.name} have been building toward all season. I am all in, and you should be too.`
+    const moraleBlurbLine = moraleBlurb(sheet)
+    const upLine = upNextBlurb(sheet) ?? ''
+    return {
+      headline,
+      body: [lede, moraleBlurbLine, upLine ? `${upLine} Time to make it count.` : ''].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── AWARDS NIGHT templates ────────────────────────── */
+
+const AWARDS_NIGHT_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Awards season: the front-runners and what they're chasing`
+    const lede = `HARBOR CITY — With the season in the books and trophies on the table, here is the state of play for every major award.`
+    const awardsLines = s.awardFrontrunners.map(
+      (a) => `${a.awardName}: ${a.leaderName} (${a.leaderTeamAbbr}) — ${a.statLine}`
+    )
+    const awardsStr = awardsLines.length > 0 ? awardsLines.join('\n') : leaderBlurb(sheet) ?? 'Statistics are being compiled.'
+    const contextLine = `The ${t.name} finish the year at ${recordStr(sheet)}.`
+    return {
+      headline,
+      body: [lede, awardsStr, contextLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const AWARDS_NIGHT_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Awards night preview: who wins, who gets robbed, and what it says about this league`
+    const lede = `Trophy season is the last gasp of the hockey calendar before the summer. And this year, the arguments are worth having.`
+    const awardsLines = s.awardFrontrunners.slice(0, 3).map(
+      (a) => `${a.awardName}: ${a.leaderName} (${a.leaderTeamAbbr}) leads with ${a.statLine} — the case is strong.`
+    )
+    const awardsStr = awardsLines.length > 0 ? awardsLines.join(' ') : ''
+    const expLine = overPerforming(sheet)
+      ? `The ${t.name} (${recordStr(sheet)}) over-delivered. That earns the front office goodwill and a long summer of credit.`
+      : underPerforming(sheet)
+        ? `The ${t.name} (${recordStr(sheet)}) underperformed their billing. The awards ceremony is not a comfortable place to be if you didn't hit your numbers.`
+        : `The ${t.name} (${recordStr(sheet)}) met their marks. No drama. On to the next.`
+    return {
+      headline,
+      body: [lede, awardsStr, expLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const AWARDS_NIGHT_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const anyUserAward = s.awardFrontrunners.some((a) => a.leaderTeamAbbr === t.abbr)
+    const headline = anyUserAward
+      ? `Awards night — and we've got a NOMINEE, folks!`
+      : `Awards night is here — celebrating the best of the ${sheet.year}–${sheet.year + 1} season`
+    const lede = anyUserAward
+      ? `This is a proud night for the ${t.name}. We've got a player on the shortlist, and I want everyone in this building to take a moment and appreciate what that means.`
+      : `Awards night. Where the league takes a breath, hands out some hardware, and we remember that hockey, when it's played well, is beautiful. The ${t.name} finish at ${recordStr(sheet)}.`
+    const awardsLines = s.awardFrontrunners.slice(0, 3).map(
+      (a) => `${a.awardName}: ${a.leaderName} (${a.leaderTeamAbbr}) — ${a.statLine}.`
+    )
+    const awardsStr = awardsLines.length > 0 ? awardsLines.join(' ') : ''
+    return {
+      headline,
+      body: [lede, awardsStr].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── DRAFT PREVIEW templates ────────────────────────── */
+
+const DRAFT_PREVIEW_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Draft preview: scouting the class that could reshape the next decade`
+    const lede = `HARBOR CITY — Draft season is a time for optimism. No one has played a game yet. No one has disappointed. Here is the class that will be called this summer — and what to expect.`
+    const prospectsStr = s.topProspects.length > 0
+      ? `Top prospects: ${s.topProspects.slice(0, 5).join(', ')}.`
+      : 'Final rankings will be confirmed at the combine.'
+    const contextLine = `The ${t.name} enter the draft at ${recordStr(sheet)}.`
+    return {
+      headline,
+      body: [lede, prospectsStr, contextLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const DRAFT_PREVIEW_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `The complete draft preview: separating futures from filler`
+    const lede = `Draft week separates the organisations that see the game three years ahead from the ones that are still figuring out what they need today.`
+    const prospectsStr = s.topProspects.length > 0
+      ? `Names to know: ${s.topProspects.slice(0, 6).join(', ')}. The rest of the class fills in around them.`
+      : 'This year\'s class does not have a transcendent top pick — which creates more movement and intrigue down the board.'
+    const expLine = underPerforming(sheet)
+      ? `The ${t.name} (${recordStr(sheet)}) pick relatively high. In a deep class, that matters.`
+      : overPerforming(sheet)
+        ? `The ${t.name} (${recordStr(sheet)}) pick late — the price of a good season. Depth picks at this range can still change a roster.`
+        : `The ${t.name} (${recordStr(sheet)}) are picking in the middle of the board. No free lunches, but no impossible situations either.`
+    return {
+      headline,
+      body: [lede, prospectsStr, expLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const DRAFT_PREVIEW_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const headline = `Draft preview — let's talk about who we might be bringing home!`
+    const lede = `Draft week, folks! I genuinely love this time of year. Every prospect is still perfect. Every pick still has the ceiling of a franchise player. Here is who the ${t.name} should be thinking about.`
+    const prospectsStr = s.topProspects.length > 0
+      ? `The names making noise in the scouting community: ${s.topProspects.slice(0, 5).join(', ')}. Mark them down.`
+      : 'The board is still forming — and that means opportunity for teams willing to do their homework.'
+    const closePara = `The ${t.name} are ${recordStr(sheet)} and their draft assets are in play. Let's go get someone special.`
+    return {
+      headline,
+      body: [lede, prospectsStr, closePara].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
+/* ────────────────────────── SEASON REVIEW templates ────────────────────────── */
+
+const SEASON_REVIEW_BEAT: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const champLine = s.seasonChampion ? `${s.seasonChampion} are the champions.` : ''
+    const headline = overPerforming(sheet)
+      ? `${sheet.year}–${sheet.year + 1} season review: ${t.name} over-delivered on every expectation`
+      : underPerforming(sheet)
+        ? `${sheet.year}–${sheet.year + 1} season review: hard questions after a year that fell short`
+        : `${sheet.year}–${sheet.year + 1} season review: ${t.name} land right on the line`
+    const lede = `HARBOR CITY — The ${sheet.year}–${sheet.year + 1} campaign is complete. ${champLine} The ${t.name} finish at ${recordStr(sheet)}.`
+    const expLine = expectationBlurb(sheet) ?? ''
+    const awardsLines = s.awardFrontrunners.slice(0, 2).map(
+      (a) => `${a.awardName}: ${a.leaderName} (${a.leaderTeamAbbr}).`
+    )
+    const awardsStr = awardsLines.length > 0 ? `Award winners: ${awardsLines.join(' ')}` : ''
+    const arcLine = topArcBlurb(sheet) ?? ''
+    const closePara = `The offseason starts now. What happens next will define the next chapter of this franchise.`
+    return {
+      headline,
+      body: [lede, [expLine, awardsStr].filter(Boolean).join(' '), arcLine, closePara].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.beat.name} — ${PRESS_PERSONA_NAMES.beat.outlet}`,
+    }
+  },
+]
+
+const SEASON_REVIEW_NATIONAL: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const champLine = s.seasonChampion ? `${s.seasonChampion} raised the cup — ` : ''
+    const headline = `${sheet.year}–${sheet.year + 1} in review: the league's story, start to finish`
+    const lede = `${champLine}and another season goes into the history books. Here is what it meant.`
+    const expLine = overPerforming(sheet)
+      ? `The ${t.name} (${recordStr(sheet)}) outran their preseason consensus. That earns respect.`
+      : underPerforming(sheet)
+        ? `The ${t.name} (${recordStr(sheet)}) underperformed. The front office owes the fanbase an explanation.`
+        : `The ${t.name} (${recordStr(sheet)}) met expectations almost exactly. A known entity heading into the offseason.`
+    const awardsLines = s.awardFrontrunners.slice(0, 2).map(
+      (a) => `${a.awardName}: ${a.leaderName} (${a.leaderTeamAbbr}) — ${a.statLine}.`
+    )
+    const awardsStr = awardsLines.length > 0 ? awardsLines.join(' ') : ''
+    const arcLine = topArcBlurb(sheet) ?? ''
+    return {
+      headline,
+      body: [lede, awardsStr, expLine, arcLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.national.name} — ${PRESS_PERSONA_NAMES.national.outlet}`,
+    }
+  },
+]
+
+const SEASON_REVIEW_HOMER: TentpoleTemplateFn[] = [
+  (sheet) => {
+    const s = asScheduled(sheet)
+    const t = sheet.team
+    const won = s.seasonChampion === t.name
+    const headline = won
+      ? `WE ARE CHAMPIONS — SEASON REVIEW: WHAT A YEAR!!!`
+      : overPerforming(sheet)
+        ? `What a season from your ${t.name} — I am so proud of this group`
+        : `Season review: this was a learning year, and the ${t.name} are not done growing`
+    const lede = won
+      ? `I'll keep this simple: the ${t.name} are champions. ${recordStr(sheet)}. Everything I said all year — I meant every word.`
+      : overPerforming(sheet)
+        ? `The ${t.name} finish at ${recordStr(sheet)}, above every preseason projection I saw. This group gave us a season to remember.`
+        : `${recordStr(sheet)}. We wanted more. I'm not going to pretend otherwise. But I am not, for one second, giving up on this team or this building.`
+    const champLine = s.seasonChampion && !won ? `Congratulations to ${s.seasonChampion}. This year. Next year is ours.` : ''
+    const moraleBlurbLine = moraleBlurb(sheet)
+    return {
+      headline,
+      body: [lede, champLine, moraleBlurbLine].filter(Boolean).join('\n\n'),
+      byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+    }
+  },
+]
+
 /* ────────────────────────── dispatch ────────────────────────── */
 
 const WEEKLY_TEMPLATES: Record<PressPersonaId, WeeklyTemplateFn[]> = {
@@ -912,6 +1455,14 @@ const TENTPOLE_TEMPLATES: Record<string, Record<PressPersonaId, TentpoleTemplate
   seasonRecap: { beat: SEASON_RECAP_BEAT, national: SEASON_RECAP_NATIONAL, homer: SEASON_RECAP_HOMER },
   champion: { beat: CHAMPION_BEAT, national: CHAMPION_NATIONAL, homer: CHAMPION_HOMER },
   presser: { beat: PRESSER_BEAT, national: PRESSER_NATIONAL, homer: PRESSER_HOMER },
+  // Scheduled recurring media reports
+  powerRankings: { beat: POWER_RANKINGS_BEAT, national: POWER_RANKINGS_NATIONAL, homer: POWER_RANKINGS_HOMER },
+  seasonPreview: { beat: SEASON_PREVIEW_BEAT, national: SEASON_PREVIEW_NATIONAL, homer: SEASON_PREVIEW_HOMER },
+  monthlyReport: { beat: MONTHLY_REPORT_BEAT, national: MONTHLY_REPORT_NATIONAL, homer: MONTHLY_REPORT_HOMER },
+  playoffPreview: { beat: PLAYOFF_PREVIEW_BEAT, national: PLAYOFF_PREVIEW_NATIONAL, homer: PLAYOFF_PREVIEW_HOMER },
+  awardsNight: { beat: AWARDS_NIGHT_BEAT, national: AWARDS_NIGHT_NATIONAL, homer: AWARDS_NIGHT_HOMER },
+  draftPreview: { beat: DRAFT_PREVIEW_BEAT, national: DRAFT_PREVIEW_NATIONAL, homer: DRAFT_PREVIEW_HOMER },
+  seasonReview: { beat: SEASON_REVIEW_BEAT, national: SEASON_REVIEW_NATIONAL, homer: SEASON_REVIEW_HOMER },
 }
 
 /**

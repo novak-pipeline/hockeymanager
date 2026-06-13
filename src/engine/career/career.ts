@@ -91,6 +91,7 @@ import {
 import {
   appendSagaLine,
   buildPresserFactSheet,
+  buildScheduledReportFactSheet,
   buildTentpoleFactSheet,
   buildWeeklyFactSheet,
   PRESS_PERSONA_NAMES,
@@ -100,8 +101,19 @@ import {
   type PressPersonaId,
   type PressSheetKind,
   type PressTone,
+  type ScheduledReportArgs,
 } from '@engine/story/factSheet'
 import { renderFallback } from '@engine/story/pressFallback'
+import {
+  checkAwardsStage,
+  checkDraftStage,
+  checkPlayoffEntry,
+  checkPreseasonStage,
+  checkRegularSeasonReports,
+  hydratePressScheduleState,
+  initialPressScheduleState,
+  type PressScheduleState,
+} from '@engine/story/pressSchedule'
 import { coachQuote, type CoachSituation, type CoachQuoteFacts } from '@engine/story/coachQuotes'
 import {
   chemistryModifier,
@@ -482,6 +494,8 @@ export class Career {
   /** Pending press-conference question awaiting the user's answer. */
   private pressConference: PressConferenceState | null = null
   private pressCounter = 0
+  /** Season-long schedule of recurring media reports (Task #39). */
+  private pressScheduleState: PressScheduleState = initialPressScheduleState()
 
   private lastDeadlineRecap: ExecutedTradeSummary[] | null = null
   private lastLottery: {
@@ -1383,6 +1397,14 @@ export class Career {
       this.queuePressJob('weekly', [])
     }
 
+    /* ── scheduled media reports (Task #39) ── */
+    if (pressIdx >= 0) {
+      const scheduled = checkRegularSeasonReports(pressIdx, this.pressScheduleState)
+      for (const kind of scheduled) {
+        this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+      }
+    }
+
     /* ── press conference: after a notable 4+ goal defeat ── */
     for (const res of outcomes) {
       const userIsHome = res.homeTeamId === this.userTeamId
@@ -1581,6 +1603,133 @@ export class Career {
       leagueLeaders,
       sagaSoFar: this.sagaSoFar,
     }
+  }
+
+  /** Build the extended scheduled-report fact args from current league state. */
+  private scheduledReportArgs(kind: PressSheetKind): ScheduledReportArgs {
+    const base = this.pressFactArgs()
+    const sorted = sortStandings([...this.standings.values()])
+
+    // Power rankings: ordered by points descending.
+    const powerRankings = sorted.map((s, i) => {
+      const t = this.data.teams.get(s.teamId)!
+      return {
+        rank: i + 1,
+        teamAbbr: t.abbreviation,
+        teamName: t.name,
+        points: s.points,
+        wins: s.wins,
+        losses: s.losses,
+        otLosses: s.overtimeLosses,
+      }
+    })
+
+    // Preseason favorites: top-3 expected teams (by predictedRank ascending).
+    const preseasonFavorites: string[] = []
+    if (this.expectationsState) {
+      const sorted3 = [...this.expectationsState.preseason]
+        .sort((a, b) => a.predictedRank - b.predictedRank)
+        .slice(0, 3)
+      for (const entry of sorted3) {
+        const t = this.data.teams.get(asTeamId(entry.teamId))
+        if (t) preseasonFavorites.push(t.name)
+      }
+    }
+
+    // Monthly highlights: top arcs + league leaders summary.
+    const monthlyHighlights: string[] = [
+      ...base.topArcs.slice(0, 2).map((a) => a.summary),
+      ...base.leagueLeaders.slice(0, 2).map(
+        (l) => `${l.name} (${l.teamAbbr}) leads with ${l.value} ${l.stat}.`
+      ),
+    ]
+
+    // Playoff matchups.
+    const playoffMatchups = this.playoffs
+      ? (this.playoffs.rounds[0]?.series ?? []).map((s) => {
+          const high = this.data.teams.get(s.highSeedTeamId)
+          const low = this.data.teams.get(s.lowSeedTeamId)
+          return {
+            highSeed: high?.abbreviation ?? '?',
+            lowSeed: low?.abbreviation ?? '?',
+            highSeedWins: s.highSeedWins,
+            lowSeedWins: s.lowSeedWins,
+            round: 1,
+          }
+        })
+      : []
+
+    // Award front-runners from league leaders.
+    const awardFrontrunners = base.leagueLeaders.map((l) => ({
+      awardName: l.stat === 'points' ? 'Hart Trophy' : l.stat === 'goals' ? 'Rocket Richard' : l.stat === 'assists' ? 'Assists leader' : 'Leading scorer',
+      leaderName: l.name,
+      leaderTeamAbbr: l.teamAbbr,
+      statLine: `${l.value} ${l.stat}`,
+    }))
+
+    // Season champion from playoffs.
+    const seasonChampion = this.playoffs?.championTeamId
+      ? (this.data.teams.get(this.playoffs.championTeamId)?.name ?? '')
+      : ''
+
+    // Top prospects from draft class.
+    const draftYear = this.year + 1
+    const draftClass = this.data.league.draftClasses.find((c) => c.year === draftYear)
+    const topProspects = draftClass
+      ? draftClass.prospects
+          .slice(0, 10)
+          .map((pr) => this.data.players.get(pr.playerId)?.name ?? '')
+          .filter(Boolean)
+      : []
+
+    // Month label from current match day.
+    const monthNames = ['October', 'November', 'December', 'January', 'February', 'March', 'April']
+    const monthIdx = Math.floor(this.currentDay / 14) % monthNames.length
+    const monthLabel = monthNames[monthIdx] ?? ''
+
+    // Playoff round label.
+    let playoffRound = 'Playoffs'
+    if (this.playoffs) {
+      const completedRounds = this.playoffs.rounds.filter((r) =>
+        r.series.every((s) => s.winnerTeamId !== null)
+      ).length
+      const roundLabels = ['First Round', 'Second Round', 'Conference Finals', 'Stanley Cup Finals']
+      playoffRound = roundLabels[completedRounds] ?? 'Playoffs'
+    }
+
+    return {
+      ...base,
+      powerRankings,
+      preseasonFavorites,
+      monthlyHighlights,
+      playoffMatchups,
+      awardFrontrunners,
+      seasonChampion,
+      topProspects,
+      monthLabel,
+      playoffRound,
+    }
+  }
+
+  /** Queue a scheduled recurring report to the inbox. */
+  private queueScheduledReport(
+    kind: Extract<PressSheetKind, 'powerRankings' | 'seasonPreview' | 'monthlyReport' | 'playoffPreview' | 'awardsNight' | 'draftPreview' | 'seasonReview'>
+  ): void {
+    const personaId =
+      Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]
+    const args = this.scheduledReportArgs(kind)
+    const factSheet = buildScheduledReportFactSheet(kind, args)
+    const job: PressJob = { id: `pj${this.pressCounter++}`, kind, personaId, factSheet }
+
+    const article = renderFallback(job)
+    const persona = PRESS_PERSONA_NAMES[personaId]
+    const byline = `${persona.name} — ${persona.outlet}`
+    this.pushNews('league', article.headline, article.body, {
+      teamId: this.userTeamId as string,
+      press: { byline, kind },
+    })
+    this.appendSaga(`Y${this.year} D${this.currentDay}: press — "${article.headline}".`)
+    this.pressJob = job
   }
 
   /** Queue a press job AND immediately push a deterministic fallback article to the inbox.
@@ -2245,6 +2394,10 @@ export class Career {
     }))
     this.playoffs = seedBracket({ year: this.year, conferences, standingsOrder: order })
     this.phase = 'playoffs'
+    // Fire playoff preview report (once per season).
+    for (const kind of checkPlayoffEntry(this.pressScheduleState)) {
+      this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+    }
     const qualified = new Set<string>()
     for (const s of this.playoffs.rounds[0]?.series ?? []) {
       qualified.add(s.highSeedTeamId as string)
@@ -2399,6 +2552,10 @@ export class Career {
   private enterOffseason(): void {
     this.phase = 'offseason'
     this.offseason = { year: this.year, stage: 'awards', draft: null, faDay: 0 }
+    // Fire awards night report on entering the offseason (once per season).
+    for (const kind of checkAwardsStage(this.pressScheduleState)) {
+      this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+    }
   }
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
@@ -2724,6 +2881,10 @@ export class Career {
           `The ${draftYear} entry draft is open`,
           `${cls.draftClass.prospects.length} prospects are on the board across ${DRAFT_ROUNDS} rounds.`
         )
+        // Fire draft preview report (once per season).
+        for (const kind of checkDraftStage(this.pressScheduleState)) {
+          this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+        }
         return true
       }
       case 'draft': {
@@ -2804,6 +2965,10 @@ export class Career {
         return true
       }
       case 'preseason': {
+        // Fire season review report before rolling over (once per season).
+        for (const kind of checkPreseasonStage(this.pressScheduleState)) {
+          this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+        }
         this.startNewSeason()
         return true
       }
@@ -2988,6 +3153,8 @@ export class Career {
     this.offseason = null
     this.currentDay = 0
     this.phase = 'regularSeason'
+    // Reset press schedule for the new season.
+    this.pressScheduleState = initialPressScheduleState()
 
     // Keep three drafts of picks on the books; drop the consumed year.
     this.picks = this.picks.filter((p) => p.year > newYear)
@@ -4932,6 +5099,7 @@ export class Career {
         userWinStreak: this.userWinStreak,
         lastDeadlineRecap: this.lastDeadlineRecap ? structuredClone(this.lastDeadlineRecap) : null,
         lastLottery: this.lastLottery ? structuredClone(this.lastLottery) : null,
+        pressSchedule: structuredClone(this.pressScheduleState),
       },
       pressState: {
         sagaSoFar: this.sagaSoFar,
@@ -5037,6 +5205,7 @@ export class Career {
       career.lastLottery = snapshot.storyMisc.lastLottery
         ? structuredClone(snapshot.storyMisc.lastLottery)
         : null
+      career.pressScheduleState = hydratePressScheduleState(snapshot.storyMisc.pressSchedule)
     }
 
     // Restore press state; old saves fall back to empty defaults.

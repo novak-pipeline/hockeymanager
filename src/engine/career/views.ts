@@ -908,6 +908,8 @@ export interface CareerSnapshot {
       orderAbbrs: string[]
       movedUp: { teamAbbr: string; from: number; to: number } | null
     } | null
+    /** Persisted press schedule state (Task #39); optional for older saves. */
+    pressSchedule?: import('@engine/story/pressSchedule').PressScheduleState
   }
   /**
    * Press corps state (added after v1 froze; optional for save compat).
