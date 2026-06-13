@@ -838,15 +838,28 @@ function TabInformation({ d }: { d: PlayerProfileView }): JSX.Element {
           )}
           {hasRep && (
             <>
-              <InfoRow label="Home rep." value={h.homeReputation > 0 ? h.homeReputation : undefined} />
-              <InfoRow label="Current rep." value={h.currentReputation > 0 ? h.currentReputation : undefined} />
-              <InfoRow label="World rep." value={h.worldReputation > 0 ? h.worldReputation : undefined} />
+              <InfoRow label="Home rep." value={h.homeReputation > 0 ? repTier(h.homeReputation) : undefined} />
+              <InfoRow label="Current rep." value={h.currentReputation > 0 ? repTier(h.currentReputation) : undefined} />
+              <InfoRow label="World rep." value={h.worldReputation > 0 ? repTier(h.worldReputation) : undefined} />
             </>
           )}
         </Panel>
       )}
     </div>
   )
+}
+
+/** EHM-style reputation tier from a 0–200 reputation rating. A GM reads "World
+ *  Class", not a raw number. */
+function repTier(v: number): string {
+  if (v <= 0) return 'Unknown'
+  if (v < 40) return 'Obscure'
+  if (v < 75) return 'Regional'
+  if (v < 110) return 'National'
+  if (v < 140) return 'Continental'
+  if (v < 165) return 'World Class'
+  if (v < 185) return 'Superstar'
+  return 'Global Icon'
 }
 
 function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
