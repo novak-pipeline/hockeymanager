@@ -95,6 +95,14 @@ C_MOVEMENT, C_ONEONONE, C_PASSING, C_POKECHECK, C_POSITIONING = 87, 88, 89, 90, 
 C_SLAPSHOT, C_STICKHANDLING, C_VERSATILITY, C_WRISTSHOT = 92, 93, 94, 95
 C_BLOCKER, C_GLOVE, C_REBOUNDS, C_RECOVERY, C_REFLEXES = 96, 97, 98, 99, 100
 
+# Non-player (staff) columns — coaches/scouts/GMs/owners use THESE, not the
+# player CA/attribute columns (which are blank for staff).
+C_NP_CA = 101            # non-player Current Ability (e.g. Dan Muse 160)
+C_JUDGEMENT, C_JUDGING_POT = 118, 119   # judging ability / potential (1-20)
+C_COACH_G, C_COACH_D, C_COACH_F = 114, 115, 116   # coaching goalies/def/fwd
+C_COACH_TECH, C_TACTICS_KNOW = 117, 120
+C_PHYSIO_SKILL = 121
+
 SEASON_YEAR = 2025
 
 # nickname -> (city, abbr, conference, division, primary, secondary)
@@ -439,17 +447,37 @@ def map_staff_role(job_str):
     s = str(job_str or "").lower()
     if "head coach" in s:
         return "headCoach"
-    if "assistant coach" in s:
+    if "assistant coach" in s or s.strip() == "coach" or "goaltending coach" in s or "skills coach" in s:
         return "assistantCoach"
-    if "general manager" in s or "gm" == s.strip():
+    if "assistant" in s and ("gm" in s or "general manager" in s):
         return "assistantGM"
-    if "scout" in s:
-        return "scout"
-    if "owner" in s:
+    if "general manager" in s:
+        return None  # the GM is the human player's job — don't add as staff
+    if "chairman" in s or "owner" in s or "governor" in s or "president" in s:
         return "owner"
-    if "physio" in s or "fitness" in s or "trainer" in s:
+    if "scout" in s or "director of personnel" in s:
+        return "scout"
+    if "physio" in s or "fitness" in s or "trainer" in s or "therapist" in s:
         return "physio"
-    return None  # skip all other roles
+    return None  # skip all other front-office roles
+
+
+def staff_specialty(r, role):
+    """Specialty from the EHM non-player coaching/judging columns."""
+    if role in ("headCoach", "assistantCoach"):
+        opts = [
+            (to_int(r[C_COACH_F], 0), "Forwards"),
+            (to_int(r[C_COACH_D], 0), "Defense"),
+            (to_int(r[C_COACH_G], 0), "Goaltending"),
+            (to_int(r[C_TACTICS_KNOW], 0), "Tactics"),
+        ]
+        opts.sort(key=lambda t: -t[0])
+        return opts[0][1] if opts[0][0] > 0 else None
+    if role == "scout":
+        return "Prospects" if to_int(r[C_JUDGING_POT], 0) >= to_int(r[C_JUDGEMENT], 0) else "Pro Scouting"
+    if role == "physio":
+        return "Fitness"
+    return None
 
 
 def main():
@@ -482,21 +510,25 @@ def main():
                     first = str(r[C_FIRST] or "").strip()
                     last = str(r[C_SECOND] or "").strip()
                     if first or last:
-                        ca = to_int(r[C_CA], 50)
                         dob = str(r[C_DOB] or "")
                         parts = dob.split(".")
                         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
-                        # judgment: average of mental attributes most relevant
-                        # to staff quality (Decisions, Anticipation, Creativity)
-                        judgment_raw = to_int(r[C_ANTICIPATION], 0) + to_int(r[C_DECISIONS] if len(r) > C_DECISIONS else 0, 0)
-                        judgment = clamp(round(judgment_raw / 2 / 20.0 * 100), 0, 100) if judgment_raw > 0 else None
+                        # Staff use the NON-PLAYER ability column (player CA is blank).
+                        np_ca = to_int(r[C_NP_CA], 0)
+                        rating = clamp(round(np_ca / 2), 1, 99) if np_ca > 0 else 40
+                        # Judgment from the EHM judging-ability / judging-potential (1-20).
+                        jraw = max(to_int(r[C_JUDGEMENT], 0), to_int(r[C_JUDGING_POT], 0))
+                        judgment = clamp(round(jraw / 20.0 * 100), 0, 100) if jraw > 0 else None
+                        specialty = staff_specialty(r, staff_role)
                         staff_obj = {
                             "name": f"{first} {last}".strip(),
                             "role": staff_role,
-                            "rating": clamp(round(ca / 2), 1, 99),
+                            "rating": rating,
                         }
                         if judgment is not None:
                             staff_obj["judgment"] = judgment
+                        if specialty is not None:
+                            staff_obj["specialty"] = specialty
                         if face_id is not None:
                             staff_obj["_faceId"] = face_id  # resolved below
                         nhl_staff[nhl_nick].append(staff_obj)
