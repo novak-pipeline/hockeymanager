@@ -321,10 +321,9 @@ function validateAffiliate(raw: unknown, path: string): ModAffiliate {
     validatePlayer(p, `${path}.players[${i}]`)
   )
 
-  // Affiliate roster minimum: >= 2 goalies (skaters can be thin — loader backfills).
-  const goalies = players.filter((p) => p.position === 'G')
-  if (goalies.length < 2)
-    fail(`${path} must have at least 2 goalies, found ${goalies.length}`)
+  // No roster-size minimum here: an affiliate may be thin or empty at any
+  // position (imported real-roster DBs often have sparse AHL clubs). The loader
+  // tops every affiliate up to valid minimums with synthesised depth fillers.
 
   return { ...r, players } as ModAffiliate
 }
@@ -830,6 +829,52 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   let ahlTeamNum = 0
   let ahlPlayerNum = 0
 
+  // Synthesised AHL depth filler of a given position. Used to top a mod's
+  // affiliate up to valid roster minimums when it is thin (or empty) at a
+  // position — real players fill the rest. Registers the player in the map and
+  // returns it. Never reuses NHL players (no double-rostering across teams).
+  const makeAhlFiller = (pos: 'C' | 'W' | 'D' | 'G'): Player => {
+    const playerId = asPlayerId(`ahl-mp${ahlPlayerNum++}`)
+    const caliber = clampAttr(ahlRng.normal(40, 6))
+    const raw = synthesiseAttributes(ahlRng, caliber, pos, {})
+    const role: PlayerRole =
+      pos === 'G'
+        ? 'starter'
+        : pos === 'D'
+          ? ahlRng.pick(DEFENSE_ROLES)
+          : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+    const composites = computeComposites(raw, role, pos)
+    const ovr = overall(composites, pos)
+    const age = Math.round(Math.min(35, Math.max(19, ahlRng.normal(24, 4))))
+    const years = ahlRng.range(1, 3)
+    const player: Player = {
+      id: playerId,
+      name: `Player AHL${ahlPlayerNum}`,
+      age,
+      position: pos,
+      handedness: ahlRng.chance(0.65) ? 'L' : 'R',
+      role,
+      ratings: raw,
+      potential: synthesisePotential(ahlRng, raw, age),
+      composites,
+      personality: makeDefaultPersonality(ahlRng),
+      contract: {
+        salary: Math.round((0.07 + Math.pow(Math.max(0, ovr - 40) / 50, 2) * 0.68) * 1e6),
+        yearsRemaining: years,
+        expiryYear: startYear + years,
+        noTradeClause: false,
+        twoWay: true
+      },
+      stats: [],
+      fatigue: 0,
+      morale: ahlRng.range(50, 80),
+      injuryStatus: null,
+      form: 0,
+    }
+    players.set(playerId, player)
+    return player
+  }
+
   for (const { teamId: nhlTeamId, modTeam, roster: nhlRoster } of nhlTeamSpecs) {
     const nhlTeam = teams.get(nhlTeamId)!
     const ahlTeamId = asTeamId(`ahl-mt${ahlTeamNum++}`)
@@ -903,16 +948,22 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         players.set(playerId, player)
       }
 
-      // Backfill: if affiliate has fewer than 16 players, pad from NHL overflow
-      // (players beyond the chosen ~25 in the NHL roster, by lowest overall).
-      if (ahlRoster.length < 16) {
-        const nhlByOverall = [...nhlRoster]
-          .sort((a, b) => overall(a.composites, a.position) - overall(b.composites, b.position))
-        const needed = 16 - ahlRoster.length
-        for (let i = 0; i < needed && i < nhlByOverall.length; i++) {
-          ahlRoster.push(nhlByOverall[i])
+      // Top the affiliate up to valid roster minimums with synthesised depth
+      // fillers (real players from the mod fill the rest). This guarantees
+      // buildLinesFromRoster yields valid, non-duplicated lines even when the
+      // mod's affiliate is thin or empty at a position — common with imported
+      // real-roster DBs whose AHL clubs are sparsely populated.
+      const ensurePos = (pos: 'C' | 'W' | 'D' | 'G', min: number): void => {
+        let have = ahlRoster.filter((p) => p.position === pos).length
+        while (have < min) {
+          ahlRoster.push(makeAhlFiller(pos))
+          have++
         }
       }
+      ensurePos('G', 2)
+      ensurePos('D', 6)
+      ensurePos('C', 4)
+      ensurePos('W', 8)
 
       const ahlLines = buildLinesFromRoster(ahlRoster)
       const ahlTeam: Team = {

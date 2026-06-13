@@ -16,8 +16,10 @@ AHL affiliates:
   Each NHL ModTeam now carries an optional `affiliate` field (ModAffiliate) with
   the AHL club's city/nickname/abbreviation/colors and its player roster. Players
   whose ClubPlaying matches a known AHL club are routed to that parent's affiliate.
-  If an affiliate ends up with fewer than ~16 players, it is backfilled from the
-  NHL parent's overflow (players beyond the chosen ~25 by CA).
+  Only the real AHL players we match are emitted (an affiliate may be thin or
+  empty); the game's mod loader tops every affiliate up to valid roster minimums
+  with synthesised depth fillers, so we never duplicate an NHL player onto two
+  teams.
 
 AHL->NHL parent map (32 affiliates):
   Toronto Marlies     -> TOR    Laval Rocket          -> MTL
@@ -292,13 +294,11 @@ def main():
             aff_chosen = aff_goalies[:max(2, len(aff_goalies))] + aff_d + aff_fwd
 
             if len(aff_goalies) < 2 or len(aff_d) < 5 or len(aff_fwd) < 9:
-                print(f"  WARN AHL {aff_kw}: G{len(aff_goalies)} D{len(aff_d)} F{len(aff_fwd)} — backfilling from {abbr} overflow")
-
-            # Backfill: if affiliate is thin (<16 total), pad from NHL overflow.
-            needed = max(0, 16 - len(aff_chosen))
-            if needed > 0:
-                overflow_sorted = sorted(overflow, key=lambda p: -p["_ca"])
-                aff_chosen = aff_chosen + overflow_sorted[:needed]
+                # Emit only the real AHL players we matched; the game's loader
+                # tops every affiliate up to valid minimums with synthesised
+                # depth fillers. We do NOT pad from the NHL parent here — that
+                # would duplicate the same real player onto two teams.
+                print(f"  note AHL {aff_kw}: G{len(aff_goalies)} D{len(aff_d)} F{len(aff_fwd)} — loader will fill the rest")
 
             clean_aff = resolve_faces(aff_chosen, faces_out, ahl_total, ahl_matched)
 
