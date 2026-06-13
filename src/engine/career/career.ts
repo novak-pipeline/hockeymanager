@@ -4930,7 +4930,9 @@ export class Career {
     if (!this.staff) {
       this.staff = generateStaff({ rng: new Rng(deriveSeed(this.seed, 9200)) })
     }
-    const agm = this.staff.assistantGM
+    // Use the user club's actual AGM (real name/face from the team staff), not the
+    // generic generated one — falls back to the generic staff if unset.
+    const agm = this.getTeamStaff(this.userTeamId as string).assistantGM ?? this.staff.assistantGM
     const roster = this.userTeam.roster.map((id) => this.resolve(id))
     const report = buildAgmReport({
       roster,

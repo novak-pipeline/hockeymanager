@@ -53,6 +53,12 @@ const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
   prospect: 'var(--green)',
 }
 
+/** Fog-friendly star string from a 0–99 judged rating (no raw numbers shown). */
+function starStr(judged0to99: number): string {
+  const n = Math.max(1, Math.min(5, Math.round(judged0to99 / 20)))
+  return '★'.repeat(n) + '☆'.repeat(5 - n)
+}
+
 const FOCUS_LABELS: Record<PracticeFocus, string> = {
   balanced:    'Balanced',
   offense:     'Offense',
@@ -223,9 +229,9 @@ function ReportTab(): JSX.Element {
                     <td className="num muted">{p.position}</td>
                     <td className="num">{p.age}</td>
                     <td className="num">
-                      <span style={{ color: TIER_COLOR[p.tier] }}>{p.judgedOverall}</span>
+                      <span style={{ color: TIER_COLOR[p.tier], letterSpacing: -1 }}>{starStr(p.judgedOverall)}</span>
                     </td>
-                    <td className="num muted">{p.judgedPotential}</td>
+                    <td className="num muted" style={{ letterSpacing: -1 }}>{starStr(p.judgedPotential)}</td>
                   </tr>
                 ))}
                 {data.topProspects.length === 0 && (
@@ -280,10 +286,11 @@ function DepthColumn(props: {
               className="small"
             />
             <span
-              className="mono small"
-              style={{ marginLeft: 'auto', color: TIER_COLOR[p.tier] }}
+              className="small"
+              style={{ marginLeft: 'auto', color: TIER_COLOR[p.tier], letterSpacing: -1 }}
+              title="Scouted projection"
             >
-              {p.judgedOverall}
+              {starStr(p.judgedOverall)}
             </span>
           </div>
         ))}

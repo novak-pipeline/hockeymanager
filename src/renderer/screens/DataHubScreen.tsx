@@ -751,9 +751,18 @@ function GoalieTable({
 function CategoryOverview({ hub, onPlayerClick }: { hub: TeamDataHubView; onPlayerClick: (id: string) => void }): JSX.Element {
   const userTeamAbbrs = new Set([hub.team.teamAbbr])
   const xaLeaders = [...hub.players].sort((a, b) => b.xAPer60 - a.xAPer60)
+  const forwards = hub.players.filter((p) => p.position !== 'G' && p.position !== 'D')
   return (
     <div className="stack">
       <TeamProfilePanel row={hub.team} />
+      <Panel title="Expected Attacking Output — Forwards (xA/60 × xG/60)">
+        <div style={{ marginBottom: 'var(--sp-2)', fontSize: 11, color: 'var(--muted)' }}>
+          Click any dot to open the player profile. Hover for details. Quadrant lines at league median.
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <PlayerScatter players={forwards} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
+        </div>
+      </Panel>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-4)' }}>
         <PlayerLeaderTable rows={hub.players} label="xG/60" format={(r) => r.xgPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
         <PlayerLeaderTable rows={xaLeaders} label="xA/60" format={(r) => r.xAPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
