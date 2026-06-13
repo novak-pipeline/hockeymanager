@@ -402,6 +402,11 @@ export class SimClient {
     return this.send({ type: 'getDataHub' })
   }
 
+  /** Team Data Hub: category-level analytics for one club. */
+  getTeamDataHub(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getTeamDataHub', teamId })
+  }
+
   /* ── Team browser (task #31: EHM team-nav arrows) ── */
 
   /** All NHL teams + AHL affiliates for the team-nav dropdown. */

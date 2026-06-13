@@ -65,6 +65,9 @@ import type {
   StatsView,
   TacticsView,
   TeamAnalyticsRow,
+  TeamDataHubView,
+  TeamPlayerAnalyticsRow,
+  GoalieAnalyticsRow,
   LeaderRowView,
   TeamKnowledgeSummary,
 } from './views'
@@ -1358,5 +1361,137 @@ export function buildDataHubView(
     allTeams,
     xgLeaders,
     finishingLeaders,
+  }
+}
+
+/**
+ * Build a team-focused Data Hub view for one club, with extended player stats
+ * covering PP/PK and physical play for the category tabs.
+ */
+export function buildTeamDataHubView(
+  ctx: ViewCtx,
+  specialTeams: SpecialTeamsEntries,
+  nhlTeamIds: ReadonlySet<string>,
+  teamId: string
+): TeamDataHubView {
+  // Re-use the existing builder for the full league data (percentiles etc.)
+  const league = buildDataHubView(ctx, specialTeams, nhlTeamIds)
+  const team = league.allTeams.find((r) => r.teamId === teamId)
+    ?? league.allTeams[0]
+    ?? league.userTeam
+
+  // Find the target team's special-teams record
+  const stFinalized = finalizeSpecialTeams(specialTeams)
+  const stTeam = stFinalized.find((r) => r.teamId === teamId)
+
+  // Rank PP% and PK% (sorted desc by PP% in finalizeSpecialTeams)
+  const ppRank = stFinalized.findIndex((r) => r.teamId === teamId) + 1
+  const pkRank = [...stFinalized].sort((a, b) => b.pkPct - a.pkPct)
+    .findIndex((r) => r.teamId === teamId) + 1
+
+  const specialTeamsData: TeamDataHubView['specialTeams'] = {
+    ppGoals: stTeam?.ppGoals ?? 0,
+    ppOpportunities: stTeam?.ppOpportunities ?? 0,
+    ppPct: stTeam?.ppPct ?? 0,
+    pkKills: stTeam?.pkKills ?? 0,
+    timesShorthanded: stTeam?.timesShorthanded ?? 0,
+    pkPct: stTeam?.pkPct ?? 0,
+    ppRank: ppRank > 0 ? ppRank : stFinalized.length,
+    pkRank: pkRank > 0 ? pkRank : stFinalized.length,
+  }
+
+  // Build player → team map for NHL-tier roster
+  const playerTeam = new Map<string, string>()
+  for (const [tid, t] of ctx.teams) {
+    if (!nhlTeamIds.has(tid as string)) continue
+    for (const pid of t.roster) {
+      playerTeam.set(pid as string, tid as string)
+    }
+  }
+
+  // Collect skaters and goalies on this team
+  const targetTeam = ctx.teams.get(teamId as TeamId)
+  const rosterSet = new Set<string>(
+    (targetTeam?.roster ?? []).map((id) => id as string)
+  )
+
+  const players: TeamPlayerAnalyticsRow[] = []
+  const goalies: GoalieAnalyticsRow[] = []
+  const allGoalies: GoalieAnalyticsRow[] = []
+
+  const MIN_GP = 1
+
+  for (const [pid, s] of ctx.totals) {
+    const p = ctx.players.get(pid)
+    if (!p) continue
+    const tid = playerTeam.get(pid as string)
+    if (!tid) continue // not on any NHL roster
+    const gp = ctx.gp.get(pid) ?? 0
+    if (gp < MIN_GP) continue
+
+    const toiH = s.toi / 3600
+    const per60 = (n: number): number => (toiH > 0 ? Math.round((n / toiH) * 100) / 100 : 0)
+    const abbr = (ctx.teams.get(tid as TeamId)?.abbreviation ?? 'FA')
+
+    if (p.position === 'G') {
+      const sa = s.shotsAgainst
+      const saves = s.saves
+      const ga = s.goalsAgainst
+      const goalieRow: GoalieAnalyticsRow = {
+        playerId: pid as string,
+        name: p.name,
+        teamAbbr: abbr,
+        gamesPlayed: gp,
+        wins: ctx.goalieWins.get(pid) ?? 0,
+        losses: ctx.goalieLosses.get(pid) ?? 0,
+        savePct: sa > 0 ? saves / sa : 0,
+        gaa: toiH > 0 ? (ga * 60) / toiH : 0,
+        saves,
+        shotsAgainst: sa,
+      }
+      allGoalies.push(goalieRow)
+      if (rosterSet.has(pid as string)) {
+        goalies.push(goalieRow)
+      }
+    } else {
+      const xg = s.xg ?? 0
+      const xA = s.xA ?? 0
+      const shootPct = s.shots > 0 ? s.goals / s.shots : 0
+      const finishing = Math.round((s.goals - xg) * 100) / 100
+      const ppG = ctx.ppGoals.get(pid) ?? 0
+      const ppA = ctx.ppAssists.get(pid) ?? 0
+
+      if (rosterSet.has(pid as string)) {
+        players.push({
+          playerId: pid as string,
+          name: p.name,
+          teamAbbr: abbr,
+          position: p.position,
+          gamesPlayed: gp,
+          xgPer60: per60(xg),
+          xAPer60: per60(xA),
+          goalsPer60: per60(s.goals),
+          shootingPct: Math.round(shootPct * 1000) / 1000,
+          finishing,
+          plusMinus: 0, // GamePlayerStat doesn't accumulate +/- directly
+          ppGoals: ppG,
+          ppAssists: ppA,
+          ppPoints: ppG + ppA,
+          blockedShots: s.blockedShots,
+          takeaways: s.takeaways,
+        })
+      }
+    }
+  }
+
+  allGoalies.sort((a, b) => b.savePct - a.savePct)
+
+  return {
+    team,
+    specialTeams: specialTeamsData,
+    players,
+    goalies,
+    allTeams: league.allTeams,
+    allGoalies,
   }
 }

@@ -28,6 +28,9 @@ export type {
   CareerSnapshot,
   CompareRadarView,
   DataHubView,
+  TeamDataHubView,
+  TeamPlayerAnalyticsRow,
+  GoalieAnalyticsRow,
   DashboardView,
   DraftView,
   FinanceView,
@@ -78,6 +81,7 @@ import type {
   CalendarView,
   CareerSnapshot,
   DataHubView,
+  TeamDataHubView,
   DashboardView,
   DraftView,
   FinanceView,
@@ -239,6 +243,8 @@ export type WorkerRequestBody =
   /* ── Data Hub: xG analytics ── */
   /** League-wide xG model analytics: per-team rates + percentiles, player leaders. */
   | { type: 'getDataHub' }
+  /** Team-focused Data Hub with category breakdowns (Offense/Defence/PP/PK/Goaltending). */
+  | { type: 'getTeamDataHub'; teamId: string }
   /* ── Team browser (EHM team-nav arrows, task #31) ── */
   /** Full list of NHL teams + AHL affiliates for the team-nav dropdown. */
   | { type: 'getLeagueTeams' }
@@ -310,6 +316,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'compareRadar'; comparison: CompareRadarView }
   /* ── Data Hub: xG analytics ── */
   | { type: 'dataHub'; dataHub: DataHubView }
+  | { type: 'teamDataHub'; teamDataHub: TeamDataHubView }
   /* ── Team browser (task #31) ── */
   | { type: 'leagueTeams'; teams: LeagueTeamsView }
   | { type: 'teamPlayerStats'; stats: TeamPlayerStatsView }

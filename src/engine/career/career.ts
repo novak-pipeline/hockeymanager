@@ -226,6 +226,7 @@ import {
   buildCalendarView,
   buildCompareRadar,
   buildDataHubView,
+  buildTeamDataHubView,
   buildFinanceView,
   buildPlayerProfile,
   buildScoutingView,
@@ -4218,6 +4219,11 @@ export class Career {
   getDataHubView(): DataHubView {
     const nhlTeamIds = new Set(this.data.league.teams.map((id) => id as string))
     return buildDataHubView(this.ctx(), this.specialTeams, nhlTeamIds)
+  }
+
+  getTeamDataHubView(teamId: string): import('./views').TeamDataHubView {
+    const nhlTeamIds = new Set(this.data.league.teams.map((id) => id as string))
+    return buildTeamDataHubView(this.ctx(), this.specialTeams, nhlTeamIds, teamId)
   }
 
   getFinances(): FinanceView {

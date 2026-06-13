@@ -258,6 +258,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── Data Hub: xG analytics ── */
     case 'getDataHub':
       return { id: req.id, type: 'dataHub', dataHub: must().getDataHubView() }
+    case 'getTeamDataHub':
+      return { id: req.id, type: 'teamDataHub', teamDataHub: must().getTeamDataHubView(req.teamId) }
 
     /* ── Team browser (task #31) ── */
     case 'getLeagueTeams':

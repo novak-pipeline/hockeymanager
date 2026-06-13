@@ -1460,3 +1460,77 @@ export interface DataHubView {
    */
   finishingLeaders: PlayerAnalyticsRow[]
 }
+
+/**
+ * Extended player analytics row including special-teams and plus/minus.
+ * Used by the Team Data Hub category views.
+ */
+export interface TeamPlayerAnalyticsRow extends PlayerAnalyticsRow {
+  /** Plus/minus (raw count, not per-60). */
+  plusMinus: number
+  /** Power-play goals. */
+  ppGoals: number
+  /** Power-play assists. */
+  ppAssists: number
+  /** Power-play points (ppGoals + ppAssists). */
+  ppPoints: number
+  /** Blocked shots. */
+  blockedShots: number
+  /** Takeaways. */
+  takeaways: number
+}
+
+/**
+ * Goalie analytics row for the team Data Hub.
+ */
+export interface GoalieAnalyticsRow {
+  playerId: string
+  name: string
+  teamAbbr: string
+  gamesPlayed: number
+  wins: number
+  losses: number
+  /** Save percentage (0–1). */
+  savePct: number
+  /** Goals-against average (per 60 min). */
+  gaa: number
+  /** Total saves. */
+  saves: number
+  /** Shots against. */
+  shotsAgainst: number
+}
+
+/**
+ * Team Data Hub — deep-dive analytics for one club with category breakdown.
+ *
+ * Response to 'getTeamDataHub'. Covers Offense/Defence/PP/PK/Goaltending.
+ */
+export interface TeamDataHubView {
+  /** The team being profiled. */
+  team: TeamAnalyticsRow
+  /** Special-teams raw data for this team. */
+  specialTeams: {
+    ppGoals: number
+    ppOpportunities: number
+    ppPct: number
+    pkKills: number
+    timesShorthanded: number
+    pkPct: number
+    /** League rank for PP% (1 = best). */
+    ppRank: number
+    /** League rank for PK% (1 = best). */
+    pkRank: number
+  }
+  /** All players on this team with extended stats (skaters only, min 1 GP). */
+  players: TeamPlayerAnalyticsRow[]
+  /** Goalie rows for this team (min 1 GP). */
+  goalies: GoalieAnalyticsRow[]
+  /**
+   * All NHL-tier team rows (with percentiles) for league-rank context.
+   * Same as DataHubView.allTeams but included here so the UI can show
+   * rank columns without a second request.
+   */
+  allTeams: TeamAnalyticsRow[]
+  /** All goalies across the league (for goalie rank context). */
+  allGoalies: GoalieAnalyticsRow[]
+}
