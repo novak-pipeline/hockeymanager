@@ -320,7 +320,7 @@ export function InboxScreen(): JSX.Element {
                     onClick={() => handleSelect(item)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '34px 1fr',
+                      gridTemplateColumns: '44px 1fr',
                       gap: 'var(--sp-2)',
                       alignItems: 'center',
                       padding: '10px var(--sp-3)',
@@ -351,7 +351,7 @@ export function InboxScreen(): JSX.Element {
                       item={item}
                       playerInfo={data.playerInfo}
                       teamInfo={data.teamInfo}
-                      size={30}
+                      size={38}
                     />
                     <span style={{ minWidth: 0 }}>
                       {/* Headline */}
