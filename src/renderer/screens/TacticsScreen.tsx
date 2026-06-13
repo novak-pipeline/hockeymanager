@@ -1453,13 +1453,15 @@ export function TacticsScreen(): JSX.Element {
               </div>
             </div>
 
-            {/* ── RIGHT: tactics panel ── */}
+            {/* ── RIGHT: Coach's System (read-only info feed) ── */}
             <div className="stack">
+              <div className="muted small" style={{ fontStyle: 'italic', lineHeight: 1.5 }}>
+                Your head coach owns the system — below is a read-only view of what he’s running.
+                To change it, make a suggestion in Front Office → Staff Meeting.
+              </div>
+              <div className="stack" style={{ pointerEvents: 'none', opacity: 0.85 }}>
               <Panel title="System">
-                <div className="muted small" style={{ marginBottom: 'var(--sp-2)', fontStyle: 'italic' }}>
-                  Set by your head coach — read-only. Suggest changes in Front Office → Staff Meeting.
-                </div>
-                <div className="stack" style={{ gap: 'var(--sp-4)', opacity: 0.7, pointerEvents: 'none' }}>
+                <div className="stack" style={{ gap: 'var(--sp-4)' }}>
 
                   {/* Forecheck */}
                   <div>
@@ -1779,6 +1781,8 @@ export function TacticsScreen(): JSX.Element {
                   })}
                 </div>
               </Panel>
+
+              </div>
 
               <CoachPanel
                 suggestion={data.coachSuggestion}
