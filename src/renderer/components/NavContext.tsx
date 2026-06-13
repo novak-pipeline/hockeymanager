@@ -15,6 +15,7 @@ export type ScreenId =
   // Front Office section
   | 'dashboard'
   | 'board'
+  | 'staffMeeting'
   // News section
   | 'inbox'
   // Team section
@@ -87,6 +88,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'playoffs':
       return 'league'
     case 'board':
+    case 'staffMeeting':
       return 'frontOffice'
     default:
       return 'frontOffice'

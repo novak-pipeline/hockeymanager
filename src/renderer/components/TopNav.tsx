@@ -48,8 +48,9 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
       label: 'Front Office',
       defaultScreen: 'dashboard',
       subTabs: [
-        { id: 'dashboard', label: 'Overview' },
-        { id: 'board',     label: 'Owner / Board' },
+        { id: 'dashboard',    label: 'Overview' },
+        { id: 'board',        label: 'Owner / Board' },
+        { id: 'staffMeeting', label: 'Staff Meeting' },
       ],
     },
     {

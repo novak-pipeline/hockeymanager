@@ -346,139 +346,6 @@ function CoachPanel({ suggestion, styleFit, onApply, applying }: CoachPanelProps
   )
 }
 
-/* ── Staff meeting: suggest a tactical direction to the head coach ── */
-const STAFF_SUGGESTIONS: { id: string; label: string; detail: string }[] = [
-  { id: 'fitRoster',           label: 'Play to our strengths',      detail: 'Set the system that best fits the players.' },
-  { id: 'faster',              label: 'Play faster',                detail: 'Push the pace; attack in transition.' },
-  { id: 'defensive',           label: 'Tighten up defensively',     detail: 'Lower tempo; protect our end.' },
-  { id: 'physical',            label: 'Play more physical',         detail: 'Heavy cycle; win the battles.' },
-  { id: 'aggressiveForecheck', label: 'Forecheck aggressively',     detail: 'Pressure the puck high (2-1-2).' },
-]
-
-interface AgendaItemLite { id: string; label: string }
-
-function StaffMeetingPanel({
-  client,
-  onApplied,
-}: {
-  client: ReturnType<typeof useClient>
-  onApplied: () => void
-}): JSX.Element {
-  const [busy, setBusy] = useState(false)
-  const [last, setLast] = useState<{ accepted: boolean; response: string } | null>(null)
-  const [agenda, setAgenda] = useState<AgendaItemLite[]>([])
-  const [discussion, setDiscussion] = useState<{ speaker: string; speakerRole: string; opinion: string } | null>(null)
-
-  const loadAgenda = useCallback(async (): Promise<void> => {
-    const res = await client.getAgenda()
-    if (res.type === 'agenda') setAgenda(res.items.map((i) => ({ id: i.id, label: i.label })))
-  }, [client])
-
-  useEffect(() => { void loadAgenda() }, [loadAgenda])
-
-  async function suggest(id: string): Promise<void> {
-    if (busy) return
-    setBusy(true)
-    try {
-      const res = await client.suggestToCoach(id)
-      if (res.type === 'coachResponse') {
-        setLast({ accepted: res.accepted, response: res.response })
-        if (res.accepted) onApplied()
-      } else if (res.type === 'error') {
-        toast(res.message, 'error')
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function discuss(id: string): Promise<void> {
-    if (busy) return
-    setBusy(true)
-    try {
-      const res = await client.discussAgendaItem(id)
-      if (res.type === 'discussion') {
-        setDiscussion({ speaker: res.result.speaker, speakerRole: res.result.speakerRole, opinion: res.result.opinion })
-        await loadAgenda()
-      } else if (res.type === 'error') {
-        toast(res.message, 'error')
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Panel title="Staff Meeting">
-      {/* Agenda the GM marked from around the app */}
-      {agenda.length > 0 && (
-        <div style={{ marginBottom: 'var(--sp-3)' }}>
-          <div className="field-label">Agenda</div>
-          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-            {agenda.map((a) => (
-              <div key={a.id} className="row-between" style={{ gap: 'var(--sp-2)' }}>
-                <span className="small" style={{ minWidth: 0 }}>{a.label}</span>
-                <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void discuss(a.id)}>
-                  Discuss
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {discussion && (
-        <div
-          style={{
-            marginBottom: 'var(--sp-3)', padding: 'var(--sp-2) var(--sp-3)',
-            borderLeft: '3px solid var(--violet-h)', background: 'var(--bg2)',
-            borderRadius: 'var(--radius-sm)', fontSize: 13, lineHeight: 1.5,
-          }}
-        >
-          <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
-            {discussion.speaker} · {discussion.speakerRole}
-          </div>
-          {discussion.opinion}
-        </div>
-      )}
-
-      <div className="muted small" style={{ marginBottom: 'var(--sp-2)' }}>
-        Your head coach owns the system. Suggest a direction — whether he adopts it
-        depends on his judgement and how well it fits the roster.
-      </div>
-      <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-        {STAFF_SUGGESTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className="btn btn-sm"
-            disabled={busy}
-            onClick={() => void suggest(s.id)}
-            title={s.detail}
-            style={{ justifyContent: 'flex-start', textAlign: 'left' }}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-      {last && (
-        <div
-          style={{
-            marginTop: 'var(--sp-3)',
-            padding: 'var(--sp-2) var(--sp-3)',
-            borderLeft: `3px solid ${last.accepted ? 'var(--success)' : 'var(--muted)'}`,
-            background: 'var(--bg2)',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          {last.response}
-        </div>
-      )}
-    </Panel>
-  )
-}
-
 /* ── Star rating (0–5, half-steps; star = clamp(overall/20, 0, 5) rounded to 0.5) ── */
 function StarRating({ value }: { value: number }): JSX.Element {
   const raw = Math.max(0, Math.min(5, value / 20))
@@ -1588,10 +1455,9 @@ export function TacticsScreen(): JSX.Element {
 
             {/* ── RIGHT: tactics panel ── */}
             <div className="stack">
-              <StaffMeetingPanel client={client} onApplied={() => { bumpRefresh(); refetch() }} />
               <Panel title="System">
                 <div className="muted small" style={{ marginBottom: 'var(--sp-2)', fontStyle: 'italic' }}>
-                  Set by your head coach — read-only. Use the staff meeting above to suggest changes.
+                  Set by your head coach — read-only. Suggest changes in Front Office → Staff Meeting.
                 </div>
                 <div className="stack" style={{ gap: 'var(--sp-4)', opacity: 0.7, pointerEvents: 'none' }}>
 

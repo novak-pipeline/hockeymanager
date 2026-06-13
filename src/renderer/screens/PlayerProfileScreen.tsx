@@ -667,169 +667,99 @@ function TabProfile({
 
   return (
     <div className="stack">
-      {/* ── Bio header strip ── */}
+      {/* ── Bio header strip — full width ── */}
       <div style={{ borderTop: '3px solid var(--team-primary, transparent)', borderRadius: 'var(--radius) var(--radius) 0 0', overflow: 'hidden' }}>
       <Panel>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--sp-5)', alignItems: 'start' }}>
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {/* Face + identity chips */}
-            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'center' }}>
-              <PlayerFace faceId={d.faceId} name={d.name} size={72} teamColor={d.teamColors?.primary} />
-              <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--team-primary, var(--text))' }}>{d.name}</div>
-                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
-                  <span className="chip chip-accent">{d.position}</span>
-                  <span className="chip">{d.handedness} shot</span>
-                  <span className="chip">{d.age} yrs</span>
-                  {d.teamName
-                    ? <span className="chip">{d.teamName}</span>
-                    : <span className="chip chip-warn">Free agent</span>}
-                  {d.bio.jerseyNumber !== undefined && (
-                    <span className="chip">#{d.bio.jerseyNumber}</span>
-                  )}
-                  {d.bio.nationality && <span className="chip">{d.bio.nationality}</span>}
-                  <ArchetypeChip archetype={d.archetype} />
-                </div>
-                {/* Height / weight */}
-                {(d.bio.heightCm !== undefined || d.bio.weightKg !== undefined) && (
-                  <span className="muted small">
-                    {d.bio.heightCm !== undefined && `${d.bio.heightCm} cm`}
-                    {d.bio.heightCm !== undefined && d.bio.weightKg !== undefined && ' · '}
-                    {d.bio.weightKg !== undefined && `${d.bio.weightKg} kg`}
-                  </span>
-                )}
-              </div>
-            </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Face */}
+          <PlayerFace faceId={d.faceId} name={d.name} size={64} teamColor={d.teamColors?.primary} />
 
-            {/* Star rating + potential + status */}
-            <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <div className="stat">
-                {d.scouted && !d.scouted.exact ? (
-                  <>
-                    {/* Fogged: show star range derived from lo/hi band */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={18} />
-                      <span className="muted small">–</span>
-                      <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={18} />
-                    </div>
-                    <div className="stat-label" style={{ marginTop: 4 }}>
-                      Rating
-                      <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
-                        {d.scouted.knowledge}%
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <StarRating stars={overallToStars(d.overall)} size={22} />
-                    <div className="stat-label" style={{ marginTop: 4 }}>Rating</div>
-                  </>
-                )}
-              </div>
-              <div className="stack" style={{ gap: 'var(--sp-1)' }}>
-                <PotentialStars count={d.potentialStars} />
-                <span className="muted small">Potential</span>
-              </div>
-              <div className="stack" style={{ gap: 'var(--sp-1)' }}>
-                <span style={{ fontSize: 20, fontWeight: 700 }}>
-                  {d.condition}<span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>/100</span>
+          {/* Identity */}
+          <div className="stack" style={{ gap: 'var(--sp-1)', flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--team-primary, var(--text))' }}>{d.name}</div>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+              <span className="chip chip-accent">{d.position}</span>
+              <span className="chip">{d.handedness} shot</span>
+              <span className="chip">{d.age} yrs</span>
+              {d.teamName
+                ? <span className="chip">{d.teamName}</span>
+                : <span className="chip chip-warn">Free agent</span>}
+              {d.bio.jerseyNumber !== undefined && <span className="chip">#{d.bio.jerseyNumber}</span>}
+              {d.bio.nationality && <span className="chip">{d.bio.nationality}</span>}
+              {(d.bio.heightCm !== undefined || d.bio.weightKg !== undefined) && (
+                <span className="chip muted">
+                  {d.bio.heightCm !== undefined && `${d.bio.heightCm}cm`}
+                  {d.bio.heightCm !== undefined && d.bio.weightKg !== undefined && ' / '}
+                  {d.bio.weightKg !== undefined && `${d.bio.weightKg}kg`}
                 </span>
-                <span className="muted small">Condition</span>
-                <ConditionBar value={d.condition} />
-              </div>
-              <div className="stack" style={{ gap: 'var(--sp-1)' }}>
-                <span style={{ fontSize: 20, fontWeight: 700 }}>{d.morale}</span>
-                <span className="muted small">Morale</span>
-              </div>
-              <div className="stack" style={{ gap: 'var(--sp-1)' }}>
-                <span style={{
-                  fontSize: 18,
-                  fontWeight: 700,
-                  color: d.form > 2 ? 'var(--success)' : d.form < -2 ? 'var(--danger)' : 'var(--text)',
-                }}>
-                  {d.form > 0 ? `+${d.form}` : d.form}
-                </span>
-                <span className="muted small">Form</span>
-              </div>
+              )}
+              <ArchetypeChip archetype={d.archetype} />
             </div>
           </div>
 
-          {/* Contract summary */}
-          {d.profileContract ? (
-            <div className="panel" style={{ minWidth: 200, background: 'var(--bg2)' }}>
-              <div className="panel-title">Contract</div>
-              <div className="stat">
-                <div className="stat-value" style={{ fontSize: 22 }}>{fmtMoney(d.profileContract.salary)}</div>
-                <div className="stat-label">per year</div>
-              </div>
-              {d.profileContract.capHit !== d.profileContract.salary && (
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  Cap hit: {fmtMoney(d.profileContract.capHit)}
-                </div>
+          {/* Star rating + potential */}
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end', flexShrink: 0, flexWrap: 'wrap' }}>
+            <div className="stat">
+              {d.scouted && !d.scouted.exact ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={16} />
+                    <span className="muted small">–</span>
+                    <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={16} />
+                  </div>
+                  <div className="stat-label" style={{ marginTop: 2 }}>
+                    Rating
+                    <span className="chip chip-warn" style={{ marginLeft: 4, fontSize: 9 }}>{d.scouted.knowledge}%</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <StarRating stars={overallToStars(d.overall)} size={18} />
+                  <div className="stat-label" style={{ marginTop: 2 }}>Rating</div>
+                </>
               )}
-              <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
-                {d.profileContract.yearsRemaining} yr{d.profileContract.yearsRemaining !== 1 ? 's' : ''} remaining
-                · expires {d.profileContract.expiryYear}
-              </div>
-              <div className="meter" style={{ marginTop: 'var(--sp-3)' }}>
-                <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, d.profileContract.salary / 12_000_000 * 100))}%` }} />
-              </div>
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {((d.profileContract.salary / 83_500_000) * 100).toFixed(1)}% of cap
-              </div>
-              {d.profileContract.freeAgentStatus && (
-                <span className="chip chip-warn" style={{ marginTop: 6 }}>{d.profileContract.freeAgentStatus}</span>
-              )}
-              {d.profileContract.noTradeClause && <span className="chip chip-warn" style={{ marginTop: 4 }}>NTC</span>}
-              {d.profileContract.twoWay && <span className="chip" style={{ marginTop: 4 }}>2-way</span>}
             </div>
-          ) : d.contract ? (
-            <div className="panel" style={{ minWidth: 200, background: 'var(--bg2)' }}>
-              <div className="panel-title">Contract</div>
-              <div className="stat">
-                <div className="stat-value" style={{ fontSize: 22 }}>{fmtMoney(d.contract.salary)}</div>
-                <div className="stat-label">per year</div>
-              </div>
-              <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
-                {d.contract.yearsRemaining} yr{d.contract.yearsRemaining !== 1 ? 's' : ''} remaining
-                · expires {d.contract.expiryYear}
-              </div>
+            <div className="stat">
+              <PotentialStars count={d.potentialStars} />
+              <div className="stat-label" style={{ marginTop: 2 }}>Potential</div>
             </div>
-          ) : (
-            <div className="panel" style={{ minWidth: 180, background: 'var(--bg2)' }}>
-              <div className="panel-title">Contract</div>
-              <span className="muted small">No contract</span>
-            </div>
-          )}
+          </div>
         </div>
       </Panel>
       </div>
 
-      {/* ── Attribute groups + Ratings card ── */}
-      <div className="grid grid-2">
-        {/* Attribute groups */}
-        <div className="stack">
-          {d.attributeGroups.map((group) => (
-            <Panel key={group.name} title={group.name}>
-              <div className="stack" style={{ gap: 6 }}>
-                {group.attributes.map((a) => (
-                  <AttrBar
-                    key={a.label}
-                    label={a.label}
-                    value={a.value}
-                    lo={a.lo}
-                    hi={a.hi}
-                    masked={a.masked}
-                  />
-                ))}
-              </div>
-            </Panel>
-          ))}
+      {/* ── Main 2-column body ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-3)', alignItems: 'start' }}>
 
-          {/* Composites */}
+        {/* ══ LEFT COLUMN: attribute groups + composites ══ */}
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          {/* All 3 attribute groups side-by-side in a sub-grid */}
+          <Panel title="Attributes">
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${d.attributeGroups.length}, 1fr)`, gap: 'var(--sp-3)' }}>
+              {d.attributeGroups.map((group) => (
+                <div key={group.name}>
+                  <div className="panel-title" style={{ marginBottom: 4, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>{group.name}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {group.attributes.map((a) => (
+                      <AttrBar
+                        key={a.label}
+                        label={a.label}
+                        value={a.value}
+                        lo={a.lo}
+                        hi={a.hi}
+                        masked={a.masked}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          {/* Composites — compact, same panel style */}
           {d.composites.length > 0 && (
             <Panel title="Composites">
-              <div className="stack" style={{ gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 var(--sp-4)' }}>
                 {d.composites.map((c) => (
                   <AttrBar key={c.label} label={c.label} value={c.value} />
                 ))}
@@ -838,8 +768,9 @@ function TabProfile({
           )}
         </div>
 
-        {/* Radar + compare */}
-        <div>
+        {/* ══ RIGHT COLUMN: radar, status cards, actions ══ */}
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          {/* Radar + compare control */}
           <CompareControl
             currentId={d.playerId}
             currentName={d.name}
@@ -849,128 +780,176 @@ function TabProfile({
             comparing={comparing}
             squadRows={squadRows}
           />
-        </div>
-      </div>
 
-      {/* ── Status cards ── */}
-      {d.injury && (
-        <Notice kind="danger">
-          Injured: {d.injury.description} — {d.injury.gamesRemaining} game{d.injury.gamesRemaining !== 1 ? 's' : ''} remaining
-        </Notice>
-      )}
+          {/* Injury notice */}
+          {d.injury && (
+            <Notice kind="danger">
+              Injured: {d.injury.description} — {d.injury.gamesRemaining} game{d.injury.gamesRemaining !== 1 ? 's' : ''} remaining
+            </Notice>
+          )}
 
-      {/* Personality archetype — the headline character read */}
-      {d.personalityType && (
-        <div
-          className="panel"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sp-3)',
-            padding: 'var(--sp-3) var(--sp-4)',
-            borderLeft: '3px solid var(--violet-h)',
-          }}
-        >
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 800,
-              color: 'var(--violet-h)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {d.personalityType.label}
-          </span>
-          <span className="muted small" style={{ lineHeight: 1.4 }}>
-            {d.personalityType.blurb}
-          </span>
-        </div>
-      )}
-
-      {/* Mark for staff-meeting discussion */}
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <MarkForMeeting playerId={d.playerId} client={client} />
-      </div>
-
-      {/* System fit — how well the player suits the team's current tactics */}
-      {d.systemFit && (() => {
-        const s = d.systemFit.score
-        const color = s >= 80 ? 'var(--success)' : s >= 66 ? 'var(--green)' : s >= 50 ? 'var(--accent2, var(--violet-h))' : 'var(--danger)'
-        return (
-          <div
-            className="panel"
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3) var(--sp-4)' }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 54 }}>
-              <span className="mono" style={{ fontSize: 20, fontWeight: 800, color }}>{s}</span>
-              <span className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>Fit</span>
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color }}>
-                {d.systemFit.label} · {d.systemFit.styleLabel}
+          {/* Condition / morale / form + contract — compact info strip */}
+          <Panel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line)', paddingBottom: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+              <div className="stat" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>
+                  {d.condition}<span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>/100</span>
+                </div>
+                <ConditionBar value={d.condition} />
+                <div className="stat-label">Condition</div>
               </div>
-              <div className="muted small" style={{ lineHeight: 1.4 }}>{d.systemFit.reason}</div>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* Interview — choose questions to reveal hidden qualities */}
-      {d.interview && (
-        <InterviewPanel
-          interview={d.interview}
-          playerId={d.playerId}
-          client={client}
-          onChanged={onChanged}
-        />
-      )}
-
-      {/* Mindset panel — staff-gathered outlook */}
-      {d.mindset && <MindsetPanel mindset={d.mindset} />}
-
-      {/* Season snapshot (current season only for the Profile tab quick view) */}
-      {d.seasons.length > 0 && (() => {
-        const cur = d.seasons[0]!
-        return (
-          <Panel title="This Season">
-            {isGoalie && cur.goalie ? (
-              <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap' }}>
-                {[
-                  { label: 'GP', value: cur.goalie.gamesPlayed },
-                  { label: 'W', value: cur.goalie.wins },
-                  { label: 'L', value: cur.goalie.losses },
-                  { label: 'SV%', value: `.${Math.round(cur.goalie.savePct * 1000)}` },
-                  { label: 'GAA', value: cur.goalie.goalsAgainstAverage.toFixed(2) },
-                  { label: 'SO', value: cur.goalie.shutouts },
-                ].map(({ label, value }) => (
-                  <div key={label} className="stat">
-                    <div className="stat-value" style={{ fontSize: 20 }}>{value}</div>
-                    <div className="stat-label">{label}</div>
-                  </div>
-                ))}
+              <div className="stat" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{d.morale}</div>
+                <div className="stat-label">Morale</div>
               </div>
-            ) : cur.skater ? (
-              <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap' }}>
-                {[
-                  { label: 'GP', value: cur.skater.gamesPlayed },
-                  { label: 'G', value: cur.skater.goals },
-                  { label: 'A', value: cur.skater.assists },
-                  { label: 'PTS', value: cur.skater.points },
-                  { label: '±', value: cur.skater.plusMinus > 0 ? `+${cur.skater.plusMinus}` : cur.skater.plusMinus },
-                  { label: 'TOI/g', value: fmtToi(cur.skater.toiPerGame) },
-                ].map(({ label, value }) => (
-                  <div key={label} className="stat">
-                    <div className="stat-value" style={{ fontSize: 20 }}>{value}</div>
-                    <div className="stat-label">{label}</div>
-                  </div>
-                ))}
+              <div className="stat" style={{ textAlign: 'center' }}>
+                <div style={{
+                  fontSize: 16, fontWeight: 700,
+                  color: d.form > 2 ? 'var(--success)' : d.form < -2 ? 'var(--danger)' : 'var(--text)',
+                }}>
+                  {d.form > 0 ? `+${d.form}` : d.form}
+                </div>
+                <div className="stat-label">Form</div>
+              </div>
+            </div>
+
+            {/* Contract summary inline */}
+            {d.profileContract ? (
+              <div>
+                <div className="panel-title" style={{ marginBottom: 4 }}>Contract</div>
+                <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{fmtMoney(d.profileContract.salary)}<span className="muted small"> /yr</span></span>
+                  <span className="muted small">{d.profileContract.yearsRemaining} yr{d.profileContract.yearsRemaining !== 1 ? 's' : ''} · exp {d.profileContract.expiryYear}</span>
+                  {d.profileContract.capHit !== d.profileContract.salary && (
+                    <span className="muted small">Cap: {fmtMoney(d.profileContract.capHit)}</span>
+                  )}
+                  {d.profileContract.freeAgentStatus && <span className="chip chip-warn">{d.profileContract.freeAgentStatus}</span>}
+                  {d.profileContract.noTradeClause && <span className="chip chip-warn">NTC</span>}
+                  {d.profileContract.twoWay && <span className="chip">2-way</span>}
+                </div>
+                <div className="meter" style={{ marginTop: 'var(--sp-2)', height: 4 }}>
+                  <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, d.profileContract.salary / 12_000_000 * 100))}%` }} />
+                </div>
+                <div className="muted small" style={{ marginTop: 2 }}>{((d.profileContract.salary / 83_500_000) * 100).toFixed(1)}% of cap</div>
+              </div>
+            ) : d.contract ? (
+              <div>
+                <div className="panel-title" style={{ marginBottom: 4 }}>Contract</div>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{fmtMoney(d.contract.salary)}<span className="muted small"> /yr</span></span>
+                <span className="muted small" style={{ marginLeft: 'var(--sp-3)' }}>{d.contract.yearsRemaining} yr{d.contract.yearsRemaining !== 1 ? 's' : ''} · exp {d.contract.expiryYear}</span>
               </div>
             ) : (
-              <span className="muted small">No games played</span>
+              <span className="muted small">No contract</span>
             )}
           </Panel>
-        )
-      })()}
+
+          {/* Personality archetype banner */}
+          {d.personalityType && (
+            <div
+              className="panel"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--sp-3)',
+                padding: 'var(--sp-2) var(--sp-3)',
+                borderLeft: '3px solid var(--violet-h)',
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--violet-h)', whiteSpace: 'nowrap' }}>
+                {d.personalityType.label}
+              </span>
+              <span className="muted small" style={{ lineHeight: 1.4 }}>
+                {d.personalityType.blurb}
+              </span>
+            </div>
+          )}
+
+          {/* System fit */}
+          {d.systemFit && (() => {
+            const s = d.systemFit.score
+            const color = s >= 80 ? 'var(--success)' : s >= 66 ? 'var(--green)' : s >= 50 ? 'var(--accent2, var(--violet-h))' : 'var(--danger)'
+            return (
+              <div
+                className="panel"
+                style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-2) var(--sp-3)' }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 46 }}>
+                  <span className="mono" style={{ fontSize: 18, fontWeight: 800, color }}>{s}</span>
+                  <span className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>Fit</span>
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color }}>
+                    {d.systemFit.label} · {d.systemFit.styleLabel}
+                  </div>
+                  <div className="muted small" style={{ lineHeight: 1.4 }}>{d.systemFit.reason}</div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Mindset */}
+          {d.mindset && <MindsetPanel mindset={d.mindset} />}
+
+          {/* Interview */}
+          {d.interview && (
+            <InterviewPanel
+              interview={d.interview}
+              playerId={d.playerId}
+              client={client}
+              onChanged={onChanged}
+            />
+          )}
+
+          {/* Mark for meeting */}
+          <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <MarkForMeeting playerId={d.playerId} client={client} />
+          </div>
+
+          {/* Season snapshot */}
+          {d.seasons.length > 0 && (() => {
+            const cur = d.seasons[0]!
+            return (
+              <Panel title="This Season">
+                {isGoalie && cur.goalie ? (
+                  <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                    {[
+                      { label: 'GP', value: cur.goalie.gamesPlayed },
+                      { label: 'W', value: cur.goalie.wins },
+                      { label: 'L', value: cur.goalie.losses },
+                      { label: 'SV%', value: `.${Math.round(cur.goalie.savePct * 1000)}` },
+                      { label: 'GAA', value: cur.goalie.goalsAgainstAverage.toFixed(2) },
+                      { label: 'SO', value: cur.goalie.shutouts },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="stat">
+                        <div className="stat-value" style={{ fontSize: 18 }}>{value}</div>
+                        <div className="stat-label">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : cur.skater ? (
+                  <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+                    {[
+                      { label: 'GP', value: cur.skater.gamesPlayed },
+                      { label: 'G', value: cur.skater.goals },
+                      { label: 'A', value: cur.skater.assists },
+                      { label: 'PTS', value: cur.skater.points },
+                      { label: '±', value: cur.skater.plusMinus > 0 ? `+${cur.skater.plusMinus}` : cur.skater.plusMinus },
+                      { label: 'TOI/g', value: fmtToi(cur.skater.toiPerGame) },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="stat">
+                        <div className="stat-value" style={{ fontSize: 18 }}>{value}</div>
+                        <div className="stat-label">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="muted small">No games played</span>
+                )}
+              </Panel>
+            )
+          })()}
+        </div>
+      </div>
     </div>
   )
 }

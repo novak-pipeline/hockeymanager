@@ -13,27 +13,20 @@ const CATEGORY_META: Record<
   NewsCategory,
   { icon: string; colorClass: string; label: string; color: string }
 > = {
-  result: { icon: '⚡', colorClass: 'chip-accent', label: 'Result', color: 'var(--violet)' },
-  injury: { icon: '🩹', colorClass: 'chip-danger', label: 'Injury', color: 'var(--red)' },
-  trade: { icon: '🔄', colorClass: 'chip-warn', label: 'Trade', color: 'var(--amber)' },
-  contract: { icon: '📋', colorClass: 'chip-warn', label: 'Contract', color: 'var(--amber)' },
-  draft: { icon: '🎯', colorClass: 'chip-accent', label: 'Draft', color: 'var(--cyan)' },
-  award: { icon: '🏅', colorClass: 'chip-warn', label: 'Award', color: 'var(--amber)' },
-  league: { icon: '🏒', colorClass: '', label: 'League', color: 'var(--muted)' },
-  milestone: { icon: '⭐', colorClass: 'chip-warn', label: 'Milestone', color: 'var(--amber)' },
-  playoffs: { icon: '🏆', colorClass: 'chip-warn', label: 'Playoffs', color: 'var(--orange)' },
+  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)' },
+  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)' },
+  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)' },
+  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)' },
+  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)' },
+  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)' },
+  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)' },
+  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
+  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
 }
 
 const ALL_CATEGORIES: NewsCategory[] = [
-  'result',
-  'injury',
-  'trade',
-  'contract',
-  'draft',
-  'award',
-  'league',
-  'milestone',
-  'playoffs',
+  'result', 'injury', 'trade', 'contract', 'draft',
+  'award', 'league', 'milestone', 'playoffs',
 ]
 
 /** Convert a 0xRRGGBB integer to a CSS hex string. */
@@ -230,13 +223,17 @@ export function InboxScreen(): JSX.Element {
   const interactions = data.interactions ?? []
 
   return (
-    <section className="stack">
+    <section className="stack" style={{ gap: 'var(--sp-3)' }}>
+      {/* ── Header ── */}
       <ScreenHeader title="Inbox">
-        <div className="row">
-          {unread > 0 && <span className="chip chip-accent">{unread} unread</span>}
+        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+          {unread > 0 && (
+            <span className="chip chip-accent" style={{ fontSize: 11 }}>
+              {unread} unread
+            </span>
+          )}
           <button
-            className="btn btn-ghost"
-            style={{ fontSize: 12 }}
+            className="btn btn-ghost btn-sm"
             onClick={handleMarkAllRead}
             disabled={unread === 0}
           >
@@ -245,20 +242,23 @@ export function InboxScreen(): JSX.Element {
         </div>
       </ScreenHeader>
 
-      {/* Player → GM concerns awaiting a response */}
+      {/* ── Player → GM concerns awaiting a response ── */}
       {interactions.length > 0 && (
-        <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+        <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
           {interactions.map((ix) => (
             <InteractionCard key={ix.id} interaction={ix} onRespond={handleRespond} />
           ))}
         </div>
       )}
 
-      {/* Category filter chips */}
-      <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+      {/* ── Category filter chips ── */}
+      <div
+        className="row"
+        style={{ flexWrap: 'wrap', gap: 'var(--sp-1)', paddingBottom: 2 }}
+      >
         <button
           className={`chip${categoryFilter === null ? ' chip-accent' : ''}`}
-          style={{ cursor: 'pointer', border: 'none' }}
+          style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
           onClick={() => setCategoryFilter(null)}
         >
           All
@@ -270,7 +270,7 @@ export function InboxScreen(): JSX.Element {
             <button
               key={cat}
               className={`chip${active ? ` ${meta.colorClass}` : ''}`}
-              style={{ cursor: 'pointer', border: 'none' }}
+              style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
               onClick={() => setCategoryFilter(active ? null : cat)}
             >
               {meta.icon} {meta.label}
@@ -279,11 +279,12 @@ export function InboxScreen(): JSX.Element {
         })}
       </div>
 
+      {/* ── Two-column layout ── */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '300px 1fr',
-          gap: 'var(--sp-4)',
+          gridTemplateColumns: '320px 1fr',
+          gap: 'var(--sp-3)',
           alignItems: 'start',
           minHeight: 0,
         }}
@@ -294,19 +295,24 @@ export function InboxScreen(): JSX.Element {
           style={{
             padding: 0,
             overflow: 'hidden',
-            maxHeight: 'calc(100vh - 220px)',
+            maxHeight: 'calc(100vh - 260px)',
             overflowY: 'auto',
           }}
         >
           {sorted.length === 0 ? (
-            <div className="muted small" style={{ padding: 'var(--sp-4)' }}>
+            <div
+              className="muted small"
+              style={{ padding: 'var(--sp-4)', textAlign: 'center' }}
+            >
               No messages{categoryFilter ? ' in this category' : ''}.
             </div>
           ) : (
             <div style={{ display: 'grid' }}>
-              {sorted.map((item) => {
+              {sorted.map((item, idx) => {
                 const meta = CATEGORY_META[item.category]
                 const isSelected = selected?.id === item.id
+                const isLast = idx === sorted.length - 1
+
                 return (
                   <button
                     key={item.id}
@@ -314,14 +320,16 @@ export function InboxScreen(): JSX.Element {
                     onClick={() => handleSelect(item)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '36px 1fr',
+                      gridTemplateColumns: '34px 1fr',
                       gap: 'var(--sp-2)',
                       alignItems: 'center',
-                      padding: 'var(--sp-2) var(--sp-3)',
-                      borderBottom: '1px solid var(--line)',
+                      padding: '10px var(--sp-3)',
+                      borderBottom: isLast ? 'none' : '1px solid var(--line)',
                       background: isSelected
-                        ? 'rgba(139,92,246,0.14)'
-                        : 'transparent',
+                        ? 'rgba(139,92,246,0.13)'
+                        : item.read
+                        ? 'transparent'
+                        : 'rgba(139,92,246,0.04)',
                       borderLeft: `3px solid ${
                         isSelected
                           ? 'var(--accent)'
@@ -336,49 +344,70 @@ export function InboxScreen(): JSX.Element {
                       width: '100%',
                       borderTop: 'none',
                       borderRight: 'none',
+                      transition: 'background 0.1s ease',
                     }}
                   >
                     <RowThumbnail
                       item={item}
                       playerInfo={data.playerInfo}
                       teamInfo={data.teamInfo}
-                      size={32}
+                      size={30}
                     />
                     <span style={{ minWidth: 0 }}>
+                      {/* Headline */}
                       <div
                         style={{
                           fontSize: 12,
-                          fontWeight: item.read ? 400 : 600,
-                          lineHeight: 1.3,
+                          fontWeight: item.read ? 400 : 650,
+                          lineHeight: 1.35,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          color: item.read ? 'var(--text)' : 'var(--text)',
+                          color: item.read ? 'var(--muted)' : 'var(--text)',
                         }}
                       >
                         {item.headline}
                       </div>
+                      {/* Meta row */}
                       <div
-                        className="muted"
-                        style={{ fontSize: 10, marginTop: 2, display: 'flex', gap: 4, alignItems: 'center' }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          marginTop: 3,
+                          fontSize: 10,
+                          color: 'var(--muted)',
+                          overflow: 'hidden',
+                        }}
                       >
                         <span
                           style={{
-                            width: 6,
-                            height: 6,
+                            width: 5,
+                            height: 5,
                             borderRadius: '50%',
                             background: meta.color,
                             flexShrink: 0,
                             display: 'inline-block',
                           }}
                         />
-                        <span>{meta.label}</span>
-                        <span>·</span>
-                        <span>{itemDate(item)}</span>
+                        <span style={{ whiteSpace: 'nowrap' }}>{meta.label}</span>
+                        <span style={{ opacity: 0.5 }}>·</span>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {itemDate(item)}
+                        </span>
                         {item.press && (
                           <>
-                            <span>·</span>
-                            <span style={{ fontStyle: 'italic' }}>{item.press.byline.split('—')[0]?.trim()}</span>
+                            <span style={{ opacity: 0.5 }}>·</span>
+                            <span
+                              style={{
+                                fontStyle: 'italic',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {item.press.byline.split('—')[0]?.trim()}
+                            </span>
                           </>
                         )}
                       </div>
@@ -399,9 +428,20 @@ export function InboxScreen(): JSX.Element {
             navigate={nav.navigate}
           />
         ) : (
-          <Panel>
-            <span className="muted small">Select a message to read it.</span>
-          </Panel>
+          <div
+            className="panel"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 200,
+              color: 'var(--muted)',
+              fontSize: 13,
+              fontStyle: 'italic',
+            }}
+          >
+            Select a message to read it.
+          </div>
         )}
       </div>
     </section>
@@ -409,16 +449,16 @@ export function InboxScreen(): JSX.Element {
 }
 
 const KIND_LABEL: Record<string, string> = {
-  iceTime: 'Wants a bigger role',
-  future: 'Contract / future',
-  unhappy: 'Unsettled',
-  feud: 'Dressing-room friction',
+  iceTime:      'Wants a bigger role',
+  future:       'Contract / future',
+  unhappy:      'Unsettled',
+  feud:         'Dressing-room friction',
   tradeRequest: 'Trade request',
 }
 
 /**
- * Player → GM concern card with response options. The GM's choice moves the
- * player's morale (and the room) deterministically based on their personality.
+ * Player → GM concern card with response options. Compact accent strip on left,
+ * small face thumbnail, label + message + buttons on one card row.
  */
 function InteractionCard(props: {
   interaction: PlayerInteractionView
@@ -437,45 +477,107 @@ function InteractionCard(props: {
 
   return (
     <div
-      className="panel"
-      style={{ padding: 0, overflow: 'hidden', border: `1px solid ${accent}55` }}
+      style={{
+        display: 'flex',
+        background: 'var(--bg1)',
+        border: `1px solid ${accent}44`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 'var(--radius)',
+        overflow: 'hidden',
+        gap: 'var(--sp-3)',
+        padding: 'var(--sp-3) var(--sp-3)',
+        alignItems: 'flex-start',
+      }}
     >
-      <div style={{ height: 3, background: accent }} />
-      <div style={{ padding: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
-        <div style={{ flexShrink: 0 }}>
-          <PlayerFace faceId={ix.faceId} name={ix.playerName} size={56} />
+      {/* Player face */}
+      <div style={{ flexShrink: 0, paddingTop: 2 }}>
+        <PlayerFace faceId={ix.faceId} name={ix.playerName} size={40} />
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Top row: label + player link */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-2)',
+            marginBottom: 4,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: 1,
+              color: accent,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {KIND_LABEL[ix.kind] ?? 'Player concern'}
+          </span>
+          <span style={{ color: 'var(--line)', fontSize: 10 }}>·</span>
+          <PlayerLink playerId={ix.playerId} name={ix.playerName} className="small" />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 4 }}>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: 1,
-                color: accent,
-              }}
+
+        {/* Message */}
+        <p
+          style={{
+            margin: 0,
+            fontSize: 12,
+            lineHeight: 1.55,
+            color: 'var(--text)',
+            maxWidth: '72ch',
+          }}
+        >
+          {ix.message}
+        </p>
+
+        {/* Response buttons */}
+        <div
+          className="row"
+          style={{ flexWrap: 'wrap', gap: 'var(--sp-1)', marginTop: 'var(--sp-2)' }}
+        >
+          {ix.options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => void pick(o.id)}
             >
-              {KIND_LABEL[ix.kind] ?? 'Player concern'}
-            </span>
-            <PlayerLink playerId={ix.playerId} name={ix.playerName} className="small" />
-          </div>
-          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, maxWidth: '60ch' }}>{ix.message}</p>
-          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
-            {ix.options.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                className="btn btn-sm"
-                disabled={busy}
-                onClick={() => void pick(o.id)}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
+              {o.label}
+            </button>
+          ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Shared accent top-bar used by all three reading pane variants. */
+function PaneAccentBar(props: { gradient: string }): JSX.Element {
+  return (
+    <div style={{ height: 3, background: props.gradient, flexShrink: 0 }} />
+  )
+}
+
+/** Shared category badge used in all three reading pane variants. */
+function PaneBadge(props: { color: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: 'uppercase' as const,
+        letterSpacing: 1.5,
+        color: props.color,
+        marginBottom: 4,
+      }}
+    >
+      {props.children}
     </div>
   )
 }
@@ -509,89 +611,85 @@ function ReadingPane(props: {
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
   return (
-    <Panel>
-      <div className="stack">
-        {/* Header row: hero image + headline block */}
-        <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
-          <HeroImage item={item} playerInfo={playerInfo} teamInfo={teamInfo} />
-          <div style={{ flex: 1, minWidth: 0 }}>
+    <div
+      className="panel"
+      style={{ padding: 0, overflow: 'hidden' }}
+    >
+      <PaneAccentBar gradient={`linear-gradient(90deg, ${meta.color}, ${meta.color}88)`} />
+
+      <div style={{ padding: 'var(--sp-4)' }}>
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          {/* Header row: hero image + headline block */}
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+            <HeroImage item={item} playerInfo={playerInfo} teamInfo={teamInfo} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <PaneBadge color={meta.color}>
+                {meta.icon} {meta.label}
+              </PaneBadge>
+              <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.25, marginBottom: 6 }}>
+                {item.headline}
+              </div>
+              <div
+                className="muted small"
+                style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
+              >
+                <span>{itemDate(item)}</span>
+                {item.playerId && playerInfo?.[item.playerId] && (
+                  <PlayerLink
+                    playerId={item.playerId}
+                    name={`→ ${playerInfo[item.playerId]!.name}`}
+                    className="muted"
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div style={{ borderTop: '1px solid var(--line)', paddingTop: 'var(--sp-3)' }}>
+            {bodyParagraphs.map((para, i) => (
+              <p
+                key={i}
+                style={{
+                  margin: 0,
+                  marginBottom: i < bodyParagraphs.length - 1 ? 'var(--sp-3)' : 0,
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  maxWidth: '62ch',
+                }}
+              >
+                {para}
+              </p>
+            ))}
+          </div>
+
+          {/* Footer actions */}
+          {(item.playerId || item.teamId) && (
             <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: 1,
-                color: meta.color,
-                marginBottom: 4,
-              }}
+              className="row"
+              style={{ borderTop: '1px solid var(--line)', paddingTop: 'var(--sp-3)' }}
             >
-              {meta.icon} {meta.label}
-            </div>
-            <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.25 }}>
-              {item.headline}
-            </div>
-            <div className="muted small" style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <span>{itemDate(item)}</span>
-              {item.playerId && playerInfo?.[item.playerId] && (
+              {item.playerId && (
                 <PlayerLink
                   playerId={item.playerId}
-                  name={`→ ${playerInfo[item.playerId]!.name}`}
-                  className="muted"
+                  name="View player profile"
+                  className="btn btn-ghost"
                 />
               )}
+              {!item.playerId && item.teamId && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => navigate('squad')}
+                >
+                  View squad
+                </button>
+              )}
             </div>
-          </div>
+          )}
         </div>
-
-        {/* Body */}
-        <div
-          style={{
-            borderTop: '1px solid var(--line)',
-            paddingTop: 'var(--sp-3)',
-          }}
-        >
-          {bodyParagraphs.map((para, i) => (
-            <p
-              key={i}
-              style={{
-                margin: 0,
-                marginBottom: i < bodyParagraphs.length - 1 ? 'var(--sp-3)' : 0,
-                fontSize: 13,
-                lineHeight: 1.7,
-                maxWidth: '62ch',
-              }}
-            >
-              {para}
-            </p>
-          ))}
-        </div>
-
-        {/* Footer actions */}
-        {(item.playerId || item.teamId) && (
-          <div
-            className="row"
-            style={{ borderTop: '1px solid var(--line)', paddingTop: 'var(--sp-3)' }}
-          >
-            {item.playerId && (
-              <PlayerLink
-                playerId={item.playerId}
-                name="View player profile"
-                className="btn btn-ghost"
-              />
-            )}
-            {!item.playerId && item.teamId && (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => navigate('squad')}
-              >
-                View squad
-              </button>
-            )}
-          </div>
-        )}
       </div>
-    </Panel>
+    </div>
   )
 }
 
@@ -608,67 +706,35 @@ function CoachQuotePane(props: {
   const meta = CATEGORY_META[item.category]
 
   return (
-    <div
-      className="panel"
-      style={{
-        background: 'var(--bg1)',
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--radius)',
-        padding: 0,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Accent top-bar */}
-      <div
-        style={{
-          height: 3,
-          background: 'linear-gradient(90deg, var(--violet), var(--amber))',
-        }}
-      />
+    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+      <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--amber))" />
 
-      <div style={{ padding: 'var(--sp-5)' }}>
+      <div style={{ padding: 'var(--sp-4)' }}>
         {/* Badge + date */}
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: 1.5,
-            color: meta.color,
-            marginBottom: 6,
-          }}
-        >
+        <PaneBadge color={meta.color}>
           {meta.icon} {meta.label} · PRESS CONFERENCE
-        </div>
-        <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-4)' }}>
+        </PaneBadge>
+        <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-3)' }}>
           {itemDate(item)}
         </div>
 
         {/* Divider */}
-        <div style={{ borderTop: '2px solid var(--amber)', marginBottom: 'var(--sp-5)' }} />
+        <div
+          style={{ borderTop: '1px solid var(--amber)', opacity: 0.5, marginBottom: 'var(--sp-4)' }}
+        />
 
         {/* Quote body */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--sp-4)',
-            alignItems: 'flex-start',
-          }}
-        >
+        <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
           {/* Coach photo */}
-          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <PlayerFace
-              faceId={item.speakerFaceId}
-              name={item.speaker ?? ''}
-              size={72}
-            />
+          <div style={{ flexShrink: 0 }}>
+            <PlayerFace faceId={item.speakerFaceId} name={item.speaker ?? ''} size={60} />
           </div>
 
           {/* Quote text */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
-                fontSize: 32,
+                fontSize: 28,
                 lineHeight: 0.8,
                 color: 'var(--amber)',
                 fontFamily: 'Georgia, serif',
@@ -681,11 +747,11 @@ function CoachQuotePane(props: {
             <p
               style={{
                 margin: 0,
-                fontSize: 16,
+                fontSize: 15,
                 lineHeight: 1.65,
                 fontStyle: 'italic',
                 color: 'var(--text)',
-                maxWidth: '54ch',
+                maxWidth: '58ch',
               }}
             >
               {item.body}
@@ -693,8 +759,8 @@ function CoachQuotePane(props: {
             <div
               style={{
                 marginTop: 'var(--sp-3)',
-                fontSize: 13,
-                fontWeight: 700,
+                fontSize: 12,
+                fontWeight: 600,
                 color: 'var(--muted)',
               }}
             >
@@ -706,11 +772,12 @@ function CoachQuotePane(props: {
         {/* Headline below as context */}
         <div
           style={{
-            marginTop: 'var(--sp-5)',
+            marginTop: 'var(--sp-4)',
             borderTop: '1px solid var(--line)',
             paddingTop: 'var(--sp-3)',
-            fontSize: 12,
+            fontSize: 11,
             color: 'var(--muted)',
+            fontStyle: 'italic',
           }}
         >
           {item.headline}
@@ -739,52 +806,30 @@ function PressArticlePane(props: {
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
   return (
-    <div
-      className="panel"
-      style={{
-        background: 'var(--bg1)',
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--radius)',
-        padding: 0,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Press article accent top-bar */}
-      <div
-        style={{
-          height: 3,
-          background: 'linear-gradient(90deg, var(--violet), var(--cyan))',
-        }}
-      />
+    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+      <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--cyan))" />
 
-      <div style={{ padding: 'var(--sp-5)' }}>
-        {/* Masthead row: kind badge + date + hero image */}
+      <div style={{ padding: 'var(--sp-4)' }}>
+        {/* Masthead row: kind badge + author + date | hero image */}
         <div
           style={{
             display: 'flex',
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             gap: 'var(--sp-4)',
-            marginBottom: 'var(--sp-4)',
+            marginBottom: 'var(--sp-3)',
           }}
         >
           <div>
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: 1.5,
-                color: 'var(--violet-h)',
-                marginBottom: 4,
-              }}
-            >
+            <PaneBadge color="var(--violet-h)">
               {press.kind.toUpperCase().replace(/-/g, ' ')}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            </PaneBadge>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
               {outletAuthor}
               {outlet && (
-                <span style={{ marginLeft: 6, color: 'var(--violet)', fontStyle: 'italic' }}>
+                <span
+                  style={{ marginLeft: 6, color: 'var(--violet)', fontStyle: 'italic' }}
+                >
                   {outlet}
                 </span>
               )}
@@ -797,17 +842,19 @@ function PressArticlePane(props: {
         </div>
 
         {/* Divider */}
-        <div style={{ borderTop: '2px solid var(--violet)', marginBottom: 'var(--sp-4)' }} />
+        <div
+          style={{ borderTop: '2px solid var(--violet)', opacity: 0.35, marginBottom: 'var(--sp-3)' }}
+        />
 
         {/* Big headline */}
         <div
           style={{
-            fontSize: 22,
+            fontSize: 20,
             fontWeight: 800,
             lineHeight: 1.2,
-            letterSpacing: -0.4,
+            letterSpacing: -0.3,
             color: 'var(--text)',
-            marginBottom: 'var(--sp-4)',
+            marginBottom: 'var(--sp-3)',
             maxWidth: '62ch',
           }}
         >
@@ -821,9 +868,9 @@ function PressArticlePane(props: {
               key={i}
               style={{
                 margin: 0,
-                marginBottom: i < bodyParagraphs.length - 1 ? 'var(--sp-4)' : 0,
-                fontSize: 14,
-                lineHeight: 1.8,
+                marginBottom: i < bodyParagraphs.length - 1 ? 'var(--sp-3)' : 0,
+                fontSize: 13,
+                lineHeight: 1.75,
                 color: 'var(--text)',
               }}
             >
@@ -836,7 +883,11 @@ function PressArticlePane(props: {
         {(item.playerId || item.teamId) && (
           <div
             className="row"
-            style={{ borderTop: '1px solid var(--line)', marginTop: 'var(--sp-5)', paddingTop: 'var(--sp-3)' }}
+            style={{
+              borderTop: '1px solid var(--line)',
+              marginTop: 'var(--sp-4)',
+              paddingTop: 'var(--sp-3)',
+            }}
           >
             {item.playerId && (
               <PlayerLink
