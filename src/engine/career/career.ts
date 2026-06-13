@@ -4529,8 +4529,11 @@ export class Career {
     return { teamName: squad.teamName, skaters, goalies }
   }
 
-  /** League-wide statistics table: every NHL player's season line, flat. */
-  getLeagueStatTable(): LeagueStatTableView {
+  /**
+   * Statistics table: every NHL player's season line, flat. When `onlyTeamId`
+   * is given, scoped to that one club (used by the Team → Statistics tab).
+   */
+  getLeagueStatTable(onlyTeamId?: string): LeagueStatTableView {
     const skaters: LeagueSkaterStatRow[] = []
     const goalies: LeagueGoalieStatRow[] = []
 
@@ -4541,6 +4544,7 @@ export class Career {
     }
 
     for (const teamId of this.data.league.teams) {
+      if (onlyTeamId && (teamId as string) !== onlyTeamId) continue
       const team = this.data.teams.get(teamId)
       if (!team) continue
       const abbr = team.abbreviation

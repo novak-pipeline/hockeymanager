@@ -160,7 +160,7 @@ export type WorkerRequestBody =
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
-  | { type: 'getLeagueStatTable' }
+  | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
   | { type: 'discussAgendaItem'; itemId: string }

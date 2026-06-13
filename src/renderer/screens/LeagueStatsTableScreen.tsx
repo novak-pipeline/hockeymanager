@@ -59,10 +59,11 @@ const POS_FILTERS: { id: string; label: string; match: (p: string) => boolean }[
   { id: 'D', label: 'D', match: (p) => p === 'D' },
 ]
 
-export function LeagueStatsTableScreen(): JSX.Element {
+export function LeagueStatsTableScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
+  const scoped = props.teamId !== undefined
   const { data, loading, error } = useScreenData<LeagueStatTableView>(
-    () => client.getLeagueStatTable(),
+    () => client.getLeagueStatTable(props.teamId),
     (r) => (r.type === 'leagueStatTable' ? r.table : null)
   )
 
@@ -137,7 +138,7 @@ export function LeagueStatsTableScreen(): JSX.Element {
           </button>
         ))}
         <button type="button" className={`chip${rookiesOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => setRookiesOnly((v) => !v)}>Rookies</button>
-        <button type="button" className={`chip${myTeamOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => setMyTeamOnly((v) => !v)}>My club</button>
+        {!scoped && <button type="button" className={`chip${myTeamOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none' }} onClick={() => setMyTeamOnly((v) => !v)}>My club</button>}
         <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           Min GP
           <input type="number" min={0} value={minGp} onChange={(e) => setMinGp(Math.max(0, Number(e.target.value) || 0))}
@@ -153,7 +154,7 @@ export function LeagueStatsTableScreen(): JSX.Element {
             <tr>
               <th style={{ width: 26 }}>#</th>
               <th style={{ minWidth: 150 }}>Player</th>
-              <th style={{ width: 40 }}>Tm</th>
+              {!scoped && <th style={{ width: 40 }}>Tm</th>}
               {mode === 'skaters' && <th style={{ width: 32 }}>Pos</th>}
               <th style={{ width: 32, textAlign: 'right' }}>Age</th>
               {cols.map((c) => (
@@ -169,7 +170,7 @@ export function LeagueStatsTableScreen(): JSX.Element {
               <tr key={r.playerId}>
                 <td className="num" style={{ color: 'var(--muted)', fontSize: 11 }}>{i + 1}</td>
                 <td><PlayerLink playerId={r.playerId} name={r.name} /></td>
-                <td className="muted small">{r.teamAbbr}</td>
+                {!scoped && <td className="muted small">{r.teamAbbr}</td>}
                 {mode === 'skaters' && <td className="muted small">{(r as LeagueSkaterStatRow).position}</td>}
                 <td className="num muted">{r.age}</td>
                 {cols.map((c) => (
@@ -180,7 +181,7 @@ export function LeagueStatsTableScreen(): JSX.Element {
               </tr>
             ))}
             {sorted.length === 0 && (
-              <tr><td colSpan={cols.length + 5} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players match the filters.</td></tr>
+              <tr><td colSpan={cols.length + (scoped ? 4 : 5)} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players match the filters.</td></tr>
             )}
           </tbody>
         </table>

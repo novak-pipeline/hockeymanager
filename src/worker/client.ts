@@ -205,8 +205,8 @@ export class SimClient {
     return this.send({ type: 'getTeamDynamics', teamId })
   }
 
-  getLeagueStatTable(): Promise<WorkerResponse> {
-    return this.send({ type: 'getLeagueStatTable' })
+  getLeagueStatTable(teamId?: string): Promise<WorkerResponse> {
+    return this.send(teamId ? { type: 'getLeagueStatTable', teamId } : { type: 'getLeagueStatTable' })
   }
 
   suggestToCoach(direction: string): Promise<WorkerResponse> {
