@@ -23,6 +23,7 @@ import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
 import { LeagueScreen } from './screens/LeagueScreen'
 import { BoardScreen } from './screens/BoardScreen'
+import { DataHubScreen } from './screens/DataHubScreen'
 import { PressConference } from './components/PressConference'
 import { pollPress } from './lib/press'
 
@@ -378,6 +379,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'offseason':
     case 'playoffs':
       return <LeagueScreen tab={props.screen} />
+
+    // ── Data Hub (Analytics) ──
+    case 'dataHub':
+      return <DataHubScreen />
 
     // ── Player profile (overlay/shared) ──
     case 'player':

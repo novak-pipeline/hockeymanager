@@ -86,6 +86,7 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
         { id: 'leagueScoreboard',   label: 'Scoreboard' },
         { id: 'leagueHistory',      label: 'History' },
         { id: 'scouting',           label: 'Scouting' },
+        { id: 'dataHub',            label: 'Analytics' },
         ...contextual,
       ],
     },
