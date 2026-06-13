@@ -537,6 +537,20 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
   )
 }
 
+/**
+ * Off-hand check (EHM handedness rules): a LW shoots best R-handed, RW best L;
+ * LD best L-handed, RD best R. Returns a short reason when the player is on his
+ * off-hand for that slot (a soft warning, not a block — versatile players cope).
+ */
+function offHandReason(slot: string, handedness: 'L' | 'R'): string | null {
+  const s = slot.toUpperCase()
+  if (s === 'LW' && handedness === 'L') return 'Off-hand wing (R preferred)'
+  if (s === 'RW' && handedness === 'R') return 'Off-hand wing (L preferred)'
+  if (s === 'LD' && handedness === 'R') return 'Off-side D (L preferred)'
+  if (s === 'RD' && handedness === 'L') return 'Off-side D (R preferred)'
+  return null
+}
+
 /* ── Slot button (DnD-aware, with face + depth dropdown) ── */
 
 interface SlotButtonProps {
@@ -632,8 +646,12 @@ function SlotButton({
         >
           <PlayerFace faceId={p.faceId} name={p.name} size={24} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
-              {p.name}
+            <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+              {(() => {
+                const off = offHandReason(slotDef.slot, p.handedness)
+                return off ? <span title={off} style={{ color: 'var(--amber, #f59e0b)', fontSize: 11, flexShrink: 0 }}>↔</span> : null
+              })()}
             </div>
             <StarRating value={p.overall} />
           </div>
