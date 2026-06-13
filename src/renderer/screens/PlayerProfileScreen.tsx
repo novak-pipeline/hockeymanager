@@ -157,16 +157,30 @@ function PotentialStars({ count }: { count: number }): JSX.Element {
   )
 }
 
-function ConditionBar({ value }: { value: number }): JSX.Element {
+/** FM-style condition heart: green → yellow → orange → red as fitness drops. */
+function conditionColor(pct: number): string {
+  if (pct >= 90) return 'var(--success, #22c55e)'
+  if (pct >= 75) return '#a3e635' // yellow-green
+  if (pct >= 55) return 'var(--amber, #f59e0b)'
+  if (pct >= 35) return '#fb923c' // orange
+  return 'var(--danger, #ef4444)'
+}
+
+function ConditionHeart({ value, size = 18 }: { value: number; size?: number }): JSX.Element {
   const pct = Math.max(0, Math.min(100, value))
-  const cls = pct < 50 ? 'meter-fill over' : pct < 75 ? 'meter-fill warn' : 'meter-fill'
+  const color = conditionColor(pct)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div className="meter" style={{ width: 80, height: 6 }}>
-        <div className={cls} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="small muted">{pct}%</span>
-    </div>
+    <span
+      title={`Condition ${pct}%`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+    >
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-label="condition" style={{ display: 'block' }}>
+        <path
+          d="M12 21s-7.5-4.9-10-9.6C.6 8.4 2.1 5 5.4 5c2 0 3.4 1.1 4.3 2.4l.4.6.4-.6C11.4 6.1 12.8 5 14.8 5c3.3 0 4.8 3.4 3.4 6.4C19.5 16.1 12 21 12 21z"
+          fill={color}
+        />
+      </svg>
+    </span>
   )
 }
 
@@ -792,10 +806,9 @@ function TabProfile({
           <Panel>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line)', paddingBottom: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
               <div className="stat" style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>
-                  {d.condition}<span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>/100</span>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <ConditionHeart value={d.condition} size={22} />
                 </div>
-                <ConditionBar value={d.condition} />
                 <div className="stat-label">Condition</div>
               </div>
               <div className="stat" style={{ textAlign: 'center' }}>

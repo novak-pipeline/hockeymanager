@@ -195,6 +195,12 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
   // Existing rumor ids
   const rumorSet = new Set(state.rumors.map((r) => r.playerId))
 
+  // Cap how many NEW rumor stories hit the inbox per tick, and only surface
+  // genuinely notable ones, so the feed isn't flooded with dozens of identical
+  // "expiring deal" items about depth players. Rumor STATE still tracks them all.
+  const MAX_RUMOR_NEWS_PER_TICK = 3
+  let rumorNewsEmitted = 0
+
   // ── spawn new rumors ────────────────────────────────────────────────────
   for (const team of teams.values()) {
     const teamId = team.id as string
@@ -231,13 +237,18 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
           : `${team.name} open to offers for ${p.name}`
       const body = `Sources indicate ${team.name} would listen to offers for ${p.name}${isSeller ? ', a team likely to sell before the deadline' : ''}. Interest is described as early-stage.`
 
-      newsSeeds.push({
-        category: 'trade',
-        headline,
-        body,
-        playerId: pid as string,
-        teamId
-      })
+      // Only the notable rumors reach the inbox, and only a few per day.
+      const newsworthy = isUnhappy || ovr >= 78
+      if (newsworthy && rumorNewsEmitted < MAX_RUMOR_NEWS_PER_TICK) {
+        rumorNewsEmitted++
+        newsSeeds.push({
+          category: 'trade',
+          headline,
+          body,
+          playerId: pid as string,
+          teamId
+        })
+      }
 
       arcSeeds.push({
         kind: 'tradeRumor',
