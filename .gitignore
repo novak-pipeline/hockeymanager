@@ -24,3 +24,7 @@ players_&_non-players*
 # Third-party EHM Editor tool (not ours to redistribute)
 EHM.Editor*
 *.zip
+
+# Local 3D asset working files (concept art, source models). Authored assets get
+# committed deliberately under the renderer's asset path, not from this scratch dir.
+3D assets/
