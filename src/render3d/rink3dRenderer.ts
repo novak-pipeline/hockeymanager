@@ -12,7 +12,7 @@
 
 import * as THREE from 'three'
 import type { MatchTimeline } from '@render2d/timeline'
-import type { MatchRenderer, MatchView, RinkColors } from '@render2d/rendererContract'
+import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from '@render2d/rendererContract'
 import type { GameStream, PlayerId } from '@domain'
 import {
   normXtoWorld,
@@ -109,6 +109,8 @@ interface PlayerPose {
   playerId: PlayerId | null
   mesh: THREE.Group
   jerseyNum: number
+  /** Billboarded name label sprite — null when no label data available. */
+  labelSprite: THREE.Sprite | null
 }
 
 interface ActiveCue {
@@ -138,6 +140,9 @@ export class Rink3dRenderer implements MatchRenderer {
 
   // ── Colors ─────────────────────────────────────────────────────────────────
   private colors: RinkColors = { home: 0x4c9aff, away: 0xff6b6b }
+
+  // ── Player labels ──────────────────────────────────────────────────────────
+  private labels: PlayerLabels = {}
 
   // ── Player meshes ──────────────────────────────────────────────────────────
   private homePoses: PlayerPose[] = []
@@ -547,6 +552,34 @@ export class Rink3dRenderer implements MatchRenderer {
     return new THREE.CanvasTexture(c)
   }
 
+  /** Build a billboarded canvas-texture name label sprite above the player. */
+  private makeLabelSprite(text: string): THREE.Sprite {
+    const c = document.createElement('canvas')
+    c.width = 256
+    c.height = 64
+    const ctx = c.getContext('2d')!
+    ctx.clearRect(0, 0, 256, 64)
+    // Dark semi-transparent pill background
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.beginPath()
+    ctx.roundRect(4, 8, 248, 48, 8)
+    ctx.fill()
+    // White text with dark shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'
+    ctx.shadowBlur = 4
+    ctx.fillStyle = '#ffffff'
+    ctx.font = 'bold 30px Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, 128, 34)
+    const tex = new THREE.CanvasTexture(c)
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true })
+    const sprite = new THREE.Sprite(mat)
+    // Scale: 256/64 = 4:1 aspect; 5ft wide × 1.25ft tall looks clean overhead
+    sprite.scale.set(5, 1.25, 1)
+    return sprite
+  }
+
   private makePose(
     color: number,
     isGoalie: boolean,
@@ -569,6 +602,20 @@ export class Rink3dRenderer implements MatchRenderer {
     mesh.position.set(startWx, 0, startWz)
     this.scene.add(mesh)
 
+    // Build a billboarded name label sprite if label data is available
+    let labelSprite: THREE.Sprite | null = null
+    if (playerId) {
+      const info = this.labels[playerId]
+      if (info) {
+        const labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
+        labelSprite = this.makeLabelSprite(labelText)
+        // Position: above the head (head is at LEG_H + TORSO_H + HEAD_R*0.9 ≈ 6.3ft, label ~1ft above that)
+        const labelY = LEG_H + TORSO_H + HEAD_R * 0.9 + 1.5
+        labelSprite.position.set(startWx, labelY, startWz)
+        this.scene.add(labelSprite)
+      }
+    }
+
     return {
       worldX: { pos: startWx, vel: 0 },
       worldZ: { pos: startWz, vel: 0 },
@@ -584,13 +631,15 @@ export class Rink3dRenderer implements MatchRenderer {
       playerId,
       mesh,
       jerseyNum: num,
+      labelSprite,
     }
   }
 
   // ── MatchRenderer interface ───────────────────────────────────────────────
 
-  load(timeline: MatchTimeline, colors?: RinkColors): void {
+  load(timeline: MatchTimeline, colors?: RinkColors, labels?: PlayerLabels): void {
     if (colors) this.colors = colors
+    if (labels) this.labels = labels
     this.timeline = timeline
     this.clockPos = 0
     this.playing = false
@@ -649,6 +698,12 @@ export class Rink3dRenderer implements MatchRenderer {
           }
         }
       })
+      // Dispose label sprite
+      if (p.labelSprite) {
+        this.scene.remove(p.labelSprite)
+        ;(p.labelSprite.material as THREE.SpriteMaterial).map?.dispose()
+        p.labelSprite.material.dispose()
+      }
     }
     this.homePoses = []
     this.awayPoses = []
@@ -866,6 +921,7 @@ export class Rink3dRenderer implements MatchRenderer {
     // Hide extras
     for (let i = snap.home.length; i < this.homePoses.length; i++) {
       this.homePoses[i].mesh.visible = false
+      if (this.homePoses[i].labelSprite) this.homePoses[i].labelSprite!.visible = false
     }
 
     // Away skaters
@@ -875,6 +931,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     for (let i = snap.away.length; i < this.awayPoses.length; i++) {
       this.awayPoses[i].mesh.visible = false
+      if (this.awayPoses[i].labelSprite) this.awayPoses[i].labelSprite!.visible = false
     }
 
     // Goalies
@@ -967,6 +1024,13 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.mesh.position.set(pose.worldX.pos + staggerOffset, bob, pose.worldZ.pos)
     pose.mesh.rotation.y = pose.angle
 
+    // Keep label sprite tracking the player (billboard stays above head regardless of bob)
+    if (pose.labelSprite) {
+      const labelY = bob + LEG_H + TORSO_H + HEAD_R * 0.9 + 1.5
+      pose.labelSprite.position.set(pose.worldX.pos + staggerOffset, labelY, pose.worldZ.pos)
+      pose.labelSprite.visible = pose.mesh.visible
+    }
+
     // Leg swing (apply to leg children index 1,2)
     const legAngle = legSwingAngle(pose.animTime, pose.speed)
     const children = pose.mesh.children
@@ -1011,6 +1075,14 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.mesh.position.set(pose.worldX.pos, butterfly ? -0.4 : 0, pose.worldZ.pos)
     pose.mesh.rotation.y = pose.angle
     pose.mesh.rotation.z = butterfly ? 0.3 : 0
+
+    // Keep label sprite above goalie
+    if (pose.labelSprite) {
+      const baseY = butterfly ? -0.4 : 0
+      const labelY = baseY + LEG_H + TORSO_H + HEAD_R * 0.9 + 1.5
+      pose.labelSprite.position.set(pose.worldX.pos, labelY, pose.worldZ.pos)
+      pose.labelSprite.visible = pose.mesh.visible
+    }
   }
 
   // ── Event cues ────────────────────────────────────────────────────────────

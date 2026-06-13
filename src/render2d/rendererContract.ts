@@ -23,6 +23,19 @@ export interface RinkColors {
   away: number
 }
 
+/**
+ * Per-player label data passed to renderers so they can draw name/number
+ * overlays without coupling to the domain Player type.
+ */
+export interface PlayerLabel {
+  lastName: string
+  /** Jersey number — omitted when unavailable (e.g. quick-sim, tests). */
+  number?: number
+}
+
+/** Map from PlayerId → label data. Passed as an optional parameter to load(). */
+export type PlayerLabels = Record<string, PlayerLabel>
+
 /** Per-frame UI state pushed to the host (scoreboard, scrubber). */
 export interface MatchView {
   period: number
@@ -38,7 +51,7 @@ export interface MatchView {
 
 export interface MatchRenderer {
   /** Swap in a new game (resets playback to 0:00). */
-  load(timeline: MatchTimeline, colors?: RinkColors): void
+  load(timeline: MatchTimeline, colors?: RinkColors, labels?: PlayerLabels): void
   /** Subscribe to per-frame scoreboard state. */
   onUpdate(cb: (v: MatchView) => void): void
   play(): void

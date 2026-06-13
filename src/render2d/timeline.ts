@@ -38,6 +38,14 @@ export interface PosSnapshot {
   awayGoalie: XY
   puck: XY
   carrier: PlayerId | null
+  /** Player IDs at each skater index — parallel to home[]. Undefined in snapshots from older code paths. */
+  homeIds?: (PlayerId | undefined)[]
+  /** Player IDs at each skater index — parallel to away[]. */
+  awayIds?: (PlayerId | undefined)[]
+  /** Goalie player ID (home side). */
+  homeGoalieId?: PlayerId
+  /** Goalie player ID (away side). */
+  awayGoalieId?: PlayerId
 }
 
 export interface ClockLabel {
@@ -174,13 +182,19 @@ export class MatchTimeline {
       ? (absT < stoppageT ? { ...a.puck } : { ...b.puck })
       : lerpXY(a.puck, b.puck, f)
 
+    // For player IDs use the dominant frame (same side-selection as carrier/blendOne)
+    const dom = f < 0.5 ? a : b
     return {
       home: blend(a.home, b.home, f),
       away: blend(a.away, b.away, f),
       homeGoalie: blendOne(a.homeGoalie, b.homeGoalie, f),
       awayGoalie: blendOne(a.awayGoalie, b.awayGoalie, f),
       puck,
-      carrier: f < 0.5 ? a.puckCarrier : b.puckCarrier
+      carrier: dom.puckCarrier,
+      homeIds: dom.home.map((s) => s.player),
+      awayIds: dom.away.map((s) => s.player),
+      homeGoalieId: dom.homeGoalie.player,
+      awayGoalieId: dom.awayGoalie.player,
     }
   }
 
@@ -249,7 +263,11 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
     homeGoalie: { ...frame.homeGoalie.pos },
     awayGoalie: { ...frame.awayGoalie.pos },
     puck: { ...frame.puck },
-    carrier: frame.puckCarrier
+    carrier: frame.puckCarrier,
+    homeIds: frame.home.map((s) => s.player),
+    awayIds: frame.away.map((s) => s.player),
+    homeGoalieId: frame.homeGoalie.player,
+    awayGoalieId: frame.awayGoalie.player,
   }
 }
 

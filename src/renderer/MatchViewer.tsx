@@ -7,7 +7,7 @@ import {
   buildHighlights,
   type HighlightSegment,
 } from '@render2d'
-import type { MatchRenderer, RinkColors } from '@render2d'
+import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
@@ -281,8 +281,14 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           viewRef.current = v
           _onUpdate(v)
         })
+        // Build player labels: last name + jersey number (number not in WatchedGame yet, omit)
+        const playerLabels: PlayerLabels = {}
+        for (const [id, fullName] of Object.entries(game.playerNames)) {
+          const parts = fullName.trim().split(/\s+/)
+          playerLabels[id] = { lastName: parts[parts.length - 1] ?? fullName }
+        }
         // Start paused at speed=2; will play when user picks a mode
-        r.load(timeline, colors)
+        r.load(timeline, colors, playerLabels)
         r.setSpeed(2)
 
         requestAnimationFrame(() => {

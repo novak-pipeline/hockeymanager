@@ -6,16 +6,16 @@
  * loop driven by a wall-clock playback position, and the sprites for skaters,
  * goalies and the puck. It computes no outcomes — that rule is the keystone.
  */
-import { Application, Container, Graphics } from 'pixi.js'
+import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js'
 // Electron's CSP forbids unsafe-eval; this side-effect import swaps Pixi's
 // eval-based shader/uniform codegen for no-eval polyfills. Must load before any
 // renderer is created.
 import 'pixi.js/unsafe-eval'
 import { RINK_ASPECT, type XY } from '@domain'
 import type { MatchTimeline } from './timeline'
-import type { MatchRenderer, MatchView, RinkColors } from './rendererContract'
+import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from './rendererContract'
 
-export type { MatchRenderer, MatchView, RinkColors } from './rendererContract'
+export type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from './rendererContract'
 
 const ICE = 0xf2f6fb
 const LINE_RED = 0xd33b3b
@@ -36,8 +36,15 @@ export class RinkRenderer implements MatchRenderer {
   private puck = new Graphics()
   private carrierRing = new Graphics()
 
+  // One Text label per skater slot + goalies (reused across frames, never allocated per-frame)
+  private readonly homeLabels: Text[] = []
+  private readonly awayLabels: Text[] = []
+  private homeGalLabel: Text | null = null
+  private awayGalLabel: Text | null = null
+
   private timeline: MatchTimeline | null = null
   private colors: RinkColors = { home: 0x4aa3ff, away: 0xff6b6b }
+  private labels: PlayerLabels = {}
   private clockPos = 0 // absolute seconds into the game
   private playing = false
   private speed = 1
@@ -136,17 +143,53 @@ export class RinkRenderer implements MatchRenderer {
     return g
   }
 
-  load(timeline: MatchTimeline, colors?: RinkColors): void {
+  private makeLabel(): Text {
+    const style = new TextStyle({
+      fontFamily: 'Arial, sans-serif',
+      fontSize: 11,
+      fontWeight: 'bold',
+      fill: '#ffffff',
+      stroke: { color: '#000000', width: 3 },
+      align: 'center',
+      dropShadow: {
+        alpha: 0.8,
+        angle: Math.PI / 4,
+        blur: 2,
+        color: '#000000',
+        distance: 1,
+      },
+    })
+    const t = new Text({ text: '', style })
+    t.anchor.set(0.5, 1) // bottom-center anchored so label sits just above the disc
+    t.visible = false
+    return t
+  }
+
+  private setLabelText(label: Text, id: string | null): void {
+    if (!id) { label.visible = false; return }
+    const info = this.labels[id]
+    if (!info) { label.visible = false; return }
+    label.text = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
+    label.visible = true
+  }
+
+  load(timeline: MatchTimeline, colors?: RinkColors, labels?: PlayerLabels): void {
     if (colors) this.colors = colors
+    if (labels) this.labels = labels
     this.timeline = timeline
     this.clockPos = 0
     this.playing = false
 
-    // Tear down any previous sprites.
+    // Tear down any previous sprites and labels.
     for (const s of [...this.homeSprites, ...this.awaySprites]) s.destroy()
     this.homeSprites.length = 0
     this.awaySprites.length = 0
     for (const s of [this.homeGoalie, this.awayGoalie, this.puck, this.carrierRing]) s.destroy()
+    for (const l of [...this.homeLabels, ...this.awayLabels]) l.destroy()
+    this.homeLabels.length = 0
+    this.awayLabels.length = 0
+    if (this.homeGalLabel) { this.homeGalLabel.destroy(); this.homeGalLabel = null }
+    if (this.awayGalLabel) { this.awayGalLabel.destroy(); this.awayGalLabel = null }
 
     this.carrierRing = new Graphics()
     this.carrierRing.circle(0, 0, SKATER_R + 4).stroke({ color: 0xffd24a, width: 3 })
@@ -159,11 +202,21 @@ export class RinkRenderer implements MatchRenderer {
       this.homeSprites.push(hs)
       this.awaySprites.push(as)
       this.world.addChild(hs, as)
+
+      const hl = this.makeLabel()
+      const al = this.makeLabel()
+      this.homeLabels.push(hl)
+      this.awayLabels.push(al)
+      this.world.addChild(hl, al)
     }
     this.homeGoalie = this.makeDisc(this.colors.home, GOALIE_R, 0xffffff)
     this.awayGoalie = this.makeDisc(this.colors.away, GOALIE_R, 0xffffff)
     this.puck = this.makeDisc(PUCK, PUCK_R, 0x000000)
     this.world.addChild(this.homeGoalie, this.awayGoalie, this.puck)
+
+    this.homeGalLabel = this.makeLabel()
+    this.awayGalLabel = this.makeLabel()
+    this.world.addChild(this.homeGalLabel, this.awayGalLabel)
 
     this.renderAt(0)
     this.emit()
@@ -171,6 +224,10 @@ export class RinkRenderer implements MatchRenderer {
 
   private place(g: Graphics, p: XY): void {
     g.position.set(this.mx(p.x), this.my(p.y))
+  }
+
+  private placeLabel(label: Text, sprite: Graphics, offsetY = SKATER_R + 2): void {
+    label.position.set(sprite.position.x, sprite.position.y - offsetY)
   }
 
   private renderAt(absT: number): void {
@@ -182,14 +239,28 @@ export class RinkRenderer implements MatchRenderer {
       if (snap.home[i]) {
         this.homeSprites[i].visible = true
         this.place(this.homeSprites[i], snap.home[i])
+        const hl = this.homeLabels[i]
+        if (hl) {
+          this.setLabelText(hl, snap.homeIds?.[i] ?? null)
+          if (hl.visible) this.placeLabel(hl, this.homeSprites[i])
+        }
       } else {
         this.homeSprites[i].visible = false
+        const hl = this.homeLabels[i]
+        if (hl) hl.visible = false
       }
       if (snap.away[i]) {
         this.awaySprites[i].visible = true
         this.place(this.awaySprites[i], snap.away[i])
+        const al = this.awayLabels[i]
+        if (al) {
+          this.setLabelText(al, snap.awayIds?.[i] ?? null)
+          if (al.visible) this.placeLabel(al, this.awaySprites[i])
+        }
       } else {
         this.awaySprites[i].visible = false
+        const al = this.awayLabels[i]
+        if (al) al.visible = false
       }
     }
     this.place(this.homeGoalie, snap.homeGoalie)
@@ -197,6 +268,16 @@ export class RinkRenderer implements MatchRenderer {
     this.place(this.puck, snap.puck)
     this.carrierRing.position.copyFrom(this.puck.position)
     this.carrierRing.visible = snap.carrier !== null
+
+    // Goalie labels
+    if (this.homeGalLabel) {
+      this.setLabelText(this.homeGalLabel, snap.homeGoalieId ?? null)
+      if (this.homeGalLabel.visible) this.placeLabel(this.homeGalLabel, this.homeGoalie, GOALIE_R + 2)
+    }
+    if (this.awayGalLabel) {
+      this.setLabelText(this.awayGalLabel, snap.awayGoalieId ?? null)
+      if (this.awayGalLabel.visible) this.placeLabel(this.awayGalLabel, this.awayGoalie, GOALIE_R + 2)
+    }
   }
 
   private tick = (): void => {
