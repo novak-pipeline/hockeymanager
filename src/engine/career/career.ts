@@ -4038,7 +4038,8 @@ export class Career {
       isOwn: isOwnPlayer,
     }
 
-    return buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx)
+    const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
+    return buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
   }
 
   /** Radar comparison view for two players (used by the Phase C compare UI). */

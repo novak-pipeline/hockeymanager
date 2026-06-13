@@ -22,6 +22,7 @@ export type { RadarAxes, RadarView } from '@engine/ratings/radar'
 export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
 export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
+export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
@@ -380,6 +381,11 @@ export interface PlayerProfileView extends PlayerBadge {
   profileContract: ProfileContractView | null
   /** Scout-generated prose report (fog-aware). */
   scoutReport: import('@engine/career/scoutReport').ScoutReportView
+  /**
+   * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
+   * Always present when PlayerProfileView is built.
+   */
+  scoutPanel: import('@engine/career/multiScout').ScoutPanel
   /**
    * Staff-gathered mindset: plain-English thoughts on this player's outlook.
    * Present for own players always; present for scouted opponents when knowledge ≥ 40.

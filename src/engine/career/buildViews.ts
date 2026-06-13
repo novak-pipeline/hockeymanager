@@ -23,6 +23,8 @@ import {
 } from '@engine/career/personalityRead'
 import type { PersonalityReadView } from '@engine/career/personalityRead'
 import { buildScoutReport } from '@engine/career/scoutReport'
+import { buildScoutPanel } from '@engine/career/multiScout'
+import type { StaffMember } from '@engine/league/staff'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -511,7 +513,14 @@ export interface MindsetBuildCtx {
   isOwn: boolean
 }
 
-export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCtx, mindsetCtx?: MindsetBuildCtx): PlayerProfileView {
+export function buildPlayerProfile(
+  ctx: ViewCtx,
+  playerId: PlayerId,
+  fog?: FogCtx,
+  mindsetCtx?: MindsetBuildCtx,
+  /** The user team's scouts — used to build the multi-scout panel. */
+  userScouts?: StaffMember[]
+): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
   let teamId: string | null = null
@@ -595,6 +604,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
       : buildPersonalityRead(p, fog.scouting)
   const potStars = potentialStars(p)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
+  const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
 
   // Mindset (optional; only built when mindsetCtx provided, or when no fog = own player)
   let mindset: import('@engine/career/playerMindset').MindsetView | undefined
@@ -641,6 +651,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
     honours: buildHonours(p),
     profileContract: buildProfileContract(p, teamId !== null),
     scoutReport,
+    scoutPanel,
     ...(mindset !== undefined ? { mindset } : {}),
   }
 }

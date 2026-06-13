@@ -22,6 +22,9 @@ import type {
   ReportCard,
   ReportGrade,
   MindsetView,
+  ScoutPanel,
+  ScoutRead,
+  RiskBand,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -1036,6 +1039,155 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
   )
 }
 
+/* ── Risk band colour ── */
+function riskColor(band: RiskBand): string {
+  if (band === 'High') return 'var(--danger)'
+  if (band === 'Medium') return 'var(--accent2)'
+  return 'var(--success)'
+}
+
+/* ── Individual scout read row ── */
+function ScoutReadRow({ read }: { read: ScoutRead }): JSX.Element {
+  const tierColor =
+    read.tier === 'Star' ? 'var(--accent)' :
+    read.tier === 'Key' ? 'var(--cyan)' :
+    read.tier === 'Core' ? 'var(--success)' :
+    read.tier === 'Prospect' ? 'var(--violet-h)' :
+    'var(--muted)'
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '28px 1fr auto',
+      alignItems: 'flex-start',
+      gap: 10,
+      padding: '8px 0',
+      borderTop: '1px solid var(--line)',
+    }}>
+      {/* Face or initials */}
+      <div style={{
+        width: 28, height: 28, borderRadius: '50%',
+        background: 'var(--panel2)',
+        border: '1px solid var(--line)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+        overflow: 'hidden', flexShrink: 0,
+      }}>
+        {read.faceId
+          ? <img src={`faces/${read.faceId}.png`} alt={read.scoutName}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : read.scoutName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+        }
+      </div>
+
+      {/* Name + take */}
+      <div className="stack" style={{ gap: 2 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{read.scoutName}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{read.take}</span>
+      </div>
+
+      {/* Tier chip */}
+      <span style={{
+        fontSize: 10, fontWeight: 700, color: tierColor,
+        border: `1px solid ${tierColor}`,
+        borderRadius: 'var(--radius-sm)',
+        padding: '2px 8px',
+        whiteSpace: 'nowrap',
+        alignSelf: 'center',
+      }}>
+        {read.tierLabel}
+      </span>
+    </div>
+  )
+}
+
+/* ── Full scout panel block ── */
+function ScoutPanelBlock({ panel }: { panel: ScoutPanel }): JSX.Element {
+  const consensusTierColor =
+    panel.consensusTier === 'Star' ? 'var(--accent)' :
+    panel.consensusTier === 'Key' ? 'var(--cyan)' :
+    panel.consensusTier === 'Core' ? 'var(--success)' :
+    panel.consensusTier === 'Prospect' ? 'var(--violet-h)' :
+    'var(--muted)'
+
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      {/* ── Scout reads list ── */}
+      <Panel title="Scout Opinions">
+        <div>
+          {panel.reads.map((r) => (
+            <ScoutReadRow key={r.scoutId} read={r} />
+          ))}
+        </div>
+      </Panel>
+
+      {/* ── Consensus + dissent + comp + risk ── */}
+      <div className="grid grid-2" style={{ alignItems: 'start' }}>
+        <Panel title="Consensus">
+          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+            {/* Consensus tier */}
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>Scouts project:</span>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: consensusTierColor,
+                border: `1px solid ${consensusTierColor}`,
+                borderRadius: 'var(--radius-sm)',
+                padding: '2px 10px',
+              }}>
+                {panel.consensusTierLabel}
+              </span>
+            </div>
+            {/* Dissent note */}
+            {panel.dissentNote && (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--accent2)', lineHeight: 1.5 }}>
+                {panel.dissentNote}
+              </p>
+            )}
+            {!panel.dissentNote && (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                Scouts are in full agreement.
+              </p>
+            )}
+            {/* NHL comp */}
+            {panel.comp && (
+              <div style={{
+                marginTop: 4,
+                padding: '6px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--panel2)',
+                border: '1px solid var(--line)',
+              }}>
+                <span className="muted small">Plays like </span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>{panel.comp.name}</span>
+                <span className="muted small"> — {panel.comp.blurb}</span>
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Risk Profile">
+          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <span style={{
+                display: 'inline-block',
+                width: 10, height: 10, borderRadius: '50%',
+                background: riskColor(panel.risk.band),
+                flexShrink: 0,
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: riskColor(panel.risk.band) }}>
+                {panel.risk.band} Risk
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+              {panel.risk.upsideNote}
+            </p>
+          </div>
+        </Panel>
+      </div>
+    </div>
+  )
+}
+
 function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
   const sr = d.scoutReport
   const isGoalie = d.position === 'G'
@@ -1128,6 +1280,9 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
           </div>
         </Panel>
       </div>
+
+      {/* ── Multi-scout panel ── */}
+      <ScoutPanelBlock panel={d.scoutPanel} />
     </div>
   )
 }
