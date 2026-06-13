@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import type { NewsCategory } from '@domain'
-import type { InboxView, NewsItem } from '../../worker/protocol'
+import type { InboxView, NewsItem, PlayerInteractionView } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /** Category metadata: icon character and accent color class. */
@@ -217,6 +218,17 @@ export function InboxScreen(): JSX.Element {
     refetch()
   }
 
+  async function handleRespond(interactionId: string, optionId: string) {
+    const res = await client.respondToInteraction(interactionId, optionId)
+    if (res.type === 'error') {
+      toast(res.message, 'error')
+    } else {
+      refetch()
+    }
+  }
+
+  const interactions = data.interactions ?? []
+
   return (
     <section className="stack">
       <ScreenHeader title="Inbox">
@@ -232,6 +244,15 @@ export function InboxScreen(): JSX.Element {
           </button>
         </div>
       </ScreenHeader>
+
+      {/* Player → GM concerns awaiting a response */}
+      {interactions.length > 0 && (
+        <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+          {interactions.map((ix) => (
+            <InteractionCard key={ix.id} interaction={ix} onRespond={handleRespond} />
+          ))}
+        </div>
+      )}
 
       {/* Category filter chips */}
       <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
@@ -384,6 +405,78 @@ export function InboxScreen(): JSX.Element {
         )}
       </div>
     </section>
+  )
+}
+
+const KIND_LABEL: Record<string, string> = {
+  iceTime: 'Wants a bigger role',
+  future: 'Contract / future',
+  unhappy: 'Unsettled',
+  feud: 'Dressing-room friction',
+  tradeRequest: 'Trade request',
+}
+
+/**
+ * Player → GM concern card with response options. The GM's choice moves the
+ * player's morale (and the room) deterministically based on their personality.
+ */
+function InteractionCard(props: {
+  interaction: PlayerInteractionView
+  onRespond: (interactionId: string, optionId: string) => void | Promise<void>
+}): JSX.Element {
+  const { interaction: ix, onRespond } = props
+  const [busy, setBusy] = useState(false)
+  const accent = ix.severity === 'serious' ? 'var(--danger, #ef4444)' : 'var(--amber, #f59e0b)'
+
+  async function pick(optionId: string) {
+    if (busy) return
+    setBusy(true)
+    await onRespond(ix.id, optionId)
+    setBusy(false)
+  }
+
+  return (
+    <div
+      className="panel"
+      style={{ padding: 0, overflow: 'hidden', border: `1px solid ${accent}55` }}
+    >
+      <div style={{ height: 3, background: accent }} />
+      <div style={{ padding: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)', alignItems: 'flex-start' }}>
+        <div style={{ flexShrink: 0 }}>
+          <PlayerFace faceId={ix.faceId} name={ix.playerName} size={56} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 4 }}>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: 1,
+                color: accent,
+              }}
+            >
+              {KIND_LABEL[ix.kind] ?? 'Player concern'}
+            </span>
+            <PlayerLink playerId={ix.playerId} name={ix.playerName} className="small" />
+          </div>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, maxWidth: '60ch' }}>{ix.message}</p>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
+            {ix.options.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => void pick(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

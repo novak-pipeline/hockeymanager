@@ -189,6 +189,10 @@ export class SimClient {
     return this.send({ type: 'markNewsRead', ids })
   }
 
+  respondToInteraction(interactionId: string, optionId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'respondToInteraction', interactionId, optionId })
+  }
+
   proposeTrade(proposal: TradeProposal): Promise<WorkerResponse> {
     return this.send({ type: 'proposeTrade', proposal })
   }

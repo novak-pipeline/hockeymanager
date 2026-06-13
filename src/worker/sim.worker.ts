@@ -116,6 +116,11 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'markNewsRead':
       must().markNewsRead(req.ids)
       return { id: req.id, type: 'ok' }
+    case 'respondToInteraction': {
+      const res = must().respondToInteraction(req.interactionId, req.optionId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not respond.')
+      return { id: req.id, type: 'ok' }
+    }
     case 'proposeTrade':
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
     case 'acceptTrade':

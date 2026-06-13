@@ -125,6 +125,12 @@ import {
   tickLockerRoom,
   type LockerRoomState,
 } from '@engine/league/lockerRoom'
+import {
+  applyInteractionResponse,
+  maybeRaiseInteraction,
+  INTERACTION_COOLDOWN_DAYS,
+  type PlayerInteraction,
+} from '@engine/league/interactions'
 import { lineSynergy, pairSynergy } from '@engine/league/archetypes'
 import {
   createInitialTentpolesState,
@@ -262,6 +268,7 @@ import {
   type FinanceView,
   type HistoryView,
   type InboxView,
+  type PlayerInteractionView,
   type LeagueLeadersView,
   type LeagueStatsView,
   type LeagueTeamsView,
@@ -461,6 +468,9 @@ export class Career {
   private readonly ppAssists = new Map<PlayerId, number>()
   private news: NewsItem[] = []
   private newsCounter = 0
+  /** Player→GM concerns (open + recently resolved). Story-first core. */
+  private interactions: PlayerInteraction[] = []
+  private interactionCounter = 0
   private playoffs: PlayoffsState | null = null
   private offseason: OffseasonState | null = null
   private picks: DraftPick[] = []
@@ -1165,6 +1175,121 @@ export class Career {
     }
   }
 
+  /* ────────────────────── player → GM interactions ────────────────────── */
+
+  private static readonly INTERACTION_NS = 7110
+  /** Keep at most this many open concerns at once, and this many total stored. */
+  private static readonly MAX_OPEN_INTERACTIONS = 3
+  private static readonly INTERACTION_HISTORY_LIMIT = 40
+
+  /** Scan the user roster after a match day and maybe raise new concerns. */
+  private maybeRaiseInteractions(day: number): void {
+    const open = this.interactions.filter((i) => i.status === 'open')
+    if (open.length >= Career.MAX_OPEN_INTERACTIONS) return
+
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return
+    const lr = this.lockerRooms.get(this.userTeamId) ?? null
+
+    // Players who already have an open concern or a recent one stay quiet.
+    const busy = new Set<string>()
+    for (const i of this.interactions) {
+      if (i.status === 'open') busy.add(i.playerId)
+      else if (day - i.day < INTERACTION_COOLDOWN_DAYS) busy.add(i.playerId)
+    }
+
+    let slots = Career.MAX_OPEN_INTERACTIONS - open.length
+    for (const pid of team.roster) {
+      if (slots <= 0) break
+      const pidStr = pid as unknown as string
+      if (busy.has(pidStr)) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+
+      // Name of any feuding teammate, for the message text.
+      let feudName: string | null = null
+      if (lr) {
+        const feud = lr.relationships.find(
+          (r) => r.kind === 'feud' && (r.a === pidStr || r.b === pidStr)
+        )
+        if (feud) {
+          const otherId = feud.a === pidStr ? feud.b : feud.a
+          feudName = this.data.players.get(asPlayerId(otherId))?.name ?? null
+        }
+      }
+
+      const interaction = maybeRaiseInteraction({
+        player: p,
+        lockerRoom: lr,
+        feudName,
+        year: this.year,
+        day,
+        rng: this.rngFor(Career.INTERACTION_NS, day, Career.pidNum(pidStr)),
+        nextId: `pi${this.interactionCounter}`,
+      })
+      if (!interaction) continue
+
+      interaction.teamId = this.userTeamId as string
+      this.interactionCounter++
+      this.interactions.unshift(interaction)
+      slots--
+      // The interaction surfaces as a card at the top of the inbox (see
+      // getInbox); no separate news item is pushed so it doesn't crowd the feed.
+    }
+
+    // Trim resolved history so the save doesn't grow unbounded.
+    if (this.interactions.length > Career.INTERACTION_HISTORY_LIMIT) {
+      const keep: PlayerInteraction[] = []
+      for (const i of this.interactions) {
+        if (i.status === 'open' || keep.length < Career.INTERACTION_HISTORY_LIMIT) keep.push(i)
+      }
+      this.interactions = keep.slice(0, Career.INTERACTION_HISTORY_LIMIT)
+    }
+  }
+
+  /** GM responds to an open concern; applies morale/room effects deterministically. */
+  respondToInteraction(interactionId: string, optionId: string): { ok: boolean; message?: string } {
+    const interaction = this.interactions.find((i) => i.id === interactionId)
+    if (!interaction) return { ok: false, message: 'That conversation is no longer available.' }
+    if (interaction.status !== 'open') return { ok: false, message: 'You have already responded.' }
+    const option = interaction.options.find((o) => o.id === optionId)
+    if (!option) return { ok: false, message: 'Unknown response.' }
+
+    const player = this.data.players.get(asPlayerId(interaction.playerId))
+    if (!player) return { ok: false, message: 'Player not found.' }
+
+    const result = applyInteractionResponse({ interaction, option, player })
+
+    // Apply morale to the player.
+    player.morale = Math.max(0, Math.min(100, player.morale + result.moraleDelta))
+
+    // Ripple to the room mood.
+    const lr = this.lockerRooms.get(asTeamId(interaction.teamId))
+    if (lr) lr.roomMorale = Math.max(0, Math.min(100, lr.roomMorale + result.roomMoraleDelta))
+
+    interaction.status = 'resolved'
+    interaction.chosenOptionId = optionId
+    interaction.outcome = result.outcome
+
+    if (result.news) {
+      this.pushNews('league', result.news.headline, result.news.body, {
+        teamId: interaction.teamId,
+        playerId: interaction.playerId,
+      })
+      // A formal trade demand becomes a story arc.
+      createArc(
+        this.arcsState,
+        'tradeRumor',
+        { playerIds: [interaction.playerId], teamIds: [interaction.teamId] },
+        `${player.name} has requested a trade`,
+        this.currentDay,
+        this.year
+      )
+    }
+
+    return { ok: true }
+  }
+
   /** AI-AI deadline-day flurry, exactly once per season when the deadline is reached. */
   private runDeadlineIfDue(day: number): void {
     if (day < this.deadlineDay) return
@@ -1370,6 +1495,9 @@ export class Career {
       if (won === undefined) continue
       this.tickTeamLockerRoom(teamId, day, won)
     }
+
+    /* ── player→GM concerns for the user club (story-first core) ── */
+    this.maybeRaiseInteractions(day)
 
     /* ── trade rumor mill + the deadline-day flurry ── */
     if (day <= this.deadlineDay) {
@@ -4288,7 +4416,27 @@ export class Career {
     // Coach-quote items carry speakerFaceId directly on the item — no extra lookup needed.
     // The InboxScreen reads item.speaker and item.speakerFaceId to render the quote card.
 
-    return { items, unread, playerInfo, teamInfo }
+    // Open player→GM concerns, newest first.
+    const interactions: PlayerInteractionView[] = []
+    for (const i of this.interactions) {
+      if (i.status !== 'open') continue
+      const p = this.data.players.get(asPlayerId(i.playerId))
+      const view: PlayerInteractionView = {
+        id: i.id,
+        playerId: i.playerId,
+        playerName: p?.name ?? 'Player',
+        kind: i.kind,
+        severity: i.severity,
+        message: i.message,
+        day: i.day,
+        year: i.year,
+        options: i.options.map((o) => ({ id: o.id, label: o.label })),
+      }
+      if (p?.faceId !== undefined) view.faceId = p.faceId
+      interactions.push(view)
+    }
+
+    return { items, unread, playerInfo, teamInfo, ...(interactions.length > 0 ? { interactions } : {}) }
   }
 
   getLastBoxScore(): BoxScoreView | null {
@@ -5136,6 +5284,8 @@ export class Career {
       lockerRooms: [...this.lockerRooms.entries()].map(
         ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
       ),
+      interactions: this.interactions.map((i) => structuredClone(i)),
+      interactionCounter: this.interactionCounter,
       tentpoles: structuredClone(this.tentpoles),
       storyMisc: {
         pointStreaks: [...this.pointStreaks],
@@ -5229,6 +5379,11 @@ export class Career {
     } else {
       career.initLockerRooms()
     }
+    // Player→GM concerns (optional/additive; old saves start with none).
+    if (snapshot.interactions) {
+      career.interactions = snapshot.interactions.map((i) => structuredClone(i))
+    }
+    career.interactionCounter = snapshot.interactionCounter ?? 0
     if (snapshot.expectations) {
       career.expectationsState = structuredClone(snapshot.expectations)
     } else {

@@ -71,6 +71,7 @@ export type {
   TeamPlayerStatRow,
   TeamPlayerStatsView,
 } from '@engine/career/views'
+export type { PlayerInteractionView, InteractionOptionView } from '@engine/career/views'
 export { RADAR_AXES } from '@engine/career/views'
 import type {
   AgmReportView,
@@ -156,6 +157,7 @@ export type WorkerRequestBody =
   | { type: 'setLines'; lines: LinesUpdate }
   | { type: 'setTactics'; tactics: TeamTactics }
   | { type: 'markNewsRead'; ids: string[] }
+  | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }

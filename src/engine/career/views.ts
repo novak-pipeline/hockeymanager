@@ -38,6 +38,8 @@ import type {
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
+import type { PlayerInteraction } from '@engine/league/interactions'
+export type { PlayerInteraction, InteractionKind } from '@engine/league/interactions'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
 import type { StaffMember, AgmReport } from '@engine/league/staff'
 import type { TeamLeadersView } from '@engine/league/playerRating'
@@ -836,9 +838,34 @@ export interface AhlSquadView {
 
 /* ────────────────────────── inbox ────────────────────────── */
 
+/** One response choice the GM can pick for a player concern. */
+export interface InteractionOptionView {
+  id: string
+  label: string
+}
+
+/** An open player→GM concern surfaced in the inbox for a response. */
+export interface PlayerInteractionView {
+  id: string
+  playerId: string
+  playerName: string
+  faceId?: string
+  kind: string
+  severity: 'mild' | 'serious'
+  message: string
+  day: number
+  year: number
+  options: InteractionOptionView[]
+}
+
 export interface InboxView {
   items: NewsItem[]
   unread: number
+  /**
+   * Open player→GM concerns awaiting a response. Optional/additive for save
+   * compat (absent = no interactions surfaced).
+   */
+  interactions?: PlayerInteractionView[]
   /**
    * Minimal player info keyed by playerId for items that reference a player.
    * Enables the inbox to show PlayerFace thumbnails and link to profiles.
@@ -919,6 +946,9 @@ export interface CareerSnapshot {
   expectations?: ExpectationsState
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
+  /** Player→GM concerns (open + recently resolved). Optional/additive. */
+  interactions?: PlayerInteraction[]
+  interactionCounter?: number
   tentpoles?: TentpolesState
   /** Small story-layer counters not derivable from the states above. */
   storyMisc?: {
