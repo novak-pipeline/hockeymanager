@@ -149,6 +149,23 @@ const TAKEAWAY_P = ((2 * RATES.takeaways) / DECISION_TICKS_PER_GAME) * 2.25
 const GIVEAWAY_P = (2 * RATES.giveaways) / DECISION_TICKS_PER_GAME
 const PENALTY_P = RATES.penalties / DECISION_TICKS_PER_GAME
 
+// ---------------------------------------------------------------------------
+// EHM-depth tactics multiplier helpers.
+// Each new optional field defaults to 0.5 → multiplier 1.0, so generated
+// teams (tactics = defaults / undefined) produce byte-identical simulation
+// output and the calibration tests remain green.
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a 0–1 slider centred at 0.5 to a multiplier in [lowEnd, highEnd].
+ * At 0.5 the result is exactly 1.0 (neutral).
+ */
+function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): number {
+  const v = val ?? 0.5
+  if (v <= 0.5) return 1 + (v - 0.5) * 2 * (1 - lowEnd)
+  return 1 + (v - 0.5) * 2 * (highEnd - 1)
+}
+
 // Passing tempo: base per-tick chance, raised by defensive pressure and pace.
 const PASS_BASE = 0.06
 // Force the carrier to move the puck if he holds it longer than this (ticks).
@@ -1454,8 +1471,14 @@ function simPeriod(
     // fictional/generated players (=> 0), so calibration is unaffected.
     const flairBoost = cs.player.flair !== undefined ? (cs.player.flair - 50) / 200 : 0
     const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG) + flairBoost
+    // dumping > 0.5 compresses the effective gap (makes dump more attractive);
+    // gapControl on the defending team also reduces effective gap.
+    // Both are neutral at 0.5 (multiplier 1.0 → gap unchanged).
+    const dumpMult = sliderMult(atk.team.tactics.dumping, 0.5, 1.6)   // >1 = prefer dump
+    const gapMult  = sliderMult(def.team.tactics.gapControl, 0.6, 1.5) // >1 = tighter gap
+    const effectiveGap = gap / (dumpMult * gapMult)
     const pick = director.sampleEntry({
-      gapFt: gap,
+      gapFt: effectiveGap,
       skill,
       pace: tempo.pace,
       passRisk: tempo.passRisk,
@@ -1683,11 +1706,13 @@ function simPeriod(
 
     // 1. Penalties — rolled for both teams each tick, weighted by proneness.
     //    A minor stops play: faceoff in the offender's end, units redeploy.
+    //    aggressiveness (default 0.5→1.0) scales penalty frequency.
     {
       let stopped = false
       for (const team of [home, away]) {
         const proneness = avg(team.unit.skaters, (p) => p.composites.penaltyProne) / LEAGUE_AVG
-        if (rng.chance(PENALTY_P * proneness)) {
+        const aggrMult = sliderMult(team.team.tactics.aggressiveness, 0.6, 1.5)
+        if (rng.chance(PENALTY_P * proneness * aggrMult)) {
           const offender =
             team.unit.skaters[
               weightedIndex(rng, team.unit.skaters.map((r) => 1 + r.player.composites.penaltyProne))
@@ -1717,25 +1742,31 @@ function simPeriod(
     }
 
     // 2. Physical play: the pressuring defender finishes a check.
-    if (presserDist < 10 && rng.chance(HIT_P)) {
-      ctx.stream.push({
-        t: clk.t,
-        period,
-        type: 'hit',
-        by: presser.player.id,
-        on: cs.player.id,
-        pos: { x: cs.pos.x, y: cs.pos.y }
-      })
-      if (rng.chance(0.3)) {
-        // Knocked off the puck — it squirts free along the wall.
-        dropLoose(rng.float(-12, 12), rng.float(-12, 12))
-        continue
+    //    hitting (default 0.5→1.0) + aggressiveness both scale hit rate.
+    {
+      const hitMult = sliderMult(def.team.tactics.hitting, 0.5, 1.6) *
+                      sliderMult(def.team.tactics.aggressiveness, 0.7, 1.4)
+      if (presserDist < 10 && rng.chance(HIT_P * hitMult)) {
+        ctx.stream.push({
+          t: clk.t,
+          period,
+          type: 'hit',
+          by: presser.player.id,
+          on: cs.player.id,
+          pos: { x: cs.pos.x, y: cs.pos.y }
+        })
+        if (rng.chance(0.3)) {
+          // Knocked off the puck — it squirts free along the wall.
+          dropLoose(rng.float(-12, 12), rng.float(-12, 12))
+          continue
+        }
       }
     }
 
     // 3. Turnovers. A takeaway is forced — the pressuring defender strips the
     //    puck; a giveaway is unforced. Either can ignite a counter-rush.
-    if (presserDist < 9 && rng.chance(TAKEAWAY_P)) {
+    //    puckPressure (default 0.5→1.0) scales the defender's takeaway chance.
+    if (presserDist < 9 && rng.chance(TAKEAWAY_P * sliderMult(def.team.tactics.puckPressure, 0.5, 1.6))) {
       const loserId = cs.player.id
       possession = def
       carrier = presser.player.id
@@ -1884,7 +1915,9 @@ function simPeriod(
           break
         }
         const central = clamp(1 - Math.abs(puck.y) / 0.5, 0, 1)
-        const eager = 0.7 + atk.team.tactics.tempo.shotEagerness * 0.6
+        // shooting slider (default 0.5→1.0) multiplies cycle shot eagerness.
+        const shootingMult = sliderMult(atk.team.tactics.shooting, 0.6, 1.5)
+        const eager = (0.7 + atk.team.tactics.tempo.shotEagerness * 0.6) * shootingMult
         // Organic shot off the cycle when a lane opens — but the cycle WORKS
         // the puck first (no instant fling right after the entry; rush beats
         // own the quick-strike shots, which keeps rushShotShare on the data).
@@ -2026,8 +2059,10 @@ function simPeriod(
       const flowing = k === 'breakout' || k === 'regroup' || k === 'cyclePossession'
       if (flowing && !beat.breakaway) {
         const tempoPace = atk.team.tactics.tempo.pace
+        // passing slider (default 0.5→1.0) multiplies pass frequency.
+        const passMult = sliderMult(atk.team.tactics.passing, 0.6, 1.5)
         const forced = heldTicks >= MAX_HOLD_TICKS
-        if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4))) {
+        if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4) * passMult)) {
           doPass(cs, pressure)
         }
       }

@@ -14,6 +14,14 @@ import type {
   DefensiveZoneCoverage,
   PowerPlayFormation,
   PenaltyKillFormation,
+  BreakoutSystem,
+  NzOffensiveSystem,
+  NzDefensiveSystem,
+  OzEntry,
+  DZoneStructure,
+  FaceoffPlay,
+  ShotTargeting,
+  PersonalTactics,
 } from '@domain'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { bumpRefresh, toast } from '../components/store'
@@ -795,6 +803,148 @@ function TacticSlider({
   )
 }
 
+/* ── EHM-depth slider (same layout as TacticSlider but with end labels) ── */
+function EhmSlider({
+  label, value, onChange, leftLabel, rightLabel,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+  leftLabel?: string
+  rightLabel?: string
+}): JSX.Element {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 28px', alignItems: 'center', gap: 6 }}>
+      <span className="muted small" style={{ textAlign: 'right', fontSize: 11 }}>{label}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <input
+          type="range" min={0} max={1} step={0.05}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          style={{ width: '100%', accentColor: 'var(--accent)' }}
+        />
+        {(leftLabel || rightLabel) && (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.7 }}>{leftLabel}</span>
+            <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.7 }}>{rightLabel}</span>
+          </div>
+        )}
+      </div>
+      <span className="small mono" style={{ textAlign: 'right', fontSize: 11 }}>{Math.round(value * 100)}</span>
+    </div>
+  )
+}
+
+/* ── Personal Tactics panel ── */
+interface PersonalTacticsProps {
+  player: PlayerBadge
+  pt: PersonalTactics
+  onChange: (pt: PersonalTactics) => void
+  onClose: () => void
+}
+
+function PersonalTacticsPanel({ player, pt, onChange, onClose }: PersonalTacticsProps): JSX.Element {
+  function set<K extends keyof PersonalTactics>(key: K, val: PersonalTactics[K]): void {
+    onChange({ ...pt, [key]: val })
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 50,
+        background: 'rgba(0,0,0,0.65)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      onClick={onClose}
+    >
+      <div
+        className="panel"
+        style={{ width: 360, display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="row-between">
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Personal Tactics — {player.name}</span>
+          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={onClose}>✕</button>
+        </div>
+
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          {/* Shoot vs Pass */}
+          <div>
+            <div className="field-label" style={{ marginBottom: 4 }}>Shoot vs Pass</div>
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              {([-1, 0, 1] as const).map((v) => (
+                <button
+                  key={v}
+                  className={`btn btn-sm ${(pt.shootVsPass ?? 0) === v ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: 11 }}
+                  onClick={() => set('shootVsPass', v)}
+                >
+                  {v === -1 ? 'Pass more' : v === 0 ? 'Default' : 'Shoot more'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Entry style (engine-wired) */}
+          <div>
+            <div className="field-label" style={{ marginBottom: 4 }}>Zone entry style <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Engine</span></div>
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              {(['default', 'carry', 'dump'] as const).map((v) => (
+                <button
+                  key={v}
+                  className={`btn btn-sm ${(pt.entryStyle ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: 11, textTransform: 'capitalize' }}
+                  onClick={() => set('entryStyle', v)}
+                >
+                  {v === 'default' ? 'Default' : v === 'carry' ? 'Always carry' : 'Dump & chase'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Rush join (engine-wired) */}
+          <div>
+            <div className="field-label" style={{ marginBottom: 4 }}>Rush join <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Engine</span></div>
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              {(['default', 'join', 'sit-back'] as const).map((v) => (
+                <button
+                  key={v}
+                  className={`btn btn-sm ${(pt.rushJoin ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: 11 }}
+                  onClick={() => set('rushJoin', v)}
+                >
+                  {v === 'default' ? 'Default' : v === 'join' ? 'Join rush' : 'Sit back'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fighting */}
+          <div>
+            <div className="field-label" style={{ marginBottom: 4 }}>Fighting</div>
+            <div className="row" style={{ gap: 'var(--sp-2)' }}>
+              {(['default', 'will-fight', 'avoid'] as const).map((v) => (
+                <button
+                  key={v}
+                  className={`btn btn-sm ${(pt.fighting ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: 11 }}
+                  onClick={() => set('fighting', v)}
+                >
+                  {v === 'default' ? 'Default' : v === 'will-fight' ? 'Will fight' : 'Avoid'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="muted small" style={{ opacity: 0.7, fontSize: 10, marginTop: -4 }}>
+            Engine-wired instructions affect simulation. Others are set-able intent for future depth.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── main component ── */
 
 export function TacticsScreen(): JSX.Element {
@@ -819,6 +969,9 @@ export function TacticsScreen(): JSX.Element {
     lineIdx: number
     slotIdx: number
   } | null>(null)
+
+  // Personal tactics modal
+  const [ptPlayer, setPtPlayer] = useState<PlayerBadge | null>(null)
 
   // DnD state
   const [dragSrc, setDragSrc] = useState<SlotAddr | null>(null)
@@ -1013,6 +1166,13 @@ export function TacticsScreen(): JSX.Element {
   }
 
   // ── tactics mutation helpers ──
+
+  function setPersonalTactics(playerId: string, pt: PersonalTactics): void {
+    setTacticsFn((t) => {
+      const existing = t.personalTactics ?? {}
+      return { ...t, personalTactics: { ...existing, [playerId]: pt } }
+    })
+  }
 
   function setTacticsFn(updater: (t: TeamTactics) => TeamTactics): void {
     const base = tactics ?? data?.tactics
@@ -1399,6 +1559,223 @@ export function TacticsScreen(): JSX.Element {
                 </label>
               </Panel>
 
+              {/* ── EHM Style sliders ── */}
+              <Panel title="Style">
+                <div className="stack" style={{ gap: 10 }}>
+                  <EhmSlider
+                    label="Aggressiveness"
+                    value={tactics.aggressiveness ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, aggressiveness: v }))}
+                    leftLabel="Disciplined"
+                    rightLabel="Physical"
+                  />
+                  <EhmSlider
+                    label="Hitting"
+                    value={tactics.hitting ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, hitting: v }))}
+                    leftLabel="Avoid"
+                    rightLabel="Punishing"
+                  />
+                  <EhmSlider
+                    label="Puck pressure"
+                    value={tactics.puckPressure ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, puckPressure: v }))}
+                    leftLabel="Passive"
+                    rightLabel="Swarming"
+                  />
+                  <EhmSlider
+                    label="Gap control"
+                    value={tactics.gapControl ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, gapControl: v }))}
+                    leftLabel="Loose"
+                    rightLabel="Tight"
+                  />
+                  <EhmSlider
+                    label="Shooting"
+                    value={tactics.shooting ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, shooting: v }))}
+                    leftLabel="Patient"
+                    rightLabel="Shoot on sight"
+                  />
+                  <EhmSlider
+                    label="Passing"
+                    value={tactics.passing ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, passing: v }))}
+                    leftLabel="Individual"
+                    rightLabel="High movement"
+                  />
+                  <EhmSlider
+                    label="Dumping"
+                    value={tactics.dumping ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, dumping: v }))}
+                    leftLabel="Always carry"
+                    rightLabel="Always dump"
+                  />
+                  <EhmSlider
+                    label="Backchecking"
+                    value={tactics.backchecking ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, backchecking: v }))}
+                    leftLabel="Float"
+                    rightLabel="Hard back"
+                  />
+                  <EhmSlider
+                    label="Mentality"
+                    value={tactics.mentality ?? 0.5}
+                    onChange={(v) => setTacticsFn((t) => ({ ...t, mentality: v }))}
+                    leftLabel="Defensive"
+                    rightLabel="All-out attack"
+                  />
+                </div>
+                <div className="muted small" style={{ marginTop: 8, opacity: 0.65, fontSize: 10 }}>
+                  Bold items affect the sim; others are intent for future depth.
+                </div>
+              </Panel>
+
+              {/* ── Positional systems ── */}
+              <Panel title="Positional Systems">
+                <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+                  <div>
+                    <label className="field-label">Breakout</label>
+                    <select
+                      className="select"
+                      value={tactics.breakout ?? 'wheel'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, breakout: e.target.value as BreakoutSystem }))}
+                    >
+                      <option value="wheel">Wheel</option>
+                      <option value="rim">Rim</option>
+                      <option value="reverse">Reverse</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">NZ Offensive</label>
+                    <select
+                      className="select"
+                      value={tactics.nzOffensive ?? 'controlled'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, nzOffensive: e.target.value as NzOffensiveSystem }))}
+                    >
+                      <option value="controlled">Controlled</option>
+                      <option value="stretch">Stretch passes</option>
+                      <option value="overload">Overload</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">NZ Defensive</label>
+                    <select
+                      className="select"
+                      value={tactics.nzDefensive ?? 'standard'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, nzDefensive: e.target.value as NzDefensiveSystem }))}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="trap">Trap</option>
+                      <option value="aggressive">Aggressive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">Zone entry preference</label>
+                    <select
+                      className="select"
+                      value={tactics.ozEntry ?? 'mixed'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, ozEntry: e.target.value as OzEntry }))}
+                    >
+                      <option value="mixed">Mixed</option>
+                      <option value="carry">Carry in</option>
+                      <option value="dump">Dump &amp; chase</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">DZone structure</label>
+                    <select
+                      className="select"
+                      value={tactics.dZoneStructure ?? 'contain'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, dZoneStructure: e.target.value as DZoneStructure }))}
+                    >
+                      <option value="contain">Contain</option>
+                      <option value="collapse">Collapse</option>
+                      <option value="aggressive">Aggressive</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">Shot targeting</label>
+                    <select
+                      className="select"
+                      value={tactics.shotTargeting ?? 'mixed'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, shotTargeting: e.target.value as ShotTargeting }))}
+                    >
+                      <option value="mixed">Mixed</option>
+                      <option value="corners">Corners</option>
+                      <option value="high-glove">High glove</option>
+                      <option value="blocker">Blocker side</option>
+                      <option value="five-hole">Five-hole</option>
+                    </select>
+                  </div>
+                </div>
+              </Panel>
+
+              {/* ── Faceoff plays ── */}
+              <Panel title="Faceoff Plays">
+                <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+                  <div>
+                    <label className="field-label">Offensive zone</label>
+                    <select
+                      className="select"
+                      value={tactics.offensiveFaceoff ?? 'standard'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, offensiveFaceoff: e.target.value as FaceoffPlay }))}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="wheel">Wheel</option>
+                      <option value="quick-strike">Quick strike</option>
+                      <option value="tie-up">Tie-up</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">Defensive zone</label>
+                    <select
+                      className="select"
+                      value={tactics.defensiveFaceoff ?? 'standard'}
+                      onChange={(e) => setTacticsFn((t) => ({ ...t, defensiveFaceoff: e.target.value as FaceoffPlay }))}
+                    >
+                      <option value="standard">Standard</option>
+                      <option value="tie-up">Tie-up</option>
+                      <option value="wheel">Wheel</option>
+                      <option value="quick-strike">Quick clear</option>
+                    </select>
+                  </div>
+                </div>
+              </Panel>
+
+              {/* ── Personal Tactics (roster list) ── */}
+              <Panel title="Personal Tactics">
+                <div className="stack" style={{ gap: 6 }}>
+                  <div className="muted small" style={{ opacity: 0.75, fontSize: 10, marginBottom: 2 }}>
+                    Click a player to set individual instructions. Engine-wired instructions affect the sim.
+                  </div>
+                  {roster.slice(0, 20).map((p) => {
+                    const pt = tactics.personalTactics?.[p.playerId]
+                    const hasInstructions = pt && Object.values(pt).some((v) => v !== undefined && v !== 'default' && v !== 0)
+                    return (
+                      <button
+                        key={p.playerId}
+                        className="btn btn-ghost btn-sm"
+                        style={{
+                          justifyContent: 'flex-start',
+                          gap: 6,
+                          padding: '4px 8px',
+                          borderColor: hasInstructions ? 'var(--accent)' : 'transparent',
+                          background: hasInstructions ? 'rgba(139,92,246,0.08)' : undefined,
+                          width: '100%',
+                        }}
+                        onClick={() => setPtPlayer(p)}
+                      >
+                        <PlayerFace faceId={p.faceId} name={p.name} size={18} />
+                        <span className="muted" style={{ fontSize: 10, width: 22 }}>{p.position}</span>
+                        <span style={{ flex: 1, fontSize: 12, textAlign: 'left' }}>{p.name}</span>
+                        {hasInstructions && <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Custom</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </Panel>
+
               <CoachPanel
                 suggestion={data.coachSuggestion}
                 styleFit={data.styleFit}
@@ -1436,6 +1813,18 @@ export function TacticsScreen(): JSX.Element {
               roster={roster}
               onSelect={handlePickerSelect}
               onClose={() => setPickerOpen(false)}
+            />
+          )}
+
+          {/* ── Personal Tactics modal ── */}
+          {ptPlayer && tactics && (
+            <PersonalTacticsPanel
+              player={ptPlayer}
+              pt={tactics.personalTactics?.[ptPlayer.playerId] ?? {}}
+              onChange={(pt) => {
+                setPersonalTactics(ptPlayer.playerId, pt)
+              }}
+              onClose={() => setPtPlayer(null)}
             />
           )}
         </>
