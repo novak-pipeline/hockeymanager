@@ -19,7 +19,8 @@ import type {
   SkaterSeasonLine,
   GoalieSeasonLine,
   ArchetypeInfo,
-  PersonalityTraitRead,
+  ReportCard,
+  ReportGrade,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -164,30 +165,26 @@ function ConditionBar({ value }: { value: number }): JSX.Element {
 }
 
 /**
- * Coarse 1–10 attribute wall.
+ * EHM-style 1–20 attribute row: label + slim bar + colour-coded number.
  *
- * Mapping: coarse = clamp(Math.ceil(v / 10), 1, 10)
- *   → a 0–99 value maps to cells 1–10 (values 1–9 → 1 cell, 10–19 → 2, …, 90–99 → 10)
- *   → minimum displayed is always 1 so even 0-rated players show one dim cell.
+ * Mapping 0–99 → 1–20: round(v/5) clamped [1, 20].
+ * Fog: when masked show "?" and a grey band across the lo–hi range.
  *
- * Fog bands: when masked and lo/hi differ, filled cells cover the lo–hi coarse range
- *   with a greyed "uncertain" look; no coarse number shown (shows "?" instead).
- *
- * Color tiers (by filled coarse value):
- *   9–10 → --success (strong green)
- *   7–8  → --green at 70% opacity (light green)
- *   4–6  → --accent2 (amber)
- *   1–3  → --danger (red)
+ * Colour tiers (EHM convention):
+ *   17–20 → strong green (--success)
+ *   14–16 → green
+ *   8–13  → amber (--accent2)
+ *   1–7   → red (--danger)
  */
-function cellColor(coarse: number): string {
-  if (coarse >= 9) return 'var(--success)'
-  if (coarse >= 7) return 'rgba(52,211,153,0.70)' /* --green @ 70% */
-  if (coarse >= 4) return 'var(--accent2)'
-  return 'var(--danger)'
+function to20(v: number): number {
+  return Math.max(1, Math.min(20, Math.round(v / 5)))
 }
 
-function toCoarse(v: number): number {
-  return Math.max(1, Math.min(10, Math.ceil(v / 10)))
+function attrColor20(v20: number): string {
+  if (v20 >= 17) return 'var(--success)'
+  if (v20 >= 14) return 'rgba(52,211,153,0.85)'
+  if (v20 >= 8) return 'var(--accent2)'
+  return 'var(--danger)'
 }
 
 function AttrBar({
@@ -203,84 +200,48 @@ function AttrBar({
   hi?: number
   masked?: boolean
 }): JSX.Element {
-  const CELLS = 10
-
-  /* Fogged: show a band across the coarse lo–hi range, greyed out. */
+  /* Fogged: show band across the lo–hi range in grey */
   if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
-    const loC = toCoarse(lo)
-    const hiC = toCoarse(hi)
+    const loV = to20(lo)
+    const hiV = to20(hi)
+    const pctLo = ((loV - 1) / 19) * 100
+    const pctHi = ((hiV - 1) / 19) * 100
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 24px', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 28px', alignItems: 'center', gap: 8 }}>
         <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-        <div style={{ display: 'flex', gap: 2 }}>
-          {Array.from({ length: CELLS }, (_, idx) => {
-            const cell = idx + 1
-            const inBand = cell >= loC && cell <= hiC
-            return (
-              <div
-                key={idx}
-                style={{
-                  flex: 1, height: 8, borderRadius: 2,
-                  background: inBand ? 'var(--muted)' : 'var(--line)',
-                  opacity: inBand ? 0.55 : 1,
-                }}
-              />
-            )
-          })}
+        <div style={{ position: 'relative', height: 5, background: 'var(--line)', borderRadius: 3 }}>
+          <div style={{
+            position: 'absolute',
+            left: `${pctLo}%`,
+            width: `${Math.max(4, pctHi - pctLo)}%`,
+            height: '100%',
+            background: 'var(--muted)',
+            borderRadius: 3,
+            opacity: 0.6,
+          }} />
         </div>
         <span className="small mono muted" style={{ textAlign: 'right' }}>?</span>
       </div>
     )
   }
 
-  /* Known value: exact coarse cell fill. */
-  const coarse = toCoarse(value)
-  const color = cellColor(coarse)
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 24px', alignItems: 'center', gap: 8 }}>
-      <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-      <div style={{ display: 'flex', gap: 2 }}>
-        {Array.from({ length: CELLS }, (_, idx) => (
-          <div
-            key={idx}
-            style={{
-              flex: 1, height: 8, borderRadius: 2,
-              background: idx < coarse ? color : 'var(--line)',
-            }}
-          />
-        ))}
-      </div>
-      <span className="small mono" style={{ color, textAlign: 'right', fontWeight: 700 }}>{coarse}</span>
-    </div>
-  )
-}
+  /* Known value */
+  const v20 = to20(value)
+  const color = attrColor20(v20)
+  const pct = ((v20 - 1) / 19) * 100
 
-/* Personality read row: descriptor + confidence badge. */
-function PersonalityReadRow({ read }: { read: PersonalityTraitRead }): JSX.Element {
-  if (!read.known) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-        <span className="muted small">{read.label}</span>
-        <span className="chip" style={{ opacity: 0.5 }}>Unknown</span>
-      </div>
-    )
-  }
-  const confColor =
-    read.confidence === 'high' ? 'var(--success)' :
-    read.confidence === 'medium' ? 'var(--accent2)' :
-    'var(--muted)'
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderTop: '1px solid var(--line)' }}>
-      <span className="muted small">{read.label}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600 }}>{read.descriptor}</span>
-        <span style={{
-          fontSize: 9, fontWeight: 700, color: confColor,
-          textTransform: 'uppercase', letterSpacing: 0.5,
-        }}>
-          {read.confidence}
-        </span>
+    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 28px', alignItems: 'center', gap: 8 }}>
+      <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <div style={{ position: 'relative', height: 5, background: 'var(--line)', borderRadius: 3 }}>
+        <div style={{
+          width: `${Math.max(4, pct)}%`,
+          height: '100%',
+          background: color,
+          borderRadius: 3,
+        }} />
       </div>
+      <span className="small mono" style={{ color, textAlign: 'right', fontWeight: 700 }}>{v20}</span>
     </div>
   )
 }
@@ -325,6 +286,40 @@ function InfoRow({ label, value }: { label: string; value: string | number | nul
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
       <span className="muted small">{label}</span>
       <span style={{ fontSize: 13, fontWeight: 500 }}>{value}</span>
+    </div>
+  )
+}
+
+/* ── Report card grade display ── */
+function gradeColor(g: ReportGrade): string {
+  if (g === 'A+' || g === 'A') return 'var(--success)'
+  if (g === 'B+' || g === 'B') return 'rgba(52,211,153,0.85)'
+  if (g === 'C+' || g === 'C') return 'var(--accent2)'
+  return 'var(--danger)'
+}
+
+function ReportCardRow({ label, grade }: { label: string; grade: ReportGrade }): JSX.Element {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
+      <span className="muted small">{label}</span>
+      <span style={{ fontWeight: 700, fontSize: 14, color: gradeColor(grade), minWidth: 28, textAlign: 'right' }}>{grade}</span>
+    </div>
+  )
+}
+
+function ReportCardPanel({ card, isGoalie }: { card: ReportCard; isGoalie: boolean }): JSX.Element {
+  return (
+    <div>
+      <ReportCardRow label="Hockey Sense" grade={card.hockeyIQ} />
+      <ReportCardRow label="Skating" grade={card.skating} />
+      {isGoalie
+        ? <ReportCardRow label="Goaltending" grade={card.goaltending ?? 'C'} />
+        : <>
+            <ReportCardRow label="Shot / Scoring" grade={card.shotScoring} />
+            <ReportCardRow label="Puck Handling" grade={card.puckhandling} />
+            <ReportCardRow label="Defence" grade={card.defence} />
+            <ReportCardRow label="Physicality" grade={card.physicality} />
+          </>}
     </div>
   )
 }
@@ -970,30 +965,33 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
 }
 
 function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
-  const knownReads = d.personalityReads.filter((r) => r.known)
-  const unknownCount = d.personalityReads.filter((r) => !r.known).length
+  const sr = d.scoutReport
+  const isGoalie = d.position === 'G'
 
-  // Derive a rough projection word from overall + potential stars
-  const projLabel =
-    d.potentialStars >= 5 ? 'Franchise player'  :
-    d.potentialStars >= 4 ? 'Top-line talent'   :
-    d.potentialStars >= 3 ? 'Solid NHL player'  :
-    d.potentialStars >= 2 ? 'Depth / role player' :
-    'Fringe NHLer'
+  // Tier chip colour
+  const tierColor =
+    sr.tier === 'Star' ? 'var(--accent)' :
+    sr.tier === 'Key' ? 'var(--cyan)' :
+    sr.tier === 'Core' ? 'var(--success)' :
+    sr.tier === 'Prospect' ? 'var(--violet-h)' :
+    'var(--muted)'
 
   return (
     <div className="stack">
-      {/* Projection summary */}
+      {/* ── Scout's Assessment header ── */}
       <Panel title="Scout's Assessment">
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
+          {/* Rating + potential */}
+          <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div className="stat">
               {d.scouted && !d.scouted.exact ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={20} />
                   <span className="muted small">–</span>
                   <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={20} />
-                  <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>{d.scouted.knowledge}%</span>
+                  <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
+                    {sr.knowledge}% scouted
+                  </span>
                 </div>
               ) : (
                 <StarRating stars={overallToStars(d.overall)} size={22} />
@@ -1004,51 +1002,60 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
               <PotentialStars count={d.potentialStars} />
               <span className="muted small">Ceiling</span>
             </div>
+            {/* Projection tier chip */}
+            <span style={{
+              display: 'inline-block',
+              padding: '3px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(0,0,0,0.25)',
+              border: `1px solid ${tierColor}`,
+              color: tierColor,
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: 0.5,
+            }}>
+              {sr.tierLabel}
+            </span>
           </div>
-          <div>
-            <span className="chip chip-info" style={{ fontSize: 12 }}>{projLabel}</span>
-          </div>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
-            {d.name} is a {d.age}-year-old {d.role} playing as {d.position}
-            {d.archetype ? ` — archetype: ${d.archetype.label}` : ''}.
-            {d.archetype?.descriptors.length ? ` Known for: ${d.archetype.descriptors.join(', ')}.` : ''}
-            {' '}Projected ceiling: <strong style={{ color: 'var(--text)' }}>{projLabel}</strong>.
-          </p>
+
+          {/* Season outlook */}
+          <span className="muted small" style={{ fontStyle: 'italic' }}>
+            {sr.seasonProjection.line}
+          </span>
         </div>
       </Panel>
 
-      {/* Personality / character reads */}
-      {d.personalityReads.length > 0 && (
-        <Panel title="Character Profile">
-          {unknownCount > 0 && (
-            <Notice kind="info">
-              {unknownCount} trait{unknownCount !== 1 ? 's' : ''} not yet scouted.
-              Assign a scout to improve knowledge.
-            </Notice>
-          )}
-          <div style={{ marginTop: knownReads.length > 0 ? 'var(--sp-3)' : 0 }}>
-            {knownReads.map((read) => (
-              <PersonalityReadRow key={read.key} read={read} />
+      {/* ── General Impressions prose ── */}
+      <Panel title="General Impressions">
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
+          {sr.generalImpressions}
+        </p>
+        {sr.knowledge < 50 && (
+          <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+            Scout knowledge is limited at {sr.knowledge}%. Assign a scout to this player for a more complete picture.
+          </p>
+        )}
+      </Panel>
+
+      <div className="grid grid-2" style={{ alignItems: 'start' }}>
+        {/* ── Report card ── */}
+        <Panel title="Report Card">
+          <ReportCardPanel card={sr.reportCard} isGoalie={isGoalie} />
+        </Panel>
+
+        {/* ── Radar axes ── */}
+        <Panel title="Radar Axes">
+          <div className="stack" style={{ gap: 6 }}>
+            {RADAR_AXES.map((key) => (
+              <AttrBar
+                key={key}
+                label={AXIS_LABELS[key] ?? key}
+                value={d.radar[key]}
+              />
             ))}
           </div>
-          {knownReads.length === 0 && unknownCount > 0 && (
-            <span className="muted small">No character information available yet.</span>
-          )}
         </Panel>
-      )}
-
-      {/* Radar axes — coarse 1–10, no exact values */}
-      <Panel title="Radar Axes">
-        <div className="stack" style={{ gap: 6 }}>
-          {RADAR_AXES.map((key) => (
-            <AttrBar
-              key={key}
-              label={AXIS_LABELS[key] ?? key}
-              value={d.radar[key]}
-            />
-          ))}
-        </div>
-      </Panel>
+      </div>
     </div>
   )
 }

@@ -22,6 +22,7 @@ import {
   buildExactPersonalityRead,
 } from '@engine/career/personalityRead'
 import type { PersonalityReadView } from '@engine/career/personalityRead'
+import { buildScoutReport } from '@engine/career/scoutReport'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -569,12 +570,14 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
           : null,
     }))
 
-  // Phase B: radar, personalityReads, bio, honours, profileContract
+  // Phase B: radar, personalityReads, bio, honours, profileContract, scoutReport
   const radar: RadarView = computeRadar(p.ratings, p.composites)
   const personalityReads: PersonalityReadView =
     fog === undefined
       ? buildExactPersonalityRead(p)
       : buildPersonalityRead(p, fog.scouting)
+  const potStars = potentialStars(p)
+  const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
 
   return {
     ...badge(p, fog),
@@ -587,7 +590,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
     form: Math.round(p.form),
     injury: p.injuryStatus,
     contract: teamId ? contractView(p) : null,
-    potentialStars: potentialStars(p),
+    potentialStars: potStars,
     personality: PERSONALITY_LABELS.map(([key, label]) => ({
       label,
       value: (p.personality as unknown as Record<string, number>)[key] ?? 0,
@@ -604,6 +607,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
     bio: buildBio(p),
     honours: buildHonours(p),
     profileContract: buildProfileContract(p, teamId !== null),
+    scoutReport,
   }
 }
 

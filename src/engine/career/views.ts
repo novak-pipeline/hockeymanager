@@ -21,6 +21,7 @@ import type {
 export type { RadarAxes, RadarView } from '@engine/ratings/radar'
 export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
+export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
@@ -372,6 +373,8 @@ export interface PlayerProfileView extends PlayerBadge {
   honours: PlayerHonoursView
   /** Extended contract block; null when player is a free agent. */
   profileContract: ProfileContractView | null
+  /** Scout-generated prose report (fog-aware). */
+  scoutReport: import('@engine/career/scoutReport').ScoutReportView
 }
 
 /** Compare-radar response: both players' RadarViews plus key stats. */
