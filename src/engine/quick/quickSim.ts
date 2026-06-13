@@ -43,6 +43,18 @@ const PENALTY_SECONDS = 120
 const PP_SHOT_MULT = 1.6
 const PK_SHOT_MULT = 0.7
 
+/**
+ * League-average xG per unblocked shot on goal — derived from the calibration
+ * target (goals ÷ shots on goal ≈ 0.095 at league average). The quick-sim has
+ * no rink-position data so it approximates as:
+ *   xG ≈ LEAGUE_AVG_XG_PER_SHOT × (0.7 + danger × 0.6)
+ * where danger is the quality draw already used for the goal-chance roll.
+ * This makes high-danger shots (danger≈1) carry ~2× the xG of weak ones
+ * (danger≈0), which matches the empirical distribution from the full engine.
+ * The formula is deterministic (no Rng draw) so it adds no non-determinism.
+ */
+const LEAGUE_AVG_XG_PER_SHOT = 0.095
+
 const LEAGUE_AVG = 50
 
 /** Quick-sim returns the shared box-score contract. */
@@ -220,11 +232,18 @@ function simShift(
       target: { x: attackingPositive ? 1 : -1, y: 0 },
       danger
     })
-    stat(ctx, shooter.id).shots++
+    const shooterStat = stat(ctx, shooter.id)
+    shooterStat.shots++
+
+    // Approximate xG: league-average per-shot scaled by danger quality.
+    // No Rng draw — purely deterministic from the danger already sampled above.
+    const shotXgApprox = LEAGUE_AVG_XG_PER_SHOT * (0.7 + danger * 0.6)
+    shooterStat.xg = (shooterStat.xg ?? 0) + shotXgApprox
 
     const goalie = def.goalie
     const goalieStat = stat(ctx, goalie.id)
     goalieStat.shotsAgainst++
+    goalieStat.xgAgainst = (goalieStat.xgAgainst ?? 0) + shotXgApprox
 
     const finish = shooter.composites.scoring / LEAGUE_AVG
     const goaliePull = (goalie.composites.goaltending - LEAGUE_AVG) / 220
@@ -239,6 +258,11 @@ function simShift(
       const assists = pickAssists(rng, atk.skaters, shooter)
       stat(ctx, shooter.id).goals++
       for (const a of assists) stat(ctx, a.id).assists++
+      // Credit the primary assister xA = shooter's xG for this shot.
+      if (assists.length > 0) {
+        const primaryA = stat(ctx, assists[0].id)
+        primaryA.xA = (primaryA.xA ?? 0) + shotXgApprox
+      }
       ctx.stream.push({
         t: tShot,
         period,

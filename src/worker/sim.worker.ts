@@ -252,6 +252,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── Phase B: player profile view layer ── */
     case 'compareRadar':
       return { id: req.id, type: 'compareRadar', comparison: must().compareRadar(req.playerIdA, req.playerIdB) }
+
+    /* ── Data Hub: xG analytics ── */
+    case 'getDataHub':
+      return { id: req.id, type: 'dataHub', dataHub: must().getDataHubView() }
   }
 }
 

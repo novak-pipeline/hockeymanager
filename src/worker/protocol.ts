@@ -25,6 +25,7 @@ export type {
   CareerPhase,
   CareerSnapshot,
   CompareRadarView,
+  DataHubView,
   DashboardView,
   DraftView,
   FinanceView,
@@ -37,6 +38,7 @@ export type {
   OffseasonView,
   PersonalityReadView,
   PersonalityTraitRead,
+  PlayerAnalyticsRow,
   PlayerBioView,
   PlayerHonoursView,
   PlayerProfileView,
@@ -53,6 +55,7 @@ export type {
   StandingsView,
   StatsView,
   TacticsView,
+  TeamAnalyticsRow,
   TentpoleView,
   TradeEvaluation,
   TradeProposal,
@@ -69,6 +72,7 @@ import type {
   BoxScoreView,
   CalendarView,
   CareerSnapshot,
+  DataHubView,
   DashboardView,
   DraftView,
   FinanceView,
@@ -219,6 +223,9 @@ export type WorkerRequestBody =
   /* ── Phase B: player profile view layer ── */
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   | { type: 'compareRadar'; playerIdA: string; playerIdB: string }
+  /* ── Data Hub: xG analytics ── */
+  /** League-wide xG model analytics: per-team rates + percentiles, player leaders. */
+  | { type: 'getDataHub' }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -275,5 +282,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'ahlSquad'; squad: AhlSquadView }
   /* ── Phase B: player profile view layer ── */
   | { type: 'compareRadar'; comparison: CompareRadarView }
+  /* ── Data Hub: xG analytics ── */
+  | { type: 'dataHub'; dataHub: DataHubView }
   | { type: 'error'; message: string }
 )

@@ -208,6 +208,7 @@ import {
   buildAhlStandingsView,
   buildCalendarView,
   buildCompareRadar,
+  buildDataHubView,
   buildFinanceView,
   buildPlayerProfile,
   buildScoutingView,
@@ -227,6 +228,7 @@ import {
   dayToDateISO,
   type AgmReportView,
   type AgmRankedPlayerView,
+  type DataHubView,
   type AhlSquadView,
   type AhlStandingsView,
   type BoardView,
@@ -3657,6 +3659,11 @@ export class Career {
 
   getStats(): StatsView {
     return buildStatsView(this.ctx())
+  }
+
+  getDataHubView(): DataHubView {
+    const nhlTeamIds = new Set(this.data.league.teams.map((id) => id as string))
+    return buildDataHubView(this.ctx(), this.specialTeams, nhlTeamIds)
   }
 
   getFinances(): FinanceView {

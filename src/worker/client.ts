@@ -392,6 +392,11 @@ export class SimClient {
     return this.send({ type: 'compareRadar', playerIdA, playerIdB })
   }
 
+  /** Data Hub: xG model analytics (per-team rates + percentiles, player leaders). */
+  getDataHub(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDataHub' })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

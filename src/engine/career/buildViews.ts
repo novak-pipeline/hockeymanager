@@ -40,11 +40,13 @@ import type {
   CalendarView,
   ContractView,
   CompareRadarView,
+  DataHubView,
   FinanceView,
   GoalieSeasonLine,
   LineSlotView,
   LineSynergyView,
   LinesView,
+  PlayerAnalyticsRow,
   PlayerBadge,
   PlayerBioView,
   PlayerHonoursView,
@@ -61,12 +63,17 @@ import type {
   StandingsView,
   StatsView,
   TacticsView,
+  TeamAnalyticsRow,
   LeaderRowView,
   TeamKnowledgeSummary,
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf, maskAttribute, maskedOverall } from '@engine/league/scouting'
+import {
+  finalizeSpecialTeams,
+  type SpecialTeamsEntries,
+} from '@engine/league/leagueStats'
 
 /** The Career state slice every builder reads. */
 export interface ViewCtx {
@@ -1129,4 +1136,220 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
 
   return { year: ctx.year, entries }
+}
+
+/* ────────────────────────── data hub (xG analytics) ────────────────────────── */
+
+/**
+ * Helper: compute a league percentile (0–100) for a value within an array of
+ * values. High `pctile` = good if `higherIsBetter`, else reversed.
+ *
+ * The percentile is defined as: fraction of OTHER teams that score WORSE than
+ * this team, scaled to 0–100, then rounded. A team at the very top gets 100.
+ */
+function pctile(value: number, allValues: number[], higherIsBetter: boolean): number {
+  const total = allValues.length
+  if (total <= 1) return 50
+  let countWorse = 0
+  for (const v of allValues) {
+    if (higherIsBetter ? v < value : v > value) countWorse++
+  }
+  return Math.round((countWorse / (total - 1)) * 100)
+}
+
+/**
+ * Build the Data Hub analytics view.
+ *
+ * @param ctx          standard view context (standings, totals, teams, players)
+ * @param specialTeams accumulated special-teams entries (from Career.specialTeams)
+ * @param nhlTeamIds   set of NHL-tier team ids (exclude AHL teams)
+ */
+export function buildDataHubView(
+  ctx: ViewCtx,
+  specialTeams: SpecialTeamsEntries,
+  nhlTeamIds: ReadonlySet<string>
+): DataHubView {
+  // ── Finalize special teams ──
+  const stMap = new Map(finalizeSpecialTeams(specialTeams).map((r) => [r.teamId, r]))
+
+  // ── Per-team totals aggregated from player stats ──
+  // We sum goalsFor, goalsAgainst, shots, shotsAgainst, xGF, xGA from player-stat map.
+  // gamesPlayed comes from standings (league-authoritative source).
+  // TOI for rate calculations: each NHL team plays 60 min/game; we derive total
+  // team-level TOI from gamesPlayed × 3600 × (team's on-ice skater count / 5).
+  // But we don't have per-team TOI directly; use gamesPlayed × 3600 as
+  // "skater-minutes" proxy. All teams use the same denominator so percentiles
+  // are unaffected by the specific scaling constant chosen.
+
+  // Aggregate from player stat totals into per-team buckets.
+  const teamBuckets = new Map<
+    string,
+    { gf: number; ga: number; shots: number; shotsAgainst: number; xgf: number; xga: number; toiSec: number }
+  >()
+
+  const ensureBucket = (tid: string) => {
+    if (!teamBuckets.has(tid)) {
+      teamBuckets.set(tid, { gf: 0, ga: 0, shots: 0, shotsAgainst: 0, xgf: 0, xga: 0, toiSec: 0 })
+    }
+    return teamBuckets.get(tid)!
+  }
+
+  // Map player → their team (current roster membership only — once a player moves
+  // their old stats stay in totals under the new team; it's an acceptable
+  // approximation for mid-season analytics).
+  const playerTeam = new Map<string, string>()
+  for (const [tid, team] of ctx.teams) {
+    if (!nhlTeamIds.has(tid as string)) continue
+    for (const pid of team.roster) {
+      playerTeam.set(pid as string, tid as string)
+    }
+  }
+
+  for (const [pid, s] of ctx.totals) {
+    const tid = playerTeam.get(pid as string)
+    if (!tid) continue
+    const bk = ensureBucket(tid)
+    // Skaters contribute xGF and shots
+    if (s.shots > 0 || (s.xg ?? 0) > 0) {
+      bk.shots += s.shots
+      bk.xgf += s.xg ?? 0
+    }
+    bk.gf += s.goals
+    bk.toiSec += s.toi
+    // Goalies contribute the other side
+    if (s.shotsAgainst > 0 || (s.xgAgainst ?? 0) > 0) {
+      bk.shotsAgainst += s.shotsAgainst
+      bk.xga += s.xgAgainst ?? 0
+      bk.ga += s.goalsAgainst
+    }
+  }
+
+  // ── Build per-team rows ──
+  const standingsMap = new Map(ctx.standingsSorted.map((s) => [s.teamId as string, s]))
+
+  const teamRows: TeamAnalyticsRow[] = []
+  for (const [tid, team] of ctx.teams) {
+    if (!nhlTeamIds.has(tid as string)) continue
+    const bk = teamBuckets.get(tid as string)
+    const standing = standingsMap.get(tid as string)
+    const gp = standing?.gamesPlayed ?? 0
+    // Use total on-ice seconds as the denominator for per-60 rates.
+    // We take the max of the goalie TOI bucket and skater bucket / 5 to avoid
+    // double-counting but keep the number meaningful.
+    const toiHours = bk ? bk.toiSec / 3600 : gp
+    const per60 = (n: number): number =>
+      toiHours > 0 ? Math.round((n / toiHours) * 100) / 100 : 0
+
+    const st = stMap.get(tid as string)
+    teamRows.push({
+      teamId: tid as string,
+      teamName: team.name,
+      teamAbbr: team.abbreviation,
+      gamesPlayed: gp,
+      gfPer60: per60(bk?.gf ?? 0),
+      gaPer60: per60(bk?.ga ?? 0),
+      xgfPer60: per60(bk?.xgf ?? 0),
+      xgaPer60: per60(bk?.xga ?? 0),
+      shotsPer60: per60(bk?.shots ?? 0),
+      shotsAgainstPer60: per60(bk?.shotsAgainst ?? 0),
+      ppPct: st?.ppPct ?? 0,
+      pkPct: st?.pkPct ?? 0,
+      // percentiles filled in below
+      gfPctile: 0,
+      gaPctile: 0,
+      xgfPctile: 0,
+      xgaPctile: 0,
+      shotsPctile: 0,
+      shotsAgainstPctile: 0,
+      ppPctile: 0,
+      pkPctile: 0,
+    })
+  }
+
+  // ── Compute percentiles ──
+  const allGf = teamRows.map((r) => r.gfPer60)
+  const allGa = teamRows.map((r) => r.gaPer60)
+  const allXgf = teamRows.map((r) => r.xgfPer60)
+  const allXga = teamRows.map((r) => r.xgaPer60)
+  const allShots = teamRows.map((r) => r.shotsPer60)
+  const allShotsA = teamRows.map((r) => r.shotsAgainstPer60)
+  const allPp = teamRows.map((r) => r.ppPct)
+  const allPk = teamRows.map((r) => r.pkPct)
+
+  for (const row of teamRows) {
+    row.gfPctile = pctile(row.gfPer60, allGf, true)
+    row.gaPctile = pctile(row.gaPer60, allGa, false) // lower GA = better
+    row.xgfPctile = pctile(row.xgfPer60, allXgf, true)
+    row.xgaPctile = pctile(row.xgaPer60, allXga, false)
+    row.shotsPctile = pctile(row.shotsPer60, allShots, true)
+    row.shotsAgainstPctile = pctile(row.shotsAgainstPer60, allShotsA, false)
+    row.ppPctile = pctile(row.ppPct, allPp, true)
+    row.pkPctile = pctile(row.pkPct, allPk, true)
+  }
+
+  // Sort by xGF/60 descending
+  const allTeams = [...teamRows].sort((a, b) => b.xgfPer60 - a.xgfPer60)
+  const userTeamRow = allTeams.find((r) => r.teamId === (ctx.userTeamId as string))
+    ?? allTeams[0] ?? {
+      teamId: ctx.userTeamId as string,
+      teamName: '',
+      teamAbbr: '',
+      gamesPlayed: 0,
+      gfPer60: 0, gaPer60: 0, xgfPer60: 0, xgaPer60: 0, shotsPer60: 0, shotsAgainstPer60: 0, ppPct: 0, pkPct: 0,
+      gfPctile: 50, gaPctile: 50, xgfPctile: 50, xgaPctile: 50, shotsPctile: 50, shotsAgainstPctile: 50, ppPctile: 50, pkPctile: 50,
+    }
+
+  // ── Per-player analytics (skaters, NHL-tier only, min 5 GP) ──
+  const MIN_GP = 5
+  const playerRows: PlayerAnalyticsRow[] = []
+
+  const teamAbbrOf = (pid: string): string => {
+    const tid = playerTeam.get(pid)
+    return tid ? (ctx.teams.get(tid as TeamId)?.abbreviation ?? 'FA') : 'FA'
+  }
+
+  for (const [pid, s] of ctx.totals) {
+    const p = ctx.players.get(pid)
+    if (!p || p.position === 'G') continue
+    const tid = playerTeam.get(pid as string)
+    if (!tid) continue // not on an NHL-tier roster
+    const gp = ctx.gp.get(pid) ?? 0
+    if (gp < MIN_GP) continue
+
+    const toiH = s.toi / 3600
+    const per60 = (n: number): number => (toiH > 0 ? Math.round((n / toiH) * 100) / 100 : 0)
+
+    const xg = s.xg ?? 0
+    const xA = s.xA ?? 0
+    const shootPct = s.shots > 0 ? s.goals / s.shots : 0
+    const finishing = Math.round((s.goals - xg) * 100) / 100
+
+    playerRows.push({
+      playerId: pid as string,
+      name: p.name,
+      teamAbbr: teamAbbrOf(pid as string),
+      position: p.position,
+      gamesPlayed: gp,
+      xgPer60: per60(xg),
+      xAPer60: per60(xA),
+      goalsPer60: per60(s.goals),
+      shootingPct: Math.round(shootPct * 1000) / 1000,
+      finishing,
+    })
+  }
+
+  const xgLeaders = [...playerRows]
+    .sort((a, b) => b.xgPer60 - a.xgPer60)
+    .slice(0, 20)
+
+  const finishingLeaders = [...playerRows]
+    .sort((a, b) => b.finishing - a.finishing)
+    .slice(0, 20)
+
+  return {
+    userTeam: userTeamRow,
+    allTeams,
+    xgLeaders,
+    finishingLeaders,
+  }
 }

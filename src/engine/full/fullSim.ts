@@ -830,13 +830,20 @@ function simPeriod(
     const recordKind: ShotKind =
       kind === 'rebound' ? 'rebound' : sinceEntry >= 0 && sinceEntry <= 6 ? 'rush' : kind
     ctx.telemetry?.shots.push({ kind: recordKind, danger, oddMan })
-    stat(ctx, shooterSk.player.id).shots++
+    const sStat = stat(ctx, shooterSk.player.id)
+    sStat.shots++
+    // Credit shooter's xG from the empirical surface value (already computed above).
+    sStat.xg = (sStat.xg ?? 0) + xg
 
     const goalie = def.unit.goalie
     const netEmpty = def.pulled
     // No goalie stats accrue against an empty net (NHL convention).
     const gStat = netEmpty ? null : stat(ctx, goalie.player.id)
-    if (gStat) gStat.shotsAgainst++
+    if (gStat) {
+      gStat.shotsAgainst++
+      // Credit goalie's xG-against from the same empirical value.
+      gStat.xgAgainst = (gStat.xgAgainst ?? 0) + xg
+    }
 
     const finish = shooterSk.player.composites.scoring / LEAGUE_AVG
     const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
@@ -855,6 +862,11 @@ function simPeriod(
         if (gStat) gStat.goalsAgainst++
         stat(ctx, shooterSk.player.id).goals++
         for (const as of assists) stat(ctx, as).assists++
+        // Credit the primary assister (first in list) xA = shooter's xG value.
+        if (assists.length > 0) {
+          const primaryA = stat(ctx, assists[0])
+          primaryA.xA = (primaryA.xA ?? 0) + xg
+        }
         // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91
         puck.y = 0

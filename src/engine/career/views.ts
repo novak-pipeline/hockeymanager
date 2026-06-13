@@ -1267,3 +1267,93 @@ export interface CalendarView {
   year: number
   entries: CalendarEntry[]
 }
+
+/* ────────────────────────── data hub (xG analytics) ────────────────────────── */
+
+/**
+ * Per-team analytics row for the Data Hub.
+ * All rates are per-60 minutes of ice time (TOI-adjusted) unless noted.
+ * Percentile fields are 0–100, where 100 = best in league.
+ */
+export interface TeamAnalyticsRow {
+  teamId: string
+  teamName: string
+  teamAbbr: string
+  gamesPlayed: number
+  /** Goals for per 60 minutes (GF/60). */
+  gfPer60: number
+  /** Goals against per 60 minutes (GA/60). */
+  gaPer60: number
+  /** Expected goals for per 60 minutes (xGF/60). */
+  xgfPer60: number
+  /** Expected goals against per 60 minutes (xGA/60). */
+  xgaPer60: number
+  /** Shots on goal for per 60 minutes. */
+  shotsPer60: number
+  /** Shots on goal against per 60 minutes. */
+  shotsAgainstPer60: number
+  /** Power-play percentage (0–1). */
+  ppPct: number
+  /** Penalty-kill percentage (0–1). */
+  pkPct: number
+  /** GF/60 league percentile (100 = highest GF/60 in the NHL tier). */
+  gfPctile: number
+  /** GA/60 league percentile (100 = lowest GA/60 — best defence). */
+  gaPctile: number
+  /** xGF/60 percentile. */
+  xgfPctile: number
+  /** xGA/60 percentile (100 = lowest xGA/60). */
+  xgaPctile: number
+  /** Shot volume percentile. */
+  shotsPctile: number
+  /** Shot suppression percentile (100 = fewest shots allowed). */
+  shotsAgainstPctile: number
+  /** PP% percentile. */
+  ppPctile: number
+  /** PK% percentile. */
+  pkPctile: number
+}
+
+/**
+ * Per-player analytics row (skaters only) for the Data Hub leaders tables.
+ */
+export interface PlayerAnalyticsRow {
+  playerId: string
+  name: string
+  teamAbbr: string
+  position: Position
+  gamesPlayed: number
+  /** xG generated as shooter per 60 minutes. */
+  xgPer60: number
+  /** xA generated as primary assister per 60 minutes. */
+  xAPer60: number
+  /** Actual goals per 60 minutes. */
+  goalsPer60: number
+  /** Shooting % (goals / shots on goal). */
+  shootingPct: number
+  /** Finishing: goals – xG (positive = over-performing). */
+  finishing: number
+}
+
+/**
+ * Data Hub view — SciSports/StatsCentre-style analytics for the user team
+ * plus league-wide context.
+ *
+ * Response to 'getDataHub'. NHL-tier only (AHL excluded).
+ */
+export interface DataHubView {
+  /** Analytics row for the user's team (NHL tier). */
+  userTeam: TeamAnalyticsRow
+  /** All NHL-tier teams sorted by xGF/60 descending. */
+  allTeams: TeamAnalyticsRow[]
+  /**
+   * Top-20 skaters by xG/60 (minimum 5 GP filter to exclude cameo appearances).
+   * Sorted xG/60 descending.
+   */
+  xgLeaders: PlayerAnalyticsRow[]
+  /**
+   * Top-20 skaters by finishing (goals – xG), sorted descending.
+   * Identifies over/under-performers vs their shot quality.
+   */
+  finishingLeaders: PlayerAnalyticsRow[]
+}
