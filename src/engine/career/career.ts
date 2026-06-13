@@ -134,6 +134,14 @@ import {
 import { lineSynergy, pairSynergy, playerStyleFit } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
+  discussPlayerTopic,
+  agendaLabel,
+  PLAYER_TOPICS,
+  type AgendaItem,
+  type AgendaTopic,
+  type DiscussionResult,
+} from '@engine/league/staffMeeting'
+import {
   createInitialTentpolesState,
   runCombine,
   runDeadlineDay,
@@ -480,6 +488,9 @@ export class Career {
   private interviews = new Map<string, string[]>()
   /** Per-club legends registry — notable retirees, "where are they now". */
   private legends = new Map<TeamId, ClubLegend[]>()
+  /** Staff-meeting agenda — topics the GM marked for discussion. */
+  private agenda: AgendaItem[] = []
+  private agendaCounter = 0
   private playoffs: PlayoffsState | null = null
   private offseason: OffseasonState | null = null
   private picks: DraftPick[] = []
@@ -4290,6 +4301,50 @@ export class Career {
     return { accepted: evalResult.accepted, response: evalResult.response }
   }
 
+  /* ────────────────────── staff-meeting agenda ────────────────────── */
+
+  /** Mark a player topic for discussion at the next staff meeting. */
+  markForMeeting(playerId: string, topic: string): { ok: boolean; message?: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Player not found.' }
+    if (!PLAYER_TOPICS.some((t) => t.id === topic)) return { ok: false, message: 'Unknown topic.' }
+    const t = topic as AgendaTopic
+    if (this.agenda.some((a) => a.playerId === playerId && a.topic === t)) {
+      return { ok: false, message: 'Already on the agenda.' }
+    }
+    this.agenda.push({
+      id: `ag${this.agendaCounter++}`,
+      playerId,
+      playerName: p.name,
+      topic: t,
+      label: agendaLabel(p.name, t),
+      day: this.currentDay,
+      year: this.year,
+    })
+    return { ok: true }
+  }
+
+  /** Current staff-meeting agenda. */
+  getAgenda(): AgendaItem[] {
+    return this.agenda.map((a) => ({ ...a }))
+  }
+
+  /** Discuss an agenda item: the relevant staff member gives an opinion; item is cleared. */
+  discussAgendaItem(itemId: string): { ok: boolean; message?: string; result?: DiscussionResult } {
+    const idx = this.agenda.findIndex((a) => a.id === itemId)
+    if (idx < 0) return { ok: false, message: 'That item is no longer on the agenda.' }
+    const item = this.agenda[idx]!
+    const p = this.data.players.get(asPlayerId(item.playerId))
+    if (!p) { this.agenda.splice(idx, 1); return { ok: false, message: 'Player no longer available.' } }
+    const result = discussPlayerTopic({
+      player: p,
+      topic: item.topic,
+      staff: this.getTeamStaff(this.userTeamId as string),
+    })
+    this.agenda.splice(idx, 1)
+    return { ok: true, result }
+  }
+
   /** Legends registry for a club, most recent first. */
   getTeamLegends(teamId: string): TeamLegendsView {
     const tid = asTeamId(teamId)
@@ -5418,6 +5473,8 @@ export class Career {
       interactionCounter: this.interactionCounter,
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       legends: [...this.legends.entries()].map(([k, v]) => [k as string, v.map((l) => structuredClone(l))] as [string, ClubLegend[]]),
+      agenda: this.agenda.map((a) => ({ ...a })),
+      agendaCounter: this.agendaCounter,
       tentpoles: structuredClone(this.tentpoles),
       storyMisc: {
         pointStreaks: [...this.pointStreaks],
@@ -5522,6 +5579,8 @@ export class Career {
     if (snapshot.legends) {
       career.legends = new Map(snapshot.legends.map(([k, v]) => [asTeamId(k), v.map((l) => structuredClone(l))]))
     }
+    if (snapshot.agenda) career.agenda = snapshot.agenda.map((a) => ({ ...a }))
+    career.agendaCounter = snapshot.agendaCounter ?? 0
     if (snapshot.expectations) {
       career.expectationsState = structuredClone(snapshot.expectations)
     } else {

@@ -75,6 +75,8 @@ export type { PlayerInteractionView, InteractionOptionView } from '@engine/caree
 export type { InterviewView, InterviewAnswerView } from '@engine/career/views'
 export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
 import type { TeamLegendsView } from '@engine/career/views'
+export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
+import type { AgendaItem, DiscussionResult } from '@engine/career/views'
 export { RADAR_AXES } from '@engine/career/views'
 import type {
   AgmReportView,
@@ -153,6 +155,9 @@ export type WorkerRequestBody =
   | { type: 'getFinances' }
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
+  | { type: 'getAgenda' }
+  | { type: 'markForMeeting'; playerId: string; topic: string }
+  | { type: 'discussAgendaItem'; itemId: string }
   | { type: 'getPlayoffs' }
   | { type: 'getOffseason' }
   /** Box score of the most recently played user game, if any. */
@@ -290,6 +295,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
+  | { type: 'agenda'; items: AgendaItem[] }
+  | { type: 'discussion'; result: DiscussionResult }
   | { type: 'playoffs'; playoffs: PlayoffBracketView | null }
   | { type: 'offseason'; offseason: OffseasonView | null }
   | { type: 'boxScore'; boxScore: BoxScoreView | null }

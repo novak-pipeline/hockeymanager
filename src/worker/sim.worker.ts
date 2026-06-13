@@ -122,6 +122,18 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().suggestToCoach(req.direction)
       return { id: req.id, type: 'coachResponse', accepted: res.accepted, response: res.response }
     }
+    case 'getAgenda':
+      return { id: req.id, type: 'agenda', items: must().getAgenda() }
+    case 'markForMeeting': {
+      const res = must().markForMeeting(req.playerId, req.topic)
+      if (!res.ok) throw new Error(res.message ?? 'Could not mark for meeting.')
+      return { id: req.id, type: 'ok' }
+    }
+    case 'discussAgendaItem': {
+      const res = must().discussAgendaItem(req.itemId)
+      if (!res.ok || !res.result) throw new Error(res.message ?? 'Could not discuss item.')
+      return { id: req.id, type: 'discussion', result: res.result }
+    }
     case 'respondToInteraction': {
       const res = must().respondToInteraction(req.interactionId, req.optionId)
       if (!res.ok) throw new Error(res.message ?? 'Could not respond.')

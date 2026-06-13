@@ -205,6 +205,18 @@ export class SimClient {
     return this.send({ type: 'suggestToCoach', direction })
   }
 
+  getAgenda(): Promise<WorkerResponse> {
+    return this.send({ type: 'getAgenda' })
+  }
+
+  markForMeeting(playerId: string, topic: string): Promise<WorkerResponse> {
+    return this.send({ type: 'markForMeeting', playerId, topic })
+  }
+
+  discussAgendaItem(itemId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'discussAgendaItem', itemId })
+  }
+
   proposeTrade(proposal: TradeProposal): Promise<WorkerResponse> {
     return this.send({ type: 'proposeTrade', proposal })
   }

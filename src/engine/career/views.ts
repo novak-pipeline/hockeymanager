@@ -40,6 +40,8 @@ import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { PlayerInteraction } from '@engine/league/interactions'
 export type { PlayerInteraction, InteractionKind } from '@engine/league/interactions'
+import type { AgendaItem } from '@engine/league/staffMeeting'
+export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/league/staffMeeting'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
 import type { StaffMember, AgmReport } from '@engine/league/staff'
 import type { TeamLeadersView } from '@engine/league/playerRating'
@@ -1004,6 +1006,9 @@ export interface CareerSnapshot {
   interviews?: Array<[string, string[]]>
   /** [teamId, ClubLegend[]][] — per-club legends registry. Optional/additive. */
   legends?: Array<[string, ClubLegend[]]>
+  /** Staff-meeting agenda items. Optional/additive. */
+  agenda?: AgendaItem[]
+  agendaCounter?: number
   tentpoles?: TentpolesState
   /** Small story-layer counters not derivable from the states above. */
   storyMisc?: {

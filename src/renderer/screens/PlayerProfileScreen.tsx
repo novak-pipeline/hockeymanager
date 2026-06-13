@@ -426,6 +426,71 @@ function InterviewPanel({
   )
 }
 
+/* ── Mark-for-meeting: queue a player topic for the next staff meeting ── */
+const MEETING_TOPICS: { id: string; label: string }[] = [
+  { id: 'form',        label: 'His recent form' },
+  { id: 'iceTime',     label: 'His ice time / usage' },
+  { id: 'role',        label: 'His best role' },
+  { id: 'development', label: 'His development' },
+  { id: 'tradeValue',  label: 'His trade value' },
+]
+
+function MarkForMeeting({
+  playerId,
+  client,
+}: {
+  playerId: string
+  client: ReturnType<typeof useClient>
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function mark(topic: string): Promise<void> {
+    setBusy(true)
+    try {
+      const res = await client.markForMeeting(playerId, topic)
+      if (res.type === 'error') toast(res.message, 'error')
+      else toast('Added to the staff-meeting agenda.', 'success')
+    } finally {
+      setBusy(false)
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => setOpen((o) => !o)}>
+        Mark for meeting ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', zIndex: 20, top: '100%', left: 0, marginTop: 4,
+            background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.4)', minWidth: 200,
+          }}
+        >
+          {MEETING_TOPICS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => void mark(t.id)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', fontSize: 13,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg2)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* Axis label map for the radar stat bars. */
 const AXIS_LABELS: Record<string, string> = {
   hockeyIQ: 'Hockey IQ',
@@ -821,6 +886,11 @@ function TabProfile({
           </span>
         </div>
       )}
+
+      {/* Mark for staff-meeting discussion */}
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <MarkForMeeting playerId={d.playerId} client={client} />
+      </div>
 
       {/* System fit — how well the player suits the team's current tactics */}
       {d.systemFit && (() => {

@@ -355,6 +355,8 @@ const STAFF_SUGGESTIONS: { id: string; label: string; detail: string }[] = [
   { id: 'aggressiveForecheck', label: 'Forecheck aggressively',     detail: 'Pressure the puck high (2-1-2).' },
 ]
 
+interface AgendaItemLite { id: string; label: string }
+
 function StaffMeetingPanel({
   client,
   onApplied,
@@ -364,6 +366,15 @@ function StaffMeetingPanel({
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [last, setLast] = useState<{ accepted: boolean; response: string } | null>(null)
+  const [agenda, setAgenda] = useState<AgendaItemLite[]>([])
+  const [discussion, setDiscussion] = useState<{ speaker: string; speakerRole: string; opinion: string } | null>(null)
+
+  const loadAgenda = useCallback(async (): Promise<void> => {
+    const res = await client.getAgenda()
+    if (res.type === 'agenda') setAgenda(res.items.map((i) => ({ id: i.id, label: i.label })))
+  }, [client])
+
+  useEffect(() => { void loadAgenda() }, [loadAgenda])
 
   async function suggest(id: string): Promise<void> {
     if (busy) return
@@ -381,8 +392,55 @@ function StaffMeetingPanel({
     }
   }
 
+  async function discuss(id: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.discussAgendaItem(id)
+      if (res.type === 'discussion') {
+        setDiscussion({ speaker: res.result.speaker, speakerRole: res.result.speakerRole, opinion: res.result.opinion })
+        await loadAgenda()
+      } else if (res.type === 'error') {
+        toast(res.message, 'error')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Panel title="Staff Meeting">
+      {/* Agenda the GM marked from around the app */}
+      {agenda.length > 0 && (
+        <div style={{ marginBottom: 'var(--sp-3)' }}>
+          <div className="field-label">Agenda</div>
+          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+            {agenda.map((a) => (
+              <div key={a.id} className="row-between" style={{ gap: 'var(--sp-2)' }}>
+                <span className="small" style={{ minWidth: 0 }}>{a.label}</span>
+                <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void discuss(a.id)}>
+                  Discuss
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {discussion && (
+        <div
+          style={{
+            marginBottom: 'var(--sp-3)', padding: 'var(--sp-2) var(--sp-3)',
+            borderLeft: '3px solid var(--violet-h)', background: 'var(--bg2)',
+            borderRadius: 'var(--radius-sm)', fontSize: 13, lineHeight: 1.5,
+          }}
+        >
+          <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
+            {discussion.speaker} · {discussion.speakerRole}
+          </div>
+          {discussion.opinion}
+        </div>
+      )}
+
       <div className="muted small" style={{ marginBottom: 'var(--sp-2)' }}>
         Your head coach owns the system. Suggest a direction — whether he adopts it
         depends on his judgement and how well it fits the roster.
