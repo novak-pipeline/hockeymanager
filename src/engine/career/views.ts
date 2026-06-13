@@ -901,6 +901,8 @@ export interface CareerSnapshot {
     scorelessStreaks: Array<[string, number]>
     /** [teamId, current losing streak]. */
     losingStreaks: Array<[string, number]>
+    /** User team current consecutive wins (for coach win-streak quotes). Optional; older saves default to 0. */
+    userWinStreak?: number
     lastDeadlineRecap: ExecutedTradeSummary[] | null
     lastLottery: {
       orderAbbrs: string[]

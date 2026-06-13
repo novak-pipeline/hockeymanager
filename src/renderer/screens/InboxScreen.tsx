@@ -407,6 +407,11 @@ function ReadingPane(props: {
     )
   }
 
+  // Coach-quote items render as a styled quote card.
+  if (item.speaker) {
+    return <CoachQuotePane item={item} navigate={navigate} />
+  }
+
   const meta = CATEGORY_META[item.category]
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
@@ -494,6 +499,131 @@ function ReadingPane(props: {
         )}
       </div>
     </Panel>
+  )
+}
+
+/**
+ * Coach quote card — rendered when a NewsItem has a `speaker` field.
+ * Shows the coach photo (or placeholder), the quote in large quotation marks,
+ * and the attribution line "— {speaker}, Head Coach".
+ */
+function CoachQuotePane(props: {
+  item: NewsItem
+  navigate: ReturnType<typeof useNav>['navigate']
+}): JSX.Element {
+  const { item } = props
+  const meta = CATEGORY_META[item.category]
+
+  return (
+    <div
+      className="panel"
+      style={{
+        background: 'var(--bg1)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius)',
+        padding: 0,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Accent top-bar */}
+      <div
+        style={{
+          height: 3,
+          background: 'linear-gradient(90deg, var(--violet), var(--amber))',
+        }}
+      />
+
+      <div style={{ padding: 'var(--sp-5)' }}>
+        {/* Badge + date */}
+        <div
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: 1.5,
+            color: meta.color,
+            marginBottom: 6,
+          }}
+        >
+          {meta.icon} {meta.label} · PRESS CONFERENCE
+        </div>
+        <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-4)' }}>
+          {itemDate(item)}
+        </div>
+
+        {/* Divider */}
+        <div style={{ borderTop: '2px solid var(--amber)', marginBottom: 'var(--sp-5)' }} />
+
+        {/* Quote body */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--sp-4)',
+            alignItems: 'flex-start',
+          }}
+        >
+          {/* Coach photo */}
+          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-2)' }}>
+            <PlayerFace
+              faceId={item.speakerFaceId}
+              name={item.speaker ?? ''}
+              size={72}
+            />
+          </div>
+
+          {/* Quote text */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 32,
+                lineHeight: 0.8,
+                color: 'var(--amber)',
+                fontFamily: 'Georgia, serif',
+                marginBottom: 6,
+                userSelect: 'none',
+              }}
+            >
+              "
+            </div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 16,
+                lineHeight: 1.65,
+                fontStyle: 'italic',
+                color: 'var(--text)',
+                maxWidth: '54ch',
+              }}
+            >
+              {item.body}
+            </p>
+            <div
+              style={{
+                marginTop: 'var(--sp-3)',
+                fontSize: 13,
+                fontWeight: 700,
+                color: 'var(--muted)',
+              }}
+            >
+              — {item.speaker}, Head Coach
+            </div>
+          </div>
+        </div>
+
+        {/* Headline below as context */}
+        <div
+          style={{
+            marginTop: 'var(--sp-5)',
+            borderTop: '1px solid var(--line)',
+            paddingTop: 'var(--sp-3)',
+            fontSize: 12,
+            color: 'var(--muted)',
+          }}
+        >
+          {item.headline}
+        </div>
+      </div>
+    </div>
   )
 }
 

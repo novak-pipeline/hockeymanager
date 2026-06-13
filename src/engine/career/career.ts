@@ -102,6 +102,7 @@ import {
   type PressTone,
 } from '@engine/story/factSheet'
 import { renderFallback } from '@engine/story/pressFallback'
+import { coachQuote, type CoachSituation, type CoachQuoteFacts } from '@engine/story/coachQuotes'
 import {
   chemistryModifier,
   developmentModifier,
@@ -469,6 +470,8 @@ export class Career {
   private readonly scorelessStreaks = new Map<string, number>()
   /** Per-team consecutive losses (for locker-room ticks). */
   private readonly losingStreaks = new Map<string, number>()
+  /** User team consecutive wins (for coach win-streak quotes). */
+  private userWinStreak = 0
   /** Yesterday's league ranks for standings-delta arcs. Transient (rebuilt daily). */
   private readonly prevRanks = new Map<string, number>()
   /* ── press corps (Wave 2) ── */
@@ -720,7 +723,13 @@ export class Career {
     category: NewsCategory,
     headline: string,
     body: string,
-    refs: { teamId?: string; playerId?: string; press?: { byline: string; kind: string } } = {}
+    refs: {
+      teamId?: string
+      playerId?: string
+      press?: { byline: string; kind: string }
+      speaker?: string
+      speakerFaceId?: string
+    } = {}
   ): void {
     const item: NewsItem = {
       id: `n${this.newsCounter++}`,
@@ -733,9 +742,30 @@ export class Career {
       ...(refs.teamId !== undefined ? { teamId: refs.teamId } : {}),
       ...(refs.playerId !== undefined ? { playerId: refs.playerId } : {}),
       ...(refs.press !== undefined ? { press: refs.press } : {}),
+      ...(refs.speaker !== undefined ? { speaker: refs.speaker } : {}),
+      ...(refs.speakerFaceId !== undefined ? { speakerFaceId: refs.speakerFaceId } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
+  }
+
+  /**
+   * Push a coach-quote news item for the user team's head coach.
+   * Deterministic: quote line is picked from the stable-hash of seed+situation.
+   */
+  private pushCoachQuote(
+    situation: CoachSituation,
+    facts: CoachQuoteFacts,
+    seed: number,
+    headline: string
+  ): void {
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const quote = coachQuote(coach, situation, facts, seed)
+    this.pushNews('result', headline, quote, {
+      teamId: this.userTeamId as string,
+      speaker: coach.name,
+      ...(coach.faceId !== undefined ? { speakerFaceId: coach.faceId } : {}),
+    })
   }
 
   /* ────────────────────────── story layer plumbing ────────────────────────── */
@@ -1368,6 +1398,48 @@ export class Career {
         )
       }
     }
+
+    /* ── Coach quote: win streak milestones (5, 10, 15) ── */
+    const WIN_STREAK_THRESHOLDS = [5, 10, 15]
+    if (WIN_STREAK_THRESHOLDS.includes(this.userWinStreak)) {
+      const quoteSeed = this.seed ^ (day * 97)
+      this.pushCoachQuote(
+        'winStreak',
+        { streakCount: this.userWinStreak },
+        quoteSeed,
+        `${this.userWinStreak}-game win streak — Coach speaks`
+      )
+    }
+
+    /* ── Coach quote: losing streak milestones (3, 5, 7) ── */
+    const LOSING_STREAK_THRESHOLDS = [3, 5, 7]
+    const userLoss = this.losingStreaks.get(this.userTeamId as string) ?? 0
+    if (LOSING_STREAK_THRESHOLDS.includes(userLoss)) {
+      const quoteSeed = this.seed ^ (day * 113)
+      this.pushCoachQuote(
+        'losingStreak',
+        { streakCount: userLoss },
+        quoteSeed,
+        `${userLoss} in a row — Coach addresses the slump`
+      )
+    }
+
+    /* ── Coach quote: slumping star (user team skater with 5+ scoreless) ── */
+    // Fire once per player when they cross the 5-game threshold.
+    const SLUMP_THRESHOLD = 5
+    for (const line of playerLines) {
+      if (line.teamId !== (this.userTeamId as string)) continue
+      if (line.scorelessStreak !== SLUMP_THRESHOLD) continue // only on exactly crossing
+      const p = this.data.players.get(asPlayerId(line.playerId))
+      if (!p || p.position === 'G') continue
+      const quoteSeed = this.seed ^ Career.pidNum(line.playerId) ^ (day * 7)
+      this.pushCoachQuote(
+        'slumpingStar',
+        { playerName: p.name, streakCount: line.scorelessStreak },
+        quoteSeed,
+        `${p.name} slump (${line.scorelessStreak} games) — Coach speaks`
+      )
+    }
   }
 
   /** Dashboard ticker line for an arc: actor name + latest beat. */
@@ -1871,6 +1943,56 @@ export class Career {
       `${away.name} ${res.awayGoals} @ ${home.name} ${res.homeGoals}${suffix}.`,
       { teamId: opp.id as string }
     )
+
+    /* ── Coach quote: big win (≥3 goal margin, regulation) or bad loss (≥3 goal margin) ── */
+    const diff = us - them
+    const quoteSeed = this.seed ^ (day * 31)
+    if (diff >= 3 && res.decidedBy === 'regulation') {
+      // Big win — coach speaks
+      this.userWinStreak++
+      this.pushCoachQuote(
+        'postBigWin',
+        { opponentAbbr: opp.abbreviation, score: `${us}-${them}`, goalDiff: diff },
+        quoteSeed,
+        `${opp.abbreviation}: "${this.coachQuoteHeadline('postBigWin', diff)}"`
+      )
+    } else if (diff <= -3 && res.decidedBy === 'regulation') {
+      // Bad loss — coach speaks
+      this.userWinStreak = 0
+      this.pushCoachQuote(
+        'postBadLoss',
+        { opponentAbbr: opp.abbreviation, score: `${them}-${us}`, goalDiff: Math.abs(diff) },
+        quoteSeed,
+        `${opp.abbreviation}: "${this.coachQuoteHeadline('postBadLoss', Math.abs(diff))}"`
+      )
+    } else if (diff > 0) {
+      this.userWinStreak++
+    } else {
+      this.userWinStreak = 0
+    }
+  }
+
+  /** One-line headline for a coach quote item. */
+  private coachQuoteHeadline(situation: CoachSituation, diff: number): string {
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const demeanor = coach.demeanor ?? 'calm'
+    if (situation === 'postBigWin') {
+      if (demeanor === 'fiery') return `We were ruthless — Coach after ${diff}-goal win`
+      if (demeanor === 'analytical') return `Underlying numbers looked excellent — Coach postgame`
+      if (demeanor === 'motivator') return `Proud of the group — Coach postgame`
+      if (demeanor === 'pragmatic') return `Two points is all that matters — Coach postgame`
+      return `A pleasing performance — Coach postgame`
+    }
+    if (situation === 'postBadLoss') {
+      if (demeanor === 'fiery') return `Not acceptable — Coach after ${diff}-goal loss`
+      if (demeanor === 'analytical') return `Structural issues to address — Coach postgame`
+      if (demeanor === 'motivator') return `We'll respond — Coach postgame`
+      if (demeanor === 'pragmatic') return `We assess and move on — Coach postgame`
+      return `We'll fix it — Coach postgame`
+    }
+    if (situation === 'winStreak') return `Streak at ${diff} — Coach speaks`
+    if (situation === 'losingStreak') return `Coach addresses losing streak`
+    return `Coach speaks`
   }
 
   /* ────────────────────────── regular-season day loop ────────────────────────── */
@@ -3336,6 +3458,16 @@ export class Career {
       `Welcome aboard: $${(salary / 1e6).toFixed(2)}M × ${years} years.`,
       { playerId }
     )
+    /* ── Coach quote: signing welcome ── */
+    {
+      const quoteSeed = this.seed ^ Career.pidNum(playerId)
+      this.pushCoachQuote(
+        'signing',
+        { playerName: player.name },
+        quoteSeed,
+        `${player.name} signing — Coach's reaction`
+      )
+    }
     /* ── Wave 4: record transaction ── */
     {
       const txResult = recordTransaction(this.transactionLedger, {
@@ -3455,6 +3587,20 @@ export class Career {
     this.pushNews('trade', `Trade completed with ${partner.abbreviation}`, `The deal is done.`, {
       teamId: offer.partnerTeamId as string,
     })
+    /* ── Coach quote: trade-add reaction (if at least one player received) ── */
+    if (offer.userReceivesPlayerIds.length > 0) {
+      const firstReceived = offer.userReceivesPlayerIds[0]!
+      const receivedPlayer = this.data.players.get(asPlayerId(firstReceived))
+      if (receivedPlayer) {
+        const quoteSeed = this.seed ^ Career.pidNum(firstReceived)
+        this.pushCoachQuote(
+          'tradeAdd',
+          { playerName: receivedPlayer.name, opponentAbbr: partner.abbreviation },
+          quoteSeed,
+          `Trade with ${partner.abbreviation} — Coach's reaction`
+        )
+      }
+    }
     /* ── Wave 4: record transaction ── */
     {
       const txResult = recordTransaction(this.transactionLedger, {
@@ -3936,6 +4082,9 @@ export class Career {
       const t = this.data.teams.get(asTeamId(tid))
       if (t) teamInfo[tid] = { abbreviation: t.abbreviation, primaryColor: t.colors.primary }
     }
+
+    // Coach-quote items carry speakerFaceId directly on the item — no extra lookup needed.
+    // The InboxScreen reads item.speaker and item.speakerFaceId to render the quote card.
 
     return { items, unread, playerInfo, teamInfo }
   }
@@ -4780,6 +4929,7 @@ export class Career {
         pointStreaks: [...this.pointStreaks],
         scorelessStreaks: [...this.scorelessStreaks],
         losingStreaks: [...this.losingStreaks],
+        userWinStreak: this.userWinStreak,
         lastDeadlineRecap: this.lastDeadlineRecap ? structuredClone(this.lastDeadlineRecap) : null,
         lastLottery: this.lastLottery ? structuredClone(this.lastLottery) : null,
       },
@@ -4880,6 +5030,7 @@ export class Career {
       for (const [k, v] of snapshot.storyMisc.pointStreaks) career.pointStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.losingStreaks) career.losingStreaks.set(k, v)
+      career.userWinStreak = snapshot.storyMisc.userWinStreak ?? 0
       career.lastDeadlineRecap = snapshot.storyMisc.lastDeadlineRecap
         ? structuredClone(snapshot.storyMisc.lastDeadlineRecap)
         : null
