@@ -452,9 +452,28 @@ function pickAssists(rng: Rng, skaters: RSkater[], scorerId: PlayerId): PlayerId
   return assists
 }
 
-/** Index of the unit's best faceoff man (he takes every draw). */
+/**
+ * Index of the skater who takes the draw. Real hockey: the centre takes it —
+ * always, even when a defenceman on the unit has a better faceoff rating (which
+ * happens with synthesized/imported ratings). Prefer an actual centreman (the
+ * best faceoff man among them if a line dresses two), then whoever sits in the
+ * centre slot, and only as a last resort the best faceoff man on the ice
+ * (special-teams / OT units may not have a natural centre out there).
+ */
 function takerIdxOf(unit: Unit): number {
-  let best = 0
+  let best = -1
+  for (let i = 0; i < unit.skaters.length; i++) {
+    if (unit.skaters[i].player.position !== 'C') continue
+    if (
+      best < 0 ||
+      unit.skaters[i].player.composites.faceoffWin > unit.skaters[best].player.composites.faceoffWin
+    )
+      best = i
+  }
+  if (best >= 0) return best
+  const centreSlot = unit.slots.indexOf(1)
+  if (centreSlot >= 0) return centreSlot
+  best = 0
   for (let i = 1; i < unit.skaters.length; i++) {
     if (unit.skaters[i].player.composites.faceoffWin > unit.skaters[best].player.composites.faceoffWin)
       best = i

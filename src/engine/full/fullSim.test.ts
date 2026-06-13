@@ -115,30 +115,35 @@ describe('fullSimGame', () => {
     expect(foundPP).toBe(true)
   }, 60000)
 
-  it('regular-season OT frames show 3 skaters per side', () => {
+  it('regular-season OT is 3-on-3 (4-on-3 only on a penalty)', () => {
     const data = generateLeague({ seed: 7 })
     const resolve = resolverFor(data)
     const teams = data.league.teams
-    let found3v3 = false
-    for (let s = 0; s < 20 && !found3v3; s++) {
+    let sawOt = false
+    let saw3v3 = false
+    for (let s = 0; s < 20; s++) {
       const home = data.teams.get(teams[s % teams.length])!
       const away = data.teams.get(teams[(s + 1) % teams.length])!
       const out = fullSimGame(home, away, resolve, { seed: 400 + s })
-      if (out.decidedBy === 'overtime' || out.decidedBy === 'shootout') {
-        for (const ev of out.stream) {
-          if (isEvent(ev, 'frame') && (ev as any).period === 4) {
-            const f = ev as any
-            expect(f.home.length).toBe(3)
-            expect(f.away.length).toBe(3)
-            found3v3 = true
-            break
-          }
-        }
+      if (out.decidedBy !== 'overtime' && out.decidedBy !== 'shootout') continue
+      for (const ev of out.stream) {
+        if (!isEvent(ev, 'frame') || (ev as any).period !== 4) continue
+        const f = ev as any
+        sawOt = true
+        // Even strength OT is 3-on-3; a penalty makes it 4-on-3. So each side is
+        // always 3 or 4 skaters, never fewer, and both teams can never be on the
+        // power play at once (no 4-on-4 from a single-penalty advantage).
+        expect(f.home.length).toBeGreaterThanOrEqual(3)
+        expect(f.away.length).toBeGreaterThanOrEqual(3)
+        expect(f.home.length).toBeLessThanOrEqual(4)
+        expect(f.away.length).toBeLessThanOrEqual(4)
+        expect(f.home.length === 4 && f.away.length === 4).toBe(false)
+        if (f.home.length === 3 && f.away.length === 3) saw3v3 = true
       }
     }
-    // May not always find OT in 20 games; skip if not found.
-    if (!found3v3) return
-    expect(found3v3).toBe(true)
+    // May not always reach OT in 20 games; only assert the invariant if we did.
+    if (!sawOt) return
+    expect(saw3v3).toBe(true)
   }, 60000)
 
   it('goalie pull produces 6-skater frames and EN goals are possible', () => {
