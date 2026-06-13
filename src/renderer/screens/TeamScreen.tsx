@@ -117,7 +117,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
         case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
         case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
         case 'teamInfo':    return <TeamInfoTabReadOnly teamId={viewedTeamId} />
-        case 'teamHistory': return <HistoryScreen />
+        case 'teamHistory': return <TeamHistoryTab teamId={viewedTeamId} />
         case 'leagueSchedule':
         default:            return <ScheduleScreen teamId={viewedTeamId} />
       }
@@ -292,6 +292,55 @@ function DepthColumn(props: {
         )}
       </div>
     </div>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   HISTORY TAB — club legends ("where are they now") + season history
+   ══════════════════════════════════════════════════════════════ */
+
+function TeamHistoryTab(props: { teamId: string }): JSX.Element {
+  const client = useClient()
+  const { data } = useScreenData(
+    () => client.getTeamLegends(props.teamId),
+    (r) => (r.type === 'teamLegends' ? r.legends : null)
+  )
+
+  return (
+    <section className="stack">
+      {data && data.legends.length > 0 && (
+        <Panel title="Club Legends">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            {data.legends.map((l) => (
+              <div
+                key={l.playerId}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--sp-3)',
+                  padding: 'var(--sp-2) 0',
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <PlayerFace faceId={l.faceId} name={l.name} size={40} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    <PlayerLink playerId={l.playerId} name={l.name} /> <span className="muted small">({l.position})</span>
+                  </div>
+                  <div className="muted small">{l.blurb}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="mono" style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{l.peakOverall}</div>
+                  <div className="muted small">Retired {l.retiredYear}</div>
+                  <div className="small" style={{ color: l.status === 'Retired' ? 'var(--muted)' : 'var(--success)' }}>{l.status}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+      <HistoryScreen />
+    </section>
   )
 }
 

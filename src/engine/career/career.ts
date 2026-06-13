@@ -271,6 +271,8 @@ import {
   type HistoryView,
   type InboxView,
   type PlayerInteractionView,
+  type ClubLegend,
+  type TeamLegendsView,
   type LeagueLeadersView,
   type LeagueStatsView,
   type LeagueTeamsView,
@@ -475,6 +477,8 @@ export class Career {
   private interactionCounter = 0
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
+  /** Per-club legends registry — notable retirees, "where are they now". */
+  private legends = new Map<TeamId, ClubLegend[]>()
   private playoffs: PlayoffsState | null = null
   private offseason: OffseasonState | null = null
   private picks: DraftPick[] = []
@@ -2891,6 +2895,19 @@ export class Career {
           })
         }
 
+        /* ── notable retirees → club legends registry ("where are they now") ── */
+        for (const id of retired.retired) {
+          const p = this.data.players.get(id)
+          if (!p) continue
+          const teamId = rosterTeamOf.get(id as string)
+          if (!teamId) continue
+          const ovr = overall(p.composites, p.position)
+          const seasonsPlayed = p.stats.length
+          // Notable = a genuine top player or a long-serving veteran.
+          if (ovr < 78 && seasonsPlayed < 12) continue
+          this.recordLegend(teamId, p, ovr, seasonsPlayed)
+        }
+
         /* ── add notable retirees to hireable pool; auto-fill empty staff slot ── */
         const retiredIds = retired.retired.map((id) => id as string)
         // Add to hireable pool (for UI to display)
@@ -2914,6 +2931,9 @@ export class Career {
               } else {
                 this.staff.assistantGM = newStaff
               }
+              const roleLabel = newStaff.role === 'headCoach' ? 'Head Coach' : 'Assistant GM'
+              const userTeamName = this.data.teams.get(this.userTeamId)?.name ?? 'the club'
+              this.updateLegendStatus(candidateId, `${roleLabel}, ${userTeamName}`)
               this.pushNews(
                 'league',
                 `${newStaff.name} joins coaching staff`,
@@ -4214,6 +4234,50 @@ export class Career {
     return { ok: true }
   }
 
+  /* ────────────────────── club legends ("where are they now") ────────────────────── */
+
+  private static readonly LEGENDS_PER_CLUB = 30
+
+  /** Record a notable retiree into his last club's legends registry. */
+  private recordLegend(teamId: TeamId, p: Player, ovr: number, seasonsPlayed: number): void {
+    const list = this.legends.get(teamId) ?? []
+    if (list.some((l) => l.playerId === (p.id as unknown as string))) return
+    const tier = ovr >= 88 ? 'franchise icon' : ovr >= 82 ? 'star' : seasonsPlayed >= 12 ? 'long-serving veteran' : 'fan favourite'
+    const blurb = `A ${tier} — ${seasonsPlayed} season${seasonsPlayed === 1 ? '' : 's'}, peak rating ${ovr}.`
+    const legend: ClubLegend = {
+      playerId: p.id as unknown as string,
+      name: p.name,
+      position: p.position,
+      retiredYear: this.year,
+      peakOverall: ovr,
+      blurb,
+      status: 'Retired',
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+    }
+    list.unshift(legend)
+    if (list.length > Career.LEGENDS_PER_CLUB) list.length = Career.LEGENDS_PER_CLUB
+    this.legends.set(teamId, list)
+  }
+
+  /** Update a legend's "where are they now" status (e.g. moved into staff). */
+  private updateLegendStatus(playerId: string, status: string): void {
+    for (const list of this.legends.values()) {
+      const entry = list.find((l) => l.playerId === playerId)
+      if (entry) { entry.status = status; return }
+    }
+  }
+
+  /** Legends registry for a club, most recent first. */
+  getTeamLegends(teamId: string): TeamLegendsView {
+    const tid = asTeamId(teamId)
+    const team = this.data.teams.get(tid)
+    return {
+      teamId,
+      teamName: team?.name ?? teamId,
+      legends: (this.legends.get(tid) ?? []).map((l) => structuredClone(l)),
+    }
+  }
+
   /** Radar comparison view for two players (used by the Phase C compare UI). */
   compareRadar(playerIdA: string, playerIdB: string): CompareRadarView {
     return buildCompareRadar(this.ctx(), playerIdA, playerIdB)
@@ -5330,6 +5394,7 @@ export class Career {
       interactions: this.interactions.map((i) => structuredClone(i)),
       interactionCounter: this.interactionCounter,
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
+      legends: [...this.legends.entries()].map(([k, v]) => [k as string, v.map((l) => structuredClone(l))] as [string, ClubLegend[]]),
       tentpoles: structuredClone(this.tentpoles),
       storyMisc: {
         pointStreaks: [...this.pointStreaks],
@@ -5430,6 +5495,9 @@ export class Career {
     career.interactionCounter = snapshot.interactionCounter ?? 0
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
+    }
+    if (snapshot.legends) {
+      career.legends = new Map(snapshot.legends.map(([k, v]) => [asTeamId(k), v.map((l) => structuredClone(l))]))
     }
     if (snapshot.expectations) {
       career.expectationsState = structuredClone(snapshot.expectations)

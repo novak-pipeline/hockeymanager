@@ -73,6 +73,8 @@ export type {
 } from '@engine/career/views'
 export type { PlayerInteractionView, InteractionOptionView } from '@engine/career/views'
 export type { InterviewView, InterviewAnswerView } from '@engine/career/views'
+export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
+import type { TeamLegendsView } from '@engine/career/views'
 export { RADAR_AXES } from '@engine/career/views'
 import type {
   AgmReportView,
@@ -150,6 +152,7 @@ export type WorkerRequestBody =
   | { type: 'getDraft' }
   | { type: 'getFinances' }
   | { type: 'getInbox' }
+  | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getPlayoffs' }
   | { type: 'getOffseason' }
   /** Box score of the most recently played user game, if any. */
@@ -284,6 +287,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'draft'; draft: DraftView }
   | { type: 'finances'; finances: FinanceView }
   | { type: 'inbox'; inbox: InboxView }
+  | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'playoffs'; playoffs: PlayoffBracketView | null }
   | { type: 'offseason'; offseason: OffseasonView | null }
   | { type: 'boxScore'; boxScore: BoxScoreView | null }

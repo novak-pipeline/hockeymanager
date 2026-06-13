@@ -412,6 +412,27 @@ export interface PlayerProfileView extends PlayerBadge {
   systemFit?: { score: number; label: string; reason: string; styleLabel: string }
 }
 
+/** A notable retiree recorded in a club's legends registry. */
+export interface ClubLegend {
+  playerId: string
+  name: string
+  faceId?: string
+  position: string
+  retiredYear: number
+  /** Peak overall reached while a known player. */
+  peakOverall: number
+  /** One-line career summary. */
+  blurb: string
+  /** "Where are they now" — e.g. "Retired" or "Head Coach, <team>". */
+  status: string
+}
+
+export interface TeamLegendsView {
+  teamId: string
+  teamName: string
+  legends: ClubLegend[]
+}
+
 /** One answered interview question. */
 export interface InterviewAnswerView {
   questionId: string
@@ -981,6 +1002,8 @@ export interface CareerSnapshot {
   interactionCounter?: number
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
+  /** [teamId, ClubLegend[]][] — per-club legends registry. Optional/additive. */
+  legends?: Array<[string, ClubLegend[]]>
   tentpoles?: TentpolesState
   /** Small story-layer counters not derivable from the states above. */
   storyMisc?: {

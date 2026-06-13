@@ -116,6 +116,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'markNewsRead':
       must().markNewsRead(req.ids)
       return { id: req.id, type: 'ok' }
+    case 'getTeamLegends':
+      return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
     case 'respondToInteraction': {
       const res = must().respondToInteraction(req.interactionId, req.optionId)
       if (!res.ok) throw new Error(res.message ?? 'Could not respond.')
