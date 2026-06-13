@@ -29,7 +29,6 @@ import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
-import { StatBar } from '../components/StatBar'
 
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
@@ -88,6 +87,59 @@ function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }):
   )
 }
 
+/**
+ * Maps a 0–99 overall to a 0–5 star rating rounded to the nearest 0.5.
+ *   star = clamp(overall / 20, 0, 5) → 99 ≈ 5, 80 = 4, 60 = 3, 40 = 2, 20 = 1
+ * Rounded to nearest 0.5 so half-stars are supported.
+ */
+function overallToStars(overall: number): number {
+  const raw = Math.max(0, Math.min(5, overall / 20))
+  return Math.round(raw * 2) / 2
+}
+
+/** Renders a 5-star display supporting half-stars (★ / ½★ / ☆). */
+function StarRating({
+  stars,
+  fogged = false,
+  size = 20,
+}: {
+  stars: number
+  fogged?: boolean
+  size?: number
+}): JSX.Element {
+  const filled = Math.floor(stars)
+  const half = stars - filled >= 0.5
+  return (
+    <span
+      title={fogged ? 'Approximate rating' : `${stars}/5`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 1, opacity: fogged ? 0.65 : 1 }}
+    >
+      {Array.from({ length: 5 }, (_, i) => {
+        if (i < filled) {
+          return (
+            <span key={i} style={{ fontSize: size, color: 'var(--accent2)', lineHeight: 1 }}>★</span>
+          )
+        }
+        if (i === filled && half) {
+          /* Half-star: overlay a clipped full star on an empty star. */
+          return (
+            <span key={i} style={{ fontSize: size, position: 'relative', display: 'inline-block', lineHeight: 1, color: 'var(--line)' }}>
+              ★
+              <span style={{
+                position: 'absolute', left: 0, top: 0, width: '50%', overflow: 'hidden',
+                color: 'var(--accent2)', display: 'inline-block',
+              }}>★</span>
+            </span>
+          )
+        }
+        return (
+          <span key={i} style={{ fontSize: size, color: 'var(--line)', lineHeight: 1 }}>★</span>
+        )
+      })}
+    </span>
+  )
+}
+
 function PotentialStars({ count }: { count: number }): JSX.Element {
   return (
     <span title={`${count}/5 potential`} style={{ letterSpacing: 2 }}>
@@ -111,7 +163,33 @@ function ConditionBar({ value }: { value: number }): JSX.Element {
   )
 }
 
-/* Attribute bar with masked (fog-of-war) support. */
+/**
+ * Coarse 1–10 attribute wall.
+ *
+ * Mapping: coarse = clamp(Math.ceil(v / 10), 1, 10)
+ *   → a 0–99 value maps to cells 1–10 (values 1–9 → 1 cell, 10–19 → 2, …, 90–99 → 10)
+ *   → minimum displayed is always 1 so even 0-rated players show one dim cell.
+ *
+ * Fog bands: when masked and lo/hi differ, filled cells cover the lo–hi coarse range
+ *   with a greyed "uncertain" look; no coarse number shown (shows "?" instead).
+ *
+ * Color tiers (by filled coarse value):
+ *   9–10 → --success (strong green)
+ *   7–8  → --green at 70% opacity (light green)
+ *   4–6  → --accent2 (amber)
+ *   1–3  → --danger (red)
+ */
+function cellColor(coarse: number): string {
+  if (coarse >= 9) return 'var(--success)'
+  if (coarse >= 7) return 'rgba(52,211,153,0.70)' /* --green @ 70% */
+  if (coarse >= 4) return 'var(--accent2)'
+  return 'var(--danger)'
+}
+
+function toCoarse(v: number): number {
+  return Math.max(1, Math.min(10, Math.ceil(v / 10)))
+}
+
 function AttrBar({
   label,
   value,
@@ -125,42 +203,54 @@ function AttrBar({
   hi?: number
   masked?: boolean
 }): JSX.Element {
-  const pct = Math.max(0, Math.min(100, value))
-  const color =
-    pct >= 85 ? 'var(--success)' :
-    pct >= 70 ? 'var(--accent)' :
-    pct >= 55 ? 'var(--accent2)' :
-    'var(--danger)'
+  const CELLS = 10
 
+  /* Fogged: show a band across the coarse lo–hi range, greyed out. */
   if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
-    const loPct = Math.max(0, Math.min(100, lo))
-    const hiPct = Math.max(0, Math.min(100, hi))
-    const bandW = hiPct - loPct
+    const loC = toCoarse(lo)
+    const hiC = toCoarse(hi)
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 56px', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 24px', alignItems: 'center', gap: 8 }}>
         <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-        <div className="meter" style={{ height: 6, position: 'relative' }}>
-          <div style={{
-            position: 'absolute', left: `${loPct}%`, width: `${bandW}%`, height: '100%',
-            background: 'var(--muted)', opacity: 0.35, borderRadius: 3,
-          }} />
-          <div style={{
-            position: 'absolute', left: `${pct}%`, width: 2, height: '100%',
-            background: color, transform: 'translateX(-50%)', borderRadius: 1,
-          }} />
+        <div style={{ display: 'flex', gap: 2 }}>
+          {Array.from({ length: CELLS }, (_, idx) => {
+            const cell = idx + 1
+            const inBand = cell >= loC && cell <= hiC
+            return (
+              <div
+                key={idx}
+                style={{
+                  flex: 1, height: 8, borderRadius: 2,
+                  background: inBand ? 'var(--muted)' : 'var(--line)',
+                  opacity: inBand ? 0.55 : 1,
+                }}
+              />
+            )
+          })}
         </div>
-        <span className="small mono muted" style={{ textAlign: 'right' }}>{lo}–{hi}</span>
+        <span className="small mono muted" style={{ textAlign: 'right' }}>?</span>
       </div>
     )
   }
 
+  /* Known value: exact coarse cell fill. */
+  const coarse = toCoarse(value)
+  const color = cellColor(coarse)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 30px', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 24px', alignItems: 'center', gap: 8 }}>
       <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-      <div className="meter" style={{ height: 6 }}>
-        <div className="meter-fill" style={{ width: `${pct}%`, background: color }} />
+      <div style={{ display: 'flex', gap: 2 }}>
+        {Array.from({ length: CELLS }, (_, idx) => (
+          <div
+            key={idx}
+            style={{
+              flex: 1, height: 8, borderRadius: 2,
+              background: idx < coarse ? color : 'var(--line)',
+            }}
+          />
+        ))}
       </div>
-      <span className="small mono" style={{ color, textAlign: 'right' }}>{value}</span>
+      <span className="small mono" style={{ color, textAlign: 'right', fontWeight: 700 }}>{coarse}</span>
     </div>
   )
 }
@@ -311,7 +401,7 @@ function CompareControl({
           )}
         </div>
 
-        {/* Radar */}
+        {/* Radar — shape only, no axis values */}
         {comparing ? (
           <span className="muted small">Loading comparison…</span>
         ) : (
@@ -321,17 +411,17 @@ function CompareControl({
             primaryName={currentName}
             compareName={compareResult?.playerB.name}
             size={240}
+            showValues={false}
           />
         )}
 
-        {/* Stat bars for the 6 axes */}
+        {/* Coarse 1–10 axis bars */}
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 5 }}>
           {RADAR_AXES.map((key) => (
-            <StatBar
+            <AttrBar
               key={key}
               label={AXIS_LABELS[key] ?? key}
               value={currentRadar[key]}
-              compact
             />
           ))}
         </div>
@@ -341,10 +431,10 @@ function CompareControl({
           <div style={{ width: '100%', borderTop: '1px solid var(--line)', paddingTop: 10 }}>
             <div className="panel-title" style={{ marginBottom: 8 }}>Key Stats vs {compareResult.playerB.name}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '4px 12px', fontSize: 12, alignItems: 'center' }}>
-              {/* OVR */}
-              <span style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{compareResult.playerA.overall}</span>
-              <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>OVR</span>
-              <span style={{ fontWeight: 700, color: 'var(--cyan)' }}>{compareResult.playerB.overall}</span>
+              {/* Rating stars (no exact number) */}
+              <span style={{ textAlign: 'right' }}><StarRating stars={overallToStars(compareResult.playerA.overall)} size={13} /></span>
+              <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>RTG</span>
+              <span><StarRating stars={overallToStars(compareResult.playerB.overall)} size={13} /></span>
               {/* Skater stats */}
               {compareResult.playerA.skater && compareResult.playerB.skater && (
                 <>
@@ -446,16 +536,19 @@ function TabProfile({
               </div>
             </div>
 
-            {/* OVR + potential + status */}
+            {/* Star rating + potential + status */}
             <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="stat">
                 {d.scouted && !d.scouted.exact ? (
                   <>
-                    <div className="stat-value" style={{ fontSize: 36, color: 'var(--muted)' }}>
-                      {d.scouted.overallLo}–{d.scouted.overallHi}
+                    {/* Fogged: show star range derived from lo/hi band */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={18} />
+                      <span className="muted small">–</span>
+                      <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={18} />
                     </div>
-                    <div className="stat-label">
-                      Overall
+                    <div className="stat-label" style={{ marginTop: 4 }}>
+                      Rating
                       <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
                         {d.scouted.knowledge}%
                       </span>
@@ -463,8 +556,8 @@ function TabProfile({
                   </>
                 ) : (
                   <>
-                    <div className="stat-value" style={{ fontSize: 42, color: 'var(--accent)' }}>{d.overall}</div>
-                    <div className="stat-label">Overall</div>
+                    <StarRating stars={overallToStars(d.overall)} size={22} />
+                    <div className="stat-label" style={{ marginTop: 4 }}>Rating</div>
                   </>
                 )}
               </div>
@@ -545,17 +638,6 @@ function TabProfile({
           )}
         </div>
       </Panel>
-
-      {/* ── Personality reads (fogged descriptors, NOT raw numbers) ── */}
-      {d.personalityReads.length > 0 && (
-        <Panel title="Personality">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0 var(--sp-5)' }}>
-            {d.personalityReads.map((read) => (
-              <PersonalityReadRow key={read.key} read={read} />
-            ))}
-          </div>
-        </Panel>
-      )}
 
       {/* ── Attribute groups + Ratings card ── */}
       <div className="grid grid-2">
@@ -886,11 +968,6 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
     d.potentialStars >= 2 ? 'Depth / role player' :
     'Fringe NHLer'
 
-  const overallLabel =
-    d.scouted && !d.scouted.exact
-      ? `${d.scouted.overallLo}–${d.scouted.overallHi} (${d.scouted.knowledge}% scouted)`
-      : `${d.overall}`
-
   return (
     <div className="stack">
       {/* Projection summary */}
@@ -898,8 +975,17 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
           <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
             <div className="stat">
-              <div className="stat-value" style={{ fontSize: 32, color: 'var(--accent)' }}>{overallLabel}</div>
-              <div className="stat-label">Overall</div>
+              {d.scouted && !d.scouted.exact ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={20} />
+                  <span className="muted small">–</span>
+                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={20} />
+                  <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>{d.scouted.knowledge}%</span>
+                </div>
+              ) : (
+                <StarRating stars={overallToStars(d.overall)} size={22} />
+              )}
+              <div className="stat-label" style={{ marginTop: 4 }}>Rating</div>
             </div>
             <div className="stack" style={{ gap: 'var(--sp-1)' }}>
               <PotentialStars count={d.potentialStars} />
@@ -938,11 +1024,11 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
         </Panel>
       )}
 
-      {/* Radar axes as condensed stat bars */}
+      {/* Radar axes — coarse 1–10, no exact values */}
       <Panel title="Radar Axes">
         <div className="stack" style={{ gap: 6 }}>
           {RADAR_AXES.map((key) => (
-            <StatBar
+            <AttrBar
               key={key}
               label={AXIS_LABELS[key] ?? key}
               value={d.radar[key]}

@@ -55,6 +55,11 @@ export interface RadarChartProps {
   /** Name of the primary player, shown in legend if compare present. */
   primaryName?: string
   size?: number
+  /**
+   * When false, axis value numbers are hidden (rough visual only — labels kept).
+   * Defaults to true to preserve existing behaviour for other callers.
+   */
+  showValues?: boolean
 }
 
 export function RadarChart({
@@ -63,6 +68,7 @@ export function RadarChart({
   compareName,
   primaryName,
   size = 260,
+  showValues = true,
 }: RadarChartProps): JSX.Element {
   const n = RADAR_AXES.length // 6
   const cx = size / 2
@@ -164,10 +170,10 @@ export function RadarChart({
 
           return (
             <g key={key}>
-              {/* label */}
+              {/* label — offset down when values are hidden so it sits centred on the vertex */}
               <text
                 x={lx}
-                y={ly - 5}
+                y={showValues ? ly - 5 : ly + 4}
                 textAnchor={textAnchor}
                 fontSize={9}
                 fontWeight={600}
@@ -178,33 +184,35 @@ export function RadarChart({
               >
                 {AXIS_LABELS[key] ?? key}
               </text>
-              {/* value(s) */}
-              {compareVal !== null ? (
-                <text
-                  x={lx}
-                  y={ly + 8}
-                  textAnchor={textAnchor}
-                  fontSize={9}
-                  fontWeight={700}
-                  fill="var(--text)"
-                  fontFamily="inherit"
-                >
-                  <tspan fill="var(--accent)">{primaryVal}</tspan>
-                  <tspan fill="var(--muted)"> / </tspan>
-                  <tspan fill="var(--cyan)">{compareVal}</tspan>
-                </text>
-              ) : (
-                <text
-                  x={lx}
-                  y={ly + 8}
-                  textAnchor={textAnchor}
-                  fontSize={10}
-                  fontWeight={700}
-                  fill="var(--text)"
-                  fontFamily="inherit"
-                >
-                  {primaryVal}
-                </text>
+              {/* value(s) — omitted when showValues is false */}
+              {showValues && (
+                compareVal !== null ? (
+                  <text
+                    x={lx}
+                    y={ly + 8}
+                    textAnchor={textAnchor}
+                    fontSize={9}
+                    fontWeight={700}
+                    fill="var(--text)"
+                    fontFamily="inherit"
+                  >
+                    <tspan fill="var(--accent)">{primaryVal}</tspan>
+                    <tspan fill="var(--muted)"> / </tspan>
+                    <tspan fill="var(--cyan)">{compareVal}</tspan>
+                  </text>
+                ) : (
+                  <text
+                    x={lx}
+                    y={ly + 8}
+                    textAnchor={textAnchor}
+                    fontSize={10}
+                    fontWeight={700}
+                    fill="var(--text)"
+                    fontFamily="inherit"
+                  >
+                    {primaryVal}
+                  </text>
+                )
               )}
             </g>
           )
