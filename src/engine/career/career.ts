@@ -1854,14 +1854,13 @@ export class Career {
     // so NHL game seeds are byte-identical to before. Only applies standings +
     // player gp/totals; no morale/injury/story side-effects for AHL games.
     if (this.data.league.ahlSchedule && this.data.league.ahlSchedule.length > 0) {
-      const ahlSeedBase = deriveSeed(this.seed ^ 0xABCD1234, this.year)
       for (const game of this.data.league.ahlSchedule) {
         if (game.day !== nextDay) continue
         const home = this.data.teams.get(game.homeTeamId)
         const away = this.data.teams.get(game.awayTeamId)
         if (!home || !away) continue
         const ahlRes = quickSimGame(home, away, this.resolve, {
-          seed: deriveSeed(ahlSeedBase, game.id.length),
+          seed: gameSeed(this.seed ^ 0xabcd1234, this.year, game.id),
         })
         game.result = {
           homeGoals: ahlRes.homeGoals,
@@ -1985,14 +1984,13 @@ export class Career {
     }
     // ── AHL day (same logic as advanceDay) ────────────────────────────
     if (this.data.league.ahlSchedule && this.data.league.ahlSchedule.length > 0) {
-      const ahlSeedBase = deriveSeed(this.seed ^ 0xABCD1234, this.year)
       for (const game of this.data.league.ahlSchedule) {
         if (game.day !== nextDay) continue
         const ahlHome = this.data.teams.get(game.homeTeamId)
         const ahlAway = this.data.teams.get(game.awayTeamId)
         if (!ahlHome || !ahlAway) continue
         const ahlRes = quickSimGame(ahlHome, ahlAway, this.resolve, {
-          seed: deriveSeed(ahlSeedBase, game.id.length),
+          seed: gameSeed(this.seed ^ 0xabcd1234, this.year, game.id),
         })
         game.result = {
           homeGoals: ahlRes.homeGoals,
