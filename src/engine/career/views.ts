@@ -1366,6 +1366,8 @@ export interface AgmRankedPlayerView {
   tier: 'nhl' | 'reserve' | 'prospect'
   /** Colour band for the UI: 'elite' ≥82, 'good' ≥70, 'solid' ≥60, 'fringe' else. */
   colorTier: 'elite' | 'good' | 'solid' | 'fringe'
+  /** Where the player currently plays (prospect rows), e.g. "NHL" / "AHL". */
+  location?: string
 }
 
 /**

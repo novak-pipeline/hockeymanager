@@ -64,6 +64,8 @@ export interface AgmRankedPlayer {
   judgedPotential: number
   /** Classification the AGM assigns based on his judged values. */
   tier: 'nhl' | 'reserve' | 'prospect'
+  /** Where the player currently plays, e.g. "NHL" / "AHL" (prospect rows). */
+  location?: string
 }
 
 export interface AgmReport {
@@ -455,6 +457,12 @@ export interface BuildAgmReportArgs {
   agm: StaffMember
   /** Seeded RNG — used only for tie-breaking when judged values are equal. */
   rng: Rng
+  /**
+   * Extra prospects outside the active roster (e.g. AHL affiliate / junior),
+   * each tagged with where they currently play. Folded into Top Prospects so the
+   * report shows the whole org's young talent and where it is.
+   */
+  prospectPool?: Array<{ player: Player; location: string }>
 }
 
 /** EHM's category best labels. */
@@ -671,11 +679,31 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
     }
   }
 
-  // ── 4. Top prospects ───────────────────────────────────────────────────────
-  const topProspects = entries
+  // ── 4. Top prospects (NHL roster young players + the wider org pool) ─────────
+  const rosterProspects = entries
     .filter((e) => e.player.age < 23)
+    .map((e) => ({ ...toRanked(e), location: 'NHL' as string }))
+
+  const poolProspects = (args.prospectPool ?? [])
+    .filter((p) => p.player.age < 23)
+    .map(({ player, location }) => {
+      const trueOvr = overall(player.composites, player.position)
+      const truePot = potentialOverall(player)
+      return {
+        playerId: player.id as string,
+        name: player.name,
+        position: player.position,
+        age: player.age,
+        judgedOverall: judgedValue(trueOvr, agm.judgment, player.id as string, 1),
+        judgedPotential: judgedValue(truePot, agm.judgment, player.id as string, 2),
+        tier: 'prospect' as const,
+        location,
+      }
+    })
+
+  const topProspects = [...rosterProspects, ...poolProspects]
     .sort((a, b) => b.judgedPotential - a.judgedPotential)
-    .map(toRanked)
+    .slice(0, 12)
 
   return { depthChart, categoryBests, topProspects }
 }

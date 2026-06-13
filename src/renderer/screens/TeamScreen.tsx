@@ -222,6 +222,7 @@ function ReportTab(): JSX.Element {
                   <th>Player</th>
                   <th className="num">Pos</th>
                   <th className="num">Age</th>
+                  <th>Plays</th>
                   <th className="num">OVR</th>
                   <th className="num">POT</th>
                 </tr>
@@ -232,6 +233,7 @@ function ReportTab(): JSX.Element {
                     <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                     <td className="num muted">{p.position}</td>
                     <td className="num">{p.age}</td>
+                    <td className="small muted">{p.location ?? 'NHL'}</td>
                     <td className="num">
                       <span style={{ color: TIER_COLOR[p.tier], letterSpacing: -1 }}>{starStr(p.judgedOverall)}</span>
                     </td>
@@ -240,7 +242,7 @@ function ReportTab(): JSX.Element {
                 ))}
                 {data.topProspects.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted">No prospects ranked.</td>
+                    <td colSpan={6} className="muted">No prospects ranked.</td>
                   </tr>
                 )}
               </tbody>

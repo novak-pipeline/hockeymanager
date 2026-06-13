@@ -5007,11 +5007,23 @@ export class Career {
     // generic generated one — falls back to the generic staff if unset.
     const agm = this.getTeamStaff(this.userTeamId as string).assistantGM ?? this.staff.assistantGM
     const roster = this.userTeam.roster.map((id) => this.resolve(id))
+    // Fold AHL-affiliate young players into the prospect pool so the report shows
+    // the whole org's prospects and where each currently plays.
+    const prospectPool: Array<{ player: Player; location: string }> = []
+    const affiliateId = this.userTeam.affiliateId
+    const ahlTeam = affiliateId ? this.data.teams.get(affiliateId as TeamId) : undefined
+    if (ahlTeam) {
+      for (const id of ahlTeam.roster) {
+        const p = this.data.players.get(id)
+        if (p) prospectPool.push({ player: p, location: 'AHL' })
+      }
+    }
     const report = buildAgmReport({
       roster,
       players: this.data.players,
       agm,
       rng: new Rng(deriveSeed(this.seed, 9202, this.currentDay)),
+      prospectPool,
     })
 
     const colorTier = (judgedOverall: number): AgmRankedPlayerView['colorTier'] => {
@@ -5030,6 +5042,7 @@ export class Career {
       judgedPotential: r.judgedPotential,
       tier: r.tier,
       colorTier: colorTier(r.judgedOverall),
+      ...(r.location !== undefined ? { location: r.location } : {}),
     })
 
     return {
