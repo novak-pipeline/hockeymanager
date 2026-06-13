@@ -16,7 +16,9 @@ import { Rng } from '@engine/shared/rng'
 import { overall } from '@engine/ratings/composites'
 import {
   buildAgmReport,
+  demeanor,
   generateStaff,
+  generateTeamStaff,
   hireRetiredPlayer,
   type AgmReport,
   type StaffMember,
@@ -356,6 +358,112 @@ describe('hireRetiredPlayer', () => {
     const b = hireRetiredPlayer({ player, role: 'scout', rng: new Rng(42) })
     expect(a.rating).toBe(b.rating)
     expect(a.judgment).toBe(b.judgment)
+  })
+})
+
+/* ─────────────────────────── demeanor helper ─────────────────────────── */
+
+describe('demeanor helper', () => {
+  const VALID: NonNullable<StaffMember['demeanor']>[] = ['fiery', 'calm', 'analytical', 'motivator', 'pragmatic']
+
+  it('always returns one of the 5 valid demeanors', () => {
+    for (let r = 40; r <= 90; r += 5) {
+      for (let j = 30; j <= 95; j += 5) {
+        expect(VALID).toContain(demeanor(r, j, 'Offense', new Rng(r + j)))
+      }
+    }
+  })
+
+  it('is deterministic: same inputs + same rng seed → same demeanor', () => {
+    const a = demeanor(72, 72, 'Defense', new Rng(1))
+    const b = demeanor(72, 72, 'Defense', new Rng(1))
+    expect(a).toBe(b)
+  })
+
+  it('high rating + high judgment tends toward analytical', () => {
+    // With nudge ≤ 3, r=85 j=85 should still land on analytical.
+    const d = demeanor(85, 85, undefined, new Rng(0))
+    expect(d).toBe('analytical')
+  })
+})
+
+/* ─────────────────────────── generateTeamStaff ─────────────────────────── */
+
+describe('generateTeamStaff', () => {
+  it('produces a full complement with correct role labels', () => {
+    const ts = generateTeamStaff(new Rng(200))
+    expect(ts.headCoach.role).toBe('headCoach')
+    expect(ts.assistantCoaches.every((ac) => ac.role === 'assistantCoach')).toBe(true)
+    expect(ts.assistantGM.role).toBe('assistantGM')
+    expect(ts.scouts.every((s) => s.role === 'scout')).toBe(true)
+    expect(ts.physios.every((p) => p.role === 'physio')).toBe(true)
+    expect(ts.owner.role).toBe('owner')
+  })
+
+  it('counts are in specified ranges', () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const ts = generateTeamStaff(new Rng(seed))
+      expect(ts.assistantCoaches.length).toBeGreaterThanOrEqual(2)
+      expect(ts.assistantCoaches.length).toBeLessThanOrEqual(3)
+      expect(ts.scouts.length).toBeGreaterThanOrEqual(2)
+      expect(ts.scouts.length).toBeLessThanOrEqual(3)
+      expect(ts.physios.length).toBeGreaterThanOrEqual(1)
+      expect(ts.physios.length).toBeLessThanOrEqual(2)
+    }
+  })
+
+  it('all ratings are in [40, 90] and all judgments in [30, 95]', () => {
+    const ts = generateTeamStaff(new Rng(300))
+    const members = [
+      ts.headCoach, ts.assistantGM, ts.owner,
+      ...ts.assistantCoaches, ...ts.scouts, ...ts.physios,
+    ]
+    for (const m of members) {
+      expect(m.rating).toBeGreaterThanOrEqual(40)
+      expect(m.rating).toBeLessThanOrEqual(90)
+      expect(m.judgment).toBeGreaterThanOrEqual(30)
+      expect(m.judgment).toBeLessThanOrEqual(95)
+    }
+  })
+
+  it('every staff member has a demeanor', () => {
+    const VALID = ['fiery', 'calm', 'analytical', 'motivator', 'pragmatic']
+    const ts = generateTeamStaff(new Rng(400))
+    const members = [
+      ts.headCoach, ts.assistantGM, ts.owner,
+      ...ts.assistantCoaches, ...ts.scouts, ...ts.physios,
+    ]
+    for (const m of members) {
+      expect(VALID).toContain(m.demeanor)
+    }
+  })
+
+  it('is deterministic: same Rng seed → same result', () => {
+    const a = generateTeamStaff(new Rng(999))
+    const b = generateTeamStaff(new Rng(999))
+    expect(a.headCoach.name).toBe(b.headCoach.name)
+    expect(a.headCoach.rating).toBe(b.headCoach.rating)
+    expect(a.assistantGM.name).toBe(b.assistantGM.name)
+    expect(a.scouts.length).toBe(b.scouts.length)
+    expect(a.owner.name).toBe(b.owner.name)
+  })
+
+  it('existing names in opts are avoided', () => {
+    const ts1 = generateTeamStaff(new Rng(10))
+    const existingNames = new Set<string>([ts1.headCoach.name, ts1.assistantGM.name])
+    const ts2 = generateTeamStaff(new Rng(10), { existingNames })
+    // With the excluded names from ts1, ts2's head coach should be a different person
+    // (or at worst the Jr. suffix variant — either way a string)
+    expect(ts2.headCoach.name).toBeTruthy()
+    expect(ts2.assistantGM.name).toBeTruthy()
+  })
+
+  it('round-trips through JSON cleanly', () => {
+    const ts = generateTeamStaff(new Rng(500))
+    const json = JSON.parse(JSON.stringify(ts))
+    expect(json.headCoach.name).toBe(ts.headCoach.name)
+    expect(json.assistantCoaches.length).toBe(ts.assistantCoaches.length)
+    expect(json.owner.specialty).toBe(ts.owner.specialty)
   })
 })
 

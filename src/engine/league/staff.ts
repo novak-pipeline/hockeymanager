@@ -20,7 +20,7 @@ import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 export interface StaffMember {
   id: string
   name: string
-  role: 'headCoach' | 'assistantGM' | 'scout'
+  role: 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner'
   /** 40–90 quality. Governs how effective the staff member is at their job. */
   rating: number
   /** 0–100. Higher = the AGM's player reads track closer to true values. */
@@ -29,6 +29,27 @@ export interface StaffMember {
   specialty?: string
   /** Set when a retired player was hired; links back to the player record. */
   formerPlayerId?: string
+  /** Facepack image key resolved to faces/<faceId>.png (from mod import). */
+  faceId?: string
+  /**
+   * Personality hint for coach quotes and press reactions.
+   * Derived deterministically from rating + judgment at generation time.
+   * 'fiery' | 'calm' | 'analytical' | 'motivator' | 'pragmatic'
+   */
+  demeanor?: 'fiery' | 'calm' | 'analytical' | 'motivator' | 'pragmatic'
+}
+
+/**
+ * Full staff complement for one team.
+ * headCoach and assistantGM are singular; the rest are arrays.
+ */
+export interface TeamStaff {
+  headCoach: StaffMember
+  assistantCoaches: StaffMember[]
+  assistantGM: StaffMember
+  scouts: StaffMember[]
+  physios: StaffMember[]
+  owner: StaffMember
 }
 
 /** One player in an AGM's depth chart or prospect list. */
@@ -141,10 +162,196 @@ const AGM_SPECIALTIES = [
   'Prospects', 'Defense', 'Goaltending', 'Analytics', 'Contract Negotiation', 'Trade Deadline'
 ]
 
+/* ─────────────────────────── demeanor derivation ─────────────────────────── */
+
+type Demeanor = NonNullable<StaffMember['demeanor']>
+
+/**
+ * Derive a stable demeanor from rating + judgment.
+ * High rating + high judgment → analytical; high rating + low judgment → fiery;
+ * low rating + high judgment → pragmatic; high judgment + mid rating → motivator;
+ * default → calm.
+ */
+function deriveDemeanor(rating: number, judgment: number): Demeanor {
+  if (rating >= 72 && judgment >= 72) return 'analytical'
+  if (rating >= 70 && judgment < 55) return 'fiery'
+  if (rating < 55 && judgment >= 68) return 'pragmatic'
+  if (judgment >= 68 && rating >= 58) return 'motivator'
+  return 'calm'
+}
+
 export interface GenerateStaffArgs {
   rng: Rng
   /** Names already in use (scouts, etc.) — avoid duplicates. */
   existingScoutNames?: string[]
+}
+
+/* ─────────────────────────── role-specific pools ─────────────────────────── */
+
+const ASSISTANT_COACH_SPECIALTIES = [
+  'Forwards', 'Defensemen', 'Goaltending', 'Power Play', 'Penalty Kill', 'Special Teams'
+]
+
+const SCOUT_SPECIALTIES = [
+  'North America', 'Europe', 'Prospects', 'College', 'Analytics', 'Defense', 'Goaltending'
+]
+
+const PHYSIO_SPECIALTIES = [
+  'Sports Medicine', 'Rehabilitation', 'Conditioning', 'Nutrition', 'Mental Health'
+]
+
+const OWNER_SPECIALTIES = [
+  'Revenue Growth', 'Community', 'Long-Term Build', 'Win-Now', 'Analytics', 'Traditions'
+]
+
+/* ─────────────────────────── demeanor helper (public) ─────────────────────────── */
+
+/**
+ * Derive a stable demeanor from rating + judgment + specialty + rng.
+ * The specialty and rng parameters let callers add entropy so staff with
+ * identical stats can still diverge in personality.
+ *
+ * High rating + high judgment → analytical
+ * High rating + low judgment  → fiery
+ * Low rating  + high judgment → pragmatic
+ * Mid rating  + high judgment → motivator
+ * default                     → calm
+ */
+export function demeanor(
+  rating: number,
+  judgment: number,
+  specialty: string | undefined,
+  rng: Rng
+): NonNullable<StaffMember['demeanor']> {
+  // Small entropy nudge (0–3) from specialty hash + rng draw, keeping it deterministic.
+  const specialtyHash = specialty
+    ? specialty.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xffff, 0)
+    : 0
+  const nudge = ((specialtyHash + rng.int(4)) % 4)
+  const r = rating + nudge
+  const j = judgment + nudge
+
+  if (r >= 72 && j >= 72) return 'analytical'
+  if (r >= 70 && j < 55)  return 'fiery'
+  if (r < 55  && j >= 68) return 'pragmatic'
+  if (j >= 68 && r >= 58) return 'motivator'
+  return 'calm'
+}
+
+/* ─────────────────────────── generateTeamStaff ─────────────────────────── */
+
+export interface GenerateTeamStaffOpts {
+  /** Names already in use across the league — avoid duplicates. */
+  existingNames?: Set<string>
+}
+
+/**
+ * Build a full staff complement for one team:
+ *   1 headCoach, 2–3 assistantCoaches, 1 assistantGM, 2–3 scouts, 1–2 physios, 1 owner.
+ *
+ * All randomness flows through the provided Rng; results are fully deterministic.
+ * Ratings/judgment use the same normal/clamp patterns as generateStaff().
+ */
+export function generateTeamStaff(rng: Rng, opts?: GenerateTeamStaffOpts): TeamStaff {
+  const taken: Set<string> = opts?.existingNames ?? new Set<string>()
+
+  const name = (): string => pickName(rng, taken)
+
+  const makeStaff = (
+    role: StaffMember['role'],
+    prefix: string,
+    ratingMean: number,
+    ratingSD: number,
+    judgmentMean: number,
+    judgmentSD: number,
+    specialties: string[]
+  ): StaffMember => {
+    const n = name()
+    taken.add(n)
+    const r = Math.round(Math.max(40, Math.min(90, rng.normal(ratingMean, ratingSD))))
+    const j = Math.round(Math.max(30, Math.min(95, rng.normal(judgmentMean, judgmentSD))))
+    const spec = specialties[rng.int(specialties.length)]!
+    return {
+      id: `${prefix}-${n.replace(/\s+/g, '-').toLowerCase()}`,
+      name: n,
+      role,
+      rating: r,
+      judgment: j,
+      specialty: spec,
+      demeanor: demeanor(r, j, spec, rng),
+    }
+  }
+
+  // Head coach
+  const headCoachName = name()
+  taken.add(headCoachName)
+  const coachR = Math.round(Math.max(40, Math.min(90, rng.normal(62, 10))))
+  const coachJ = Math.round(Math.max(30, Math.min(95, rng.normal(60, 14))))
+  const coachSpec = HEAD_COACH_SPECIALTIES[rng.int(HEAD_COACH_SPECIALTIES.length)]!
+  const headCoach: StaffMember = {
+    id: `coach-${headCoachName.replace(/\s+/g, '-').toLowerCase()}`,
+    name: headCoachName,
+    role: 'headCoach',
+    rating: coachR,
+    judgment: coachJ,
+    specialty: coachSpec,
+    demeanor: demeanor(coachR, coachJ, coachSpec, rng),
+  }
+
+  // 2–3 assistant coaches
+  const acCount = 2 + rng.int(2) // 2 or 3
+  const assistantCoaches: StaffMember[] = []
+  for (let i = 0; i < acCount; i++) {
+    assistantCoaches.push(makeStaff('assistantCoach', 'ac', 58, 10, 56, 13, ASSISTANT_COACH_SPECIALTIES))
+  }
+
+  // Assistant GM
+  const agmName = name()
+  taken.add(agmName)
+  const agmR = Math.round(Math.max(40, Math.min(90, rng.normal(60, 10))))
+  const agmJ = Math.round(Math.max(30, Math.min(95, rng.normal(58, 16))))
+  const agmSpec = AGM_SPECIALTIES[rng.int(AGM_SPECIALTIES.length)]!
+  const assistantGM: StaffMember = {
+    id: `agm-${agmName.replace(/\s+/g, '-').toLowerCase()}`,
+    name: agmName,
+    role: 'assistantGM',
+    rating: agmR,
+    judgment: agmJ,
+    specialty: agmSpec,
+    demeanor: demeanor(agmR, agmJ, agmSpec, rng),
+  }
+
+  // 2–3 scouts
+  const scoutCount = 2 + rng.int(2)
+  const scouts: StaffMember[] = []
+  for (let i = 0; i < scoutCount; i++) {
+    scouts.push(makeStaff('scout', 'scout', 55, 12, 62, 14, SCOUT_SPECIALTIES))
+  }
+
+  // 1–2 physios
+  const physioCount = 1 + rng.int(2)
+  const physios: StaffMember[] = []
+  for (let i = 0; i < physioCount; i++) {
+    physios.push(makeStaff('physio', 'physio', 57, 11, 50, 12, PHYSIO_SPECIALTIES))
+  }
+
+  // Owner (single)
+  const ownerName = name()
+  taken.add(ownerName)
+  const ownerR = Math.round(Math.max(40, Math.min(90, rng.normal(65, 12))))
+  const ownerJ = Math.round(Math.max(30, Math.min(95, rng.normal(55, 18))))
+  const ownerSpec = OWNER_SPECIALTIES[rng.int(OWNER_SPECIALTIES.length)]!
+  const owner: StaffMember = {
+    id: `owner-${ownerName.replace(/\s+/g, '-').toLowerCase()}`,
+    name: ownerName,
+    role: 'owner',
+    rating: ownerR,
+    judgment: ownerJ,
+    specialty: ownerSpec,
+    demeanor: demeanor(ownerR, ownerJ, ownerSpec, rng),
+  }
+
+  return { headCoach, assistantCoaches, assistantGM, scouts, physios, owner }
 }
 
 /**

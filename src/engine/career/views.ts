@@ -915,6 +915,12 @@ export interface CareerSnapshot {
     assistantGM: StaffMember
   }
   /**
+   * Per-team full staff complements — [teamId, TeamStaff][] entry array.
+   * Optional for backward compat; older saves regenerate on load.
+   * Includes every NHL-tier team; AHL teams share/skip.
+   */
+  teamStaff?: Array<[string, import('@engine/league/staff').TeamStaff]>
+  /**
    * Per-player rolling game ratings (last up to 10 per player).
    * [playerId, number[]][] — JSON-safe entry array.
    */

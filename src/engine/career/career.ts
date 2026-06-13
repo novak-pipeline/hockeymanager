@@ -154,9 +154,11 @@ import {
 } from '@engine/league/scouting'
 import {
   generateStaff,
+  generateTeamStaff,
   buildAgmReport,
   hireRetiredPlayer,
   type StaffMember,
+  type TeamStaff,
 } from '@engine/league/staff'
 import {
   boardSummary,
@@ -505,6 +507,11 @@ export class Career {
    * Populated by processRetirements — cleared each season rollover.
    */
   private hireableStaff: string[] = []
+  /**
+   * Per-team full staff complements (NHL-tier teams only).
+   * Keyed by TeamId string; built at career construction, persisted in snapshots.
+   */
+  private readonly teamStaffMap = new Map<string, TeamStaff>()
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -542,6 +549,13 @@ export class Career {
 
       /* ── generate staff for the user team ── */
       this.staff = generateStaff({ rng: new Rng(deriveSeed(seed, 9200)) })
+
+      /* ── generate full staff complement for every NHL team ── */
+      // Uses a SEPARATE Rng namespace (9201) so existing player/team/AHL Rng draws
+      // are byte-identical. The user team's full staff is seeded at idx=0 within
+      // that namespace; the existing this.staff (headCoach + agm) continues to be
+      // the user-facing accessor for backward compat.
+      this.generateAllTeamStaff()
 
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
@@ -775,6 +789,51 @@ export class Career {
         ...(last !== undefined ? { lastYearRank: last } : {}),
       }
     })
+  }
+
+  /**
+   * Rng seed namespace for per-team staff generation.
+   * Must not clash with any other deriveSeed(seed, NAMESPACE, ...) call.
+   * Existing namespace 9200 = user-team headCoach/AGM via generateStaff.
+   * Existing namespace 9201 = hireRetiredPlayer (uses 3-key: seed,9201,year).
+   * We use 9260 which is used nowhere else in the codebase.
+   */
+  private static readonly TEAM_STAFF_NS = 9260
+
+  /**
+   * Generate a full TeamStaff for every NHL-tier team.
+   * Called once at career construction; NOT called on restore (loaded from snapshot).
+   * The shared name-set is local to this call — staff names won't duplicate within
+   * the staff pool itself (but may overlap with player names, which is acceptable).
+   */
+  private generateAllTeamStaff(): void {
+    const existingNames = new Set<string>()
+    this.data.league.teams.forEach((teamId, idx) => {
+      const teamRng = new Rng(deriveSeed(this.seed, Career.TEAM_STAFF_NS, idx))
+      const ts = generateTeamStaff(teamRng, { existingNames })
+      existingNames.add(ts.headCoach.name)
+      for (const ac of ts.assistantCoaches) existingNames.add(ac.name)
+      existingNames.add(ts.assistantGM.name)
+      for (const s of ts.scouts) existingNames.add(s.name)
+      for (const p of ts.physios) existingNames.add(p.name)
+      existingNames.add(ts.owner.name)
+      this.teamStaffMap.set(teamId as string, ts)
+    })
+  }
+
+  /**
+   * Return the full staff complement for a given NHL-tier team.
+   * If the map has no entry (defensive: should never happen after construction or
+   * restore), regenerates deterministically from the career seed so callers never throw.
+   */
+  getTeamStaff(teamId: string): TeamStaff {
+    const existing = this.teamStaffMap.get(teamId)
+    if (existing) return existing
+    const idx = this.data.league.teams.indexOf(teamId as unknown as typeof this.data.league.teams[number])
+    const teamRng = new Rng(deriveSeed(this.seed, Career.TEAM_STAFF_NS, Math.max(0, idx)))
+    const ts = generateTeamStaff(teamRng)
+    this.teamStaffMap.set(teamId, ts)
+    return ts
   }
 
   private initLockerRooms(): void {
@@ -4628,6 +4687,9 @@ export class Career {
         pressConference: this.pressConference ? structuredClone(this.pressConference) : null,
       },
       staff: this.staff ? structuredClone(this.staff) : undefined,
+      teamStaff: this.teamStaffMap.size > 0
+        ? [...this.teamStaffMap.entries()].map(([k, v]) => [k, structuredClone(v)] as [string, TeamStaff])
+        : undefined,
       playerRatings: [...this.playerRatings.entries()].map(([k, v]) => [k, [...v]] as [string, number[]]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
@@ -4740,6 +4802,14 @@ export class Career {
       career.staff = structuredClone(snapshot.staff)
     } else {
       career.staff = generateStaff({ rng: new Rng(deriveSeed(snapshot.seed, 9200)) })
+    }
+    // Restore per-team staff or regenerate from the career seed.
+    if (snapshot.teamStaff && snapshot.teamStaff.length > 0) {
+      for (const [k, v] of snapshot.teamStaff) {
+        career.teamStaffMap.set(k, structuredClone(v))
+      }
+    } else {
+      career.generateAllTeamStaff()
     }
     if (snapshot.playerRatings) {
       for (const [k, v] of snapshot.playerRatings) {
