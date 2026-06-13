@@ -383,6 +383,11 @@ export class SimClient {
     return this.send({ type: 'sendDown', playerId })
   }
 
+  /** Six-axis radar comparison for two players (Phase C compare UI). */
+  compareRadar(playerIdA: string, playerIdB: string): Promise<WorkerResponse> {
+    return this.send({ type: 'compareRadar', playerIdA, playerIdB })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

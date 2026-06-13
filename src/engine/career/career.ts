@@ -206,6 +206,7 @@ import {
   badge,
   buildAhlSquadView,
   buildAhlStandingsView,
+  buildCompareRadar,
   buildFinanceView,
   buildPlayerProfile,
   buildScoutingView,
@@ -230,6 +231,7 @@ import {
   type BoxScoreView,
   type CareerPhase,
   type CareerSnapshot,
+  type CompareRadarView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -3604,6 +3606,11 @@ export class Career {
     const isOwnPlayer = this.userTeam.roster.includes(pid)
     const fog = isOwnPlayer ? undefined : this.fogCtx()
     return buildPlayerProfile(this.ctx(), pid, fog)
+  }
+
+  /** Radar comparison view for two players (used by the Phase C compare UI). */
+  compareRadar(playerIdA: string, playerIdB: string): CompareRadarView {
+    return buildCompareRadar(this.ctx(), playerIdA, playerIdB)
   }
 
   getScouting(): ScoutingView {

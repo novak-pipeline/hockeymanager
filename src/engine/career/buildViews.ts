@@ -15,6 +15,13 @@ import type {
   TeamId,
 } from '@domain'
 import { overall } from '@engine/ratings/composites'
+import { computeRadar } from '@engine/ratings/radar'
+import type { RadarView } from '@engine/ratings/radar'
+import {
+  buildPersonalityRead,
+  buildExactPersonalityRead,
+} from '@engine/career/personalityRead'
+import type { PersonalityReadView } from '@engine/career/personalityRead'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -30,13 +37,17 @@ import type {
   ArchetypeInfo,
   AttributeGroupView,
   ContractView,
+  CompareRadarView,
   FinanceView,
   GoalieSeasonLine,
   LineSlotView,
   LineSynergyView,
   LinesView,
   PlayerBadge,
+  PlayerBioView,
+  PlayerHonoursView,
   PlayerProfileView,
+  ProfileContractView,
   AhlSquadView,
   AhlStandingsView,
   ScheduleView,
@@ -417,6 +428,64 @@ export function potentialStars(p: Player): number {
   return 1
 }
 
+/** Build the bio block for a player. */
+function buildBio(p: Player): PlayerBioView {
+  const bio: PlayerBioView = {}
+  if (p.nationality !== undefined) bio.nationality = p.nationality
+  if (p.birthplace !== undefined) bio.birthplace = p.birthplace
+  if (p.jerseyNumber !== undefined) bio.jerseyNumber = p.jerseyNumber
+  if (p.heightCm !== undefined) bio.heightCm = p.heightCm
+  if (p.weightKg !== undefined) bio.weightKg = p.weightKg
+  return bio
+}
+
+/** Build the honours block for a player. */
+function buildHonours(p: Player): PlayerHonoursView {
+  return {
+    intlApps: p.intlApps ?? 0,
+    intlGoals: p.intlGoals ?? 0,
+    intlAssists: p.intlAssists ?? 0,
+    stanleyCups: p.stanleyCups ?? 0,
+    homeReputation: p.homeReputation ?? 0,
+    currentReputation: p.currentReputation ?? 0,
+    worldReputation: p.worldReputation ?? 0,
+    nhlDraftEligible: p.nhlDraftEligible ?? false,
+    nhlDrafted: p.nhlDrafted ?? false,
+    ...(p.juniorPreference !== undefined ? { juniorPreference: p.juniorPreference } : {}),
+  }
+}
+
+/**
+ * Build the extended profile contract block.
+ * RFA: yearsRemaining === 0 and age < 27 (simplified EHM rule).
+ * UFA: yearsRemaining === 0 and age >= 27.
+ * Under contract: yearsRemaining > 0 → null status.
+ */
+function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView | null {
+  if (!hasTeam) return null
+  const c = p.contract
+  let freeAgentStatus: 'RFA' | 'UFA' | null = null
+  if (c.yearsRemaining <= 0) {
+    freeAgentStatus = p.age < 27 ? 'RFA' : 'UFA'
+  }
+  const base: ProfileContractView = {
+    salary: c.salary,
+    yearsRemaining: c.yearsRemaining,
+    expiryYear: c.expiryYear,
+    noTradeClause: c.noTradeClause,
+    twoWay: c.twoWay,
+    capHit: c.salary,
+    freeAgentStatus,
+  }
+  // Two-way contracts: buried cap hit is the minor-league minimum (approximation).
+  // EHM uses actual minor-league salary; we approximate as half the NHL salary,
+  // floored at 750_000 (NHL minimum-adjacent).
+  if (c.twoWay) {
+    base.buriedCapHit = Math.max(750_000, Math.round(c.salary * 0.5))
+  }
+  return base
+}
+
 export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCtx): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
@@ -491,6 +560,13 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
           : null,
     }))
 
+  // Phase B: radar, personalityReads, bio, honours, profileContract
+  const radar: RadarView = computeRadar(p.ratings, p.composites)
+  const personalityReads: PersonalityReadView =
+    fog === undefined
+      ? buildExactPersonalityRead(p)
+      : buildPersonalityRead(p, fog.scouting)
+
   return {
     ...badge(p, fog),
     teamId,
@@ -513,6 +589,53 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
       value: Math.round((p.composites as unknown as Record<string, number>)[key] ?? 0),
     })),
     seasons: [currentSeason, ...history],
+    // Phase B additions
+    radar,
+    personalityReads,
+    bio: buildBio(p),
+    honours: buildHonours(p),
+    profileContract: buildProfileContract(p, teamId !== null),
+  }
+}
+
+/**
+ * Build a side-by-side radar comparison for two players.
+ * Fog is not applied here — the compare view is typically accessed
+ * from the user's own roster or via a scouted profile already seen.
+ * The caller (Career.compareRadar) passes the relevant fog per player.
+ */
+export function buildCompareRadar(
+  ctx: ViewCtx,
+  playerIdA: string,
+  playerIdB: string
+): CompareRadarView {
+  const pA = ctx.players.get(playerIdA as PlayerId)
+  const pB = ctx.players.get(playerIdB as PlayerId)
+  if (!pA) throw new Error(`unknown player ${playerIdA}`)
+  if (!pB) throw new Error(`unknown player ${playerIdB}`)
+
+  const ovrA = overall(pA.composites, pA.position)
+  const ovrB = overall(pB.composites, pB.position)
+
+  return {
+    playerA: {
+      playerId: playerIdA,
+      name: pA.name,
+      position: pA.position,
+      overall: ovrA,
+      radar: computeRadar(pA.ratings, pA.composites),
+      skater: pA.position !== 'G' ? skaterLine(ctx, playerIdA as PlayerId) : null,
+      goalie: pA.position === 'G' ? goalieLine(ctx, playerIdA as PlayerId) : null,
+    },
+    playerB: {
+      playerId: playerIdB,
+      name: pB.name,
+      position: pB.position,
+      overall: ovrB,
+      radar: computeRadar(pB.ratings, pB.composites),
+      skater: pB.position !== 'G' ? skaterLine(ctx, playerIdB as PlayerId) : null,
+      goalie: pB.position === 'G' ? goalieLine(ctx, playerIdB as PlayerId) : null,
+    },
   }
 }
 

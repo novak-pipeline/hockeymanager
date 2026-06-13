@@ -246,6 +246,10 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.reason)
       return { id: req.id, type: 'ok' }
     }
+
+    /* ── Phase B: player profile view layer ── */
+    case 'compareRadar':
+      return { id: req.id, type: 'compareRadar', comparison: must().compareRadar(req.playerIdA, req.playerIdB) }
   }
 }
 

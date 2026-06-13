@@ -23,6 +23,7 @@ export type {
   BoxScoreView,
   CareerPhase,
   CareerSnapshot,
+  CompareRadarView,
   DashboardView,
   DraftView,
   FinanceView,
@@ -33,9 +34,16 @@ export type {
   LinesUpdate,
   LockerRoomView,
   OffseasonView,
+  PersonalityReadView,
+  PersonalityTraitRead,
+  PlayerBioView,
+  PlayerHonoursView,
   PlayerProfileView,
   PlayoffBracketView,
   PracticeView,
+  ProfileContractView,
+  RadarAxes,
+  RadarView,
   RivalriesView,
   ScheduleView,
   ScoreboardView,
@@ -51,6 +59,7 @@ export type {
   TransactionsView,
   TeamLeadersView,
 } from '@engine/career/views'
+export { RADAR_AXES } from '@engine/career/views'
 import type {
   AgmReportView,
   AhlSquadView,
@@ -204,6 +213,9 @@ export type WorkerRequestBody =
   | { type: 'callUp'; playerId: string }
   /** Assign an NHL player to the user's AHL affiliate. */
   | { type: 'sendDown'; playerId: string }
+  /* ── Phase B: player profile view layer ── */
+  /** Six-axis radar comparison for two players (Phase C compare UI). */
+  | { type: 'compareRadar'; playerIdA: string; playerIdB: string }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -257,5 +269,7 @@ export type WorkerResponse = { id: number } & (
   /* ── AHL farm system ── */
   | { type: 'ahlStandings'; standings: AhlStandingsView }
   | { type: 'ahlSquad'; squad: AhlSquadView }
+  /* ── Phase B: player profile view layer ── */
+  | { type: 'compareRadar'; comparison: CompareRadarView }
   | { type: 'error'; message: string }
 )

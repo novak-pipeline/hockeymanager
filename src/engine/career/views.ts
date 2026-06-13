@@ -18,6 +18,9 @@ import type {
   Position,
   TeamTactics,
 } from '@domain'
+export type { RadarAxes, RadarView } from '@engine/ratings/radar'
+export { RADAR_AXES } from '@engine/ratings/radar'
+export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
@@ -273,6 +276,46 @@ export interface AttributeGroupView {
   }>
 }
 
+/** Bio fields surfaced on the player profile. All optional (absent on fictional players). */
+export interface PlayerBioView {
+  nationality?: string
+  birthplace?: string
+  jerseyNumber?: number
+  heightCm?: number
+  weightKg?: number
+}
+
+/** International & career honours for the profile Honours tab. */
+export interface PlayerHonoursView {
+  intlApps: number
+  intlGoals: number
+  intlAssists: number
+  stanleyCups: number
+  /** 0–200 reputation values (absent = 0 for fictional players). */
+  homeReputation: number
+  currentReputation: number
+  worldReputation: number
+  /** True if currently eligible for the NHL entry draft. */
+  nhlDraftEligible: boolean
+  /** True if already drafted. */
+  nhlDrafted: boolean
+  /** Preferred development pathway string (e.g. "QMJHL"). */
+  juniorPreference?: string
+}
+
+/** Contract block on the profile, with RFA/UFA derivation. */
+export interface ProfileContractView extends ContractView {
+  /** Cap-hit equivalent; equals salary for standard contracts. */
+  capHit: number
+  /**
+   * For two-way contracts: the cap hit applied when the player is buried in
+   * the minors (minor-league salary). Absent for one-way contracts.
+   */
+  buriedCapHit?: number
+  /** 'RFA' | 'UFA' | null if under contract with years remaining. */
+  freeAgentStatus: 'RFA' | 'UFA' | null
+}
+
 export interface PlayerProfileView extends PlayerBadge {
   teamId: string | null
   teamName: string | null
@@ -295,6 +338,41 @@ export interface PlayerProfileView extends PlayerBadge {
     skater: SkaterSeasonLine | null
     goalie: GoalieSeasonLine | null
   }>
+
+  /* ── Phase B additions (view-layer only, additive) ── */
+
+  /** Six-axis radar model derived from composites. */
+  radar: import('@engine/ratings/radar').RadarView
+  /** Fog-aware personality and hidden-trait reads. */
+  personalityReads: import('@engine/career/personalityRead').PersonalityReadView
+  /** Bio fields (absent on fictional players). */
+  bio: PlayerBioView
+  /** Career honours block. */
+  honours: PlayerHonoursView
+  /** Extended contract block; null when player is a free agent. */
+  profileContract: ProfileContractView | null
+}
+
+/** Compare-radar response: both players' RadarViews plus key stats. */
+export interface CompareRadarView {
+  playerA: {
+    playerId: string
+    name: string
+    position: Position
+    overall: number
+    radar: import('@engine/ratings/radar').RadarView
+    skater: SkaterSeasonLine | null
+    goalie: GoalieSeasonLine | null
+  }
+  playerB: {
+    playerId: string
+    name: string
+    position: Position
+    overall: number
+    radar: import('@engine/ratings/radar').RadarView
+    skater: SkaterSeasonLine | null
+    goalie: GoalieSeasonLine | null
+  }
 }
 
 /* ────────────────────────── tactics / lines ────────────────────────── */
