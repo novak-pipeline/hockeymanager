@@ -205,50 +205,21 @@ function AttrBar({
   hi?: number
   masked?: boolean
 }): JSX.Element {
-  /* Fogged: show band across the lo–hi range in grey */
-  if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
-    const loV = to20(lo)
-    const hiV = to20(hi)
-    const pctLo = ((loV - 1) / 19) * 100
-    const pctHi = ((hiV - 1) / 19) * 100
-    return (
-      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 28px', alignItems: 'center', gap: 8 }}>
-        <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-        <div style={{ position: 'relative', height: 5, background: 'var(--line)', borderRadius: 3 }}>
-          <div style={{
-            position: 'absolute',
-            left: `${pctLo}%`,
-            width: `${Math.max(4, pctHi - pctLo)}%`,
-            height: '100%',
-            background: 'var(--muted)',
-            borderRadius: 3,
-            opacity: 0.6,
-          }} />
-        </div>
-        <span className="small mono muted" style={{ textAlign: 'right' }}>?</span>
-      </div>
-    )
-  }
-
-  /* Known value */
-  const v20 = to20(value)
-  const color = attrColor20(v20)
-  const pct = ((v20 - 1) / 19) * 100
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 28px', alignItems: 'center', gap: 8 }}>
-      <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-      <div style={{ position: 'relative', height: 5, background: 'var(--line)', borderRadius: 3 }}>
-        <div style={{
-          width: `${Math.max(4, pct)}%`,
-          height: '100%',
-          background: color,
-          borderRadius: 3,
-        }} />
-      </div>
-      <span className="small mono" style={{ color, textAlign: 'right', fontWeight: 700 }}>{v20}</span>
+  /* FM-style: attribute name on the left, a colour-coded number on the right.
+     No bars — clean and scannable. Fogged attributes show a lo–hi range. */
+  const row = (right: JSX.Element): JSX.Element => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '1.5px 0' }}>
+      <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      {right}
     </div>
   )
+
+  if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
+    return row(<span className="mono muted" style={{ fontSize: 12, fontWeight: 600 }}>{to20(lo)}–{to20(hi)}</span>)
+  }
+
+  const v20 = to20(value)
+  return row(<span className="mono" style={{ color: attrColor20(v20), fontWeight: 700, fontSize: 13, minWidth: 16, textAlign: 'right' }}>{v20}</span>)
 }
 
 /* Skater / Goalie row helpers for the history table. */
@@ -1064,21 +1035,8 @@ function ScoutReadRow({ read }: { read: ScoutRead }): JSX.Element {
       padding: '8px 0',
       borderTop: '1px solid var(--line)',
     }}>
-      {/* Face or initials */}
-      <div style={{
-        width: 28, height: 28, borderRadius: '50%',
-        background: 'var(--panel2)',
-        border: '1px solid var(--line)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 10, fontWeight: 700, color: 'var(--muted)',
-        overflow: 'hidden', flexShrink: 0,
-      }}>
-        {read.faceId
-          ? <img src={`faces/${read.faceId}.png`} alt={read.scoutName}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : read.scoutName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-        }
-      </div>
+      {/* Face (resolves via the mod bridge; silhouette/initials fallback) */}
+      <PlayerFace faceId={read.faceId} name={read.scoutName} size={28} />
 
       {/* Name + take */}
       <div className="stack" style={{ gap: 2 }}>

@@ -51,11 +51,6 @@ function tierIndex(t: ProjectionTier): number {
   return i < 0 ? 2 : i
 }
 
-function tierFromIndex(i: number): ProjectionTier {
-  const clamped = Math.max(0, Math.min(TIER_ORDER.length - 1, i))
-  return TIER_ORDER[clamped]!
-}
-
 /* ─────────────────────── specialty bias ─────────────────────── */
 
 /**
@@ -104,33 +99,42 @@ function specialtyBias(
  *   judgment  60 → ≤ 1 tier off
  *   judgment  30 → ≤ 2 tiers off
  */
+// The QUALITY ladder a scout's read can drift along. 'Prospect' is NOT here —
+// it's a separate young-high-ceiling label, not a rank above Star, so an
+// established star can never be mis-read as a "prospect".
+const QUALITY_ORDER: ProjectionTier[] = ['Fringe', 'Depth', 'Core', 'Key', 'Star']
+function qIndex(t: ProjectionTier): number {
+  const i = QUALITY_ORDER.indexOf(t)
+  return i < 0 ? 3 : i // Prospect (or unknown) anchors around Key
+}
+
 function scoutTierEstimate(
   scout: StaffMember,
   player: Player,
   trueTier: ProjectionTier,
-  potStars: number,
+  _potStars: number,
   composites: Record<string, number>
 ): ProjectionTier {
-  const trueIdx = tierIndex(trueTier)
-
-  // Error magnitude: [0, 2] tiers
+  // Error magnitude: [0, 2] tiers, shrinking with judgment.
   const maxError = 2 * Math.max(0, 1 - scout.judgment / 100)
-
-  // Stable signed bias [-1, +1] for this (scout, player) pair
   const bias = hash01(scout.id + ':' + (player.id as string) + ':tier') * 2 - 1
   const rawError = bias * maxError
-
-  // Specialty bias adds/subtracts from the index
   const specDelta = specialtyBias(scout, player, composites) * (maxError > 0.5 ? 0.3 : 0.1)
-
-  // Demeanor skew: optimist scouts shade up, pessimists shade down
   let demeanorDelta = 0
   if (scout.demeanor === 'motivator') demeanorDelta = 0.3
   else if (scout.demeanor === 'fiery') demeanorDelta = -0.2
-  else if (scout.demeanor === 'analytical') demeanorDelta = 0 // unbiased
 
-  const finalIdx = Math.round(trueIdx + rawError + specDelta + demeanorDelta)
-  return tierFromIndex(finalIdx)
+  // A genuine young prospect: scouts debate the ceiling (Core..Star) and some
+  // still file him under "Prospect" — but he never reads as a fringe NHLer.
+  if (trueTier === 'Prospect') {
+    const idx = Math.round(3 + rawError + specDelta + demeanorDelta) // anchor at Key
+    if (hash01(scout.id + ':' + (player.id as string) + ':prosp') > 0.45) return 'Prospect'
+    return QUALITY_ORDER[Math.max(2, Math.min(4, idx))]!
+  }
+
+  // Established players drift only within the quality ladder — never to Prospect.
+  const finalIdx = Math.round(qIndex(trueTier) + rawError + specDelta + demeanorDelta)
+  return QUALITY_ORDER[Math.max(0, Math.min(4, finalIdx))]!
 }
 
 /* ─────────────────────── per-scout one-liner ─────────────────────── */
