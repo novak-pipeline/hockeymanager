@@ -21,6 +21,7 @@ export type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  CalendarView,
   CareerPhase,
   CareerSnapshot,
   CompareRadarView,
@@ -66,6 +67,7 @@ import type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  CalendarView,
   CareerSnapshot,
   DashboardView,
   DraftView,
@@ -122,6 +124,7 @@ export type WorkerRequestBody =
   | { type: 'getSquad' }
   | { type: 'getPlayer'; playerId: string }
   | { type: 'getTactics' }
+  | { type: 'getCalendar' }
   | { type: 'getSchedule' }
   | { type: 'getStandings' }
   | { type: 'getStats' }
@@ -232,6 +235,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'squad'; squad: SquadView }
   | { type: 'player'; player: PlayerProfileView }
   | { type: 'tactics'; tactics: TacticsView }
+  | { type: 'calendar'; calendar: CalendarView }
   | { type: 'schedule'; schedule: ScheduleView }
   | { type: 'standings'; standings: StandingsView }
   | { type: 'stats'; stats: StatsView }

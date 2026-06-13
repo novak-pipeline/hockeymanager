@@ -46,6 +46,7 @@ export type ScreenId =
   | 'matchcenter'
   | 'trades'
   | 'lockerRoom'
+  | 'calendar'
   | 'settings'
   // Legacy aliases kept for backward compat (redirect to new equivalents)
   | 'schedule'

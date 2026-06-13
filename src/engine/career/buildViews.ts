@@ -36,6 +36,8 @@ import {
 import type {
   ArchetypeInfo,
   AttributeGroupView,
+  CalendarEntry,
+  CalendarView,
   ContractView,
   CompareRadarView,
   FinanceView,
@@ -1042,4 +1044,89 @@ export function buildAhlSquadView(
     rosterCount: rows.length,
     hasAffiliate: true,
   }
+}
+
+/* ────────────────────────── calendar ────────────────────────── */
+
+/**
+ * Extra context the calendar builder needs beyond the base ViewCtx.
+ * These fields are all available on the Career without extra cost.
+ */
+export interface CalendarCtx extends ViewCtx {
+  /** Day of the trade deadline (floor(lastMatchDay * 0.75)). */
+  deadlineDay: number
+  /** First match day of the playoffs (null when still regular season or not started). */
+  playoffsStartDay: number | null
+}
+
+/**
+ * Build the CalendarView for the user's club.
+ * - One 'game' entry per user fixture.
+ * - Key-date entries for: season start, trade deadline, playoffs start (when known), season end.
+ * - Sorted chronologically by dateISO.
+ */
+export function buildCalendarView(ctx: CalendarCtx): CalendarView {
+  const entries: CalendarEntry[] = []
+
+  // ── user fixtures ──
+  const userGames = ctx.schedule.filter(
+    (g) => g.homeTeamId === ctx.userTeamId || g.awayTeamId === ctx.userTeamId
+  )
+  const nextGame = userGames.find((g) => !g.result)
+
+  for (const g of userGames) {
+    const home = g.homeTeamId === ctx.userTeamId
+    const opp = ctx.teams.get(home ? g.awayTeamId : g.homeTeamId)
+    if (!opp) continue
+    const won =
+      g.result !== null &&
+      (home ? g.result.homeGoals > g.result.awayGoals : g.result.awayGoals > g.result.homeGoals)
+    const result = g.result
+      ? {
+          homeGoals: g.result.homeGoals,
+          awayGoals: g.result.awayGoals,
+          won,
+          decidedBy: g.result.decidedBy,
+        }
+      : null
+    entries.push({
+      kind: 'game',
+      dateISO: dayToDateISO(ctx.year, g.day),
+      day: g.day,
+      gameId: g.id as string,
+      opponentAbbr: opp.abbreviation,
+      opponentName: opp.name,
+      home,
+      result,
+      isNext: g === nextGame,
+    })
+  }
+
+  // ── key dates ──
+  // Season start (day 1)
+  const allDays = ctx.schedule.map((g) => g.day)
+  if (allDays.length > 0) {
+    const firstDay = Math.min(...allDays)
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
+  }
+
+  // Trade deadline
+  if (ctx.deadlineDay > 0) {
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })
+  }
+
+  // Playoffs start (if known — i.e. first day after all regular-season games)
+  if (ctx.playoffsStartDay !== null) {
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.playoffsStartDay), label: 'Playoffs Begin' })
+  }
+
+  // Season end (last match day of regular season)
+  if (allDays.length > 0) {
+    const lastDay = Math.max(...allDays)
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, lastDay), label: 'Regular Season Ends' })
+  }
+
+  entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
+
+  return { year: ctx.year, entries }
 }

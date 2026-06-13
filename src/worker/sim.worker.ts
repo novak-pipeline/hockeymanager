@@ -80,6 +80,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
     case 'getTactics':
       return { id: req.id, type: 'tactics', tactics: must().getTactics() }
+    case 'getCalendar':
+      return { id: req.id, type: 'calendar', calendar: must().getCalendarView() }
     case 'getSchedule':
       return { id: req.id, type: 'schedule', schedule: must().getSchedule() }
     case 'getStandings':

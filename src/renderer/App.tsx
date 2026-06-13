@@ -15,6 +15,7 @@ import { DashboardScreen } from './screens/DashboardScreen'
 import { InboxScreen } from './screens/InboxScreen'
 import { MatchCenterScreen } from './screens/MatchCenterScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
+import { CalendarScreen } from './screens/CalendarScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
@@ -390,6 +391,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     // ── Shared screens ──
     case 'matchcenter':
       return <MatchCenterScreen />
+    case 'calendar':
+      return <CalendarScreen />
     case 'trades':
       return <TradesScreen />
     case 'lockerRoom':

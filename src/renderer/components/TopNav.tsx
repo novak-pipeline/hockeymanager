@@ -261,6 +261,12 @@ export function TopNav(props: {
           Match
         </button>
         <button
+          className={nav.screen === 'calendar' ? 'topnav-section active' : 'topnav-section'}
+          onClick={() => nav.navigate('calendar')}
+        >
+          Calendar
+        </button>
+        <button
           className={nav.screen === 'trades' ? 'topnav-section active' : 'topnav-section'}
           onClick={() => nav.navigate('trades')}
         >

@@ -1224,3 +1224,46 @@ export interface ScoreboardView {
     final: boolean
   }>
 }
+
+/* ────────────────────────── calendar view ────────────────────────── */
+
+/**
+ * A single entry on the calendar grid.
+ * - 'game': user-club fixture (scheduled or played).
+ * - 'keydate': notable season milestone (deadline, playoffs start, draft, etc.).
+ */
+export type CalendarEntry =
+  | {
+      kind: 'game'
+      dateISO: string
+      day: number
+      gameId: string
+      opponentAbbr: string
+      opponentName: string
+      /** True = home, false = away. */
+      home: boolean
+      /** Null when game not yet played. */
+      result: {
+        homeGoals: number
+        awayGoals: number
+        won: boolean
+        decidedBy: GameResult['decidedBy']
+      } | null
+      /** True when this is the user's next unplayed fixture. */
+      isNext: boolean
+    }
+  | {
+      kind: 'keydate'
+      dateISO: string
+      /** Human-readable label, e.g. 'Trade Deadline', 'Playoffs Begin'. */
+      label: string
+    }
+
+/**
+ * Season laid out for calendar rendering.
+ * Response to 'getCalendar'.
+ */
+export interface CalendarView {
+  year: number
+  entries: CalendarEntry[]
+}

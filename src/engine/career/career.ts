@@ -206,6 +206,7 @@ import {
   badge,
   buildAhlSquadView,
   buildAhlStandingsView,
+  buildCalendarView,
   buildCompareRadar,
   buildFinanceView,
   buildPlayerProfile,
@@ -218,6 +219,7 @@ import {
   potentialStars,
   standingRowView,
   type AhlViewCtx,
+  type CalendarCtx,
   type FogCtx,
   type ViewCtx,
 } from './buildViews'
@@ -229,6 +231,7 @@ import {
   type AhlStandingsView,
   type BoardView,
   type BoxScoreView,
+  type CalendarView,
   type CareerPhase,
   type CareerSnapshot,
   type CompareRadarView,
@@ -3631,6 +3634,21 @@ export class Career {
 
   getSchedule(): ScheduleView {
     return buildScheduleView(this.ctx())
+  }
+
+  getCalendarView(): CalendarView {
+    const lastMatchDay = this.matchDays[this.matchDays.length - 1] ?? 0
+    // Playoffs begin the day after the regular season ends (same convention as
+    // the career phase machine, which flips to 'playoffs' after the last match day).
+    const playoffsStartDay = this.phase !== 'regularSeason' || lastMatchDay > 0
+      ? lastMatchDay + 1
+      : null
+    const ctx: CalendarCtx = {
+      ...this.ctx(),
+      deadlineDay: this.deadlineDay,
+      playoffsStartDay,
+    }
+    return buildCalendarView(ctx)
   }
 
   getStandings(): StandingsView {

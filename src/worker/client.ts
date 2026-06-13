@@ -131,6 +131,10 @@ export class SimClient {
     return this.send({ type: 'getTactics' })
   }
 
+  getCalendar(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCalendar' })
+  }
+
   getSchedule(): Promise<WorkerResponse> {
     return this.send({ type: 'getSchedule' })
   }
