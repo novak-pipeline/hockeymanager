@@ -31,6 +31,7 @@ import { ScheduleScreen } from './ScheduleScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { useShellActions } from '../components/ActionsContext'
 import { bumpRefresh, toast } from '../components/store'
+import { ThemeScope, useTeamColors } from '../components/ThemeScope'
 
 type TeamTab =
   | 'squad'
@@ -92,6 +93,9 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
   // (This can happen when navigating via TopNav sub-tabs without clearing teamId.)
   const effectiveTab = (!isOwnTeam && MANAGEMENT_TABS.has(tab)) ? 'squad' : tab
 
+  // Resolve the viewed team's colors for scoped accent tinting.
+  const teamColors = useTeamColors(viewedTeamId)
+
   // Render
   const header = (
     <TeamHeader
@@ -130,13 +134,17 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <ThemeScope
+      colors={teamColors}
+      className="team-scope"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+    >
       {header}
       {/* Key by viewedTeamId so changing teams remounts the tab and refetches. */}
       <div key={viewedTeamId} style={{ flex: 1, overflow: 'auto' }}>
         {body()}
       </div>
-    </div>
+    </ThemeScope>
   )
 }
 

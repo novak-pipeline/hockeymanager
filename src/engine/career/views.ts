@@ -60,6 +60,8 @@ export interface LeagueTeamRow {
   points: number
   /** NHL parent for AHL rows; AHL affiliate for NHL rows. */
   affiliateId?: string
+  /** Jersey colors as 0xRRGGBB ints — used by the UI to tint team screens. */
+  colors?: { primary: number; secondary: number }
 }
 
 export interface LeagueTeamsView {
@@ -341,6 +343,8 @@ export interface ProfileContractView extends ContractView {
 export interface PlayerProfileView extends PlayerBadge {
   teamId: string | null
   teamName: string | null
+  /** Team jersey colors as 0xRRGGBB ints — absent when player is a free agent. */
+  teamColors?: { primary: number; secondary: number }
   handedness: 'L' | 'R'
   role: string
   condition: number

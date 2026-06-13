@@ -4079,6 +4079,7 @@ export class Career {
         abbreviation: t.abbreviation,
         tier: ('nhl' as const),
         points: s.points,
+        colors: t.colors,
         ...(t.affiliateId ? { affiliateId: t.affiliateId as string } : {}),
       }
     })
@@ -4092,6 +4093,7 @@ export class Career {
       abbreviation: t.abbreviation,
       tier: ('ahl' as const),
       points: 0,
+      colors: t.colors,
       ...(t.parentTeamId ? { affiliateId: t.parentTeamId as string } : {}),
     }))
     return { nhl: nhlRows, ahl: ahlRows }

@@ -115,6 +115,15 @@ a:hover { text-decoration: underline; }
   margin-bottom: var(--sp-3);
 }
 
+/* Team-scoped tinting: panel titles and screen titles pick up the team's primary color. */
+.team-scope .panel-title {
+  color: var(--team-primary, var(--violet-h));
+}
+
+.team-scope .screen-title {
+  color: var(--team-primary, var(--text));
+}
+
 .screen-title {
   font-size: 19px;
   font-weight: 700;

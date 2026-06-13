@@ -502,11 +502,13 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
   let teamId: string | null = null
   let teamName: string | null = null
   let teamAbbr = 'FA'
+  let teamColors: { primary: number; secondary: number } | undefined
   for (const t of ctx.teams.values()) {
     if (t.roster.includes(playerId)) {
       teamId = t.id as string
       teamName = t.name
       teamAbbr = t.abbreviation
+      teamColors = t.colors
       break
     }
   }
@@ -583,6 +585,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
     ...badge(p, fog),
     teamId,
     teamName,
+    ...(teamColors !== undefined ? { teamColors } : {}),
     handedness: p.handedness,
     role: p.role,
     condition: conditionOf(p),

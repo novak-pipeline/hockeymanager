@@ -30,6 +30,7 @@ import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
+import { ThemeScope } from '../components/ThemeScope'
 
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
@@ -499,14 +500,15 @@ function TabProfile({
   return (
     <div className="stack">
       {/* ── Bio header strip ── */}
+      <div style={{ borderTop: '3px solid var(--team-primary, transparent)', borderRadius: 'var(--radius) var(--radius) 0 0', overflow: 'hidden' }}>
       <Panel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--sp-5)', alignItems: 'start' }}>
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
             {/* Face + identity chips */}
             <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'center' }}>
-              <PlayerFace faceId={d.faceId} name={d.name} size={72} />
+              <PlayerFace faceId={d.faceId} name={d.name} size={72} teamColor={d.teamColors?.primary} />
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>{d.name}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--team-primary, var(--text))' }}>{d.name}</div>
                 <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
                   <span className="chip chip-accent">{d.position}</span>
                   <span className="chip">{d.handedness} shot</span>
@@ -633,6 +635,7 @@ function TabProfile({
           )}
         </div>
       </Panel>
+      </div>
 
       {/* ── Attribute groups + Ratings card ── */}
       <div className="grid grid-2">
@@ -1146,6 +1149,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
   const d = data
 
   return (
+    <ThemeScope colors={d.teamColors}>
     <section className="stack">
       {/* ── Page header ── */}
       <ScreenHeader title={d.name}>
@@ -1197,5 +1201,6 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       {activeTab === 'history' && <TabHistory d={d} />}
       {activeTab === 'scout' && <TabScout d={d} />}
     </section>
+    </ThemeScope>
   )
 }
