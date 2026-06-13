@@ -112,7 +112,7 @@ import type { TeamTactics } from '@domain'
 import type { ScoutTarget } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
-export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView } from '@engine/career/views'
+export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView, StaffView, StaffRowView } from '@engine/career/views'
 
 /** A request without its correlation id; the client stamps the id on send. */
 export type WorkerRequestBody =
@@ -248,6 +248,8 @@ export type WorkerRequestBody =
   | { type: 'getTeamSchedule'; teamId: string }
   /** Per-player season stats for a specific team (Team > Statistics tab). */
   | { type: 'getTeamPlayerStats'; teamId: string }
+  /** Full staff complement for a team (own team when teamId absent). */
+  | { type: 'getTeamStaff'; teamId?: string }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -311,5 +313,6 @@ export type WorkerResponse = { id: number } & (
   /* ── Team browser (task #31) ── */
   | { type: 'leagueTeams'; teams: LeagueTeamsView }
   | { type: 'teamPlayerStats'; stats: TeamPlayerStatsView }
+  | { type: 'teamStaff'; staff: import('@engine/career/views').StaffView }
   | { type: 'error'; message: string }
 )

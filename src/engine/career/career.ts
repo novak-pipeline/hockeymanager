@@ -273,6 +273,8 @@ import {
   type TransactionsView,
   type TeamPlayerStatRow,
   type TeamPlayerStatsView,
+  type StaffView,
+  type StaffRowView,
 } from './views'
 import type { ScoutingState, ScoutTarget } from '@domain/scouting'
 
@@ -3822,6 +3824,55 @@ export class Career {
       else skaters.push(entry)
     }
     return { teamName: squad.teamName, skaters, goalies }
+  }
+
+  /** Full staff view for any team (or user team when teamId is absent). */
+  getTeamStaffView(teamId?: string): StaffView {
+    const tid = teamId ? asTeamId(teamId) : this.userTeamId
+    const team = this.data.teams.get(tid)
+    const teamName = team?.name ?? 'Unknown Team'
+    const ts = this.getTeamStaff(tid as string)
+
+    const DEMEANOR_LABELS: Record<NonNullable<import('@engine/league/staff').StaffMember['demeanor']>, string> = {
+      fiery:      'Fiery',
+      calm:       'Calm',
+      analytical: 'Analytical',
+      motivator:  'Motivator',
+      pragmatic:  'Pragmatic',
+    }
+
+    const ROLE_LABELS: Record<import('@engine/league/staff').StaffMember['role'], string> = {
+      headCoach:      'Head Coach',
+      assistantCoach: 'Assistant Coach',
+      assistantGM:    'Assistant GM',
+      scout:          'Scout',
+      physio:         'Physio',
+      owner:          'Owner',
+    }
+
+    function toRow(m: import('@engine/league/staff').StaffMember): StaffRowView {
+      const row: StaffRowView = {
+        id:        m.id,
+        name:      m.name,
+        roleLabel: ROLE_LABELS[m.role],
+        rating:    m.rating,
+        judgment:  m.judgment,
+      }
+      if (m.specialty !== undefined) row.specialty = m.specialty
+      if (m.demeanor !== undefined) row.demeanorLabel = DEMEANOR_LABELS[m.demeanor]
+      if (m.faceId !== undefined) row.faceId = m.faceId
+      return row
+    }
+
+    return {
+      teamName,
+      headCoach:       toRow(ts.headCoach),
+      assistantCoaches: ts.assistantCoaches.map(toRow),
+      assistantGM:     toRow(ts.assistantGM),
+      scouts:          ts.scouts.map(toRow),
+      physios:         ts.physios.map(toRow),
+      owner:           toRow(ts.owner),
+    }
   }
 
   getDataHubView(): DataHubView {

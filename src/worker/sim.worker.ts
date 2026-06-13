@@ -268,6 +268,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'schedule', schedule: must().getScheduleFor(req.teamId) }
     case 'getTeamPlayerStats':
       return { id: req.id, type: 'teamPlayerStats', stats: must().getTeamPlayerStats(req.teamId) }
+    case 'getTeamStaff':
+      return { id: req.id, type: 'teamStaff', staff: must().getTeamStaffView(req.teamId) }
   }
 }
 

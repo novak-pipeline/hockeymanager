@@ -12,6 +12,7 @@ import type {
   AgmReportView,
   PracticeView,
   SquadView,
+  StaffView,
 } from '../../worker/protocol'
 import type { PracticeFocus } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -27,6 +28,7 @@ import { TacticsScreen } from './TacticsScreen'
 import { FinancesScreen } from './FinancesScreen'
 import { HistoryScreen } from './HistoryScreen'
 import { ScheduleScreen } from './ScheduleScreen'
+import { PlayerFace } from '../components/PlayerFace'
 import { useShellActions } from '../components/ActionsContext'
 import { bumpRefresh, toast } from '../components/store'
 
@@ -74,7 +76,7 @@ const FOCUS_DESC: Record<PracticeFocus, string> = {
 
 /** Management-only tabs: hidden when browsing another team. */
 const MANAGEMENT_TABS: ReadonlySet<TeamTab> = new Set([
-  'report', 'personnel', 'practice', 'tactics', 'finances',
+  'report', 'practice', 'tactics', 'finances',
 ])
 
 export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
@@ -106,6 +108,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       switch (effectiveTab) {
         case 'squad':       return <SquadScreen teamId={viewedTeamId} />
         case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
+        case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
         case 'teamInfo':    return <TeamInfoTabReadOnly teamId={viewedTeamId} />
         case 'teamHistory': return <HistoryScreen />
         case 'leagueSchedule':
@@ -117,7 +120,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       case 'squad':       return <SquadScreen />
       case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
       case 'report':      return <ReportTab />
-      case 'personnel':   return <PersonnelTab />
+      case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
       case 'practice':    return <PracticeTab />
       case 'tactics':     return <TacticsScreen />
       case 'finances':    return <FinancesScreen />
@@ -281,47 +284,93 @@ function DepthColumn(props: {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   PERSONNEL TAB — staff listing
+   PERSONNEL TAB — full staff listing with photos
    ══════════════════════════════════════════════════════════════ */
 
-function PersonnelTab(): JSX.Element {
-  const client = useClient()
-  // Personnel data comes through the squad view which includes team name;
-  // staff is embedded in the career snapshot but not yet surfaced as a
-  // dedicated view. We rely on the dashboard for the basics.
-  // For now we fetch squad for team name and show a notice about staff.
-  const { data: squad, loading, error } = useScreenData<SquadView>(
-    () => client.getSquad(),
-    (r) => (r.type === 'squad' ? r.squad : null)
+const DEMEANOR_COLOR: Record<string, string> = {
+  Analytical: 'var(--violet-h)',
+  Fiery:      'var(--danger)',
+  Calm:       'var(--muted)',
+  Motivator:  'var(--green)',
+  Pragmatic:  'var(--amber, #f59e0b)',
+}
+
+function StaffSection(props: {
+  title: string
+  members: StaffView['scouts'] // StaffRowView[]
+}): JSX.Element {
+  if (props.members.length === 0) return <></>
+  return (
+    <Panel title={props.title}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+        {props.members.map((m) => (
+          <div
+            key={m.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--sp-3)',
+              padding: 'var(--sp-2) 0',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <PlayerFace faceId={m.faceId} name={m.name} size={44} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{m.name}</div>
+              <div className="muted small">{m.roleLabel}{m.specialty ? ` · ${m.specialty}` : ''}</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                <span className="small muted">Rating</span>
+                <span className="mono small" style={{ color: 'var(--fg)' }}>{m.rating}</span>
+                <span className="small muted">Judgment</span>
+                <span className="mono small" style={{ color: 'var(--fg)' }}>{m.judgment}</span>
+              </div>
+              {m.demeanorLabel && (
+                <span
+                  className="chip"
+                  style={{
+                    fontSize: 10,
+                    color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)',
+                    background: 'var(--bg3)',
+                    padding: '1px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  {m.demeanorLabel}
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
   )
+}
+
+function PersonnelTab(props: { teamId: string }): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData<StaffView>(
+    () => client.getTeamStaff(props.teamId),
+    (r) => (r.type === 'teamStaff' ? r.staff : null)
+  )
+
+  if (error) return <Notice kind="warn">{error}</Notice>
+  if (loading && !data) return <Notice kind="info">Loading personnel…</Notice>
+  if (!data) return <Notice kind="info">No personnel data.</Notice>
 
   return (
     <section className="stack">
-      <ScreenHeader title="Personnel" />
-      <ScreenStateNotices
-        loading={loading && !squad}
-        error={error}
-        empty={false}
-        emptyText=""
-      />
-      <Panel title="Staff">
-        <Notice kind="info">
-          Staff management (head coach, AGM, scouts) is available in a future update.
-          Scout assignments can be managed in the League &gt; Scouting tab.
-        </Notice>
-      </Panel>
-      {squad && (
-        <Panel title="Roster summary">
-          <div className="row-between small">
-            <span>Roster size</span>
-            <strong>{squad.rosterCount} players</strong>
-          </div>
-          <div className="row-between small" style={{ marginTop: 'var(--sp-2)' }}>
-            <span>Dressed for next game</span>
-            <strong>{squad.dressedCount} players</strong>
-          </div>
-        </Panel>
-      )}
+      <ScreenHeader title="Personnel">
+        <span className="muted small">{data.teamName}</span>
+      </ScreenHeader>
+
+      <StaffSection title="Head Coach" members={[data.headCoach]} />
+      <StaffSection title="Assistant Coaches" members={data.assistantCoaches} />
+      <StaffSection title="Assistant General Manager" members={[data.assistantGM]} />
+      <StaffSection title="Scouts" members={data.scouts} />
+      <StaffSection title="Physios" members={data.physios} />
+      <StaffSection title="Owner" members={[data.owner]} />
     </section>
   )
 }

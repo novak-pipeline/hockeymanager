@@ -424,6 +424,13 @@ export class SimClient {
     return this.send({ type: 'getTeamPlayerStats', teamId })
   }
 
+  /** Full staff complement for a team (own team when teamId absent). */
+  getTeamStaff(teamId?: string): Promise<WorkerResponse> {
+    return teamId !== undefined
+      ? this.send({ type: 'getTeamStaff', teamId })
+      : this.send({ type: 'getTeamStaff' })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

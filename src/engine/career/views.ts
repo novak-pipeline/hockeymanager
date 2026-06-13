@@ -1124,6 +1124,40 @@ export interface TentpoleView {
   } | null
 }
 
+/* ────────────────────────── staff / personnel view ────────────────────────── */
+
+/** One row in the Personnel screen — a single staff member. */
+export interface StaffRowView {
+  id: string
+  name: string
+  /** Human-readable role label, e.g. "Head Coach", "Assistant Coach". */
+  roleLabel: string
+  /** 40–90 quality rating. */
+  rating: number
+  /** 0–100 scouting/evaluation accuracy. */
+  judgment: number
+  /** Optional specialty, e.g. "Power Play", "Prospects". */
+  specialty?: string
+  /** Demeanor tag for the UI, e.g. "Analytical", "Fiery". */
+  demeanorLabel?: string
+  /** Facepack image key (faces/<faceId>.png). Absent when no facepack. */
+  faceId?: string
+}
+
+/**
+ * Full staff complement for one team, grouped by role.
+ * Response to 'getTeamStaff'.
+ */
+export interface StaffView {
+  teamName: string
+  headCoach: StaffRowView
+  assistantCoaches: StaffRowView[]
+  assistantGM: StaffRowView
+  scouts: StaffRowView[]
+  physios: StaffRowView[]
+  owner: StaffRowView
+}
+
 /* ────────────────────────── AGM report view ────────────────────────── */
 
 /** A player entry in the AGM depth chart with display colour tier. */
