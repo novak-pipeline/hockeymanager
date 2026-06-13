@@ -118,6 +118,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'ok' }
     case 'getTeamLegends':
       return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
+    case 'getTeamDynamics':
+      return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
     case 'suggestToCoach': {
       const res = must().suggestToCoach(req.direction)
       return { id: req.id, type: 'coachResponse', accepted: res.accepted, response: res.response }

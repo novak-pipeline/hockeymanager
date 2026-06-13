@@ -1189,6 +1189,8 @@ export interface RelationshipView {
   label: string
 }
 
+export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/dynamics'
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

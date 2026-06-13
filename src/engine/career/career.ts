@@ -185,6 +185,7 @@ import {
   tickScouting,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
+import { buildTeamDynamics } from '@engine/career/dynamics'
 import {
   generateStaff,
   generateTeamStaff,
@@ -282,6 +283,7 @@ import {
   type PlayerInteractionView,
   type ClubLegend,
   type TeamLegendsView,
+  type TeamDynamicsView,
   type LeagueLeadersView,
   type LeagueStatsView,
   type LeagueTeamsView,
@@ -4343,6 +4345,23 @@ export class Career {
     })
     this.agenda.splice(idx, 1)
     return { ok: true, result }
+  }
+
+  /** FM-style squad-dynamics view for a club (hierarchy / social groups / happiness). */
+  getTeamDynamics(teamId: string): TeamDynamicsView {
+    const tid = asTeamId(teamId)
+    const team = this.data.teams.get(tid)
+    const roster = team ? team.roster.map((id) => this.resolve(id)) : []
+    const lr = this.lockerRooms.get(tid) ?? null
+    const coach = this.getTeamStaff(teamId).headCoach
+    return buildTeamDynamics({
+      teamId,
+      teamName: team?.name ?? teamId,
+      roster,
+      lockerRoom: lr,
+      headCoachName: coach.name,
+      ...(coach.faceId !== undefined ? { headCoachFaceId: coach.faceId } : {}),
+    })
   }
 
   /** Legends registry for a club, most recent first. */

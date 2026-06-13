@@ -25,6 +25,7 @@ import { TeamHeader } from '../components/TeamHeader'
 import { SquadScreen } from './SquadScreen'
 import { TeamStatsScreen } from './TeamStatsScreen'
 import { TeamDataHubBody } from './DataHubScreen'
+import { DynamicsScreen } from './DynamicsScreen'
 import { TacticsScreen } from './TacticsScreen'
 import { FinancesScreen } from './FinancesScreen'
 import { HistoryScreen } from './HistoryScreen'
@@ -45,6 +46,7 @@ type TeamTab =
   | 'teamInfo'
   | 'teamHistory'
   | 'teamDataHub'
+  | 'teamDynamics'
 
 /* ── tier color mapping ── */
 const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
@@ -121,6 +123,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
         case 'squad':       return <SquadScreen teamId={viewedTeamId} />
         case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
         case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
+        case 'teamDynamics': return <DynamicsScreen teamId={viewedTeamId} />
         case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
         case 'teamInfo':    return <TeamInfoTabReadOnly teamId={viewedTeamId} />
         case 'teamHistory': return <TeamHistoryTab teamId={viewedTeamId} />
@@ -133,6 +136,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       case 'squad':       return <SquadScreen />
       case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
       case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
+      case 'teamDynamics': return <DynamicsScreen teamId={viewedTeamId} />
       case 'report':      return <ReportTab />
       case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
       case 'practice':    return <PracticeTab />
