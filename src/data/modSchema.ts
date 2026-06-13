@@ -128,6 +128,23 @@ export interface ModPlayer {
    * DB should set this so a player's role matches reality.
    */
   role?: PlayerRole
+  /**
+   * Optional FM-style personality (each 1–20). Drives development, morale,
+   * locker-room chemistry, and contract demands. Omitted = randomised.
+   */
+  personality?: {
+    ambition: number
+    professionalism: number
+    loyalty: number
+    temperament: number
+    determination: number
+  }
+  /** Optional display-only bio fields from the source DB. */
+  nationality?: string
+  birthplace?: string
+  jerseyNumber?: number
+  heightCm?: number
+  weightKg?: number
 }
 
 /**
@@ -308,6 +325,16 @@ function validatePlayer(raw: unknown, path: string): ModPlayer {
 
   if (r['role'] !== undefined && !ROLE_KEYS.has(r['role'] as PlayerRole))
     fail(`${path}.role is not a valid PlayerRole: "${r['role']}"`)
+
+  if (r['personality'] !== undefined) {
+    assertObject(r['personality'], `${path}.personality`)
+    const pe = r['personality'] as Record<string, unknown>
+    for (const k of ['ambition', 'professionalism', 'loyalty', 'temperament', 'determination']) {
+      assertNumber(pe[k], `${path}.personality.${k}`)
+      const n = pe[k] as number
+      if (n < 1 || n > 20) fail(`${path}.personality.${k} must be 1–20, got ${n}`)
+    }
+  }
 
   return r as unknown as ModPlayer
 }
@@ -602,6 +629,18 @@ function makeDefaultPersonality(rng: Rng): Personality {
   }
 }
 
+/** Optional display-only bio fields, spread onto a Player when the mod has them
+ *  (exactOptionalPropertyTypes: omit absent keys rather than set undefined). */
+function bioFields(mp: ModPlayer): Partial<Player> {
+  return {
+    ...(mp.nationality !== undefined ? { nationality: mp.nationality } : {}),
+    ...(mp.birthplace !== undefined ? { birthplace: mp.birthplace } : {}),
+    ...(mp.jerseyNumber !== undefined ? { jerseyNumber: mp.jerseyNumber } : {}),
+    ...(mp.heightCm !== undefined ? { heightCm: mp.heightCm } : {}),
+    ...(mp.weightKg !== undefined ? { weightKg: mp.weightKg } : {})
+  }
+}
+
 /** Build forward lines, D pairs, goalie depth, and special-teams units. */
 function buildLinesFromRoster(players: Player[]): Lines {
   const byOverall = (a: Player, b: Player): number =>
@@ -774,7 +813,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
             ratings: raw,
             potential: potentialRaw,
             composites,
-            personality: makeDefaultPersonality(rng),
+            personality: modPlayer.personality ?? makeDefaultPersonality(rng),
             contract,
             stats: [],
             fatigue: 0,
@@ -782,7 +821,8 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
             injuryStatus: null,
             form: 0,
             externalId: modPlayer.externalId,
-            ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {})
+            ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
+            ...bioFields(modPlayer)
           }
 
           // Demote second+ goalie's role label.
@@ -948,7 +988,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           ratings: raw,
           potential: potentialRaw,
           composites,
-          personality: makeDefaultPersonality(ahlRng),
+          personality: modPlayer.personality ?? makeDefaultPersonality(ahlRng),
           contract,
           stats: [],
           fatigue: 0,
@@ -956,7 +996,8 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           injuryStatus: null,
           form: 0,
           externalId: modPlayer.externalId,
-          ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {})
+          ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
+          ...bioFields(modPlayer)
         }
         const goaliesBefore = ahlRoster.filter((p) => p.position === 'G').length
         if (modPlayer.position === 'G' && goaliesBefore > 0) player.role = 'backup'

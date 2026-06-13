@@ -56,6 +56,10 @@ C_HAND = 51
 C_EXPIRES = 13      # "Contract Expires Club", e.g. "30.6.2027"
 C_WAGE = 14         # "Estimated Wage" = annual salary (accurate, e.g. 8700000)
 C_ROLE = 50         # "Role", e.g. "Centre: Playmaker", "Defenceman: Defensive"
+C_BIRTHTOWN = 7     # "Birth Town", e.g. "cole harbour:ns:can"
+C_FAV_NUM, C_SQUAD_NUM = 52, 53   # favourite / squad jersey number
+# FM-style personality (each 1-20), maps 1:1 onto our Personality scale.
+C_AMBITION, C_DETERMINATION, C_LOYALTY, C_PROFESSIONALISM, C_TEMPERAMENT = 30, 31, 32, 34, 36
 
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
@@ -202,6 +206,31 @@ def contract_from_row(row):
     years = clamp(exp_year - SEASON_YEAR, 1, 8) if exp_year else 2
     return {"salary": salary, "years": years}
 
+def personality_from_row(row):
+    """EHM personality columns (1-20) -> our Personality (same 1-20 scale)."""
+    def p(col):
+        return clamp(to_int(row[col], 10), 1, 20)
+    return {
+        "ambition": p(C_AMBITION),
+        "professionalism": p(C_PROFESSIONALISM),
+        "loyalty": p(C_LOYALTY),
+        "temperament": p(C_TEMPERAMENT),
+        "determination": p(C_DETERMINATION),
+    }
+
+def birthplace_from_row(row):
+    """EHM birth town 'cole harbour:ns:can' -> 'Cole Harbour, NS'."""
+    raw = str(row[C_BIRTHTOWN] or "").strip()
+    if not raw or raw == "[None]":
+        return None
+    parts = [x for x in raw.split(":") if x]
+    if not parts:
+        return None
+    town = parts[0].title()
+    if len(parts) >= 2 and len(parts[1]) <= 3:
+        return f"{town}, {parts[1].upper()}"
+    return town
+
 def position(row):
     g = row[C_GOALIE] or 0
     d = max(row[C_LD] or 0, row[C_RD] or 0)
@@ -340,12 +369,28 @@ def main():
             "potential": clamp(round(pa / 2), 1, 99),
             "attributes": build_attributes(r, pos),
             "role": map_role(r[C_ROLE], pos),
+            "personality": personality_from_row(r),
             "faceId": face_id,
             "_ca": ca,
         }
         contract = contract_from_row(r)
         if contract is not None:
             player["contract"] = contract
+        nationality = str(r[C_NATION] or "").strip()
+        if nationality and nationality != "[None]":
+            player["nationality"] = nationality
+        bp = birthplace_from_row(r)
+        if bp is not None:
+            player["birthplace"] = bp
+        jersey = to_int(r[C_SQUAD_NUM], 0) or to_int(r[C_FAV_NUM], 0)
+        if jersey > 0:
+            player["jerseyNumber"] = jersey
+        ht = to_int(r[C_HEIGHT_CM], 0)
+        if ht > 0:
+            player["heightCm"] = ht
+        wt = to_int(r[C_WEIGHT_KG], 0)
+        if wt > 0:
+            player["weightKg"] = wt
         if nhl_nick:
             nhl_teams[nhl_nick].append(player)
         else:

@@ -88,4 +88,11 @@ export interface Player {
    * silhouette.
    */
   faceId?: string
+  /** Display-only bio fields, populated by mod loaders when the DB provides
+   *  them. The sim engine never reads these. */
+  nationality?: string
+  birthplace?: string
+  jerseyNumber?: number
+  heightCm?: number
+  weightKg?: number
 }
