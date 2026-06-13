@@ -292,19 +292,23 @@ export function buildSchedule(teamIds: TeamId[], roundRobins: number, season: nu
   for (let rr = 0; rr < roundRobins; rr++) {
     const rounds = roundRobin(teamIds)
     for (const round of rounds) {
-      day++
-      for (const [a, b] of round) {
-        // Alternate home/away each round-robin so the slate stays balanced.
+      // Stagger each round across TWO match days so not every club plays on the
+      // same night — realistic off-days + a longer (≈8-month) season span. The
+      // game-id ORDER is unchanged (ids still map to the same matchups), so game
+      // seeds/results/totals are byte-identical — only the calendar spread changes.
+      const half = Math.ceil(round.length / 2)
+      round.forEach(([a, b], i) => {
         const [home, away] = rr % 2 === 0 ? [a, b] : [b, a]
         games.push({
           id: asGameId(`g${gameNum++}`),
           season,
-          day,
+          day: day + (i < half ? 1 : 2),
           homeTeamId: home,
           awayTeamId: away,
           result: null
         })
-      }
+      })
+      day += 2
     }
   }
   return games

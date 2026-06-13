@@ -48,7 +48,7 @@ describe('Career — regular season', () => {
     const career = new Career(data, 5, data.league.teams[0])
     let days = 0
     while (career.advanceDay()) days++
-    expect(days).toBe(60) // 4 round-robins × 15 rounds
+    expect(days).toBe(120) // 60 rounds × 2 staggered match days each (4 RR × 15 rounds)
     expect(career.done).toBe(true)
     expect(career.advanceDay()).toBe(false)
     expect(career.getDashboard().phase).toBe('playoffs')
@@ -327,8 +327,8 @@ describe('Career — story layer', () => {
     expect(before.lastDeadlineRecap).toBeNull()
     expect(before.deadlinePassed).toBe(false)
 
-    // Advance through the deadline (deadline = 75% of the season).
-    career.advance(50)
+    // Advance through the deadline (deadline = 75% of the ~120-day staggered season).
+    career.advance(100)
     const after = career.getTentpoles()
     expect(after.deadlinePassed).toBe(true)
     expect(after.lastDeadlineRecap).not.toBeNull()
