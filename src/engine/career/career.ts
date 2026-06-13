@@ -269,6 +269,8 @@ import {
   type TradeSideView,
   type TradesView,
   type TransactionsView,
+  type TeamPlayerStatRow,
+  type TeamPlayerStatsView,
 } from './views'
 import type { ScoutingState, ScoutTarget } from '@domain/scouting'
 
@@ -3741,6 +3743,26 @@ export class Career {
 
   getStats(): StatsView {
     return buildStatsView(this.ctx())
+  }
+
+  /** Per-player season stats for a specific team (Team > Statistics tab). */
+  getTeamPlayerStats(teamId: string): TeamPlayerStatsView {
+    const squad = this.getSquadFor(teamId)
+    const skaters: TeamPlayerStatsView['skaters'] = []
+    const goalies: TeamPlayerStatsView['goalies'] = []
+    for (const row of squad.rows) {
+      const entry: TeamPlayerStatRow = {
+        playerId: row.playerId,
+        name: row.name,
+        position: row.position,
+        age: row.age,
+        skater: row.skater,
+        goalie: row.goalie,
+      }
+      if (row.position === 'G') goalies.push(entry)
+      else skaters.push(entry)
+    }
+    return { teamName: squad.teamName, skaters, goalies }
   }
 
   getDataHubView(): DataHubView {

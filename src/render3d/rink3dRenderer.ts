@@ -602,19 +602,13 @@ export class Rink3dRenderer implements MatchRenderer {
     mesh.position.set(startWx, 0, startWz)
     this.scene.add(mesh)
 
-    // Build a billboarded name label sprite if label data is available
-    let labelSprite: THREE.Sprite | null = null
-    if (playerId) {
-      const info = this.labels[playerId]
-      if (info) {
-        const labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
-        labelSprite = this.makeLabelSprite(labelText)
-        // Position: above the head (head is at LEG_H + TORSO_H + HEAD_R*0.9 ≈ 6.3ft, label ~1ft above that)
-        const labelY = LEG_H + TORSO_H + HEAD_R * 0.9 + 1.5
-        labelSprite.position.set(startWx, labelY, startWz)
-        this.scene.add(labelSprite)
-      }
-    }
+    // Always create a label sprite per slot — text is set/updated each frame via
+    // updatePoseLabelForPlayer().  Start hidden until a player id is resolved.
+    const labelSprite = this.makeLabelSprite('')
+    const labelY = LEG_H + TORSO_H + HEAD_R * 0.9 + 1.5
+    labelSprite.position.set(startWx, labelY, startWz)
+    labelSprite.visible = false
+    this.scene.add(labelSprite)
 
     return {
       worldX: { pos: startWx, vel: 0 },
@@ -633,6 +627,48 @@ export class Rink3dRenderer implements MatchRenderer {
       jerseyNum: num,
       labelSprite,
     }
+  }
+
+  /**
+   * Update the label sprite text for `pose` whenever the player in this slot
+   * changes (or on first population).  Reuses the existing sprite — no allocation.
+   */
+  private updatePoseLabelForPlayer(pose: PlayerPose, newId: PlayerId | undefined | null): void {
+    const id = newId ?? null
+    if (id === pose.playerId) return          // same player — nothing to do
+    pose.playerId = id
+    if (!id) {
+      pose.labelSprite!.visible = false
+      return
+    }
+    const info = this.labels[id]
+    if (!info) {
+      pose.labelSprite!.visible = false
+      return
+    }
+    // Rebuild the canvas texture with the new player name
+    const labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
+    const c = document.createElement('canvas')
+    c.width = 256
+    c.height = 64
+    const ctx = c.getContext('2d')!
+    ctx.clearRect(0, 0, 256, 64)
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.beginPath()
+    ctx.roundRect(4, 8, 248, 48, 8)
+    ctx.fill()
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'
+    ctx.shadowBlur = 4
+    ctx.fillStyle = '#ffffff'
+    ctx.font = 'bold 30px Arial, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(labelText, 128, 34)
+    const mat = pose.labelSprite!.material as THREE.SpriteMaterial
+    mat.map?.dispose()
+    mat.map = new THREE.CanvasTexture(c)
+    mat.needsUpdate = true
+    pose.labelSprite!.visible = true
   }
 
   // ── MatchRenderer interface ───────────────────────────────────────────────
@@ -916,29 +952,33 @@ export class Rink3dRenderer implements MatchRenderer {
     // Home skaters
     for (let i = 0; i < snap.home.length && i < this.homePoses.length; i++) {
       this.homePoses[i].mesh.visible = true
+      this.updatePoseLabelForPlayer(this.homePoses[i], snap.homeIds?.[i])
       this.updatePose(this.homePoses[i], snap.home[i]?.x ?? 0, snap.home[i]?.y ?? 0, dt)
     }
     // Hide extras
     for (let i = snap.home.length; i < this.homePoses.length; i++) {
       this.homePoses[i].mesh.visible = false
-      if (this.homePoses[i].labelSprite) this.homePoses[i].labelSprite!.visible = false
+      this.homePoses[i].labelSprite!.visible = false
     }
 
     // Away skaters
     for (let i = 0; i < snap.away.length && i < this.awayPoses.length; i++) {
       this.awayPoses[i].mesh.visible = true
+      this.updatePoseLabelForPlayer(this.awayPoses[i], snap.awayIds?.[i])
       this.updatePose(this.awayPoses[i], snap.away[i]?.x ?? 0, snap.away[i]?.y ?? 0, dt)
     }
     for (let i = snap.away.length; i < this.awayPoses.length; i++) {
       this.awayPoses[i].mesh.visible = false
-      if (this.awayPoses[i].labelSprite) this.awayPoses[i].labelSprite!.visible = false
+      this.awayPoses[i].labelSprite!.visible = false
     }
 
     // Goalies
     if (this.homeGoaliePose) {
+      this.updatePoseLabelForPlayer(this.homeGoaliePose, snap.homeGoalieId)
       this.updateGoaliePose(this.homeGoaliePose, snap.homeGoalie.x, snap.homeGoalie.y, snap.puck, dt)
     }
     if (this.awayGoaliePose) {
+      this.updatePoseLabelForPlayer(this.awayGoaliePose, snap.awayGoalieId)
       this.updateGoaliePose(this.awayGoaliePose, snap.awayGoalie.x, snap.awayGoalie.y, snap.puck, dt)
     }
 

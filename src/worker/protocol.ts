@@ -65,6 +65,8 @@ export type {
   TradesView,
   TransactionsView,
   TeamLeadersView,
+  TeamPlayerStatRow,
+  TeamPlayerStatsView,
 } from '@engine/career/views'
 export { RADAR_AXES } from '@engine/career/views'
 import type {
@@ -104,6 +106,7 @@ import type {
   TradeProposal,
   TradesView,
   TransactionsView,
+  TeamPlayerStatsView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
 import type { ScoutTarget } from '@domain/scouting'
@@ -243,6 +246,8 @@ export type WorkerRequestBody =
   | { type: 'getTeamSquad'; teamId: string }
   /** Schedule view for an arbitrary team. */
   | { type: 'getTeamSchedule'; teamId: string }
+  /** Per-player season stats for a specific team (Team > Statistics tab). */
+  | { type: 'getTeamPlayerStats'; teamId: string }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -305,5 +310,6 @@ export type WorkerResponse = { id: number } & (
   | { type: 'dataHub'; dataHub: DataHubView }
   /* ── Team browser (task #31) ── */
   | { type: 'leagueTeams'; teams: LeagueTeamsView }
+  | { type: 'teamPlayerStats'; stats: TeamPlayerStatsView }
   | { type: 'error'; message: string }
 )

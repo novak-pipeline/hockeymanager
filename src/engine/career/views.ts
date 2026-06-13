@@ -522,6 +522,26 @@ export interface StatsView {
   wins: LeaderRowView[]
 }
 
+/* ────────────────────────── team player stats ────────────────────────── */
+
+/** One row in the Team > Statistics tab — one rostered player's season line. */
+export interface TeamPlayerStatRow {
+  playerId: string
+  name: string
+  position: Position
+  age: number
+  /** Skater season line (null for goalies). */
+  skater: SkaterSeasonLine | null
+  /** Goalie season line (null for skaters). */
+  goalie: GoalieSeasonLine | null
+}
+
+export interface TeamPlayerStatsView {
+  teamName: string
+  skaters: TeamPlayerStatRow[]
+  goalies: TeamPlayerStatRow[]
+}
+
 /* ────────────────────────── trades ────────────────────────── */
 
 export interface PickAssetView {

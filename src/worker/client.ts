@@ -419,6 +419,11 @@ export class SimClient {
     return this.send({ type: 'getTeamSchedule', teamId })
   }
 
+  /** Per-player season stats for a specific team (Team > Statistics tab). */
+  getTeamPlayerStats(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getTeamPlayerStats', teamId })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

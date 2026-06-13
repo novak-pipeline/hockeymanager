@@ -338,16 +338,23 @@ function CoachPanel({ suggestion, styleFit, onApply, applying }: CoachPanelProps
   )
 }
 
-/* ── OVR dot ── */
-function OvrDot({ value }: { value: number }): JSX.Element {
+/* ── Star rating (0–5, half-steps; star = clamp(overall/20, 0, 5) rounded to 0.5) ── */
+function StarRating({ value }: { value: number }): JSX.Element {
+  const raw = Math.max(0, Math.min(5, value / 20))
+  const stars = Math.round(raw * 2) / 2 // round to nearest 0.5
   const color =
-    value >= 85 ? 'var(--success)' :
-    value >= 75 ? 'var(--accent)' :
-    value >= 65 ? 'var(--accent2)' :
+    stars >= 4.5 ? 'var(--success)' :
+    stars >= 3.5 ? 'var(--accent)' :
+    stars >= 2.5 ? 'var(--accent2)' :
     'var(--muted)'
+  const full = Math.floor(stars)
+  const half = stars - full >= 0.5
+  const empty = 5 - full - (half ? 1 : 0)
   return (
-    <span style={{ color, fontWeight: 700, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
-      {value}
+    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1 }} title={`OVR: ${value}`}>
+      {'★'.repeat(full)}
+      {half ? '½' : ''}
+      {'☆'.repeat(empty)}
     </span>
   )
 }
@@ -416,7 +423,7 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
               <PlayerFace faceId={p.faceId} name={p.name} size={22} />
               <span className="muted small" style={{ width: 28, textAlign: 'right' }}>{p.position}</span>
               <span style={{ flex: 1 }}>{p.name}</span>
-              <OvrDot value={p.overall} />
+              <StarRating value={p.overall} />
               <span className="muted small">{p.age}y</span>
             </button>
           ))}
@@ -510,7 +517,7 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
               <PlayerFace faceId={p.faceId} name={p.name} size={18} />
               <span className="muted" style={{ fontSize: 10, width: 24, flexShrink: 0 }}>{p.position}</span>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-              <OvrDot value={p.overall} />
+              <StarRating value={p.overall} />
             </button>
           ))}
           {roster.length === 0 && (
@@ -620,7 +627,7 @@ function SlotButton({
             <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
               {p.name}
             </div>
-            <OvrDot value={p.overall} />
+            <StarRating value={p.overall} />
           </div>
         </div>
       ) : (
@@ -1142,14 +1149,14 @@ export function TacticsScreen(): JSX.Element {
             </Notice>
           )}
 
-          <div className="grid grid-2" style={{ alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(500px,2fr) minmax(300px,1fr)', gap: 'var(--sp-4)', alignItems: 'start' }}>
             {/* ── LEFT: lines editor ── */}
             <div className="stack">
               <div className="row-between" style={{ marginBottom: -4 }}>
                 <span className="panel-title" style={{ fontSize: 13, fontWeight: 700 }}>Lines</span>
                 <button
                   className="btn btn-ghost btn-sm"
-                  style={{ fontSize: 11, gap: 4 }}
+                  style={{ fontSize: 12, gap: 4, whiteSpace: 'nowrap', minWidth: 0 }}
                   onClick={() => { void handleCoachSetLines() }}
                   disabled={coachBuilding}
                   title="Let the head coach build the full lineup and scratch list"
@@ -1214,7 +1221,7 @@ export function TacticsScreen(): JSX.Element {
                 </div>
               </Panel>
 
-              {/* Scratches — also a drop target */}
+              {/* Depth pool / Scratches — drop target, grouped by position */}
               <div
                 onDragOver={handleScratchDragOver}
                 onDragLeave={() => setDragOverAddr(null)}
@@ -1230,41 +1237,56 @@ export function TacticsScreen(): JSX.Element {
                 }}
               >
                 <div className="panel-title" style={{ marginBottom: 'var(--sp-3)' }}>
-                  Scratches {scratchDragOver && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>Drop to bench</span>}
+                  Depth Pool — Scratches &amp; Extras
+                  {scratchDragOver && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>Drop to bench</span>}
                 </div>
-                {lines.scratches.length > 0 ? (
-                  <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-                    {lines.scratches.map((p) => (
-                      <div
-                        key={p.playerId}
-                        className="chip"
-                        draggable
-                        onDragStart={(e) => {
-                          const payload: DragPayload = { src: { kind: 'scratch', playerId: p.playerId }, playerId: p.playerId }
-                          e.dataTransfer.setData('application/x-lineup-slot', JSON.stringify(payload))
-                          e.dataTransfer.effectAllowed = 'move'
-                          dragPayloadRef.current = payload
-                          setDragSrc({ kind: 'scratch', playerId: p.playerId })
-                        }}
-                        onDragEnd={() => { setDragSrc(null); setDragOverAddr(null) }}
-                        style={{
-                          cursor: 'grab',
-                          gap: 6,
-                          paddingLeft: 6,
-                          userSelect: 'none',
-                        }}
-                        title={`${p.name} — drag to a slot`}
-                      >
-                        <PlayerFace faceId={p.faceId} name={p.name} size={20} />
-                        <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
-                        <span style={{ fontSize: 12 }}>{p.name}</span>
-                        <OvrDot value={p.overall} />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
+                {lines.scratches.length > 0 ? (() => {
+                  // Group by position category
+                  const fwds = lines.scratches.filter((p) => p.position !== 'D' && p.position !== 'G')
+                  const defs = lines.scratches.filter((p) => p.position === 'D')
+                  const gols = lines.scratches.filter((p) => p.position === 'G')
+                  const groups: Array<{ label: string; players: PlayerBadge[] }> = []
+                  if (fwds.length) groups.push({ label: 'Forwards', players: fwds })
+                  if (defs.length) groups.push({ label: 'Defence', players: defs })
+                  if (gols.length) groups.push({ label: 'Goalies', players: gols })
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+                      {groups.map((grp) => (
+                        <div key={grp.label}>
+                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', marginBottom: 'var(--sp-1)' }}>
+                            {grp.label}
+                          </div>
+                          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+                            {grp.players.map((p) => (
+                              <div
+                                key={p.playerId}
+                                className="chip"
+                                draggable
+                                onDragStart={(e) => {
+                                  const payload: DragPayload = { src: { kind: 'scratch', playerId: p.playerId }, playerId: p.playerId }
+                                  e.dataTransfer.setData('application/x-lineup-slot', JSON.stringify(payload))
+                                  e.dataTransfer.effectAllowed = 'move'
+                                  dragPayloadRef.current = payload
+                                  setDragSrc({ kind: 'scratch', playerId: p.playerId })
+                                }}
+                                onDragEnd={() => { setDragSrc(null); setDragOverAddr(null) }}
+                                style={{ cursor: 'grab', gap: 6, paddingLeft: 6, userSelect: 'none' }}
+                                title={`${p.name} — drag to a slot`}
+                              >
+                                <PlayerFace faceId={p.faceId} name={p.name} size={20} />
+                                <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
+                                <span style={{ fontSize: 12 }}>{p.name}</span>
+                                <StarRating value={p.overall} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })() : (
                   <div className="muted small" style={{ fontStyle: 'italic' }}>
-                    {scratchDragOver ? 'Release to bench this player.' : 'No scratches — drag a player here to bench them.'}
+                    {scratchDragOver ? 'Release to bench this player.' : 'All rostered players are dressed — drag a player here to scratch them.'}
                   </div>
                 )}
               </div>
