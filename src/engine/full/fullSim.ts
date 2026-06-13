@@ -438,7 +438,13 @@ function pushFrame(
 function pickAssists(rng: Rng, skaters: RSkater[], scorerId: PlayerId): PlayerId[] {
   const mates = skaters.filter((r) => r.player.id !== scorerId)
   if (mates.length === 0) return []
-  const weights = mates.map((r) => 1 + r.player.composites.playmaking)
+  // Forward bias: defencemen pick up point assists but forwards drive most of
+  // the playmaking, so D contribute at a reduced share (mirrors quickSim). Total
+  // assists per goal are unchanged.
+  const weights = mates.map((r) => {
+    const base = 1 + r.player.composites.playmaking
+    return r.player.position === 'D' ? base * 0.6 : base
+  })
   const assists: PlayerId[] = []
   if (rng.chance(0.85)) {
     const primary = weightedIndex(rng, weights)

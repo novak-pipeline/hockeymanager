@@ -159,9 +159,21 @@ function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
   return s
 }
 
+// Forwards take the large majority of goals/points; without a position bias the
+// elite offensive D (high scoring/playmaking composites + more ice on the top
+// pair) out-scored forwards and dominated the points race. These factors pull
+// the per-position share back toward reality (~3/4 of goals to forwards) without
+// changing the total goals/assists per game. Scoring instinct still separates
+// players within a position.
+const D_GOAL_BIAS = 0.5
+const D_ASSIST_BIAS = 0.6
+
 /** Weighted pick of a shooter from the on-ice forwards/D by scoring instinct. */
 function pickShooter(rng: Rng, skaters: Player[]): Player {
-  const weights = skaters.map((p) => 1 + p.composites.scoring + p.composites.playmaking * 0.4)
+  const weights = skaters.map((p) => {
+    const base = 1 + p.composites.scoring + p.composites.playmaking * 0.4
+    return p.position === 'D' ? base * D_GOAL_BIAS : base
+  })
   return skaters[weightedIndex(rng, weights)]
 }
 
@@ -169,7 +181,10 @@ function pickAssists(rng: Rng, skaters: Player[], scorer: Player): Player[] {
   const mates = skaters.filter((p) => p.id !== scorer.id)
   if (mates.length === 0) return []
   const assists: Player[] = []
-  const weights = mates.map((p) => 1 + p.composites.playmaking)
+  const weights = mates.map((p) => {
+    const base = 1 + p.composites.playmaking
+    return p.position === 'D' ? base * D_ASSIST_BIAS : base
+  })
   const primaryIdx = weightedIndex(rng, weights)
   if (rng.chance(0.85)) {
     assists.push(mates[primaryIdx])
@@ -352,11 +367,11 @@ function simPeriod(
     const beforeH = home.goals
     const beforeA = away.goals
     simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive)
+    // Sudden death ends on the FIRST goal — check between the two teams' shifts
+    // so a single step can never let both score and leave the game tied.
+    if (suddenDeath && home.goals > beforeH) return true
     simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive)
-
-    if (suddenDeath && (home.goals > beforeH || away.goals > beforeA)) {
-      return true // game over in OT
-    }
+    if (suddenDeath && away.goals > beforeA) return true
   }
   ctx.stream.push({ t: lengthSeconds, period, type: 'periodEnd' })
   return false
