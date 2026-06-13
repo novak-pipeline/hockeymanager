@@ -93,6 +93,7 @@ import {
   buildPresserFactSheet,
   buildTentpoleFactSheet,
   buildWeeklyFactSheet,
+  PRESS_PERSONA_NAMES,
   type PressConferenceState,
   type PressFactArgs,
   type PressJob,
@@ -100,6 +101,7 @@ import {
   type PressSheetKind,
   type PressTone,
 } from '@engine/story/factSheet'
+import { renderFallback } from '@engine/story/pressFallback'
 import {
   chemistryModifier,
   developmentModifier,
@@ -1344,7 +1346,10 @@ export class Career {
 
     /* ── press corps: weekly column every 7th match day index ── */
     const pressIdx = this.matchDays.indexOf(day)
-    if (pressIdx >= 0 && (pressIdx + 1) % 7 === 0 && this.pressJob === null) {
+    // Weekly column fires every 7th match day (regardless of any pending job,
+    // since the deterministic fallback is pushed to the inbox immediately and the
+    // pressJob field just enables an optional LLM upgrade).
+    if (pressIdx >= 0 && (pressIdx + 1) % 7 === 0) {
       this.queuePressJob('weekly', [])
     }
 
@@ -1506,7 +1511,14 @@ export class Career {
     }
   }
 
-  /** Queue (replace) the pending press job; persona rotates deterministically. */
+  /** Queue a press job AND immediately push a deterministic fallback article to the inbox.
+   *
+   * The fallback is always generated and pushed — no API key required — so the
+   * inbox is always populated with real editorial content. The pressJob field is
+   * additionally set so the renderer-side press pump can optionally rewrite the
+   * article with an LLM when a key is present (the LLM article appears as a
+   * second, richer version after the wire report).
+   */
   private queuePressJob(kind: PressSheetKind, special: string[]): void {
     const personaId =
       Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]
@@ -1517,7 +1529,20 @@ export class Career {
         : kind === 'presser'
           ? buildPresserFactSheet(args, special)
           : buildTentpoleFactSheet(kind, args, special)
-    this.pressJob = { id: `pj${this.pressCounter++}`, kind, personaId, factSheet }
+    const job: PressJob = { id: `pj${this.pressCounter++}`, kind, personaId, factSheet }
+
+    // Always render + push the deterministic wire report immediately.
+    const article = renderFallback(job)
+    const persona = PRESS_PERSONA_NAMES[personaId]
+    const byline = `${persona.name} — ${persona.outlet}`
+    this.pushNews('league', article.headline, article.body, {
+      teamId: this.userTeamId as string,
+      press: { byline, kind },
+    })
+    this.appendSaga(`Y${this.year} D${this.currentDay}: press — "${article.headline}".`)
+
+    // Keep the job pending for an optional LLM upgrade from the renderer pump.
+    this.pressJob = job
   }
 
   /** Queue (replace) a pending press-conference question for the user. */

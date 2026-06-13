@@ -558,6 +558,71 @@ describe('Career — press corps', () => {
     expect(snap2.pressState!.pressCounter).toBe(snap.pressState!.pressCounter)
     expect(snap2.pressState!.sagaSoFar).toBe(snap.pressState!.sagaSoFar)
   })
+
+  it('auto-pushes a fallback press article to the inbox immediately at queue time (no pump needed)', () => {
+    const data = generateLeague({ seed: 55 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 55, userId)
+
+    // Before any match days there are no press items.
+    const before = career.getInbox().items.filter((n) => n.press !== undefined)
+    expect(before).toHaveLength(0)
+
+    // Advance 7 match days to trigger the weekly column.
+    for (let i = 0; i < 7; i++) career.advanceDay()
+
+    // A press item must now exist in the inbox WITHOUT any submitPressArticle call.
+    const after = career.getInbox().items.filter((n) => n.press !== undefined)
+    expect(after.length).toBeGreaterThanOrEqual(1)
+
+    const article = after[0]!
+    expect(article.category).toBe('league')
+    expect(article.headline.length).toBeGreaterThan(5)
+    expect(article.body.length).toBeGreaterThan(80)
+    expect(article.press!.byline).toMatch(/—/)
+    expect(article.press!.kind).toBe('weekly')
+  })
+
+  it('simming a full half-season produces multiple press articles automatically', () => {
+    const data = generateLeague({ seed: 56 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 56, userId)
+
+    // Advance 40 match days (should trigger ~5-6 weekly columns).
+    for (let i = 0; i < 40; i++) career.advanceDay()
+
+    const pressItems = career.getInbox().items.filter((n) => n.press !== undefined)
+    expect(pressItems.length).toBeGreaterThanOrEqual(3)
+
+    // Each article must have a non-empty headline, body, and byline.
+    for (const item of pressItems) {
+      expect(item.headline.length, `headline of ${item.id}`).toBeGreaterThan(5)
+      expect(item.body.length, `body of ${item.id}`).toBeGreaterThan(50)
+      expect(item.press!.byline, `byline of ${item.id}`).toMatch(/—/)
+    }
+
+    // Headlines should not all be identical (template variety).
+    const headlines = pressItems.map((n) => n.headline)
+    const unique = new Set(headlines)
+    expect(unique.size).toBeGreaterThanOrEqual(2)
+  })
+
+  it('deadline tentpole also auto-pushes a press article', () => {
+    const data = generateLeague({ seed: 57 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 57, userId)
+
+    // Run the whole regular season to trigger the deadline.
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+
+    const pressItems = career.getInbox().items.filter((n) => n.press !== undefined)
+    expect(pressItems.length).toBeGreaterThanOrEqual(1)
+
+    // At least one should be a deadline article.
+    const deadlineArt = pressItems.find((n) => n.press!.kind === 'deadline')
+    expect(deadlineArt).toBeDefined()
+    expect(deadlineArt!.headline.toLowerCase()).toContain('deadline')
+  })
 })
 
 describe('Career — persistence', () => {
