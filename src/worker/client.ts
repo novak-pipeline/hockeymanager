@@ -205,6 +205,10 @@ export class SimClient {
     return this.send({ type: 'getTeamDynamics', teamId })
   }
 
+  getMedical(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMedical' })
+  }
+
   getLeagueStatTable(teamId?: string): Promise<WorkerResponse> {
     return this.send(teamId ? { type: 'getLeagueStatTable', teamId } : { type: 'getLeagueStatTable' })
   }

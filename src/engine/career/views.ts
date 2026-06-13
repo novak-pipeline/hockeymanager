@@ -1247,6 +1247,31 @@ export interface RelationshipView {
 
 export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/dynamics'
 
+/** One row in the Medical Center risk table. */
+export interface MedicalRow {
+  playerId: string
+  name: string
+  faceId?: string
+  position: string
+  /** 0–100 condition (higher = fresher). */
+  condition: number
+  /** 0–100 fatigue. */
+  fatigue: number
+  /** Injury description if currently injured. */
+  injuryDescription?: string
+  injuryGamesRemaining?: number
+  /** Injury-risk band + 0–100 score. */
+  riskLabel: 'Low' | 'Increased' | 'High'
+  risk: number
+}
+
+/** Response to 'getMedical' — the user club's medical/risk picture. */
+export interface MedicalView {
+  teamName: string
+  injuredCount: number
+  rows: MedicalRow[]
+}
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

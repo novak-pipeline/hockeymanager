@@ -284,6 +284,8 @@ import {
   type ClubLegend,
   type TeamLegendsView,
   type TeamDynamicsView,
+  type MedicalView,
+  type MedicalRow,
   type LeagueStatTableView,
   type LeagueSkaterStatRow,
   type LeagueGoalieStatRow,
@@ -4365,6 +4367,40 @@ export class Career {
       headCoachName: coach.name,
       ...(coach.faceId !== undefined ? { headCoachFaceId: coach.faceId } : {}),
     })
+  }
+
+  /** Medical Center: condition / fatigue / injury / injury-risk for the user roster. */
+  getMedical(): MedicalView {
+    const team = this.data.teams.get(this.userTeamId)
+    const rows: MedicalRow[] = []
+    let injuredCount = 0
+    for (const id of team?.roster ?? []) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      const fatigue = Math.round(Math.max(0, Math.min(100, p.fatigue)))
+      const condition = 100 - fatigue
+      const proneness = p.injuryProneness ?? 30
+      // Risk blends durability tendency with current fatigue; injured = max.
+      const injured = p.injuryStatus !== null
+      if (injured) injuredCount++
+      const risk = injured ? 100 : Math.round(Math.max(0, Math.min(100, proneness * 0.55 + fatigue * 0.45)))
+      const riskLabel: MedicalRow['riskLabel'] = risk >= 60 ? 'High' : risk >= 33 ? 'Increased' : 'Low'
+      const row: MedicalRow = {
+        playerId: id as unknown as string,
+        name: p.name,
+        position: p.position,
+        condition,
+        fatigue,
+        riskLabel,
+        risk,
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining } : {}),
+      }
+      rows.push(row)
+    }
+    // Most at-risk / injured first.
+    rows.sort((a, b) => b.risk - a.risk)
+    return { teamName: team?.name ?? 'Team', injuredCount, rows }
   }
 
   /** Legends registry for a club, most recent first. */
