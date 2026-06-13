@@ -39,10 +39,21 @@ function patienceColor(p: number): string {
    Meter bar
    ════════════════════════════════════════════════════════════════ */
 
+/** Patience as an attitude phrase rather than a bare number. */
+function patienceWord(p: number): string {
+  if (p >= 80) return 'Rock solid'
+  if (p >= 55) return 'Patient'
+  if (p >= 35) return 'Watching closely'
+  if (p >= 20) return 'Wearing thin'
+  return 'Nearly exhausted'
+}
+
 function Meter(props: {
   label: string
   value: number
   color: string
+  /** Attitude phrase shown instead of a raw number. */
+  valueLabel: string
   sublabel?: string
 }): JSX.Element {
   const pct = Math.max(0, Math.min(100, props.value))
@@ -53,7 +64,7 @@ function Meter(props: {
         style={{ marginBottom: 'var(--sp-1)' }}
       >
         <span style={{ fontWeight: 600 }}>{props.label}</span>
-        <span style={{ color: props.color, fontWeight: 700 }}>{props.value}/100</span>
+        <span style={{ color: props.color, fontWeight: 700 }}>{props.valueLabel}</span>
       </div>
       <div className="meter">
         <div
@@ -233,13 +244,14 @@ function BoardBody(props: { board: BoardView }): JSX.Element {
             label="Confidence"
             value={board.confidence}
             color={confidenceColor(board.confidence)}
-            sublabel={board.confidenceLabel}
+            valueLabel={board.confidenceLabel}
           />
 
           <Meter
             label="Patience"
             value={board.patience}
             color={patienceColor(board.patience)}
+            valueLabel={patienceWord(board.patience)}
             sublabel={board.patience <= 20 ? 'Nearly exhausted — one more miss could end things' : undefined}
           />
         </Panel>
@@ -302,7 +314,7 @@ function FiredState(props: { board: BoardView }): JSX.Element {
         </div>
         <div style={{ marginTop: 'var(--sp-4)' }}>
           <span className="chip chip-danger">
-            Confidence reached {board.confidence}/100 ·{' '}
+            {board.confidenceLabel} to the end ·{' '}
             {board.warnings} warning{board.warnings === 1 ? '' : 's'} issued
           </span>
         </div>

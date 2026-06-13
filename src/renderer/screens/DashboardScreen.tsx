@@ -741,7 +741,7 @@ function BoardConfidenceChip(props: {
         onClick={props.onNavigate}
         title="View owner / board expectations"
       >
-        Board: {board.confidenceLabel} ({board.confidence}%) · {board.statusLabel}
+        Board: {board.confidenceLabel} · {board.statusLabel}
       </button>
     </div>
   )
