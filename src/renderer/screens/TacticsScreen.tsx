@@ -893,6 +893,10 @@ export function TacticsScreen(): JSX.Element {
   // ── DnD handlers ──
 
   const handleDragStart = useCallback((addr: SlotAddr & { kind: 'slot' }) => {
+    // Record the drag source so handleDrop can resolve it. The dragged player is
+    // looked up from the slot at drop time (getAtAddr), so playerId is a
+    // placeholder here. (Scratch chips set their own full payload on drag start.)
+    dragPayloadRef.current = { src: addr, playerId: '' }
     setDragSrc(addr)
   }, [])
 
@@ -1087,9 +1091,10 @@ export function TacticsScreen(): JSX.Element {
     onDepthSelect: handleDepthSelect,
   }
 
-  // We need the drop handler to read from dataTransfer; wrap it
-  function makeSectionDropHandler(dst: SlotAddr & { kind: 'slot' }) {
-    return () => handleDrop(dst)
+  // Section slots call this with their address on drop. It must INVOKE the drop
+  // (not return a handler) — sections wire it as onDrop(addr) directly.
+  function makeSectionDropHandler(dst: SlotAddr & { kind: 'slot' }): void {
+    handleDrop(dst)
   }
 
   // Override SlotButton to wire native drag events via wrapper div approach.
