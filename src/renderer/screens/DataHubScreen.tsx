@@ -1041,6 +1041,69 @@ function TeamPicker({
 
 type Scope = 'league' | 'team'
 
+/**
+ * TeamDataHubBody — self-contained team-scope analytics for one club.
+ * Fetches its own TeamDataHubView keyed on teamId so it can be embedded
+ * directly on the Team page (not just under the League → Analytics tab).
+ */
+export function TeamDataHubBody({ teamId }: { teamId: string }): JSX.Element {
+  const client = useClient()
+  const nav = useNav()
+  const [teamData, setTeamData] = useState<TeamDataHubView | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const seqRef = useRef(0)
+
+  useEffect(() => {
+    if (!teamId) return
+    const seq = ++seqRef.current
+    setLoading(true)
+    setError(null)
+    client.getTeamDataHub(teamId).then((res) => {
+      if (seq !== seqRef.current) return
+      if (res.type === 'teamDataHub') {
+        setTeamData(res.teamDataHub)
+      } else if (res.type === 'error') {
+        setError(res.message)
+      }
+      setLoading(false)
+    }).catch((err: unknown) => {
+      if (seq !== seqRef.current) return
+      setError(err instanceof Error ? err.message : String(err))
+      setLoading(false)
+    })
+  }, [teamId])
+
+  function navigateToPlayer(playerId: string): void {
+    nav.navigate('player', { playerId })
+  }
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Analytics Hub">
+        <span className="muted small">SciSports-style team analytics · All rates per 60 min</span>
+      </ScreenHeader>
+      <ScreenStateNotices
+        loading={loading && !teamData}
+        error={error}
+        empty={!loading && !error && !teamData}
+        emptyText="No analytics data yet — play some games first."
+      />
+      {teamData && (
+        <div className="stack">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{teamData.team.teamName}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{teamData.team.gamesPlayed} games played</div>
+            </div>
+          </div>
+          <TeamCategoryTabs hub={teamData} onPlayerClick={navigateToPlayer} />
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function DataHubScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()

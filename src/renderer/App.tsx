@@ -398,6 +398,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'finances':
     case 'teamInfo':
     case 'teamHistory':
+    case 'teamDataHub':
       return <TeamScreen tab={props.screen} />
 
     // ── League (mega-screen with sub-tab router) ──

@@ -65,6 +65,7 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
       subTabs: [
         { id: 'squad',       label: 'Roster' },
         { id: 'teamStats',   label: 'Statistics' },
+        { id: 'teamDataHub', label: 'Analytics' },
         { id: 'report',      label: 'Report' },
         { id: 'personnel',   label: 'Personnel' },
         { id: 'practice',    label: 'Practice' },
