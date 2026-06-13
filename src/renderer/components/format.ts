@@ -39,6 +39,24 @@ export function fmtToi(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+/** Player morale (0–100) → a broad mood word (no raw numbers shown to the GM). */
+export function moraleWord(morale: number): string {
+  if (morale >= 85) return 'Delighted'
+  if (morale >= 70) return 'Happy'
+  if (morale >= 55) return 'Content'
+  if (morale >= 40) return 'Unsettled'
+  if (morale >= 25) return 'Unhappy'
+  return 'Miserable'
+}
+
+/** Color for a morale mood word, for colored text. */
+export function moraleColor(morale: number): string {
+  if (morale >= 70) return 'var(--success)'
+  if (morale >= 55) return 'var(--green, #4ade80)'
+  if (morale >= 40) return 'var(--amber, #f59e0b)'
+  return 'var(--danger)'
+}
+
 /** Deterministic placeholder crest color until real team colors reach the UI. */
 export function crestColor(teamId: string): string {
   let hash = 0

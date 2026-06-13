@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
-import { fmtMoney, fmtToi } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
@@ -386,7 +386,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                             </td>
                             <td className="num"><OvrChip value={row.overall} /></td>
                             <td><CondBar value={row.condition} /></td>
-                            <td className="num muted">{row.morale}</td>
+                            <td style={{ color: moraleColor(row.morale), fontWeight: 600, fontSize: 12 }}>{moraleWord(row.morale)}</td>
                             <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
                             <td><InjuryBadge row={row} /></td>
                             <td className="num" style={{ whiteSpace: 'nowrap' }}>

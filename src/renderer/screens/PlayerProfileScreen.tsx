@@ -30,7 +30,7 @@ import type {
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
 import { useNav } from '../components/NavContext'
-import { fmtMoney, fmtToi } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
@@ -812,7 +812,7 @@ function TabProfile({
                 <div className="stat-label">Condition</div>
               </div>
               <div className="stat" style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>{d.morale}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: moraleColor(d.morale) }}>{moraleWord(d.morale)}</div>
                 <div className="stat-label">Morale</div>
               </div>
               <div className="stat" style={{ textAlign: 'center' }}>

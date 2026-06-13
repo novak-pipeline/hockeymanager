@@ -6,6 +6,7 @@ import type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '../../wo
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { moraleWord, moraleColor } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 function barColor(v: number): string {
@@ -25,16 +26,6 @@ function StatBar({ title, bar }: { title: string; bar: DynamicsBar }): JSX.Eleme
       </div>
     </div>
   )
-}
-
-function happinessColor(label: string): string {
-  switch (label) {
-    case 'Delighted': return 'var(--success)'
-    case 'Happy': return 'var(--green, #4ade80)'
-    case 'Content': return 'var(--accent2, var(--violet-h))'
-    case 'Unsettled': return 'var(--amber, #f59e0b)'
-    default: return 'var(--danger)'
-  }
 }
 
 /** A player chip used in the hierarchy pyramid + social groups. */
@@ -152,8 +143,7 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
                 <th className="num">Pos</th>
                 <th>Standing</th>
                 <th>Personality</th>
-                <th className="num">Morale</th>
-                <th>Overall</th>
+                <th>Morale</th>
               </tr>
             </thead>
             <tbody>
@@ -163,8 +153,7 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
                   <td className="num muted">{p.position}</td>
                   <td className="small muted">{p.tier === 'leader' ? 'Team Leader' : p.tier === 'highlyInfluential' ? 'Highly Influential' : p.tier === 'influential' ? 'Influential' : 'Squad Player'}</td>
                   <td className="small">{p.personality}</td>
-                  <td className="num">{p.morale}</td>
-                  <td style={{ color: happinessColor(p.happiness), fontWeight: 700, fontSize: 13 }}>{p.happiness}</td>
+                  <td style={{ color: moraleColor(p.morale), fontWeight: 700, fontSize: 13 }}>{moraleWord(p.morale)}</td>
                 </tr>
               ))}
             </tbody>
