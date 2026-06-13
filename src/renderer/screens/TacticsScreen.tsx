@@ -803,6 +803,7 @@ export function TacticsScreen(): JSX.Element {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [coachBuilding, setCoachBuilding] = useState(false)
 
   // Picker state
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -1071,6 +1072,24 @@ export function TacticsScreen(): JSX.Element {
     }
   }
 
+  async function handleCoachSetLines(): Promise<void> {
+    setCoachBuilding(true)
+    try {
+      const res = await client.coachSetLines()
+      if (res.type === 'error') {
+        toast(res.message, 'error')
+      } else if (res.type === 'coachLines') {
+        setDraftLines(deepCloneLines(res.lines))
+        setDirty(true)
+        toast('Coach set the lines.', 'success')
+      }
+    } catch {
+      toast('Failed to get coach lines.', 'error')
+    } finally {
+      setCoachBuilding(false)
+    }
+  }
+
   // ── picker data ──
   const pickerSlot = getPickerSlot()
   const roster = buildRoster()
@@ -1126,6 +1145,18 @@ export function TacticsScreen(): JSX.Element {
           <div className="grid grid-2" style={{ alignItems: 'start' }}>
             {/* ── LEFT: lines editor ── */}
             <div className="stack">
+              <div className="row-between" style={{ marginBottom: -4 }}>
+                <span className="panel-title" style={{ fontSize: 13, fontWeight: 700 }}>Lines</span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: 11, gap: 4 }}
+                  onClick={() => { void handleCoachSetLines() }}
+                  disabled={coachBuilding}
+                  title="Let the head coach build the full lineup and scratch list"
+                >
+                  {coachBuilding ? 'Asking coach…' : 'Ask the coach to set lines'}
+                </button>
+              </div>
               <Panel title="Lines">
                 <div className="stack" style={{ gap: 'var(--sp-5)' }}>
                   <LinesSection

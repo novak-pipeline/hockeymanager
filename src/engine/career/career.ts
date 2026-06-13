@@ -145,7 +145,7 @@ import {
   rollInjuries,
   tickRecovery,
 } from '@engine/league/condition'
-import { repairLines } from '@engine/league/lineup'
+import { repairLines, coachSetLineup } from '@engine/league/lineup'
 import {
   assignScout,
   createInitialScouting,
@@ -3632,6 +3632,32 @@ export class Career {
 
   getTactics(): TacticsView {
     return buildTacticsView(this.ctx())
+  }
+
+  /**
+   * Ask the head coach to set the full lineup.
+   * Returns a LinesView shaped exactly like getTactics().lines but built by
+   * the coach (not the saved team.lines). The result is NOT persisted — the
+   * caller (UI) loads it into the editable draft.
+   */
+  coachSetLines(): TacticsView['lines'] {
+    if (!this.staff) {
+      this.staff = generateStaff({ rng: new Rng(deriveSeed(this.seed, 9200)) })
+    }
+    const coach = this.staff.headCoach
+    const roster = this.userTeam.roster.map((id) => this.resolve(id))
+    // Use a seed derived from the career seed + coach id + current year so the
+    // result is stable within a save but changes when the coach changes.
+    const coachSeed = deriveSeed(this.seed, 7700, this.year)
+    const rng = new Rng(coachSeed)
+    const result = coachSetLineup({ roster, coach, rng })
+
+    // Snapshot the temp lines into the view via buildTacticsView on a temporary
+    // Team shell — reuse the existing view builder (handles slot labels, badges,
+    // scratches, issues, synergies etc.)
+    const tempTeam = { ...this.userTeam, lines: result.lines }
+    const ctx = { ...this.ctx(), teams: new Map(this.ctx().teams).set(this.userTeamId, tempTeam as typeof this.userTeam) }
+    return buildTacticsView(ctx).lines
   }
 
   getSchedule(): ScheduleView {

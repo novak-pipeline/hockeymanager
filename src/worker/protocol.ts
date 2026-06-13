@@ -34,6 +34,7 @@ export type {
   LeagueLeadersView,
   LeagueStatsView,
   LinesUpdate,
+  LinesView,
   LockerRoomView,
   OffseasonView,
   PersonalityReadView,
@@ -81,6 +82,7 @@ import type {
   LeagueLeadersView,
   LeagueStatsView,
   LinesUpdate,
+  LinesView,
   LockerRoomView,
   OffseasonView,
   PlayerProfileView,
@@ -200,6 +202,11 @@ export type WorkerRequestBody =
    * user team's current tactics (additive — only supplied fields are changed).
    */
   | { type: 'applyCoachSuggestion'; suggestedTactics: Partial<TeamTactics> }
+  /**
+   * Ask the head coach to build the full lineup (who dresses, who sits,
+   * line ordering). Returns a LinesView for the UI draft — does NOT persist.
+   */
+  | { type: 'coachSetLines' }
   /* ── franchise drama + League hub (Wave 4) ── */
   /** Owner/board mandate, confidence, patience, hot-seat status. */
   | { type: 'getBoard' }
@@ -277,6 +284,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'leagueStats'; stats: LeagueStatsView }
   | { type: 'transactions'; transactions: TransactionsView }
   | { type: 'scoreboard'; scoreboard: ScoreboardView }
+  /** Coach-built lineup ready to load into the UI draft. */
+  | { type: 'coachLines'; lines: LinesView }
   /* ── AHL farm system ── */
   | { type: 'ahlStandings'; standings: AhlStandingsView }
   | { type: 'ahlSquad'; squad: AhlSquadView }

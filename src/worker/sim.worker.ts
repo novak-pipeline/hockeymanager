@@ -220,6 +220,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'applyCoachSuggestion':
       must().applyCoachSuggestion(req.suggestedTactics)
       return { id: req.id, type: 'ok' }
+    case 'coachSetLines':
+      return { id: req.id, type: 'coachLines', lines: must().coachSetLines() }
 
     /* ── franchise drama + League hub (Wave 4) ── */
     case 'getBoard':

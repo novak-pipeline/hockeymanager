@@ -19,6 +19,8 @@
 import { asPlayerId } from '@domain'
 import type { Lines, Player, PlayerId, Position, Team } from '@domain'
 import { overall } from '@engine/ratings/composites'
+import type { StaffMember } from '@engine/league/staff'
+import { Rng } from '@engine/shared/rng'
 
 const FORWARD_LINE_COUNT = 4
 const DEFENSE_PAIR_COUNT = 3
@@ -308,4 +310,197 @@ export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean
   }
 
   return changed
+}
+
+/* ────────────────────────── coachSetLineup ────────────────────────── */
+
+export interface CoachLineupResult {
+  lines: Lines
+  /** Player ids who were left out (healthy but not dressed). */
+  scratchIds: PlayerId[]
+}
+
+/**
+ * The head coach builds the full lineup and decides who dresses vs sits.
+ *
+ * Coach quality model:
+ *  - `coach.judgment` (0–100): how accurately the coach reads true overall.
+ *    A weaker coach adds seeded noise to each player's "seen" score; a perfect
+ *    coach ranks by true overall. The noise is stable per (playerId, salt) so
+ *    the same coach always over/under-values the same players.
+ *  - `coach.rating` (40–90): overall coaching quality. Higher → smaller noise
+ *    budget AND smaller positional bias (weaker coaches over-weight the wrong
+ *    composites).
+ *  - `coach.specialty`: biases which composite the coach emphasises.
+ *    "Offense" / "Power Play" → boosts scoring; "Defense" / "Penalty Kill" →
+ *    boosts defensiveZone; "Player Development" → values potential; default →
+ *    balanced.
+ *
+ * Dress rule: best 12 forwards + 6 defensemen + 2 goalies; remainder = scratches.
+ * Never dress an injured player.
+ * Runs repairLines for legality at the end.
+ */
+export function coachSetLineup(args: {
+  roster: Player[]
+  coach: StaffMember
+  rng: Rng
+}): CoachLineupResult {
+  const { roster, coach, rng } = args
+
+  /* ── 1. Stable per-player noise from judgment ── */
+
+  // Noise budget: judgment 100 → 0, judgment 0 → 20
+  const noiseBudget = 20 * (1 - coach.judgment / 100)
+
+  // Stable hash identical to staff.ts stableFloat
+  function stableFloat(playerId: string, salt: number): number {
+    let h = 5381
+    for (let i = 0; i < playerId.length; i++) {
+      h = ((h << 5) + h + playerId.charCodeAt(i)) >>> 0
+    }
+    h = (Math.imul(h ^ (salt >>> 0), 0x9e3779b1) + 0x85ebca77) >>> 0
+    return (h >>> 0) / 4294967296
+  }
+
+  function coachScore(p: Player): number {
+    const trueOvr = overall(p.composites, p.position)
+    // Base composite weighting — specialty shifts this
+    let specialtyBonus = 0
+    const spec = coach.specialty ?? ''
+    if (p.position !== 'G') {
+      if (spec === 'Offense' || spec === 'Power Play') {
+        specialtyBonus = (p.composites.scoring + p.composites.playmaking) / 2 - trueOvr
+      } else if (spec === 'Defense' || spec === 'Penalty Kill') {
+        specialtyBonus = (p.composites.defensiveZone + p.composites.takeaway) / 2 - trueOvr
+      } else if (spec === 'Player Development') {
+        // Slightly prefer younger players with upside (potential proxy: age < 26)
+        specialtyBonus = p.age < 26 ? 3 : 0
+      }
+      // Scale specialty bonus by coach rating (weaker coaches have larger bias)
+      specialtyBonus *= (90 - coach.rating) / 50
+    }
+
+    // Perturb with stable noise
+    const bias = stableFloat(p.id as string, 42) * 2 - 1
+    const noise = bias * noiseBudget
+
+    return trueOvr + specialtyBonus + noise
+  }
+
+  /* ── 2. Split by position and filter healthy ── */
+  const healthy = roster.filter((p) => p.injuryStatus === null)
+  const goalies = healthy.filter((p) => p.position === 'G')
+  const defensemen = healthy.filter((p) => p.position === 'D')
+  const forwards = healthy.filter((p) => p.position === 'C' || p.position === 'W')
+
+  const sortByScore = (a: Player, b: Player): number =>
+    coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1)
+
+  goalies.sort(sortByScore)
+  defensemen.sort(sortByScore)
+  forwards.sort(sortByScore)
+
+  /* ── 3. Dress the best players ── */
+  // Standard NHL dress: 12 forwards, 6 defensemen, 2 goalies = 20 total
+  const dressedGoalies = goalies.slice(0, 2)
+  const dressedDefense = defensemen.slice(0, 6)
+  const dressedForwards = forwards.slice(0, 12)
+
+  const dressed = new Set<string>([
+    ...dressedGoalies.map((p) => p.id as string),
+    ...dressedDefense.map((p) => p.id as string),
+    ...dressedForwards.map((p) => p.id as string),
+  ])
+
+  /* ── 4. Build scratch list (healthy undressed + injured) ── */
+  const scratchIds: PlayerId[] = roster
+    .filter((p) => !dressed.has(p.id as string))
+    .map((p) => p.id)
+
+  /* ── 5. Build lines from dressed players ── */
+  // Divide 12 forwards into 4 lines of 3, alternating C/W/W.
+  // Centres first (sort centres to C slots), then fill remaining with W.
+  const centres = dressedForwards.filter((p) => p.position === 'C')
+  const wings = dressedForwards.filter((p) => p.position === 'W')
+
+  // We need 4 centres (one per line); if insufficient, promote best wing
+  while (centres.length < 4 && wings.length > 0) {
+    centres.push(wings.shift()!)
+  }
+
+  const fwdLines: PlayerId[][] = []
+  for (let i = 0; i < 4; i++) {
+    const c = centres[i]
+    const lw = wings[i * 2]
+    const rw = wings[i * 2 + 1]
+    fwdLines.push([
+      lw?.id ?? asPlayerId(''),
+      c?.id ?? asPlayerId(''),
+      rw?.id ?? asPlayerId(''),
+    ])
+  }
+
+  // Divide 6 defensemen into 3 pairs of 2
+  const defPairs: PlayerId[][] = []
+  for (let i = 0; i < 3; i++) {
+    const ld = dressedDefense[i * 2]
+    const rd = dressedDefense[i * 2 + 1]
+    defPairs.push([
+      ld?.id ?? asPlayerId(''),
+      rd?.id ?? asPlayerId(''),
+    ])
+  }
+
+  const goalieSlots: PlayerId[] = [
+    dressedGoalies[0]?.id ?? asPlayerId(''),
+    dressedGoalies[1]?.id ?? dressedGoalies[0]?.id ?? asPlayerId(''),
+  ]
+
+  // Special teams: PP takes top scorers, PK takes top defensive skaters
+  const allDressedSkaters = [...dressedForwards, ...dressedDefense]
+  const ppRanked = allDressedSkaters
+    .slice()
+    .sort((a, b) => b.composites.scoring + b.composites.playmaking - (a.composites.scoring + a.composites.playmaking) || (a.id < b.id ? -1 : 1))
+  const pkRanked = allDressedSkaters
+    .slice()
+    .sort((a, b) => b.composites.defensiveZone - a.composites.defensiveZone || (a.id < b.id ? -1 : 1))
+
+  const pp1 = ppRanked.slice(0, 5).map((p) => p.id)
+  const pp2 = ppRanked.slice(5, 10).map((p) => p.id)
+  // Ensure pp2 has 5 — top up from pp1 if short
+  for (const p of ppRanked) {
+    if (pp2.length >= 5) break
+    if (!pp2.includes(p.id)) pp2.push(p.id)
+  }
+
+  const pk1 = pkRanked.slice(0, 4).map((p) => p.id)
+  const pk2 = pkRanked.slice(4, 8).map((p) => p.id)
+  for (const p of pkRanked) {
+    if (pk2.length >= 4) break
+    if (!pk2.includes(p.id)) pk2.push(p.id)
+  }
+
+  const lines: Lines = {
+    forwards: fwdLines,
+    defensePairs: defPairs,
+    goalies: goalieSlots,
+    powerPlayUnits: [pp1, pp2],
+    penaltyKillUnits: [pk1, pk2],
+  }
+
+  /* ── 6. Run repairLines for legality ── */
+  // Build a temporary Team shell (repairLines only reads team.lines + team.roster)
+  const playersMap = new Map<PlayerId, Player>(roster.map((p) => [p.id, p]))
+  const tempTeam: Team = {
+    ...(roster[0] ? ({} as Team) : ({} as Team)), // structural placeholder
+    roster: roster.map((p) => p.id),
+    lines,
+  } as unknown as Team
+  repairLines(tempTeam, playersMap)
+
+  // Use rng to avoid unused-parameter lint (rng is part of the public API for
+  // future tie-breaking extensions; it's seeded so callers can rely on stability)
+  void rng
+
+  return { lines: tempTeam.lines, scratchIds }
 }

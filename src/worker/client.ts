@@ -334,6 +334,11 @@ export class SimClient {
     return this.send({ type: 'applyCoachSuggestion', suggestedTactics })
   }
 
+  /** Ask the head coach to build the full lineup. Returns a LinesView for the UI draft. */
+  coachSetLines(): Promise<WorkerResponse> {
+    return this.send({ type: 'coachSetLines' })
+  }
+
   /* ── franchise drama + League hub (Wave 4) ── */
 
   /** Owner/board mandate, confidence, patience, hot-seat status. */
