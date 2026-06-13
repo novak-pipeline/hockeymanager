@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type {
   LinesView,
@@ -18,6 +18,7 @@ import type {
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { bumpRefresh, toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { PlayerFace } from '../components/PlayerFace'
 
 /* ── helpers ── */
 
@@ -33,6 +34,109 @@ function linesViewToUpdate(lines: LinesView): LinesUpdate {
 
 function deepCloneLines(lines: LinesView): LinesView {
   return JSON.parse(JSON.stringify(lines)) as LinesView
+}
+
+/* ── Drag-and-drop types ── */
+
+/** Identifies a slot on the board. */
+type SlotAddr =
+  | { kind: 'slot'; section: Section; lineIdx: number; slotIdx: number }
+  | { kind: 'scratch'; playerId: string }
+
+type Section = 'forwards' | 'defense' | 'goalies' | 'pp' | 'pk'
+
+/** JSON-serialisable payload carried via dataTransfer. */
+interface DragPayload {
+  src: SlotAddr
+  playerId: string
+}
+
+/* ── Mutation helpers (pure) ── */
+
+/** Return the slot array for a given section within a draft clone. */
+function getSectionSlots(l: LinesView, section: Section): LineSlotView[][] {
+  if (section === 'forwards') return l.forwards
+  if (section === 'defense') return l.defensePairs
+  if (section === 'pp') return l.powerPlayUnits
+  if (section === 'pk') return l.penaltyKillUnits
+  // goalies: wrap in [[...]] for uniform handling
+  return [l.goalies]
+}
+
+/** Get the PlayerBadge at a slot address (from draft lines). */
+function getAtAddr(l: LinesView, addr: SlotAddr): PlayerBadge | null {
+  if (addr.kind === 'scratch') {
+    return l.scratches.find((p) => p.playerId === addr.playerId) ?? null
+  }
+  const { section, lineIdx, slotIdx } = addr
+  const rows = getSectionSlots(l, section)
+  return rows[lineIdx]?.[slotIdx]?.player ?? null
+}
+
+/** Set the player at a slot address. */
+function setAtAddr(l: LinesView, addr: SlotAddr, player: PlayerBadge | null): void {
+  if (addr.kind === 'scratch') return // scratches are managed as a list, not by addr
+  const { section, lineIdx, slotIdx } = addr
+  if (section === 'goalies') {
+    const slot = l.goalies[lineIdx]
+    if (slot) slot.player = player
+  } else {
+    const rows = getSectionSlots(l, section)
+    const slot = rows[lineIdx]?.[slotIdx]
+    if (slot) slot.player = player
+  }
+}
+
+/** Remove a player from scratches list. Returns true if found. */
+function removeFromScratches(l: LinesView, playerId: string): boolean {
+  const idx = l.scratches.findIndex((p) => p.playerId === playerId)
+  if (idx === -1) return false
+  l.scratches.splice(idx, 1)
+  return true
+}
+
+/** Add a player to scratches list (dedup). */
+function addToScratches(l: LinesView, player: PlayerBadge): void {
+  if (!l.scratches.some((p) => p.playerId === player.playerId)) {
+    l.scratches.push(player)
+  }
+}
+
+/**
+ * Apply a DnD move inside the draft lines.
+ *
+ * Rules:
+ * - slot → empty slot: move
+ * - slot → occupied slot: swap
+ * - slot → scratches: bench (player goes to scratches, slot becomes empty)
+ * - scratch → slot: place (if slot occupied, displaced player goes to scratches)
+ * - scratch → scratch: no-op (same player, or reorder — we keep scratches unordered)
+ */
+function applyDrop(l: LinesView, src: SlotAddr, dst: SlotAddr, draggedPlayer: PlayerBadge): void {
+  if (src.kind === 'scratch' && dst.kind === 'scratch') return // no-op
+
+  if (src.kind === 'slot' && dst.kind === 'scratch') {
+    // Bench the dragged player
+    setAtAddr(l, src, null)
+    addToScratches(l, draggedPlayer)
+    return
+  }
+
+  if (src.kind === 'scratch' && dst.kind === 'slot') {
+    // Place from scratches into a slot
+    const displaced = getAtAddr(l, dst)
+    removeFromScratches(l, draggedPlayer.playerId)
+    setAtAddr(l, dst, draggedPlayer)
+    if (displaced) addToScratches(l, displaced)
+    return
+  }
+
+  if (src.kind === 'slot' && dst.kind === 'slot') {
+    // Move or swap
+    const dstPlayer = getAtAddr(l, dst)
+    setAtAddr(l, src, dstPlayer) // may be null (move) or another player (swap)
+    setAtAddr(l, dst, draggedPlayer)
+  }
 }
 
 /* ── Synergy badge ── */
@@ -309,6 +413,7 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
               }}
               onClick={() => { onSelect(p); onClose() }}
             >
+              <PlayerFace faceId={p.faceId} name={p.name} size={22} />
               <span className="muted small" style={{ width: 28, textAlign: 'right' }}>{p.position}</span>
               <span style={{ flex: 1 }}>{p.name}</span>
               <OvrDot value={p.overall} />
@@ -324,53 +429,251 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
   )
 }
 
-/* ── Slot button ── */
-function SlotButton({
-  slotDef,
-  onClick,
-}: {
-  slotDef: LineSlotView
-  onClick: () => void
-}): JSX.Element {
-  const p = slotDef.player
+/* ── Depth-chart dropdown ── */
+
+interface DepthDropdownProps {
+  /** Currently slotted player (may be null). */
+  current: PlayerBadge | null
+  /** Full roster sorted by overall desc. */
+  roster: PlayerBadge[]
+  onSelect: (p: PlayerBadge) => void
+}
+
+function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
   return (
-    <button
-      className="btn"
-      style={{
-        minWidth: 120, flexDirection: 'column', alignItems: 'flex-start',
-        padding: '6px 10px', gap: 2,
-        background: p ? 'var(--bg2)' : 'var(--bg0)',
-        borderStyle: p ? 'solid' : 'dashed',
-        borderColor: p ? 'var(--line)' : 'rgba(139,149,166,0.4)',
-      }}
-      onClick={onClick}
-      title={`${slotDef.slot} — click to change`}
-    >
-      <span className="muted" style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-        {slotDef.slot}
-      </span>
-      {p ? (
-        <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
-          {p.name}
-        </span>
-      ) : (
-        <span className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>Empty</span>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{
+          padding: '1px 4px',
+          fontSize: 10,
+          lineHeight: 1,
+          color: 'var(--muted)',
+          borderColor: 'transparent',
+          minWidth: 0,
+        }}
+        title="Quick depth swap"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
+      >
+        ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            zIndex: 60,
+            minWidth: 220,
+            maxHeight: 260,
+            overflowY: 'auto',
+            background: 'var(--bg2)',
+            border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+            padding: '4px 0',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {roster.map((p) => (
+            <button
+              key={p.playerId}
+              className="btn btn-ghost"
+              style={{
+                width: '100%',
+                justifyContent: 'flex-start',
+                gap: 6,
+                padding: '4px 10px',
+                fontSize: 12,
+                borderRadius: 0,
+                borderColor: 'transparent',
+                background: current?.playerId === p.playerId ? 'rgba(139,92,246,0.18)' : 'transparent',
+                fontWeight: current?.playerId === p.playerId ? 600 : 400,
+              }}
+              onClick={() => { onSelect(p); setOpen(false) }}
+            >
+              <PlayerFace faceId={p.faceId} name={p.name} size={18} />
+              <span className="muted" style={{ fontSize: 10, width: 24, flexShrink: 0 }}>{p.position}</span>
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+              <OvrDot value={p.overall} />
+            </button>
+          ))}
+          {roster.length === 0 && (
+            <div className="muted small" style={{ padding: '8px 10px' }}>No players available.</div>
+          )}
+        </div>
       )}
-      {p && <OvrDot value={p.overall} />}
-    </button>
+    </div>
   )
 }
 
-/* ── lines sub-sections ── */
+/* ── Slot button (DnD-aware, with face + depth dropdown) ── */
+
+interface SlotButtonProps {
+  slotDef: LineSlotView
+  addr: SlotAddr & { kind: 'slot' }
+  roster: PlayerBadge[]
+  dragOver: boolean
+  onClickSlot: () => void
+  onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
+  onDragOver: (addr: SlotAddr & { kind: 'slot' }) => void
+  onDragLeave: () => void
+  onDrop: (dst: SlotAddr & { kind: 'slot' }) => void
+  onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
+}
+
+function SlotButton({
+  slotDef,
+  addr,
+  roster,
+  dragOver,
+  onClickSlot,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDepthSelect,
+}: SlotButtonProps): JSX.Element {
+  const p = slotDef.player
+
+  return (
+    <div
+      draggable={p !== null}
+      onDragStart={(e) => {
+        if (!p) return
+        const payload: DragPayload = { src: addr, playerId: p.playerId }
+        e.dataTransfer.setData('application/x-lineup-slot', JSON.stringify(payload))
+        e.dataTransfer.effectAllowed = 'move'
+        onDragStart(addr)
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        onDragOver(addr)
+      }}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDrop(addr)
+      }}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        minWidth: 128,
+        padding: '6px 8px',
+        gap: 2,
+        background: dragOver
+          ? 'rgba(139,92,246,0.18)'
+          : p
+            ? 'var(--bg2)'
+            : 'var(--bg0)',
+        border: dragOver
+          ? '1px solid var(--accent)'
+          : p
+            ? '1px solid var(--line)'
+            : '1px dashed rgba(139,149,166,0.4)',
+        borderRadius: 'var(--radius-sm)',
+        cursor: p ? 'grab' : 'default',
+        transition: 'background 0.1s, border-color 0.1s',
+        position: 'relative',
+        userSelect: 'none',
+      }}
+    >
+      {/* slot label row */}
+      <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 4 }}>
+        <span className="muted" style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, flex: 1 }}>
+          {slotDef.slot}
+        </span>
+        {/* Depth dropdown caret */}
+        <DepthDropdown
+          current={p ?? null}
+          roster={roster}
+          onSelect={(chosen) => onDepthSelect(addr, chosen)}
+        />
+      </div>
+
+      {/* player row */}
+      {p ? (
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', cursor: 'pointer' }}
+          onClick={onClickSlot}
+          title={`${slotDef.slot} — click to search/change`}
+        >
+          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+              {p.name}
+            </div>
+            <OvrDot value={p.overall} />
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', paddingTop: 2 }}
+          onClick={onClickSlot}
+          title={`${slotDef.slot} — click to assign player`}
+        >
+          <div style={{
+            width: 24, height: 24, borderRadius: '50%',
+            border: '1px dashed rgba(139,149,166,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <span className="muted" style={{ fontSize: 10 }}>+</span>
+          </div>
+          <span className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>Empty</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Lines sub-section (DnD-aware) ── */
 
 interface LinesSectionProps {
   title: string
   lines: LineSlotView[][]
+  section: Section
+  roster: PlayerBadge[]
+  dragOverAddr: SlotAddr | null
   onClickSlot: (lineIdx: number, slotIdx: number) => void
+  onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
+  onDragOver: (addr: SlotAddr) => void
+  onDragLeave: () => void
+  onDrop: (dst: SlotAddr) => void
+  onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
   synergies?: LineSynergyView[]
 }
 
-function LinesSection({ title, lines, onClickSlot, synergies }: LinesSectionProps): JSX.Element {
+function LinesSection({
+  title, lines, section, roster, dragOverAddr,
+  onClickSlot, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
+  synergies,
+}: LinesSectionProps): JSX.Element {
+  function addrMatches(a: SlotAddr | null, b: SlotAddr): boolean {
+    if (!a || a.kind !== b.kind) return false
+    if (a.kind === 'slot' && b.kind === 'slot') {
+      return a.section === b.section && a.lineIdx === b.lineIdx && a.slotIdx === b.slotIdx
+    }
+    return false
+  }
+
   return (
     <div className="stack" style={{ gap: 'var(--sp-2)' }}>
       <div className="panel-title">{title}</div>
@@ -380,13 +683,24 @@ function LinesSection({ title, lines, onClickSlot, synergies }: LinesSectionProp
             <span className="muted small" style={{ width: 24, textAlign: 'right', alignSelf: 'center' }}>
               {li + 1}
             </span>
-            {line.map((slot, si) => (
-              <SlotButton
-                key={`${li}-${si}`}
-                slotDef={slot}
-                onClick={() => onClickSlot(li, si)}
-              />
-            ))}
+            {line.map((slot, si) => {
+              const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx: li, slotIdx: si }
+              return (
+                <SlotButton
+                  key={`${li}-${si}`}
+                  slotDef={slot}
+                  addr={addr}
+                  roster={roster}
+                  dragOver={addrMatches(dragOverAddr, addr)}
+                  onClickSlot={() => onClickSlot(li, si)}
+                  onDragStart={onDragStart}
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={() => onDrop(addr)}
+                  onDepthSelect={onDepthSelect}
+                />
+              )
+            })}
             {synergies?.[li] && (
               <div style={{ alignSelf: 'center', marginLeft: 'var(--sp-1)' }}>
                 <SynergyBadge
@@ -398,6 +712,56 @@ function LinesSection({ title, lines, onClickSlot, synergies }: LinesSectionProp
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+/* ── Goalies row (separate — goalies are a flat array, not lines[][]) ── */
+
+interface GoaliesRowProps {
+  goalies: LineSlotView[]
+  roster: PlayerBadge[]
+  dragOverAddr: SlotAddr | null
+  onClickSlot: (idx: number) => void
+  onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
+  onDragOver: (addr: SlotAddr) => void
+  onDragLeave: () => void
+  onDrop: (dst: SlotAddr) => void
+  onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
+}
+
+function GoaliesRow({
+  goalies, roster, dragOverAddr,
+  onClickSlot, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
+}: GoaliesRowProps): JSX.Element {
+  function addrMatches(a: SlotAddr | null, si: number): boolean {
+    if (!a || a.kind !== 'slot') return false
+    return a.section === 'goalies' && a.lineIdx === si
+  }
+
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+      <div className="panel-title">Goalies</div>
+      <div className="row" style={{ gap: 'var(--sp-2)' }}>
+        {goalies.map((slot, si) => {
+          const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section: 'goalies', lineIdx: si, slotIdx: 0 }
+          return (
+            <SlotButton
+              key={si}
+              slotDef={slot}
+              addr={addr}
+              roster={roster}
+              dragOver={addrMatches(dragOverAddr, si)}
+              onClickSlot={() => onClickSlot(si)}
+              onDragStart={onDragStart}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={() => onDrop(addr)}
+              onDepthSelect={onDepthSelect}
+            />
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -447,6 +811,12 @@ export function TacticsScreen(): JSX.Element {
     lineIdx: number
     slotIdx: number
   } | null>(null)
+
+  // DnD state
+  const [dragSrc, setDragSrc] = useState<SlotAddr | null>(null)
+  const [dragOverAddr, setDragOverAddr] = useState<SlotAddr | null>(null)
+  // Payload carried during drag (set on dragstart, consumed on drop)
+  const dragPayloadRef = useRef<DragPayload | null>(null)
 
   // When fresh data arrives and no local draft, sync from server
   const lines = draftLines ?? data?.lines ?? null
@@ -499,8 +869,7 @@ export function TacticsScreen(): JSX.Element {
     })
   }
 
-  // Build a healthy roster for the picker. Slot lists hold LineSlotView
-  // (player: PlayerBadge | null); scratches are already PlayerBadge[].
+  // Build a healthy roster for the picker/dropdown sorted by overall desc.
   function buildRoster(): PlayerBadge[] {
     if (!data) return []
     const fromSlots = [
@@ -513,7 +882,122 @@ export function TacticsScreen(): JSX.Element {
     const healthy = fromSlots.concat(data.lines.scratches)
     // deduplicate
     const seen = new Set<string>()
-    return healthy.filter((p) => { if (seen.has(p.playerId)) return false; seen.add(p.playerId); return true })
+    const deduped = healthy.filter((p) => {
+      if (seen.has(p.playerId)) return false
+      seen.add(p.playerId)
+      return true
+    })
+    return deduped.slice().sort((a, b) => b.overall - a.overall)
+  }
+
+  // ── DnD handlers ──
+
+  const handleDragStart = useCallback((addr: SlotAddr & { kind: 'slot' }) => {
+    setDragSrc(addr)
+  }, [])
+
+  const handleDragOver = useCallback((addr: SlotAddr) => {
+    setDragOverAddr(addr)
+  }, [])
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverAddr(null)
+  }, [])
+
+  function handleDrop(dst: SlotAddr): void {
+    // Try to read from ref first (set in onDragStart handler), then from state
+    const payload = dragPayloadRef.current
+    dragPayloadRef.current = null
+    setDragSrc(null)
+    setDragOverAddr(null)
+
+    if (!payload || !lines) return
+
+    const src = payload.src
+    // Same address — no-op
+    if (
+      src.kind === 'slot' && dst.kind === 'slot' &&
+      src.section === dst.section && src.lineIdx === dst.lineIdx && src.slotIdx === dst.slotIdx
+    ) return
+    if (src.kind === 'scratch' && dst.kind === 'scratch' && src.playerId === dst.kind) return
+
+    setLines((l) => {
+      const draggedPlayer = getAtAddr(l, src)
+        ?? l.scratches.find((p) => p.playerId === payload.playerId)
+        ?? null
+      if (!draggedPlayer) return l
+      applyDrop(l, src, dst, draggedPlayer)
+      return l
+    })
+  }
+
+  function handleScratchDragOver(e: React.DragEvent<HTMLDivElement>): void {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverAddr({ kind: 'scratch', playerId: '' })
+  }
+
+  function handleScratchDrop(e: React.DragEvent<HTMLDivElement>): void {
+    e.preventDefault()
+    // Parse payload from dataTransfer (the ref approach works within same component tree,
+    // but dataTransfer is the reliable cross-element channel)
+    const raw = e.dataTransfer.getData('application/x-lineup-slot')
+    if (!raw) return
+    try {
+      const payload = JSON.parse(raw) as DragPayload
+      dragPayloadRef.current = payload
+      handleDrop({ kind: 'scratch', playerId: '' })
+    } catch {
+      setDragSrc(null)
+      setDragOverAddr(null)
+    }
+  }
+
+  // ── Depth dropdown handler ──
+  // Selecting a player from the depth dropdown should:
+  // - If the selected player is already in a slot elsewhere, swap them.
+  // - If the selected player is in scratches, place them (old slot occupant goes to scratches).
+  // - Then set the target slot to the selected player.
+  function handleDepthSelect(targetAddr: SlotAddr & { kind: 'slot' }, chosen: PlayerBadge): void {
+    setLines((l) => {
+      // Find where the chosen player currently lives
+      let chosenSrc: SlotAddr | null = null
+
+      // Search slots
+      const sections: Section[] = ['forwards', 'defense', 'goalies', 'pp', 'pk']
+      outer: for (const sec of sections) {
+        if (sec === 'goalies') {
+          for (let i = 0; i < l.goalies.length; i++) {
+            if (l.goalies[i]?.player?.playerId === chosen.playerId) {
+              chosenSrc = { kind: 'slot', section: 'goalies', lineIdx: i, slotIdx: 0 }
+              break outer
+            }
+          }
+        } else {
+          const rows = getSectionSlots(l, sec)
+          for (let li = 0; li < rows.length; li++) {
+            const row = rows[li]
+            if (!row) continue
+            for (let si = 0; si < row.length; si++) {
+              if (row[si]?.player?.playerId === chosen.playerId) {
+                chosenSrc = { kind: 'slot', section: sec, lineIdx: li, slotIdx: si }
+                break outer
+              }
+            }
+          }
+        }
+      }
+
+      // Check scratches
+      if (!chosenSrc && l.scratches.some((p) => p.playerId === chosen.playerId)) {
+        chosenSrc = { kind: 'scratch', playerId: chosen.playerId }
+      }
+
+      if (!chosenSrc) return l // player not found (stale roster)
+
+      applyDrop(l, chosenSrc, targetAddr, chosen)
+      return l
+    })
   }
 
   // ── tactics mutation helpers ──
@@ -587,6 +1071,34 @@ export function TacticsScreen(): JSX.Element {
   const pickerSlot = getPickerSlot()
   const roster = buildRoster()
 
+  // Is the scratches area currently a drop target?
+  const scratchDragOver = dragOverAddr?.kind === 'scratch'
+
+  // Common DnD slot props builder for LinesSection/GoaliesRow
+  // We pass the raw handlers since each slot needs to set up its own DnD via div props.
+  // The sections pass through the addr-based callbacks; slot divs wire up native events.
+
+  // Shared DnD callbacks passed to sub-components
+  const dndHandlers = {
+    dragOverAddr,
+    onDragStart: handleDragStart,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDepthSelect: handleDepthSelect,
+  }
+
+  // We need the drop handler to read from dataTransfer; wrap it
+  function makeSectionDropHandler(dst: SlotAddr & { kind: 'slot' }) {
+    return () => handleDrop(dst)
+  }
+
+  // Override SlotButton to wire native drag events via wrapper div approach.
+  // The sub-components (LinesSection, GoaliesRow) pass onDrop as a simple callback,
+  // but we need access to the DragEvent for dataTransfer. We handle this by using
+  // dragPayloadRef which is set in onDragStart — for same-window drags this always works.
+
+  void dragSrc // referenced to avoid lint warning (used in dragPayloadRef logic)
+
   return (
     <section className="stack" style={{ paddingBottom: dirty ? 72 : 0 }}>
       <ScreenHeader title="Tactics &amp; Lines" />
@@ -614,25 +1126,32 @@ export function TacticsScreen(): JSX.Element {
                   <LinesSection
                     title="Forwards"
                     lines={lines.forwards}
+                    section="forwards"
+                    roster={roster}
+                    {...dndHandlers}
                     onClickSlot={(li, si) => openPicker('forwards', li, si)}
+                    onDrop={makeSectionDropHandler}
                     synergies={data.lineSynergies}
                   />
                   <LinesSection
                     title="Defence Pairs"
                     lines={lines.defensePairs}
+                    section="defense"
+                    roster={roster}
+                    {...dndHandlers}
                     onClickSlot={(li, si) => openPicker('defense', li, si)}
+                    onDrop={makeSectionDropHandler}
                     synergies={data.pairSynergies}
                   />
 
                   {/* Goalies */}
-                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-                    <div className="panel-title">Goalies</div>
-                    <div className="row" style={{ gap: 'var(--sp-2)' }}>
-                      {lines.goalies.map((slot, si) => (
-                        <SlotButton key={si} slotDef={slot} onClick={() => openPicker('goalies', si, 0)} />
-                      ))}
-                    </div>
-                  </div>
+                  <GoaliesRow
+                    goalies={lines.goalies}
+                    roster={roster}
+                    {...dndHandlers}
+                    onClickSlot={(si) => openPicker('goalies', si, 0)}
+                    onDrop={makeSectionDropHandler}
+                  />
                 </div>
               </Panel>
 
@@ -641,28 +1160,78 @@ export function TacticsScreen(): JSX.Element {
                   <LinesSection
                     title="Power Play"
                     lines={lines.powerPlayUnits}
+                    section="pp"
+                    roster={roster}
+                    {...dndHandlers}
                     onClickSlot={(li, si) => openPicker('pp', li, si)}
+                    onDrop={makeSectionDropHandler}
                   />
                   <LinesSection
                     title="Penalty Kill"
                     lines={lines.penaltyKillUnits}
+                    section="pk"
+                    roster={roster}
+                    {...dndHandlers}
                     onClickSlot={(li, si) => openPicker('pk', li, si)}
+                    onDrop={makeSectionDropHandler}
                   />
                 </div>
               </Panel>
 
-              {/* Scratches */}
-              {lines.scratches.length > 0 && (
-                <Panel title="Scratches">
+              {/* Scratches — also a drop target */}
+              <div
+                onDragOver={handleScratchDragOver}
+                onDragLeave={() => setDragOverAddr(null)}
+                onDrop={handleScratchDrop}
+                style={{
+                  borderRadius: 'var(--radius)',
+                  border: scratchDragOver
+                    ? '1px solid var(--accent)'
+                    : '1px solid var(--line)',
+                  background: scratchDragOver ? 'rgba(139,92,246,0.08)' : 'var(--bg1)',
+                  padding: 'var(--sp-4)',
+                  transition: 'border-color 0.12s, background 0.12s',
+                }}
+              >
+                <div className="panel-title" style={{ marginBottom: 'var(--sp-3)' }}>
+                  Scratches {scratchDragOver && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>Drop to bench</span>}
+                </div>
+                {lines.scratches.length > 0 ? (
                   <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
                     {lines.scratches.map((p) => (
-                      <span key={p.playerId} className="chip">
-                        {p.position} {p.name} <OvrDot value={p.overall} />
-                      </span>
+                      <div
+                        key={p.playerId}
+                        className="chip"
+                        draggable
+                        onDragStart={(e) => {
+                          const payload: DragPayload = { src: { kind: 'scratch', playerId: p.playerId }, playerId: p.playerId }
+                          e.dataTransfer.setData('application/x-lineup-slot', JSON.stringify(payload))
+                          e.dataTransfer.effectAllowed = 'move'
+                          dragPayloadRef.current = payload
+                          setDragSrc({ kind: 'scratch', playerId: p.playerId })
+                        }}
+                        onDragEnd={() => { setDragSrc(null); setDragOverAddr(null) }}
+                        style={{
+                          cursor: 'grab',
+                          gap: 6,
+                          paddingLeft: 6,
+                          userSelect: 'none',
+                        }}
+                        title={`${p.name} — drag to a slot`}
+                      >
+                        <PlayerFace faceId={p.faceId} name={p.name} size={20} />
+                        <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
+                        <span style={{ fontSize: 12 }}>{p.name}</span>
+                        <OvrDot value={p.overall} />
+                      </div>
                     ))}
                   </div>
-                </Panel>
-              )}
+                ) : (
+                  <div className="muted small" style={{ fontStyle: 'italic' }}>
+                    {scratchDragOver ? 'Release to bench this player.' : 'No scratches — drag a player here to bench them.'}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* ── RIGHT: tactics panel ── */}
