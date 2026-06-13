@@ -349,8 +349,11 @@ export function coachSetLineup(args: {
 
   /* ── 1. Stable per-player noise from judgment ── */
 
-  // Noise budget: judgment 100 → 0, judgment 0 → 20
-  const noiseBudget = 20 * (1 - coach.judgment / 100)
+  // Noise budget: judgment 100 → 0, judgment 0 → 6. Kept small on purpose — a
+  // coach reshuffles borderline calls, but no coach buries a clear star two
+  // lines down. With a typical judgment (~50) this is ±3, so a 9-point overall
+  // gap (e.g. an 83 vs a 74) is never flipped.
+  const noiseBudget = 6 * (1 - coach.judgment / 100)
 
   // Stable hash identical to staff.ts stableFloat
   function stableFloat(playerId: string, salt: number): number {
@@ -376,8 +379,10 @@ export function coachSetLineup(args: {
         // Slightly prefer younger players with upside (potential proxy: age < 26)
         specialtyBonus = p.age < 26 ? 3 : 0
       }
-      // Scale specialty bonus by coach rating (weaker coaches have larger bias)
+      // Scale specialty bonus by coach rating (weaker coaches have larger bias),
+      // then clamp so a stylistic lean nudges the order rather than upending it.
       specialtyBonus *= (90 - coach.rating) / 50
+      specialtyBonus = Math.max(-4, Math.min(4, specialtyBonus))
     }
 
     // Perturb with stable noise
