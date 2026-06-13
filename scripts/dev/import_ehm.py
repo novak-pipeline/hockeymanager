@@ -46,12 +46,26 @@ Usage:
 """
 import sys, os, io, json, unicodedata, glob, shutil
 
-# Column indices (0-based) from the EHM "Players and non-players" export.
+# Column indices (0-based) from the EHM editor xlsx export (two header rows;
+# field names live on row 1). Verified against xECK29x's Premier Pivot DB.
 C_FIRST, C_SECOND, C_DOB, C_NATION = 1, 2, 3, 4
 C_JOB, C_CLUB = 9, 11
 C_CA, C_PA = 37, 38
 C_GOALIE, C_LD, C_RD, C_LW, C_C, C_RW = 42, 43, 44, 45, 46, 47
 C_HAND = 51
+
+# Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
+# 1-99 RawAttributes so imported players start out exactly as the DB describes.
+C_HEIGHT_CM, C_WEIGHT_KG = 55, 56
+C_AGGRESSION, C_ANTICIPATION, C_BRAVERY, C_CONSISTENCY, C_DECISIONS = 58, 59, 60, 61, 62
+C_DIRTINESS, C_FLAIR, C_IMPORTANT, C_LEADERSHIP, C_MORALE = 63, 64, 65, 66, 67
+C_PASS_TENDENCY, C_TEAMWORK, C_CREATIVITY, C_WORKRATE = 68, 69, 70, 71
+C_ACCELERATION, C_AGILITY, C_BALANCE, C_FIGHTING, C_HITTING = 72, 73, 74, 75, 76
+C_INJURY_PRONE, C_NAT_FITNESS, C_PACE, C_STAMINA, C_STRENGTH = 77, 78, 79, 80, 81
+C_AGITATION, C_CHECKING, C_DEFLECTIONS, C_DEKING, C_FACEOFFS = 82, 83, 84, 85, 86
+C_MOVEMENT, C_ONEONONE, C_PASSING, C_POKECHECK, C_POSITIONING = 87, 88, 89, 90, 91
+C_SLAPSHOT, C_STICKHANDLING, C_VERSATILITY, C_WRISTSHOT = 92, 93, 94, 95
+C_BLOCKER, C_GLOVE, C_REBOUNDS, C_RECOVERY, C_REFLEXES = 96, 97, 98, 99, 100
 
 SEASON_YEAR = 2025
 
@@ -170,6 +184,74 @@ def to_int(v, default=0):
     except Exception:
         return default
 
+def s20(row, col):
+    """EHM 1-20 attribute -> our 1-99 scale."""
+    return clamp(round(to_int(row[col], 0) / 20.0 * 99), 1, 99)
+
+def avg20(row, *cols):
+    """Average of several EHM 1-20 attributes -> our 1-99 scale."""
+    vals = [to_int(row[c], 0) for c in cols]
+    return clamp(round(sum(vals) / len(vals) / 20.0 * 99), 1, 99)
+
+def height_rating(row):
+    """Height in cm -> a 1-99 size rating (≈165cm -> 1, ≈203cm -> 99)."""
+    cm = to_int(row[C_HEIGHT_CM], 0)
+    if cm <= 0:
+        return None
+    return clamp(round((cm - 165) / (203 - 165) * 99), 1, 99)
+
+def build_attributes(row, pos):
+    """Map the EHM 1-20 attribute columns onto our flat ModPlayerAttributes
+    (1-99 each), so an imported player starts out exactly as the DB describes.
+    Attributes our model has but EHM doesn't are derived from the closest EHM
+    inputs (e.g. offensiveIQ from Decisions+Creativity)."""
+    a = {
+        # Technical
+        "wristShot": s20(row, C_WRISTSHOT),
+        "slapShot": s20(row, C_SLAPSHOT),
+        "stickhandling": avg20(row, C_STICKHANDLING, C_DEKING),
+        "passing": s20(row, C_PASSING),
+        "deflections": s20(row, C_DEFLECTIONS),
+        "faceoffs": s20(row, C_FACEOFFS),
+        # Physical
+        "speed": s20(row, C_PACE),
+        "acceleration": s20(row, C_ACCELERATION),
+        "strength": s20(row, C_STRENGTH),
+        "balance": s20(row, C_BALANCE),
+        "stamina": s20(row, C_STAMINA),
+        "agility": s20(row, C_AGILITY),
+        # Mental
+        "offensiveIQ": avg20(row, C_DECISIONS, C_CREATIVITY),
+        "defensiveIQ": avg20(row, C_DECISIONS, C_POSITIONING),
+        "positioning": s20(row, C_POSITIONING),
+        "vision": s20(row, C_CREATIVITY),
+        "aggression": s20(row, C_AGGRESSION),
+        "composure": avg20(row, C_CONSISTENCY, C_IMPORTANT),
+        "workRate": s20(row, C_WORKRATE),
+        # Dirtiness is inverse of discipline.
+        "discipline": clamp(round((20 - to_int(row[C_DIRTINESS], 5)) / 20.0 * 99), 1, 99),
+        "anticipation": s20(row, C_ANTICIPATION),
+        # Defensive
+        "checking": s20(row, C_CHECKING),
+        "shotBlocking": avg20(row, C_BRAVERY, C_CHECKING),
+        "stickChecking": s20(row, C_POKECHECK),
+        "takeaway": avg20(row, C_POKECHECK, C_ANTICIPATION),
+    }
+    h = height_rating(row)
+    if h is not None:
+        a["height"] = h
+    if pos == "G":
+        a.update({
+            "reflexes": s20(row, C_REFLEXES),
+            "positioningG": s20(row, C_POSITIONING),
+            "reboundControl": s20(row, C_REBOUNDS),
+            "glove": s20(row, C_GLOVE),
+            "blocker": s20(row, C_BLOCKER),
+            "recovery": s20(row, C_RECOVERY),
+            "puckHandlingG": avg20(row, C_STICKHANDLING, C_PASSING),
+        })
+    return a
+
 def main():
     xlsx, out_dir = sys.argv[1], sys.argv[2]
     facedirs = sys.argv[3:]
@@ -189,9 +271,12 @@ def main():
             continue
         club = r[C_CLUB]
 
-        # Try NHL match first, then AHL.
-        nhl_nick = match_nhl_club(club)
-        ahl_kw = None if nhl_nick else match_ahl_club(club)
+        # Match AHL FIRST: many AHL club names contain an NHL nickname
+        # ("Providence Bruins", "Belleville Senators", "Wilkes-Barre Penguins",
+        # "Abbotsford Canucks", "Bridgeport Islanders"), so an NHL-first check
+        # would wrongly route those affiliate players into the NHL pool.
+        ahl_kw = match_ahl_club(club)
+        nhl_nick = None if ahl_kw else match_nhl_club(club)
 
         if nhl_nick is None and ahl_kw is None:
             continue
@@ -206,14 +291,19 @@ def main():
         ca = to_int(r[C_CA], 50)
         pa = to_int(r[C_PA], ca)
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
+        pos = position(r)
         player = {
             "externalId": f"ehm-{norm(first)}-{norm(last)}-{year}",
             "name": f"{first} {last}".strip(),
             "age": age,
-            "position": position(r),
+            "position": pos,
             "handedness": "L" if str(r[C_HAND] or "Right").lower().startswith("l") else "R",
+            # overall is a caliber fallback only; the loader derives the shown
+            # overall from the real attributes below. potential (PA) is the DB's
+            # single potential-ability number, halved to our 1-99 scale.
             "overall": clamp(round(ca / 2), 1, 99),
             "potential": clamp(round(pa / 2), 1, 99),
+            "attributes": build_attributes(r, pos),
             "faceId": face_id,
             "_ca": ca,
         }
