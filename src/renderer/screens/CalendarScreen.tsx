@@ -290,9 +290,9 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
 function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
   return {
     verticalAlign: 'top',
-    padding: '4px 5px',
-    minHeight: 80,
-    height: 88,
+    padding: '6px 7px',
+    minHeight: 110,
+    height: 118,
     border: '1px solid var(--line)',
     background: inMonth
       ? hasEntries ? 'rgba(139,92,246,0.04)' : 'var(--bg1)'
@@ -305,7 +305,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
     return (
       <span
         className="chip chip-violet"
-        style={{ fontSize: 9, padding: '1px 4px', width: '100%', boxSizing: 'border-box' }}
+        style={{ fontSize: 11, padding: '2px 6px', width: '100%', boxSizing: 'border-box' }}
       >
         {entry.label}
       </span>
@@ -331,7 +331,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
       <div className="row" style={{ gap: 3, alignItems: 'center', flexWrap: 'nowrap' }}>
         <span
           className={entry.home ? 'chip chip-accent' : 'chip'}
-          style={{ fontSize: 8, padding: '0px 3px', flexShrink: 0 }}
+          style={{ fontSize: 10, padding: '1px 5px', flexShrink: 0 }}
         >
           {entry.home ? 'H' : 'A'}
         </span>
@@ -339,9 +339,9 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
           className="crest"
           style={{
             background: crestColor(entry.opponentAbbr),
-            width: 14,
-            height: 14,
-            fontSize: 6,
+            width: 18,
+            height: 18,
+            fontSize: 8,
             border: 'none',
             flexShrink: 0,
           }}
@@ -350,7 +350,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
         </span>
         <span
           style={{
-            fontSize: 10,
+            fontSize: 12,
             fontWeight: 600,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -366,7 +366,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
       {entry.result ? (
         <ResultChip entry={entry} />
       ) : isNext ? (
-        <span className="chip chip-warn" style={{ fontSize: 8, padding: '1px 3px' }}>Next</span>
+        <span className="chip chip-warn" style={{ fontSize: 9, padding: '1px 5px' }}>Next</span>
       ) : null}
     </div>
   )

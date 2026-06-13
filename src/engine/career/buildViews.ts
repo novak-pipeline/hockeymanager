@@ -1179,27 +1179,42 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
   }
 
   // ── key dates ──
-  // Season start (day 1)
+  // The NHL-style season cadence, derived from the schedule span (presentational
+  // only — these markers don't change the schedule or the sim).
   const allDays = ctx.schedule.map((g) => g.day)
   if (allDays.length > 0) {
     const firstDay = Math.min(...allDays)
-    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
-  }
-
-  // Trade deadline
-  if (ctx.deadlineDay > 0) {
-    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })
-  }
-
-  // Playoffs start (if known — i.e. first day after all regular-season games)
-  if (ctx.playoffsStartDay !== null) {
-    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.playoffsStartDay), label: 'Playoffs Begin' })
-  }
-
-  // Season end (last match day of regular season)
-  if (allDays.length > 0) {
     const lastDay = Math.max(...allDays)
+
+    // Pre-season: training camp (mid-September, before the Oct 1 season start).
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year}-09-18`, label: 'Training Camp Opens' })
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
+
+    // Holiday roster freeze (late December).
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year}-12-19`, label: 'Holiday Roster Freeze' })
+
+    // All-Star break ~55% through the season (early February in a real schedule).
+    const asbDay = firstDay + Math.round((lastDay - firstDay) * 0.55)
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, asbDay), label: 'All-Star Break' })
+
+    // Trade deadline.
+    if (ctx.deadlineDay > 0) {
+      entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })
+    }
+
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, lastDay), label: 'Regular Season Ends' })
+
+    // Playoffs start (if known — first day after all regular-season games).
+    if (ctx.playoffsStartDay !== null) {
+      entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.playoffsStartDay), label: 'Playoffs Begin' })
+    }
+
+    // Offseason tentpoles (next calendar year): combine → draft → free agency.
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-02`, label: 'Scouting Combine' })
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-28`, label: 'Entry Draft' })
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-07-01`, label: 'Free Agency Opens' })
+  } else if (ctx.deadlineDay > 0) {
+    entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })
   }
 
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
