@@ -45,6 +45,7 @@ import type { BoardState, BoardSummaryView } from '@engine/league/board'
 import type { RivalriesState } from '@engine/league/rivalries'
 import type { SpecialTeamsEntries, TransactionLedger, TeamSpecialTeams, Transaction } from '@engine/league/leagueStats'
 export type { BoardSummaryView } from '@engine/league/board'
+export type { MindsetView, MindsetTone } from '@engine/career/playerMindset'
 export type { Rivalry, RivalriesState } from '@engine/league/rivalries'
 export type { TeamSpecialTeams, Transaction, TransactionKind } from '@engine/league/leagueStats'
 
@@ -379,6 +380,12 @@ export interface PlayerProfileView extends PlayerBadge {
   profileContract: ProfileContractView | null
   /** Scout-generated prose report (fog-aware). */
   scoutReport: import('@engine/career/scoutReport').ScoutReportView
+  /**
+   * Staff-gathered mindset: plain-English thoughts on this player's outlook.
+   * Present for own players always; present for scouted opponents when knowledge ≥ 40.
+   * Absent (omitted) when knowledge < 40 and isOwn = false.
+   */
+  mindset?: import('@engine/career/playerMindset').MindsetView
 }
 
 /** Compare-radar response: both players' RadarViews plus key stats. */

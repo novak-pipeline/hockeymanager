@@ -21,6 +21,7 @@ import type {
   ArchetypeInfo,
   ReportCard,
   ReportGrade,
+  MindsetView,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -322,6 +323,71 @@ function ReportCardPanel({ card, isGoalie }: { card: ReportCard; isGoalie: boole
             <ReportCardRow label="Physicality" grade={card.physicality} />
           </>}
     </div>
+  )
+}
+
+/* ── Mindset panel ── */
+function mindsetToneColor(tone: MindsetView['tone']): string {
+  if (tone === 'positive') return 'var(--success)'
+  if (tone === 'negative') return 'var(--danger)'
+  return 'var(--muted)'
+}
+
+function mindsetToneLabel(tone: MindsetView['tone']): string {
+  if (tone === 'positive') return 'Positive'
+  if (tone === 'negative') return 'Negative'
+  return 'Neutral'
+}
+
+function clarityLabel(clarity: MindsetView['clarity']): string {
+  if (clarity === 'clear') return 'Staff report'
+  if (clarity === 'partial') return 'Staff believe'
+  return 'Staff sense'
+}
+
+function MindsetPanel({ mindset }: { mindset: MindsetView }): JSX.Element {
+  const toneColor = mindsetToneColor(mindset.tone)
+  return (
+    <Panel title="Mindset">
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        {/* Tone badge + clarity label */}
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          <span
+            style={{
+              display: 'inline-block',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: toneColor,
+              flexShrink: 0,
+            }}
+          />
+          <span style={{ fontSize: 12, fontWeight: 700, color: toneColor }}>
+            {mindsetToneLabel(mindset.tone)}
+          </span>
+          <span className="muted small">·</span>
+          <span className="muted small">{clarityLabel(mindset.clarity)}</span>
+        </div>
+
+        {/* Thought lines */}
+        <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+          {mindset.lines.map((line, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: 13,
+                lineHeight: 1.55,
+                paddingLeft: 12,
+                borderLeft: `2px solid ${i === 0 ? toneColor : 'var(--line)'}`,
+                color: i === 0 ? 'var(--text)' : 'var(--muted)',
+              }}
+            >
+              {line}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
   )
 }
 
@@ -690,6 +756,9 @@ function TabProfile({
           Injured: {d.injury.description} — {d.injury.gamesRemaining} game{d.injury.gamesRemaining !== 1 ? 's' : ''} remaining
         </Notice>
       )}
+
+      {/* Mindset panel — staff-gathered outlook */}
+      {d.mindset && <MindsetPanel mindset={d.mindset} />}
 
       {/* Season snapshot (current season only for the Profile tab quick view) */}
       {d.seasons.length > 0 && (() => {

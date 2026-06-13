@@ -229,6 +229,7 @@ import {
   buildTeamDataHubView,
   buildFinanceView,
   buildPlayerProfile,
+  type MindsetBuildCtx,
   buildScoutingView,
   buildScheduleView,
   buildSquadView,
@@ -4013,7 +4014,21 @@ export class Career {
     // Apply fog for players not on user's own roster
     const isOwnPlayer = this.userTeam.roster.includes(pid)
     const fog = isOwnPlayer ? undefined : this.fogCtx()
-    return buildPlayerProfile(this.ctx(), pid, fog)
+
+    // Find which team this player is on to pull locker room
+    let playerTeamId: TeamId | undefined
+    for (const [tid, team] of this.data.teams) {
+      if (team.roster.includes(pid)) { playerTeamId = tid; break }
+    }
+    const lockerRoom = playerTeamId ? (this.lockerRooms.get(playerTeamId) ?? null) : null
+
+    const mindsetCtx: MindsetBuildCtx = {
+      lockerRoom,
+      getPlayerName: (id) => this.data.players.get(asPlayerId(id))?.name ?? null,
+      isOwn: isOwnPlayer,
+    }
+
+    return buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx)
   }
 
   /** Radar comparison view for two players (used by the Phase C compare UI). */

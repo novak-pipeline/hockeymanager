@@ -78,6 +78,8 @@ import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
 } from '@engine/league/leagueStats'
+import { buildMindset, type MindsetCtx } from '@engine/career/playerMindset'
+import type { LockerRoomState } from '@engine/league/lockerRoom'
 
 /** The Career state slice every builder reads. */
 export interface ViewCtx {
@@ -499,7 +501,17 @@ function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView 
   return base
 }
 
-export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCtx): PlayerProfileView {
+/** Optional extra context for player mindset generation. */
+export interface MindsetBuildCtx {
+  /** Locker room for the team this player is on. */
+  lockerRoom: LockerRoomState | null
+  /** Resolve a player name by id for named-relationship lines. */
+  getPlayerName: (id: string) => string | null
+  /** True when the player is on the user's own roster. */
+  isOwn: boolean
+}
+
+export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCtx, mindsetCtx?: MindsetBuildCtx): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
   let teamId: string | null = null
@@ -584,6 +596,21 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
   const potStars = potentialStars(p)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
 
+  // Mindset (optional; only built when mindsetCtx provided, or when no fog = own player)
+  let mindset: import('@engine/career/playerMindset').MindsetView | undefined
+  if (mindsetCtx) {
+    const mCtx: MindsetCtx = {
+      year: ctx.year,
+      lockerRoom: mindsetCtx.lockerRoom,
+      getPlayerName: mindsetCtx.getPlayerName,
+      isOwn: mindsetCtx.isOwn,
+      ...(fog ? { scouting: fog.scouting } : {}),
+    }
+    const built = buildMindset(p, mCtx)
+    // Omit entirely for low-knowledge opponents (vague + 0 lines would just be noise)
+    mindset = built
+  }
+
   return {
     ...badge(p, fog),
     teamId,
@@ -614,6 +641,7 @@ export function buildPlayerProfile(ctx: ViewCtx, playerId: PlayerId, fog?: FogCt
     honours: buildHonours(p),
     profileContract: buildProfileContract(p, teamId !== null),
     scoutReport,
+    ...(mindset !== undefined ? { mindset } : {}),
   }
 }
 
