@@ -420,6 +420,9 @@ export class Career {
   private readonly ahlStandings = new Map<TeamId, Standing>()
   /** AHL games-played counters for AHL-tier players. */
   private readonly ahlGp = new Map<PlayerId, number>()
+  /** AHL season totals — kept separate from NHL totals so the two never mix
+   *  in leaders/standings/profile, but still feed prospect development. */
+  private readonly ahlTotals = new Map<PlayerId, GamePlayerStat>()
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
@@ -1868,7 +1871,7 @@ export class Career {
           decidedBy: ahlRes.decidedBy,
         }
         applyStandingsResult(this.ahlStandings, ahlRes)
-        mergePlayerStats(this.totals, ahlRes.playerStats)
+        mergePlayerStats(this.ahlTotals, ahlRes.playerStats)
         for (const [pid, s] of ahlRes.playerStats) {
           if (s.toi > 0) {
             // AHL gp tracked separately; this.gp is NHL-only
@@ -1998,7 +2001,7 @@ export class Career {
           decidedBy: ahlRes.decidedBy,
         }
         applyStandingsResult(this.ahlStandings, ahlRes)
-        mergePlayerStats(this.totals, ahlRes.playerStats)
+        mergePlayerStats(this.ahlTotals, ahlRes.playerStats)
         for (const [pid, s] of ahlRes.playerStats) {
           if (s.toi > 0) {
             // AHL gp tracked separately; this.gp is NHL-only
@@ -2275,20 +2278,27 @@ export class Career {
           rng,
           performance: (id) => {
             const t = this.totals.get(id)
+            const at = this.ahlTotals.get(id)
             const p = this.data.players.get(id)!
-            // For players who ONLY played in the AHL this season, their NHL gp
-            // is 0 but ahlGp reflects their actual activity. We use combined gp
-            // for gamesPlayed so the performance ratio is meaningful.
+            // NHL and AHL totals are kept separate so they never mix in
+            // leaders/standings, but development judges a player on his total
+            // production across both tiers (a prospect lighting up the AHL still
+            // develops well). Likewise gamesPlayed combines both tiers, so a
+            // scratched player (0 NHL + 0 AHL) stagnates.
             const nhlGp = this.gp.get(id) ?? 0
             const ahlGp = this.ahlGp.get(id) ?? 0
             const combinedGp = nhlGp + ahlGp
+            const goals = (t?.goals ?? 0) + (at?.goals ?? 0)
+            const assists = (t?.assists ?? 0) + (at?.assists ?? 0)
+            const saves = (t?.saves ?? 0) + (at?.saves ?? 0)
+            const shotsAgainst = (t?.shotsAgainst ?? 0) + (at?.shotsAgainst ?? 0)
             const base = {
-              points: (t?.goals ?? 0) + (t?.assists ?? 0),
+              points: goals + assists,
               gamesPlayed: combinedGp,
               position: p.position,
             }
-            return p.position === 'G' && t && t.shotsAgainst > 0
-              ? { ...base, savePct: t.saves / t.shotsAgainst }
+            return p.position === 'G' && shotsAgainst > 0
+              ? { ...base, savePct: saves / shotsAgainst }
               : base
           },
           expectations: (id) => {
@@ -2744,6 +2754,7 @@ export class Career {
       for (const g of this.data.league.ahlSchedule) g.result = null
     }
     this.ahlGp.clear()
+    this.ahlTotals.clear()
 
     this.totals.clear()
     this.gp.clear()
@@ -4490,6 +4501,7 @@ export class Career {
       transactionLedger: structuredClone(this.transactionLedger),
       ahlStandings: serializeMap(this.ahlStandings as unknown as Map<string, unknown>),
       ahlGp: serializeMap(this.ahlGp as unknown as Map<string, number>),
+      ahlTotals: serializeMap(this.ahlTotals as unknown as Map<string, unknown>),
     }
   }
 
@@ -4651,6 +4663,11 @@ export class Career {
     }
     if (snapshot.ahlGp) {
       for (const [k, v] of snapshot.ahlGp) career.ahlGp.set(asPlayerId(k), v)
+    }
+    if (snapshot.ahlTotals) {
+      for (const [k, v] of snapshot.ahlTotals) {
+        career.ahlTotals.set(asPlayerId(k), v as GamePlayerStat)
+      }
     }
 
     // Rebuild transient state that deliberately isn't saved.

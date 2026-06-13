@@ -833,6 +833,8 @@ export interface CareerSnapshot {
    * Optional for backward compat.
    */
   ahlGp?: Array<[string, number]>
+  /** AHL season totals, kept separate from NHL playerTotals. Optional. */
+  ahlTotals?: Array<[string, unknown]>
 }
 
 export interface SaveSlotInfo {

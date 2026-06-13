@@ -53,6 +53,9 @@ C_JOB, C_CLUB = 9, 11
 C_CA, C_PA = 37, 38
 C_GOALIE, C_LD, C_RD, C_LW, C_C, C_RW = 42, 43, 44, 45, 46, 47
 C_HAND = 51
+C_EXPIRES = 13      # "Contract Expires Club", e.g. "30.6.2027"
+C_WAGE = 14         # "Estimated Wage" = annual salary (accurate, e.g. 8700000)
+C_ROLE = 50         # "Role", e.g. "Centre: Playmaker", "Defenceman: Defensive"
 
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
@@ -166,6 +169,38 @@ def match_ahl_club(club):
         if all(word.lower() in club_lower for word in keyword.split()):
             return keyword
     return None
+
+def map_role(role_str, pos):
+    """Map an EHM role string (e.g. 'Centre: Playmaker') to our PlayerRole."""
+    s = str(role_str or "").lower()
+    if pos == "G":
+        return "starter"
+    if pos == "D":
+        if "offensive" in s or "puck" in s or "two" in s:
+            return "offensiveD"
+        if "stay" in s:
+            return "stayAtHomeD"
+        return "shutdownD"  # "Defensive", "All around", default
+    # Forwards.
+    if "playmaker" in s:
+        return "playmaker"
+    if "sniper" in s or "goal" in s or "scorer" in s:
+        return "sniper"
+    if "power" in s:
+        return "powerForward"
+    if "enforcer" in s or "fighter" in s:
+        return "enforcer"
+    return "twoWay"  # "Two-way", "Defensive", "Grinder", "All around", default
+
+def contract_from_row(row):
+    """Build {salary, years} from the EHM wage + contract-expiry columns."""
+    salary = to_int(row[C_WAGE], 0)
+    if salary <= 0:
+        return None
+    parts = str(row[C_EXPIRES] or "").split(".")
+    exp_year = to_int(parts[2]) if len(parts) == 3 else 0
+    years = clamp(exp_year - SEASON_YEAR, 1, 8) if exp_year else 2
+    return {"salary": salary, "years": years}
 
 def position(row):
     g = row[C_GOALIE] or 0
@@ -304,9 +339,13 @@ def main():
             "overall": clamp(round(ca / 2), 1, 99),
             "potential": clamp(round(pa / 2), 1, 99),
             "attributes": build_attributes(r, pos),
+            "role": map_role(r[C_ROLE], pos),
             "faceId": face_id,
             "_ca": ca,
         }
+        contract = contract_from_row(r)
+        if contract is not None:
+            player["contract"] = contract
         if nhl_nick:
             nhl_teams[nhl_nick].append(player)
         else:

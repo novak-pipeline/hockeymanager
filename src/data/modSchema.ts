@@ -122,6 +122,12 @@ export interface ModPlayer {
    */
   potential?: number
   contract?: ModContract
+  /**
+   * Optional explicit role (e.g. 'playmaker', 'shutdownD'). When omitted, the
+   * loader picks a role at random weighted by position. Mods built from a real
+   * DB should set this so a player's role matches reality.
+   */
+  role?: PlayerRole
 }
 
 /**
@@ -247,6 +253,11 @@ const ATTR_KEYS = new Set<string>([
   'reflexes', 'positioningG', 'reboundControl', 'glove', 'blocker', 'recovery', 'puckHandlingG'
 ])
 
+const ROLE_KEYS = new Set<PlayerRole>([
+  'sniper', 'playmaker', 'twoWay', 'powerForward', 'enforcer',
+  'offensiveD', 'shutdownD', 'stayAtHomeD', 'starter', 'backup'
+])
+
 function validatePlayer(raw: unknown, path: string): ModPlayer {
   assertObject(raw, path)
   const r = raw as Record<string, unknown>
@@ -294,6 +305,9 @@ function validatePlayer(raw: unknown, path: string): ModPlayer {
     if ((c['years'] as number) < 1 || (c['years'] as number) > 8)
       fail(`${path}.contract.years must be 1–8, got ${c['years']}`)
   }
+
+  if (r['role'] !== undefined && !ROLE_KEYS.has(r['role'] as PlayerRole))
+    fail(`${path}.role is not a valid PlayerRole: "${r['role']}"`)
 
   return r as unknown as ModPlayer
 }
@@ -708,11 +722,12 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           const raw = synthesiseAttributes(rng, caliber, modPlayer.position, modPlayer.attributes ?? {})
 
           const role: PlayerRole =
-            modPlayer.position === 'G'
+            modPlayer.role ??
+            (modPlayer.position === 'G'
               ? 'starter'
               : modPlayer.position === 'D'
                 ? rng.pick(DEFENSE_ROLES)
-                : pickWeightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+                : pickWeightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS))
 
           const composites = computeComposites(raw, role, modPlayer.position)
           const ovr = overall(composites, modPlayer.position)
@@ -896,11 +911,12 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         const caliber = clampAttr(modPlayer.overall ?? 45)
         const raw = synthesiseAttributes(ahlRng, caliber, modPlayer.position, modPlayer.attributes ?? {})
         const role: PlayerRole =
-          modPlayer.position === 'G'
+          modPlayer.role ??
+          (modPlayer.position === 'G'
             ? 'starter'
             : modPlayer.position === 'D'
               ? ahlRng.pick(DEFENSE_ROLES)
-              : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+              : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS))
         const composites = computeComposites(raw, role, modPlayer.position)
         const ovr = overall(composites, modPlayer.position)
         const potentialRaw =
