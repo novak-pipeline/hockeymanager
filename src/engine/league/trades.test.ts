@@ -14,11 +14,16 @@ import {
 import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng, deriveSeed } from '@engine/shared/rng'
 import {
+  buildTeamProfile,
+  canRetain,
   evaluateProposal,
   executeTrade,
   generateAiOffers,
+  perriPickValue,
   pickValue,
   playerValue,
+  retentionCapSplit,
+  teamPhilosophy,
   type StoredTradeOffer
 } from './trades'
 
@@ -194,12 +199,14 @@ describe('playerValue', () => {
 /* ────────────────────────── pickValue ────────────────────────── */
 
 describe('pickValue', () => {
-  it('values round 1 far above round 2 and later rounds', () => {
+  it('values round 1 above round 2 and later rounds', () => {
     const r1 = pickValue(makePick(2026, 1, 't1'), { year: 2026 })
     const r2 = pickValue(makePick(2026, 2, 't1'), { year: 2026 })
     const r4 = pickValue(makePick(2026, 4, 't1'), { year: 2026 })
-    expect(r1).toBeGreaterThan(2.5 * r2)
-    expect(r2).toBeGreaterThan(2 * r4)
+    // Perri power-law: r1/r2 ≈ 1.66, r1/r4 ≈ 2.45 (gradual decay by round)
+    expect(r1).toBeGreaterThan(r2)
+    expect(r2).toBeGreaterThan(r4)
+    expect(r1).toBeGreaterThan(r4 * 2)
   })
 
   it('discounts future years', () => {
@@ -280,13 +287,12 @@ describe('evaluateProposal', () => {
   it('counters when the offer is close but short', () => {
     const { partnerTeam, partnerPlayers } = partnerFixture()
     for (let seed = 1; seed <= 20; seed++) {
-      // gain = r1 + r5 = 95, loss = r1 + r4 + r7 = 100 → ratio 0.95.
+      // Perri curve + RebuildDraft philosophy (team 'pt' hashes to RebuildDraft, 1.25× pick bias):
+      // gain_biased = r1 * 1.25 ≈ 34.9; loss = r1+r5 ≈ 38.1 → ratio ≈ 0.917
+      // Counter zone: ratio in [threshold-0.15, threshold). 0.917 is in [0.84, 0.99) for all seeds.
       const result = evaluateProposal({
-        give: { players: [], picks: [makePick(2026, 1, 'u'), makePick(2026, 5, 'u')] },
-        receive: {
-          players: [],
-          picks: [makePick(2026, 1, 'pt'), makePick(2026, 4, 'pt'), makePick(2026, 7, 'pt')]
-        },
+        give: { players: [], picks: [makePick(2026, 1, 'u')] },
+        receive: { players: [], picks: [makePick(2026, 1, 'pt'), makePick(2026, 5, 'pt')] },
         partnerTeam,
         partnerPlayers,
         rng: new Rng(seed)
@@ -594,5 +600,224 @@ describe('generateAiOffers', () => {
     const a = collectOffers(200, 555)
     const b = collectOffers(200, 555)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+})
+
+/* ────────────────────────── perriPickValue ────────────────────────── */
+
+describe('perriPickValue', () => {
+  it('anchors #1=100 and #2 ≈ 72.69', () => {
+    expect(perriPickValue(1)).toBeCloseTo(100, 4)
+    expect(perriPickValue(2)).toBeCloseTo(72.69, 0)
+  })
+
+  it('is strictly monotone decreasing over 1–224', () => {
+    for (let i = 1; i < 224; i++) {
+      expect(perriPickValue(i)).toBeGreaterThan(perriPickValue(i + 1))
+    }
+  })
+
+  it('clamps at 1 and 224', () => {
+    expect(perriPickValue(0)).toBe(perriPickValue(1))
+    expect(perriPickValue(999)).toBe(perriPickValue(224))
+  })
+
+  it('produces a steep early decay and a long flat tail', () => {
+    const gap1to2 = perriPickValue(1) - perriPickValue(2)
+    const gap31to32 = perriPickValue(31) - perriPickValue(32)
+    expect(gap1to2).toBeGreaterThan(gap31to32 * 3)
+    // tail is indeed flat (picks 100–110 differ by less than 2 total)
+    expect(perriPickValue(100) - perriPickValue(110)).toBeLessThan(2)
+  })
+
+  it('maintains the Perri #1 vs #2 ratio of ~1.376', () => {
+    expect(perriPickValue(1) / perriPickValue(2)).toBeCloseTo(1.376, 1)
+  })
+})
+
+/* ────────────────────────── pickValue uses Perri curve ────────────────────────── */
+
+describe('pickValue (Perri-backed)', () => {
+  it('round-1 from weakest team is worth significantly more than from strongest', () => {
+    const weak = pickValue(makePick(2026, 1, 't1'), { year: 2026, teamStrengthRank: 32 })
+    const strong = pickValue(makePick(2026, 1, 't1'), { year: 2026, teamStrengthRank: 1 })
+    expect(weak).toBeGreaterThan(strong * 1.5)
+  })
+
+  it('round-1 is worth significantly more than round-4', () => {
+    const r1 = pickValue(makePick(2026, 1, 't1'), { year: 2026 })
+    const r4 = pickValue(makePick(2026, 4, 't1'), { year: 2026 })
+    // Perri power-law gives r1/r4 ≈ 2.45 when no rank info (midpoint slot assumed)
+    expect(r1).toBeGreaterThan(r4 * 2)
+  })
+})
+
+/* ────────────────────────── retained salary ────────────────────────── */
+
+describe('retentionCapSplit', () => {
+  it('splits cap hit correctly', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000, years: 3 })
+    const { receiverHit, retainerHit } = retentionCapSplit(p, 4_000_000)
+    expect(receiverHit).toBe(4_000_000)
+    expect(retainerHit).toBe(4_000_000)
+    expect(receiverHit + retainerHit).toBe(p.contract.salary)
+  })
+
+  it('supports partial retention', () => {
+    const p = makePlayer('p', 80, { salary: 6_000_000, years: 2 })
+    const { receiverHit, retainerHit } = retentionCapSplit(p, 1_500_000)
+    expect(retainerHit).toBe(1_500_000)
+    expect(receiverHit).toBe(4_500_000)
+  })
+})
+
+describe('canRetain', () => {
+  it('allows valid retention', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000 })
+    expect(canRetain(p, 0.50, [], 0)).toBeNull()
+  })
+
+  it('blocks retention over 50%', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000 })
+    expect(canRetain(p, 0.51, [], 0)).not.toBeNull()
+    expect(canRetain(p, 0, [], 0)).not.toBeNull()
+  })
+
+  it('blocks when team already has MAX_RETAIN_SLOTS (3) other retained slots', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000 })
+    const existing: import('./trades').RetainedSalarySlot[] = [
+      { playerId: asPlayerId('a'), retainedAmount: 1e6, expiryYear: 2027, retentionCount: 1 },
+      { playerId: asPlayerId('b'), retainedAmount: 1e6, expiryYear: 2027, retentionCount: 1 },
+      { playerId: asPlayerId('c'), retainedAmount: 1e6, expiryYear: 2027, retentionCount: 1 },
+    ]
+    expect(canRetain(p, 0.25, existing, 0)).not.toBeNull()
+  })
+
+  it('allows new slot for same player that replaces the existing slot (count < max)', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000 })
+    // 3 slots but one is for this player itself → effectively 2 others
+    const existing: import('./trades').RetainedSalarySlot[] = [
+      { playerId: p.id, retainedAmount: 2e6, expiryYear: 2027, retentionCount: 1 },
+      { playerId: asPlayerId('b'), retainedAmount: 1e6, expiryYear: 2027, retentionCount: 1 },
+      { playerId: asPlayerId('c'), retainedAmount: 1e6, expiryYear: 2027, retentionCount: 1 },
+    ]
+    // retentionCount 1 < MAX_RETAIN_TIMES(2) — should be allowed
+    expect(canRetain(p, 0.25, existing, 1)).toBeNull()
+  })
+
+  it('blocks a contract already retained MAX_RETAIN_TIMES (2) times', () => {
+    const p = makePlayer('p', 80, { salary: 8_000_000 })
+    expect(canRetain(p, 0.25, [], 2)).not.toBeNull()
+  })
+})
+
+/* ────────────────────────── team philosophy & needs ────────────────────────── */
+
+describe('teamPhilosophy', () => {
+  it('returns a valid philosophy for any team id', () => {
+    const valid = new Set(['WinNow', 'FavorYoung', 'RebuildProspects', 'RebuildDraft', 'Balanced'])
+    for (const id of ['team-1', 'team-2', 'nhl-team-10', 'abc', 'xyz']) {
+      expect(valid.has(teamPhilosophy(asTeamId(id)))).toBe(true)
+    }
+  })
+
+  it('is deterministic — same id always gives the same philosophy', () => {
+    const id = asTeamId('stable-id')
+    expect(teamPhilosophy(id)).toBe(teamPhilosophy(id))
+  })
+})
+
+describe('buildTeamProfile', () => {
+  it('detects needs when a group is below target', () => {
+    // Team with only 5 forwards (target 12) and enough D/G
+    const fwds = Array.from({ length: 5 }, (_, i) => makePlayer(`f${i}`, 70, { position: i < 3 ? 'C' : 'W' }))
+    const defs = Array.from({ length: 6 }, (_, i) => makePlayer(`d${i}`, 68, { position: 'D' }))
+    const goalies = Array.from({ length: 2 }, (_, i) => makePlayer(`g${i}`, 70, { position: 'G' }))
+    const team = makeTeam('tn', [...fwds, ...defs, ...goalies])
+    const players = new Map([...fwds, ...defs, ...goalies].map((p) => [p.id, p]))
+    const profile = buildTeamProfile(team, players)
+    expect(profile.needs).toContain('F')
+    expect(profile.needs).not.toContain('D')
+    expect(profile.needs).not.toContain('G')
+  })
+
+  it('reports no needs when roster is full', () => {
+    const fwds = Array.from({ length: 12 }, (_, i) => makePlayer(`f${i}`, 70, { position: i < 6 ? 'C' : 'W' }))
+    const defs = Array.from({ length: 6 }, (_, i) => makePlayer(`d${i}`, 68, { position: 'D' }))
+    const goalies = Array.from({ length: 2 }, (_, i) => makePlayer(`g${i}`, 70, { position: 'G' }))
+    const team = makeTeam('full', [...fwds, ...defs, ...goalies])
+    const players = new Map([...fwds, ...defs, ...goalies].map((p) => [p.id, p]))
+    const profile = buildTeamProfile(team, players)
+    expect(profile.needs).toHaveLength(0)
+  })
+})
+
+/* ────────────────────────── philosophy biases AI acceptance ────────────────────────── */
+
+describe('evaluateProposal philosophy bias', () => {
+  it('RebuildDraft partner values picks more — accepts a pick-heavy offer', () => {
+    // Build a RebuildDraft team by brute-forcing a matching team id
+    // teamPhilosophy uses char-code hash % 5; RebuildDraft = index 3.
+    // Find an id that hashes to 3 by trying ids.
+    let rebuildDraftId = ''
+    for (let i = 0; i < 200; i++) {
+      const tid = asTeamId(`rd-${i}`)
+      if (teamPhilosophy(tid) === 'RebuildDraft') { rebuildDraftId = `rd-${i}`; break }
+    }
+    expect(rebuildDraftId).not.toBe('')
+
+    const roster: Player[] = []
+    for (let i = 0; i < 8; i++) roster.push(makePlayer(`r-f${i}`, 70, { position: i < 4 ? 'C' : 'W' }))
+    for (let i = 0; i < 6; i++) roster.push(makePlayer(`r-d${i}`, 68, { position: 'D' }))
+    for (let i = 0; i < 2; i++) roster.push(makePlayer(`r-g${i}`, 70, { position: 'G' }))
+    const partnerTeam = makeTeam(rebuildDraftId, roster)
+    const partnerPlayers = new Map(roster.map((p) => [p.id, p]))
+
+    // Give one 1st + one 2nd; receive one 1st.
+    // A balanced team would likely reject; a RebuildDraft team should be more favourable.
+    const result = evaluateProposal({
+      give: { players: [], picks: [makePick(2026, 1, 'u'), makePick(2026, 2, 'u')] },
+      receive: { players: [], picks: [makePick(2026, 1, rebuildDraftId)] },
+      partnerTeam,
+      partnerPlayers,
+      rng: new Rng(1)
+    })
+    // With RebuildDraft bias the incoming picks are valued 25% more — deal should accept
+    expect(result.verdict).toBe('accept')
+  })
+
+  it('retained salary reduces cap hit counted against the partner', () => {
+    const roster: Player[] = []
+    for (let i = 0; i < 8; i++) roster.push(makePlayer(`rs-f${i}`, 70, { position: i < 4 ? 'C' : 'W' }))
+    for (let i = 0; i < 5; i++) roster.push(makePlayer(`rs-d${i}`, 68, { position: 'D' }))
+    for (let i = 0; i < 2; i++) roster.push(makePlayer(`rs-g${i}`, 70, { position: 'G' }))
+    // Partner is near the cap
+    const partnerTeam = makeTeam('rs', roster, { capUsed: 85_000_000 })
+    partnerTeam.finances.salaryCap = 88_000_000
+    const partnerPlayers = new Map(roster.map((p) => [p.id, p]))
+
+    const expensivePlayer = makePlayer('star', 85, { salary: 4_000_000 })
+
+    // Without retention: 85M + 4M = 89M > 88M cap → should reject
+    const noRetain = evaluateProposal({
+      give: { players: [expensivePlayer], picks: [] },
+      receive: { players: [], picks: [] },
+      partnerTeam,
+      partnerPlayers,
+      rng: new Rng(1)
+    })
+    expect(noRetain.verdict).toBe('reject')
+    expect(noRetain.message).toMatch(/cap/i)
+
+    // With 50% retention: incoming cap hit = 2M → 85M + 2M = 87M < 88M → passes cap check
+    const withRetain = evaluateProposal({
+      give: { players: [expensivePlayer], picks: [], retainedAmounts: new Map([[(expensivePlayer.id as string), 2_000_000]]) },
+      receive: { players: [], picks: [] },
+      partnerTeam,
+      partnerPlayers,
+      rng: new Rng(1)
+    })
+    // Cap check should pass now
+    expect(withRetain.verdict).not.toBe('reject')
   })
 })

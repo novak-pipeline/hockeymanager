@@ -147,6 +147,7 @@ import {
   releasePlayer as releaseFromTeam,
 } from '@engine/league/contracts'
 import {
+  buildTeamProfile,
   evaluateProposal,
   executeTrade,
   generateAiOffers,
@@ -4295,12 +4296,14 @@ export class Career {
   }
 
   private pickAsset(p: DraftPick): PickAssetView {
+    const pv = pickValue(p, { year: this.year })
     return {
       id: this.pickId(p),
       year: p.year,
       round: p.round,
       originalTeamAbbr: this.data.teams.get(p.originalTeamId)!.abbreviation,
       label: `${p.year} R${p.round} (${this.data.teams.get(p.originalTeamId)!.abbreviation})`,
+      value: Math.round(pv * 10) / 10,
     }
   }
 
@@ -4344,18 +4347,25 @@ export class Career {
         }
       })
     }
+    const userTeam = this.userTeam
+    const myCapSpace = userTeam.finances.salaryCap - userTeam.finances.capUsed
     return {
       incoming: this.tradeOffers.map((o) => this.offerView(o)),
       partners: this.data.league.teams
         .filter((tid) => tid !== this.userTeamId)
         .map((tid) => {
           const team = this.data.teams.get(tid)!
+          const profile = buildTeamProfile(team, this.data.players)
+          const needLabels: Record<string, string> = { F: 'Forwards', D: 'Defence', G: 'Goaltending' }
           return {
             teamId: tid as string,
             teamName: team.name,
             teamAbbr: team.abbreviation,
             players: tradable(tid),
             picks: this.picks.filter((p) => p.ownerTeamId === tid).map((p) => this.pickAsset(p)),
+            capSpace: profile.capSpace,
+            needs: profile.needs.map((g) => needLabels[g] ?? g),
+            philosophy: profile.philosophy,
           }
         }),
       myPlayers: tradable(this.userTeamId),
@@ -4364,6 +4374,7 @@ export class Career {
         .map((p) => this.pickAsset(p)),
       deadlineDay: this.deadlineDay,
       tradingOpen: this.tradingOpen(),
+      myCapSpace,
     }
   }
 

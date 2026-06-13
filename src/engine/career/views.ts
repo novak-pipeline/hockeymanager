@@ -568,6 +568,8 @@ export interface PickAssetView {
   round: number
   originalTeamAbbr: string
   label: string
+  /** Perri-curve value on the 0–100 scale (rounded to 1 decimal). */
+  value: number
 }
 
 export interface TradeSideView {
@@ -611,6 +613,12 @@ export interface TradePartnerView {
   teamAbbr: string
   players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
   picks: PickAssetView[]
+  /** Roster cap space ($). Positive = room available. */
+  capSpace: number
+  /** Position groups the partner is thin on (below target depth). */
+  needs: string[]
+  /** Philosophy label shown in the UI. */
+  philosophy: string
 }
 
 export interface TradesView {
@@ -623,6 +631,8 @@ export interface TradesView {
   /** Trades are frozen outside the regular season (and after the deadline day, if set). */
   deadlineDay: number | null
   tradingOpen: boolean
+  /** User team's current cap space. */
+  myCapSpace: number
 }
 
 /* ────────────────────────── draft / offseason / finances ────────────────────────── */

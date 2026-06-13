@@ -62,9 +62,11 @@ function PlayerChip(props: {
 function PickChip(props: { pick: PickAssetView }): JSX.Element {
   return (
     <span
+      title={`Perri value: ${props.pick.value}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        gap: 5,
         padding: '3px 10px',
         background: 'rgba(139,92,246,0.10)',
         border: '1px solid rgba(139,92,246,0.35)',
@@ -75,6 +77,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
       }}
     >
       {props.pick.label}
+      <span style={{ color: 'var(--muted)', fontSize: 10 }}>{props.pick.value}</span>
     </span>
   )
 }
@@ -472,6 +475,34 @@ function ProposeTab(props: {
           ))}
         </select>
       </Panel>
+
+      {partner && (
+        <Panel title={`${partner.teamName} profile`}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+            <div>
+              <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Philosophy</span>
+              <span className="chip" style={{ fontSize: 11 }}>{partner.philosophy}</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Cap space</span>
+              <span style={{
+                fontWeight: 600,
+                color: partner.capSpace >= 0 ? 'var(--success)' : 'var(--danger)'
+              }}>
+                {partner.capSpace >= 0 ? '+' : ''}{fmtMoney(partner.capSpace)}
+              </span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Needs</span>
+              {partner.needs.length === 0
+                ? <span className="muted small">None identified</span>
+                : partner.needs.map((n) => (
+                  <span key={n} className="chip chip-warn" style={{ fontSize: 10, marginRight: 4 }}>{n}</span>
+                ))}
+            </div>
+          </div>
+        </Panel>
+      )}
 
       {partner && (
         <div className="grid grid-2">

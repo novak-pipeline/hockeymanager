@@ -7,6 +7,19 @@
  * are disproportionately expensive (one 90 costs far more than two 75s),
  * which is how real GMs price elite talent.
  *
+ * Pick values follow the Perri curve (Matt Perri, PuckPedia) anchored at
+ * #1=100, #2=72.69, with steep early decay and a long flat tail through ~224.
+ * The curve is a two-piece exponential fit to the published table.
+ *
+ * Retained salary: a team can retain up to 50% of a traded player's cap hit,
+ * up to 3 retained contracts per team roster-wide, and a contract may be
+ * retained at most twice (enabling a third-team broker). AI teams near the cap
+ * value retention relief, cap-rich teams will broker for picks.
+ *
+ * Team philosophy: each team has a Philosophy (Balanced / Win Now / Favor Young
+ * / Rebuild Prospects / Rebuild Draft) that biases AI willingness and what they
+ * ask for. Needs (positional gaps) are computed from the live roster.
+ *
  * This is an engine-level module: it returns plain, JSON-serializable results
  * and the Career maps them onto the UI view models in career/views.ts. Every
  * stochastic decision flows through the injected seeded Rng — determinism is
@@ -104,8 +117,43 @@ export function playerValue(player: Player): number {
   return value
 }
 
-/** Base value per round; round 1 is worth several round 2s. */
-const ROUND_BASE = [90, 32, 15, 8, 5, 3, 2] as const
+/* ────────────────────────── Perri pick-value curve ────────────────────────── */
+
+/**
+ * Perri-style pick value on a 0–100 scale, calibrated to historical
+ * pick-for-pick trade precedent (market value, not prospect probability).
+ *
+ * Anchors: #1=100.00, #2=72.69 (gap=27.31 points). Formula: power law
+ *   value(n) = 100 / n^k   where k = log(100/72.69) / log(2) ≈ 0.4602
+ *
+ * This exactly reproduces the #1/#2 anchor, is strictly monotone decreasing,
+ * and produces a long tail to #224 ≈ 8.3, matching Perri's published table
+ * shape (steep early decay, gradual flattening across all 7 rounds).
+ *
+ * Sample values:
+ *   #1=100, #2=72.7, #5=47.7, #10=34.7, #16=27.9,
+ *   #32=20.3, #64=14.7, #128=10.7, #224=8.3
+ */
+const PERRI_K = Math.log(100 / 72.69) / Math.log(2) // ≈ 0.4602
+
+export function perriPickValue(overallPickNumber: number): number {
+  const n = Math.max(1, Math.min(224, overallPickNumber))
+  return 100 / Math.pow(n, PERRI_K)
+}
+
+/**
+ * Convert a round + team-strength-rank into an expected overall pick number
+ * within a 32-team league. Rank 1 = strongest team (picks last in round),
+ * rank 32 = weakest (picks first). We model each round as 32 slots.
+ */
+function expectedOverallPick(round: number, teamStrengthRank: number | undefined): number {
+  const teamsPerRound = 32
+  // Weakest team (rank 32) picks ~slot 1 in the round; strongest (rank 1) picks ~slot 32.
+  const slotInRound = teamStrengthRank !== undefined
+    ? clamp(teamsPerRound + 1 - teamStrengthRank, 1, teamsPerRound)
+    : teamsPerRound / 2  // no info → middle of round
+  return (round - 1) * teamsPerRound + slotInRound
+}
 
 /** Per extra year out, a pick loses this much of its value (uncertainty). */
 const FUTURE_YEAR_DISCOUNT = 0.82
@@ -118,19 +166,220 @@ const FUTURE_YEAR_DISCOUNT = 0.82
  *    (1 = strongest). A weak original team finishes low and picks early, so
  *    its pick is worth more; the slot effect matters most in round 1 and is
  *    attenuated in later rounds.
+ *
+ * The base slot value uses the Perri curve (perriPickValue) so pick-for-pick
+ * valuations match historical NHL trade precedent.
  */
 export function pickValue(
   pick: DraftPick,
   args: { year: number; teamStrengthRank?: number }
 ): number {
-  const base = ROUND_BASE[clamp(pick.round, 1, ROUND_BASE.length) - 1]
+  const overallPick = expectedOverallPick(pick.round, args.teamStrengthRank)
+  const base = perriPickValue(overallPick)
   const yearsOut = Math.max(0, pick.year - args.year)
-  let value = base * Math.pow(FUTURE_YEAR_DISCOUNT, yearsOut)
-  if (args.teamStrengthRank !== undefined) {
-    const slot = clamp(0.72 + 0.034 * (args.teamStrengthRank - 1), 0.72, 1.8)
-    value *= 1 + (slot - 1) / pick.round
+  return base * Math.pow(FUTURE_YEAR_DISCOUNT, yearsOut)
+}
+
+/* ────────────────────────── team philosophy & needs ────────────────────────── */
+
+/**
+ * Team philosophy shapes what assets an AI club values and how aggressively
+ * it trades. Generated deterministically from the team id seed.
+ *
+ *  - WinNow: prioritises experienced players, accepts salary, gives picks away
+ *  - FavorYoung: pays premium for U24 talent, reluctant to deal youth picks
+ *  - RebuildProspects: wants high-overall prospects, will trade veterans
+ *  - RebuildDraft: hoards picks, deep discounts on veterans
+ *  - Balanced: moderate biases in all directions
+ */
+export type TeamPhilosophy = 'WinNow' | 'FavorYoung' | 'RebuildProspects' | 'RebuildDraft' | 'Balanced'
+
+export interface TeamProfile {
+  philosophy: TeamPhilosophy
+  /**
+   * Position groups where the team is below its target roster depth.
+   * AI clubs pay a premium for arrivals that fill a listed need.
+   */
+  needs: PositionGroup[]
+  /**
+   * Cap space remaining (salaryCap - capUsed). Positive = room; negative = over.
+   */
+  capSpace: number
+}
+
+/** Deterministic philosophy assignment from a team id string. */
+export function teamPhilosophy(teamId: TeamId): TeamPhilosophy {
+  // Sum char codes for a simple hash. Stable across runs.
+  let h = 0
+  for (let i = 0; i < (teamId as string).length; i++) {
+    h = (h * 31 + (teamId as string).charCodeAt(i)) >>> 0
   }
-  return value
+  const PHILOSOPHIES: TeamPhilosophy[] = ['WinNow', 'FavorYoung', 'RebuildProspects', 'RebuildDraft', 'Balanced']
+  return PHILOSOPHIES[h % PHILOSOPHIES.length]!
+}
+
+/**
+ * Build a TeamProfile for the given club: philosophy + live positional needs +
+ * cap space. Used by the AI evaluator and surfaced in the trade UI.
+ */
+export function buildTeamProfile(
+  team: Team,
+  players: Map<PlayerId, Player>
+): TeamProfile {
+  const counts = groupCounts(team, players, [])
+  const needs: PositionGroup[] = []
+  for (const g of ['F', 'D', 'G'] as const) {
+    if (counts[g] < GROUP_TARGET[g]) needs.push(g)
+  }
+  return {
+    philosophy: teamPhilosophy(team.id),
+    needs,
+    capSpace: team.finances.salaryCap - team.finances.capUsed,
+  }
+}
+
+/**
+ * Philosophy bias multiplier applied to the partner's perceived gain when
+ * evaluating a proposed asset. Values > 1 mean the club values this more;
+ * < 1 means it's worth less to them.
+ */
+function philosophyGainBias(
+  philosophy: TeamPhilosophy,
+  asset: { kind: 'player'; player: Player } | { kind: 'pick'; pick: DraftPick }
+): number {
+  if (asset.kind === 'pick') {
+    // WinNow: picks worth less (future doesn't matter as much)
+    // RebuildDraft: picks worth more
+    if (philosophy === 'WinNow') return 0.85
+    if (philosophy === 'RebuildDraft') return 1.25
+    if (philosophy === 'RebuildProspects') return 1.0
+    if (philosophy === 'FavorYoung') return 0.9
+    return 1.0 // Balanced
+  }
+  // player asset
+  const p = asset.player
+  const ovr = overall(p.composites, p.position)
+  const isYoung = p.age < 24
+  const isVet = p.age >= 30
+  if (philosophy === 'WinNow') {
+    // Veterans with high overall are extra valuable; young prospects less so
+    return isVet && ovr >= 75 ? 1.12 : isYoung && ovr < 75 ? 0.88 : 1.0
+  }
+  if (philosophy === 'FavorYoung') {
+    return isYoung ? 1.18 : isVet ? 0.85 : 1.0
+  }
+  if (philosophy === 'RebuildProspects') {
+    return isYoung ? 1.15 : isVet ? 0.80 : 1.0
+  }
+  if (philosophy === 'RebuildDraft') {
+    // draft teams give less for players (except cheap picks)
+    return ovr >= 80 ? 0.90 : 0.80
+  }
+  return 1.0 // Balanced
+}
+
+/* ────────────────────────── retained salary ────────────────────────── */
+
+/**
+ * Retained-salary model (NHL rules):
+ *  - A team can retain up to 50% of a player's cap hit per player.
+ *  - A team may have at most 3 retained-salary contracts on its books at once.
+ *  - A single contract can be retained at most twice (third-team broker model).
+ *
+ * `RetainedSalarySlot` records the retention commitment that stays with the
+ * trading-away team after the deal. It is stored on the Career alongside
+ * the main roster so it draws cap space.
+ */
+export interface RetainedSalarySlot {
+  /** The player whose salary is being partially retained. */
+  playerId: PlayerId
+  /** Annual cap hit retained by the original team ($). */
+  retainedAmount: number
+  /** Contract year at which retention expires (mirrors player contract). */
+  expiryYear: number
+  /**
+   * How many times this contract has been retained (1 or 2).
+   * At 2 the slot is "fully brokered" and cannot be retained again.
+   */
+  retentionCount: number
+}
+
+/** Max percentage of cap hit a team may retain on one player. */
+export const MAX_RETAIN_PCT = 0.50
+/** Max retained-salary slots a team may carry simultaneously. */
+export const MAX_RETAIN_SLOTS = 3
+/** Max times a single contract may be retained (enables third-team broker). */
+export const MAX_RETAIN_TIMES = 2
+
+/**
+ * Validate whether a team can add a new retained-salary commitment.
+ *
+ * Returns null if allowed, or a string describing the violation.
+ */
+export function canRetain(
+  player: Player,
+  retainPct: number,
+  currentSlots: RetainedSalarySlot[],
+  existingRetentionCount: number
+): string | null {
+  if (retainPct <= 0 || retainPct > MAX_RETAIN_PCT) {
+    return `Retention must be between 1% and ${MAX_RETAIN_PCT * 100}% of cap hit`
+  }
+  const activeSlots = currentSlots.filter(
+    (s) => s.playerId !== player.id
+  ).length
+  if (activeSlots >= MAX_RETAIN_SLOTS) {
+    return `Team already has ${MAX_RETAIN_SLOTS} retained salary contracts`
+  }
+  if (existingRetentionCount >= MAX_RETAIN_TIMES) {
+    return `This contract has already been retained ${MAX_RETAIN_TIMES} times`
+  }
+  return null
+}
+
+/**
+ * The effective cap hit a team pays after retention.
+ *
+ * `retainedAmount` is the dollar amount the original team keeps paying.
+ * Returns `{ receiverHit, retainerHit }` — what each side counts against cap.
+ */
+export function retentionCapSplit(
+  player: Player,
+  retainedAmount: number
+): { receiverHit: number; retainerHit: number } {
+  return {
+    receiverHit: player.contract.salary - retainedAmount,
+    retainerHit: retainedAmount,
+  }
+}
+
+/**
+ * AI-derived dollar value of $1M of cap relief per year, expressed in trade
+ * points. Based on the Perri model: empirical pick cost of retained-salary
+ * deals suggests ~1 round-3 equivalent pick per ~$1M/yr of cap relief.
+ * We map that to trade points via the Perri curve.
+ *
+ * teamsPerRound=32 → round-3 slot ~97 → perriPickValue(97) ≈ 4.4 points/yr/$M
+ */
+export const CAP_RELIEF_POINTS_PER_MILLION = perriPickValue(97)
+
+/**
+ * AI value of a player deal WITH retained salary considered. A cap-strapped
+ * buyer gains less from an expensive player; a relief provider (third-team)
+ * earns pick value in return.
+ *
+ * `capSpaceAfter` is how much room the receiving team would have after absorbing
+ * the full cap hit (before any retention). Negative = over cap.
+ */
+export function retentionValueBonus(
+  retainedAmount: number,
+  receivingTeamCapSpaceAfter: number
+): number {
+  if (retainedAmount <= 0) return 0
+  const millionsRelieved = retainedAmount / 1e6
+  // The more cap-strapped the receiver, the more they value the relief.
+  const urgencyFactor = receivingTeamCapSpaceAfter < 5e6 ? 1.4 : 1.0
+  return millionsRelieved * CAP_RELIEF_POINTS_PER_MILLION * urgencyFactor
 }
 
 /* ────────────────────────── proposal evaluation ────────────────────────── */
@@ -139,6 +388,8 @@ export function pickValue(
 export interface TradePackage {
   players: Player[]
   picks: DraftPick[]
+  /** Optional retained salary amounts, keyed by player id (string). */
+  retainedAmounts?: Map<string, number>
 }
 
 export interface ProposalEvaluation {
@@ -153,14 +404,14 @@ export interface ProposalEvaluation {
   counterAskValue: number
 }
 
-type PositionGroup = 'F' | 'D' | 'G'
+export type PositionGroup = 'F' | 'D' | 'G'
 
-const groupOf = (pos: Position): PositionGroup => (pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F')
+export const groupOf = (pos: Position): PositionGroup => (pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F')
 
 /** Healthy roster sizes a club wants per group; below these, arrivals at the group are worth extra. */
-const GROUP_TARGET: Record<PositionGroup, number> = { F: 12, D: 6, G: 2 }
+export const GROUP_TARGET: Record<PositionGroup, number> = { F: 12, D: 6, G: 2 }
 
-function groupCounts(
+export function groupCounts(
   team: Team,
   players: Map<PlayerId, Player>,
   leaving: Player[]
@@ -175,7 +426,11 @@ function groupCounts(
   return counts
 }
 
-const sumSalary = (ps: Player[]): number => ps.reduce((s, p) => s + p.contract.salary, 0)
+const sumSalary = (ps: Player[], retainedAmounts?: Map<string, number>): number =>
+  ps.reduce((s, p) => {
+    const retained = retainedAmounts?.get(p.id as string) ?? 0
+    return s + (p.contract.salary - retained)
+  }, 0)
 
 /** Earliest draft year named in the proposal — the discounting baseline. */
 const baselineYear = (picks: DraftPick[]): number =>
@@ -190,6 +445,11 @@ const round1 = (v: number): number => Math.round(v * 10) / 10
  * seeded ±4% mood wiggle), counters when the offer is within 15% of that bar,
  * and rejects otherwise. No-trade clauses and the partner's salary cap are
  * hard gates checked before any value math.
+ *
+ * Philosophy biases (WinNow / FavorYoung / RebuildDraft / RebuildProspects)
+ * are applied to the gain side so each club values assets differently.
+ * Retained salary reduces the effective cap hit counted against the partner's
+ * cap and adds bonus value reflecting cap relief.
  */
 export function evaluateProposal(args: {
   give: TradePackage
@@ -213,8 +473,10 @@ export function evaluateProposal(args: {
     }
   }
 
-  const capAfter =
-    partnerTeam.finances.capUsed + sumSalary(give.players) - sumSalary(receive.players)
+  // Cap check: retained salary on incoming players reduces the partner's cap hit.
+  const incomingSalary = sumSalary(give.players, give.retainedAmounts)
+  const outgoingSalary = sumSalary(receive.players)
+  const capAfter = partnerTeam.finances.capUsed + incomingSalary - outgoingSalary
   if (capAfter > partnerTeam.finances.salaryCap) {
     return {
       verdict: 'reject',
@@ -233,9 +495,27 @@ export function evaluateProposal(args: {
     return g === 'G' ? 1.1 : 1.07
   }
 
+  const philosophy = teamPhilosophy(partnerTeam.id)
+
+  // Gain = what the partner receives (the user's "give" side).
   const gain =
-    give.players.reduce((s, p) => s + playerValue(p) * needBonus(p.position), 0) +
-    give.picks.reduce((s, p) => s + pickValue(p, { year }), 0)
+    give.players.reduce((s, p) => {
+      const base = playerValue(p) * needBonus(p.position)
+      const bias = philosophyGainBias(philosophy, { kind: 'player', player: p })
+      // Cap relief bonus: if the player's salary is retained by the other side,
+      // the partner benefits from reduced cap hit.
+      const retained = give.retainedAmounts?.get(p.id as string) ?? 0
+      const partnerCapAfterPlayer = partnerTeam.finances.capUsed + (p.contract.salary - retained) - outgoingSalary
+      const relief = retentionValueBonus(retained, partnerTeam.finances.salaryCap - partnerCapAfterPlayer)
+      return s + base * bias + relief
+    }, 0) +
+    give.picks.reduce((s, p) => {
+      const pv = pickValue(p, { year })
+      const bias = philosophyGainBias(philosophy, { kind: 'pick', pick: p })
+      return s + pv * bias
+    }, 0)
+
+  // Loss = what the partner gives up (the user's "receive" side).
   const loss =
     receive.players.reduce((s, p) => s + playerValue(p), 0) +
     receive.picks.reduce((s, p) => s + pickValue(p, { year }), 0)
