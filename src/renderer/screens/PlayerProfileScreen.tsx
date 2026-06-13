@@ -1,12 +1,50 @@
-import type { PlayerProfileView } from '../../worker/protocol'
-import type { SkaterSeasonLine, GoalieSeasonLine, ArchetypeInfo } from '../../engine/career/views'
+/**
+ * Player Profile — tabbed FM-style view.
+ *
+ * Tabs:
+ *   1. Profile   — face/bio header, attribute groups, radar + stat bars, personality reads, status
+ *   2. Positions — position(s), role, archetype/descriptor suitability
+ *   3. Information — birthplace, nationality, honours, draft status, international record
+ *   4. Contract  — salary, cap hit, buried cap hit, FA status, expiry, clauses
+ *   5. History   — season-by-season stat table
+ *   6. Scout Report — fogged personality reads framed as a scout's write-up + projection
+ *
+ * Compare control on the Profile tab: pick a second player from the squad
+ * (dropdown) → overlays their radar via client.compareRadar() and shows
+ * key-stat lines side by side.
+ */
+import { useState, useCallback } from 'react'
+import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
+import type {
+  SkaterSeasonLine,
+  GoalieSeasonLine,
+  ArchetypeInfo,
+  PersonalityTraitRead,
+} from '../../engine/career/views'
+import { RADAR_AXES } from '../../engine/career/views'
+import type { SquadView } from '../../engine/career/views'
 import { useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
+import { RadarChart } from '../components/RadarChart'
+import { StatBar } from '../components/StatBar'
 
-/* ── sub-components ── */
+/* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
+
+type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'profile',     label: 'Profile' },
+  { id: 'positions',   label: 'Positions & Roles' },
+  { id: 'information', label: 'Information' },
+  { id: 'contract',    label: 'Contract' },
+  { id: 'history',     label: 'History' },
+  { id: 'scout',       label: 'Scout Report' },
+]
+
+/* ═══════════════════════════ SUB-COMPONENTS ═══════════════════════════ */
 
 function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }): JSX.Element | null {
   if (!archetype) return null
@@ -28,13 +66,7 @@ function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }):
     >
       {archetype.label}
       {archetype.descriptors.length > 0 && (
-        <span
-          style={{
-            display: 'flex',
-            gap: 4,
-            flexWrap: 'wrap',
-          }}
-        >
+        <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {archetype.descriptors.slice(0, 3).map((d) => (
             <span
               key={d}
@@ -66,6 +98,20 @@ function PotentialStars({ count }: { count: number }): JSX.Element {
   )
 }
 
+function ConditionBar({ value }: { value: number }): JSX.Element {
+  const pct = Math.max(0, Math.min(100, value))
+  const cls = pct < 50 ? 'meter-fill over' : pct < 75 ? 'meter-fill warn' : 'meter-fill'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="meter" style={{ width: 80, height: 6 }}>
+        <div className={cls} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="small muted">{pct}%</span>
+    </div>
+  )
+}
+
+/* Attribute bar with masked (fog-of-war) support. */
 function AttrBar({
   label,
   value,
@@ -87,7 +133,6 @@ function AttrBar({
     'var(--danger)'
 
   if (masked && lo !== undefined && hi !== undefined && lo !== hi) {
-    // Render a soft band: grey fill for the range, midpoint marker
     const loPct = Math.max(0, Math.min(100, lo))
     const hiPct = Math.max(0, Math.min(100, hi))
     const bandW = hiPct - loPct
@@ -95,25 +140,13 @@ function AttrBar({
       <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 56px', alignItems: 'center', gap: 8 }}>
         <span className="muted small" style={{ textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
         <div className="meter" style={{ height: 6, position: 'relative' }}>
-          {/* Band fill */}
           <div style={{
-            position: 'absolute',
-            left: `${loPct}%`,
-            width: `${bandW}%`,
-            height: '100%',
-            background: 'var(--muted)',
-            opacity: 0.35,
-            borderRadius: 3,
+            position: 'absolute', left: `${loPct}%`, width: `${bandW}%`, height: '100%',
+            background: 'var(--muted)', opacity: 0.35, borderRadius: 3,
           }} />
-          {/* Midpoint marker */}
           <div style={{
-            position: 'absolute',
-            left: `${pct}%`,
-            width: 2,
-            height: '100%',
-            background: color,
-            transform: 'translateX(-50%)',
-            borderRadius: 1,
+            position: 'absolute', left: `${pct}%`, width: 2, height: '100%',
+            background: color, transform: 'translateX(-50%)', borderRadius: 1,
           }} />
         </div>
         <span className="small mono muted" style={{ textAlign: 'right' }}>{lo}–{hi}</span>
@@ -132,29 +165,37 @@ function AttrBar({
   )
 }
 
-function PersonalityChip({ label, value }: { label: string; value: number }): JSX.Element {
-  // value is 0-100; show as a qualitative chip
-  const tier =
-    value >= 80 ? { cls: 'chip chip-success', suffix: '+' } :
-    value >= 60 ? { cls: 'chip chip-accent', suffix: '' } :
-    value >= 40 ? { cls: 'chip', suffix: '' } :
-    { cls: 'chip chip-danger', suffix: '−' }
-  return <span className={tier.cls}>{label}{tier.suffix}</span>
-}
-
-function ConditionBar({ value }: { value: number }): JSX.Element {
-  const pct = Math.max(0, Math.min(100, value))
-  const cls = pct < 50 ? 'meter-fill over' : pct < 75 ? 'meter-fill warn' : 'meter-fill'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div className="meter" style={{ width: 80, height: 6 }}>
-        <div className={cls} style={{ width: `${pct}%` }} />
+/* Personality read row: descriptor + confidence badge. */
+function PersonalityReadRow({ read }: { read: PersonalityTraitRead }): JSX.Element {
+  if (!read.known) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+        <span className="muted small">{read.label}</span>
+        <span className="chip" style={{ opacity: 0.5 }}>Unknown</span>
       </div>
-      <span className="small muted">{pct}%</span>
+    )
+  }
+  const confColor =
+    read.confidence === 'high' ? 'var(--success)' :
+    read.confidence === 'medium' ? 'var(--accent2)' :
+    'var(--muted)'
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderTop: '1px solid var(--line)' }}>
+      <span className="muted small">{read.label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{read.descriptor}</span>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: confColor,
+          textTransform: 'uppercase', letterSpacing: 0.5,
+        }}>
+          {read.confidence}
+        </span>
+      </div>
     </div>
   )
 }
 
+/* Skater / Goalie row helpers for the history table. */
 function SkaterHistoryRow({ s }: { s: SkaterSeasonLine }): JSX.Element {
   return (
     <>
@@ -187,79 +228,226 @@ function GoalieHistoryRow({ g }: { g: GoalieSeasonLine }): JSX.Element {
   )
 }
 
-export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
-  const client = useClient()
-  const nav = useNav()
-  const { data, loading, error } = useScreenData<PlayerProfileView>(
-    () => client.getPlayer(props.playerId),
-    (r) => (r.type === 'player' ? r.player : null)
+/* Small info row used across Information + Contract tabs. */
+function InfoRow({ label, value }: { label: string; value: string | number | null | undefined }): JSX.Element | null {
+  if (value === null || value === undefined || value === '') return null
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
+      <span className="muted small">{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 500 }}>{value}</span>
+    </div>
   )
+}
 
-  if (error) {
-    return (
-      <section className="stack">
-        <ScreenHeader title="Player">
-          <button className="btn btn-ghost" onClick={() => nav.navigate('squad')}>← Squad</button>
-        </ScreenHeader>
-        <Notice kind="warn">{error}</Notice>
-      </section>
-    )
+/* Axis label map for the radar stat bars. */
+const AXIS_LABELS: Record<string, string> = {
+  hockeyIQ: 'Hockey IQ',
+  skating: 'Skating',
+  shot: 'Shot',
+  offensiveZone: 'Off. Zone',
+  defensiveZone: 'Def. Zone',
+  physicality: 'Physical',
+}
+
+/* ═══════════════════════════ COMPARE CONTROL ═══════════════════════════ */
+
+interface CompareControlProps {
+  /** Current player (excluded from dropdown). */
+  currentId: string
+  currentName: string
+  currentRadar: import('../../engine/career/views').RadarView
+  /** Callback to trigger an async compare fetch. */
+  onCompare: (playerId: string | null) => void
+  compareResult: CompareRadarView | null
+  comparing: boolean
+  squadRows: Array<{ playerId: string; name: string; position: string }>
+}
+
+function CompareControl({
+  currentId,
+  currentName,
+  currentRadar,
+  onCompare,
+  compareResult,
+  comparing,
+  squadRows,
+}: CompareControlProps): JSX.Element {
+  const [selected, setSelected] = useState<string>('')
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    const id = e.target.value
+    setSelected(id)
+    onCompare(id || null)
   }
 
-  if (!data) {
-    return (
-      <section className="stack">
-        <ScreenHeader title="Player">
-          <button className="btn btn-ghost" onClick={() => nav.navigate('squad')}>← Squad</button>
-        </ScreenHeader>
-        <Notice kind="info">{loading ? 'Loading…' : 'Player not found.'}</Notice>
-      </section>
-    )
+  const handleClear = (): void => {
+    setSelected('')
+    onCompare(null)
   }
 
-  const d = data
-  const isGoalie = d.position === 'G'
-  const capPct = d.contract ? Math.max(0, Math.min(100, d.contract.salary / 12_000_000 * 100)) : 0
+  const others = squadRows.filter((r) => r.playerId !== currentId)
 
   return (
-    <section className="stack">
-      {/* ── header ── */}
-      <ScreenHeader title={d.name}>
-        <div className="row">
-          <button className="btn btn-ghost small" onClick={() => nav.navigate('squad')}>← Squad</button>
+    <Panel title="Ratings">
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-3)' }}>
+        {/* Compare picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+          <label className="muted small" style={{ whiteSpace: 'nowrap' }}>Compare vs:</label>
+          <select
+            className="select"
+            value={selected}
+            onChange={handleChange}
+            style={{ flex: 1, fontSize: 12 }}
+          >
+            <option value="">— no comparison —</option>
+            {others.map((r) => (
+              <option key={r.playerId} value={r.playerId}>
+                {r.name} ({r.position})
+              </option>
+            ))}
+          </select>
+          {selected && (
+            <button className="btn btn-ghost btn-sm" onClick={handleClear}>✕</button>
+          )}
         </div>
-      </ScreenHeader>
 
-      {/* ── injury banner ── */}
-      {d.injury && (
-        <Notice kind="danger">
-          Injured: {d.injury.description} — {d.injury.gamesRemaining} game{d.injury.gamesRemaining !== 1 ? 's' : ''} remaining
-        </Notice>
-      )}
+        {/* Radar */}
+        {comparing ? (
+          <span className="muted small">Loading comparison…</span>
+        ) : (
+          <RadarChart
+            radar={currentRadar}
+            compareRadar={compareResult?.playerB.radar}
+            primaryName={currentName}
+            compareName={compareResult?.playerB.name}
+            size={240}
+          />
+        )}
 
-      {/* ── hero strip ── */}
+        {/* Stat bars for the 6 axes */}
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {RADAR_AXES.map((key) => (
+            <StatBar
+              key={key}
+              label={AXIS_LABELS[key] ?? key}
+              value={currentRadar[key]}
+              compact
+            />
+          ))}
+        </div>
+
+        {/* Compare key stats (when active) */}
+        {compareResult && (
+          <div style={{ width: '100%', borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+            <div className="panel-title" style={{ marginBottom: 8 }}>Key Stats vs {compareResult.playerB.name}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '4px 12px', fontSize: 12, alignItems: 'center' }}>
+              {/* OVR */}
+              <span style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{compareResult.playerA.overall}</span>
+              <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>OVR</span>
+              <span style={{ fontWeight: 700, color: 'var(--cyan)' }}>{compareResult.playerB.overall}</span>
+              {/* Skater stats */}
+              {compareResult.playerA.skater && compareResult.playerB.skater && (
+                <>
+                  <span style={{ textAlign: 'right', color: 'var(--accent)' }}>{compareResult.playerA.skater.goals}</span>
+                  <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>G</span>
+                  <span style={{ color: 'var(--cyan)' }}>{compareResult.playerB.skater.goals}</span>
+
+                  <span style={{ textAlign: 'right', color: 'var(--accent)' }}>{compareResult.playerA.skater.assists}</span>
+                  <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>A</span>
+                  <span style={{ color: 'var(--cyan)' }}>{compareResult.playerB.skater.assists}</span>
+
+                  <span style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{compareResult.playerA.skater.points}</span>
+                  <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>PTS</span>
+                  <span style={{ fontWeight: 700, color: 'var(--cyan)' }}>{compareResult.playerB.skater.points}</span>
+                </>
+              )}
+              {/* Goalie stats */}
+              {compareResult.playerA.goalie && compareResult.playerB.goalie && (
+                <>
+                  <span style={{ textAlign: 'right', color: 'var(--accent)' }}>.{Math.round(compareResult.playerA.goalie.savePct * 1000)}</span>
+                  <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>SV%</span>
+                  <span style={{ color: 'var(--cyan)' }}>.{Math.round(compareResult.playerB.goalie.savePct * 1000)}</span>
+
+                  <span style={{ textAlign: 'right', color: 'var(--accent)' }}>{compareResult.playerA.goalie.goalsAgainstAverage.toFixed(2)}</span>
+                  <span className="muted" style={{ textAlign: 'center', fontSize: 10, textTransform: 'uppercase' }}>GAA</span>
+                  <span style={{ color: 'var(--cyan)' }}>{compareResult.playerB.goalie.goalsAgainstAverage.toFixed(2)}</span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
+/* ═══════════════════════════ TAB PANELS ═══════════════════════════ */
+
+function TabProfile({
+  d,
+  client,
+  squadRows,
+}: {
+  d: PlayerProfileView
+  client: ReturnType<typeof useClient>
+  squadRows: Array<{ playerId: string; name: string; position: string }>
+}): JSX.Element {
+  const [compareResult, setCompareResult] = useState<CompareRadarView | null>(null)
+  const [comparing, setComparing] = useState(false)
+
+  const handleCompare = useCallback(
+    async (playerId: string | null): Promise<void> => {
+      if (!playerId) {
+        setCompareResult(null)
+        return
+      }
+      setComparing(true)
+      const res = await client.compareRadar(d.playerId, playerId)
+      setComparing(false)
+      if (res.type === 'compareRadar') setCompareResult(res.comparison)
+    },
+    [client, d.playerId]
+  )
+
+  const isGoalie = d.position === 'G'
+
+  return (
+    <div className="stack">
+      {/* ── Bio header strip ── */}
       <Panel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 'var(--sp-5)', alignItems: 'start' }}>
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {/* Identity chips (with face image) */}
+            {/* Face + identity chips */}
             <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-3)', alignItems: 'center' }}>
-              <PlayerFace faceId={d.faceId} name={d.name} size={64} />
-            </div>
-            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-              <span className="chip chip-accent">{d.position}</span>
-              <span className="chip">{d.handedness} shot</span>
-              <span className="chip">{d.age} yrs</span>
-              {d.teamName
-                ? <span className="chip">{d.teamName}</span>
-                : <span className="chip chip-warn">Free agent</span>}
-              <span className="chip">{d.role}</span>
-              {d.contract?.noTradeClause && <span className="chip chip-warn">NTC</span>}
-              {d.contract?.twoWay && <span className="chip">2-way</span>}
-              <ArchetypeChip archetype={d.archetype} />
+              <PlayerFace faceId={d.faceId} name={d.name} size={72} />
+              <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{d.name}</div>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+                  <span className="chip chip-accent">{d.position}</span>
+                  <span className="chip">{d.handedness} shot</span>
+                  <span className="chip">{d.age} yrs</span>
+                  {d.teamName
+                    ? <span className="chip">{d.teamName}</span>
+                    : <span className="chip chip-warn">Free agent</span>}
+                  {d.bio.jerseyNumber !== undefined && (
+                    <span className="chip">#{d.bio.jerseyNumber}</span>
+                  )}
+                  {d.bio.nationality && <span className="chip">{d.bio.nationality}</span>}
+                  <ArchetypeChip archetype={d.archetype} />
+                </div>
+                {/* Height / weight */}
+                {(d.bio.heightCm !== undefined || d.bio.weightKg !== undefined) && (
+                  <span className="muted small">
+                    {d.bio.heightCm !== undefined && `${d.bio.heightCm} cm`}
+                    {d.bio.heightCm !== undefined && d.bio.weightKg !== undefined && ' · '}
+                    {d.bio.weightKg !== undefined && `${d.bio.weightKg} kg`}
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Big OVR + potential */}
-            <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end' }}>
+            {/* OVR + potential + status */}
+            <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div className="stat">
                 {d.scouted && !d.scouted.exact ? (
                   <>
@@ -286,8 +474,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               </div>
               <div className="stack" style={{ gap: 'var(--sp-1)' }}>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>
-                  {d.condition}
-                  <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>/100</span>
+                  {d.condition}<span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>/100</span>
                 </span>
                 <span className="muted small">Condition</span>
                 <ConditionBar value={d.condition} />
@@ -296,20 +483,49 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{d.morale}</span>
                 <span className="muted small">Morale</span>
               </div>
-            </div>
-
-            {/* Personality */}
-            {d.personality.length > 0 && (
-              <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
-                {d.personality.map((p) => (
-                  <PersonalityChip key={p.label} label={p.label} value={p.value} />
-                ))}
+              <div className="stack" style={{ gap: 'var(--sp-1)' }}>
+                <span style={{
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: d.form > 2 ? 'var(--success)' : d.form < -2 ? 'var(--danger)' : 'var(--text)',
+                }}>
+                  {d.form > 0 ? `+${d.form}` : d.form}
+                </span>
+                <span className="muted small">Form</span>
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Contract panel */}
-          {d.contract ? (
+          {/* Contract summary */}
+          {d.profileContract ? (
+            <div className="panel" style={{ minWidth: 200, background: 'var(--bg2)' }}>
+              <div className="panel-title">Contract</div>
+              <div className="stat">
+                <div className="stat-value" style={{ fontSize: 22 }}>{fmtMoney(d.profileContract.salary)}</div>
+                <div className="stat-label">per year</div>
+              </div>
+              {d.profileContract.capHit !== d.profileContract.salary && (
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  Cap hit: {fmtMoney(d.profileContract.capHit)}
+                </div>
+              )}
+              <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
+                {d.profileContract.yearsRemaining} yr{d.profileContract.yearsRemaining !== 1 ? 's' : ''} remaining
+                · expires {d.profileContract.expiryYear}
+              </div>
+              <div className="meter" style={{ marginTop: 'var(--sp-3)' }}>
+                <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, d.profileContract.salary / 12_000_000 * 100))}%` }} />
+              </div>
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {((d.profileContract.salary / 83_500_000) * 100).toFixed(1)}% of cap
+              </div>
+              {d.profileContract.freeAgentStatus && (
+                <span className="chip chip-warn" style={{ marginTop: 6 }}>{d.profileContract.freeAgentStatus}</span>
+              )}
+              {d.profileContract.noTradeClause && <span className="chip chip-warn" style={{ marginTop: 4 }}>NTC</span>}
+              {d.profileContract.twoWay && <span className="chip" style={{ marginTop: 4 }}>2-way</span>}
+            </div>
+          ) : d.contract ? (
             <div className="panel" style={{ minWidth: 200, background: 'var(--bg2)' }}>
               <div className="panel-title">Contract</div>
               <div className="stat">
@@ -319,12 +535,6 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
                 {d.contract.yearsRemaining} yr{d.contract.yearsRemaining !== 1 ? 's' : ''} remaining
                 · expires {d.contract.expiryYear}
-              </div>
-              <div className="meter" style={{ marginTop: 'var(--sp-3)' }}>
-                <div className="meter-fill" style={{ width: `${capPct}%` }} />
-              </div>
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {((d.contract.salary / 83_500_000) * 100).toFixed(1)}% of cap
               </div>
             </div>
           ) : (
@@ -336,7 +546,18 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
         </div>
       </Panel>
 
-      {/* ── attributes + composites ── */}
+      {/* ── Personality reads (fogged descriptors, NOT raw numbers) ── */}
+      {d.personalityReads.length > 0 && (
+        <Panel title="Personality">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0 var(--sp-5)' }}>
+            {d.personalityReads.map((read) => (
+              <PersonalityReadRow key={read.key} read={read} />
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Attribute groups + Ratings card ── */}
       <div className="grid grid-2">
         {/* Attribute groups */}
         <div className="stack">
@@ -356,71 +577,462 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               </div>
             </Panel>
           ))}
+
+          {/* Composites */}
+          {d.composites.length > 0 && (
+            <Panel title="Composites">
+              <div className="stack" style={{ gap: 8 }}>
+                {d.composites.map((c) => (
+                  <AttrBar key={c.label} label={c.label} value={c.value} />
+                ))}
+              </div>
+            </Panel>
+          )}
         </div>
 
-        {/* Composites */}
-        <div className="stack">
-          <Panel title="Composites">
-            <div className="stack" style={{ gap: 8 }}>
-              {d.composites.map((c) => (
-                <AttrBar key={c.label} label={c.label} value={c.value} />
-              ))}
-            </div>
-          </Panel>
+        {/* Radar + compare */}
+        <div>
+          <CompareControl
+            currentId={d.playerId}
+            currentName={d.name}
+            currentRadar={d.radar}
+            onCompare={(id) => { void handleCompare(id) }}
+            compareResult={compareResult}
+            comparing={comparing}
+            squadRows={squadRows}
+          />
         </div>
       </div>
 
-      {/* ── season history ── */}
-      {d.seasons.length > 0 && (
-        <Panel title="Career Stats">
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Season</th>
-                  <th>Team</th>
-                  {isGoalie ? (
-                    <>
-                      <th className="num">GP</th>
-                      <th className="num">W</th>
-                      <th className="num">L</th>
-                      <th className="num">SV%</th>
-                      <th className="num">GAA</th>
-                      <th className="num">SO</th>
-                      <th className="num"></th>
-                      <th className="num"></th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="num">GP</th>
-                      <th className="num">G</th>
-                      <th className="num">A</th>
-                      <th className="num">P</th>
-                      <th className="num">±</th>
-                      <th className="num">PIM</th>
-                      <th className="num">TOI/g</th>
-                      <th className="num">PP</th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {d.seasons.map((season, i) => (
-                  <tr key={season.year} style={i === 0 ? { fontWeight: 600 } : undefined}>
-                    <td>{season.year}–{String(season.year + 1).slice(2)}</td>
-                    <td className="muted">{season.teamAbbr}</td>
-                    {season.goalie
-                      ? <GoalieHistoryRow g={season.goalie} />
-                      : season.skater
-                        ? <SkaterHistoryRow s={season.skater} />
-                        : <td colSpan={8} className="muted">—</td>}
-                  </tr>
+      {/* ── Status cards ── */}
+      {d.injury && (
+        <Notice kind="danger">
+          Injured: {d.injury.description} — {d.injury.gamesRemaining} game{d.injury.gamesRemaining !== 1 ? 's' : ''} remaining
+        </Notice>
+      )}
+
+      {/* Season snapshot (current season only for the Profile tab quick view) */}
+      {d.seasons.length > 0 && (() => {
+        const cur = d.seasons[0]!
+        return (
+          <Panel title="This Season">
+            {isGoalie && cur.goalie ? (
+              <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'GP', value: cur.goalie.gamesPlayed },
+                  { label: 'W', value: cur.goalie.wins },
+                  { label: 'L', value: cur.goalie.losses },
+                  { label: 'SV%', value: `.${Math.round(cur.goalie.savePct * 1000)}` },
+                  { label: 'GAA', value: cur.goalie.goalsAgainstAverage.toFixed(2) },
+                  { label: 'SO', value: cur.goalie.shutouts },
+                ].map(({ label, value }) => (
+                  <div key={label} className="stat">
+                    <div className="stat-value" style={{ fontSize: 20 }}>{value}</div>
+                    <div className="stat-label">{label}</div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            ) : cur.skater ? (
+              <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap' }}>
+                {[
+                  { label: 'GP', value: cur.skater.gamesPlayed },
+                  { label: 'G', value: cur.skater.goals },
+                  { label: 'A', value: cur.skater.assists },
+                  { label: 'PTS', value: cur.skater.points },
+                  { label: '±', value: cur.skater.plusMinus > 0 ? `+${cur.skater.plusMinus}` : cur.skater.plusMinus },
+                  { label: 'TOI/g', value: fmtToi(cur.skater.toiPerGame) },
+                ].map(({ label, value }) => (
+                  <div key={label} className="stat">
+                    <div className="stat-value" style={{ fontSize: 20 }}>{value}</div>
+                    <div className="stat-label">{label}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="muted small">No games played</span>
+            )}
+          </Panel>
+        )
+      })()}
+    </div>
+  )
+}
+
+function TabPositions({ d }: { d: PlayerProfileView }): JSX.Element {
+  return (
+    <div className="stack">
+      <Panel title="Position & Role">
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <span className="muted small" style={{ width: 90 }}>Position</span>
+            <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{d.position}</span>
+          </div>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <span className="muted small" style={{ width: 90 }}>Role</span>
+            <span className="chip" style={{ fontSize: 13, padding: '4px 14px' }}>{d.role}</span>
+          </div>
+          {d.handedness && (
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+              <span className="muted small" style={{ width: 90 }}>Shot</span>
+              <span className="chip">{d.handedness} shot</span>
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      {d.archetype && (
+        <Panel title="Archetype">
+          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+            <ArchetypeChip archetype={d.archetype} />
+            {d.archetype.descriptors.length > 0 && (
+              <div>
+                <div className="panel-title" style={{ marginBottom: 6 }}>Style traits</div>
+                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+                  {d.archetype.descriptors.map((desc) => (
+                    <span key={desc} className="chip">{desc}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Panel>
       )}
+
+      {/* Composites as suitability indicators */}
+      {d.composites.length > 0 && (
+        <Panel title="Composites">
+          <div className="stack" style={{ gap: 8 }}>
+            {d.composites.map((c) => (
+              <AttrBar key={c.label} label={c.label} value={c.value} />
+            ))}
+          </div>
+        </Panel>
+      )}
+    </div>
+  )
+}
+
+function TabInformation({ d }: { d: PlayerProfileView }): JSX.Element {
+  const h = d.honours
+  const hasIntl = h.intlApps > 0
+  const hasCups = h.stanleyCups > 0
+  const hasRep = h.homeReputation > 0 || h.currentReputation > 0 || h.worldReputation > 0
+
+  return (
+    <div className="stack">
+      {/* Bio */}
+      <Panel title="Personal">
+        <InfoRow label="Nationality" value={d.bio.nationality} />
+        <InfoRow label="Birthplace" value={d.bio.birthplace} />
+        <InfoRow label="Jersey number" value={d.bio.jerseyNumber !== undefined ? `#${d.bio.jerseyNumber}` : undefined} />
+        <InfoRow label="Height" value={d.bio.heightCm !== undefined ? `${d.bio.heightCm} cm` : undefined} />
+        <InfoRow label="Weight" value={d.bio.weightKg !== undefined ? `${d.bio.weightKg} kg` : undefined} />
+        {!d.bio.nationality && !d.bio.birthplace && !d.bio.heightCm && !d.bio.weightKg && (
+          <span className="muted small">No biographical data recorded.</span>
+        )}
+      </Panel>
+
+      {/* Draft */}
+      <Panel title="Draft Status">
+        <InfoRow
+          label="NHL Draft"
+          value={h.nhlDrafted ? 'Drafted' : h.nhlDraftEligible ? 'Draft eligible' : 'Not eligible'}
+        />
+        <InfoRow label="Junior preference" value={h.juniorPreference} />
+      </Panel>
+
+      {/* Honours */}
+      {(hasCups || hasIntl || hasRep) && (
+        <Panel title="Honours">
+          {hasCups && (
+            <InfoRow label="Stanley Cups" value={h.stanleyCups} />
+          )}
+          {hasIntl && (
+            <>
+              <InfoRow label="Intl appearances" value={h.intlApps} />
+              <InfoRow label="Intl goals" value={h.intlGoals} />
+              <InfoRow label="Intl assists" value={h.intlAssists} />
+            </>
+          )}
+          {hasRep && (
+            <>
+              <InfoRow label="Home rep." value={h.homeReputation > 0 ? h.homeReputation : undefined} />
+              <InfoRow label="Current rep." value={h.currentReputation > 0 ? h.currentReputation : undefined} />
+              <InfoRow label="World rep." value={h.worldReputation > 0 ? h.worldReputation : undefined} />
+            </>
+          )}
+        </Panel>
+      )}
+    </div>
+  )
+}
+
+function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
+  const pc = d.profileContract
+  const c = d.contract
+
+  if (!pc && !c) {
+    return (
+      <Panel>
+        <span className="muted small">This player has no active contract.</span>
+      </Panel>
+    )
+  }
+
+  const salary = pc?.salary ?? c?.salary ?? 0
+  const capHit = pc?.capHit ?? salary
+  const yearsRem = pc?.yearsRemaining ?? c?.yearsRemaining ?? 0
+  const expiryYear = pc?.expiryYear ?? c?.expiryYear ?? 0
+
+  return (
+    <div className="stack">
+      <Panel title="Contract Details">
+        <InfoRow label="Annual salary" value={fmtMoney(salary)} />
+        <InfoRow label="Cap hit" value={fmtMoney(capHit)} />
+        {pc?.buriedCapHit !== undefined && (
+          <InfoRow label="Buried cap hit (minors)" value={fmtMoney(pc.buriedCapHit)} />
+        )}
+        <InfoRow label="Years remaining" value={yearsRem} />
+        <InfoRow label="Expiry year" value={expiryYear} />
+        <InfoRow label="FA status" value={pc?.freeAgentStatus ?? (c ? 'Under contract' : null)} />
+        <InfoRow label="No-trade clause" value={(pc?.noTradeClause ?? c?.noTradeClause) ? 'Yes' : null} />
+        <InfoRow label="Two-way contract" value={(pc?.twoWay ?? c?.twoWay) ? 'Yes' : null} />
+      </Panel>
+
+      <Panel title="Cap Usage">
+        <div className="meter" style={{ marginBottom: 8 }}>
+          <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, capHit / 83_500_000 * 100))}%` }} />
+        </div>
+        <span className="muted small">
+          {fmtMoney(capHit)} of $83.5M cap · {((capHit / 83_500_000) * 100).toFixed(1)}%
+        </span>
+      </Panel>
+    </div>
+  )
+}
+
+function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
+  const isGoalie = d.position === 'G'
+
+  if (d.seasons.length === 0) {
+    return (
+      <Panel>
+        <span className="muted small">No season history recorded.</span>
+      </Panel>
+    )
+  }
+
+  return (
+    <Panel title="Career Stats">
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Season</th>
+              <th>Team</th>
+              {isGoalie ? (
+                <>
+                  <th className="num">GP</th>
+                  <th className="num">W</th>
+                  <th className="num">L</th>
+                  <th className="num">SV%</th>
+                  <th className="num">GAA</th>
+                  <th className="num">SO</th>
+                  <th className="num"></th>
+                  <th className="num"></th>
+                </>
+              ) : (
+                <>
+                  <th className="num">GP</th>
+                  <th className="num">G</th>
+                  <th className="num">A</th>
+                  <th className="num">P</th>
+                  <th className="num">±</th>
+                  <th className="num">PIM</th>
+                  <th className="num">TOI/g</th>
+                  <th className="num">PP</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {d.seasons.map((season, i) => (
+              <tr key={season.year} style={i === 0 ? { fontWeight: 600 } : undefined}>
+                <td>{season.year}–{String(season.year + 1).slice(2)}</td>
+                <td className="muted">{season.teamAbbr}</td>
+                {season.goalie
+                  ? <GoalieHistoryRow g={season.goalie} />
+                  : season.skater
+                    ? <SkaterHistoryRow s={season.skater} />
+                    : <td colSpan={8} className="muted">—</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
+function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
+  const knownReads = d.personalityReads.filter((r) => r.known)
+  const unknownCount = d.personalityReads.filter((r) => !r.known).length
+
+  // Derive a rough projection word from overall + potential stars
+  const projLabel =
+    d.potentialStars >= 5 ? 'Franchise player'  :
+    d.potentialStars >= 4 ? 'Top-line talent'   :
+    d.potentialStars >= 3 ? 'Solid NHL player'  :
+    d.potentialStars >= 2 ? 'Depth / role player' :
+    'Fringe NHLer'
+
+  const overallLabel =
+    d.scouted && !d.scouted.exact
+      ? `${d.scouted.overallLo}–${d.scouted.overallHi} (${d.scouted.knowledge}% scouted)`
+      : `${d.overall}`
+
+  return (
+    <div className="stack">
+      {/* Projection summary */}
+      <Panel title="Scout's Assessment">
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-end' }}>
+            <div className="stat">
+              <div className="stat-value" style={{ fontSize: 32, color: 'var(--accent)' }}>{overallLabel}</div>
+              <div className="stat-label">Overall</div>
+            </div>
+            <div className="stack" style={{ gap: 'var(--sp-1)' }}>
+              <PotentialStars count={d.potentialStars} />
+              <span className="muted small">Ceiling</span>
+            </div>
+          </div>
+          <div>
+            <span className="chip chip-info" style={{ fontSize: 12 }}>{projLabel}</span>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>
+            {d.name} is a {d.age}-year-old {d.role} playing as {d.position}
+            {d.archetype ? ` — archetype: ${d.archetype.label}` : ''}.
+            {d.archetype?.descriptors.length ? ` Known for: ${d.archetype.descriptors.join(', ')}.` : ''}
+            {' '}Projected ceiling: <strong style={{ color: 'var(--text)' }}>{projLabel}</strong>.
+          </p>
+        </div>
+      </Panel>
+
+      {/* Personality / character reads */}
+      {d.personalityReads.length > 0 && (
+        <Panel title="Character Profile">
+          {unknownCount > 0 && (
+            <Notice kind="info">
+              {unknownCount} trait{unknownCount !== 1 ? 's' : ''} not yet scouted.
+              Assign a scout to improve knowledge.
+            </Notice>
+          )}
+          <div style={{ marginTop: knownReads.length > 0 ? 'var(--sp-3)' : 0 }}>
+            {knownReads.map((read) => (
+              <PersonalityReadRow key={read.key} read={read} />
+            ))}
+          </div>
+          {knownReads.length === 0 && unknownCount > 0 && (
+            <span className="muted small">No character information available yet.</span>
+          )}
+        </Panel>
+      )}
+
+      {/* Radar axes as condensed stat bars */}
+      <Panel title="Radar Axes">
+        <div className="stack" style={{ gap: 6 }}>
+          {RADAR_AXES.map((key) => (
+            <StatBar
+              key={key}
+              label={AXIS_LABELS[key] ?? key}
+              value={d.radar[key]}
+            />
+          ))}
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+/* ═══════════════════════════ MAIN SCREEN ═══════════════════════════ */
+
+export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
+  const client = useClient()
+  const nav = useNav()
+  const [activeTab, setActiveTab] = useState<TabId>('profile')
+
+  const { data, loading, error } = useScreenData<PlayerProfileView>(
+    () => client.getPlayer(props.playerId),
+    (r) => (r.type === 'player' ? r.player : null)
+  )
+
+  // Fetch squad for compare dropdown (best-effort; silently absent = empty list).
+  const { data: squadData } = useScreenData<SquadView>(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+
+  const squadRows = (squadData?.rows ?? []).map((r) => ({
+    playerId: r.playerId,
+    name: r.name,
+    position: r.position,
+  }))
+
+  if (error) {
+    return (
+      <section className="stack">
+        <ScreenHeader title="Player">
+          <button className="btn btn-ghost" onClick={() => nav.navigate('squad')}>← Squad</button>
+        </ScreenHeader>
+        <Notice kind="warn">{error}</Notice>
+      </section>
+    )
+  }
+
+  if (!data) {
+    return (
+      <section className="stack">
+        <ScreenHeader title="Player">
+          <button className="btn btn-ghost" onClick={() => nav.navigate('squad')}>← Squad</button>
+        </ScreenHeader>
+        <Notice kind="info">{loading ? 'Loading…' : 'Player not found.'}</Notice>
+      </section>
+    )
+  }
+
+  const d = data
+
+  return (
+    <section className="stack">
+      {/* ── Page header ── */}
+      <ScreenHeader title={d.name}>
+        <div className="row">
+          <button className="btn btn-ghost small" onClick={() => nav.navigate('squad')}>← Squad</button>
+        </div>
+      </ScreenHeader>
+
+      {/* ── Tabs ── */}
+      <div className="tabs">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            className={`tab${activeTab === tab.id ? ' active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab content ── */}
+      {activeTab === 'profile' && (
+        <TabProfile d={d} client={client} squadRows={squadRows} />
+      )}
+      {activeTab === 'positions' && <TabPositions d={d} />}
+      {activeTab === 'information' && <TabInformation d={d} />}
+      {activeTab === 'contract' && <TabContract d={d} />}
+      {activeTab === 'history' && <TabHistory d={d} />}
+      {activeTab === 'scout' && <TabScout d={d} />}
     </section>
   )
 }
