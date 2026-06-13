@@ -400,6 +400,25 @@ export interface PlayerProfileView extends PlayerBadge {
    * Absent (omitted) otherwise.
    */
   personalityType?: { label: string; blurb: string }
+  /**
+   * Interview section: answered Q&A (deterministic from traits) + the questions
+   * the GM hasn't asked yet. Present whenever the player can be interviewed.
+   */
+  interview?: InterviewView
+}
+
+/** One answered interview question. */
+export interface InterviewAnswerView {
+  questionId: string
+  prompt: string
+  trait: string
+  answer: string
+  reveal: string
+}
+
+export interface InterviewView {
+  answers: InterviewAnswerView[]
+  available: { id: string; prompt: string }[]
 }
 
 /** Compare-radar response: both players' RadarViews plus key stats. */
@@ -955,6 +974,8 @@ export interface CareerSnapshot {
   /** Player→GM concerns (open + recently resolved). Optional/additive. */
   interactions?: PlayerInteraction[]
   interactionCounter?: number
+  /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
+  interviews?: Array<[string, string[]]>
   tentpoles?: TentpolesState
   /** Small story-layer counters not derivable from the states above. */
   storyMisc?: {

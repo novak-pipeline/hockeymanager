@@ -22,6 +22,7 @@ import type {
   ReportCard,
   ReportGrade,
   MindsetView,
+  InterviewView,
   ScoutPanel,
   ScoutRead,
   RiskBand,
@@ -365,6 +366,66 @@ function MindsetPanel({ mindset }: { mindset: MindsetView }): JSX.Element {
   )
 }
 
+/* ── Interview panel: ask questions to reveal hidden qualities ── */
+function InterviewPanel({
+  interview,
+  playerId,
+  client,
+  onChanged,
+}: {
+  interview: InterviewView
+  playerId: string
+  client: ReturnType<typeof useClient>
+  onChanged: () => void
+}): JSX.Element {
+  const [busy, setBusy] = useState(false)
+
+  async function ask(questionId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    await client.conductInterview(playerId, questionId)
+    setBusy(false)
+    onChanged()
+  }
+
+  return (
+    <Panel title="Interview">
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        {interview.answers.length === 0 && (
+          <span className="muted small">
+            Sit down with the player — pick a question to learn what raw ratings don’t show.
+          </span>
+        )}
+        {interview.answers.map((a) => (
+          <div key={a.questionId} style={{ borderLeft: '3px solid var(--violet-h)', paddingLeft: 'var(--sp-3)' }}>
+            <div className="muted small" style={{ fontStyle: 'italic' }}>{a.prompt}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.5, margin: '2px 0' }}>{a.answer}</div>
+            <div className="small" style={{ color: 'var(--violet-h)', fontWeight: 700 }}>
+              Read: {a.reveal}
+            </div>
+          </div>
+        ))}
+        {interview.available.length > 0 && (
+          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
+            {interview.available.map((q) => (
+              <button
+                key={q.id}
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => void ask(q.id)}
+                title="Ask this question"
+              >
+                {q.prompt}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
+  )
+}
+
 /* Axis label map for the radar stat bars. */
 const AXIS_LABELS: Record<string, string> = {
   hockeyIQ: 'Hockey IQ',
@@ -513,10 +574,12 @@ function TabProfile({
   d,
   client,
   squadRows,
+  onChanged,
 }: {
   d: PlayerProfileView
   client: ReturnType<typeof useClient>
   squadRows: Array<{ playerId: string; name: string; position: string }>
+  onChanged: () => void
 }): JSX.Element {
   const [compareResult, setCompareResult] = useState<CompareRadarView | null>(null)
   const [comparing, setComparing] = useState(false)
@@ -757,6 +820,16 @@ function TabProfile({
             {d.personalityType.blurb}
           </span>
         </div>
+      )}
+
+      {/* Interview — choose questions to reveal hidden qualities */}
+      {d.interview && (
+        <InterviewPanel
+          interview={d.interview}
+          playerId={d.playerId}
+          client={client}
+          onChanged={onChanged}
+        />
       )}
 
       {/* Mindset panel — staff-gathered outlook */}
@@ -1403,7 +1476,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
 
       {/* ── Tab content ── */}
       {activeTab === 'profile' && (
-        <TabProfile d={d} client={client} squadRows={squadRows} />
+        <TabProfile d={d} client={client} squadRows={squadRows} onChanged={refetch} />
       )}
       {activeTab === 'positions' && <TabPositions d={d} />}
       {activeTab === 'information' && <TabInformation d={d} />}

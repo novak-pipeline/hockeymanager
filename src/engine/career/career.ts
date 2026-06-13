@@ -169,11 +169,13 @@ import {
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup } from '@engine/league/lineup'
 import {
+  addKnowledge,
   assignScout,
   createInitialScouting,
   knowledgeOf,
   tickScouting,
 } from '@engine/league/scouting'
+import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
 import {
   generateStaff,
   generateTeamStaff,
@@ -471,6 +473,8 @@ export class Career {
   /** Player→GM concerns (open + recently resolved). Story-first core. */
   private interactions: PlayerInteraction[] = []
   private interactionCounter = 0
+  /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
+  private interviews = new Map<string, string[]>()
   private playoffs: PlayoffsState | null = null
   private offseason: OffseasonState | null = null
   private picks: DraftPick[] = []
@@ -4168,7 +4172,39 @@ export class Career {
     }
 
     const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
-    return buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
+    const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
+
+    // Interview section: answered Q&A (deterministic from traits) + remaining questions.
+    const player = this.data.players.get(pid)
+    if (player) {
+      const asked = this.interviews.get(playerId) ?? []
+      const answers = asked
+        .map((qid) => answerInterviewQuestion(player, qid))
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+      const available = INTERVIEW_QUESTIONS
+        .filter((q) => !asked.includes(q.id))
+        .map((q) => ({ id: q.id, prompt: q.prompt }))
+      profile.interview = { answers, available }
+    }
+
+    return profile
+  }
+
+  /** GM asks a player one interview question; records it and sharpens knowledge. */
+  conductInterview(playerId: string, questionId: string): { ok: boolean; message?: string } {
+    const pid = asPlayerId(playerId)
+    const player = this.data.players.get(pid)
+    if (!player) return { ok: false, message: 'Player not found.' }
+    if (!INTERVIEW_QUESTIONS.some((q) => q.id === questionId)) {
+      return { ok: false, message: 'Unknown question.' }
+    }
+    const asked = this.interviews.get(playerId) ?? []
+    if (asked.includes(questionId)) return { ok: false, message: 'Already asked.' }
+    asked.push(questionId)
+    this.interviews.set(playerId, asked)
+    // Sitting down with a player sharpens the read on him.
+    addKnowledge(this.scouting, playerId, 6)
+    return { ok: true }
   }
 
   /** Radar comparison view for two players (used by the Phase C compare UI). */
@@ -5286,6 +5322,7 @@ export class Career {
       ),
       interactions: this.interactions.map((i) => structuredClone(i)),
       interactionCounter: this.interactionCounter,
+      interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       tentpoles: structuredClone(this.tentpoles),
       storyMisc: {
         pointStreaks: [...this.pointStreaks],
@@ -5384,6 +5421,9 @@ export class Career {
       career.interactions = snapshot.interactions.map((i) => structuredClone(i))
     }
     career.interactionCounter = snapshot.interactionCounter ?? 0
+    if (snapshot.interviews) {
+      career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
+    }
     if (snapshot.expectations) {
       career.expectationsState = structuredClone(snapshot.expectations)
     } else {

@@ -193,6 +193,10 @@ export class SimClient {
     return this.send({ type: 'respondToInteraction', interactionId, optionId })
   }
 
+  conductInterview(playerId: string, questionId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'conductInterview', playerId, questionId })
+  }
+
   proposeTrade(proposal: TradeProposal): Promise<WorkerResponse> {
     return this.send({ type: 'proposeTrade', proposal })
   }

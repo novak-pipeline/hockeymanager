@@ -35,6 +35,16 @@ function setKnowledge(state: ScoutingState, playerId: string, value: number): vo
   state.knowledge.push([playerId, clamped])
 }
 
+/**
+ * Raise (or lower) a player's knowledge by a delta, clamped 0–100. Used by
+ * non-scout knowledge sources such as conducting an interview. Returns the new value.
+ */
+export function addKnowledge(state: ScoutingState, playerId: string, delta: number): number {
+  const next = Math.max(0, Math.min(100, knowledgeOf(state, playerId) + delta))
+  setKnowledge(state, playerId, next)
+  return next
+}
+
 /** Deterministic 32-bit hash combining two numbers. Used for stable per-player-per-attr offsets. */
 function deterministicHash(a: number, b: number): number {
   // FNV-1a inspired mixing — cheap, deterministic, no RNG needed
