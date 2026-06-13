@@ -284,6 +284,9 @@ import {
   type ClubLegend,
   type TeamLegendsView,
   type TeamDynamicsView,
+  type LeagueStatTableView,
+  type LeagueSkaterStatRow,
+  type LeagueGoalieStatRow,
   type LeagueLeadersView,
   type LeagueStatsView,
   type LeagueTeamsView,
@@ -4524,6 +4527,53 @@ export class Career {
       else skaters.push(entry)
     }
     return { teamName: squad.teamName, skaters, goalies }
+  }
+
+  /** League-wide statistics table: every NHL player's season line, flat. */
+  getLeagueStatTable(): LeagueStatTableView {
+    const skaters: LeagueSkaterStatRow[] = []
+    const goalies: LeagueGoalieStatRow[] = []
+
+    const avgRatingOf = (pid: string): number | null => {
+      const arr = this.playerRatings.get(asPlayerId(pid))
+      if (!arr || arr.length === 0) return null
+      return Math.round((arr.reduce((s, v) => s + v, 0) / arr.length) * 100) / 100
+    }
+
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const abbr = team.abbreviation
+      const squad = this.getTeamPlayerStats(teamId as string)
+      for (const r of [...squad.skaters, ...squad.goalies]) {
+        const rookie = r.age <= 21
+        if (r.goalie) {
+          const g = r.goalie
+          goalies.push({
+            playerId: r.playerId, name: r.name, teamAbbr: abbr, age: r.age, rookie,
+            gp: g.gamesPlayed, wins: g.wins, losses: g.losses, savePct: g.savePct,
+            gaa: g.goalsAgainstAverage, shutouts: g.shutouts, saves: g.saves,
+            shotsAgainst: g.shotsAgainst, avgRating: avgRatingOf(r.playerId),
+          })
+        } else if (r.skater) {
+          const s = r.skater
+          const tot = this.totals.get(asPlayerId(r.playerId))
+          skaters.push({
+            playerId: r.playerId, name: r.name, teamAbbr: abbr, position: r.position, age: r.age, rookie,
+            gp: s.gamesPlayed, goals: s.goals, assists: s.assists, points: s.points,
+            plusMinus: s.plusMinus, pim: s.penaltyMinutes, shots: s.shots,
+            shootingPct: s.shots > 0 ? s.goals / s.shots : 0,
+            atoi: s.toiPerGame, ppGoals: s.ppGoals, ppAssists: s.ppAssists,
+            ppPoints: s.ppGoals + s.ppAssists,
+            hits: tot?.hits ?? 0, blocks: tot?.blockedShots ?? 0,
+            takeaways: tot?.takeaways ?? 0, giveaways: tot?.giveaways ?? 0,
+            avgRating: avgRatingOf(r.playerId),
+          })
+        }
+      }
+    }
+    const userTeamAbbr = this.data.teams.get(this.userTeamId)?.abbreviation ?? ''
+    return { skaters, goalies, userTeamAbbr }
   }
 
   /** Full staff view for any team (or user team when teamId is absent). */

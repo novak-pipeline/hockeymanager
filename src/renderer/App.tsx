@@ -410,6 +410,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'standings':
     case 'leagueSchedule':
     case 'stats':
+    case 'leagueLeaders':
     case 'leagueTeamStats':
     case 'leagueTransactions':
     case 'leagueScoreboard':

@@ -84,7 +84,8 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
       subTabs: [
         { id: 'leagueOverview',     label: 'Overview' },
         { id: 'standings',          label: 'Standings' },
-        { id: 'stats',              label: 'Player Stats' },
+        { id: 'stats',              label: 'Statistics' },
+        { id: 'leagueLeaders',      label: 'Leaders' },
         { id: 'leagueTeamStats',    label: 'Team Stats' },
         { id: 'leagueTransactions', label: 'Transactions' },
         { id: 'leagueScoreboard',   label: 'Scoreboard' },

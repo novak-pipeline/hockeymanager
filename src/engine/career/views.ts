@@ -599,6 +599,62 @@ export interface StatsView {
   wins: LeaderRowView[]
 }
 
+/* ──── full league statistics table (sortable/filterable) ──── */
+
+export interface LeagueSkaterStatRow {
+  playerId: string
+  name: string
+  teamAbbr: string
+  position: Position
+  age: number
+  rookie: boolean
+  gp: number
+  goals: number
+  assists: number
+  points: number
+  plusMinus: number
+  pim: number
+  shots: number
+  /** Shooting % (0–1). */
+  shootingPct: number
+  /** Average time on ice per game, seconds. */
+  atoi: number
+  ppGoals: number
+  ppAssists: number
+  ppPoints: number
+  hits: number
+  blocks: number
+  takeaways: number
+  giveaways: number
+  /** Mean game rating (1–10), or null if never rated. */
+  avgRating: number | null
+}
+
+export interface LeagueGoalieStatRow {
+  playerId: string
+  name: string
+  teamAbbr: string
+  age: number
+  rookie: boolean
+  gp: number
+  wins: number
+  losses: number
+  savePct: number
+  gaa: number
+  shutouts: number
+  saves: number
+  shotsAgainst: number
+  avgRating: number | null
+}
+
+/** Response to 'getLeagueStatTable' — every NHL player's season line. */
+export interface LeagueStatTableView {
+  skaters: LeagueSkaterStatRow[]
+  goalies: LeagueGoalieStatRow[]
+  /** The user club's abbreviation (for the "My club" filter). */
+  userTeamAbbr: string
+}
+
 /* ────────────────────────── team player stats ────────────────────────── */
 
 /** One row in the Team > Statistics tab — one rostered player's season line. */

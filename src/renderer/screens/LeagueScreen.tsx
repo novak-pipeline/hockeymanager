@@ -20,6 +20,7 @@ import { crestColor } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { StandingsScreen } from './StandingsScreen'
 import { StatsScreen } from './StatsScreen'
+import { LeagueStatsTableScreen } from './LeagueStatsTableScreen'
 import { HistoryScreen } from './HistoryScreen'
 import { ScoutingScreen } from './ScoutingScreen'
 import { DraftScreen } from './DraftScreen'
@@ -32,6 +33,7 @@ type LeagueTab =
   | 'standings'
   | 'leagueSchedule'
   | 'stats'
+  | 'leagueLeaders'
   | 'leagueTeamStats'
   | 'leagueTransactions'
   | 'leagueScoreboard'
@@ -69,7 +71,8 @@ export function LeagueScreen(props: { tab: LeagueTab }): JSX.Element {
     case 'leagueOverview':     return <LeagueOverviewTab />
     case 'standings':          return <StandingsScreen />
     case 'leagueSchedule':     return <LeagueScheduleTab />
-    case 'stats':              return <StatsScreen />
+    case 'stats':              return <LeagueStatsTableScreen />
+    case 'leagueLeaders':      return <StatsScreen />
     case 'leagueTeamStats':    return <LeagueTeamStatsTab />
     case 'leagueTransactions': return <LeagueTransactionsTab />
     case 'leagueScoreboard':   return <LeagueScoreboardTab />
