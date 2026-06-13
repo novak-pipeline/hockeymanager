@@ -38,6 +38,12 @@ import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { buildSchedule, freshStanding } from './generate'
 import type { LeagueData } from './generate'
+import {
+  demeanor,
+  generateTeamStaff,
+  type StaffMember,
+  type TeamStaff,
+} from '@engine/league/staff'
 
 /* ─────────────────────────── Public schema types ─────────────────────────── */
 
@@ -207,6 +213,24 @@ export interface ModPlayer {
 }
 
 /**
+ * A real non-player staff member imported from EHM or supplied by a mod.
+ * Maps onto StaffMember — missing optional fields are synthesised by the loader.
+ */
+export interface ModStaff {
+  name: string
+  /** Must match one of the StaffMember role values. */
+  role: StaffMember['role']
+  /** 1–99 quality rating (from CA/2 in the EHM export). */
+  rating: number
+  /** 0–100 judgment (optional; synthesised if absent). */
+  judgment?: number
+  /** Optional specialty label, e.g. "Defense", "Prospects". */
+  specialty?: string
+  /** Facepack image key resolved to faces/<faceId>.png. */
+  faceId?: string
+}
+
+/**
  * Optional AHL affiliate definition on a mod team.
  *
  * When present, the loader creates a linked AHL Team from this data.
@@ -252,6 +276,12 @@ export interface ModTeam {
    * every NHL team always has one in the generated LeagueData.
    */
   affiliate?: ModAffiliate
+  /**
+   * Optional real non-player staff. When present the loader builds a TeamStaff
+   * from these entries and stores it in LeagueData.staffByTeam. Missing roles
+   * (e.g. no owner in the import) are synthesised so every slot is always filled.
+   */
+  staff?: ModStaff[]
 }
 
 export interface ModDivision {
@@ -332,6 +362,10 @@ const ATTR_KEYS = new Set<string>([
 const ROLE_KEYS = new Set<PlayerRole>([
   'sniper', 'playmaker', 'twoWay', 'powerForward', 'enforcer',
   'offensiveD', 'shutdownD', 'stayAtHomeD', 'starter', 'backup'
+])
+
+const STAFF_ROLE_KEYS = new Set<StaffMember['role']>([
+  'headCoach', 'assistantCoach', 'assistantGM', 'scout', 'physio', 'owner'
 ])
 
 function validatePlayer(raw: unknown, path: string): ModPlayer {
@@ -446,6 +480,25 @@ function validatePlayer(raw: unknown, path: string): ModPlayer {
   return r as unknown as ModPlayer
 }
 
+function validateStaff(raw: unknown, path: string): ModStaff {
+  assertObject(raw, path)
+  const r = raw as Record<string, unknown>
+  assertString(r['name'], `${path}.name`)
+  if (!STAFF_ROLE_KEYS.has(r['role'] as StaffMember['role']))
+    fail(`${path}.role must be one of ${[...STAFF_ROLE_KEYS].join('|')}, got "${r['role']}"`)
+  assertNumber(r['rating'], `${path}.rating`)
+  const rating = r['rating'] as number
+  if (rating < 1 || rating > 99) fail(`${path}.rating must be 1–99, got ${rating}`)
+  if (r['judgment'] !== undefined) {
+    assertNumber(r['judgment'], `${path}.judgment`)
+    const j = r['judgment'] as number
+    if (j < 0 || j > 100) fail(`${path}.judgment must be 0–100, got ${j}`)
+  }
+  if (r['specialty'] !== undefined) assertString(r['specialty'], `${path}.specialty`)
+  if (r['faceId'] !== undefined) assertString(r['faceId'], `${path}.faceId`)
+  return r as unknown as ModStaff
+}
+
 function validateAffiliate(raw: unknown, path: string): ModAffiliate {
   assertObject(raw, path)
   const r = raw as Record<string, unknown>
@@ -524,7 +577,21 @@ function validateTeam(raw: unknown, path: string): ModTeam {
     affiliate = validateAffiliate(r['affiliate'], `${path}.affiliate`)
   }
 
-  return { ...r, players, ...(affiliate !== undefined ? { affiliate } : {}) } as ModTeam
+  // Validate optional staff array.
+  let staff: ModStaff[] | undefined
+  if (r['staff'] !== undefined) {
+    assertArray(r['staff'], `${path}.staff`)
+    staff = (r['staff'] as unknown[]).map((s, si) =>
+      validateStaff(s, `${path}.staff[${si}]`)
+    )
+  }
+
+  return {
+    ...r,
+    players,
+    ...(affiliate !== undefined ? { affiliate } : {}),
+    ...(staff !== undefined ? { staff } : {}),
+  } as ModTeam
 }
 
 /**
@@ -856,12 +923,107 @@ const emptyStanding = (teamId: TeamId): Standing => ({
  * All randomness flows through the seeded Rng — same seed always gives the
  * same LeagueData.
  */
+/** Build a full TeamStaff from a list of ModStaff entries, filling any missing
+ *  roles with generated staff driven by `fillRng`. */
+function buildTeamStaffFromMod(
+  modStaff: ModStaff[],
+  fillRng: Rng,
+  teamKey: string,
+): TeamStaff {
+  // Helper: turn a ModStaff into a StaffMember.
+  const toMember = (ms: ModStaff, idx: number): StaffMember => {
+    const r = Math.round(Math.max(1, Math.min(99, ms.rating)))
+    const j = ms.judgment !== undefined
+      ? Math.round(Math.max(0, Math.min(100, ms.judgment)))
+      : Math.round(Math.max(30, Math.min(95, fillRng.normal(60, 14))))
+    const spec = ms.specialty
+    const dm = demeanor(r, j, spec, fillRng)
+    const idBase = `${ms.role}-${ms.name.replace(/\s+/g, '-').toLowerCase()}-${idx}`
+    return {
+      id: idBase,
+      name: ms.name,
+      role: ms.role,
+      rating: r,
+      judgment: j,
+      demeanor: dm,
+      ...(spec !== undefined ? { specialty: spec } : {}),
+      ...(ms.faceId !== undefined ? { faceId: ms.faceId } : {}),
+    }
+  }
+
+  // Separate by role.
+  const byRole = (role: StaffMember['role']): ModStaff[] =>
+    modStaff.filter((s) => s.role === role)
+
+  const headCoaches = byRole('headCoach')
+  const assistantCoachList = byRole('assistantCoach')
+  const assistantGMs = byRole('assistantGM')
+  const scoutList = byRole('scout')
+  const physioList = byRole('physio')
+  const owners = byRole('owner')
+
+  // Use a sub-Rng so fills don't perturb the rest of the load.
+  const genFill = new Rng((fillRng.int(0xffffffff) ^ 0x57AFF) >>> 0)
+  // Fallback: generate a synthetic TeamStaff for any role not covered.
+  const synthetic = generateTeamStaff(genFill, { existingNames: new Set(modStaff.map((s) => s.name)) })
+
+  // Head coach: best-rated (first) or fallback.
+  const headCoach: StaffMember = headCoaches.length > 0
+    ? toMember(headCoaches.sort((a, b) => b.rating - a.rating)[0], 0)
+    : synthetic.headCoach
+
+  // Assistant coaches: up to 3 from mod; pad with synthetic if fewer than 2.
+  const assistantCoaches: StaffMember[] = assistantCoachList.map((ms, i) => toMember(ms, i))
+  while (assistantCoaches.length < 2) {
+    assistantCoaches.push(synthetic.assistantCoaches[assistantCoaches.length] ?? synthetic.assistantCoaches[0])
+  }
+
+  // Assistant GM: first or fallback.
+  const assistantGM: StaffMember = assistantGMs.length > 0
+    ? toMember(assistantGMs[0], 0)
+    : synthetic.assistantGM
+
+  // Scouts: all from mod; pad to 2.
+  const scouts: StaffMember[] = scoutList.map((ms, i) => toMember(ms, i))
+  while (scouts.length < 2) {
+    scouts.push(synthetic.scouts[scouts.length] ?? synthetic.scouts[0])
+  }
+
+  // Physios: all from mod; pad to 1.
+  const physios: StaffMember[] = physioList.map((ms, i) => toMember(ms, i))
+  if (physios.length === 0) physios.push(synthetic.physios[0])
+
+  // Owner: first or fallback.
+  const owner: StaffMember = owners.length > 0
+    ? toMember(owners[0], 0)
+    : synthetic.owner
+
+  // Ensure unique ids (unlikely collision but safe).
+  const seen = new Set<string>()
+  const dedup = (m: StaffMember): StaffMember => {
+    if (!seen.has(m.id)) { seen.add(m.id); return m }
+    const safe = { ...m, id: `${m.id}-${teamKey}` }
+    seen.add(safe.id)
+    return safe
+  }
+
+  return {
+    headCoach: dedup(headCoach),
+    assistantCoaches: assistantCoaches.map(dedup),
+    assistantGM: dedup(assistantGM),
+    scouts: scouts.map(dedup),
+    physios: physios.map(dedup),
+    owner: dedup(owner),
+  }
+}
+
 export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueData {
   const { seed, startYear = 2025, roundRobins = 4 } = opts
   const rng = new Rng(seed)
 
   const players = new Map<PlayerId, Player>()
   const teams = new Map<TeamId, Team>()
+  const staffByTeam = new Map<TeamId, TeamStaff>()
   const conferences: Conference[] = []
   const divisions: Division[] = []
   const allTeamIds: TeamId[] = []
@@ -869,6 +1031,8 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   let playerNum = 0
   let teamNum = 0
   let divNum = 0
+  // Separate counter for staff-fill Rng (keeps NHL attribute rolls stable).
+  let staffNum = 0
 
   // Track NHL teams + their mod specs so we can build AHL affiliates after.
   const nhlTeamSpecs: Array<{ teamId: TeamId; modTeam: ModTeam; roster: Player[] }> = []
@@ -997,6 +1161,17 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         }
 
         teams.set(teamId, team)
+
+        // Build staff from mod data when present.
+        if (modTeam.staff !== undefined && modTeam.staff.length > 0) {
+          const staffRng = new Rng(
+            (seed ^ (0xBADCAFE + staffNum * 0x1337)) >>> 0
+          )
+          staffNum++
+          const ts = buildTeamStaffFromMod(modTeam.staff, staffRng, teamId as string)
+          staffByTeam.set(teamId, ts)
+        }
+
         // Record the NHL team + its mod spec for AHL affiliate building below.
         nhlTeamSpecs.push({ teamId, modTeam, roster })
       }
@@ -1283,5 +1458,10 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     ahlStandings,
   }
 
-  return { league, teams, players }
+  return {
+    league,
+    teams,
+    players,
+    ...(staffByTeam.size > 0 ? { staffByTeam } : {}),
+  }
 }

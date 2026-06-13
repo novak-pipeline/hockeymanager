@@ -859,6 +859,16 @@ export class Career {
   private generateAllTeamStaff(): void {
     const existingNames = new Set<string>()
     this.data.league.teams.forEach((teamId, idx) => {
+      // Prefer real staff from a mod import when available.
+      const modStaff = this.data.staffByTeam?.get(teamId)
+      if (modStaff !== undefined) {
+        for (const m of [modStaff.headCoach, modStaff.assistantGM, modStaff.owner]) existingNames.add(m.name)
+        for (const ac of modStaff.assistantCoaches) existingNames.add(ac.name)
+        for (const s of modStaff.scouts) existingNames.add(s.name)
+        for (const p of modStaff.physios) existingNames.add(p.name)
+        this.teamStaffMap.set(teamId as string, modStaff)
+        return
+      }
       const teamRng = new Rng(deriveSeed(this.seed, Career.TEAM_STAFF_NS, idx))
       const ts = generateTeamStaff(teamRng, { existingNames })
       existingNames.add(ts.headCoach.name)

@@ -38,6 +38,12 @@ export interface LeagueData {
   league: League
   teams: Map<TeamId, Team>
   players: Map<PlayerId, Player>
+  /**
+   * Pre-built staff complements from a mod import. Populated only when a
+   * ModDatabase provides real staff data; absent for generated leagues.
+   * Career.generateAllTeamStaff prefers these over generated staff.
+   */
+  staffByTeam?: Map<TeamId, import('@engine/league/staff').TeamStaff>
 }
 
 export interface GenerateOptions {

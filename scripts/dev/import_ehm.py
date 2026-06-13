@@ -12,6 +12,22 @@ loader understands:
 Nothing here is committed (mods/ is gitignored). The shipped game stays
 fictional; this is only to make local review familiar.
 
+Non-player staff (coaches, scouts, GMs, owners) are collected per NHL club and
+emitted as ModTeam.staff[]. The loader builds a real TeamStaff from these
+entries, filling missing roles with generated staff. EHM job strings map to our
+staff roles as follows:
+  "Head Coach"      -> headCoach
+  "Assistant Coach" -> assistantCoach
+  "General Manager" -> assistantGM   (treated as the GM/decision-maker)
+  "Assistant GM"    -> assistantGM
+  "Scout"           -> scout
+  "Owner"           -> owner
+  "Physio"          -> physio
+  "Fitness Coach"   -> physio
+Rows whose job is "Player" are collected as today; all other job strings that
+don't match above are skipped. Staff faces are resolved from the facepack dirs
+the same way as player faces (same norm(first_last_dob) key).
+
 AHL affiliates:
   Each NHL ModTeam now carries an optional `affiliate` field (ModAffiliate) with
   the AHL club's city/nickname/abbreviation/colors and its player roster. Players
@@ -412,6 +428,30 @@ def build_attributes(row, pos):
         })
     return a
 
+def map_staff_role(job_str):
+    """Map an EHM job string to our StaffMember role union, or return None to skip.
+
+    EHM job strings are title-case, e.g. 'Head Coach', 'Assistant Coach',
+    'General Manager', 'Assistant General Manager', 'Scout', 'Owner',
+    'Physio', 'Fitness Coach'. Rows whose job is 'Player' are handled
+    separately in the player loop and must NOT be passed here.
+    """
+    s = str(job_str or "").lower()
+    if "head coach" in s:
+        return "headCoach"
+    if "assistant coach" in s:
+        return "assistantCoach"
+    if "general manager" in s or "gm" == s.strip():
+        return "assistantGM"
+    if "scout" in s:
+        return "scout"
+    if "owner" in s:
+        return "owner"
+    if "physio" in s or "fitness" in s or "trainer" in s:
+        return "physio"
+    return None  # skip all other roles
+
+
 def main():
     xlsx, out_dir = sys.argv[1], sys.argv[2]
     facedirs = sys.argv[3:]
@@ -424,12 +464,45 @@ def main():
     nhl_teams = {nick: [] for nick in NHL}
     # ahl_keyword -> list of player dicts
     ahl_teams = {kw: [] for kw in AHL_CLUBS}
+    # NHL nickname -> list of staff dicts (ModStaff shape)
+    nhl_staff = {nick: [] for nick in NHL}
 
     for r in it:
         job = r[C_JOB]
-        if not (job and "player" in str(job).lower()):
-            continue
+        job_str = str(job or "")
         club = r[C_CLUB]
+        is_player = job and "player" in job_str.lower()
+
+        if not is_player:
+            # Non-player: attempt to collect as staff for an NHL club.
+            staff_role = map_staff_role(job_str)
+            if staff_role is not None:
+                nhl_nick = match_nhl_club(club)
+                if nhl_nick is not None:
+                    first = str(r[C_FIRST] or "").strip()
+                    last = str(r[C_SECOND] or "").strip()
+                    if first or last:
+                        ca = to_int(r[C_CA], 50)
+                        dob = str(r[C_DOB] or "")
+                        parts = dob.split(".")
+                        face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
+                        # judgment: average of mental attributes most relevant
+                        # to staff quality (Decisions, Anticipation, Creativity)
+                        judgment_raw = to_int(r[C_ANTICIPATION], 0) + to_int(r[C_DECISIONS] if len(r) > C_DECISIONS else 0, 0)
+                        judgment = clamp(round(judgment_raw / 2 / 20.0 * 100), 0, 100) if judgment_raw > 0 else None
+                        staff_obj = {
+                            "name": f"{first} {last}".strip(),
+                            "role": staff_role,
+                            "rating": clamp(round(ca / 2), 1, 99),
+                        }
+                        if judgment is not None:
+                            staff_obj["judgment"] = judgment
+                        if face_id is not None:
+                            staff_obj["_faceId"] = face_id  # resolved below
+                        nhl_staff[nhl_nick].append(staff_obj)
+            continue
+
+        # ── Players (original logic unchanged below) ─────────────────────
 
         # Match AHL FIRST: many AHL club names contain an NHL nickname
         # ("Providence Bruins", "Belleville Senators", "Wilkes-Barre Penguins",
@@ -525,6 +598,26 @@ def main():
             clean.append(q)
         return clean
 
+    def resolve_staff_faces(staff_list, faces_out, staff_total_ref, staff_matched_ref):
+        """Resolve faceId for staff entries and clean _faceId sentinel."""
+        clean = []
+        for s in staff_list:
+            staff_total_ref[0] += 1
+            fid = s.get("_faceId")
+            out = {k: v for k, v in s.items() if k != "_faceId"}
+            if fid and fid in face_index:
+                dest = os.path.join(faces_dir, fid + ".png")
+                if not os.path.exists(dest):
+                    try:
+                        shutil.copyfile(face_index[fid], dest)
+                    except Exception:
+                        pass
+                faces_out[fid] = fid + ".png"
+                out["faceId"] = fid
+                staff_matched_ref[0] += 1
+            clean.append(out)
+        return clean
+
     # Build reverse lookup: NHL abbreviation -> NHL nickname key.
     abbr_to_nick = {v[1]: k for k, v in NHL.items()}
 
@@ -533,6 +626,7 @@ def main():
     faces_out = {}
     total, matched = [0], [0]
     ahl_total, ahl_matched = [0], [0]
+    staff_total, staff_matched = [0], [0]
 
     for nick, (city, abbr, conf, div, prim, sec) in NHL.items():
         roster = sorted(nhl_teams[nick], key=lambda p: -p["_ca"])
@@ -583,6 +677,10 @@ def main():
                 "players": clean_aff,
             }
 
+        # Staff for this NHL club.
+        raw_staff = nhl_staff.get(nick, [])
+        clean_staff = resolve_staff_faces(raw_staff, faces_out, staff_total, staff_matched)
+
         team_obj = {
             "externalId": f"ehm-team-{abbr}",
             "city": city, "nickname": nick, "abbreviation": abbr,
@@ -590,6 +688,8 @@ def main():
         }
         if affiliate_obj is not None:
             team_obj["affiliate"] = affiliate_obj
+        if clean_staff:
+            team_obj["staff"] = clean_staff
 
         confs.setdefault(conf, {}).setdefault(div, []).append(team_obj)
 
@@ -610,6 +710,7 @@ def main():
     print(f"NHL teams: {sum(len(dd['teams']) for c in db['conferences'] for dd in c['divisions'])}")
     print(f"NHL players: {total[0]}  faces matched: {matched[0]} ({100*matched[0]//max(1,total[0])}%)")
     print(f"AHL players: {ahl_total[0]}  faces matched: {ahl_matched[0]} ({100*ahl_matched[0]//max(1,ahl_total[0])}%)")
+    print(f"Staff: {staff_total[0]}  faces matched: {staff_matched[0]} ({100*staff_matched[0]//max(1,staff_total[0])}%)")
 
 if __name__ == "__main__":
     main()
