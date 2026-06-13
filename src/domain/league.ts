@@ -68,4 +68,20 @@ export interface League {
   schedule: ScheduledGame[]
   draftClasses: DraftClass[]
   season: SeasonState
+  /**
+   * AHL affiliate team ids. These teams live in LeagueData.teams but are
+   * intentionally excluded from `teams` so existing NHL standings/schedule/
+   * draft loops never see them. Absent on old saves (tolerated everywhere).
+   */
+  ahlTeams?: TeamId[]
+  /**
+   * Scheduled games for the AHL tier. Built by buildSchedule over ahlTeams.
+   * Simmed by advanceDay via quickSimGame; never watched in v1.
+   */
+  ahlSchedule?: ScheduledGame[]
+  /**
+   * Current-season standings for the AHL tier, one row per ahlTeam.
+   * Initialised as fresh Standing objects; updated in parallel with NHL standings.
+   */
+  ahlStandings?: Standing[]
 }

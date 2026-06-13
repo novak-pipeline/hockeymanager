@@ -8,6 +8,7 @@ import {
   serializeMap,
   validateSnapshot
 } from './serialize'
+import { Career } from './career'
 
 describe('serializeMap / deserializeMap', () => {
   it('round-trips a string-keyed map through JSON', () => {
@@ -92,6 +93,67 @@ function makeSnapshot(): CareerSnapshot {
     history: []
   }
 }
+
+describe('AHL save round-trip', () => {
+  it('saves and restores AHL standings + ahlGp across exportSnapshot/fromSnapshot', () => {
+    const data = generateLeague({ seed: 77 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 77, userId)
+
+    // The career should have AHL standings if affiliates were generated.
+    const ahlView = career.getAhlStandingsView()
+    expect(Array.isArray(ahlView.rows)).toBe(true)
+
+    const snap = career.exportSnapshot('test-ahl', '2026-06-12T00:00:00.000Z')
+    // ahlStandings field should be present (even if empty)
+    expect(Array.isArray(snap.ahlStandings)).toBe(true)
+    expect(Array.isArray(snap.ahlGp)).toBe(true)
+
+    // Round-trip through JSON
+    const validated = validateSnapshot(JSON.parse(JSON.stringify(snap)))
+    const restored = Career.fromSnapshot(validated)
+
+    // Restored AHL standings should match original
+    const restoredView = restored.getAhlStandingsView()
+    expect(restoredView.rows.length).toBe(ahlView.rows.length)
+    if (ahlView.rows.length > 0) {
+      // team ids should match (order may vary by points)
+      const origIds = new Set(ahlView.rows.map((r) => r.teamId))
+      const restoredIds = new Set(restoredView.rows.map((r) => r.teamId))
+      expect(restoredIds).toEqual(origIds)
+    }
+  })
+
+  it('old saves without ahlStandings field load without error, AHL initialised from league', () => {
+    const data = generateLeague({ seed: 78 })
+    const snap = {
+      version: 1,
+      savedAt: '2026-06-12T00:00:00.000Z',
+      saveName: 'Old Save',
+      seed: 78,
+      userTeamId: data.league.teams[0],
+      phase: 'regularSeason',
+      currentDay: 0,
+      year: 2025,
+      leagueData: serializeLeagueData(data),
+      standings: [],
+      playerTotals: [],
+      gamesPlayed: [],
+      news: [],
+      newsCounter: 0,
+      playoffs: null,
+      offseason: null,
+      picks: [],
+      history: [],
+      // deliberately omit ahlStandings and ahlGp
+    }
+    const validated = validateSnapshot(snap)
+    expect(() => Career.fromSnapshot(validated)).not.toThrow()
+    const restored = Career.fromSnapshot(validated)
+    const view = restored.getAhlStandingsView()
+    expect(Array.isArray(view.rows)).toBe(true)
+  })
+})
 
 describe('validateSnapshot', () => {
   it('accepts a valid snapshot and returns it typed', () => {

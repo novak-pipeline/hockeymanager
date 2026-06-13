@@ -272,7 +272,10 @@ export function aiResignDay(args: {
   const { teams, players, userTeamId, year, rng } = args
   const signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> = []
 
-  const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId).sort(byId)
+  // Exclude AHL affiliates — re-signs are NHL-only operations.
+  const aiTeams = [...teams.values()]
+    .filter((t) => t.id !== userTeamId && t.tier !== 'ahl')
+    .sort(byId)
   for (const team of aiTeams) {
     const expiring = team.roster
       .map((id) => players.get(id))
@@ -324,7 +327,10 @@ export function aiFreeAgencyDay(args: {
     .filter((p): p is Player => p !== undefined && !rostered.has(p.id))
     .sort(byOverallDesc)
 
-  const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId).sort(byId)
+  // Exclude AHL affiliates — they are not part of the NHL free-agency pool.
+  const aiTeams = [...teams.values()]
+    .filter((t) => t.id !== userTeamId && t.tier !== 'ahl')
+    .sort(byId)
 
   for (let rank = 0; rank < pool.length; rank++) {
     const player = pool[rank]

@@ -230,6 +230,22 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'transactions', transactions: must().getTransactions(req.limit) }
     case 'getScoreboard':
       return { id: req.id, type: 'scoreboard', scoreboard: must().getScoreboard(req.day) }
+
+    /* ── AHL farm system ── */
+    case 'getAhlStandings':
+      return { id: req.id, type: 'ahlStandings', standings: must().getAhlStandingsView() }
+    case 'getAhlSquad':
+      return { id: req.id, type: 'ahlSquad', squad: must().getAhlSquadView() }
+    case 'callUp': {
+      const res = must().callUp(req.playerId)
+      if (!res.ok) throw new Error(res.reason)
+      return { id: req.id, type: 'ok' }
+    }
+    case 'sendDown': {
+      const res = must().sendDown(req.playerId)
+      if (!res.ok) throw new Error(res.reason)
+      return { id: req.id, type: 'ok' }
+    }
   }
 }
 

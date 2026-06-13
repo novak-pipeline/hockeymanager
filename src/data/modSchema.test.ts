@@ -439,16 +439,27 @@ describe('loadModDatabase', () => {
     }
   })
 
-  it('league player list contains all players from all teams', () => {
+  it('league player list contains all players from NHL teams (not AHL)', () => {
     const db = validateModDatabase(makeFixtureMod(4))
     const data = loadModDatabase(db, { seed: 13 })
 
-    const allRosterIds = new Set<string>()
+    // league.players contains NHL players only; AHL players are on AHL rosters.
+    const nhlTeamIds = new Set(data.league.teams)
+    const ahlTeamIds = new Set(data.league.ahlTeams ?? [])
     for (const team of data.teams.values()) {
-      for (const pid of team.roster) allRosterIds.add(pid)
-    }
-    for (const pid of allRosterIds) {
-      expect(data.league.players).toContain(pid)
+      if (nhlTeamIds.has(team.id)) {
+        for (const pid of team.roster) {
+          expect(data.league.players).toContain(pid)
+        }
+      } else if (ahlTeamIds.has(team.id)) {
+        // AHL players must NOT be in league.players.
+        for (const pid of team.roster) {
+          // Only check ahl-prefixed players (backfill from NHL roster may appear).
+          if (String(pid).startsWith('ahl-')) {
+            expect(data.league.players).not.toContain(pid)
+          }
+        }
+      }
     }
   })
 
@@ -490,6 +501,95 @@ describe('loadModDatabase', () => {
     expect(data.league.season.year).toBe(2027)
     for (const g of data.league.schedule) {
       expect(g.season).toBe(2027)
+    }
+  })
+})
+
+/* ─────────────────────────── AHL affiliate tests ─────────────────────────── */
+
+describe('loadModDatabase — AHL affiliates', () => {
+  it('synthesises a fictional affiliate for every NHL team when none provided', () => {
+    const db = validateModDatabase(makeFixtureMod(4))
+    const data = loadModDatabase(db, { seed: 55 })
+
+    // One AHL affiliate per NHL team.
+    expect(data.league.ahlTeams).toHaveLength(4)
+    expect(data.league.ahlStandings).toHaveLength(4)
+    expect(data.league.ahlSchedule!.length).toBeGreaterThan(0)
+
+    for (const ahlId of data.league.ahlTeams!) {
+      const ahlTeam = data.teams.get(ahlId)!
+      expect(ahlTeam).toBeDefined()
+      expect(ahlTeam.tier).toBe('ahl')
+      expect(ahlTeam.parentTeamId).toBeDefined()
+      // NHL parent must point back.
+      const nhlTeam = data.teams.get(ahlTeam.parentTeamId!)!
+      expect(nhlTeam.affiliateId).toBe(ahlId)
+      // AHL team must NOT be in NHL teams list.
+      expect(data.league.teams).not.toContain(ahlId)
+      // AHL team must have valid roster and lines.
+      expect(ahlTeam.roster.length).toBeGreaterThan(0)
+      expect(ahlTeam.lines.forwards).toHaveLength(4)
+    }
+  })
+
+  it('loads explicit affiliate from mod and links it correctly', () => {
+    const db = makeFixtureMod(4)
+    // Add an explicit affiliate to the first team.
+    const affiliatePlayers: import('./modSchema').ModPlayer[] = []
+    for (let i = 0; i < 3; i++) affiliatePlayers.push(makeSkater(500 + i, 'C'))
+    for (let i = 0; i < 9; i++) affiliatePlayers.push(makeSkater(510 + i, 'W'))
+    for (let i = 0; i < 6; i++) affiliatePlayers.push(makeSkater(520 + i, 'D'))
+    affiliatePlayers.push(makeGoalie(530))
+    affiliatePlayers.push(makeGoalie(531))
+
+    db.conferences[0].divisions[0].teams[0].affiliate = {
+      city: 'Springfield',
+      nickname: 'Ice Cats',
+      abbreviation: 'SIC',
+      primary: '#AA0000',
+      secondary: '#FFFFFF',
+      players: affiliatePlayers
+    }
+
+    const validated = validateModDatabase(db)
+    const data = loadModDatabase(validated, { seed: 77 })
+
+    // Should have AHL teams.
+    expect(data.league.ahlTeams).toHaveLength(4)
+
+    // Find the team with the explicit affiliate.
+    const ahlWithAffiliate = [...data.teams.values()].find(
+      (t) => t.tier === 'ahl' && t.city === 'Springfield'
+    )
+    expect(ahlWithAffiliate).toBeDefined()
+    expect(ahlWithAffiliate!.abbreviation).toBe('SIC')
+    expect(ahlWithAffiliate!.tier).toBe('ahl')
+
+    // NHL parent must point back.
+    const nhlParent = data.teams.get(ahlWithAffiliate!.parentTeamId!)!
+    expect(nhlParent.affiliateId).toBe(ahlWithAffiliate!.id)
+  })
+
+  it('AHL schedule games only reference AHL team ids', () => {
+    const db = validateModDatabase(makeFixtureMod(4))
+    const data = loadModDatabase(db, { seed: 33 })
+    const ahlSet = new Set(data.league.ahlTeams)
+    for (const g of data.league.ahlSchedule!) {
+      expect(ahlSet.has(g.homeTeamId)).toBe(true)
+      expect(ahlSet.has(g.awayTeamId)).toBe(true)
+      expect(g.homeTeamId).not.toBe(g.awayTeamId)
+    }
+  })
+
+  it('AHL standings have one fresh row per affiliate', () => {
+    const db = validateModDatabase(makeFixtureMod(4))
+    const data = loadModDatabase(db, { seed: 44 })
+    const ahlSet = new Set(data.league.ahlTeams)
+    for (const s of data.league.ahlStandings!) {
+      expect(ahlSet.has(s.teamId)).toBe(true)
+      expect(s.gamesPlayed).toBe(0)
+      expect(s.wins).toBe(0)
     }
   })
 })

@@ -1,12 +1,14 @@
 import { useState, useMemo } from 'react'
-import type { SquadView } from '../../worker/protocol'
+import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtMoney, fmtToi } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
+import { useUiStore } from '../components/store'
 
+type ScreenTab = 'nhl' | 'ahl'
 type PosFilter = 'ALL' | 'F' | 'D' | 'G'
 type SortKey =
   | 'name' | 'age' | 'pos' | 'overall' | 'line'
@@ -177,9 +179,17 @@ function GoalieCols({ row }: { row: SquadRowView }): JSX.Element {
 export function SquadScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
+  const bump = useUiStore((s) => s.bump)
+
+  const [screenTab, setScreenTab] = useState<ScreenTab>('nhl')
+
   const { data, loading, error } = useScreenData<SquadView>(
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
+  )
+  const { data: ahlData, loading: ahlLoading, error: ahlError, refetch: refetchAhl } = useScreenData<AhlSquadView>(
+    () => client.getAhlSquad(),
+    (r) => (r.type === 'ahlSquad' ? r.squad : null)
   )
 
   const [posFilter, setPosFilter] = useState<PosFilter>('ALL')
@@ -208,17 +218,39 @@ export function SquadScreen(): JSX.Element {
 
   const sharedSortProps = { current: sortKey, asc: sortAsc, onSort }
 
+  async function handleSendDown(playerId: string): Promise<void> {
+    const res = await client.sendDown(playerId)
+    if (res.type === 'error') {
+      alert(res.message)
+    } else {
+      bump()
+      refetchAhl()
+    }
+  }
+
+  async function handleCallUp(playerId: string): Promise<void> {
+    const res = await client.callUp(playerId)
+    if (res.type === 'error') {
+      alert(res.message)
+    } else {
+      bump()
+      refetchAhl()
+    }
+  }
+
   return (
     <section className="stack">
-      <ScreenHeader title={data ? data.teamName : 'Squad'}>
+      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Squad') : (ahlData?.teamName ?? 'AHL Affiliate')}>
         <div className="row" style={{ gap: 'var(--sp-2)' }}>
-          <input
-            className="input"
-            placeholder="Search player…"
-            style={{ width: 200 }}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          {screenTab === 'nhl' && (
+            <input
+              className="input"
+              placeholder="Search player…"
+              style={{ width: 200 }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          )}
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => nav.navigate('lockerRoom')}
@@ -229,127 +261,284 @@ export function SquadScreen(): JSX.Element {
         </div>
       </ScreenHeader>
 
-      {error && <Notice kind="warn">{error}</Notice>}
-      {loading && !data && <Notice kind="info">Loading…</Notice>}
+      {/* Top-level NHL / AHL tab switcher */}
+      <div className="tabs" style={{ borderBottom: '1px solid var(--border)' }}>
+        <button
+          className={`tab${screenTab === 'nhl' ? ' active' : ''}`}
+          onClick={() => setScreenTab('nhl')}
+        >
+          NHL Roster
+        </button>
+        <button
+          className={`tab${screenTab === 'ahl' ? ' active' : ''}`}
+          onClick={() => setScreenTab('ahl')}
+        >
+          AHL / Farm
+          {ahlData && ahlData.hasAffiliate && (
+            <span className="muted small" style={{ marginLeft: 4 }}>({ahlData.rosterCount})</span>
+          )}
+        </button>
+      </div>
 
-      {data && (
+      {screenTab === 'nhl' && (
         <>
-          <div className="tabs">
-            {POS_TABS.map((t) => (
-              <button
-                key={t.value}
-                className={`tab${posFilter === t.value ? ' active' : ''}`}
-                onClick={() => setPosFilter(t.value)}
-              >
-                {t.label}
-                {t.value !== 'ALL' && (
-                  <span className="muted small" style={{ marginLeft: 4 }}>
-                    ({data.rows.filter((r) => posGroup(r.position) === t.value).length})
-                  </span>
-                )}
-              </button>
-            ))}
-            <span className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', paddingRight: 8 }}>
-              {filtered.length} player{filtered.length !== 1 ? 's' : ''}
-            </span>
-          </div>
+          {error && <Notice kind="warn">{error}</Notice>}
+          {loading && !data && <Notice kind="info">Loading…</Notice>}
 
-          <Panel>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <SortTh label="Name" sortKey="name" {...sharedSortProps} />
-                    <SortTh label="Age" sortKey="age" {...sharedSortProps} align="right" />
-                    <SortTh label="Pos" sortKey="pos" {...sharedSortProps} />
-                    <SortTh label="Role" sortKey="line" {...sharedSortProps} />
-                    <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
-                    <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
-                    <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
-                    <th title="Form trend">Form</th>
-                    <th>Inj</th>
-                    <SortTh label="Contract" sortKey="salary" {...sharedSortProps} align="right" />
-                    {/* Stats headers */}
-                    <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
-                    {isGoalieView || hasGoalies ? (
-                      <>
-                        <th className="num" title="Wins (G) or Goals (S)">W/G</th>
-                        <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
-                        <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
-                        <th className="num" title="Shutouts / +/-">SO/±</th>
-                        <th className="num">PIM</th>
-                        <th className="num">TOI</th>
-                      </>
-                    ) : (
-                      <>
-                        <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
-                        <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
-                        <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
-                        <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
-                        <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
-                        <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
-                      </>
+          {data && (
+            <>
+              <div className="tabs">
+                {POS_TABS.map((t) => (
+                  <button
+                    key={t.value}
+                    className={`tab${posFilter === t.value ? ' active' : ''}`}
+                    onClick={() => setPosFilter(t.value)}
+                  >
+                    {t.label}
+                    {t.value !== 'ALL' && (
+                      <span className="muted small" style={{ marginLeft: 4 }}>
+                        ({data.rows.filter((r) => posGroup(r.position) === t.value).length})
+                      </span>
                     )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => {
-                    const isGoalie = posGroup(row.position) === 'G'
-                    return (
+                  </button>
+                ))}
+                <span className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', paddingRight: 8 }}>
+                  {filtered.length} player{filtered.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <Panel>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <SortTh label="Name" sortKey="name" {...sharedSortProps} />
+                        <SortTh label="Age" sortKey="age" {...sharedSortProps} align="right" />
+                        <SortTh label="Pos" sortKey="pos" {...sharedSortProps} />
+                        <SortTh label="Role" sortKey="line" {...sharedSortProps} />
+                        <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
+                        <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
+                        <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
+                        <th title="Form trend">Form</th>
+                        <th>Inj</th>
+                        <SortTh label="Contract" sortKey="salary" {...sharedSortProps} align="right" />
+                        {/* Stats headers */}
+                        <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
+                        {isGoalieView || hasGoalies ? (
+                          <>
+                            <th className="num" title="Wins (G) or Goals (S)">W/G</th>
+                            <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
+                            <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
+                            <th className="num" title="Shutouts / +/-">SO/±</th>
+                            <th className="num">PIM</th>
+                            <th className="num">TOI</th>
+                          </>
+                        ) : (
+                          <>
+                            <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
+                            <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
+                            <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
+                            <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
+                            <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
+                            <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
+                          </>
+                        )}
+                        <th style={{ width: 80 }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((row) => {
+                        const isGoalie = posGroup(row.position) === 'G'
+                        return (
+                          <tr key={row.playerId} style={row.injury ? { opacity: 0.72 } : undefined}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <PlayerFace faceId={row.faceId} name={row.name} size={24} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                                    <PlayerLink playerId={row.playerId} name={row.name} />
+                                    {row.contract.noTradeClause && (
+                                      <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
+                                    )}
+                                    {row.contract.twoWay && (
+                                      <span className="chip" style={{ marginLeft: 2, fontSize: 9 }}>2W</span>
+                                    )}
+                                  </div>
+                                  <ArchetypeLabel archetype={row.archetype} />
+                                </div>
+                              </div>
+                            </td>
+                            <td className="num muted">{row.age}</td>
+                            <td className="muted">{row.position}</td>
+                            <td>
+                              <span className="chip" style={{ fontSize: 11 }}>{row.lineLabel}</span>
+                              {row.role && (
+                                <span className="muted small" style={{ marginLeft: 6 }}>{row.role}</span>
+                              )}
+                            </td>
+                            <td className="num"><OvrChip value={row.overall} /></td>
+                            <td><CondBar value={row.condition} /></td>
+                            <td className="num muted">{row.morale}</td>
+                            <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
+                            <td><InjuryBadge row={row} /></td>
+                            <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                              <span>{fmtMoney(row.contract.salary)}</span>
+                              <span className="muted small" style={{ marginLeft: 4 }}>×{row.contract.yearsRemaining}</span>
+                            </td>
+                            {isGoalie
+                              ? <GoalieCols row={row} />
+                              : <SkaterCols row={row} />}
+                            <td>
+                              {row.contract.twoWay && (
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ fontSize: 11, padding: '2px 6px' }}
+                                  title="Send down to AHL affiliate"
+                                  onClick={() => void handleSendDown(row.playerId)}
+                                >
+                                  Send ↓
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {filtered.length === 0 && (
+                        <tr>
+                          <td colSpan={18} className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>
+                            No players match.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Panel>
+            </>
+          )}
+        </>
+      )}
+
+      {screenTab === 'ahl' && (
+        <AhlSquadPanel
+          data={ahlData}
+          loading={ahlLoading}
+          error={ahlError}
+          onCallUp={handleCallUp}
+        />
+      )}
+    </section>
+  )
+}
+
+/* ────────────────────────── AHL Farm Panel ────────────────────────── */
+
+function AhlSquadPanel({
+  data,
+  loading,
+  error,
+  onCallUp,
+}: {
+  data: AhlSquadView | null
+  loading: boolean
+  error: string | null
+  onCallUp: (playerId: string) => Promise<void>
+}): JSX.Element {
+  if (error) return <Notice kind="warn">{error}</Notice>
+  if (loading && !data) return <Notice kind="info">Loading…</Notice>
+  if (!data || !data.hasAffiliate) {
+    return (
+      <Notice kind="info">
+        This team has no AHL affiliate configured.
+      </Notice>
+    )
+  }
+
+  const forwards = data.rows.filter((r) => posGroup(r.position) === 'F')
+  const defense = data.rows.filter((r) => posGroup(r.position) === 'D')
+  const goalies = data.rows.filter((r) => posGroup(r.position) === 'G')
+
+  return (
+    <div className="stack">
+      <Panel title={`${data.teamName} — ${data.rosterCount} players`}>
+        <p className="muted small" style={{ margin: '0 0 var(--sp-2)' }}>
+          Use Recall to move a player up to the NHL roster. Two-way contracts can be sent down from the NHL tab.
+        </p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="num">Age</th>
+                <th>Pos</th>
+                <th className="num">OVR</th>
+                <th className="num">Cond</th>
+                <th>Inj</th>
+                <th className="num">Contract</th>
+                <th className="num">AHL GP</th>
+                <th style={{ width: 80 }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>
+                    No players on AHL roster.
+                  </td>
+                </tr>
+              )}
+              {[
+                { label: 'Forwards', rows: forwards },
+                { label: 'Defence', rows: defense },
+                { label: 'Goalies', rows: goalies },
+              ].map(({ label, rows }) =>
+                rows.length === 0 ? null : (
+                  <>
+                    <tr key={`hdr-${label}`} style={{ background: 'var(--surface-raised)' }}>
+                      <td
+                        colSpan={9}
+                        style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', padding: '6px 8px' }}
+                      >
+                        {label}
+                      </td>
+                    </tr>
+                    {rows.map((row) => (
                       <tr key={row.playerId} style={row.injury ? { opacity: 0.72 } : undefined}>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <PlayerFace faceId={row.faceId} name={row.name} size={24} />
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                                <PlayerLink playerId={row.playerId} name={row.name} />
-                                {row.contract.noTradeClause && (
-                                  <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
-                                )}
-                                {row.contract.twoWay && (
-                                  <span className="chip" style={{ marginLeft: 2, fontSize: 9 }}>2W</span>
-                                )}
-                              </div>
-                              <ArchetypeLabel archetype={row.archetype} />
-                            </div>
+                            <PlayerLink playerId={row.playerId} name={row.name} />
                           </div>
                         </td>
                         <td className="num muted">{row.age}</td>
                         <td className="muted">{row.position}</td>
-                        <td>
-                          <span className="chip" style={{ fontSize: 11 }}>{row.lineLabel}</span>
-                          {row.role && (
-                            <span className="muted small" style={{ marginLeft: 6 }}>{row.role}</span>
-                          )}
-                        </td>
                         <td className="num"><OvrChip value={row.overall} /></td>
                         <td><CondBar value={row.condition} /></td>
-                        <td className="num muted">{row.morale}</td>
-                        <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
                         <td><InjuryBadge row={row} /></td>
                         <td className="num" style={{ whiteSpace: 'nowrap' }}>
                           <span>{fmtMoney(row.contract.salary)}</span>
                           <span className="muted small" style={{ marginLeft: 4 }}>×{row.contract.yearsRemaining}</span>
                         </td>
-                        {isGoalie
-                          ? <GoalieCols row={row} />
-                          : <SkaterCols row={row} />}
+                        <td className="num muted">{row.skater?.gamesPlayed ?? row.goalie?.gamesPlayed ?? 0}</td>
+                        <td>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 11, padding: '2px 6px', color: 'var(--success)' }}
+                            title="Recall to NHL roster"
+                            onClick={() => void onCallUp(row.playerId)}
+                          >
+                            Recall ↑
+                          </button>
+                        </td>
                       </tr>
-                    )
-                  })}
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={17} className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>
-                        No players match.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-        </>
-      )}
-    </section>
+                    ))}
+                  </>
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
   )
 }

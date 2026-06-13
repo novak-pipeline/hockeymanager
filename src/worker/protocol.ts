@@ -17,6 +17,8 @@ export type { PressJob, PressConferenceState, PressTone } from '@engine/story/fa
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 export type {
   AgmReportView,
+  AhlSquadView,
+  AhlStandingsView,
   BoardView,
   BoxScoreView,
   CareerPhase,
@@ -51,6 +53,8 @@ export type {
 } from '@engine/career/views'
 import type {
   AgmReportView,
+  AhlSquadView,
+  AhlStandingsView,
   BoardView,
   BoxScoreView,
   CareerSnapshot,
@@ -191,6 +195,15 @@ export type WorkerRequestBody =
   | { type: 'getTransactions'; limit?: number }
   /** Scoreboard for a given day (defaults to current day). */
   | { type: 'getScoreboard'; day?: number }
+  /* ── AHL farm system ── */
+  /** League-wide AHL standings. */
+  | { type: 'getAhlStandings' }
+  /** User's AHL affiliate roster. */
+  | { type: 'getAhlSquad' }
+  /** Recall an AHL player to the user's NHL roster. */
+  | { type: 'callUp'; playerId: string }
+  /** Assign an NHL player to the user's AHL affiliate. */
+  | { type: 'sendDown'; playerId: string }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -241,5 +254,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'leagueStats'; stats: LeagueStatsView }
   | { type: 'transactions'; transactions: TransactionsView }
   | { type: 'scoreboard'; scoreboard: ScoreboardView }
+  /* ── AHL farm system ── */
+  | { type: 'ahlStandings'; standings: AhlStandingsView }
+  | { type: 'ahlSquad'; squad: AhlSquadView }
   | { type: 'error'; message: string }
 )

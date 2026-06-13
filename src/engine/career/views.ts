@@ -67,6 +67,8 @@ export interface PlayerBadge {
   overall: number
   /** Facepack image key. Populated from Player.faceId when the mod provides one. */
   faceId?: string
+  /** Present when this player belongs to an AHL-tier team. */
+  tier?: 'nhl' | 'ahl'
   /** Present when this player is visible through the scouting fog. */
   scouted?: {
     knowledge: number
@@ -656,6 +658,33 @@ export interface BoxScoreView {
   awayGoalies: BoxScoreGoalieRow[]
 }
 
+/* ────────────────────────── AHL farm system views ────────────────────────── */
+
+/**
+ * AHL standings for the league-wide affiliate league.
+ * Response to 'getAhlStandings'.
+ */
+export interface AhlStandingsView {
+  /** Sorted best-first. */
+  rows: StandingRowView[]
+}
+
+/**
+ * AHL affiliate roster for the user's organisation.
+ * Reuses SquadRowView; the teamName is the affiliate's name.
+ * Response to 'getAhlSquad'.
+ */
+export interface AhlSquadView {
+  /** AHL affiliate team name, e.g. "Springfield Falcons AHL". */
+  teamName: string
+  /** AHL team id. */
+  teamId: string
+  rows: SquadRowView[]
+  rosterCount: number
+  /** True when the user's NHL team has an AHL affiliate configured. */
+  hasAffiliate: boolean
+}
+
 /* ────────────────────────── inbox ────────────────────────── */
 
 export interface InboxView {
@@ -794,6 +823,16 @@ export interface CareerSnapshot {
    * Transactions ledger. Optional for backward compat.
    */
   transactionLedger?: TransactionLedger
+  /**
+   * AHL standings — [teamId, Standing][] entry array. Optional for backward compat
+   * (old saves re-initialize from league.ahlTeams on load).
+   */
+  ahlStandings?: Array<[string, unknown]>
+  /**
+   * AHL player games-played counters — [playerId, number][] entry array.
+   * Optional for backward compat.
+   */
+  ahlGp?: Array<[string, number]>
 }
 
 export interface SaveSlotInfo {

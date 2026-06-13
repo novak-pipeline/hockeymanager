@@ -37,6 +37,8 @@ import type {
   LinesView,
   PlayerBadge,
   PlayerProfileView,
+  AhlSquadView,
+  AhlStandingsView,
   ScheduleView,
   ScoutingView,
   SkaterSeasonLine,
@@ -775,5 +777,146 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     hasDraftClass: draftProspectIds.size > 0,
     teamKnowledge,
     topGains,
+  }
+}
+
+/* ────────────────────────── AHL farm system views ────────────────────────── */
+
+/** Context for AHL view builders — extends the base with AHL-specific maps. */
+export interface AhlViewCtx {
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  ahlSchedule: ScheduledGame[]
+  ahlStandingsSorted: Standing[]
+  /** The user's AHL affiliate team id, if any. */
+  userAhlTeamId: TeamId | null
+}
+
+/**
+ * Build the AHL league-wide standings.
+ * Reuses `standingRowView` shape (same fields) but reads from ahlSchedule.
+ */
+export function buildAhlStandingsView(ctx: AhlViewCtx): AhlStandingsView {
+  const rows: StandingRowView[] = ctx.ahlStandingsSorted.map((s) => {
+    const team = ctx.teams.get(s.teamId)
+    if (!team) return null
+    // Compute streak/lastFive from AHL schedule.
+    const results: Array<'W' | 'L' | 'O'> = []
+    for (const g of ctx.ahlSchedule) {
+      if (!g.result) continue
+      const home = g.homeTeamId === s.teamId
+      if (!home && g.awayTeamId !== s.teamId) continue
+      const us = home ? g.result.homeGoals : g.result.awayGoals
+      const them = home ? g.result.awayGoals : g.result.homeGoals
+      results.push(us > them ? 'W' : g.result.decidedBy === 'regulation' ? 'L' : 'O')
+    }
+    const streak = results.length === 0
+      ? '—'
+      : (() => {
+          const last = results[results.length - 1]
+          let n = 0
+          for (let i = results.length - 1; i >= 0 && results[i] === last; i--) n++
+          return `${last}${n}`
+        })()
+    const lastFive = results.slice(-5).join('')
+    return {
+      teamId: s.teamId as string,
+      name: team.name,
+      abbreviation: team.abbreviation,
+      gamesPlayed: s.gamesPlayed,
+      wins: s.wins,
+      losses: s.losses,
+      overtimeLosses: s.overtimeLosses,
+      points: s.points,
+      goalsFor: s.goalsFor,
+      goalsAgainst: s.goalsAgainst,
+      streak,
+      lastFive,
+    } satisfies StandingRowView
+  }).filter((r): r is StandingRowView => r !== null)
+  return { rows }
+}
+
+/**
+ * Build the user's AHL affiliate squad view.
+ * Uses simplified stats (AHL gp only — no totals/skaterLine available for AHL players).
+ */
+export function buildAhlSquadView(
+  ctx: AhlViewCtx,
+  ahlGp: Map<PlayerId, number>
+): AhlSquadView {
+  if (!ctx.userAhlTeamId) {
+    return { teamName: 'No Affiliate', teamId: '', rows: [], rosterCount: 0, hasAffiliate: false }
+  }
+  const ahlTeam = ctx.teams.get(ctx.userAhlTeamId)
+  if (!ahlTeam) {
+    return { teamName: 'No Affiliate', teamId: ctx.userAhlTeamId as string, rows: [], rosterCount: 0, hasAffiliate: false }
+  }
+  const order: Record<Position, number> = { C: 0, W: 1, D: 2, G: 3 }
+  const rows: SquadRowView[] = ahlTeam.roster
+    .map((id) => {
+      const p = ctx.players.get(id)
+      if (!p) return null
+      const gp = ahlGp.get(id) ?? 0
+      const skaterLine: SkaterSeasonLine | null = p.position !== 'G'
+        ? {
+            gamesPlayed: gp,
+            goals: 0,
+            assists: 0,
+            points: 0,
+            plusMinus: 0,
+            penaltyMinutes: 0,
+            shots: 0,
+            toiPerGame: 0,
+            ppGoals: 0,
+            ppAssists: 0,
+          }
+        : null
+      const goalieLine = p.position === 'G'
+        ? {
+            gamesPlayed: gp,
+            wins: 0,
+            losses: 0,
+            savePct: 0,
+            goalsAgainstAverage: 0,
+            shutouts: 0,
+            saves: 0,
+            shotsAgainst: 0,
+          }
+        : null
+      const b = badge(p)
+      return {
+        ...b,
+        tier: 'ahl' as const,
+        role: p.role,
+        handedness: p.handedness,
+        condition: Math.round(100 - Math.max(0, Math.min(100, p.fatigue))),
+        morale: Math.round(p.morale),
+        form: Math.round(p.form),
+        injury: p.injuryStatus,
+        contract: {
+          salary: p.contract.salary,
+          yearsRemaining: p.contract.yearsRemaining,
+          expiryYear: p.contract.expiryYear,
+          noTradeClause: p.contract.noTradeClause,
+          twoWay: p.contract.twoWay,
+        },
+        lineLabel: '—',
+        skater: skaterLine,
+        goalie: goalieLine,
+        scratched: false,
+        gameRatingForm: '',
+        avgRating: 0,
+      } satisfies SquadRowView
+    })
+    .filter((r): r is SquadRowView => r !== null)
+    .sort((a, b) => order[a.position] - order[b.position] || b.overall - a.overall)
+
+  return {
+    teamName: ahlTeam.name,
+    teamId: ctx.userAhlTeamId as string,
+    rows,
+    rosterCount: rows.length,
+    hasAffiliate: true,
   }
 }

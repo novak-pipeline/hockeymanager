@@ -361,6 +361,28 @@ export class SimClient {
       : this.send({ type: 'getScoreboard' })
   }
 
+  /* ── AHL farm system ── */
+
+  /** League-wide AHL standings. */
+  getAhlStandings(): Promise<WorkerResponse> {
+    return this.send({ type: 'getAhlStandings' })
+  }
+
+  /** User's AHL affiliate roster. */
+  getAhlSquad(): Promise<WorkerResponse> {
+    return this.send({ type: 'getAhlSquad' })
+  }
+
+  /** Recall an AHL player to the user's NHL roster. */
+  callUp(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'callUp', playerId })
+  }
+
+  /** Assign an NHL player to the user's AHL affiliate. */
+  sendDown(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'sendDown', playerId })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

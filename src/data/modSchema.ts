@@ -36,7 +36,7 @@ import {
 import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
-import { buildSchedule } from './generate'
+import { buildSchedule, freshStanding } from './generate'
 import type { LeagueData } from './generate'
 
 /* ─────────────────────────── Public schema types ─────────────────────────── */
@@ -124,6 +124,29 @@ export interface ModPlayer {
   contract?: ModContract
 }
 
+/**
+ * Optional AHL affiliate definition on a mod team.
+ *
+ * When present, the loader creates a linked AHL Team from this data.
+ * When absent, the loader synthesises a small fictional affiliate so every
+ * NHL team always has one.
+ */
+export interface ModAffiliate {
+  city: string
+  nickname: string
+  /** Exactly 3 characters. */
+  abbreviation: string
+  /** Primary jersey color as '#RRGGBB'. */
+  primary: string
+  /** Secondary jersey color as '#RRGGBB'. */
+  secondary: string
+  /**
+   * Affiliate roster. Minimum 12 skaters (C/W/D) and 2 goalies.
+   * Can be thin — the loader backfills from NHL overflow if fewer than 16 total.
+   */
+  players: ModPlayer[]
+}
+
 export interface ModTeam {
   /**
    * Mod-stable external key, e.g. "nhl-team-10". Must be unique within the
@@ -141,6 +164,12 @@ export interface ModTeam {
   logoId?: string
   /** Must include >= 17 skaters (C/W/D combined) and >= 2 goalies. */
   players: ModPlayer[]
+  /**
+   * Optional AHL affiliate. When present, loaded as a tier:'ahl' Team linked
+   * to this NHL parent. When absent, a fictional affiliate is synthesised so
+   * every NHL team always has one in the generated LeagueData.
+   */
+  affiliate?: ModAffiliate
 }
 
 export interface ModDivision {
@@ -269,6 +298,37 @@ function validatePlayer(raw: unknown, path: string): ModPlayer {
   return r as unknown as ModPlayer
 }
 
+function validateAffiliate(raw: unknown, path: string): ModAffiliate {
+  assertObject(raw, path)
+  const r = raw as Record<string, unknown>
+
+  assertString(r['city'], `${path}.city`)
+  assertString(r['nickname'], `${path}.nickname`)
+  assertString(r['abbreviation'], `${path}.abbreviation`)
+  if ((r['abbreviation'] as string).length !== 3)
+    fail(`${path}.abbreviation must be exactly 3 characters, got "${r['abbreviation']}"`)
+
+  assertString(r['primary'], `${path}.primary`)
+  if (parseColor(r['primary'] as string) === null)
+    fail(`${path}.primary must be a '#RRGGBB' hex color, got "${r['primary']}"`)
+
+  assertString(r['secondary'], `${path}.secondary`)
+  if (parseColor(r['secondary'] as string) === null)
+    fail(`${path}.secondary must be a '#RRGGBB' hex color, got "${r['secondary']}"`)
+
+  assertArray(r['players'], `${path}.players`)
+  const players: ModPlayer[] = (r['players'] as unknown[]).map((p, i) =>
+    validatePlayer(p, `${path}.players[${i}]`)
+  )
+
+  // Affiliate roster minimum: >= 2 goalies (skaters can be thin — loader backfills).
+  const goalies = players.filter((p) => p.position === 'G')
+  if (goalies.length < 2)
+    fail(`${path} must have at least 2 goalies, found ${goalies.length}`)
+
+  return { ...r, players } as ModAffiliate
+}
+
 function validateTeam(raw: unknown, path: string): ModTeam {
   assertObject(raw, path)
   const r = raw as Record<string, unknown>
@@ -311,7 +371,13 @@ function validateTeam(raw: unknown, path: string): ModTeam {
     seen.add(p.externalId)
   }
 
-  return { ...r, players } as ModTeam
+  // Validate optional affiliate.
+  let affiliate: ModAffiliate | undefined
+  if (r['affiliate'] !== undefined) {
+    affiliate = validateAffiliate(r['affiliate'], `${path}.affiliate`)
+  }
+
+  return { ...r, players, ...(affiliate !== undefined ? { affiliate } : {}) } as ModTeam
 }
 
 /**
@@ -615,6 +681,9 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   let teamNum = 0
   let divNum = 0
 
+  // Track NHL teams + their mod specs so we can build AHL affiliates after.
+  const nhlTeamSpecs: Array<{ teamId: TeamId; modTeam: ModTeam; roster: Player[] }> = []
+
   for (let ci = 0; ci < mod.conferences.length; ci++) {
     const modConf = mod.conferences[ci]
     const confDivIds: string[] = []
@@ -737,6 +806,8 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         }
 
         teams.set(teamId, team)
+        // Record the NHL team + its mod spec for AHL affiliate building below.
+        nhlTeamSpecs.push({ teamId, modTeam, roster })
       }
 
       divisions.push({ id: divId, name: modDiv.name, teamIds: divTeamIds })
@@ -746,7 +817,206 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     conferences.push({ id: `conf${ci}`, name: modConf.name, divisionIds: confDivIds })
   }
 
+  // Capture NHL player ids BEFORE building AHL so league.players stays NHL-only.
+  const nhlPlayerIds = [...players.keys()]
+
   const schedule: ScheduledGame[] = buildSchedule(allTeamIds, roundRobins, startYear)
+
+  // ─── AHL Affiliate Generation ─────────────────────────────────────────────
+  // Uses a SEPARATE Rng seeded from `seed ^ 0xAHL_MOD` so NHL attribute rolls
+  // are never perturbed. AHL team ids use prefix `ahl-mt` and players `ahl-mp`.
+  const ahlRng = new Rng((seed ^ 0xa411) >>> 0)
+  const ahlTeamIds: TeamId[] = []
+  let ahlTeamNum = 0
+  let ahlPlayerNum = 0
+
+  for (const { teamId: nhlTeamId, modTeam, roster: nhlRoster } of nhlTeamSpecs) {
+    const nhlTeam = teams.get(nhlTeamId)!
+    const ahlTeamId = asTeamId(`ahl-mt${ahlTeamNum++}`)
+    ahlTeamIds.push(ahlTeamId)
+
+    // Link the NHL team to its affiliate.
+    nhlTeam.affiliateId = ahlTeamId
+
+    const ahlRoster: Player[] = []
+
+    if (modTeam.affiliate !== undefined) {
+      // Mod provides an explicit affiliate roster — load it.
+      const aff = modTeam.affiliate
+      const affPrimaryColor = parseColor(aff.primary)!
+      const affSecondaryColor = parseColor(aff.secondary)!
+
+      for (const modPlayer of aff.players) {
+        const playerId = asPlayerId(`ahl-mp${ahlPlayerNum++}`)
+        const caliber = clampAttr(modPlayer.overall ?? 45)
+        const raw = synthesiseAttributes(ahlRng, caliber, modPlayer.position, modPlayer.attributes ?? {})
+        const role: PlayerRole =
+          modPlayer.position === 'G'
+            ? 'starter'
+            : modPlayer.position === 'D'
+              ? ahlRng.pick(DEFENSE_ROLES)
+              : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+        const composites = computeComposites(raw, role, modPlayer.position)
+        const ovr = overall(composites, modPlayer.position)
+        const potentialRaw =
+          modPlayer.potential !== undefined
+            ? synthesiseAttributes(ahlRng, modPlayer.potential, modPlayer.position, {})
+            : synthesisePotential(ahlRng, raw, modPlayer.age)
+        const contract: Contract = modPlayer.contract
+          ? {
+              salary: modPlayer.contract.salary,
+              yearsRemaining: modPlayer.contract.years,
+              expiryYear: startYear + modPlayer.contract.years,
+              noTradeClause: false,
+              twoWay: true
+            }
+          : {
+              salary: Math.round((0.07 + Math.pow(Math.max(0, ovr - 40) / 50, 2) * 0.68) * 1e6),
+              yearsRemaining: ahlRng.range(1, 3),
+              expiryYear: startYear + ahlRng.range(1, 3),
+              noTradeClause: false,
+              twoWay: true
+            }
+        const player: Player = {
+          id: playerId,
+          name: modPlayer.name,
+          age: modPlayer.age,
+          position: modPlayer.position,
+          handedness: modPlayer.handedness,
+          role,
+          ratings: raw,
+          potential: potentialRaw,
+          composites,
+          personality: makeDefaultPersonality(ahlRng),
+          contract,
+          stats: [],
+          fatigue: 0,
+          morale: ahlRng.range(50, 80),
+          injuryStatus: null,
+          form: 0,
+          externalId: modPlayer.externalId,
+          ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {})
+        }
+        const goaliesBefore = ahlRoster.filter((p) => p.position === 'G').length
+        if (modPlayer.position === 'G' && goaliesBefore > 0) player.role = 'backup'
+        ahlRoster.push(player)
+        players.set(playerId, player)
+      }
+
+      // Backfill: if affiliate has fewer than 16 players, pad from NHL overflow
+      // (players beyond the chosen ~25 in the NHL roster, by lowest overall).
+      if (ahlRoster.length < 16) {
+        const nhlByOverall = [...nhlRoster]
+          .sort((a, b) => overall(a.composites, a.position) - overall(b.composites, b.position))
+        const needed = 16 - ahlRoster.length
+        for (let i = 0; i < needed && i < nhlByOverall.length; i++) {
+          ahlRoster.push(nhlByOverall[i])
+        }
+      }
+
+      const ahlLines = buildLinesFromRoster(ahlRoster)
+      const ahlTeam: Team = {
+        id: ahlTeamId,
+        name: `${aff.city} ${aff.nickname}`,
+        abbreviation: aff.abbreviation,
+        city: aff.city,
+        colors: { primary: affPrimaryColor, secondary: affSecondaryColor },
+        conferenceId: 'ahl-conf',
+        divisionId: 'ahl-div',
+        roster: ahlRoster.map((p) => p.id),
+        lines: ahlLines,
+        tactics: structuredClone(DEFAULT_TACTICS),
+        finances: {
+          budget: 12e6,
+          salaryCap: 88e6,
+          capUsed: ahlRoster.reduce((s, p) => s + p.contract.salary, 0),
+          revenue: 0
+        },
+        staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
+        tier: 'ahl',
+        parentTeamId: nhlTeamId,
+      }
+      teams.set(ahlTeamId, ahlTeam)
+    } else {
+      // No explicit affiliate — synthesise a small fictional one.
+      // City: parent city + "AHL". Colors: swapped from parent.
+      const synthCaliber = clampAttr(ahlRng.normal(42, 6))
+      const positions: Array<{ pos: 'C' | 'W' | 'D' | 'G'; count: number }> = [
+        { pos: 'C', count: 3 }, { pos: 'W', count: 9 }, { pos: 'D', count: 6 }, { pos: 'G', count: 2 }
+      ]
+      for (const { pos, count } of positions) {
+        for (let i = 0; i < count; i++) {
+          const playerId = asPlayerId(`ahl-mp${ahlPlayerNum++}`)
+          const caliber = clampAttr(ahlRng.normal(synthCaliber, 6))
+          const raw = synthesiseAttributes(ahlRng, caliber, pos, {})
+          const role: PlayerRole =
+            pos === 'G' ? 'starter' : pos === 'D' ? ahlRng.pick(DEFENSE_ROLES) : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+          const composites = computeComposites(raw, role, pos)
+          const ovr = overall(composites, pos)
+          const age = Math.round(Math.min(35, Math.max(19, ahlRng.normal(24, 4))))
+          const years = ahlRng.range(1, 3)
+          const player: Player = {
+            id: playerId,
+            name: `Player AHL${ahlPlayerNum}`,
+            age,
+            position: pos,
+            handedness: ahlRng.chance(0.65) ? 'L' : 'R',
+            role,
+            ratings: raw,
+            potential: synthesisePotential(ahlRng, raw, age),
+            composites,
+            personality: makeDefaultPersonality(ahlRng),
+            contract: {
+              salary: Math.round((0.07 + Math.pow(Math.max(0, ovr - 40) / 50, 2) * 0.68) * 1e6),
+              yearsRemaining: years,
+              expiryYear: startYear + years,
+              noTradeClause: false,
+              twoWay: true
+            },
+            stats: [],
+            fatigue: 0,
+            morale: ahlRng.range(50, 80),
+            injuryStatus: null,
+            form: 0,
+          }
+          if (pos === 'G' && ahlRoster.filter((p) => p.position === 'G').length > 0) {
+            player.role = 'backup'
+          }
+          ahlRoster.push(player)
+          players.set(playerId, player)
+        }
+      }
+
+      const ahlLines = buildLinesFromRoster(ahlRoster)
+      const abbr = nhlTeam.abbreviation.slice(0, 2) + 'A'
+      const ahlTeam: Team = {
+        id: ahlTeamId,
+        name: `${nhlTeam.city} AHL`,
+        abbreviation: abbr,
+        city: nhlTeam.city,
+        colors: { primary: nhlTeam.colors.secondary, secondary: nhlTeam.colors.primary },
+        conferenceId: 'ahl-conf',
+        divisionId: 'ahl-div',
+        roster: ahlRoster.map((p) => p.id),
+        lines: ahlLines,
+        tactics: structuredClone(DEFAULT_TACTICS),
+        finances: {
+          budget: 12e6,
+          salaryCap: 88e6,
+          capUsed: ahlRoster.reduce((s, p) => s + p.contract.salary, 0),
+          revenue: 0
+        },
+        staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
+        tier: 'ahl',
+        parentTeamId: nhlTeamId,
+      }
+      teams.set(ahlTeamId, ahlTeam)
+    }
+  }
+
+  const ahlSchedule: ScheduledGame[] = ahlTeamIds.length >= 2 ? buildSchedule(ahlTeamIds, 2, startYear) : []
+  const ahlStandings = ahlTeamIds.map(freshStanding)
+  // ─── End AHL Generation ───────────────────────────────────────────────────
 
   const league: League = {
     id: asLeagueId('lg0'),
@@ -754,14 +1024,18 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     conferences,
     divisions,
     teams: allTeamIds,
-    players: [...players.keys()],
+    // NHL players only — AHL players are on AHL team rosters, not in this list.
+    players: nhlPlayerIds,
     schedule,
     draftClasses: [],
     season: {
       year: startYear,
       standings: allTeamIds.map(emptyStanding),
       news: []
-    }
+    },
+    ahlTeams: ahlTeamIds,
+    ahlSchedule,
+    ahlStandings,
   }
 
   return { league, teams, players }

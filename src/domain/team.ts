@@ -59,4 +59,20 @@ export interface Team {
    * active mod folder. Absent = show a generated crest from team colors.
    */
   logoId?: string
+  /**
+   * League tier. Absent or 'nhl' = top-level NHL team (back-compat default).
+   * 'ahl' = minor-league affiliate that lives in leagueData.teams but NOT in
+   * league.teams; it appears in league.ahlTeams instead.
+   */
+  tier?: 'nhl' | 'ahl'
+  /**
+   * Set on AHL teams only. Points to the NHL parent's TeamId.
+   * Drives call-up/send-down routing and UI grouping.
+   */
+  parentTeamId?: TeamId
+  /**
+   * Set on NHL teams only. Points to the AHL affiliate's TeamId.
+   * Drives call-up/send-down routing and UI grouping.
+   */
+  affiliateId?: TeamId
 }

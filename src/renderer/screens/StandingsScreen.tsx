@@ -1,17 +1,21 @@
 import { useState } from 'react'
-import type { StandingRowView, StandingsView } from '../../worker/protocol'
+import type { AhlStandingsView, StandingRowView, StandingsView } from '../../worker/protocol'
 import { crestColor } from '../components/format'
-import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
-type TabId = 'overall' | 'conference' | 'division'
+type TabId = 'overall' | 'conference' | 'division' | 'ahl'
 
-/** Full league standings: Overall / Conference / Division tabs. */
+/** Full league standings: Overall / Conference / Division / AHL tabs. */
 export function StandingsScreen(): JSX.Element {
   const client = useClient()
   const { data, loading, error } = useScreenData<StandingsView>(
     () => client.getStandings(),
     (r) => (r.type === 'standings' ? r.standings : null)
+  )
+  const { data: ahlData, loading: ahlLoading, error: ahlError } = useScreenData<AhlStandingsView>(
+    () => client.getAhlStandings(),
+    (r) => (r.type === 'ahlStandings' ? r.standings : null)
   )
   const [tab, setTab] = useState<TabId>('overall')
   // per-conference subtab when on "conference" view
@@ -37,6 +41,9 @@ export function StandingsScreen(): JSX.Element {
           setConfIdx={setConfIdx}
           divIdx={divIdx}
           setDivIdx={setDivIdx}
+          ahlData={ahlData}
+          ahlLoading={ahlLoading}
+          ahlError={ahlError}
         />
       )}
     </section>
@@ -53,15 +60,18 @@ function StandingsBody(props: {
   setConfIdx: (i: number) => void
   divIdx: number
   setDivIdx: (i: number) => void
+  ahlData: AhlStandingsView | null
+  ahlLoading: boolean
+  ahlError: string | null
 }): JSX.Element {
-  const { data, tab, setTab, confIdx, setConfIdx, divIdx, setDivIdx } = props
+  const { data, tab, setTab, confIdx, setConfIdx, divIdx, setDivIdx, ahlData, ahlLoading, ahlError } = props
 
   return (
     <div className="stack">
       <div className="tabs">
-        {(['overall', 'conference', 'division'] as TabId[]).map((t) => (
+        {(['overall', 'conference', 'division', 'ahl'] as TabId[]).map((t) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'overall' ? 'Overall' : t === 'conference' ? 'Conference' : 'Division'}
+            {t === 'overall' ? 'Overall' : t === 'conference' ? 'Conference' : t === 'division' ? 'Division' : 'AHL'}
           </button>
         ))}
       </div>
@@ -113,6 +123,21 @@ function StandingsBody(props: {
           {data.divisions[divIdx] && (
             <Panel title={`${data.divisions[divIdx].name} · ${data.divisions[divIdx].conferenceName}`}>
               <StandingsTable rows={data.divisions[divIdx].rows} playoffLine={null} />
+            </Panel>
+          )}
+        </div>
+      )}
+
+      {tab === 'ahl' && (
+        <div className="stack">
+          {ahlError && <Notice kind="warn">{ahlError}</Notice>}
+          {ahlLoading && !ahlData && <Notice kind="info">Loading AHL standings…</Notice>}
+          {ahlData && ahlData.rows.length === 0 && (
+            <Notice kind="info">No AHL affiliates have been generated for this league.</Notice>
+          )}
+          {ahlData && ahlData.rows.length > 0 && (
+            <Panel title="AHL Affiliate League">
+              <StandingsTable rows={ahlData.rows} playoffLine={null} />
             </Panel>
           )}
         </div>

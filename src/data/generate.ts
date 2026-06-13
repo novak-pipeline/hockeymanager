@@ -304,7 +304,7 @@ export function buildSchedule(teamIds: TeamId[], roundRobins: number, season: nu
   return games
 }
 
-const emptyStanding = (teamId: TeamId): Standing => ({
+export const freshStanding = (teamId: TeamId): Standing => ({
   teamId,
   gamesPlayed: 0,
   wins: 0,
@@ -314,6 +314,9 @@ const emptyStanding = (teamId: TeamId): Standing => ({
   goalsFor: 0,
   goalsAgainst: 0
 })
+
+/** Alias kept internal for callers that already used emptyStanding. */
+const emptyStanding = freshStanding
 
 export function generateLeague(opts: GenerateOptions): LeagueData {
   const {
@@ -417,21 +420,240 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
 
   const schedule = buildSchedule(teamIds, roundRobins, startYear)
 
+  // Capture NHL player ids BEFORE AHL generation so league.players stays NHL-only.
+  const nhlPlayerIds = [...players.keys()]
+
+  // ─── AHL Affiliate Generation ─────────────────────────────────────────────
+  // CRITICAL: All NHL content above is generated FIRST with `rng` to preserve
+  // existing RNG draws. AHL content uses a SEPARATE Rng seeded from
+  // `seed ^ 0xAHL_SEED` so adding affiliates never perturbs the NHL stream.
+  // AHL teams/players use ids starting beyond the NHL namespace to avoid
+  // collisions: teamIds like `ahl-t0`, playerIds like `ahl-p0`.
+
+  const ahlRng = new Rng((seed ^ 0xa410) >>> 0)
+
+  // Minor-league city/nickname pairs — one per NHL team slot, in generation order.
+  // Pattern: fictional minor-league city near the parent's region.
+  const AHL_FRANCHISES: readonly { city: string; nickname: string; abbreviation: string }[] = [
+    { city: 'Riverside Valley', nickname: 'Rapids', abbreviation: 'RVA' },
+    { city: 'Granite Hills', nickname: 'Miners', abbreviation: 'GRH' },
+    { city: 'Cedarwood', nickname: 'Loggers', abbreviation: 'CDW' },
+    { city: 'Port Haven', nickname: 'Clippers', abbreviation: 'PHC' },
+    { city: 'Summit Lake', nickname: 'Eagles', abbreviation: 'SML' },
+    { city: 'Ironside', nickname: 'Steel', abbreviation: 'IRS' },
+    { city: 'Aurora Falls', nickname: 'Lights', abbreviation: 'AUF' },
+    { city: 'Maple Valley', nickname: 'Wolves', abbreviation: 'MPV' },
+    { city: 'Bayshore', nickname: 'Gulls', abbreviation: 'BYS' },
+    { city: 'Frostburg', nickname: 'Bears', abbreviation: 'FBG' },
+    { city: 'Capitol Pines', nickname: 'Guards', abbreviation: 'CPG' },
+    { city: 'Thunder Ridge', nickname: 'Bolts', abbreviation: 'TRB' },
+    { city: 'Silver Creek', nickname: 'Foxes', abbreviation: 'SLC' },
+    { city: 'Harborview', nickname: 'Seals', abbreviation: 'HBV' },
+    { city: 'Birch Falls', nickname: 'Moose', abbreviation: 'BIF' },
+    { city: 'Crystal Cove', nickname: 'Rays', abbreviation: 'CYC' },
+  ]
+
+  // AHL rosters: fewer players than NHL, lower CA, include young high-potential
+  // prospects to make call-up decisions meaningful.
+  const AHL_FORWARDS = 12
+  const AHL_DEFENSE = 6
+  const AHL_GOALIES = 2
+  const AHL_TOTAL = AHL_FORWARDS + AHL_DEFENSE + AHL_GOALIES
+
+  const ahlTeamIds: TeamId[] = []
+  let ahlPlayerNum = 0
+  let ahlTeamNum = 0
+
+  for (let t = 0; t < teamCount; t++) {
+    const nhlTeamId = teamIds[t]
+    const nhlTeam = teams.get(nhlTeamId)!
+    const ahlFranchise = AHL_FRANCHISES[t % AHL_FRANCHISES.length]
+
+    // AHL team caliber is meaningfully lower than NHL to distinguish tiers.
+    const ahlTeamCaliber = clampRating(ahlRng.normal(42, 6))
+
+    const ahlTeamId = asTeamId(`ahl-t${ahlTeamNum++}`)
+    ahlTeamIds.push(ahlTeamId)
+
+    // Link NHL team to its affiliate (mutate the already-stored NHL team).
+    nhlTeam.affiliateId = ahlTeamId
+
+    const ahlRoster: Player[] = []
+
+    // Build AHL roster: mix of depth players (lower caliber) and young prospects
+    // (low current rating but high potential — these are the interesting call-up candidates).
+    const prospectSlots = Math.round(AHL_TOTAL * 0.35) // ~35% are genuine prospects
+    for (let i = 0; i < AHL_FORWARDS; i++) {
+      const pos: Position = i < Math.max(3, Math.round(AHL_FORWARDS / 3)) ? 'C' : 'W'
+      const isProspect = i < Math.round(prospectSlots * (AHL_FORWARDS / AHL_TOTAL))
+      const p = makeAhlPlayer(ahlRng, asPlayerId(`ahl-p${ahlPlayerNum++}`), pos, ahlTeamCaliber, startYear, isProspect)
+      ahlRoster.push(p)
+      players.set(p.id, p)
+    }
+    for (let i = 0; i < AHL_DEFENSE; i++) {
+      const isProspect = i < Math.round(prospectSlots * (AHL_DEFENSE / AHL_TOTAL))
+      const p = makeAhlPlayer(ahlRng, asPlayerId(`ahl-p${ahlPlayerNum++}`), 'D', ahlTeamCaliber, startYear, isProspect)
+      ahlRoster.push(p)
+      players.set(p.id, p)
+    }
+    for (let i = 0; i < AHL_GOALIES; i++) {
+      const p = makeAhlPlayer(ahlRng, asPlayerId(`ahl-p${ahlPlayerNum++}`), 'G', ahlTeamCaliber, startYear, false)
+      if (i > 0) p.role = 'backup'
+      ahlRoster.push(p)
+      players.set(p.id, p)
+    }
+
+    const ahlLines = buildLines(ahlRoster)
+
+    // AHL-level finances: minor-league budget, no NHL cap relevance.
+    const ahlCapUsed = ahlRoster.reduce((s, p) => s + p.contract.salary, 0)
+
+    // Colors: slightly shift the parent's palette so they look related but distinct.
+    const ahlPrimary = nhlTeam.colors.secondary
+    const ahlSecondary = nhlTeam.colors.primary
+
+    const ahlTeam: Team = {
+      id: ahlTeamId,
+      name: `${ahlFranchise.city} ${ahlFranchise.nickname}`,
+      abbreviation: ahlFranchise.abbreviation,
+      city: ahlFranchise.city,
+      colors: { primary: ahlPrimary, secondary: ahlSecondary },
+      // AHL teams get a single shared AHL division/conference that does NOT
+      // collide with NHL conference/division ids (which are conf0/conf1, div0-div3).
+      conferenceId: 'ahl-conf',
+      divisionId: 'ahl-div',
+      roster: ahlRoster.map((p) => p.id),
+      lines: ahlLines,
+      tactics: structuredClone(DEFAULT_TACTICS),
+      finances: { budget: 12e6, salaryCap: 88e6, capUsed: ahlCapUsed, revenue: 0 },
+      staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
+      tier: 'ahl',
+      parentTeamId: nhlTeamId,
+    }
+
+    teams.set(ahlTeamId, ahlTeam)
+  }
+
+  // AHL schedule: single round-robin (fewer games than NHL — minor-league pace).
+  const ahlSchedule = buildSchedule(ahlTeamIds, 2, startYear)
+  // AHL standings: one fresh row per affiliate.
+  const ahlStandings = ahlTeamIds.map(freshStanding)
+  // ─── End AHL Generation ───────────────────────────────────────────────────
+
   const league: League = {
     id: asLeagueId('lg0'),
     name: leagueName,
     conferences,
     divisions,
     teams: teamIds,
-    players: [...players.keys()],
+    // NHL players only — AHL players are on AHL team rosters, not in this list.
+    players: nhlPlayerIds,
     schedule,
     draftClasses: [],
     season: {
       year: startYear,
       standings: teamIds.map(emptyStanding),
       news: []
-    }
+    },
+    ahlTeams: ahlTeamIds,
+    ahlSchedule,
+    ahlStandings,
   }
 
   return { league, teams, players }
+}
+
+/**
+ * Generate an AHL-tier player. Prospects have lower current ability but
+ * significantly higher potential — making call-up decisions meaningful.
+ */
+function makeAhlPlayer(
+  rng: Rng,
+  id: PlayerId,
+  position: Position,
+  teamCaliber: number,
+  startYear: number,
+  isProspect: boolean
+): Player {
+  // Prospects: young (18–23), lower current caliber, high potential ceiling.
+  // Depth players: typical AHL veteran range.
+  const age = isProspect
+    ? Math.round(Math.min(23, Math.max(18, rng.normal(20, 1.5))))
+    : Math.round(Math.min(35, Math.max(21, rng.normal(26, 4))))
+
+  const currentCaliber = isProspect
+    ? clampRating(rng.normal(teamCaliber - 8, 5)) // raw, unpolished
+    : clampRating(rng.normal(teamCaliber, 6))
+
+  const raw = makeRawAttributes(rng, currentCaliber, position)
+  const role: PlayerRole =
+    position === 'G'
+      ? 'starter'
+      : position === 'D'
+        ? rng.pick(DEFENSE_ROLES)
+        : weightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
+  const composites = computeComposites(raw, role, position)
+  const ovr = overall(composites, position)
+
+  // Prospects: potential can reach NHL-quality caliber (55–80+).
+  // Depth veterans: potential is close to current.
+  const potential = isProspect
+    ? makePotentialAhl(rng, raw, age, rng.float(55, 82))
+    : makePotential(rng, raw, age)
+
+  return {
+    id,
+    name: makeName(rng),
+    age,
+    position,
+    handedness: rng.chance(0.65) ? 'L' : 'R',
+    role,
+    ratings: raw,
+    potential,
+    composites,
+    personality: makePersonality(rng),
+    contract: makeAhlContract(rng, ovr, startYear),
+    stats: [],
+    fatigue: 0,
+    morale: rng.range(50, 80),
+    injuryStatus: null,
+    form: 0,
+  }
+}
+
+/**
+ * Potential for a prospect: ceiling is driven by a target overall rather than
+ * purely age-based headroom, so young AHL prospects can develop into NHL players.
+ */
+function makePotentialAhl(rng: Rng, current: RawAttributes, age: number, targetOverall: number): RawAttributes {
+  // Compute how much bump is needed to reach targetOverall.
+  const ageRoom = Math.max(0, 26 - age)
+  const bump = (v: number): number => clampRating(v + rng.float(ageRoom * 0.3, Math.max(ageRoom * 0.3, targetOverall - 40)))
+  const bumpGroup = <T extends object>(g: T): T =>
+    Object.fromEntries(Object.entries(g).map(([k, v]) => [k, bump(v as number)])) as T
+  const pot: RawAttributes = {
+    technical: bumpGroup(current.technical),
+    physical: bumpGroup(current.physical),
+    mental: bumpGroup(current.mental),
+    defensive: bumpGroup(current.defensive),
+  }
+  if (current.goalie) pot.goalie = bumpGroup(current.goalie)
+  return pot
+}
+
+/**
+ * AHL contracts: two-way deals, much lower salary (minor-league scale).
+ */
+function makeAhlContract(rng: Rng, ovr: number, startYear: number): Contract {
+  // AHL-level salary: $70k–$750k range.
+  const base = 0.07 + Math.pow(Math.max(0, ovr - 40) / 50, 2) * 0.68
+  const salary = Math.round(base * 1e6)
+  const years = rng.range(1, 3)
+  return {
+    salary,
+    yearsRemaining: years,
+    expiryYear: startYear + years,
+    noTradeClause: false,
+    twoWay: true,
+  }
 }

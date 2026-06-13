@@ -204,6 +204,8 @@ import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMa
 import { buildBoxScore } from './boxScore'
 import {
   badge,
+  buildAhlSquadView,
+  buildAhlStandingsView,
   buildFinanceView,
   buildPlayerProfile,
   buildScoutingView,
@@ -214,6 +216,7 @@ import {
   buildTacticsView,
   potentialStars,
   standingRowView,
+  type AhlViewCtx,
   type FogCtx,
   type ViewCtx,
 } from './buildViews'
@@ -221,6 +224,8 @@ import {
   dayToDateISO,
   type AgmReportView,
   type AgmRankedPlayerView,
+  type AhlSquadView,
+  type AhlStandingsView,
   type BoardView,
   type BoxScoreView,
   type CareerPhase,
@@ -411,6 +416,10 @@ export class Career {
   private readonly standings = new Map<TeamId, Standing>()
   private readonly totals = new Map<PlayerId, GamePlayerStat>()
   private readonly gp = new Map<PlayerId, number>()
+  /** AHL standings — keyed by AHL team id. */
+  private readonly ahlStandings = new Map<TeamId, Standing>()
+  /** AHL games-played counters for AHL-tier players. */
+  private readonly ahlGp = new Map<PlayerId, number>()
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
@@ -492,6 +501,8 @@ export class Career {
     this.playerCounter = this.computePlayerCounter()
     if (!restored) {
       for (const teamId of data.league.teams) this.standings.set(teamId, freshStanding(teamId))
+      // Initialize AHL standings from the AHL schedule's team ids.
+      for (const teamId of data.league.ahlTeams ?? []) this.ahlStandings.set(teamId, freshStanding(teamId))
       this.picks = initialPicks({
         teamIds: [...data.league.teams],
         firstDraftYear: this.year + 1,
@@ -549,6 +560,11 @@ export class Career {
       this.specialTeams = []
       this.transactionLedger = emptyLedger()
     }
+    // AI auto-assignment: ensure every NHL roster is legal and AHL affiliates hold the rest.
+    // Only called for fresh careers (not restored saves, where the user controls their roster).
+    if (!restored) {
+      this.assignRosters()
+    }
   }
 
   /* ────────────────────────── small accessors ────────────────────────── */
@@ -563,6 +579,39 @@ export class Career {
 
   get done(): boolean {
     return this.phase !== 'regularSeason'
+  }
+
+  /**
+   * Current AHL standings, sorted by points descending.
+   * Returns an empty array when the league has no AHL affiliates.
+   */
+  getAhlStandings(): Standing[] {
+    return sortStandings([...this.ahlStandings.values()])
+  }
+
+  /** Context slice for AHL view builders. */
+  private ahlViewCtx(): AhlViewCtx {
+    const nhlTeam = this.userTeam
+    const userAhlTeamId: TeamId | null = nhlTeam.affiliateId
+      ? (nhlTeam.affiliateId as TeamId)
+      : null
+    return {
+      teams: this.data.teams,
+      players: this.data.players,
+      ahlSchedule: this.data.league.ahlSchedule ?? [],
+      ahlStandingsSorted: sortStandings([...this.ahlStandings.values()]),
+      userAhlTeamId,
+    }
+  }
+
+  /** League-wide AHL standings view model. */
+  getAhlStandingsView(): AhlStandingsView {
+    return buildAhlStandingsView(this.ahlViewCtx())
+  }
+
+  /** User's AHL affiliate roster view model. */
+  getAhlSquadView(): AhlSquadView {
+    return buildAhlSquadView(this.ahlViewCtx(), this.ahlGp)
   }
 
   private get deadlineDay(): number {
@@ -1800,6 +1849,36 @@ export class Career {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
       }
     }
+    // ── AHL day: sim any AHL games scheduled on the same match day ──────
+    // Uses a distinct seed namespace (AHL_SEED_OFFSET added to the season seed)
+    // so NHL game seeds are byte-identical to before. Only applies standings +
+    // player gp/totals; no morale/injury/story side-effects for AHL games.
+    if (this.data.league.ahlSchedule && this.data.league.ahlSchedule.length > 0) {
+      const ahlSeedBase = deriveSeed(this.seed ^ 0xABCD1234, this.year)
+      for (const game of this.data.league.ahlSchedule) {
+        if (game.day !== nextDay) continue
+        const home = this.data.teams.get(game.homeTeamId)
+        const away = this.data.teams.get(game.awayTeamId)
+        if (!home || !away) continue
+        const ahlRes = quickSimGame(home, away, this.resolve, {
+          seed: deriveSeed(ahlSeedBase, game.id.length),
+        })
+        game.result = {
+          homeGoals: ahlRes.homeGoals,
+          awayGoals: ahlRes.awayGoals,
+          decidedBy: ahlRes.decidedBy,
+        }
+        applyStandingsResult(this.ahlStandings, ahlRes)
+        mergePlayerStats(this.totals, ahlRes.playerStats)
+        for (const [pid, s] of ahlRes.playerStats) {
+          if (s.toi > 0) {
+            // AHL gp tracked separately; this.gp is NHL-only
+            this.ahlGp.set(pid, (this.ahlGp.get(pid) ?? 0) + 1)
+          }
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return true
   }
@@ -1904,6 +1983,33 @@ export class Career {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
       }
     }
+    // ── AHL day (same logic as advanceDay) ────────────────────────────
+    if (this.data.league.ahlSchedule && this.data.league.ahlSchedule.length > 0) {
+      const ahlSeedBase = deriveSeed(this.seed ^ 0xABCD1234, this.year)
+      for (const game of this.data.league.ahlSchedule) {
+        if (game.day !== nextDay) continue
+        const ahlHome = this.data.teams.get(game.homeTeamId)
+        const ahlAway = this.data.teams.get(game.awayTeamId)
+        if (!ahlHome || !ahlAway) continue
+        const ahlRes = quickSimGame(ahlHome, ahlAway, this.resolve, {
+          seed: deriveSeed(ahlSeedBase, game.id.length),
+        })
+        game.result = {
+          homeGoals: ahlRes.homeGoals,
+          awayGoals: ahlRes.awayGoals,
+          decidedBy: ahlRes.decidedBy,
+        }
+        applyStandingsResult(this.ahlStandings, ahlRes)
+        mergePlayerStats(this.totals, ahlRes.playerStats)
+        for (const [pid, s] of ahlRes.playerStats) {
+          if (s.toi > 0) {
+            // AHL gp tracked separately; this.gp is NHL-only
+            this.ahlGp.set(pid, (this.ahlGp.get(pid) ?? 0) + 1)
+          }
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return watched
   }
@@ -2159,18 +2265,28 @@ export class Career {
         this.tentpoles.tournament = tour.tournament
         this.pushSeeds(tour.newsSeeds)
 
-        /* ── development: performance-relative, chemistry-aware ── */
+        /* ── development: performance-relative, chemistry-aware, AHL-aware ── */
+        // Ice-time weighting: combine NHL + AHL games played so a prospect
+        // playing heavy AHL minutes develops at full rate, while a scratched
+        // player (0 NHL + 0 AHL) stagnates. The gamesPlayedById callback feeds
+        // developPlayers' internal gamesFactor curve (0 GP → 0.6, 60+ GP → 1.0).
         const dev = developPlayers({
           players: this.data.players,
-          gamesPlayedById: (id) => this.gp.get(id) ?? 0,
+          gamesPlayedById: (id) => (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0),
           year: this.year,
           rng,
           performance: (id) => {
             const t = this.totals.get(id)
             const p = this.data.players.get(id)!
+            // For players who ONLY played in the AHL this season, their NHL gp
+            // is 0 but ahlGp reflects their actual activity. We use combined gp
+            // for gamesPlayed so the performance ratio is meaningful.
+            const nhlGp = this.gp.get(id) ?? 0
+            const ahlGp = this.ahlGp.get(id) ?? 0
+            const combinedGp = nhlGp + ahlGp
             const base = {
               points: (t?.goals ?? 0) + (t?.assists ?? 0),
-              gamesPlayed: this.gp.get(id) ?? 0,
+              gamesPlayed: combinedGp,
               position: p.position,
             }
             return p.position === 'G' && t && t.shotsAgainst > 0
@@ -2618,6 +2734,19 @@ export class Career {
 
     this.standings.clear()
     for (const teamId of this.data.league.teams) this.standings.set(teamId, freshStanding(teamId))
+
+    // Reset AHL standings and schedule results for the new season.
+    // A new AHL schedule is rebuilt alongside the NHL one (buildSchedule already called above).
+    // We clear results on the existing ahlSchedule entries in-place.
+    this.ahlStandings.clear()
+    for (const teamId of this.data.league.ahlTeams ?? []) {
+      this.ahlStandings.set(teamId, freshStanding(teamId))
+    }
+    if (this.data.league.ahlSchedule) {
+      for (const g of this.data.league.ahlSchedule) g.result = null
+    }
+    this.ahlGp.clear()
+
     this.totals.clear()
     this.gp.clear()
     this.goalieWins.clear()
@@ -2647,6 +2776,8 @@ export class Career {
       )
     }
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+    // Re-balance rosters across NHL/AHL pairs for the new season.
+    this.assignRosters()
 
     /* ── story layer rollover ── */
     this.tentpoles = createInitialTentpolesState()
@@ -2790,6 +2921,230 @@ export class Career {
         summary: `${this.userTeam.abbreviation} releases ${p.name}.`,
       })
       this.transactionLedger = txResult.ledger
+    }
+  }
+
+  /* ────────────────────────── farm system ────────────────────────── */
+
+  /**
+   * Minimum roster position counts required for a team to ice full lines.
+   * A team that drops below any of these after a removal would be illegal.
+   */
+  private static readonly ROSTER_MIN_F = 12
+  private static readonly ROSTER_MIN_D = 6
+  private static readonly ROSTER_MIN_G = 2
+
+  /**
+   * Count healthy players of each broad position on a team's roster.
+   * Returns { f, d, g } counts (F = C + W, D = D, G = G).
+   */
+  private rosterCounts(team: { roster: PlayerId[] }): { f: number; d: number; g: number } {
+    let f = 0
+    let d = 0
+    let g = 0
+    for (const id of team.roster) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      if (p.position === 'D') d++
+      else if (p.position === 'G') g++
+      else f++
+    }
+    return { f, d, g }
+  }
+
+  /**
+   * Call up a player from the AHL to their parent NHL team.
+   *
+   * The player must be on an AHL team whose parentTeamId points to an NHL team.
+   * The source AHL team must retain at least 12F + 6D + 2G after removal.
+   * Returns `{ ok: false, reason }` rather than throwing if any pre-condition fails.
+   * On success, pushes a news item and transaction ledger entry for the user's org.
+   */
+  callUp(playerId: string): { ok: true } | { ok: false; reason: string } {
+    const pid = asPlayerId(playerId)
+    const ahlTeam = [...this.data.teams.values()].find(
+      (t) => t.tier === 'ahl' && t.roster.includes(pid)
+    )
+    if (!ahlTeam) {
+      return { ok: false, reason: 'Player is not on any AHL roster.' }
+    }
+    const nhlTeam = ahlTeam.parentTeamId ? this.data.teams.get(ahlTeam.parentTeamId) : undefined
+    if (!nhlTeam) {
+      return { ok: false, reason: 'AHL team has no parent NHL team.' }
+    }
+
+    // Validate source AHL team retains minimums after removal.
+    const p = this.data.players.get(pid)
+    if (!p) return { ok: false, reason: 'Player not found.' }
+    const counts = this.rosterCounts(ahlTeam)
+    const posKey = p.position === 'D' ? 'd' : p.position === 'G' ? 'g' : 'f'
+    const mins = { f: Career.ROSTER_MIN_F, d: Career.ROSTER_MIN_D, g: Career.ROSTER_MIN_G }
+    if (counts[posKey] - 1 < mins[posKey]) {
+      return {
+        ok: false,
+        reason: `The AHL team would be short of ${posKey.toUpperCase()} players after this call-up.`,
+      }
+    }
+
+    // Move the player.
+    ahlTeam.roster = ahlTeam.roster.filter((id) => id !== pid)
+    nhlTeam.roster.push(pid)
+    repairLines(ahlTeam, this.data.players)
+    repairLines(nhlTeam, this.data.players)
+
+    // News + transaction for the user's org only.
+    if (nhlTeam.id === this.userTeamId || ahlTeam.parentTeamId === this.userTeamId) {
+      this.pushNews(
+        'contract',
+        `${p.name} recalled from ${ahlTeam.abbreviation}`,
+        `${p.name} (${p.position}, ${p.age}) has been recalled from the AHL affiliate.`,
+        { playerId: playerId, teamId: nhlTeam.id as string }
+      )
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'signing',
+        teamIds: [nhlTeam.id as string],
+        summary: `${nhlTeam.abbreviation} recalls ${p.name} from ${ahlTeam.abbreviation}.`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
+
+    return { ok: true }
+  }
+
+  /**
+   * Send down a player from an NHL team to its AHL affiliate.
+   *
+   * The player must be on an NHL team that has an affiliateId.
+   * The source NHL team must retain at least 12F + 6D + 2G after removal.
+   * Returns `{ ok: false, reason }` rather than throwing if any pre-condition fails.
+   * On success, pushes a news item and transaction ledger entry for the user's org.
+   */
+  sendDown(playerId: string): { ok: true } | { ok: false; reason: string } {
+    const pid = asPlayerId(playerId)
+    // Find the NHL team that holds this player (skip AHL teams).
+    const nhlTeam = [...this.data.teams.values()].find(
+      (t) => t.tier !== 'ahl' && t.roster.includes(pid)
+    )
+    if (!nhlTeam) {
+      return { ok: false, reason: 'Player is not on any NHL roster.' }
+    }
+    const ahlTeam = nhlTeam.affiliateId ? this.data.teams.get(nhlTeam.affiliateId) : undefined
+    if (!ahlTeam) {
+      return { ok: false, reason: 'This NHL team has no AHL affiliate.' }
+    }
+
+    // Validate source NHL team retains minimums after removal.
+    const p = this.data.players.get(pid)
+    if (!p) return { ok: false, reason: 'Player not found.' }
+    const counts = this.rosterCounts(nhlTeam)
+    const posKey = p.position === 'D' ? 'd' : p.position === 'G' ? 'g' : 'f'
+    const mins = { f: Career.ROSTER_MIN_F, d: Career.ROSTER_MIN_D, g: Career.ROSTER_MIN_G }
+    if (counts[posKey] - 1 < mins[posKey]) {
+      return {
+        ok: false,
+        reason: `The NHL team would be short of ${posKey.toUpperCase()} players after this assignment.`,
+      }
+    }
+
+    // Move the player.
+    nhlTeam.roster = nhlTeam.roster.filter((id) => id !== pid)
+    ahlTeam.roster.push(pid)
+    repairLines(nhlTeam, this.data.players)
+    repairLines(ahlTeam, this.data.players)
+
+    // News + transaction for the user's org only.
+    if (nhlTeam.id === this.userTeamId) {
+      this.pushNews(
+        'contract',
+        `${p.name} assigned to ${ahlTeam.abbreviation}`,
+        `${p.name} (${p.position}, ${p.age}) has been assigned to the AHL affiliate.`,
+        { playerId: playerId, teamId: ahlTeam.id as string }
+      )
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'release',
+        teamIds: [nhlTeam.id as string],
+        summary: `${nhlTeam.abbreviation} assigns ${p.name} to ${ahlTeam.abbreviation}.`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
+
+    return { ok: true }
+  }
+
+  /**
+   * AI auto-assignment: for every NHL team, keep roughly the best 23 players on
+   * the NHL roster and send extras to the AHL affiliate. The process is additive
+   * and preserves existing NHL players — it only moves excess NHL players DOWN
+   * (trimming rosters > NHL_TARGET), and pulls AHL players UP only when the NHL
+   * team is below position minimums (12F + 6D + 2G). The user's team is included
+   * so it is never left in an illegal state after injury waves.
+   *
+   * Deterministic — no Rng; pure ranking by overall.
+   */
+  assignRosters(): void {
+    const NHL_TARGET = 23
+    for (const nhlTeamId of this.data.league.teams) {
+      const nhlTeam = this.data.teams.get(nhlTeamId)
+      if (!nhlTeam) continue
+      const ahlTeam = nhlTeam.affiliateId ? this.data.teams.get(nhlTeam.affiliateId) : undefined
+      if (!ahlTeam) continue // no affiliate — skip
+
+      // ── Step 1: send excess NHL players to AHL ───────────────────────────
+      if (nhlTeam.roster.length > NHL_TARGET) {
+        const nhlPlayers = nhlTeam.roster.map((id) => {
+          const p = this.data.players.get(id)
+          return p ? { id, ovr: overall(p.composites, p.position) } : null
+        }).filter((x): x is { id: PlayerId; ovr: number } => x !== null)
+
+        // Sort worst-first so we send the lowest-rated extras to AHL.
+        nhlPlayers.sort((a, b) => a.ovr - b.ovr || (a.id < b.id ? -1 : 1))
+        const excess = nhlTeam.roster.length - NHL_TARGET
+        const toSend = nhlPlayers.slice(0, excess).map((p) => p.id)
+        const toSendSet = new Set(toSend)
+        nhlTeam.roster = nhlTeam.roster.filter((id) => !toSendSet.has(id))
+        for (const id of toSend) ahlTeam.roster.push(id)
+      }
+
+      // ── Step 2: pull AHL players up if NHL team below position minimums ──
+      // This handles post-offseason scenarios where contract expiries left gaps.
+      const nhlCounts = this.rosterCounts(nhlTeam)
+      const deficit = {
+        G: Math.max(0, Career.ROSTER_MIN_G - nhlCounts.g),
+        D: Math.max(0, Career.ROSTER_MIN_D - nhlCounts.d),
+        F: Math.max(0, Career.ROSTER_MIN_F - nhlCounts.f),
+      }
+      const totalDeficit = deficit.G + deficit.D + deficit.F
+      if (totalDeficit > 0) {
+        // Pull the best available AHL players of the needed positions.
+        const posNeed = (pos: Position): boolean =>
+          (pos === 'G' && deficit.G > 0) ||
+          (pos === 'D' && deficit.D > 0) ||
+          ((pos === 'C' || pos === 'W') && deficit.F > 0)
+
+        const candidates = ahlTeam.roster
+          .map((id) => {
+            const p = this.data.players.get(id)
+            return p ? { id, ovr: overall(p.composites, p.position), pos: p.position } : null
+          })
+          .filter((x): x is { id: PlayerId; ovr: number; pos: Position } => x !== null && posNeed(x.pos))
+          .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1))
+
+        for (const cand of candidates) {
+          if (!posNeed(cand.pos)) continue
+          nhlTeam.roster.push(cand.id)
+          ahlTeam.roster = ahlTeam.roster.filter((id) => id !== cand.id)
+          const bucket = cand.pos === 'G' ? 'G' : cand.pos === 'D' ? 'D' : 'F'
+          deficit[bucket] = Math.max(0, deficit[bucket] - 1)
+          if (deficit.G === 0 && deficit.D === 0 && deficit.F === 0) break
+        }
+      }
+
+      repairLines(nhlTeam, this.data.players)
+      repairLines(ahlTeam, this.data.players)
     }
   }
 
@@ -4135,6 +4490,8 @@ export class Career {
       rivalriesState: structuredClone(this.rivalriesState),
       specialTeams: structuredClone(this.specialTeams),
       transactionLedger: structuredClone(this.transactionLedger),
+      ahlStandings: serializeMap(this.ahlStandings as unknown as Map<string, unknown>),
+      ahlGp: serializeMap(this.ahlGp as unknown as Map<string, number>),
     }
   }
 
@@ -4280,6 +4637,22 @@ export class Career {
     }
     if (snapshot.transactionLedger) {
       career.transactionLedger = structuredClone(snapshot.transactionLedger)
+    }
+
+    // Restore AHL standings; if absent (older saves) initialize from ahlTeams.
+    if (snapshot.ahlStandings && snapshot.ahlStandings.length > 0) {
+      career.ahlStandings.clear()
+      for (const [k, v] of snapshot.ahlStandings) {
+        career.ahlStandings.set(asTeamId(k), v as Standing)
+      }
+    } else {
+      career.ahlStandings.clear()
+      for (const teamId of data.league.ahlTeams ?? []) {
+        career.ahlStandings.set(teamId, freshStanding(teamId))
+      }
+    }
+    if (snapshot.ahlGp) {
+      for (const [k, v] of snapshot.ahlGp) career.ahlGp.set(asPlayerId(k), v)
     }
 
     // Rebuild transient state that deliberately isn't saved.
