@@ -60,6 +60,11 @@ C_BIRTHTOWN = 7     # "Birth Town", e.g. "cole harbour:ns:can"
 C_FAV_NUM, C_SQUAD_NUM = 52, 53   # favourite / squad jersey number
 # FM-style personality (each 1-20), maps 1:1 onto our Personality scale.
 C_AMBITION, C_DETERMINATION, C_LOYALTY, C_PROFESSIONALISM, C_TEMPERAMENT = 30, 31, 32, 34, 36
+C_ADAPTABILITY, C_PRESSURE, C_SPORTSMANSHIP = 29, 33, 35
+C_INTL_APPS, C_INTL_GOALS, C_INTL_ASSISTS, C_STANLEY_CUPS = 21, 22, 23, 25
+C_HOME_REP, C_CURRENT_REP, C_WORLD_REP = 39, 40, 41
+C_JUNIOR_PREF = 57
+C_NHL_DRAFT_ELIGIBLE, C_NHL_DRAFTED = 139, 140
 
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
@@ -218,6 +223,97 @@ def personality_from_row(row):
         "determination": p(C_DETERMINATION),
     }
 
+def extended_fields_from_row(row):
+    """Build the extended EHM-sourced fields for a player dict.
+    Only emits keys that are meaningful (non-zero / non-empty).
+    All returned keys are optional; absence is always a valid fallback."""
+    out = {}
+
+    # Gameplay attrs (EHM 1-20 -> our 1-99 via s20)
+    for key, col in [
+        ("leadership",    C_LEADERSHIP),
+        ("teamwork",      C_TEAMWORK),
+        ("flair",         C_FLAIR),
+        ("agitation",     C_AGITATION),
+        ("movement",      C_MOVEMENT),
+        ("oneOnOnes",     C_ONEONONE),
+        ("versatility",   C_VERSATILITY),
+    ]:
+        raw = to_int(row[col], 0)
+        if raw > 0:
+            out[key] = s20(row, col)
+
+    # fighting is also 1-20 -> 1-99
+    raw_fight = to_int(row[C_FIGHTING], 0)
+    if raw_fight > 0:
+        out["fighting"] = s20(row, C_FIGHTING)
+
+    # injuryProneness / naturalFitness (1-20 -> 1-99)
+    raw_ip = to_int(row[C_INJURY_PRONE], 0)
+    if raw_ip > 0:
+        out["injuryProneness"] = s20(row, C_INJURY_PRONE)
+    raw_nf = to_int(row[C_NAT_FITNESS], 0)
+    if raw_nf > 0:
+        out["naturalFitness"] = s20(row, C_NAT_FITNESS)
+
+    # Personality-adjacent (keep EHM 1-20 scale, clamp 1-20)
+    for key, col in [
+        ("adaptability",  C_ADAPTABILITY),
+        ("pressure",      C_PRESSURE),
+        ("sportsmanship", C_SPORTSMANSHIP),
+    ]:
+        raw = to_int(row[col], 0)
+        if raw > 0:
+            out[key] = clamp(raw, 1, 20)
+
+    # History counts (emit only if > 0)
+    for key, col in [
+        ("intlApps",    C_INTL_APPS),
+        ("intlGoals",   C_INTL_GOALS),
+        ("intlAssists", C_INTL_ASSISTS),
+        ("stanleyCups", C_STANLEY_CUPS),
+    ]:
+        val = to_int(row[col], 0)
+        if val > 0:
+            out[key] = val
+
+    # Reputation (0-200, emit as-is; emit if > 0)
+    for key, col in [
+        ("homeReputation",    C_HOME_REP),
+        ("currentReputation", C_CURRENT_REP),
+        ("worldReputation",   C_WORLD_REP),
+    ]:
+        val = to_int(row[col], 0)
+        if val > 0:
+            out[key] = val
+
+    # Draft booleans — coerce from Python True/False or string 'True'/'False'
+    def to_bool(v):
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        if s in ("true", "1", "yes"):
+            return True
+        if s in ("false", "0", "no", "[none]", ""):
+            return False
+        return None
+
+    eligible = to_bool(row[C_NHL_DRAFT_ELIGIBLE] if len(row) > C_NHL_DRAFT_ELIGIBLE else None)
+    if eligible is not None:
+        out["nhlDraftEligible"] = eligible
+
+    drafted = to_bool(row[C_NHL_DRAFTED] if len(row) > C_NHL_DRAFTED else None)
+    if drafted is not None:
+        out["nhlDrafted"] = drafted
+
+    # Junior preference string (skip '[None]' and empty)
+    jp = str(row[C_JUNIOR_PREF] or "").strip()
+    if jp and jp != "[None]":
+        out["juniorPreference"] = jp
+
+    return out
+
+
 def birthplace_from_row(row):
     """EHM birth town 'cole harbour:ns:can' -> 'Cole Harbour, NS'."""
     raw = str(row[C_BIRTHTOWN] or "").strip()
@@ -356,6 +452,7 @@ def main():
         pa = to_int(r[C_PA], ca)
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
         pos = position(r)
+        extended = extended_fields_from_row(r)
         player = {
             "externalId": f"ehm-{norm(first)}-{norm(last)}-{year}",
             "name": f"{first} {last}".strip(),
@@ -372,6 +469,7 @@ def main():
             "personality": personality_from_row(r),
             "faceId": face_id,
             "_ca": ca,
+            **extended,
         }
         contract = contract_from_row(r)
         if contract is not None:

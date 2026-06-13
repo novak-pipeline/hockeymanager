@@ -81,9 +81,17 @@ export interface ArcSeed {
 const clamp = (v: number, lo: number, hi: number): number =>
   v < lo ? lo : v > hi ? hi : v
 
-/** Leadership score used for captaincy: professionalism + loyalty + determination. */
+/**
+ * Leadership score used for captaincy/influence (~0–60 scale). Prefers the
+ * source DB's explicit leadership rating (1–99) when present — mapped onto the
+ * same scale and blended with loyalty/determination — otherwise falls back to
+ * the professionalism + loyalty + determination personality proxy.
+ */
 function leadershipScore(p: Player): number {
   const { professionalism, loyalty, determination } = p.personality
+  if (p.leadership !== undefined) {
+    return (p.leadership / 99) * 40 + (loyalty + determination) / 2
+  }
   return professionalism + loyalty + determination
 }
 
@@ -271,13 +279,19 @@ export function initLockerRoom(args: {
       continue
     }
 
-    // Friendship: similar age (diff ≤ 3) + both high loyalty (≥ 13)
+    // Friendship: similar age (diff ≤ 3) + both high loyalty (≥ 13).
+    // Team-first players (high teamwork from the DB) bond more readily; absent
+    // teamwork on fictional players leaves the base 0.35 chance unchanged.
+    const twBonus =
+      pa.teamwork !== undefined && pb.teamwork !== undefined
+        ? Math.max(0, (pa.teamwork + pb.teamwork) / 2 - 50) / 100 * 0.3
+        : 0
     if (
       !friendPairs.has(key) &&
       ageDiff <= 3 &&
       pa.personality.loyalty >= 13 &&
       pb.personality.loyalty >= 13 &&
-      rng.chance(0.35)
+      rng.chance(0.35 + twBonus)
     ) {
       relationships.push({
         a: pa.id,

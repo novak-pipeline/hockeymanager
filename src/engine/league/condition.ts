@@ -91,7 +91,11 @@ function injuryChance(player: Player, toi: number): number {
   const balanceFactor = 1 + (50 - player.ratings.physical.balance) / 125
   const aggressionFactor = 1 + (player.ratings.mental.aggression - 50) / 150
   const toiFactor = clamp(0.5 + 0.5 * (toi / ref), 0.25, 2)
-  return clamp(base * balanceFactor * aggressionFactor * toiFactor, 0, 0.25)
+  // Per-player durability from the source DB (1–99, 50 = league average). A
+  // glass player (high proneness) gets hurt more; an iron man less. Absent on
+  // fictional players → 1.0× (unchanged).
+  const proneFactor = player.injuryProneness !== undefined ? clamp(player.injuryProneness / 50, 0.2, 2.5) : 1
+  return clamp(base * balanceFactor * aggressionFactor * toiFactor * proneFactor, 0, 0.25)
 }
 
 export interface InjuryRoll {
@@ -175,7 +179,9 @@ export function tickRecovery(args: {
         100
       )
     } else {
-      p.fatigue = clamp(p.fatigue - REST_RECOVERY, 0, 100)
+      // Natural fitness (1–99, 50 = average) speeds rest recovery. Absent → 1.0×.
+      const fitFactor = p.naturalFitness !== undefined ? 0.7 + 0.6 * (p.naturalFitness / 100) : 1
+      p.fatigue = clamp(p.fatigue - REST_RECOVERY * fitFactor, 0, 100)
     }
 
     p.morale = clamp(p.morale + (MORALE_BASELINE - p.morale) * MORALE_DRIFT, 0, 100)

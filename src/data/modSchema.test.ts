@@ -346,6 +346,50 @@ describe('loadModDatabase', () => {
     expect(player!.faceId).toBe('face-8478402')
   })
 
+  it('loads extended EHM fields (attrs, personality-adjacent, history) onto Player', () => {
+    const db = makeFixtureMod(4)
+    db.conferences[0].divisions[0].teams[0].players[0] = {
+      ...db.conferences[0].divisions[0].teams[0].players[0],
+      externalId: 'nhl-ext',
+      injuryProneness: 12,
+      naturalFitness: 88,
+      leadership: 95,
+      teamwork: 80,
+      flair: 70,
+      adaptability: 14,
+      pressure: 18,
+      intlApps: 61,
+      stanleyCups: 3,
+      homeReputation: 184,
+      nhlDrafted: true,
+      juniorPreference: 'Major Junior'
+    }
+    const validated = validateModDatabase(db)
+    const data = loadModDatabase(validated, { seed: 1 })
+    const p = [...data.players.values()].find((x) => x.externalId === 'nhl-ext')!
+    expect(p).toBeDefined()
+    expect(p.injuryProneness).toBe(12)
+    expect(p.naturalFitness).toBe(88)
+    expect(p.leadership).toBe(95)
+    expect(p.teamwork).toBe(80)
+    expect(p.flair).toBe(70)
+    expect(p.adaptability).toBe(14)
+    expect(p.intlApps).toBe(61)
+    expect(p.stanleyCups).toBe(3)
+    expect(p.homeReputation).toBe(184)
+    expect(p.nhlDrafted).toBe(true)
+    expect(p.juniorPreference).toBe('Major Junior')
+  })
+
+  it('rejects out-of-range extended fields', () => {
+    const db = makeFixtureMod(4) as ModDatabase
+    db.conferences[0].divisions[0].teams[0].players[0] = {
+      ...db.conferences[0].divisions[0].teams[0].players[0],
+      injuryProneness: 250
+    }
+    expect(() => validateModDatabase(db)).toThrow(/injuryProneness/)
+  })
+
   it('carries externalId and logoId through to Team', () => {
     const db = makeFixtureMod(4)
     db.conferences[0].divisions[0].teams[0].externalId = 'nhl-team-10'

@@ -395,6 +395,54 @@ function validatePlayer(raw: unknown, path: string): ModPlayer {
     }
   }
 
+  // Extended EHM gameplay attributes (1–99)
+  for (const k of [
+    'injuryProneness', 'naturalFitness', 'fighting', 'flair', 'agitation',
+    'movement', 'oneOnOnes', 'versatility', 'leadership', 'teamwork'
+  ]) {
+    if (r[k] !== undefined) {
+      assertNumber(r[k], `${path}.${k}`)
+      const n = r[k] as number
+      if (n < 1 || n > 99) fail(`${path}.${k} must be 1–99, got ${n}`)
+    }
+  }
+
+  // Personality-adjacent attributes (1–20)
+  for (const k of ['adaptability', 'pressure', 'sportsmanship']) {
+    if (r[k] !== undefined) {
+      assertNumber(r[k], `${path}.${k}`)
+      const n = r[k] as number
+      if (n < 1 || n > 20) fail(`${path}.${k} must be 1–20, got ${n}`)
+    }
+  }
+
+  // History counts (non-negative integers)
+  for (const k of ['intlApps', 'intlGoals', 'intlAssists', 'stanleyCups']) {
+    if (r[k] !== undefined) {
+      assertNumber(r[k], `${path}.${k}`)
+      const n = r[k] as number
+      if (!Number.isInteger(n) || n < 0) fail(`${path}.${k} must be a non-negative integer, got ${n}`)
+    }
+  }
+
+  // Reputation ratings (non-negative integers, 0–200)
+  for (const k of ['homeReputation', 'currentReputation', 'worldReputation']) {
+    if (r[k] !== undefined) {
+      assertNumber(r[k], `${path}.${k}`)
+      const n = r[k] as number
+      if (!Number.isInteger(n) || n < 0) fail(`${path}.${k} must be a non-negative integer, got ${n}`)
+    }
+  }
+
+  // Draft flags (booleans)
+  for (const k of ['nhlDraftEligible', 'nhlDrafted']) {
+    if (r[k] !== undefined && typeof r[k] !== 'boolean')
+      fail(`${path}.${k} must be a boolean, got ${JSON.stringify(r[k])}`)
+  }
+
+  // Junior preference string
+  if (r['juniorPreference'] !== undefined) assertString(r['juniorPreference'], `${path}.juniorPreference`)
+
   return r as unknown as ModPlayer
 }
 
@@ -688,15 +736,45 @@ function makeDefaultPersonality(rng: Rng): Personality {
   }
 }
 
-/** Optional display-only bio fields, spread onto a Player when the mod has them
- *  (exactOptionalPropertyTypes: omit absent keys rather than set undefined). */
+/** Optional display-only bio fields + extended EHM attrs, spread onto a Player
+ *  when the mod has them. Uses conditional-spread idiom (exactOptionalPropertyTypes:
+ *  omit absent keys rather than set undefined). */
 function bioFields(mp: ModPlayer): Partial<Player> {
   return {
     ...(mp.nationality !== undefined ? { nationality: mp.nationality } : {}),
     ...(mp.birthplace !== undefined ? { birthplace: mp.birthplace } : {}),
     ...(mp.jerseyNumber !== undefined ? { jerseyNumber: mp.jerseyNumber } : {}),
     ...(mp.heightCm !== undefined ? { heightCm: mp.heightCm } : {}),
-    ...(mp.weightKg !== undefined ? { weightKg: mp.weightKg } : {})
+    ...(mp.weightKg !== undefined ? { weightKg: mp.weightKg } : {}),
+    // Extended EHM gameplay attributes (1–99)
+    ...(mp.injuryProneness !== undefined ? { injuryProneness: mp.injuryProneness } : {}),
+    ...(mp.naturalFitness !== undefined ? { naturalFitness: mp.naturalFitness } : {}),
+    ...(mp.fighting !== undefined ? { fighting: mp.fighting } : {}),
+    ...(mp.flair !== undefined ? { flair: mp.flair } : {}),
+    ...(mp.agitation !== undefined ? { agitation: mp.agitation } : {}),
+    ...(mp.movement !== undefined ? { movement: mp.movement } : {}),
+    ...(mp.oneOnOnes !== undefined ? { oneOnOnes: mp.oneOnOnes } : {}),
+    ...(mp.versatility !== undefined ? { versatility: mp.versatility } : {}),
+    ...(mp.leadership !== undefined ? { leadership: mp.leadership } : {}),
+    ...(mp.teamwork !== undefined ? { teamwork: mp.teamwork } : {}),
+    // Personality-adjacent (1–20)
+    ...(mp.adaptability !== undefined ? { adaptability: mp.adaptability } : {}),
+    ...(mp.pressure !== undefined ? { pressure: mp.pressure } : {}),
+    ...(mp.sportsmanship !== undefined ? { sportsmanship: mp.sportsmanship } : {}),
+    // History counts
+    ...(mp.intlApps !== undefined ? { intlApps: mp.intlApps } : {}),
+    ...(mp.intlGoals !== undefined ? { intlGoals: mp.intlGoals } : {}),
+    ...(mp.intlAssists !== undefined ? { intlAssists: mp.intlAssists } : {}),
+    ...(mp.stanleyCups !== undefined ? { stanleyCups: mp.stanleyCups } : {}),
+    // Reputation
+    ...(mp.homeReputation !== undefined ? { homeReputation: mp.homeReputation } : {}),
+    ...(mp.currentReputation !== undefined ? { currentReputation: mp.currentReputation } : {}),
+    ...(mp.worldReputation !== undefined ? { worldReputation: mp.worldReputation } : {}),
+    // Draft flags
+    ...(mp.nhlDraftEligible !== undefined ? { nhlDraftEligible: mp.nhlDraftEligible } : {}),
+    ...(mp.nhlDrafted !== undefined ? { nhlDrafted: mp.nhlDrafted } : {}),
+    // Junior preference
+    ...(mp.juniorPreference !== undefined ? { juniorPreference: mp.juniorPreference } : {})
   }
 }
 
