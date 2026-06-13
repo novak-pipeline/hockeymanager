@@ -23,6 +23,7 @@ import {
 } from '@engine/career/personalityRead'
 import type { PersonalityReadView } from '@engine/career/personalityRead'
 import { personalityArchetype } from '@engine/career/personalityType'
+import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
@@ -614,6 +615,14 @@ export function buildPlayerProfile(
   const potStars = potentialStars(p)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
   const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
+  // FM-style Overall Report verdict (own players / reliably scouted opponents).
+  const scoutVerdict = archetypeKnown
+    ? buildScoutVerdict(
+        p,
+        Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2)),
+        potStars
+      )
+    : undefined
 
   // Mindset (optional; only built when mindsetCtx provided, or when no fog = own player)
   let mindset: import('@engine/career/playerMindset').MindsetView | undefined
@@ -663,6 +672,7 @@ export function buildPlayerProfile(
     scoutPanel,
     ...(mindset !== undefined ? { mindset } : {}),
     ...(personalityType !== undefined ? { personalityType } : {}),
+    ...(scoutVerdict !== undefined ? { scoutVerdict } : {}),
   }
 }
 

@@ -1352,8 +1352,67 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
     sr.tier === 'Prospect' ? 'var(--violet-h)' :
     'var(--muted)'
 
+  const v = d.scoutVerdict
+
   return (
     <div className="stack">
+      {/* ── FM-style Overall Report ── */}
+      {v && (
+        <Panel title="Overall Report">
+          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+            {/* Verdict banner */}
+            <div
+              style={{
+                background: 'rgba(34,197,94,0.12)',
+                border: '1px solid rgba(34,197,94,0.4)',
+                borderRadius: 'var(--radius-sm)',
+                padding: 'var(--sp-3) var(--sp-4)',
+                fontWeight: 700,
+                color: 'var(--success)',
+              }}
+            >
+              {v.recommendation}
+            </div>
+
+            {/* Ability + best role */}
+            <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div>
+                <div className="muted small">Current ability</div>
+                <StarRating stars={v.currentStars} size={18} />
+              </div>
+              <div>
+                <div className="muted small">Potential</div>
+                <StarRating stars={v.potentialStars} fogged size={18} />
+              </div>
+              <div>
+                <div className="muted small">Best role</div>
+                <div style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{v.bestRole}</div>
+              </div>
+            </div>
+
+            {/* Pros / Cons */}
+            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+              <div>
+                <div className="field-label" style={{ color: 'var(--success)' }}>Pros</div>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {v.pros.length > 0 ? v.pros.map((s, i) => (
+                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
+                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No standout strengths.</li>}
+                </ul>
+              </div>
+              <div>
+                <div className="field-label" style={{ color: 'var(--danger)' }}>Cons</div>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {v.cons.length > 0 ? v.cons.map((s, i) => (
+                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
+                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No notable weaknesses.</li>}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       {/* ── Scout's Assessment header ── */}
       <Panel title="Scout's Assessment">
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>

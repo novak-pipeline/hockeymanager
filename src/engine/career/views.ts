@@ -403,6 +403,11 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   personalityType?: { label: string; blurb: string }
   /**
+   * FM-style Overall Report: recommendation + pros/cons + ability/potential
+   * stars + best role. Present for own players / sufficiently scouted opponents.
+   */
+  scoutVerdict?: import('@engine/career/scoutVerdict').ScoutVerdict
+  /**
    * Interview section: answered Q&A (deterministic from traits) + the questions
    * the GM hasn't asked yet. Present whenever the player can be interviewed.
    */
