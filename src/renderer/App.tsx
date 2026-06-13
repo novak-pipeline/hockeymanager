@@ -6,6 +6,7 @@ import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods
 import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
+import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
@@ -271,6 +272,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   }
 
   return (
+    <UserTeamContext.Provider value={props.team.teamId}>
     <NavContext.Provider value={navApi}>
       <ActionsContext.Provider value={actions}>
         {watched ? (
@@ -299,6 +301,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         )}
       </ActionsContext.Provider>
     </NavContext.Provider>
+    </UserTeamContext.Provider>
   )
 }
 

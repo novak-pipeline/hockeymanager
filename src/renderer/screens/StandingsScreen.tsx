@@ -3,6 +3,8 @@ import type { AhlStandingsView, StandingRowView, StandingsView } from '../../wor
 import { crestColor } from '../components/format'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { useNav } from '../components/NavContext'
+import { useUserTeamId } from '../components/UserTeamContext'
 
 type TabId = 'overall' | 'conference' | 'division' | 'ahl'
 
@@ -152,6 +154,8 @@ function StandingsTable(props: {
   playoffLine: number | null
 }): JSX.Element {
   const { rows, playoffLine } = props
+  const nav = useNav()
+  const userTeamId = useUserTeamId()
 
   return (
     <div className="table-wrap">
@@ -204,7 +208,17 @@ function StandingsTable(props: {
                     >
                       {row.abbreviation.slice(0, 2)}
                     </span>
-                    <span>{row.name}</span>
+                    <button
+                      type="button"
+                      className="player-link"
+                      onClick={() =>
+                        row.teamId === userTeamId
+                          ? nav.navigate('squad')
+                          : nav.navigate('squad', { teamId: row.teamId })
+                      }
+                    >
+                      {row.name}
+                    </button>
                     <span className="muted small">{row.abbreviation}</span>
                   </span>
                 </td>

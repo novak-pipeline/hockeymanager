@@ -14,15 +14,19 @@ import type {
   SquadView,
 } from '../../worker/protocol'
 import type { PracticeFocus } from '../../worker/protocol'
-import { PlayerLink } from '../components/NavContext'
+import { PlayerLink, useNav } from '../components/NavContext'
+import type { ScreenId } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { useUserTeamId } from '../components/UserTeamContext'
+import { TeamHeader } from '../components/TeamHeader'
 import { SquadScreen } from './SquadScreen'
 import { StatsScreen } from './StatsScreen'
 import { TacticsScreen } from './TacticsScreen'
 import { FinancesScreen } from './FinancesScreen'
 import { HistoryScreen } from './HistoryScreen'
+import { ScheduleScreen } from './ScheduleScreen'
 import { useShellActions } from '../components/ActionsContext'
 import { bumpRefresh, toast } from '../components/store'
 
@@ -68,20 +72,69 @@ const FOCUS_DESC: Record<PracticeFocus, string> = {
    Root component
    ══════════════════════════════════════════════════════════════ */
 
+/** Management-only tabs: hidden when browsing another team. */
+const MANAGEMENT_TABS: ReadonlySet<TeamTab> = new Set([
+  'report', 'personnel', 'practice', 'tactics', 'finances',
+])
+
 export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
   const { tab } = props
+  const nav = useNav()
+  const userTeamId = useUserTeamId()
 
-  switch (tab) {
-    case 'squad':       return <SquadScreen />
-    case 'teamStats':   return <StatsScreen />
-    case 'report':      return <ReportTab />
-    case 'personnel':   return <PersonnelTab />
-    case 'practice':    return <PracticeTab />
-    case 'tactics':     return <TacticsScreen />
-    case 'finances':    return <FinancesScreen />
-    case 'teamInfo':    return <TeamInfoTab />
-    case 'teamHistory': return <HistoryScreen />
+  // The viewed team — absent or equal to userTeamId means own club.
+  const viewedTeamId = nav.params.teamId ?? userTeamId
+  const isOwnTeam = !nav.params.teamId || nav.params.teamId === userTeamId
+
+  // If a management tab is requested while viewing another team, redirect to squad.
+  // (This can happen when navigating via TopNav sub-tabs without clearing teamId.)
+  const effectiveTab = (!isOwnTeam && MANAGEMENT_TABS.has(tab)) ? 'squad' : tab
+
+  // Render
+  const header = (
+    <TeamHeader
+      viewedTeamId={viewedTeamId}
+      userTeamId={userTeamId}
+      currentTab={effectiveTab as ScreenId}
+    />
+  )
+
+  // For own team: full management. For others: only roster/stats/info/history/schedule.
+  function body(): JSX.Element {
+    if (!isOwnTeam) {
+      // Read-only tabs for other teams
+      switch (effectiveTab) {
+        case 'squad':       return <SquadScreen teamId={viewedTeamId} />
+        case 'teamStats':   return <StatsScreen />
+        case 'teamInfo':    return <TeamInfoTabReadOnly teamId={viewedTeamId} />
+        case 'teamHistory': return <HistoryScreen />
+        case 'leagueSchedule':
+        default:            return <ScheduleScreen teamId={viewedTeamId} />
+      }
+    }
+    // Own team: full management
+    switch (effectiveTab) {
+      case 'squad':       return <SquadScreen />
+      case 'teamStats':   return <StatsScreen />
+      case 'report':      return <ReportTab />
+      case 'personnel':   return <PersonnelTab />
+      case 'practice':    return <PracticeTab />
+      case 'tactics':     return <TacticsScreen />
+      case 'finances':    return <FinancesScreen />
+      case 'teamInfo':    return <TeamInfoTab />
+      case 'teamHistory': return <HistoryScreen />
+    }
   }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {header}
+      {/* Key by viewedTeamId so changing teams remounts the tab and refetches. */}
+      <div key={viewedTeamId} style={{ flex: 1, overflow: 'auto' }}>
+        {body()}
+      </div>
+    </div>
+  )
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -472,6 +525,44 @@ function TeamInfoTab(): JSX.Element {
               <strong style={{ color: finances.capSpace < 0 ? 'var(--danger)' : 'var(--success)' }}>
                 {fmtMoney(finances.capSpace)}
               </strong>
+            </div>
+          </div>
+        </Panel>
+      )}
+    </section>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TEAM INFO (READ-ONLY) — for browsing other teams
+   ══════════════════════════════════════════════════════════════ */
+
+function TeamInfoTabReadOnly(props: { teamId: string }): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData<SquadView>(
+    () => client.getTeamSquad(props.teamId),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+
+  return (
+    <section className="stack">
+      <ScreenHeader title="Team Info" />
+      <ScreenStateNotices
+        loading={loading && !data}
+        error={error}
+        empty={!loading && !error && !data}
+        emptyText="No team data."
+      />
+      {data && (
+        <Panel title={data.teamName}>
+          <div className="list">
+            <div className="row-between small">
+              <span className="muted">Roster players</span>
+              <strong>{data.rosterCount}</strong>
+            </div>
+            <div className="row-between small">
+              <span className="muted">Dressed players</span>
+              <strong>{data.dressedCount}</strong>
             </div>
           </div>
         </Panel>

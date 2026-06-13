@@ -4,10 +4,11 @@ import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /** Fixtures grouped by month; next game highlighted; results shown as chips. Rival fixtures get a badge. */
-export function ScheduleScreen(): JSX.Element {
+export function ScheduleScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
+  const { teamId } = props
   const { data, loading, error } = useScreenData<ScheduleView>(
-    () => client.getSchedule(),
+    () => (teamId ? client.getTeamSchedule(teamId) : client.getSchedule()),
     (r) => (r.type === 'schedule' ? r.schedule : null)
   )
 

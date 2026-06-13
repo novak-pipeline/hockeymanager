@@ -402,6 +402,23 @@ export class SimClient {
     return this.send({ type: 'getDataHub' })
   }
 
+  /* ── Team browser (task #31: EHM team-nav arrows) ── */
+
+  /** All NHL teams + AHL affiliates for the team-nav dropdown. */
+  getLeagueTeams(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueTeams' })
+  }
+
+  /** Squad for any team (read-only). */
+  getTeamSquad(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getTeamSquad', teamId })
+  }
+
+  /** Schedule for any team. */
+  getTeamSchedule(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getTeamSchedule', teamId })
+  }
+
   /** Terminates the worker; in-flight requests resolve `{ type: 'error' }`. */
   dispose(): void {
     this.worker.terminate()

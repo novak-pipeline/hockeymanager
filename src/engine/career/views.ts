@@ -47,6 +47,27 @@ export type { BoardSummaryView } from '@engine/league/board'
 export type { Rivalry, RivalriesState } from '@engine/league/rivalries'
 export type { TeamSpecialTeams, Transaction, TransactionKind } from '@engine/league/leagueStats'
 
+/* ────────────────────────── league team browser (task #31) ────────────────────────── */
+
+/** One row in the team-nav dropdown: covers both NHL and AHL tiers. */
+export interface LeagueTeamRow {
+  teamId: string
+  name: string
+  abbreviation: string
+  tier: 'nhl' | 'ahl'
+  /** Points for NHL sort (standings order). AHL teams sorted alphabetically after NHL. */
+  points: number
+  /** NHL parent for AHL rows; AHL affiliate for NHL rows. */
+  affiliateId?: string
+}
+
+export interface LeagueTeamsView {
+  /** NHL teams in standings order (best first). */
+  nhl: LeagueTeamRow[]
+  /** AHL affiliates in alphabetical order. */
+  ahl: LeagueTeamRow[]
+}
+
 /* ────────────────────────── shared atoms ────────────────────────── */
 
 export type CareerPhase = 'regularSeason' | 'playoffs' | 'offseason'

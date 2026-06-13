@@ -2,6 +2,7 @@ import type { DashboardView } from '../../worker/protocol'
 import { useShellActions } from './ActionsContext'
 import { crestColor, fmtDate } from './format'
 import { useNav, sectionOf, type ScreenId, type SectionId } from './NavContext'
+import { useUserTeamId } from './UserTeamContext'
 
 const PHASE_CHIP: Record<DashboardView['phase'], string> = {
   regularSeason: 'chip chip-violet',
@@ -117,8 +118,27 @@ export function TopNav(props: {
   const unread = d?.unreadNews ?? 0
   const next = d?.nextGame ?? null
 
+  const userTeamId = useUserTeamId()
   const sections = buildSections(phase, unread)
   const activeSection = sectionOf(nav.screen)
+
+  // When in team section viewing another team, preserve the teamId param when
+  // switching between team sub-tabs so the viewed team doesn't reset.
+  const viewedTeamId = nav.params.teamId
+  const isViewingOtherTeam =
+    activeSection === 'team' &&
+    viewedTeamId !== undefined &&
+    viewedTeamId !== userTeamId
+
+  /** Navigate to a tab, preserving teamId for team sub-tabs when browsing another team. */
+  function navToTab(screenId: ScreenId): void {
+    const isTeamSubTab = sectionOf(screenId) === 'team'
+    if (isViewingOtherTeam && isTeamSubTab) {
+      nav.navigate(screenId, { teamId: viewedTeamId })
+    } else {
+      nav.navigate(screenId)
+    }
+  }
 
   const currentSection = sections.find((s) => s.id === activeSection) ?? sections[0]!
 
@@ -244,7 +264,11 @@ export function TopNav(props: {
           <button
             key={section.id}
             className={activeSection === section.id ? 'topnav-section active' : 'topnav-section'}
-            onClick={() => nav.navigate(section.defaultScreen)}
+            onClick={() => {
+              // Navigating to the team section from outside always resets to own club
+              // (no teamId param). Navigating to any other section always clears teamId.
+              nav.navigate(section.defaultScreen)
+            }}
           >
             {section.label}
             {section.id === 'news' && unread > 0 && (
@@ -292,18 +316,26 @@ export function TopNav(props: {
       {/* ── Row 3: sub-tabs for active section ── */}
       {currentSection.subTabs.length > 1 && (
         <nav className="topnav-row3">
-          {currentSection.subTabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={nav.screen === tab.id ? 'topnav-item active' : 'topnav-item'}
-              onClick={() => nav.navigate(tab.id)}
-            >
-              {tab.label}
-              {tab.badge !== undefined && (
-                <span className="badge">{tab.badge}</span>
-              )}
-            </button>
-          ))}
+          {currentSection.subTabs.map((tab) => {
+            // Management-only tabs are disabled when browsing another team
+            const isManagementTab = ['report', 'personnel', 'practice', 'tactics', 'finances'].includes(tab.id)
+            const disabledForOtherTeam = isViewingOtherTeam && isManagementTab
+            return (
+              <button
+                key={tab.id}
+                className={nav.screen === tab.id ? 'topnav-item active' : 'topnav-item'}
+                onClick={() => navToTab(tab.id)}
+                disabled={disabledForOtherTeam}
+                title={disabledForOtherTeam ? 'Management tabs are only available for your own club' : undefined}
+                style={disabledForOtherTeam ? { opacity: 0.4 } : undefined}
+              >
+                {tab.label}
+                {tab.badge !== undefined && (
+                  <span className="badge">{tab.badge}</span>
+                )}
+              </button>
+            )
+          })}
         </nav>
       )}
     </header>

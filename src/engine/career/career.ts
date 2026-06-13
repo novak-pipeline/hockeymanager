@@ -244,6 +244,7 @@ import {
   type InboxView,
   type LeagueLeadersView,
   type LeagueStatsView,
+  type LeagueTeamsView,
   type LinesUpdate,
   type LockerRoomView,
   type OffseasonView,
@@ -3662,6 +3663,61 @@ export class Career {
 
   getSchedule(): ScheduleView {
     return buildScheduleView(this.ctx())
+  }
+
+  /* ── Team-browser getters (task #31: EHM-style team-nav arrows) ── */
+
+  /** All NHL teams (standings order) + their AHL affiliates. */
+  getLeagueTeams(): LeagueTeamsView {
+    const standingsSorted = sortStandings([...this.standings.values()])
+    const nhlRows = standingsSorted.map((s) => {
+      const t = this.data.teams.get(s.teamId)!
+      return {
+        teamId: t.id as string,
+        name: t.name,
+        abbreviation: t.abbreviation,
+        tier: ('nhl' as const),
+        points: s.points,
+        ...(t.affiliateId ? { affiliateId: t.affiliateId as string } : {}),
+      }
+    })
+    const ahlTeams = (this.data.league.ahlTeams ?? [])
+      .map((id) => this.data.teams.get(id))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined)
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const ahlRows = ahlTeams.map((t) => ({
+      teamId: t.id as string,
+      name: t.name,
+      abbreviation: t.abbreviation,
+      tier: ('ahl' as const),
+      points: 0,
+      ...(t.parentTeamId ? { affiliateId: t.parentTeamId as string } : {}),
+    }))
+    return { nhl: nhlRows, ahl: ahlRows }
+  }
+
+  /** Squad for any team (read-only; no scratches/ratings for non-user teams). */
+  getSquadFor(teamId: string): SquadView {
+    const tid = asTeamId(teamId)
+    const isUserTeam = tid === this.userTeamId
+    if (isUserTeam) return this.getSquad()
+    // For other teams: build a ctx with the target team as "user" so buildSquadView works.
+    const ctx = { ...this.ctx(), userTeamId: tid }
+    return buildSquadView(ctx)
+  }
+
+  /** Schedule for any team. */
+  getScheduleFor(teamId: string): ScheduleView {
+    const tid = asTeamId(teamId)
+    if (tid === this.userTeamId) return this.getSchedule()
+    // Use AHL schedule if the team is an AHL affiliate.
+    const team = this.data.teams.get(tid)
+    const schedule =
+      team?.tier === 'ahl' && this.data.league.ahlSchedule
+        ? this.data.league.ahlSchedule
+        : this.data.league.schedule
+    const ctx = { ...this.ctx(), userTeamId: tid, schedule }
+    return buildScheduleView(ctx)
   }
 
   getCalendarView(): CalendarView {

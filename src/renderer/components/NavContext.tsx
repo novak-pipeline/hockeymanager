@@ -93,6 +93,8 @@ export function sectionOf(screen: ScreenId): SectionId {
 
 export interface NavParams {
   playerId?: string
+  /** Team being browsed in the Team section. Absent = user's own club. */
+  teamId?: string
 }
 
 export interface NavApi {

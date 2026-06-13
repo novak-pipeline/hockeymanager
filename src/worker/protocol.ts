@@ -18,6 +18,8 @@ import type { PressJob, PressConferenceState, PressTone } from '@engine/story/fa
 export type {
   AgmReportView,
   AhlSquadView,
+  LeagueTeamRow,
+  LeagueTeamsView,
   AhlStandingsView,
   BoardView,
   BoxScoreView,
@@ -88,6 +90,7 @@ import type {
   PlayerProfileView,
   PlayoffBracketView,
   PracticeView,
+  LeagueTeamsView,
   RivalriesView,
   ScheduleView,
   ScoreboardView,
@@ -233,6 +236,13 @@ export type WorkerRequestBody =
   /* ── Data Hub: xG analytics ── */
   /** League-wide xG model analytics: per-team rates + percentiles, player leaders. */
   | { type: 'getDataHub' }
+  /* ── Team browser (EHM team-nav arrows, task #31) ── */
+  /** Full list of NHL teams + AHL affiliates for the team-nav dropdown. */
+  | { type: 'getLeagueTeams' }
+  /** Squad view for an arbitrary team (read-only; falls back to user team when teamId absent). */
+  | { type: 'getTeamSquad'; teamId: string }
+  /** Schedule view for an arbitrary team. */
+  | { type: 'getTeamSchedule'; teamId: string }
 
 /** Intersecting with the union distributes, preserving the discriminants. */
 export type WorkerRequest = WorkerRequestBody & { id: number }
@@ -293,5 +303,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'compareRadar'; comparison: CompareRadarView }
   /* ── Data Hub: xG analytics ── */
   | { type: 'dataHub'; dataHub: DataHubView }
+  /* ── Team browser (task #31) ── */
+  | { type: 'leagueTeams'; teams: LeagueTeamsView }
   | { type: 'error'; message: string }
 )

@@ -176,17 +176,21 @@ function GoalieCols({ row }: { row: SquadRowView }): JSX.Element {
   )
 }
 
-export function SquadScreen(): JSX.Element {
+export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
   const nav = useNav()
   const bump = useUiStore((s) => s.bump)
+  const { teamId } = props
+  // When a specific (non-user) teamId is provided, hide write controls
+  const isReadOnly = teamId !== undefined
 
   const [screenTab, setScreenTab] = useState<ScreenTab>('nhl')
 
   const { data, loading, error } = useScreenData<SquadView>(
-    () => client.getSquad(),
+    () => (teamId ? client.getTeamSquad(teamId) : client.getSquad()),
     (r) => (r.type === 'squad' ? r.squad : null)
   )
+  // AHL tab only shown for the user's own team
   const { data: ahlData, loading: ahlLoading, error: ahlError, refetch: refetchAhl } = useScreenData<AhlSquadView>(
     () => client.getAhlSquad(),
     (r) => (r.type === 'ahlSquad' ? r.squad : null)
@@ -251,34 +255,38 @@ export function SquadScreen(): JSX.Element {
               onChange={(e) => setSearch(e.target.value)}
             />
           )}
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => nav.navigate('lockerRoom')}
-            title="View locker room dynamics"
-          >
-            Locker Room
-          </button>
+          {!isReadOnly && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => nav.navigate('lockerRoom')}
+              title="View locker room dynamics"
+            >
+              Locker Room
+            </button>
+          )}
         </div>
       </ScreenHeader>
 
-      {/* Top-level NHL / AHL tab switcher */}
-      <div className="tabs" style={{ borderBottom: '1px solid var(--border)' }}>
-        <button
-          className={`tab${screenTab === 'nhl' ? ' active' : ''}`}
-          onClick={() => setScreenTab('nhl')}
-        >
-          NHL Roster
-        </button>
-        <button
-          className={`tab${screenTab === 'ahl' ? ' active' : ''}`}
-          onClick={() => setScreenTab('ahl')}
-        >
-          AHL / Farm
-          {ahlData && ahlData.hasAffiliate && (
-            <span className="muted small" style={{ marginLeft: 4 }}>({ahlData.rosterCount})</span>
-          )}
-        </button>
-      </div>
+      {/* Top-level NHL / AHL tab switcher — only shown for own team */}
+      {!isReadOnly && (
+        <div className="tabs" style={{ borderBottom: '1px solid var(--border)' }}>
+          <button
+            className={`tab${screenTab === 'nhl' ? ' active' : ''}`}
+            onClick={() => setScreenTab('nhl')}
+          >
+            NHL Roster
+          </button>
+          <button
+            className={`tab${screenTab === 'ahl' ? ' active' : ''}`}
+            onClick={() => setScreenTab('ahl')}
+          >
+            AHL / Farm
+            {ahlData && ahlData.hasAffiliate && (
+              <span className="muted small" style={{ marginLeft: 4 }}>({ahlData.rosterCount})</span>
+            )}
+          </button>
+        </div>
+      )}
 
       {screenTab === 'nhl' && (
         <>
@@ -389,7 +397,7 @@ export function SquadScreen(): JSX.Element {
                               ? <GoalieCols row={row} />
                               : <SkaterCols row={row} />}
                             <td>
-                              {row.contract.twoWay && (
+                              {!isReadOnly && row.contract.twoWay && (
                                 <button
                                   className="btn btn-ghost btn-sm"
                                   style={{ fontSize: 11, padding: '2px 6px' }}
@@ -419,7 +427,7 @@ export function SquadScreen(): JSX.Element {
         </>
       )}
 
-      {screenTab === 'ahl' && (
+      {!isReadOnly && screenTab === 'ahl' && (
         <AhlSquadPanel
           data={ahlData}
           loading={ahlLoading}
