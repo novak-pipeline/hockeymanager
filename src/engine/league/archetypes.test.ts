@@ -24,6 +24,8 @@ import {
   pairSynergy,
   teamStyleFit,
   styleMatch,
+  playerStyleFit,
+  styleFromTactics,
   ARCHETYPE_META
 } from './archetypes'
 import type { Archetype, TeamTactics } from './archetypes'
@@ -695,5 +697,47 @@ describe('multiplier bounds', () => {
       expect(m).toBeGreaterThanOrEqual(0.97)
       expect(m).toBeLessThanOrEqual(1.03)
     }
+  })
+})
+
+/* ───────────────────────── playerStyleFit ───────────────────────── */
+
+describe('styleFromTactics', () => {
+  it('reads a trap when forecheck is trap', () => {
+    expect(styleFromTactics(makeTactics({ forecheck: 'trap' })).kind).toBe('trap')
+  })
+  it('reads speed & skill at high pace', () => {
+    expect(styleFromTactics(makeTactics({ tempo: { pace: 0.8, passRisk: 0.5, shotEagerness: 0.6, defensivePinch: 0.5 } })).kind).toBe('speedSkill')
+  })
+})
+
+describe('playerStyleFit', () => {
+  it('a sniper fits a speed & skill system better than a trap', () => {
+    const sniper = makePlayer('W', 'sniper', {
+      technical: { wristShot: 92, slapShot: 85 },
+      mental: { offensiveIQ: 85 },
+      physical: { speed: 80, acceleration: 80 }
+    })
+    const speed = makeTactics({ tempo: { pace: 0.8, passRisk: 0.6, shotEagerness: 0.7, defensivePinch: 0.5 } })
+    const trap = makeTactics({ forecheck: 'trap', tempo: { pace: 0.3, passRisk: 0.3, shotEagerness: 0.4, defensivePinch: 0.2 } })
+    const fitSpeed = playerStyleFit(sniper, speed)!
+    const fitTrap = playerStyleFit(sniper, trap)!
+    expect(fitSpeed.score).toBeGreaterThan(fitTrap.score)
+  })
+
+  it('a shutdown D fits a trap system well', () => {
+    const shutdown = makePlayer('D', 'shutdownD', {
+      defensive: { checking: 85, shotBlocking: 85, stickChecking: 80, takeaway: 80 },
+      mental: { defensiveIQ: 85, positioning: 85 }
+    })
+    const trap = makeTactics({ forecheck: 'trap', tempo: { pace: 0.3, passRisk: 0.3, shotEagerness: 0.4, defensivePinch: 0.2 } })
+    const fit = playerStyleFit(shutdown, trap)!
+    expect(fit.score).toBeGreaterThanOrEqual(66)
+    expect(fit.styleLabel.toLowerCase()).toContain('trap')
+  })
+
+  it('returns null for goalies', () => {
+    const g = makePlayer('G', 'starter', { goalie: { reflexes: 80 } })
+    expect(playerStyleFit(g, makeTactics())).toBeNull()
   })
 })

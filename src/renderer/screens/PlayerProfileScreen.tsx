@@ -822,6 +822,29 @@ function TabProfile({
         </div>
       )}
 
+      {/* System fit — how well the player suits the team's current tactics */}
+      {d.systemFit && (() => {
+        const s = d.systemFit.score
+        const color = s >= 80 ? 'var(--success)' : s >= 66 ? 'var(--green)' : s >= 50 ? 'var(--accent2, var(--violet-h))' : 'var(--danger)'
+        return (
+          <div
+            className="panel"
+            style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-3) var(--sp-4)' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 54 }}>
+              <span className="mono" style={{ fontSize: 20, fontWeight: 800, color }}>{s}</span>
+              <span className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>Fit</span>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color }}>
+                {d.systemFit.label} · {d.systemFit.styleLabel}
+              </div>
+              <div className="muted small" style={{ lineHeight: 1.4 }}>{d.systemFit.reason}</div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Interview — choose questions to reveal hidden qualities */}
       {d.interview && (
         <InterviewPanel

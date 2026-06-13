@@ -675,6 +675,88 @@ export function teamStyleFit(args: {
   return { suggestedTactics, styleLabel, rationale }
 }
 
+/* ─────────────────────── per-player system fit ─────────────────────── */
+
+export type TeamStyleKind = 'trap' | 'speedSkill' | 'cycleGrind' | 'balanced'
+
+/** Classify a team's *current tactics* into a coaching style. */
+export function styleFromTactics(tactics: TeamTactics): { kind: TeamStyleKind; label: string } {
+  const pace = tactics.tempo.pace
+  if (tactics.forecheck === 'trap' || pace < 0.4) return { kind: 'trap', label: 'Defensive / Trap' }
+  if (pace >= 0.65) return { kind: 'speedSkill', label: 'Speed & Skill' }
+  if (tactics.forecheck === '2-1-2' && pace <= 0.52) return { kind: 'cycleGrind', label: 'Cycle & Grind' }
+  return { kind: 'balanced', label: 'Balanced' }
+}
+
+/** Archetype → 0-100 base fit for each coaching style. */
+const STYLE_FIT: Record<TeamStyleKind, Partial<Record<Archetype, number>>> = {
+  speedSkill: {
+    sniper: 90, playmaker: 90, puckMover: 88, offensiveDefenseman: 82, twoWayForward: 72,
+    twoWayDefenseman: 66, powerForward: 60, shutdownDefenseman: 50, grinder: 46, enforcer: 30,
+  },
+  cycleGrind: {
+    powerForward: 90, grinder: 86, enforcer: 76, twoWayForward: 72, shutdownDefenseman: 72,
+    twoWayDefenseman: 68, sniper: 56, playmaker: 56, offensiveDefenseman: 56, puckMover: 50,
+  },
+  trap: {
+    shutdownDefenseman: 92, twoWayDefenseman: 86, twoWayForward: 82, grinder: 72, puckMover: 66,
+    powerForward: 62, playmaker: 60, offensiveDefenseman: 56, sniper: 54, enforcer: 56,
+  },
+  balanced: {
+    twoWayForward: 80, twoWayDefenseman: 80, playmaker: 74, sniper: 72, puckMover: 72,
+    powerForward: 72, offensiveDefenseman: 72, shutdownDefenseman: 72, grinder: 66, enforcer: 58,
+  },
+}
+
+export interface PlayerStyleFitResult {
+  /** 0–100 fit of this player in the team's current system. */
+  score: number
+  label: string
+  /** One-line plain-English reason. */
+  reason: string
+  /** Team style the fit was measured against. */
+  styleLabel: string
+}
+
+/**
+ * Score how well one player suits the team's current tactical system. Pure +
+ * deterministic; descriptive only (the sim is unaffected). Goalies return null —
+ * system fit is a skater concept.
+ */
+export function playerStyleFit(player: Player, tactics: TeamTactics): PlayerStyleFitResult | null {
+  if (player.position === 'G') return null
+  const style = styleFromTactics(tactics)
+  const { archetype } = classifyArchetype(player)
+  let score = STYLE_FIT[style.kind][archetype] ?? 65
+
+  // Attribute nudge: the trait the style leans on, relative to league-average 50.
+  const c = player.composites
+  let lever: number
+  if (style.kind === 'speedSkill') lever = c.skating
+  else if (style.kind === 'cycleGrind') lever = (c.hitting + player.ratings.physical.strength) / 2
+  else if (style.kind === 'trap') lever = c.defensiveZone
+  else lever = (c.skating + c.defensiveZone) / 2
+  score += clamp((lever - 50) * 0.25, -12, 12)
+
+  score = Math.round(clamp(score, 0, 100))
+
+  const meta = ARCHETYPE_META[archetype]
+  let label: string
+  if (score >= 80) label = 'Excellent fit'
+  else if (score >= 66) label = 'Good fit'
+  else if (score >= 50) label = 'Adequate'
+  else label = 'Poor fit'
+
+  const reason =
+    score >= 66
+      ? `A ${meta.label.toLowerCase()} thrives in a ${style.label.toLowerCase()} system.`
+      : score >= 50
+        ? `A ${meta.label.toLowerCase()} can play in a ${style.label.toLowerCase()} system but isn't ideal.`
+        : `A ${meta.label.toLowerCase()} is a poor match for a ${style.label.toLowerCase()} system.`
+
+  return { score, label, reason, styleLabel: style.label }
+}
+
 /* ─────────────────────── style match ─────────────────────── */
 
 export interface StyleMatchResult {

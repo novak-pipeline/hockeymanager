@@ -131,7 +131,7 @@ import {
   INTERACTION_COOLDOWN_DAYS,
   type PlayerInteraction,
 } from '@engine/league/interactions'
-import { lineSynergy, pairSynergy } from '@engine/league/archetypes'
+import { lineSynergy, pairSynergy, playerStyleFit } from '@engine/league/archetypes'
 import {
   createInitialTentpolesState,
   runCombine,
@@ -4185,6 +4185,13 @@ export class Career {
         .filter((q) => !asked.includes(q.id))
         .map((q) => ({ id: q.id, prompt: q.prompt }))
       profile.interview = { answers, available }
+
+      // System fit vs the player's team's current tactics (skaters only).
+      const team = playerTeamId ? this.data.teams.get(playerTeamId) : undefined
+      if (team?.tactics) {
+        const fit = playerStyleFit(player, team.tactics)
+        if (fit) profile.systemFit = fit
+      }
     }
 
     return profile

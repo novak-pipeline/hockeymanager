@@ -405,6 +405,11 @@ export interface PlayerProfileView extends PlayerBadge {
    * the GM hasn't asked yet. Present whenever the player can be interviewed.
    */
   interview?: InterviewView
+  /**
+   * How well the player fits his team's current tactical system. Skaters only
+   * (absent for goalies and players without team tactics).
+   */
+  systemFit?: { score: number; label: string; reason: string; styleLabel: string }
 }
 
 /** One answered interview question. */
