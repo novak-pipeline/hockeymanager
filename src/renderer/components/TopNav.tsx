@@ -187,6 +187,15 @@ export function TopNav(props: {
         <div className="topnav-actions">
           <button
             className="topnav-util-btn"
+            onClick={() => nav.goBack()}
+            disabled={!nav.canGoBack}
+            title="Go back"
+            aria-label="Go back"
+          >
+            ◄ Back
+          </button>
+          <button
+            className="topnav-util-btn"
             onClick={props.onSave}
             disabled={props.busy}
             title="Save career"

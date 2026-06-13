@@ -135,13 +135,43 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     screen: 'dashboard',
     params: {},
   })
+  const [history, setHistory] = useState<Array<{ screen: ScreenId; params: NavParams }>>([])
+
   const navigate = useCallback(
-    (screen: ScreenId, params?: NavParams) => setNav({ screen, params: params ?? {} }),
+    (screen: ScreenId, params?: NavParams) => {
+      const nextParams = params ?? {}
+      setNav((prev) => {
+        // Skip pushing if the destination is identical to current entry.
+        const sameScreen = prev.screen === screen
+        const prevParamsStr = JSON.stringify(prev.params)
+        const nextParamsStr = JSON.stringify(nextParams)
+        const sameParams = prevParamsStr === nextParamsStr
+        if (!sameScreen || !sameParams) {
+          setHistory((h) => {
+            const capped = h.length >= 50 ? h.slice(h.length - 49) : h
+            return [...capped, prev]
+          })
+        }
+        return { screen, params: nextParams }
+      })
+    },
     []
   )
+
+  const goBack = useCallback(() => {
+    setHistory((h) => {
+      if (h.length === 0) return h
+      const prev = h[h.length - 1]!
+      setNav(prev)
+      return h.slice(0, h.length - 1)
+    })
+  }, [])
+
+  const canGoBack = history.length > 0
+
   const navApi = useMemo<NavApi>(
-    () => ({ screen: nav.screen, params: nav.params, navigate }),
-    [nav, navigate]
+    () => ({ screen: nav.screen, params: nav.params, navigate, goBack, canGoBack }),
+    [nav, navigate, goBack, canGoBack]
   )
 
   const [watched, setWatched] = useState<WatchedGame | null>(null)
@@ -211,6 +241,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const closeViewer = useCallback(() => {
     setWatched(null)
     setNav({ screen: 'dashboard', params: {} })
+    setHistory([])
     bumpRefresh()
   }, [])
 
@@ -260,6 +291,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           return
         }
         setNav({ screen: 'dashboard', params: {} })
+        setHistory([])
         bumpRefresh()
         toast(`Loaded "${newest.saveName}"`, 'success')
       } catch (err) {
@@ -389,9 +421,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
 
     // ── Player profile (overlay/shared) ──
     case 'player':
-      // Keyed by playerId so navigating player → player remounts + refetches.
       return props.params.playerId ? (
-        <PlayerProfileScreen key={props.params.playerId} playerId={props.params.playerId} />
+        <PlayerProfileScreen playerId={props.params.playerId} />
       ) : (
         <Notice kind="warn">No player selected.</Notice>
       )

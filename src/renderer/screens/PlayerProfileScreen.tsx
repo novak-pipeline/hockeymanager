@@ -13,7 +13,7 @@
  * (dropdown) → overlays their radar via client.compareRadar() and shows
  * key-stat lines side by side.
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
 import type {
   SkaterSeasonLine,
@@ -1067,10 +1067,22 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
   const nav = useNav()
   const [activeTab, setActiveTab] = useState<TabId>('profile')
 
-  const { data, loading, error } = useScreenData<PlayerProfileView>(
+  const { data, loading, error, refetch } = useScreenData<PlayerProfileView>(
     () => client.getPlayer(props.playerId),
     (r) => (r.type === 'player' ? r.player : null)
   )
+
+  // When playerId prop changes (prev/next navigation), refetch player data.
+  // Skip the initial mount since useScreenData already fires on mount.
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    refetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.playerId])
 
   // Fetch squad for compare dropdown (best-effort; silently absent = empty list).
   const { data: squadData } = useScreenData<SquadView>(
@@ -1083,6 +1095,31 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
     name: r.name,
     position: r.position,
   }))
+
+  // Fetch the team roster for prev/next navigation.
+  // We use manual state + effect so we can key the fetch off data?.teamId.
+  const [rosterIds, setRosterIds] = useState<string[]>([])
+  const teamIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!data?.teamId) {
+      setRosterIds([])
+      return
+    }
+    if (teamIdRef.current === data.teamId) return
+    teamIdRef.current = data.teamId
+    void (async () => {
+      const res = await client.getTeamSquad(data.teamId!)
+      if (res.type === 'squad') {
+        setRosterIds(res.squad.rows.map((r) => r.playerId))
+      }
+    })()
+  }, [client, data?.teamId])
+
+  // Compute prev/next player in the roster.
+  const currentIdx = rosterIds.indexOf(props.playerId)
+  const hasPrevNext = rosterIds.length > 1 && currentIdx >= 0
+  const prevId = hasPrevNext ? rosterIds[(currentIdx - 1 + rosterIds.length) % rosterIds.length]! : null
+  const nextId = hasPrevNext ? rosterIds[(currentIdx + 1) % rosterIds.length]! : null
 
   if (error) {
     return (
@@ -1112,7 +1149,27 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
     <section className="stack">
       {/* ── Page header ── */}
       <ScreenHeader title={d.name}>
-        <div className="row">
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {hasPrevNext && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => nav.navigate('player', { playerId: prevId! })}
+              title="Previous player on roster"
+              aria-label="Previous player"
+            >
+              ◄
+            </button>
+          )}
+          {hasPrevNext && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => nav.navigate('player', { playerId: nextId! })}
+              title="Next player on roster"
+              aria-label="Next player"
+            >
+              ►
+            </button>
+          )}
           <button className="btn btn-ghost small" onClick={() => nav.navigate('squad')}>← Squad</button>
         </div>
       </ScreenHeader>

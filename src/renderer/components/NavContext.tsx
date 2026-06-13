@@ -101,6 +101,10 @@ export interface NavApi {
   screen: ScreenId
   params: NavParams
   navigate: (screen: ScreenId, params?: NavParams) => void
+  /** Go back to the previous history entry. No-op when canGoBack is false. */
+  goBack: () => void
+  /** True when there is at least one entry to go back to. */
+  canGoBack: boolean
 }
 
 export const NavContext = createContext<NavApi | null>(null)
