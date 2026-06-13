@@ -1431,7 +1431,11 @@ function simPeriod(
       if ((r.pos.x - cs.pos.x) * a > -0.02) gap = Math.min(gap, distFt(r.pos, cs.pos))
     }
     const tempo = atk.team.tactics.tempo
-    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG)
+    // Flair raises how OFTEN a carrier ATTEMPTS the skilled carry/entry instead
+    // of the safe dump — success still rides on puckControl/skating. Absent on
+    // fictional/generated players (=> 0), so calibration is unaffected.
+    const flairBoost = cs.player.flair !== undefined ? (cs.player.flair - 50) / 200 : 0
+    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG) + flairBoost
     const pick = director.sampleEntry({
       gapFt: gap,
       skill,
@@ -1867,7 +1871,11 @@ function simPeriod(
         // the puck first (no instant fling right after the entry; rush beats
         // own the quick-strike shots, which keeps rushShotShare on the data).
         const settledInZone = clk.t - (entryAt.get(atk) ?? -999) > 6
-        if (settledInZone && adv > 0.5 && rng.chance(director.cycleShotPerTick * (0.5 + central) * eager * strengthMult)) {
+        // Flair makes a carrier more willing to fire a tougher, lower-percentage
+        // shot off the cycle. Shot DANGER still comes from position (shotXg).
+        // Absent on fictional players (=> 1.0×), so calibration is unaffected.
+        const flairShot = cs.player.flair !== undefined ? 1 + ((cs.player.flair - 50) / 100) * 0.5 : 1
+        if (settledInZone && adv > 0.5 && rng.chance(director.cycleShotPerTick * (0.5 + central) * eager * strengthMult * flairShot)) {
           tryShoot(cs, 'cycle', false, false)
           beat = null
           break
