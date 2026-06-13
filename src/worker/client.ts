@@ -201,6 +201,10 @@ export class SimClient {
     return this.send({ type: 'getTeamLegends', teamId })
   }
 
+  suggestToCoach(direction: string): Promise<WorkerResponse> {
+    return this.send({ type: 'suggestToCoach', direction })
+  }
+
   proposeTrade(proposal: TradeProposal): Promise<WorkerResponse> {
     return this.send({ type: 'proposeTrade', proposal })
   }

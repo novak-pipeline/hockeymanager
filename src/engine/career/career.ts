@@ -132,6 +132,7 @@ import {
   type PlayerInteraction,
 } from '@engine/league/interactions'
 import { lineSynergy, pairSynergy, playerStyleFit } from '@engine/league/archetypes'
+import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
   createInitialTentpolesState,
   runCombine,
@@ -4265,6 +4266,28 @@ export class Career {
       const entry = list.find((l) => l.playerId === playerId)
       if (entry) { entry.status = status; return }
     }
+  }
+
+  /**
+   * GM suggests a tactical direction to the head coach in a staff meeting. The
+   * coach decides (by knowledge/demeanour + roster fit) whether to adopt it.
+   * Tactics only change when the coach accepts — keeps default sims unchanged.
+   */
+  suggestToCoach(direction: string): { accepted: boolean; response: string } {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return { accepted: false, response: 'No team.' }
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const roster = team.roster.map((id) => this.resolve(id))
+    const evalResult = evaluateCoachSuggestion({
+      coach,
+      roster,
+      tactics: team.tactics,
+      direction: direction as SuggestionDirection,
+    })
+    if (evalResult.accepted && evalResult.newTactics) {
+      team.tactics = evalResult.newTactics
+    }
+    return { accepted: evalResult.accepted, response: evalResult.response }
   }
 
   /** Legends registry for a club, most recent first. */

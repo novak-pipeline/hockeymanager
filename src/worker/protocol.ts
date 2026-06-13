@@ -163,6 +163,7 @@ export type WorkerRequestBody =
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'conductInterview'; playerId: string; questionId: string }
+  | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
@@ -288,6 +289,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'finances'; finances: FinanceView }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
+  | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'playoffs'; playoffs: PlayoffBracketView | null }
   | { type: 'offseason'; offseason: OffseasonView | null }
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
