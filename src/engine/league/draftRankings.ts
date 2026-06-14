@@ -77,3 +77,69 @@ export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[
     .sort((a, b) => b.score - a.score)
     .map((x) => x.id)
 }
+
+/**
+ * What role analysts project a prospect tops out at, in hockey terms, from their
+ * projected ceiling (0–100) and position. This is the "where do they top out"
+ * read that pundits attach to a prospect — distinct from current ability.
+ */
+export function ceilingRole(ceiling: number, position: string): string {
+  const isG = position === 'G'
+  const isD = position === 'D' || position === 'LD' || position === 'RD'
+  if (isG) {
+    if (ceiling >= 84) return 'a franchise starting goaltender'
+    if (ceiling >= 78) return 'a starting goaltender'
+    if (ceiling >= 71) return 'a capable 1B / tandem netminder'
+    if (ceiling >= 63) return 'an NHL backup'
+    return 'an AHL / depth goaltender'
+  }
+  if (isD) {
+    if (ceiling >= 86) return 'a true #1 defenceman who drives play in all situations'
+    if (ceiling >= 80) return 'a top-pairing defenceman'
+    if (ceiling >= 74) return 'a second-pairing defenceman'
+    if (ceiling >= 67) return 'a third-pairing defenceman'
+    if (ceiling >= 60) return 'a depth / 7th defenceman'
+    return 'an AHL blueliner'
+  }
+  if (ceiling >= 88) return 'a franchise forward and perennial all-star'
+  if (ceiling >= 82) return 'a genuine first-line forward'
+  if (ceiling >= 76) return 'a top-six contributor'
+  if (ceiling >= 70) return 'a reliable middle-six forward'
+  if (ceiling >= 63) return 'a bottom-six / energy-line forward'
+  return 'an AHL / depth forward'
+}
+
+export interface AnalystProjectionInput {
+  name: string
+  position: string
+  /** Projected ceiling, 0–100. */
+  ceiling: number
+  eligibility: DraftEligibility
+  /** Board rank, if the player made the published top board (omit if off-board). */
+  rank?: number
+  /** Display label for the current phase, e.g. "Mid-season ranking". */
+  phaseLabel: string
+  /** Upcoming entry-draft year. */
+  draftYear: number
+}
+
+/**
+ * The analyst/pundit projection blurb shown under a prospect's scout report —
+ * the consensus read on where they're ranked and the ceiling they're predicted
+ * to reach. Returns null for players who aren't draft-relevant.
+ */
+export function analystProjection(p: AnalystProjectionInput): string | null {
+  const role = ceilingRole(p.ceiling, p.position)
+  if (p.eligibility === 'radar') {
+    return `Not yet draft-eligible, but already on analysts' radar for a future class. Early ceiling read: projects as ${role}.`
+  }
+  const reentry = p.eligibility === 'reentry'
+  const where =
+    p.rank !== undefined
+      ? `have ${p.name} ranked #${p.rank} in the ${p.draftYear} class`
+      : `have ${p.name} outside their published board for the ${p.draftYear} class`
+  const lead = reentry
+    ? `Passed over once and re-entry eligible; analysts ${where}`
+    : `Analyst consensus (${p.phaseLabel.toLowerCase()}) ${where}`
+  return `${lead}. Their projection: tops out as ${role}.`
+}

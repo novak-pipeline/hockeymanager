@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -4514,6 +4514,24 @@ export class Career {
       // Opinion timeline — how the read on him has moved this/last season.
       const timeline = this.opinionHistory.get(playerId)
       if (timeline && timeline.length > 0) profile.opinionTimeline = timeline.map((s) => ({ ...s }))
+
+      // Analyst draft projection — the pundit consensus read for draft-relevant
+      // prospects (rank + projected ceiling role), shown under the scout report.
+      const elig = draftEligibility(player.age, !!player.nhlDrafted)
+      if (elig) {
+        const board = this.getDraftRankings()
+        const rank = board.rankings.find((r) => r.playerId === playerId)?.rank
+        const proj = analystProjection({
+          name: player.name,
+          position: player.position,
+          ceiling: agedPotential(player),
+          eligibility: elig,
+          ...(rank !== undefined ? { rank } : {}),
+          phaseLabel: board.phaseLabel,
+          draftYear: board.draftYear,
+        })
+        if (proj) profile.analystProjection = proj
+      }
     }
 
     return profile

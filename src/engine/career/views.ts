@@ -406,6 +406,12 @@ export interface PlayerProfileView extends PlayerBadge {
   /** Scout-generated prose report (fog-aware). */
   scoutReport: import('@engine/career/scoutReport').ScoutReportView
   /**
+   * NHL analyst/pundit draft projection — the consensus board read on a
+   * draft-relevant prospect (rank + projected ceiling role). Present only for
+   * draft-eligible / on-the-radar young players; omitted for everyone else.
+   */
+  analystProjection?: string
+  /**
    * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
    * Always present when PlayerProfileView is built.
    */

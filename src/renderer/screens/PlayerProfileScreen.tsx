@@ -1709,6 +1709,22 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             {knowledgeProse(sr.knowledge)} — the attribute reads are estimates (marked *). Assign a scout for a sharper picture.
           </p>
         )}
+        {d.analystProjection && (
+          <div style={{
+            margin: '12px 0 0',
+            padding: '10px 12px',
+            borderLeft: '3px solid var(--accent2, #e0b341)',
+            background: 'rgba(0,0,0,0.18)',
+            borderRadius: 'var(--radius-sm)',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
+              ANALYST DRAFT PROJECTION
+            </div>
+            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
+              {d.analystProjection}
+            </p>
+          </div>
+        )}
       </Panel>
 
       <div className="grid grid-2" style={{ alignItems: 'start' }}>

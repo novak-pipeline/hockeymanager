@@ -392,6 +392,29 @@ NEG_PA_BANDS = {
     -10: (172, 200),
 }
 
+# Data-driven ceiling per negative PA code, filled by compute_neg_pa_ceilings()
+# at import time: the best current ability any player with that code has reached
+# (i.e. proof of how high the code can develop). Covers the bulk codes (-11..-20)
+# the curated bands above don't, so EVERY negative code translates correctly.
+NEG_PA_CEILINGS = {}
+
+
+def compute_neg_pa_ceilings(xlsx):
+    """Stream the players sheet and return {neg_pa_code: max CA observed}."""
+    import openpyxl
+    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+    ws = wb["Sheet1"]
+    it = ws.iter_rows(values_only=True); next(it); next(it)
+    out = {}
+    for r in it:
+        if "player" not in str(r[C_JOB] or "").lower():
+            continue
+        ca = to_int(r[C_CA], 0); pa = to_int(r[C_PA], 0)
+        if pa < 0 and ca > 0 and ca > out.get(pa, 0):
+            out[pa] = ca
+    wb.close()
+    return out
+
 
 def resolve_potential(pa, ca, age):
     """Return (single_ca, band_or_None) on the 1-200 CA scale.
@@ -408,6 +431,13 @@ def resolve_potential(pa, ca, age):
         lo, hi = band
         lo = max(lo, ca); hi = max(hi, lo)  # ceiling never below current ability
         return (lo + hi) // 2, (lo, hi)
+    # Other negative codes (-11..-20): use the empirical ceiling for that code.
+    ceiling = NEG_PA_CEILINGS.get(pa, 0)
+    if ceiling > ca:
+        hi = min(200, ceiling)
+        lo = max(ca, hi - 28)
+        return (lo + hi) // 2, (lo, hi)
+    # Last resort (code unseen in the DB / ceiling not above current): CA + headroom.
     base = (46 if age <= 18 else 38 if age == 19 else 30 if age == 20 else
             23 if age == 21 else 16 if age == 22 else 11 if age == 23 else 7)
     lo = min(200, ca + round(base * 0.55))
@@ -789,6 +819,10 @@ def main():
     xlsx, out_dir = sys.argv[1], sys.argv[2]
     facedirs = sys.argv[3:]
     import openpyxl
+    # Pre-pass: learn each negative PA code's true ceiling from the whole DB so
+    # every prospect's potential translates correctly (not just the curated codes).
+    NEG_PA_CEILINGS.update(compute_neg_pa_ceilings(xlsx))
+    print(f"neg-PA ceilings: {dict(sorted(NEG_PA_CEILINGS.items(), reverse=True))}")
     wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     ws = wb["Sheet1"]
     it = ws.iter_rows(values_only=True); next(it); next(it)

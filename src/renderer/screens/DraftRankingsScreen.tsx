@@ -63,7 +63,7 @@ export function DraftRankingsScreen(): JSX.Element {
                 <th style={{ textAlign: 'left' }}>League</th>
                 <th style={{ textAlign: 'left' }}>Team</th>
                 <th style={{ textAlign: 'left' }}>Ability</th>
-                <th style={{ textAlign: 'left' }}>Ceiling</th>
+                <th style={{ textAlign: 'left' }}>Potential</th>
               </tr>
             </thead>
             <tbody>
@@ -104,7 +104,7 @@ export function DraftRankingsScreen(): JSX.Element {
                 <th style={{ textAlign: 'left' }}>Nation</th>
                 <th style={{ textAlign: 'left' }}>League</th>
                 <th style={{ textAlign: 'left' }}>Team</th>
-                <th style={{ textAlign: 'left' }}>Ceiling</th>
+                <th style={{ textAlign: 'left' }}>Potential</th>
               </tr>
             </thead>
             <tbody>
