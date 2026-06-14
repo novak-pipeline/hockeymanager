@@ -67,10 +67,11 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
         { id: 'leagueHistory', label: 'History' },
         ...compExtra,
       ] },
-    { id: 'world', label: 'World', icon: 'world', section: 'competition', screen: 'world', match: ['world', 'worldInternational'],
+    { id: 'world', label: 'World', icon: 'world', section: 'competition', screen: 'world', match: ['world', 'worldInternational', 'worldProspects'],
       subTabs: [
         { id: 'world', label: 'Leagues' },
         { id: 'worldInternational', label: 'International' },
+        { id: 'worldProspects', label: 'Prospects' },
       ] },
     { id: 'scouting', label: 'Scouting', icon: 'scouting', section: 'competition', screen: 'scouting', match: ['scouting'] },
     { id: 'transfers', label: 'Transfers', icon: 'transfers', section: 'competition', screen: 'trades', match: ['trades'] },

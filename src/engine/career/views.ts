@@ -711,6 +711,26 @@ export interface InternationalView {
   nations: NationView[]
 }
 
+/* ──── prospect watch (prospect-first scouting discovery) ──── */
+
+export interface WorldProspectRowView {
+  playerId: string
+  name: string
+  teamId: string
+  teamAbbr: string
+  leagueAbbr: string
+  leagueName: string
+  nation: string
+  position: string
+  age: number
+  currentStars: number
+  potentialStars: number
+}
+
+export interface ProspectsView {
+  prospects: WorldProspectRowView[]
+}
+
 export interface StatsView {
   points: LeaderRowView[]
   goals: LeaderRowView[]

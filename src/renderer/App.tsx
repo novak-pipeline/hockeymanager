@@ -474,6 +474,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <WorldScreen tab="leagues" />
     case 'worldInternational':
       return <WorldScreen tab="international" />
+    case 'worldProspects':
+      return <WorldScreen tab="prospects" />
 
     // ── Data Hub (Analytics) ──
     case 'dataHub':

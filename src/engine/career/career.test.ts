@@ -1587,6 +1587,21 @@ describe('Career — wider-world quick-sim', () => {
     expect(can.topPlayers[0]!.currentStars).toBeGreaterThanOrEqual(can.topPlayers[can.topPlayers.length - 1]!.currentStars)
   })
 
+  it('getProspects surfaces draft-age world talent ranked by ceiling', () => {
+    const data = withCompetitions(36)
+    const career = new Career(data, 36, data.league.teams[7]!)
+    const view = career.getProspects()
+    // Every row is draft-age and carries league + team context.
+    for (const p of view.prospects) {
+      expect(p.age).toBeLessThanOrEqual(20)
+      expect(p.leagueAbbr).toBeTruthy()
+    }
+    // Sorted by projected ceiling (then ability), best first.
+    for (let i = 1; i < view.prospects.length; i++) {
+      expect(view.prospects[i - 1]!.potentialStars).toBeGreaterThanOrEqual(view.prospects[i]!.potentialStars)
+    }
+  })
+
   it('persists wider-world standings + stats across save/load', () => {
     const data = withCompetitions(32)
     const career = new Career(data, 32, data.league.teams[7]!)

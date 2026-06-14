@@ -297,6 +297,8 @@ import {
   type CompetitionNotableView,
   type InternationalView,
   type NationView,
+  type ProspectsView,
+  type WorldProspectRowView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -5065,6 +5067,38 @@ export class Career {
     nations.sort((a, b) => b.rating - a.rating)
     nations.forEach((n, i) => { n.rank = i + 1 })
     return { nations }
+  }
+
+  /** Prospect watch: the best draft-age (U21) talent across the world's leagues,
+   *  ranked by projected ceiling — the prospect-first scouting discovery board. */
+  getProspects(): ProspectsView {
+    const comps = this.data.league.competitions ?? []
+    const rows: WorldProspectRowView[] = []
+    for (const c of comps) {
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (!p || p.age > 20) continue
+          rows.push({
+            playerId: p.id as string,
+            name: p.name,
+            teamId: t.id as string,
+            teamAbbr: t.abbreviation,
+            leagueAbbr: c.abbrev,
+            leagueName: c.name,
+            nation: p.nationality ?? '',
+            position: p.position,
+            age: p.age,
+            currentStars: overallToStars(ratedOverall(p)),
+            potentialStars: overallToStars(agedPotential(p)),
+          })
+        }
+      }
+    }
+    rows.sort((a, b) => b.potentialStars - a.potentialStars || b.currentStars - a.currentStars)
+    return { prospects: rows.slice(0, 60) }
   }
 
   getStats(): StatsView {

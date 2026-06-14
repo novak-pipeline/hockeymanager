@@ -90,6 +90,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'competitions', competitions: must().getCompetitions() }
     case 'getInternational':
       return { id: req.id, type: 'international', international: must().getInternational() }
+    case 'getProspects':
+      return { id: req.id, type: 'prospects', prospects: must().getProspects() }
     case 'getStats':
       return { id: req.id, type: 'stats', stats: must().getStats() }
     case 'getTrades':

@@ -77,13 +77,67 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
   )
 }
 
-export function WorldScreen(props: { tab?: 'leagues' | 'international' }): JSX.Element {
+export function WorldScreen(props: { tab?: 'leagues' | 'international' | 'prospects' }): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
       <ScreenHeader title="World">
         <span className="muted small">The wider hockey world — leagues, juniors &amp; international</span>
       </ScreenHeader>
-      {props.tab === 'international' ? <InternationalPanel /> : <LeaguesPanel />}
+      {props.tab === 'international' ? <InternationalPanel />
+        : props.tab === 'prospects' ? <ProspectsPanel />
+        : <LeaguesPanel />}
+    </div>
+  )
+}
+
+function ProspectsPanel(): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData(
+    () => client.getProspects(),
+    (r) => (r.type === 'prospects' ? r.prospects : null)
+  )
+  const rows = data?.prospects ?? []
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      <ScreenStateNotices
+        loading={loading}
+        error={error}
+        empty={!loading && rows.length === 0}
+        emptyText="No world prospects to scout. Load a multi-league database to surface draft-age talent from the OHL, KHL, Liiga and beyond."
+      />
+      {rows.length > 0 && (
+        <Panel title="Prospect watch — top draft-age talent across the world">
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th style={{ textAlign: 'left' }}>Player</th>
+                <th>Age</th><th>Pos</th>
+                <th style={{ textAlign: 'left' }}>Nation</th>
+                <th style={{ textAlign: 'left' }}>League</th>
+                <th style={{ textAlign: 'left' }}>Team</th>
+                <th style={{ textAlign: 'left' }}>Ability</th>
+                <th style={{ textAlign: 'left' }}>Ceiling</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p, i) => (
+                <tr key={p.playerId}>
+                  <td className="muted" style={{ textAlign: 'center' }}>{i + 1}</td>
+                  <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                  <td style={{ textAlign: 'center' }}>{p.age}</td>
+                  <td style={{ textAlign: 'center' }}>{p.position}</td>
+                  <td className="muted">{p.nation}</td>
+                  <td className="muted">{p.leagueAbbr}</td>
+                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
+                  <td><Stars value={p.currentStars} /></td>
+                  <td><Stars value={p.potentialStars} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
     </div>
   )
 }
