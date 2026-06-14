@@ -253,6 +253,30 @@ export function ratedPotential(p: {
  * level, so his ceiling is simply his current ability. This stops a 30-year-old
  * fourth-liner from projecting growth into a "middle-six key player".
  */
+/**
+ * Optimism added to a young player's ceiling for the intangibles that history
+ * shows drive over-achievement of raw rating: a strong work ethic / drive /
+ * professionalism, and draft pedigree. Fades out by 25 (the bet is on growth).
+ * Returns 0–~5 overall points.
+ */
+export function upsideBias(p: {
+  age: number
+  personality?: { determination?: number; professionalism?: number }
+  ratings?: { mental?: { workRate?: number } }
+  draftRound?: number
+}): number {
+  if (p.age > 24) return 0
+  const det = p.personality?.determination ?? 10       // 1–20
+  const prof = p.personality?.professionalism ?? 10     // 1–20
+  const workRate = p.ratings?.mental?.workRate ?? 50    // 0–100
+  const drive = (det / 20 + prof / 20 + workRate / 100) / 3 // 0–1
+  let bias = Math.max(0, drive - 0.5) * 8               // reward only above-average drive, 0–4
+  if (p.draftRound === 1) bias += 1.5
+  else if (p.draftRound === 2) bias += 0.5
+  const youthMult = p.age <= 19 ? 1 : p.age <= 21 ? 0.85 : p.age <= 23 ? 0.6 : 0.35
+  return Math.round(bias * youthMult)
+}
+
 export function agedPotential(p: {
   composites: CompositeRatings
   potential: RawAttributes
@@ -261,9 +285,12 @@ export function agedPotential(p: {
   age: number
   baseOverall?: number
   basePotential?: number
+  personality?: { determination?: number; professionalism?: number }
+  ratings?: { mental?: { workRate?: number } }
+  draftRound?: number
 }): number {
   const cur = ratedOverall(p)
-  const ceiling = Math.max(cur, ratedPotential(p))
+  const ceiling = Math.min(99, Math.max(cur, ratedPotential(p) + upsideBias(p)))
   // Through 24 a player still has the runway to reach his ceiling; from 25 the
   // window to fill untapped potential closes, fully gone by 31 (he's at/past
   // peak and starting to decline).

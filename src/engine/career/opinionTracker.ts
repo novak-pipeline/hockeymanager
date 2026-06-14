@@ -15,6 +15,7 @@ import type { Player, PlayerId } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf } from '@engine/league/scouting'
 import { ratedOverall, agedPotential, overallToStars } from '@engine/ratings/composites'
+import { maskedOverall } from '@engine/league/scouting'
 
 export interface OpinionSnapshot {
   day: number
@@ -41,6 +42,21 @@ export function potentialStarsOf(p: Player): number {
   return overallToStars(agedPotential(p))
 }
 
+/**
+ * The read on a player's CURRENT level right now — what the timeline tracks.
+ * It moves over the season because: (a) the fogged estimate converges to the
+ * truth as knowledge grows (you figure him out), and (b) recent form colours
+ * the perception (a hot player looks better than a slumping one).
+ */
+function perceivedOverall(p: Player, knowledge: number): number {
+  const truth = ratedOverall(p)
+  const base = knowledge >= 95
+    ? truth
+    : (() => { const { lo, hi } = maskedOverall(truth, knowledge, p.id as string); return Math.round((lo + hi) / 2) })()
+  const formAdj = Math.round((p.form ?? 0) * 0.8) // form −5..5 → ±4
+  return Math.max(1, Math.min(100, base + formAdj))
+}
+
 export interface RecordOpinionsArgs {
   history: Map<string, OpinionSnapshot[]>
   players: Map<PlayerId, Player>
@@ -61,12 +77,14 @@ export interface OpinionShift {
   note: string
 }
 
-/** Notable inbox-worthy move (ceiling change or a strong overall swing). */
+/**
+ * Inbox-worthy move. Only a re-evaluation of the player's CEILING is notable
+ * enough for the inbox — short-term overall wobble is mostly recent form and
+ * would flood the feed (it stays visible on the Opinion timeline instead).
+ */
 function notableShift(prev: OpinionSnapshot, cur: OpinionSnapshot): OpinionShift['note'] | null {
   if (cur.potentialStars > prev.potentialStars) return 'raised-ceiling'
   if (cur.potentialStars < prev.potentialStars) return 'lowered-ceiling'
-  if (cur.overall - prev.overall >= 4) return 'rising'
-  if (cur.overall - prev.overall <= -4) return 'falling'
   return null
 }
 
@@ -84,11 +102,12 @@ export function recordOpinions(args: RecordOpinionsArgs): OpinionShift[] {
     const k = own ? 100 : knowledgeOf(args.scouting, id)
     if (!own && k < TRACK_FLOOR) continue
 
+    const perceived = perceivedOverall(p, k)
     const snap: OpinionSnapshot = {
       day: args.day,
       year: args.year,
-      overall: ratedOverall(p),
-      currentStars: currentStarsOf(p),
+      overall: perceived,
+      currentStars: overallToStars(perceived),
       potentialStars: potentialStarsOf(p),
       knowledge: Math.round(k),
     }

@@ -2390,6 +2390,23 @@ export class Career {
       freeAgentIds: this.currentFaIds(),
       rng: this.rngFor(7008, day),
     })
+    // Games reveal players: anyone who suits up becomes better known, so the
+    // league's read sharpens as the season is played. Own-org players clear all
+    // the way (you know your guys); the rest of the league climbs to "well known"
+    // but stops just short of full clarity — getting an exact read still takes a
+    // scout assignment (which is also what keeps the inbox from filling with a
+    // scout report for every league player who crosses the reporting threshold).
+    // Draft prospects don't play in the league, so they stay foggy — that's where
+    // scouting truly lives.
+    const orgIds = this.ownOrgIds()
+    const PASSIVE_CAP = 79 // just below the scout-report threshold (80)
+    for (const pid of played) {
+      const id = pid as string
+      const own = orgIds.has(id)
+      const cap = own ? 100 : PASSIVE_CAP
+      const cur = knowledgeOf(this.scouting, id)
+      if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
+    }
     this.emitScoutReports()
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
     if (day % 15 === 0) {
