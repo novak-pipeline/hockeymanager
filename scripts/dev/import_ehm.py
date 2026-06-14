@@ -374,17 +374,40 @@ def s20(row, col):
     """EHM 1-20 attribute -> our 1-99 scale."""
     return clamp(round(to_int(row[col], 0) / 20.0 * 99), 1, 99)
 
+# EHM graded potential bands. Negative PA codes -1..-10 are a CEILING grade
+# (NOT tied to current ability) — -10 is generational. Verified empirically
+# against this DB: the -10 cohort tops out at CA 185 and contains the marquee
+# prospects (Gavin McKenna, Porter Martone, Ivan Demidov). Each is a [lo,hi]
+# range on the 1-200 scale; the engine rolls within it per career.
+NEG_PA_BANDS = {
+    -1:  (40, 70),
+    -2:  (50, 80),
+    -3:  (58, 88),
+    -4:  (68, 98),
+    -5:  (80, 110),
+    -6:  (95, 125),
+    -7:  (112, 142),
+    -8:  (130, 160),
+    -9:  (150, 182),
+    -10: (172, 200),
+}
+
+
 def resolve_potential(pa, ca, age):
     """Return (single_ca, band_or_None) on the 1-200 CA scale.
 
-    Positive PA is an explicit ceiling, used as-is. Negative PA is an OPAQUE
-    range code in this DB (it spans -1..-20 and its magnitude is not a reliable
-    'higher = better' signal — the most common codes are mid players). So for
-    negatives we derive a realistic ceiling from CURRENT ability + youth
-    headroom: a player only projects as a star if he's already strong for his
-    age. The engine rolls within the [lo,hi] band per career (option B)."""
+    Positive PA is an explicit ceiling, used as-is. Negative PA -1..-10 is a
+    GRADED potential band (see NEG_PA_BANDS) — used directly so a young, low-CA
+    blue-chipper (e.g. an 18-year-old at -10) still projects elite. Other
+    negative codes (-11..-20, the ordinary/legacy bulk) fall back to a CA +
+    youth-headroom estimate."""
     if pa is None or pa >= 0:
         return max(pa or ca, ca), None
+    band = NEG_PA_BANDS.get(pa)
+    if band is not None:
+        lo, hi = band
+        lo = max(lo, ca); hi = max(hi, lo)  # ceiling never below current ability
+        return (lo + hi) // 2, (lo, hi)
     base = (46 if age <= 18 else 38 if age == 19 else 30 if age == 20 else
             23 if age == 21 else 16 if age == 22 else 11 if age == 23 else 7)
     lo = min(200, ca + round(base * 0.55))
