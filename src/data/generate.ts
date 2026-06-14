@@ -359,6 +359,11 @@ export function buildWeightedSchedule(
   // odd-meeting pairs goes to whoever is currently more away-heavy.
   const net = new Map<string, number>() // + = home-heavy
   const bump = (id: string, d: number): void => net.set(id, (net.get(id) ?? 0) + d)
+  // Per-pairing phase offset (golden-ratio low-discrepancy) so different pairings'
+  // meetings don't all target the same handful of days. Without it every "first
+  // meeting" piles near one day and the schedule clusters mid-season, leaving
+  // October sparse; the phase fans the targets evenly across the whole window.
+  let pairingIdx = 0
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       const a = teams[i]!, b = teams[j]!
@@ -376,38 +381,103 @@ export function buildWeightedSchedule(
         if (aNet <= bNet) { aHome++; bump(a.id as string, 1); bump(b.id as string, -1) }
         else { bump(b.id as string, 1); bump(a.id as string, -1) }
       }
+      const phase = (pairingIdx * 0.6180339887498949) % 1 // golden ratio
+      pairingIdx++
       for (let k = 0; k < meetings; k++) {
         const aHosts = k < aHome
         const home = aHosts ? a.id : b.id
         const away = aHosts ? b.id : a.id
-        const targetDay = Math.max(1, Math.round(((k + 0.5) / meetings) * seasonDays))
+        // Spread this pairing's meetings across [1, seasonDays], offset by the
+        // pairing phase so the league's games cover the full calendar evenly.
+        const frac = (k + phase) / meetings
+        const targetDay = Math.min(seasonDays, Math.max(1, Math.round(frac * (seasonDays - 1)) + 1))
         planned.push({ home, away, targetDay })
       }
     }
   }
 
-  // 2. Assign each game to a day near its target where neither team already
-  //    plays and the day isn't over capacity — searching outward from target.
+  // 2. Assign each game to a day near its target, respecting REST so no club is
+  //    booked on a long streak of consecutive nights. Real NHL clubs play ~3.5
+  //    games/week with off-days between most of them and only a handful of
+  //    back-to-backs; without a rest rule a greedy fill packs a team into a
+  //    20-game streak. Constraints, in priority order:
+  //      - never twice on the same calendar day,
+  //      - never three nights in a row (hard limit),
+  //      - prefer ≥1 rest day; allow a limited budget of back-to-backs/team.
+  //    Determinism is preserved — no Rng, fully ordered placement.
   const total = planned.length
-  const perDayCap = Math.max(4, Math.ceil(total / seasonDays) + 2)
-  const busy = new Map<number, Set<string>>()
+  const perDayCap = Math.max(4, Math.ceil(total / seasonDays) + 3)
+  const B2B_BUDGET = 16 // back-to-backs allowed per team across the season
+  const playsOn = new Map<string, Set<number>>() // teamId → set of days it plays
+  const b2bUsed = new Map<string, number>()
   const countOnDay = new Map<number, number>()
-  const free = (d: number, h: TeamId, w: TeamId): boolean => {
-    const s = busy.get(d)
-    if (s && (s.has(h as string) || s.has(w as string))) return false
-    return (countOnDay.get(d) ?? 0) < perDayCap
+  const plays = (t: string, d: number): boolean => playsOn.get(t)?.has(d) ?? false
+  /** Length of the existing consecutive run a game on day `d` would extend into. */
+  const runAround = (t: string, d: number): { left: number; right: number } => {
+    let left = 0
+    while (plays(t, d - 1 - left)) left++
+    let right = 0
+    while (plays(t, d + 1 + right)) right++
+    return { left, right }
   }
+  const restOk = (t: string, d: number, allowB2B: boolean): boolean => {
+    if (plays(t, d)) return false
+    const { left, right } = runAround(t, d)
+    if (left + 1 + right >= 3) return false // never 3 nights in a row
+    const isB2B = left + right >= 1
+    if (isB2B && (!allowB2B || (b2bUsed.get(t) ?? 0) >= B2B_BUDGET)) return false
+    return true
+  }
+  const place = (home: TeamId, away: TeamId, d: number): void => {
+    for (const t of [home as string, away as string]) {
+      const { left, right } = runAround(t, d)
+      if (left + right >= 1) b2bUsed.set(t, (b2bUsed.get(t) ?? 0) + 1)
+      let s = playsOn.get(t)
+      if (!s) { s = new Set(); playsOn.set(t, s) }
+      s.add(d)
+    }
+    countOnDay.set(d, (countOnDay.get(d) ?? 0) + 1)
+  }
+  /** First acceptable day searching outward from the target within the season
+   *  window [1, seasonDays], or null. Bounding to the window forces the tail of
+   *  the schedule to compress into back-to-backs rather than spilling past the
+   *  end of the calendar. */
+  const findDay = (g: PlannedGame, allowB2B: boolean, capped: boolean): number | null => {
+    for (let step = 0; step <= seasonDays * 2 + 50; step++) {
+      const d = step === 0 ? g.targetDay : g.targetDay + (step % 2 === 1 ? (step + 1) / 2 : -(step / 2))
+      if (d < 1 || d > seasonDays) continue
+      if (capped && (countOnDay.get(d) ?? 0) >= perDayCap) continue
+      if (restOk(g.home as string, d, allowB2B) && restOk(g.away as string, d, allowB2B)) return d
+    }
+    return null
+  }
+
   planned.sort((x, y) => x.targetDay - y.targetDay)
   const placed: Array<{ home: TeamId; away: TeamId; day: number }> = []
+  const deferred: PlannedGame[] = []
+  // Pass 1 — strict: spread with a rest day between games where possible.
   for (const g of planned) {
+    const d = findDay(g, false, true)
+    if (d === null) { deferred.push(g); continue }
+    place(g.home, g.away, d)
+    placed.push({ home: g.home, away: g.away, day: d })
+  }
+  // Pass 2 — allow back-to-backs (still never 3-in-a-row) for the leftovers.
+  const stillDeferred: PlannedGame[] = []
+  for (const g of deferred) {
+    const d = findDay(g, true, true) ?? findDay(g, true, false)
+    if (d === null) { stillDeferred.push(g); continue }
+    place(g.home, g.away, d)
+    placed.push({ home: g.home, away: g.away, day: d })
+  }
+  // Pass 3 — guarantee placement: only the same-day double-book rule remains.
+  for (const g of stillDeferred) {
     let day = g.targetDay
-    for (let step = 0; step < seasonDays * 2 + 50; step++) {
+    for (let step = 0; step <= seasonDays * 3 + 100; step++) {
       const d = step === 0 ? g.targetDay : g.targetDay + (step % 2 === 1 ? (step + 1) / 2 : -(step / 2))
-      if (d >= 1 && free(d, g.home, g.away)) { day = d; break }
+      if (d >= 1 && !plays(g.home as string, d) && !plays(g.away as string, d)) { day = d; break }
     }
-    let s = busy.get(day); if (!s) { s = new Set(); busy.set(day, s) }
-    s.add(g.home as string); s.add(g.away as string)
-    countOnDay.set(day, (countOnDay.get(day) ?? 0) + 1)
+    place(g.home, g.away, day)
     placed.push({ home: g.home, away: g.away, day })
   }
 

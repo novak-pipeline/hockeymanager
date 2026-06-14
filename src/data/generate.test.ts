@@ -70,6 +70,41 @@ describe('buildWeightedSchedule', () => {
     expect(again.map((g) => `${g.day}:${g.homeTeamId}-${g.awayTeamId}`))
       .toEqual(games.map((g) => `${g.day}:${g.homeTeamId}-${g.awayTeamId}`))
   })
+
+  /** Days, ascending, that a given team plays on. */
+  function daysFor(teamId: string): number[] {
+    return games
+      .filter((g) => (g.homeTeamId as string) === teamId || (g.awayTeamId as string) === teamId)
+      .map((g) => g.day)
+      .sort((a, b) => a - b)
+  }
+
+  it('never books a team three nights in a row', () => {
+    for (const t of teams) {
+      const days = daysFor(t.id as string)
+      for (let i = 2; i < days.length; i++) {
+        const threeInARow = days[i]! - days[i - 1]! === 1 && days[i - 1]! - days[i - 2]! === 1
+        expect(threeInARow).toBe(false)
+      }
+    }
+  })
+
+  it('gives teams real rest — most games have a day off, back-to-backs are the minority', () => {
+    for (const t of teams) {
+      const days = daysFor(t.id as string)
+      let backToBack = 0
+      for (let i = 1; i < days.length; i++) if (days[i]! - days[i - 1]! === 1) backToBack++
+      // Real NHL: ~13-16 back-to-backs out of 82 games. Allow generous headroom
+      // but it must be a small minority, not a packed streak.
+      expect(backToBack).toBeLessThanOrEqual(20)
+    }
+  })
+
+  it('spreads the season across most of the calendar window', () => {
+    const maxDay = Math.max(...games.map((g) => g.day))
+    // 84 games should fill a real Oct–Apr window, not pack into the first weeks.
+    expect(maxDay).toBeGreaterThan(150)
+  })
 })
 
 describe('generateLeague', () => {
