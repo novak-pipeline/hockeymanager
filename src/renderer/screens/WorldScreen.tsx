@@ -77,36 +77,46 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
   )
 }
 
-export function WorldScreen(props: { tab?: 'leagues' | 'international' | 'prospects' }): JSX.Element {
+export function WorldScreen(props: { tab?: 'leagues' | 'international' | 'draft' }): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
       <ScreenHeader title="World">
         <span className="muted small">The wider hockey world — leagues, juniors &amp; international</span>
       </ScreenHeader>
       {props.tab === 'international' ? <InternationalPanel />
-        : props.tab === 'prospects' ? <ProspectsPanel />
+        : props.tab === 'draft' ? <DraftBoardPanel />
         : <LeaguesPanel />}
     </div>
   )
 }
 
-function ProspectsPanel(): JSX.Element {
+const DRAFT_PHASE_BLURB: Record<'preliminary' | 'midseason' | 'final', string> = {
+  preliminary: 'Early-season consensus, heavy on projection — expect big swings.',
+  midseason: 'The board firms up as the season’s body of work grows.',
+  final: 'The final pre-draft consensus, weighting production and readiness.',
+}
+
+function DraftBoardPanel(): JSX.Element {
   const client = useClient()
   const { data, loading, error } = useScreenData(
-    () => client.getProspects(),
-    (r) => (r.type === 'prospects' ? r.prospects : null)
+    () => client.getDraftRankings(),
+    (r) => (r.type === 'draftRankings' ? r.draftRankings : null)
   )
-  const rows = data?.prospects ?? []
+  const rows = data?.rankings ?? []
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
       <ScreenStateNotices
         loading={loading}
         error={error}
         empty={!loading && rows.length === 0}
-        emptyText="No world prospects to scout. Load a multi-league database to surface draft-age talent from the OHL, KHL, Liiga and beyond."
+        emptyText="No draft-eligible prospects to rank. Load a multi-league database to scout the draft class across the OHL, USHL, Liiga and beyond."
       />
-      {rows.length > 0 && (
-        <Panel title="Prospect watch — top draft-age talent across the world">
+      {data && rows.length > 0 && (
+        <Panel title={`NHL analyst draft rankings — ${data.draftYear} class`}>
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            <strong style={{ color: 'var(--accent2, #e0b341)' }}>{data.phaseLabel}</strong>
+            {' · '}{DRAFT_PHASE_BLURB[data.phase]}
+          </div>
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
               <tr>
@@ -121,9 +131,9 @@ function ProspectsPanel(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {rows.map((p, i) => (
+              {rows.map((p) => (
                 <tr key={p.playerId}>
-                  <td className="muted" style={{ textAlign: 'center' }}>{i + 1}</td>
+                  <td className="muted" style={{ textAlign: 'center', fontWeight: 700 }}>{p.rank}</td>
                   <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                   <td style={{ textAlign: 'center' }}>{p.age}</td>
                   <td style={{ textAlign: 'center' }}>{p.position}</td>

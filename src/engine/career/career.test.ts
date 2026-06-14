@@ -1587,19 +1587,28 @@ describe('Career — wider-world quick-sim', () => {
     expect(can.topPlayers[0]!.currentStars).toBeGreaterThanOrEqual(can.topPlayers[can.topPlayers.length - 1]!.currentStars)
   })
 
-  it('getProspects surfaces draft-age world talent ranked by ceiling', () => {
+  it('getDraftRankings produces an analyst board of the draft-eligible class', () => {
     const data = withCompetitions(36)
+    // Guarantee a draft-eligible cohort: make some world-team players 18/undrafted.
+    let n = 0
+    for (const tid of data.league.teams.slice(0, 6)) {
+      const t = data.teams.get(tid)!
+      for (const pid of t.roster) {
+        const p = data.players.get(pid)!
+        if (n++ % 3 === 0) { p.age = 18; p.nhlDrafted = false }
+      }
+    }
     const career = new Career(data, 36, data.league.teams[7]!)
-    const view = career.getProspects()
-    // Every row is draft-age and carries league + team context.
-    for (const p of view.prospects) {
-      expect(p.age).toBeLessThanOrEqual(20)
-      expect(p.leagueAbbr).toBeTruthy()
-    }
-    // Sorted by projected ceiling (then ability), best first.
-    for (let i = 1; i < view.prospects.length; i++) {
-      expect(view.prospects[i - 1]!.potentialStars).toBeGreaterThanOrEqual(view.prospects[i]!.potentialStars)
-    }
+    const view = career.getDraftRankings()
+    expect(['preliminary', 'midseason', 'final']).toContain(view.phase)
+    expect(view.phaseLabel).toBeTruthy()
+    expect(view.draftYear).toBe(career.year + 1)
+    expect(view.rankings.length).toBeGreaterThan(0)
+    view.rankings.forEach((r, i) => {
+      expect(r.rank).toBe(i + 1) // ranks are 1..n in order
+      expect(r.age).toBeLessThanOrEqual(18)
+      expect(r.leagueAbbr).toBeTruthy()
+    })
   })
 
   it('persists wider-world standings + stats across save/load', () => {

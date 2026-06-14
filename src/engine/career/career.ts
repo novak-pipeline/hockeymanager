@@ -72,6 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
+import { analystRank, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import {
   createArc,
   createInitialArcsState,
@@ -298,8 +299,8 @@ import {
   type CompetitionNotableView,
   type InternationalView,
   type NationView,
-  type ProspectsView,
-  type WorldProspectRowView,
+  type DraftRankingsView,
+  type DraftRankRowView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -5084,36 +5085,63 @@ export class Career {
     return { nations, worldJuniors }
   }
 
-  /** Prospect watch: the best draft-age (U21) talent across the world's leagues,
-   *  ranked by projected ceiling — the prospect-first scouting discovery board. */
-  getProspects(): ProspectsView {
+  /** Which point in the analyst-ranking cycle the season is at. */
+  private draftRankPhase(): DraftRankPhase {
+    if (this.phase === 'offseason' || this.phase === 'playoffs') return 'final'
+    const last = this.matchDays[this.matchDays.length - 1] ?? 1
+    const frac = this.currentDay / Math.max(1, last)
+    if (frac < 0.35) return 'preliminary'
+    if (frac < 0.8) return 'midseason'
+    return 'final'
+  }
+
+  /** NHL analyst draft rankings: the consensus board of the draft-eligible class
+   *  (under-19, undrafted) across the world's leagues, weighted and shuffled per
+   *  the current phase (preliminary / mid-season / final). */
+  getDraftRankings(): DraftRankingsView {
     const comps = this.data.league.competitions ?? []
-    const rows: WorldProspectRowView[] = []
+    const phase = this.draftRankPhase()
+    interface Cand {
+      row: Omit<DraftRankRowView, 'rank'>
+      input: RankInput
+    }
+    const cands = new Map<string, Cand>()
     for (const c of comps) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
         if (!t) continue
         for (const pid of t.roster) {
           const p = this.data.players.get(pid)
-          if (!p || p.age > 20) continue
-          rows.push({
-            playerId: p.id as string,
-            name: p.name,
-            teamId: t.id as string,
-            teamAbbr: t.abbreviation,
-            leagueAbbr: c.abbrev,
-            leagueName: c.name,
-            nation: p.nationality ?? '',
-            position: p.position,
-            age: p.age,
-            currentStars: overallToStars(ratedOverall(p)),
-            potentialStars: overallToStars(agedPotential(p)),
+          if (!p || p.nhlDrafted || p.age > 18) continue // draft-eligible cohort
+          const id = p.id as string
+          cands.set(id, {
+            input: { id, ceiling: agedPotential(p), current: ratedOverall(p) },
+            row: {
+              playerId: id,
+              name: p.name,
+              teamId: t.id as string,
+              teamAbbr: t.abbreviation,
+              leagueAbbr: c.abbrev,
+              nation: p.nationality ?? '',
+              position: p.position,
+              age: p.age,
+              currentStars: overallToStars(ratedOverall(p)),
+              potentialStars: overallToStars(agedPotential(p)),
+            },
           })
         }
       }
     }
-    rows.sort((a, b) => b.potentialStars - a.potentialStars || b.currentStars - a.currentStars)
-    return { prospects: rows.slice(0, 60) }
+    const ordered = analystRank([...cands.values()].map((c) => c.input), phase)
+    const rankings: DraftRankRowView[] = ordered.slice(0, 64).map((id, i) => ({
+      rank: i + 1,
+      ...cands.get(id)!.row,
+    }))
+    const phaseLabel =
+      phase === 'preliminary' ? 'Preliminary ranking'
+      : phase === 'midseason' ? 'Mid-season ranking'
+      : 'Final pre-draft ranking'
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings }
   }
 
   getStats(): StatsView {

@@ -732,15 +732,15 @@ export interface InternationalView {
   worldJuniors: WorldJuniorsView | null
 }
 
-/* ──── prospect watch (prospect-first scouting discovery) ──── */
+/* ──── NHL analyst draft rankings (the season's evolving consensus board) ──── */
 
-export interface WorldProspectRowView {
+export interface DraftRankRowView {
+  rank: number
   playerId: string
   name: string
   teamId: string
   teamAbbr: string
   leagueAbbr: string
-  leagueName: string
   nation: string
   position: string
   age: number
@@ -748,8 +748,14 @@ export interface WorldProspectRowView {
   potentialStars: number
 }
 
-export interface ProspectsView {
-  prospects: WorldProspectRowView[]
+export interface DraftRankingsView {
+  /** preliminary | midseason | final. */
+  phase: 'preliminary' | 'midseason' | 'final'
+  /** Human label, e.g. "Mid-season ranking". */
+  phaseLabel: string
+  /** Draft year these prospects are eligible for. */
+  draftYear: number
+  rankings: DraftRankRowView[]
 }
 
 export interface StatsView {
