@@ -9,7 +9,8 @@
  */
 
 import type { Player } from '@domain'
-import { ratedOverall } from '@engine/ratings/composites'
+import { agedPotential, ratedOverall } from '@engine/ratings/composites'
+import { ceilingRoleShort } from '@engine/league/draftRankings'
 import { projectionTier, TIER_LABELS, type ProjectionTier } from './scoutReport'
 
 export interface DevelopmentRow {
@@ -23,6 +24,9 @@ export interface DevelopmentRow {
   potentialStars: number
   tier: ProjectionTier
   tierLabel: string
+  /** Projected ceiling role, e.g. "First-line F", "Top-pair D" — a real role,
+   *  never a vague "Prospect". */
+  projection: string
   /** Remaining upside, 0–5 (potentialStars − currentStars, floored at 0). */
   upside: number
   /** Short development note (next step / outlook). */
@@ -88,6 +92,7 @@ export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentC
       potentialStars: pot,
       tier,
       tierLabel: TIER_LABELS[tier],
+      projection: ceilingRoleShort(agedPotential(p), p.position),
       upside,
       note: devNote(p, location, upside, tier),
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),

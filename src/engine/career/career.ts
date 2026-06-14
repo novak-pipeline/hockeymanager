@@ -530,6 +530,11 @@ export class Career {
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
   private pendingInterviews: Array<{ playerId: string; dueDay: number; year: number }> = []
+  /** The analyst draft board rank per prospect as of the PREVIOUS phase — the
+   *  baseline the mid-season / final rankings show movement arrows against. */
+  private prevDraftBoard = new Map<string, number>()
+  /** The draft-rank phase last observed (to detect phase transitions). */
+  private draftPhaseSeen: DraftRankPhase | null = null
   /** Per-club legends registry — notable retirees, "where are they now". */
   private legends = new Map<TeamId, ClubLegend[]>()
   /** Staff-meeting agenda — topics the GM marked for discussion. */
@@ -2444,6 +2449,14 @@ export class Career {
     }
     this.emitScoutReports()
     this.resolveDueInterviews(day)
+    // Snapshot the analyst draft board at each phase boundary so the mid-season
+    // and final rankings can show movement arrows vs the previous phase.
+    const dph = this.draftRankPhase()
+    if (this.draftPhaseSeen === null) this.draftPhaseSeen = dph
+    else if (dph !== this.draftPhaseSeen) {
+      this.prevDraftBoard = this.analystRankMap(this.draftPhaseSeen)
+      this.draftPhaseSeen = dph
+    }
     // In-season development: a continuous bi-weekly micro-pass so current ability
     // and ceilings (and the profile's live trend arrows) drift through the season
     // rather than only jumping at the offseason. Bounded by a per-season budget;
@@ -4473,6 +4486,43 @@ export class Career {
     const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
     const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
 
+    // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
+    // AHL or wider-world player shows 0 GP even though his league is simulated.
+    // Re-point the current season at the totals for the league he actually plays
+    // in (AHL affiliate or a world competition).
+    const curTeam = playerTeamId ? this.data.teams.get(playerTeamId) : undefined
+    const curTier = curTeam?.tier
+    if ((curTier === 'ahl' || curTier === 'world') && profile.seasons[0]) {
+      const totals = curTier === 'ahl' ? this.ahlTotals : this.worldSim.totals
+      const gpMap = curTier === 'ahl' ? this.ahlGp : this.worldSim.gp
+      const t = totals.get(pid)
+      const g = gpMap.get(pid) ?? 0
+      const p = this.data.players.get(pid)!
+      if (p.position === 'G') {
+        const sa = t?.shotsAgainst ?? 0
+        profile.seasons[0].goalie = {
+          gamesPlayed: g, wins: 0, losses: 0,
+          savePct: sa > 0 ? (t?.saves ?? 0) / sa : 0,
+          goalsAgainstAverage: g > 0 ? (t?.goalsAgainst ?? 0) / g : 0,
+          shutouts: t?.shutouts ?? 0, saves: t?.saves ?? 0, shotsAgainst: sa,
+        }
+        profile.seasons[0].skater = null
+      } else {
+        profile.seasons[0].skater = {
+          gamesPlayed: g,
+          goals: t?.goals ?? 0,
+          assists: t?.assists ?? 0,
+          points: (t?.goals ?? 0) + (t?.assists ?? 0),
+          plusMinus: 0,
+          penaltyMinutes: t?.penaltyMinutes ?? 0,
+          shots: t?.shots ?? 0,
+          toiPerGame: g > 0 ? Math.round((t?.toi ?? 0) / g) : 0,
+          ppGoals: 0, ppAssists: 0,
+        }
+        profile.seasons[0].goalie = null
+      }
+    }
+
     // Interview section: answered Q&A (deterministic from traits) + remaining questions.
     const player = this.data.players.get(pid)
     if (player) {
@@ -5286,16 +5336,15 @@ export class Career {
   /** NHL analyst draft rankings: the consensus board of the draft-eligible class
    *  (under-19, undrafted) across the world's leagues, weighted and shuffled per
    *  the current phase (preliminary / mid-season / final). */
-  getDraftRankings(): DraftRankingsView {
+  /** Gather the draft-eligible cohort (candidates + radar rows). Shared by the
+   *  rankings view and the phase-transition movement snapshot. */
+  private buildDraftBoard(): {
+    board: Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>
+    radarRows: Array<Omit<DraftRankRowView, 'rank'>>
+  } {
     const comps = this.data.league.competitions ?? []
-    const phase = this.draftRankPhase()
-    interface Cand {
-      row: Omit<DraftRankRowView, 'rank'>
-      input: RankInput
-      player: Player
-    }
-    const board = new Map<string, Cand>() // eligible + reentry → analyst-ranked
-    const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = [] // 14–16 watch list
+    const board = new Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>()
+    const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = []
     for (const c of comps) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
@@ -5319,19 +5368,37 @@ export class Career {
             currentStars: overallToStars(ratedOverall(p)),
             potentialStars: overallToStars(agedPotential(p)),
           }
-          if (elig === 'radar') {
-            radarRows.push(row)
-          } else {
-            board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row, player: p })
-          }
+          if (elig === 'radar') radarRows.push(row)
+          else board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row, player: p })
         }
       }
     }
+    return { board, radarRows }
+  }
+
+  /** id → analyst rank for a given phase, with the cohort's CURRENT ratings.
+   *  Used to snapshot the board at a phase boundary for movement arrows. */
+  private analystRankMap(phase: DraftRankPhase): Map<string, number> {
+    const { board } = this.buildDraftBoard()
     const ordered = analystRank([...board.values()].map((c) => c.input), phase)
-    const rankings: DraftRankRowView[] = ordered.slice(0, 64).map((id, i) => ({
-      rank: i + 1,
-      ...board.get(id)!.row,
-    }))
+    const m = new Map<string, number>()
+    ordered.forEach((id, i) => m.set(id, i + 1))
+    return m
+  }
+
+  getDraftRankings(): DraftRankingsView {
+    const phase = this.draftRankPhase()
+    type Cand = { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }
+    const { board, radarRows } = this.buildDraftBoard()
+    const ordered = analystRank([...board.values()].map((c) => c.input), phase)
+    // Movement vs the previous phase's published board (▲ rose / ▼ slid).
+    const prev = this.prevDraftBoard
+    const rankings: DraftRankRowView[] = ordered.slice(0, 64).map((id, i) => {
+      const rank = i + 1
+      const wasRanked = prev.get(id)
+      const movement = wasRanked !== undefined ? wasRanked - rank : 0
+      return { rank, movement, ...board.get(id)!.row }
+    })
     // Radar: youngest standouts by projected ceiling — they're "on the radar".
     const radar: DraftRankRowView[] = radarRows
       .sort((a, b) => b.potentialStars - a.potentialStars || b.currentStars - a.currentStars)
@@ -6506,6 +6573,8 @@ export class Career {
       interactionCounter: this.interactionCounter,
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
+      prevDraftBoard: [...this.prevDraftBoard.entries()],
+      ...(this.draftPhaseSeen !== null ? { draftPhaseSeen: this.draftPhaseSeen } : {}),
       legends: [...this.legends.entries()].map(([k, v]) => [k as string, v.map((l) => structuredClone(l))] as [string, ClubLegend[]]),
       agenda: this.agenda.map((a) => ({ ...a })),
       agendaCounter: this.agendaCounter,
@@ -6617,6 +6686,8 @@ export class Career {
     if (snapshot.pendingInterviews) {
       career.pendingInterviews = snapshot.pendingInterviews.map((i) => ({ ...i }))
     }
+    if (snapshot.prevDraftBoard) career.prevDraftBoard = new Map(snapshot.prevDraftBoard)
+    if (snapshot.draftPhaseSeen) career.draftPhaseSeen = snapshot.draftPhaseSeen
     if (snapshot.legends) {
       career.legends = new Map(snapshot.legends.map(([k, v]) => [asTeamId(k), v.map((l) => structuredClone(l))]))
     }

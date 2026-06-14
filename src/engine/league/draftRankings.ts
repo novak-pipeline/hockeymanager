@@ -109,6 +109,37 @@ export function ceilingRole(ceiling: number, position: string): string {
   return 'an AHL / depth forward'
 }
 
+/**
+ * Compact ceiling-role label for tables (e.g. "First-line F", "Top-pair D",
+ * "Starting G"). The terse cousin of {@link ceilingRole} — a real projection of
+ * what a player tops out as, never a vague "Prospect".
+ */
+export function ceilingRoleShort(ceiling: number, position: string): string {
+  const isG = position === 'G'
+  const isD = position === 'D' || position === 'LD' || position === 'RD'
+  if (isG) {
+    if (ceiling >= 84) return 'Franchise G'
+    if (ceiling >= 78) return 'Starter'
+    if (ceiling >= 71) return '1B / Tandem'
+    if (ceiling >= 63) return 'Backup'
+    return 'AHL G'
+  }
+  if (isD) {
+    if (ceiling >= 86) return '#1 D'
+    if (ceiling >= 80) return 'Top-pair D'
+    if (ceiling >= 74) return '2nd-pair D'
+    if (ceiling >= 67) return '3rd-pair D'
+    if (ceiling >= 60) return 'Depth D'
+    return 'AHL D'
+  }
+  if (ceiling >= 88) return 'Franchise F'
+  if (ceiling >= 82) return 'First-line F'
+  if (ceiling >= 76) return 'Top-six F'
+  if (ceiling >= 70) return 'Middle-six F'
+  if (ceiling >= 63) return 'Bottom-six F'
+  return 'AHL F'
+}
+
 export interface AnalystProjectionInput {
   name: string
   position: string

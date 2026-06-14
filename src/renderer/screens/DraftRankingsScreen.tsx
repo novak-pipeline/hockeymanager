@@ -93,6 +93,7 @@ export function DraftRankingsScreen(): JSX.Element {
             <thead>
               <tr>
                 <th>#</th>
+                {data.phase !== 'preliminary' && <th title="Movement since the last ranking">Move</th>}
                 <th style={{ textAlign: 'left' }}>Player</th>
                 <th>Age</th><th>Pos</th>
                 <th style={{ textAlign: 'left' }}>Nation</th>
@@ -106,6 +107,9 @@ export function DraftRankingsScreen(): JSX.Element {
               {rows.map((p) => (
                 <tr key={p.playerId}>
                   <td className="muted" style={{ textAlign: 'center', fontWeight: 700 }}>{p.rank}</td>
+                  {data.phase !== 'preliminary' && (
+                    <td style={{ textAlign: 'center' }}><Movement value={p.movement ?? 0} /></td>
+                  )}
                   <td>
                     <PlayerLink playerId={p.playerId} name={p.name} />
                     {p.eligibility === 'reentry' && (

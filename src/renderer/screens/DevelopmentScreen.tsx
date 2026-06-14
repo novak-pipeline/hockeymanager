@@ -96,7 +96,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                   </td>
                   <td><Stars value={r.currentStars} muted /></td>
                   <td><Stars value={r.potentialStars} /></td>
-                  <td style={{ color: tierColor(r.tier), fontWeight: 600, fontSize: 12 }}>{r.tierLabel}</td>
+                  <td style={{ color: tierColor(r.tier), fontWeight: 600, fontSize: 12 }}>{r.projection}</td>
                   <td className="small muted">{r.note}</td>
                 </tr>
               ))}

@@ -787,6 +787,9 @@ export interface DraftRankRowView {
   eligibility: 'eligible' | 'reentry' | 'radar'
   currentStars: number
   potentialStars: number
+  /** Analyst rank movement vs the previous phase's board (+ rose, − slid).
+   *  Present on the analyst rankings from mid-season on; omitted at preliminary. */
+  movement?: number
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
@@ -1306,6 +1309,10 @@ export interface CareerSnapshot {
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */
   pendingInterviews?: Array<{ playerId: string; dueDay: number; year: number }>
+  /** Previous-phase analyst draft board ranks (for movement arrows). Optional/additive. */
+  prevDraftBoard?: Array<[string, number]>
+  /** Draft-rank phase last observed. Optional/additive. */
+  draftPhaseSeen?: 'preliminary' | 'midseason' | 'final'
   /** [teamId, ClubLegend[]][] — per-club legends registry. Optional/additive. */
   legends?: Array<[string, ClubLegend[]]>
   /** Staff-meeting agenda items. Optional/additive. */
