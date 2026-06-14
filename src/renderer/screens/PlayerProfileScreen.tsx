@@ -101,6 +101,29 @@ function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }):
 /* Star rating uses the canonical NHL-calibrated scale (see overallToStars in
  * @engine/ratings/composites): 1★ below-NHL, 2★ AHL, 3★ regular, 4★ good, 5★ great. */
 
+/** FM-style improving/declining trend arrow. Green ▲ rising, red ▼ falling,
+ *  nothing when steady (keeps the UI quiet for the majority who aren't moving). */
+function TrendArrow({
+  trend,
+  size = 12,
+  title,
+}: {
+  trend: 'up' | 'down' | 'steady'
+  size?: number
+  title?: string
+}): JSX.Element | null {
+  if (trend === 'steady') return null
+  const up = trend === 'up'
+  return (
+    <span
+      title={title ?? (up ? 'Improving' : 'Declining')}
+      style={{ fontSize: size, lineHeight: 1, color: up ? 'var(--good, #4ade80)' : 'var(--bad, #f87171)' }}
+    >
+      {up ? '▲' : '▼'}
+    </span>
+  )
+}
+
 /** Renders a 5-star display supporting half-stars (★ / ½★ / ☆). */
 function StarRating({
   stars,
@@ -747,19 +770,36 @@ function TabProfile({
         <div className="pp-band-col pp-band-abilities">
           <div className="pp-ability">
             <div className="pp-band-label">Current Ability</div>
-            {d.scouted && !d.scouted.exact ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={15} />
-                <span className="muted small">–</span>
-                <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={15} />
-              </div>
-            ) : (
-              <StarRating stars={overallToStars(d.overall)} size={17} />
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {d.scouted && !d.scouted.exact ? (
+                <>
+                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={15} />
+                  <span className="muted small">–</span>
+                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={15} />
+                </>
+              ) : (
+                <StarRating stars={overallToStars(d.overall)} size={17} />
+              )}
+              <TrendArrow trend={d.overallTrend} />
+            </div>
           </div>
           <div className="pp-ability">
             <div className="pp-band-label">Potential Ability</div>
-            <StarRating stars={d.potentialStars} fogged={!!(d.scouted && !d.scouted.exact)} size={17} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <StarRating stars={d.potentialStars} fogged={!!(d.scouted && !d.scouted.exact)} size={17} />
+              <TrendArrow trend={d.potentialTrend} title={d.potentialTrend === 'up' ? 'Ceiling trending up' : 'Ceiling trending down'} />
+            </div>
+            {d.potentialBand.hi > d.potentialBand.lo && (
+              <div
+                className="muted small"
+                title="Realistic range of where his career could land — wide for unproven youth, narrowing as he proves out"
+                style={{ marginTop: 2 }}
+              >
+                Range {d.potentialBand.lo === d.potentialBand.hi
+                  ? `${d.potentialBand.lo}★`
+                  : `${d.potentialBand.lo}–${d.potentialBand.hi}★`}
+              </div>
+            )}
           </div>
         </div>
       </div>

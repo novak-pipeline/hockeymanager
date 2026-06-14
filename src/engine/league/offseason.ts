@@ -323,7 +323,7 @@ export function developPlayers(args: {
     // ── ceiling drift (boom/bust) then growth / decline ───────────────────
     // Revise the young player's ceiling first, so this year's growth chases the
     // updated target — a breakout opens new room, a bust shuts it down.
-    driftYouthCeiling(p, seasonAge, perfRatio, hadSample, rng)
+    p.ceilingTrend = driftYouthCeiling(p, seasonAge, perfRatio, hadSample, rng)
 
     if (seasonAge < 26) {
       const persona =
@@ -343,7 +343,9 @@ export function developPlayers(args: {
     p.form *= 0.3
     if (Math.abs(p.form) < 0.25) p.form = 0
 
-    deltas.push({ playerId: p.id, delta: overall(p.composites, p.position) - before })
+    const devDelta = overall(p.composites, p.position) - before
+    p.devTrend = devDelta
+    deltas.push({ playerId: p.id, delta: devDelta })
   }
 
   const risers = deltas

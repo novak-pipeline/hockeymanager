@@ -439,6 +439,61 @@ export function potentialStars(p: Player): number {
   return overallToStars(agedPotential(p))
 }
 
+/** FM-style trend arrow from a signed development delta. A move of a full
+ *  overall point (or more) since the last pass counts as a real trend; smaller
+ *  jitter reads as steady. */
+function trendOf(delta: number | undefined): 'up' | 'down' | 'steady' {
+  if (delta === undefined) return 'steady'
+  if (delta >= 1) return 'up'
+  if (delta <= -1) return 'down'
+  return 'steady'
+}
+
+/**
+ * Optimism band on a player's ceiling, in stars. The realistic spread of where
+ * his career actually lands: wide for unproven youth (a great-on-paper prospect
+ * can still flop; a modest one can pop off), narrowing toward a point as he ages
+ * and proves out. Fog widens it further — an unscouted player is more uncertain.
+ * Centred on agedPotential, asymmetric (more downside for high-pedigree youth,
+ * more upside for low-pedigree youth) mirrors real draft-outcome distributions.
+ */
+function potentialBandOf(p: Player, knowledge: number | undefined): { lo: number; hi: number } {
+  const ceiling = agedPotential(p)
+  // Age-driven base spread in overall points (the dominant signal).
+  let down: number
+  let up: number
+  if (p.age <= 19) {
+    down = 12
+    up = 9
+  } else if (p.age <= 21) {
+    down = 9
+    up = 7
+  } else if (p.age <= 23) {
+    down = 6
+    up = 5
+  } else if (p.age <= 25) {
+    down = 4
+    up = 3
+  } else if (p.age <= 29) {
+    down = 2
+    up = 1.5
+  } else {
+    down = 1
+    up = 0.5
+  }
+  // Fog widens uncertainty: a fully-known player (100) keeps the base spread; a
+  // poorly-scouted one (0) widens it by up to ~60%.
+  if (knowledge !== undefined) {
+    const unknown = Math.max(0, Math.min(100, 100 - knowledge)) / 100
+    const widen = 1 + unknown * 0.6
+    down *= widen
+    up *= widen
+  }
+  const lo = overallToStars(Math.max(0, ceiling - down))
+  const hi = overallToStars(Math.min(99, ceiling + up))
+  return { lo, hi }
+}
+
 /** Build the bio block for a player. */
 function buildBio(p: Player): PlayerBioView {
   const bio: PlayerBioView = {}
@@ -720,6 +775,9 @@ export function buildPlayerProfile(
     injury: p.injuryStatus,
     contract: teamId ? contractView(p) : null,
     potentialStars: potStars,
+    overallTrend: trendOf(p.devTrend),
+    potentialTrend: trendOf(p.ceilingTrend),
+    potentialBand: potentialBandOf(p, fog ? knowledgeOf(fog.scouting, pidStr) : undefined),
     personality: PERSONALITY_LABELS.map(([key, label]) => ({
       label,
       value: (p.personality as unknown as Record<string, number>)[key] ?? 0,

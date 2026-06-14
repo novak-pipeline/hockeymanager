@@ -165,6 +165,14 @@ export interface Player {
   basePotential?: number
 
   /**
+   * Most recent development pass's overall change (signed). Drives the FM-style
+   * improving/declining trend arrow. Absent until the first offseason develops.
+   */
+  devTrend?: number
+  /** Most recent ceiling drift (signed) — his projection trending up/down. */
+  ceilingTrend?: number
+
+  /**
    * Draft status flags from the source DB.
    */
   /** Player is currently eligible for the NHL entry draft. */

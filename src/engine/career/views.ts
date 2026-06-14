@@ -444,6 +444,13 @@ export interface PlayerProfileView extends PlayerBadge {
    * snapshots). Present when any history has accrued.
    */
   opinionTimeline?: import('@engine/career/opinionTracker').OpinionSnapshot[]
+  /** FM-style trend of current ability after the last development pass. */
+  overallTrend: 'up' | 'down' | 'steady'
+  /** Trend of his projected ceiling (boom/bust drift). */
+  potentialTrend: 'up' | 'down' | 'steady'
+  /** Optimism band on the ceiling in stars [lo, hi] — wide for unproven youth,
+   *  narrowing to a point as he ages/proves out. */
+  potentialBand: { lo: number; hi: number }
 }
 
 /** A notable retiree recorded in a club's legends registry. */
