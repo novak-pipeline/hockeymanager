@@ -1,5 +1,6 @@
 import type { DashboardView, RivalriesView, ScheduleEntryView, ScheduleView } from '../../worker/protocol'
-import { crestColor, fmtDate } from '../components/format'
+import { fmtDate } from '../components/format'
+import { TeamCrest } from '../components/Crest'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -139,18 +140,12 @@ function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<s
                       </td>
                       <td>
                         <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                          <span
+                          <TeamCrest
                             className="crest"
-                            style={{
-                              background: crestColor(e.opponentTeamId),
-                              width: 20,
-                              height: 20,
-                              fontSize: 9,
-                              border: 'none',
-                            }}
-                          >
-                            {e.opponentAbbr.slice(0, 2)}
-                          </span>
+                            teamId={e.opponentTeamId}
+                            abbr={e.opponentAbbr.slice(0, 2)}
+                            style={{ width: 20, height: 20, fontSize: 9 }}
+                          />
                           {e.opponentName}
                           {e.isNext && <span className="chip chip-warn" style={{ fontSize: 10 }}>Next</span>}
                           {isRival && (

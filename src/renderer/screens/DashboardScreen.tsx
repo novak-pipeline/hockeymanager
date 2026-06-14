@@ -11,7 +11,8 @@ import type {
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, useNav } from '../components/NavContext'
-import { crestColor, fmtDate, fmtMoney } from '../components/format'
+import { fmtDate, fmtMoney } from '../components/format'
+import { TeamCrest } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -589,19 +590,12 @@ function MiniTable(props: { rows: StandingRowView[]; userTeamId: string }): JSX.
                 </td>
                 <td>
                   <span className="row" style={{ gap: 5 }}>
-                    <span
+                    <TeamCrest
                       className="crest"
-                      style={{
-                        background: crestColor(row.teamId),
-                        width: 18,
-                        height: 18,
-                        fontSize: 8,
-                        border: 'none',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {row.abbreviation.slice(0, 2)}
-                    </span>
+                      teamId={row.teamId}
+                      abbr={row.abbreviation.slice(0, 2)}
+                      style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
+                    />
                     {row.abbreviation}
                   </span>
                 </td>

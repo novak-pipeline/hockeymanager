@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { CalendarEntry, CalendarView } from '../../worker/protocol'
-import { crestColor } from '../components/format'
+import { TeamCrest } from '../components/Crest'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -335,19 +335,12 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
         >
           {entry.home ? 'H' : 'A'}
         </span>
-        <span
+        <TeamCrest
           className="crest"
-          style={{
-            background: crestColor(entry.opponentAbbr),
-            width: 18,
-            height: 18,
-            fontSize: 8,
-            border: 'none',
-            flexShrink: 0,
-          }}
-        >
-          {entry.opponentAbbr.slice(0, 2)}
-        </span>
+          teamId={entry.opponentAbbr}
+          abbr={entry.opponentAbbr.slice(0, 2)}
+          style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
+        />
         <span
           style={{
             fontSize: 12,

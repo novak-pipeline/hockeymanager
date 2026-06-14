@@ -9,6 +9,7 @@ import { NavContext, type NavApi, type NavParams, type ScreenId } from './compon
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
 import { SideNav } from './components/SideNav'
+import { TeamColorsProvider } from './components/Crest'
 import { SubTabBar } from './components/SubTabBar'
 import { useGlobalTeamTheme } from './components/ThemeScope'
 import { THEME_PRESETS } from './components/themes'
@@ -343,6 +344,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     <UserTeamContext.Provider value={props.team.teamId}>
     <NavContext.Provider value={navApi}>
       <ActionsContext.Provider value={actions}>
+        <TeamColorsProvider>
         {watched ? (
           <div className="match-fullbleed">
             <MatchViewer game={watched} onClose={closeViewer} />
@@ -373,6 +375,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             </div>
           </div>
         )}
+        </TeamColorsProvider>
       </ActionsContext.Provider>
     </NavContext.Provider>
     </UserTeamContext.Provider>

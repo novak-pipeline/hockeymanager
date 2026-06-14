@@ -6,7 +6,8 @@ import type {
   PenaltyLogRow,
 } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
-import { crestColor, fmtToi } from '../components/format'
+import { fmtToi } from '../components/format'
+import { useTeamColorMap, colorFromMap } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -31,6 +32,7 @@ const STRENGTH_CLASS: Record<GoalLogRow['strength'], string> = {
 
 export function MatchCenterScreen(): JSX.Element {
   const client = useClient()
+  const colorMap = useTeamColorMap()
   const { data, loading, error } = useScreenData<BoxScoreView>(
     () => client.getLastBoxScore(),
     (r) => (r.type === 'boxScore' ? r.boxScore : null)
@@ -58,8 +60,8 @@ export function MatchCenterScreen(): JSX.Element {
   const d = data
   const awayWon = d.awayGoals > d.homeGoals
   const homeWon = d.homeGoals > d.awayGoals
-  const awayColor = crestColor(d.awayAbbr)
-  const homeColor = crestColor(d.homeAbbr)
+  const awayColor = colorFromMap(colorMap, d.awayAbbr)
+  const homeColor = colorFromMap(colorMap, d.homeAbbr)
 
   const periodCount = Math.max(d.homeByPeriod.length, d.awayByPeriod.length)
 

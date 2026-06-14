@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { PlayoffBracketView, SeriesView } from '../../worker/protocol'
-import { crestColor } from '../components/format'
+import { useTeamCrestColor } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -103,8 +103,8 @@ function SeriesCard(props: { series: SeriesView; winsNeeded: number }): JSX.Elem
 
   const hi = series.highSeed
   const lo = series.lowSeed
-  const hiColor = crestColor(hi.teamId)
-  const loColor = crestColor(lo.teamId)
+  const hiColor = useTeamCrestColor(hi.teamId)
+  const loColor = useTeamCrestColor(lo.teamId)
 
   return (
     <div

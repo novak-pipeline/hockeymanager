@@ -16,7 +16,7 @@ import type {
 } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
-import { crestColor } from '../components/format'
+import { TeamCrest } from '../components/Crest'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { StandingsScreen } from './StandingsScreen'
 import { StatsScreen } from './StatsScreen'
@@ -279,19 +279,12 @@ function ConferenceStandingsTable(props: {
               </td>
               <td>
                 <span className="row" style={{ gap: 5 }}>
-                  <span
+                  <TeamCrest
                     className="crest"
-                    style={{
-                      background: crestColor(row.teamId),
-                      width: 18,
-                      height: 18,
-                      fontSize: 8,
-                      border: 'none',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {row.abbreviation.slice(0, 2)}
-                  </span>
+                    teamId={row.teamId}
+                    abbr={row.abbreviation.slice(0, 2)}
+                    style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
+                  />
                   {row.abbreviation}
                 </span>
               </td>
@@ -372,19 +365,12 @@ function LeagueTeamStatsTab(): JSX.Element {
                     </td>
                     <td>
                       <span className="row" style={{ gap: 5 }}>
-                        <span
+                        <TeamCrest
                           className="crest"
-                          style={{
-                            background: crestColor(row.teamId),
-                            width: 18,
-                            height: 18,
-                            fontSize: 8,
-                            border: 'none',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {row.teamAbbr.slice(0, 2)}
-                        </span>
+                          teamId={row.teamId}
+                          abbr={row.teamAbbr.slice(0, 2)}
+                          style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
+                        />
                         {row.teamAbbr}
                         <span className="muted small">{row.teamName}</span>
                       </span>
