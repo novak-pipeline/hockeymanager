@@ -17,7 +17,7 @@
  */
 
 import type { Player } from '@domain'
-import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
+import { ratedOverall, agedPotential } from '@engine/ratings/composites'
 
 /* ────────────────────────── deterministic hash ────────────────────────── */
 
@@ -55,9 +55,9 @@ function positionNoun(position: string): string {
   }
 }
 
-/** Potential-based overall (his ceiling), DB-anchored when available. */
+/** Age-aware ceiling overall — collapses to current ability past the dev window. */
 export function potentialOverallOf(p: Player): number {
-  return ratedPotential(p)
+  return agedPotential(p)
 }
 
 /* ────────────────────────── depth-slot mapping ────────────────────────── */
@@ -111,27 +111,27 @@ function ceilingRoleFor(group: Group, potOvr: number): string {
     return 'AHL goaltender'
   }
   if (group === 'D') {
-    if (potOvr >= 80) return 'elite #1 defenceman'
-    if (potOvr >= 72) return 'top-pairing defenceman'
-    if (potOvr >= 64) return 'top-four defenceman'
-    if (potOvr >= 56) return 'bottom-pairing defenceman'
-    if (potOvr >= 48) return 'depth defenceman'
+    if (potOvr >= 84) return 'elite #1 defenceman'
+    if (potOvr >= 76) return 'top-pairing defenceman'
+    if (potOvr >= 68) return 'top-four defenceman'
+    if (potOvr >= 60) return 'bottom-pairing defenceman'
+    if (potOvr >= 50) return 'depth defenceman'
     return 'AHL defenceman'
   }
-  if (potOvr >= 82) return 'franchise forward'
-  if (potOvr >= 74) return 'first-line forward'
-  if (potOvr >= 66) return 'middle-six forward'
-  if (potOvr >= 58) return 'bottom-six forward'
-  if (potOvr >= 49) return 'depth forward'
+  if (potOvr >= 84) return 'franchise forward'
+  if (potOvr >= 77) return 'first-line forward'
+  if (potOvr >= 70) return 'middle-six forward'
+  if (potOvr >= 60) return 'bottom-six forward'
+  if (potOvr >= 50) return 'depth forward'
   return 'AHL forward'
 }
 
 /** Short value word for "rates him as a ___ player". */
 function statusWord(ovr: number): string {
-  if (ovr >= 82) return 'franchise player'
-  if (ovr >= 75) return 'star player'
-  if (ovr >= 68) return 'key player'
-  if (ovr >= 61) return 'core player'
+  if (ovr >= 85) return 'franchise player'
+  if (ovr >= 78) return 'star player'
+  if (ovr >= 71) return 'key player'
+  if (ovr >= 63) return 'core player'
   if (ovr >= 54) return 'regular contributor'
   if (ovr >= 47) return 'depth player'
   return 'reserve player'

@@ -219,3 +219,27 @@ export function ratedPotential(p: {
   if (p.basePotential === undefined) return computed
   return Math.round(0.7 * p.basePotential + 0.3 * computed)
 }
+
+/**
+ * Age-aware ceiling (0–100): how good a player can still BECOME, not just his
+ * raw potential. Inside the development window (≤20) the full ceiling stands;
+ * from 21–24 the remaining upside fades; from 25 on a player has reached his
+ * level, so his ceiling is simply his current ability. This stops a 30-year-old
+ * fourth-liner from projecting growth into a "middle-six key player".
+ */
+export function agedPotential(p: {
+  composites: CompositeRatings
+  potential: RawAttributes
+  role: PlayerRole
+  position: Position
+  age: number
+  baseOverall?: number
+  basePotential?: number
+}): number {
+  const cur = ratedOverall(p)
+  const ceiling = Math.max(cur, ratedPotential(p))
+  if (p.age <= 20) return ceiling
+  if (p.age >= 25) return cur
+  const frac = (25 - p.age) / 5 // 21 → 0.8 … 24 → 0.2
+  return Math.round(cur + (ceiling - cur) * frac)
+}

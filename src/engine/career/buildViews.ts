@@ -14,7 +14,7 @@ import type {
   Team,
   TeamId,
 } from '@domain'
-import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
+import { ratedOverall, agedPotential } from '@engine/ratings/composites'
 import { computeRadar } from '@engine/ratings/radar'
 import type { RadarView } from '@engine/ratings/radar'
 import {
@@ -433,9 +433,9 @@ function groupView(
   }
 }
 
-/** 1–5 stars from the player's ceiling (DB-anchored when available). */
+/** 1–5 stars from the player's age-aware ceiling (no growth left past ~25). */
 export function potentialStars(p: Player): number {
-  const score = Math.max(ratedOverall(p), ratedPotential(p))
+  const score = agedPotential(p)
   if (score >= 82) return 5
   if (score >= 72) return 4
   if (score >= 62) return 3
