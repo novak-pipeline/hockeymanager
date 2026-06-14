@@ -374,19 +374,20 @@ def s20(row, col):
     """EHM 1-20 attribute -> our 1-99 scale."""
     return clamp(round(to_int(row[col], 0) / 20.0 * 99), 1, 99)
 
-def pa_ceiling(pa, ca):
-    """Resolve an EHM Potential Ability into a concrete CA-scale ceiling.
+# EHM negative Potential-Ability range codes -1..-10 -> CA-scale bands (1-200).
+# More negative = higher ceiling. The game rolls a real value within the band
+# per career (option B), so the same prospect can boom or bust across saves.
+PA_BANDS = {1: (95, 115), 2: (110, 135), 3: (125, 150), 4: (140, 160), 5: (150, 170),
+            6: (160, 180), 7: (170, 188), 8: (178, 194), 9: (188, 198), 10: (195, 200)}
 
-    EHM (like CM/FM) stores young players' PA as a NEGATIVE range code: more
-    negative = higher ceiling band. Positive PA is used as-is. The result is
-    always at least the current ability."""
-    if pa is None:
-        return ca
-    if pa >= 0:
-        return max(pa, ca)
-    # Negative range codes -1..-10 -> ceiling bands (CA-scale, 1-200).
-    bands = {1: 110, 2: 125, 3: 140, 4: 150, 5: 160, 6: 170, 7: 180, 8: 188, 9: 195, 10: 200}
-    return max(ca, bands.get(min(10, abs(pa)), 150))
+def resolve_potential(pa, ca):
+    """Return (single_ca, band_or_None). Positive PA is fixed; negative PA yields
+    a [lo,hi] band (>= current ability) for the engine to roll per career."""
+    if pa is None or pa >= 0:
+        return max(pa or ca, ca), None
+    lo, hi = PA_BANDS.get(min(10, abs(pa)), (130, 160))
+    lo = max(lo, ca); hi = max(hi, lo)
+    return (lo + hi) // 2, (lo, hi)
 
 def avg20(row, *cols):
     """Average of several EHM 1-20 attributes -> our 1-99 scale."""
@@ -640,7 +641,7 @@ def main():
         year = to_int(parts[2]) if len(parts) == 3 else 0
         age = clamp(SEASON_YEAR - year if year else 25, 16, 45)
         ca = to_int(r[C_CA], 50)
-        pa = pa_ceiling(to_int(r[C_PA], ca), ca)
+        pa_single, pa_band = resolve_potential(to_int(r[C_PA], ca), ca)
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
         pos = position(r)
         extended = extended_fields_from_row(r)
@@ -654,13 +655,14 @@ def main():
             # overall from the real attributes below. potential (PA) is the DB's
             # potential-ability number (negative = range code), halved to 1-99.
             "overall": clamp(round(ca / 2), 1, 99),
-            "potential": clamp(round(pa / 2), 1, 99),
+            "potential": clamp(round(pa_single / 2), 1, 99),
+            **({"potentialRange": [clamp(round(pa_band[0] / 2), 1, 99), clamp(round(pa_band[1] / 2), 1, 99)]} if pa_band else {}),
             "attributes": build_attributes(r, pos),
             "role": map_role(r[C_ROLE], pos),
             "personality": personality_from_row(r),
             "faceId": face_id,
             "_ca": ca,
-            "_pa": pa,
+            "_pa": pa_single,
             "_key": face_id,  # norm(first_last_dob) — joins to player_career_history
             **extended,
         }

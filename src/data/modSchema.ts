@@ -128,6 +128,13 @@ export interface ModPlayer {
    * and overall (younger players get more headroom).
    */
   potential?: number
+  /**
+   * Potential RANGE [lo, hi] (1–99 overall) from an EHM negative-PA code. When
+   * present the loader ROLLS the true ceiling within this band using the career
+   * seed (option B) — so the same prospect booms or busts differently per save.
+   * `potential` is the deterministic fallback midpoint.
+   */
+  potentialRange?: [number, number]
   contract?: ModContract
   /**
    * Optional explicit role (e.g. 'playmaker', 'shutdownD'). When omitted, the
@@ -797,6 +804,22 @@ function synthesiseAttributes(
   return raw
 }
 
+/**
+ * Resolve a mod player's potential-ability ceiling (1–99 overall), rolling
+ * within a potentialRange band using the career seed when present (option B:
+ * the same prospect booms or busts differently per save). Returns null to fall
+ * back to age-based synthesis.
+ */
+function rollPotentialOverall(mp: ModPlayer, currentOverall: number, rng: Rng): number | null {
+  if (mp.potentialRange) {
+    const lo = Math.max(mp.potentialRange[0], currentOverall)
+    const hi = Math.max(mp.potentialRange[1], lo)
+    return rng.range(lo, hi)
+  }
+  if (mp.potential !== undefined) return Math.max(mp.potential, currentOverall)
+  return null
+}
+
 function synthesisePotential(
   rng: Rng,
   current: RawAttributes,
@@ -1115,11 +1138,11 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           const composites = computeComposites(raw, role, modPlayer.position)
           const ovr = overall(composites, modPlayer.position)
 
-          // Potential: mod-specified or synthesised from age.
+          // Potential: rolled from range (per career) / mod-specified / synthesised.
           let potentialRaw: RawAttributes
-          if (modPlayer.potential !== undefined) {
-            // Build a synthetic attribute set centred on the mod's potential ceiling.
-            potentialRaw = synthesiseAttributes(rng, modPlayer.potential, modPlayer.position, {})
+          const paOverall = rollPotentialOverall(modPlayer, ovr, rng)
+          if (paOverall !== null) {
+            potentialRaw = synthesiseAttributes(rng, paOverall, modPlayer.position, {})
           } else {
             potentialRaw = synthesisePotential(rng, raw, modPlayer.age)
           }
@@ -1314,9 +1337,10 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
               : pickWeightedRole(ahlRng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS))
         const composites = computeComposites(raw, role, modPlayer.position)
         const ovr = overall(composites, modPlayer.position)
+        const affPaOverall = rollPotentialOverall(modPlayer, ovr, ahlRng)
         const potentialRaw =
-          modPlayer.potential !== undefined
-            ? synthesiseAttributes(ahlRng, modPlayer.potential, modPlayer.position, {})
+          affPaOverall !== null
+            ? synthesiseAttributes(ahlRng, affPaOverall, modPlayer.position, {})
             : synthesisePotential(ahlRng, raw, modPlayer.age)
         const contract: Contract = modPlayer.contract
           ? {
