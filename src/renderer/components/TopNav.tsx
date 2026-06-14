@@ -1,6 +1,7 @@
 import type { DashboardView } from '../../worker/protocol'
 import { useShellActions } from './ActionsContext'
-import { crestColor, fmtDate } from './format'
+import { Crest } from './Crest'
+import { fmtDate } from './format'
 import { useNav } from './NavContext'
 
 const PHASE_CHIP: Record<DashboardView['phase'], string> = {
@@ -41,9 +42,7 @@ export function TopNav(props: {
       <div className="topnav-row1">
         {/* Club identity */}
         <div className="topnav-club">
-          <div className="topnav-crest" style={{ background: crestColor(props.teamId) }}>
-            {props.clubAbbr}
-          </div>
+          <Crest teamId={props.teamId} abbr={props.clubAbbr} className="topnav-crest" />
           <div>
             <div className="topnav-club-name">{d?.userTeam.name ?? props.clubName}</div>
             <div className="topnav-club-record">

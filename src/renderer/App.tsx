@@ -246,6 +246,26 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     [busy, client, run]
   )
 
+  // Spacebar advances the game (FM-style) — unless a match is open, the user is
+  // typing in a field, or a button/link is focused (where space activates it).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      if (watched || e.repeat) return
+      const t = e.target as HTMLElement | null
+      const tag = t?.tagName
+      if (
+        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        tag === 'BUTTON' || tag === 'A' ||
+        t?.isContentEditable || t?.getAttribute('role') === 'button'
+      ) return
+      e.preventDefault()
+      actions.continueGame()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [watched, actions])
+
   const closeViewer = useCallback(() => {
     setWatched(null)
     setNav({ screen: 'dashboard', params: {} })

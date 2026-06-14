@@ -15,7 +15,7 @@ import type { LeagueTeamsView } from '../../worker/protocol'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 import type { ScreenId } from './NavContext'
-import { crestColor } from './format'
+import { CrestView } from './Crest'
 
 interface TeamHeaderProps {
   /** The team currently being viewed (may be own team). */
@@ -176,23 +176,22 @@ export function TeamHeader({ viewedTeamId, userTeamId, currentTab }: TeamHeaderP
       </div>
 
       {/* Crest + name */}
-      <div
+      <CrestView
+        teamId={viewedTeamId}
+        abbr={viewedTeam?.abbreviation ?? '??'}
+        {...(viewedTeam?.colors ? { colors: viewedTeam.colors } : {})}
         style={{
           width: 28,
           height: 28,
           borderRadius: 4,
-          background: viewedTeam ? 'var(--team-primary, var(--bg3))' : 'var(--bg3)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontWeight: 700,
           fontSize: 11,
-          color: '#fff',
           flexShrink: 0,
         }}
-      >
-        {viewedTeam?.abbreviation ?? '??'}
-      </div>
+      />
 
       <span style={{ fontWeight: 600, fontSize: 14 }}>
         {viewedTeam?.name ?? viewedTeamId}

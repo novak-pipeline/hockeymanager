@@ -89,6 +89,30 @@ export function teamColorHex(color: number): string {
 }
 
 /**
+ * Crest placeholder colours from a team's real { primary, secondary }.
+ * Fills with the primary (kept true — Pittsburgh stays black), letters in the
+ * secondary, ringed in the secondary so a dark crest reads on a dark topbar.
+ * If primary/secondary are too close in lightness, the text falls back to
+ * black/white for contrast.
+ */
+export function crestStyle(primary: number, secondary: number): {
+  background: string; color: string; borderColor: string
+} {
+  const p = intToRgb(primary)
+  const s = intToRgb(secondary)
+  const pl = luminance(p.r, p.g, p.b)
+  const sl = luminance(s.r, s.g, s.b)
+  const fg = Math.abs(pl - sl) < 0.22
+    ? (pl < 0.5 ? { r: 255, g: 255, b: 255 } : { r: 16, g: 19, b: 26 })
+    : s
+  return {
+    background: toHex(p.r, p.g, p.b),
+    color: toHex(fg.r, fg.g, fg.b),
+    borderColor: toHex(s.r, s.g, s.b),
+  }
+}
+
+/**
  * Global team theme: recolours the whole app accent (the violet tokens) to the
  * MANAGED team's colours. Picks the more accent-able of primary/secondary (a
  * very dark primary like Pittsburgh's black falls back to the gold secondary),
