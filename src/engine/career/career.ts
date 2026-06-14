@@ -71,6 +71,7 @@ import {
   type WorldSimState,
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
+import { runWorldJuniors } from '@engine/league/worldJuniors'
 import {
   createArc,
   createInitialArcsState,
@@ -5066,7 +5067,21 @@ export class Career {
     }
     nations.sort((a, b) => b.rating - a.rating)
     nations.forEach((n, i) => { n.rank = i + 1 })
-    return { nations }
+
+    // Projected World Juniors (U20) — deterministic per season.
+    const wj = runWorldJuniors({
+      players: this.data.players,
+      rng: this.rngFor(8020, this.year),
+      teamAbbrOf: (id) => teamOfPlayer.get(id as string)?.abbr ?? 'FA',
+    })
+    const worldJuniors = wj.contested === 0 ? null : {
+      gold: wj.gold,
+      silver: wj.silver,
+      bronze: wj.bronze,
+      standings: wj.standings,
+      allStars: wj.allStars,
+    }
+    return { nations, worldJuniors }
   }
 
   /** Prospect watch: the best draft-age (U21) talent across the world's leagues,

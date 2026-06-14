@@ -707,8 +707,29 @@ export interface NationView {
   topPlayers: CompetitionNotableView[]
 }
 
+export interface WorldJuniorsStandoutView {
+  playerId: string
+  name: string
+  nation: string
+  teamAbbr: string
+  position: string
+  stars: number
+}
+
+export interface WorldJuniorsView {
+  gold: string | null
+  silver: string | null
+  bronze: string | null
+  /** Projected final placings (rank order), with pool strength. */
+  standings: Array<{ nation: string; rating: number; finish: number }>
+  allStars: WorldJuniorsStandoutView[]
+}
+
 export interface InternationalView {
   nations: NationView[]
+  /** Projected World Juniors (U20) medal table + all-stars, or null if the pool
+   *  is too thin to contest. */
+  worldJuniors: WorldJuniorsView | null
 }
 
 /* ──── prospect watch (prospect-first scouting discovery) ──── */

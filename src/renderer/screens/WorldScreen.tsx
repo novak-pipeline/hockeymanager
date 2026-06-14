@@ -301,6 +301,7 @@ function InternationalPanel(): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
 
   const nations = data?.nations ?? []
+  const wj = data?.worldJuniors ?? null
   const current = nations.find((n) => n.nation === selected) ?? nations[0] ?? null
 
   return (
@@ -311,6 +312,34 @@ function InternationalPanel(): JSX.Element {
         empty={!loading && nations.length === 0}
         emptyText="No nationality data in this database. Load a multi-league database to see national-team power rankings."
       />
+
+      {wj && (
+        <Panel title="World Juniors (U20) — projected">
+          <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 180 }}>
+              <div style={{ fontSize: 13, marginBottom: 4 }}>🥇 <strong>{wj.gold ?? '—'}</strong></div>
+              <div style={{ fontSize: 13, marginBottom: 4 }}>🥈 {wj.silver ?? '—'}</div>
+              <div style={{ fontSize: 13, marginBottom: 8 }}>🥉 {wj.bronze ?? '—'}</div>
+              <div className="muted small">Projected from current U20 pools.</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div className="muted small" style={{ marginBottom: 4 }}>All-tournament team</div>
+              <table className="data-table" style={{ width: '100%' }}>
+                <tbody>
+                  {wj.allStars.map((s) => (
+                    <tr key={s.playerId}>
+                      <td><PlayerLink playerId={s.playerId} name={s.name} /></td>
+                      <td className="muted" style={{ textAlign: 'center' }}>{s.position}</td>
+                      <td className="muted">{s.nation}</td>
+                      <td><Stars value={s.stars} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Panel>
+      )}
 
       {nations.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
