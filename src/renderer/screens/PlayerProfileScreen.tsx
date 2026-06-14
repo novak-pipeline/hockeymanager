@@ -30,7 +30,8 @@ import type {
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
 import { useNav } from '../components/NavContext'
-import { fmtMoney, fmtToi, moraleWord, moraleColor, flagEmoji } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
+import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
@@ -697,8 +698,8 @@ function TabProfile({
         <div className="pp-band-col">
           <div className="pp-band-row"><strong>{d.age}</strong><span className="muted"> years old</span></div>
           {d.bio.nationality && (
-            <div className="pp-band-row">
-              {flagEmoji(d.bio.nationality) && <span style={{ marginRight: 5 }}>{flagEmoji(d.bio.nationality)}</span>}
+            <div className="pp-band-row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <FlagIcon nationality={d.bio.nationality} size={20} />
               {d.bio.nationality}
             </div>
           )}

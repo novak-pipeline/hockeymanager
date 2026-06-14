@@ -10,7 +10,8 @@ import type { ScoutingView } from '../../worker/protocol'
 import type { ScoutCardView, TeamKnowledgeSummary, ScoutedPlayerRow } from '../../engine/career/views'
 import type { ScoutTarget } from '@domain/scouting'
 import { PlayerLink } from '../components/NavContext'
-import { fmtMoney, flagEmoji } from '../components/format'
+import { fmtMoney } from '../components/format'
+import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -279,8 +280,8 @@ function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
                 <tr key={r.playerId}>
                   <td><span style={{ fontWeight: 800, color: REC_COLOR[r.rec] }}>{r.rec}</span></td>
                   <td>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {r.nationality && flagEmoji(r.nationality) && <span style={{ fontSize: 11 }}>{flagEmoji(r.nationality)}</span>}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <FlagIcon nationality={r.nationality} size={15} />
                       <PlayerLink playerId={r.playerId} name={r.name} />
                     </span>
                   </td>

@@ -23,10 +23,16 @@ const NATION_ISO: Record<string, string> = {
  */
 export function flagEmoji(nationality?: string): string {
   if (!nationality) return ''
-  const iso = NATION_ISO[nationality.trim().toLowerCase()]
+  const iso = nationIso(nationality)
   if (!iso) return ''
   const A = 0x1f1e6
   return String.fromCodePoint(A + (iso.charCodeAt(0) - 65), A + (iso.charCodeAt(1) - 65))
+}
+
+/** Nation name → ISO-3166 alpha-2 code (lowercase-insensitive). */
+export function nationIso(nationality?: string): string | undefined {
+  if (!nationality) return undefined
+  return NATION_ISO[nationality.trim().toLowerCase()]
 }
 
 /** '2026-10-12' → '12 Oct 2026'. Returns the input unchanged if malformed. */
