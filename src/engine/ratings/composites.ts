@@ -264,8 +264,11 @@ export function agedPotential(p: {
 }): number {
   const cur = ratedOverall(p)
   const ceiling = Math.max(cur, ratedPotential(p))
-  if (p.age <= 20) return ceiling
-  if (p.age >= 25) return cur
-  const frac = (25 - p.age) / 5 // 21 → 0.8 … 24 → 0.2
+  // Through 24 a player still has the runway to reach his ceiling; from 25 the
+  // window to fill untapped potential closes, fully gone by 31 (he's at/past
+  // peak and starting to decline).
+  if (p.age <= 24) return ceiling
+  if (p.age >= 31) return cur
+  const frac = (31 - p.age) / 6 // 25 → 0.83 … 30 → 0.17
   return Math.round(cur + (ceiling - cur) * frac)
 }
