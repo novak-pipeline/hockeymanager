@@ -1516,6 +1516,65 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
         </Panel>
       )}
 
+      {/* ── Roster Projection (EHM-style suggested / projected status) ── */}
+      {d.rosterProjection && (
+        <Panel title="Projection">
+          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+              <div>
+                <div className="field-label">Current role</div>
+                <div style={{ fontWeight: 700, fontSize: 14, textTransform: 'capitalize' }}>
+                  {d.rosterProjection.currentRole}
+                </div>
+                <div className="muted small" style={{ marginTop: 2 }}>
+                  {d.rosterProjection.nhlReady ? 'Ready for the NHL roster' : 'Not yet NHL-ready'}
+                </div>
+              </div>
+              <div>
+                <div className="field-label">Ceiling</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--violet-h)', textTransform: 'capitalize' }}>
+                  {d.rosterProjection.ceilingRole}
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="field-label">Suggested status with {d.rosterProjection.teamName}</div>
+              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
+                {d.rosterProjection.suggestedStatus}
+              </p>
+            </div>
+            <div>
+              <div className="field-label">Projected status with {d.rosterProjection.teamName}</div>
+              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
+                {d.rosterProjection.projectedStatus}
+              </p>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Coaching staff reports ── */}
+      {d.coachReports && d.coachReports.length > 0 && (
+        <Panel title="Coaching Staff Reports">
+          <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+            {d.coachReports.map((r, i) => (
+              <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+                <PlayerFace faceId={r.faceId} name={r.coachName} size={40} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    {r.coachName}{' '}
+                    <span className="muted small" style={{ fontWeight: 500 }}>· {r.coachRole}</span>
+                  </div>
+                  <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.65, color: 'var(--text)' }}>
+                    {r.text}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       {/* ── Scout's Assessment header ── */}
       <Panel title="Scout's Assessment">
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>

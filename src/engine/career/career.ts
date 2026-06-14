@@ -240,6 +240,7 @@ import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMa
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import { buildScoutVerdict } from './scoutVerdict'
+import { buildRosterProjection, buildCoachReports } from './playerProjection'
 import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
@@ -4283,6 +4284,42 @@ export class Career {
       if (team?.tactics) {
         const fit = playerStyleFit(player, team.tactics)
         if (fit) profile.systemFit = fit
+      }
+
+      // EHM-style roster projection + per-coach reports. Same gate as the scout
+      // verdict (own player / reliably scouted). Prospects on an AHL affiliate
+      // are measured against the parent NHL club, as EHM does.
+      if (profile.scoutVerdict) {
+        let clubId = playerTeamId
+        if (team?.tier === 'ahl') {
+          for (const [tid, t] of this.data.teams) {
+            if (t.affiliateId === playerTeamId) { clubId = tid; break }
+          }
+        }
+        const club = clubId ? this.data.teams.get(clubId) : undefined
+        if (club) {
+          const clubRoster = club.roster
+            .map((id) => this.data.players.get(id))
+            .filter((pl): pl is Player => pl !== undefined)
+          const staff = this.getTeamStaff(clubId as string)
+          profile.rosterProjection = buildRosterProjection({
+            player,
+            teamName: club.name,
+            clubRoster,
+            coachName: staff.headCoach.name,
+          })
+          const coachList = [staff.headCoach, ...staff.assistantCoaches.slice(0, 2)]
+          profile.coachReports = buildCoachReports(
+            player,
+            coachList.map((c) => ({
+              name: c.name,
+              role: c.role,
+              judgment: c.judgment,
+              ...(c.faceId !== undefined ? { faceId: c.faceId } : {}),
+              ...(c.demeanor !== undefined ? { demeanor: c.demeanor } : {}),
+            })),
+          )
+        }
       }
     }
 

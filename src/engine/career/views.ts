@@ -23,6 +23,7 @@ export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
 export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
 export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
+export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
@@ -430,6 +431,17 @@ export interface PlayerProfileView extends PlayerBadge {
    * (absent for goalies and players without team tactics).
    */
   systemFit?: { score: number; label: string; reason: string; styleLabel: string }
+  /**
+   * EHM-style roster projection: where he slots on his NHL club now (Suggested
+   * status) + his ceiling in roster terms (Projected status). Present for own
+   * players / sufficiently scouted players whose club is known.
+   */
+  rosterProjection?: import('@engine/career/playerProjection').RosterProjection
+  /**
+   * Per-coach scouting reports (head coach + assistants), tone varying by the
+   * coach. Present for own players / sufficiently scouted players.
+   */
+  coachReports?: import('@engine/career/playerProjection').CoachReport[]
 }
 
 /** A notable retiree recorded in a club's legends registry. */
