@@ -76,6 +76,7 @@ import { analystProjection, analystRank, draftEligibility, perceivedCeiling, pro
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { scoutDraftBias } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
@@ -2452,10 +2453,14 @@ export class Career {
     // Snapshot the analyst draft board at each phase boundary so the mid-season
     // and final rankings can show movement arrows vs the previous phase.
     const dph = this.draftRankPhase()
-    if (this.draftPhaseSeen === null) this.draftPhaseSeen = dph
-    else if (dph !== this.draftPhaseSeen) {
+    if (this.draftPhaseSeen === null) {
+      this.draftPhaseSeen = dph
+      if (dph === 'preliminary') this.publishDraftClassArticle()
+    } else if (dph !== this.draftPhaseSeen) {
       this.prevDraftBoard = this.analystRankMap(this.draftPhaseSeen)
       this.draftPhaseSeen = dph
+      // A fresh class each season → a new breakdown when the preliminary board opens.
+      if (dph === 'preliminary') this.publishDraftClassArticle()
     }
     // In-season development: a continuous bi-weekly micro-pass so current ability
     // and ceilings (and the profile's live trend arrows) drift through the season
@@ -2584,6 +2589,13 @@ export class Career {
             this.ahlGp.set(pid, (this.ahlGp.get(pid) ?? 0) + 1)
           }
         }
+        // AHL players (incl. prospects on the farm) can be injured too.
+        rollInjuries({
+          participants: [...ahlRes.playerStats]
+            .filter(([, s]) => s.toi > 0)
+            .map(([pid, s]) => ({ player: this.resolve(pid), toi: s.toi })),
+          rng: this.rngFor(7402, this.year, game.id.length),
+        })
       }
     }
     // ── wider world: sim other leagues' games on this match day ──────────
@@ -2635,6 +2647,7 @@ export class Career {
       state: this.worldSim,
       seedBase: this.seed ^ 0x5eed0001,
       year: this.year,
+      rng: this.rngFor(7401, day), // prospects in other leagues can be injured too
     })
   }
 
@@ -2810,6 +2823,13 @@ export class Career {
             this.ahlGp.set(pid, (this.ahlGp.get(pid) ?? 0) + 1)
           }
         }
+        // AHL players (incl. prospects on the farm) can be injured too.
+        rollInjuries({
+          participants: [...ahlRes.playerStats]
+            .filter(([, s]) => s.toi > 0)
+            .map(([pid, s]) => ({ player: this.resolve(pid), toi: s.toi })),
+          rng: this.rngFor(7402, this.year, game.id.length),
+        })
       }
     }
     // ── wider world ────────────────────────────────────────────────────
@@ -5333,6 +5353,15 @@ export class Career {
     return 'final'
   }
 
+  /** Drop an EP-style "Breaking down the {year} Draft class" feature into the
+   *  inbox — generated from the current analyst board. Fires once per class. */
+  private publishDraftClassArticle(): void {
+    const board = this.getDraftRankings()
+    const article = buildDraftClassArticle(board.rankings, board.draftYear)
+    if (!article) return
+    this.pushNews('scouting', article.headline, article.body, { press: { byline: 'EP Scouting', kind: 'draftGuide' } })
+  }
+
   /** NHL analyst draft rankings: the consensus board of the draft-eligible class
    *  (under-19, undrafted) across the world's leagues, weighted and shuffled per
    *  the current phase (preliminary / mid-season / final). */
@@ -5379,7 +5408,10 @@ export class Career {
           // is generic). Production blends this season's pace with last season's
           // from the historical record, converted to an NHL-equivalent rate. The
           // true ceiling stays hidden and is what development pays out.
-          const perceived = perceivedCeiling(agedPotential(p), p.age, this.prospectProductionPremium(p, c.strength))
+          // Currently-injured prospects take a small availability/durability
+          // ding (missed viewings + health questions) — injuries move the board.
+          const injuryDing = p.injuryStatus ? 4 : 0
+          const perceived = perceivedCeiling(agedPotential(p), p.age, this.prospectProductionPremium(p, c.strength) - injuryDing)
           const row: Omit<DraftRankRowView, 'rank'> = {
             playerId: id,
             name: p.name,

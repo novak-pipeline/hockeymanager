@@ -15,7 +15,9 @@
  * so a league's `standings` stays live as games are played.
  */
 import type { Competition, Player, PlayerId, Position, Standing, Team, TeamId } from '@domain'
+import type { Rng } from '@engine/shared/rng'
 import { quickSimGame } from '@engine/quick/quickSim'
+import { rollInjuries } from '@engine/league/condition'
 import { applyGameResult, gameSeed, mergePlayerStats } from '@engine/quick/season'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -69,6 +71,8 @@ export interface SimWorldDayArgs {
   /** Distinct seed base so world games never collide with NHL/AHL game seeds. */
   seedBase: number
   year: number
+  /** When provided, prospects/players in these leagues can get injured too. */
+  rng?: Rng
 }
 
 /**
@@ -95,6 +99,12 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
       mergePlayerStats(args.state.totals, res.playerStats)
       for (const [pid, s] of res.playerStats) {
         if (s.toi > 0) args.state.gp.set(pid, (args.state.gp.get(pid) ?? 0) + 1)
+      }
+      if (args.rng) {
+        const participants = [...res.playerStats]
+          .filter(([, s]) => s.toi > 0)
+          .map(([pid, s]) => ({ player: args.resolve(pid), toi: s.toi }))
+        rollInjuries({ participants, rng: args.rng })
       }
       gamesPlayed++
     }

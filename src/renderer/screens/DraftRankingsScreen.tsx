@@ -34,9 +34,15 @@ export function DraftRankingsScreen(): JSX.Element {
     () => client.getDraftRankings(),
     (r) => (r.type === 'draftRankings' ? r.draftRankings : null)
   )
-  const rows = data?.rankings ?? []
+  const allRows = data?.rankings ?? []
   const [board, setBoard] = useState<'analyst' | 'scouts'>('analyst')
   const [scoutId, setScoutId] = useState<string>('') // '' = staff consensus
+  const [moveFilter, setMoveFilter] = useState<'all' | 'risers' | 'drops'>('all')
+  const rows = moveFilter === 'risers'
+    ? allRows.filter((r) => (r.movement ?? 0) > 0).sort((a, b) => (b.movement ?? 0) - (a.movement ?? 0))
+    : moveFilter === 'drops'
+    ? allRows.filter((r) => (r.movement ?? 0) < 0).sort((a, b) => (a.movement ?? 0) - (b.movement ?? 0))
+    : allRows
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
@@ -46,18 +52,28 @@ export function DraftRankingsScreen(): JSX.Element {
       <ScreenStateNotices
         loading={loading}
         error={error}
-        empty={!loading && rows.length === 0}
+        empty={!loading && allRows.length === 0}
         emptyText="No draft-eligible prospects to rank. Load a multi-league database to scout the class across the NCAA, OHL, USHL, Liiga and beyond."
       />
 
-      {data && rows.length > 0 && (
-        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+      {data && allRows.length > 0 && (
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" className={`btn btn-sm${board === 'analyst' ? ' btn-primary' : ''}`} onClick={() => setBoard('analyst')}>
             Analyst Consensus
           </button>
           <button type="button" className={`btn btn-sm${board === 'scouts' ? ' btn-primary' : ''}`} onClick={() => setBoard('scouts')}>
             Your Scouts’ Board
           </button>
+          {board === 'analyst' && data.phase !== 'preliminary' && (
+            <span className="row" style={{ gap: 4, marginLeft: 'auto', alignItems: 'center' }}>
+              <span className="muted small">Show:</span>
+              {(['all', 'risers', 'drops'] as const).map((f) => (
+                <button key={f} type="button" className={`btn btn-sm${moveFilter === f ? ' btn-primary' : ''}`} onClick={() => setMoveFilter(f)}>
+                  {f === 'all' ? 'All' : f === 'risers' ? '▲ Risers' : '▼ Drops'}
+                </button>
+              ))}
+            </span>
+          )}
         </div>
       )}
 
@@ -83,12 +99,16 @@ export function DraftRankingsScreen(): JSX.Element {
         )
       })()}
 
-      {data && board === 'analyst' && rows.length > 0 && (
+      {data && board === 'analyst' && allRows.length > 0 && (
         <Panel title={`NHL Draft Prospect Rankings — ${data.draftYear} class`}>
           <div className="muted small" style={{ marginBottom: 8 }}>
             <strong style={{ color: 'var(--accent2, #e0b341)' }}>{data.phaseLabel}</strong>
             {' · '}{PHASE_BLURB[data.phase]}
+            {moveFilter !== 'all' && ` · ${moveFilter === 'risers' ? 'biggest risers' : 'biggest drops'} since the last ranking`}
           </div>
+          {rows.length === 0 && (
+            <div className="muted small">No {moveFilter} to show at this stage.</div>
+          )}
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
               <tr>
