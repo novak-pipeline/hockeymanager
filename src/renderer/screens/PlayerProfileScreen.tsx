@@ -34,6 +34,7 @@ import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { overallToStars } from '../../engine/ratings/composites'
 import { toast, bumpRefresh } from '../components/store'
 import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
@@ -97,15 +98,8 @@ function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }):
   )
 }
 
-/**
- * Maps a 0–99 overall to a 0–5 star rating rounded to the nearest 0.5.
- *   star = clamp(overall / 20, 0, 5) → 99 ≈ 5, 80 = 4, 60 = 3, 40 = 2, 20 = 1
- * Rounded to nearest 0.5 so half-stars are supported.
- */
-function overallToStars(overall: number): number {
-  const raw = Math.max(0, Math.min(5, overall / 20))
-  return Math.round(raw * 2) / 2
-}
+/* Star rating uses the canonical NHL-calibrated scale (see overallToStars in
+ * @engine/ratings/composites): 1★ below-NHL, 2★ AHL, 3★ regular, 4★ good, 5★ great. */
 
 /** Renders a 5-star display supporting half-stars (★ / ½★ / ☆). */
 function StarRating({

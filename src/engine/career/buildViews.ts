@@ -14,7 +14,7 @@ import type {
   Team,
   TeamId,
 } from '@domain'
-import { ratedOverall, agedPotential } from '@engine/ratings/composites'
+import { ratedOverall, agedPotential, overallToStars } from '@engine/ratings/composites'
 import { computeRadar } from '@engine/ratings/radar'
 import type { RadarView } from '@engine/ratings/radar'
 import {
@@ -433,14 +433,10 @@ function groupView(
   }
 }
 
-/** 1–5 stars from the player's age-aware ceiling (no growth left past ~25). */
+/** Stars from the player's age-aware ceiling (no growth left past ~25), on the
+ *  shared NHL-calibrated scale. */
 export function potentialStars(p: Player): number {
-  const score = agedPotential(p)
-  if (score >= 82) return 5
-  if (score >= 72) return 4
-  if (score >= 62) return 3
-  if (score >= 52) return 2
-  return 1
+  return overallToStars(agedPotential(p))
 }
 
 /** Build the bio block for a player. */
@@ -689,7 +685,7 @@ export function buildPlayerProfile(
   const scoutVerdict = archetypeKnown
     ? buildScoutVerdict(
         p,
-        Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2)),
+        overallToStars(ratedOverall(p)),
         potStars,
         teamId !== null,
       )
@@ -1103,7 +1099,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     if (k < 15) continue
     const p = players.get(pid as PlayerId)
     if (!p) continue
-    const cur = Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2))
+    const cur = overallToStars(ratedOverall(p))
     const pot = potentialStars(p)
     const ceiling = Math.max(cur, pot)
     const young = p.age <= 23

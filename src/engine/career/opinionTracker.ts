@@ -14,7 +14,7 @@
 import type { Player, PlayerId } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf } from '@engine/league/scouting'
-import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
+import { ratedOverall, agedPotential, overallToStars } from '@engine/ratings/composites'
 
 export interface OpinionSnapshot {
   day: number
@@ -34,12 +34,11 @@ const TRACK_FLOOR = 40
 const DEFAULT_MAX = 40
 
 export function currentStarsOf(p: Player): number {
-  return Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2))
+  return overallToStars(ratedOverall(p))
 }
 
 export function potentialStarsOf(p: Player): number {
-  const score = Math.max(ratedOverall(p), ratedPotential(p))
-  return score >= 82 ? 5 : score >= 72 ? 4 : score >= 62 ? 3 : score >= 52 ? 2 : 1
+  return overallToStars(agedPotential(p))
 }
 
 export interface RecordOpinionsArgs {

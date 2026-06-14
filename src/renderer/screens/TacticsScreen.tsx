@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { overallToStars } from '../../engine/ratings/composites'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type {
   LinesView,
@@ -346,10 +347,9 @@ function CoachPanel({ suggestion, styleFit, onApply, applying }: CoachPanelProps
   )
 }
 
-/* ── Star rating (0–5, half-steps; star = clamp(overall/20, 0, 5) rounded to 0.5) ── */
+/* ── Star rating (0–5, half-steps) on the canonical NHL-calibrated scale ── */
 function StarRating({ value }: { value: number }): JSX.Element {
-  const raw = Math.max(0, Math.min(5, value / 20))
-  const stars = Math.round(raw * 2) / 2 // round to nearest 0.5
+  const stars = overallToStars(value)
   const color =
     stars >= 4.5 ? 'var(--success)' :
     stars >= 3.5 ? 'var(--accent)' :

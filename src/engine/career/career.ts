@@ -37,7 +37,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall, ratedOverall } from '@engine/ratings/composites'
+import { overall, ratedOverall, overallToStars } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -847,7 +847,7 @@ export class Career {
     if (fresh.length === 0) return
     fresh.sort((a, b) => b.pot - a.pot)
     for (const f of fresh.slice(0, 2)) {
-      const cur = Math.max(0, Math.min(5, Math.round((ratedOverall(f.p) / 20) * 2) / 2))
+      const cur = overallToStars(ratedOverall(f.p))
       const v = buildScoutVerdict(f.p, cur, f.pot)
       const pro = v.pros[0] ? ` ${v.pros[0]}.` : ''
       this.pushNews(
@@ -4604,7 +4604,7 @@ export class Career {
       .map((id) => this.data.players.get(id))
       .filter((p): p is Player => p !== undefined)
     const stars = (p: Player): [number, number] => [
-      Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2)),
+      overallToStars(ratedOverall(p)),
       potentialStars(p),
     ]
     return buildDevelopmentCenter({

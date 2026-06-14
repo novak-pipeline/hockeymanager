@@ -8,6 +8,7 @@
  * and the Practice tab have new UI built here.
  */
 import { useState } from 'react'
+import { overallToStars } from '../../engine/ratings/composites'
 import type {
   AgmReportView,
   ClubInfoView,
@@ -70,9 +71,10 @@ function locationStyle(location?: string): { color: string; tag: string } {
   return { color: 'var(--amber, #f59e0b)', tag: loc.slice(0, 3) }
 }
 
-/** Fog-friendly star string from a 0–99 judged rating (no raw numbers shown). */
+/** Fog-friendly star string from a 0–99 judged rating (no raw numbers shown),
+ *  on the canonical NHL-calibrated star scale. */
 function starStr(judged0to99: number): string {
-  const n = Math.max(1, Math.min(5, Math.round(judged0to99 / 20)))
+  const n = Math.max(1, Math.min(5, Math.round(overallToStars(judged0to99))))
   return '★'.repeat(n) + '☆'.repeat(5 - n)
 }
 

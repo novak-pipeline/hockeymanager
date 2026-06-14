@@ -101,7 +101,7 @@ export function projectionTier(
 /** EHM-style prose label for tier used in the chip. */
 export const TIER_LABELS: Record<ProjectionTier, string> = {
   Prospect: 'Prospect',
-  Star: 'Star Player',
+  Star: 'Franchise Player',
   Key: 'Key Player',
   Core: 'Core Player',
   Depth: 'Depth Player',
@@ -110,7 +110,7 @@ export const TIER_LABELS: Record<ProjectionTier, string> = {
 
 /** One-line definition of each tier, in hockey terms (shown on the profile). */
 export const TIER_BLURBS: Record<ProjectionTier, string> = {
-  Star: 'A franchise-calibre talent who drives results — a first-line forward, number-one defenceman, or a starting goalie you build around.',
+  Star: 'A franchise-calibre talent you build the team around — a first-line forward, number-one defenceman, or a true starting goalie.',
   Key: 'A high-end regular the team leans on every night — a top-six forward, top-four defenceman, or a clear starter.',
   Core: 'A dependable everyday player through the middle of the lineup — reliable minutes, rarely a liability.',
   Depth: 'Rounds out the roster — a bottom-six forward, third-pair defenceman, or a backup; valuable in a defined role.',

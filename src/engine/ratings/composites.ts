@@ -185,6 +185,32 @@ export function overall(c: CompositeRatings, position: Position): Rating {
 }
 
 /**
+ * Canonical star rating (0.5–5, half steps) from a 0–100 overall, calibrated to
+ * the real NHL overall distribution (median regular ≈ 70):
+ *
+ *   1★  below NHL level (junior / deep minors)
+ *   2★  farm / development-team calibre (AHL)
+ *   3★  a run-of-the-mill NHL regular
+ *   4★  a good NHL player (top-six / top-four)
+ *   5★  a great, league-driving talent
+ *
+ * Use this everywhere stars are shown so current/potential ratings share one scale.
+ */
+export function overallToStars(overall: number): number {
+  const o = overall
+  if (o >= 88) return 5
+  if (o >= 82) return 4.5
+  if (o >= 76) return 4
+  if (o >= 71) return 3.5
+  if (o >= 64) return 3
+  if (o >= 57) return 2.5
+  if (o >= 50) return 2
+  if (o >= 43) return 1.5
+  if (o >= 36) return 1
+  return 0.5
+}
+
+/**
  * Authoritative display rating (0–100). When the player carries a source-DB
  * `baseOverall` (a properly-weighted rating that captures intangibles the
  * composite formula under-values), anchor to it — mostly the DB rating, with a

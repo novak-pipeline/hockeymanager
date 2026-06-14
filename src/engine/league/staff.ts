@@ -637,11 +637,15 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
       case 'Biggest Star':
         trueScore = entry.trueOverall
         break
-      case 'Best Leader':
-        trueScore = Math.round(
-          (p.personality.professionalism + p.personality.determination + p.personality.ambition) / 3 * (entry.trueOverall / 80)
-        )
+      case 'Best Leader': {
+        // Use the player's actual leadership attribute (0–100, from the DB) as
+        // the backbone, with a small nudge from on-ice intangibles. Falls back to
+        // a personality proxy for players without an imported leadership rating.
+        const proxy = (p.personality.professionalism + p.personality.determination + p.personality.ambition) / 3 * 5
+        const lead = p.leadership ?? proxy
+        trueScore = Math.round(lead * 0.8 + proxy * 0.2)
         break
+      }
       case 'Best Skater':
         trueScore = c.skating
         break
