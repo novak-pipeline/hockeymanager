@@ -4893,12 +4893,16 @@ export class Career {
       .sort((a, b) => b.strength - a.strength)
       .forEach((c, i) => rankById.set(c.id, i + 1))
     const out: CompetitionView[] = comps.map((c) => {
-      // playerId -> team abbreviation, for scorer rows.
+      // playerId -> { teamId, abbreviation }, for scorer/notable rows.
       const teamAbbrByPlayer = new Map<string, string>()
+      const teamIdByPlayer = new Map<string, string>()
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
         if (!t) continue
-        for (const pid of t.roster) teamAbbrByPlayer.set(pid as string, t.abbreviation)
+        for (const pid of t.roster) {
+          teamAbbrByPlayer.set(pid as string, t.abbreviation)
+          teamIdByPlayer.set(pid as string, t.id as string)
+        }
       }
       const standings: CompetitionStandingRowView[] = sortStandings([...c.standings]).map((s) => {
         const t = this.data.teams.get(s.teamId)
@@ -4923,6 +4927,7 @@ export class Career {
           return {
             playerId: pid as string,
             name: p?.name ?? '?',
+            teamId: teamIdByPlayer.get(pid as string) ?? '',
             teamAbbr: teamAbbrByPlayer.get(pid as string) ?? '?',
             gamesPlayed: this.worldSim.gp.get(pid) ?? 0,
             goals: st.goals,
@@ -4945,6 +4950,7 @@ export class Career {
       const toNotable = (p: Player): CompetitionNotableView => ({
         playerId: p.id as string,
         name: p.name,
+        teamId: teamIdByPlayer.get(p.id as string) ?? '',
         teamAbbr: teamAbbrByPlayer.get(p.id as string) ?? '?',
         position: p.position,
         age: p.age,

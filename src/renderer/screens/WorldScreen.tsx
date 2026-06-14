@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import type { CompetitionNotableView, CompetitionView } from '../../engine/career/views'
-import { PlayerLink } from '../components/NavContext'
+import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -65,7 +65,7 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
         {rows.map((p) => (
           <tr key={p.playerId}>
             <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-            <td className="muted">{p.teamAbbr}</td>
+            <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
             <td style={{ textAlign: 'center' }}>{p.position}</td>
             {showAge && <td style={{ textAlign: 'center' }}>{p.age}</td>}
             <td><Stars value={p.currentStars} /></td>
@@ -167,7 +167,7 @@ export function WorldScreen(): JSX.Element {
                               display: 'inline-block', width: 8, height: 8, borderRadius: 2, marginRight: 6,
                               background: hex(s.colors.primary), border: `1px solid ${hex(s.colors.secondary)}`,
                             }} />
-                            {s.name}
+                            <TeamLink teamId={s.teamId} name={s.name} />
                           </td>
                           <td style={{ textAlign: 'center' }}>{s.gamesPlayed}</td>
                           <td style={{ textAlign: 'center' }}>{s.wins}</td>
@@ -197,7 +197,7 @@ export function WorldScreen(): JSX.Element {
                         {current.scorers.map((p) => (
                           <tr key={p.playerId}>
                             <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-                            <td className="muted" style={{ textAlign: 'center' }}>{p.teamAbbr}</td>
+                            <td className="muted" style={{ textAlign: 'center' }}><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
                             <td style={{ textAlign: 'center' }}>{p.gamesPlayed}</td>
                             <td style={{ textAlign: 'center' }}>{p.goals}</td>
                             <td style={{ textAlign: 'center' }}>{p.assists}</td>

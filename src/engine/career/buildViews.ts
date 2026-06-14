@@ -634,6 +634,7 @@ export function buildPlayerProfile(
   const currentSeason = {
     year: ctx.year,
     teamAbbr,
+    ...(teamId ? { teamId } : {}),
     skater: p.position === 'G' ? null : skaterLine(ctx, playerId),
     goalie: p.position === 'G' ? goalieLine(ctx, playerId) : null,
   }
@@ -642,6 +643,7 @@ export function buildPlayerProfile(
     .map((s) => ({
       year: s.season,
       teamAbbr: ctx.teams.get(s.teamId as TeamId)?.abbreviation ?? s.teamId,
+      ...(ctx.teams.has(s.teamId as TeamId) ? { teamId: s.teamId as string } : {}),
       skater:
         p.position === 'G'
           ? null
@@ -684,11 +686,27 @@ export function buildPlayerProfile(
     const last = words[words.length - 1] ?? name
     return last.slice(0, 3).toUpperCase()
   }
+  // Resolve a historical club name to a team currently in the world, so old
+  // EHM history rows link to that club's page when it still exists. Match on
+  // full team name first, then on nickname (the team-name's last word).
+  const teamByName = new Map<string, string>()
+  for (const t of ctx.teams.values()) {
+    teamByName.set(t.name.toLowerCase(), t.id as string)
+    const nick = t.name.trim().split(/\s+/).pop()
+    if (nick) teamByName.set(nick.toLowerCase(), t.id as string)
+  }
+  const resolveClub = (club: string): string | undefined => {
+    const c = club.trim().toLowerCase()
+    if (teamByName.has(c)) return teamByName.get(c)
+    const last = c.split(/\s+/).pop()
+    return last ? teamByName.get(last) : undefined
+  }
   const dbHistory = (p.careerHistory ?? [])
     .filter((s) => s.year < ctx.year)
     .map((s) => ({
       year: s.year,
       teamAbbr: clubAbbr(s.club),
+      ...((): { teamId?: string } => { const id = resolveClub(s.club); return id ? { teamId: id } : {} })(),
       skater:
         p.position === 'G'
           ? null

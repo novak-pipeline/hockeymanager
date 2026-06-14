@@ -383,6 +383,10 @@ export interface PlayerProfileView extends PlayerBadge {
   seasons: Array<{
     year: number
     teamAbbr: string
+    /** Current team id when the club resolves to a team in the world (NHL,
+     *  affiliate, or any competition) — makes the row clickable. Absent for
+     *  defunct/unmatched historical clubs. */
+    teamId?: string
     skater: SkaterSeasonLine | null
     goalie: GoalieSeasonLine | null
   }>
@@ -642,6 +646,7 @@ export interface CompetitionStandingRowView {
 export interface CompetitionScorerRowView {
   playerId: string
   name: string
+  teamId: string
   teamAbbr: string
   gamesPlayed: number
   goals: number
@@ -653,6 +658,7 @@ export interface CompetitionScorerRowView {
 export interface CompetitionNotableView {
   playerId: string
   name: string
+  teamId: string
   teamAbbr: string
   position: string
   age: number

@@ -148,3 +148,25 @@ export function PlayerLink(props: {
     </button>
   )
 }
+
+/** Clickable team name → that club's Squad page (any league). When `teamId` is
+ *  absent (e.g. a historical club not in the current world) it renders plain
+ *  text so callers can pass through unresolved names safely. */
+export function TeamLink(props: {
+  teamId?: string | undefined
+  name: string
+  className?: string
+}): JSX.Element {
+  const nav = useNav()
+  if (!props.teamId) return <span className={props.className}>{props.name}</span>
+  const teamId = props.teamId
+  return (
+    <button
+      type="button"
+      className={props.className ? `player-link ${props.className}` : 'player-link'}
+      onClick={() => nav.navigate('squad', { teamId })}
+    >
+      {props.name}
+    </button>
+  )
+}

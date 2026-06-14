@@ -29,7 +29,7 @@ import type {
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
-import { useNav } from '../components/NavContext'
+import { useNav, TeamLink } from '../components/NavContext'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -1366,7 +1366,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
             {d.seasons.map((season, i) => (
               <tr key={season.year} style={i === 0 ? { fontWeight: 600 } : undefined}>
                 <td>{season.year}–{String(season.year + 1).slice(2)}</td>
-                <td className="muted">{season.teamAbbr}</td>
+                <td className="muted"><TeamLink teamId={season.teamId} name={season.teamAbbr} /></td>
                 {season.goalie
                   ? <GoalieHistoryRow g={season.goalie} />
                   : season.skater
