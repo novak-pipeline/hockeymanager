@@ -36,7 +36,7 @@ import {
 import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
-import { buildSchedule, freshStanding } from './generate'
+import { buildSchedule, buildWeightedSchedule, freshStanding, type ScheduleTeam } from './generate'
 import type { LeagueData } from './generate'
 import { FIRST_NAMES, LAST_NAMES } from './names'
 import {
@@ -1284,7 +1284,18 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   // Capture NHL player ids BEFORE building AHL so league.players stays NHL-only.
   const nhlPlayerIds = [...players.keys()]
 
-  const schedule: ScheduledGame[] = buildSchedule(allTeamIds, roundRobins, startYear)
+  // Realistic NHL-style schedule (≈82 games, weighted division > conference >
+  // inter-conference) when the league has a conference/division structure; falls
+  // back to round-robins for flat leagues.
+  const scheduleTeams: ScheduleTeam[] = [...teams.values()].map((t) => ({
+    id: t.id,
+    conferenceId: t.conferenceId,
+    divisionId: t.divisionId,
+  }))
+  const structured = new Set(scheduleTeams.map((t) => t.divisionId)).size >= 2 && scheduleTeams.length >= 24
+  const schedule: ScheduledGame[] = structured
+    ? buildWeightedSchedule(scheduleTeams, startYear)
+    : buildSchedule(allTeamIds, roundRobins, startYear)
 
   // ─── AHL Affiliate Generation ─────────────────────────────────────────────
   // Uses a SEPARATE Rng seeded from `seed ^ 0xAHL_MOD` so NHL attribute rolls

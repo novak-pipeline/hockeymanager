@@ -314,6 +314,115 @@ export function buildSchedule(teamIds: TeamId[], roundRobins: number, season: nu
   return games
 }
 
+/** One team's conference/division membership, for weighted scheduling. */
+export interface ScheduleTeam {
+  id: TeamId
+  conferenceId: string
+  divisionId: string
+}
+
+export interface WeightedScheduleOptions {
+  /** Meetings vs a division rival (default 4). */
+  divMeetings?: number
+  /** Meetings vs a same-conference, other-division team (default 3). */
+  confMeetings?: number
+  /** Meetings vs an other-conference team (default 2). */
+  interMeetings?: number
+  /** Calendar days to spread the season across (default 184 ≈ Oct–Apr). */
+  seasonDays?: number
+}
+
+/**
+ * Realistic NHL-style weighted schedule: teams play division rivals most often,
+ * same-conference clubs next, and the other conference least — ≈82 games with the
+ * default 4/3/2 weighting (e.g. a 2×2×8 league → 28+24+32 = 84 per team). Each
+ * pairing's meetings are spread evenly across the calendar; home/away is balanced
+ * per pair (odd counts alternate the extra home game so team totals stay even).
+ *
+ * Deterministic — no Rng. Falls back gracefully for any conference/division shape.
+ */
+export function buildWeightedSchedule(
+  teams: ScheduleTeam[],
+  season: number,
+  opts: WeightedScheduleOptions = {},
+): ScheduledGame[] {
+  const divM = opts.divMeetings ?? 4
+  const confM = opts.confMeetings ?? 3
+  const interM = opts.interMeetings ?? 2
+  const seasonDays = opts.seasonDays ?? 184
+
+  // 1. Build pairings with meeting count + home/away split. For odd counts the
+  //    "extra home" alternates per bucket so each team's home total stays even.
+  interface PlannedGame { home: TeamId; away: TeamId; targetDay: number }
+  const planned: PlannedGame[] = []
+  // Track each team's running home−away balance so the odd "extra home" in
+  // odd-meeting pairs goes to whoever is currently more away-heavy.
+  const net = new Map<string, number>() // + = home-heavy
+  const bump = (id: string, d: number): void => net.set(id, (net.get(id) ?? 0) + d)
+  for (let i = 0; i < teams.length; i++) {
+    for (let j = i + 1; j < teams.length; j++) {
+      const a = teams[i]!, b = teams[j]!
+      const meetings =
+        a.divisionId === b.divisionId ? divM
+        : a.conferenceId === b.conferenceId ? confM
+        : interM
+      if (meetings <= 0) continue
+      // Base split: floor(m/2) home each (net-neutral). The odd one goes to the
+      // currently more away-heavy team so league-wide home/away stays even.
+      let aHome = Math.floor(meetings / 2)
+      if (meetings % 2 === 1) {
+        const aNet = net.get(a.id as string) ?? 0
+        const bNet = net.get(b.id as string) ?? 0
+        if (aNet <= bNet) { aHome++; bump(a.id as string, 1); bump(b.id as string, -1) }
+        else { bump(b.id as string, 1); bump(a.id as string, -1) }
+      }
+      for (let k = 0; k < meetings; k++) {
+        const aHosts = k < aHome
+        const home = aHosts ? a.id : b.id
+        const away = aHosts ? b.id : a.id
+        const targetDay = Math.max(1, Math.round(((k + 0.5) / meetings) * seasonDays))
+        planned.push({ home, away, targetDay })
+      }
+    }
+  }
+
+  // 2. Assign each game to a day near its target where neither team already
+  //    plays and the day isn't over capacity — searching outward from target.
+  const total = planned.length
+  const perDayCap = Math.max(4, Math.ceil(total / seasonDays) + 2)
+  const busy = new Map<number, Set<string>>()
+  const countOnDay = new Map<number, number>()
+  const free = (d: number, h: TeamId, w: TeamId): boolean => {
+    const s = busy.get(d)
+    if (s && (s.has(h as string) || s.has(w as string))) return false
+    return (countOnDay.get(d) ?? 0) < perDayCap
+  }
+  planned.sort((x, y) => x.targetDay - y.targetDay)
+  const placed: Array<{ home: TeamId; away: TeamId; day: number }> = []
+  for (const g of planned) {
+    let day = g.targetDay
+    for (let step = 0; step < seasonDays * 2 + 50; step++) {
+      const d = step === 0 ? g.targetDay : g.targetDay + (step % 2 === 1 ? (step + 1) / 2 : -(step / 2))
+      if (d >= 1 && free(d, g.home, g.away)) { day = d; break }
+    }
+    let s = busy.get(day); if (!s) { s = new Set(); busy.set(day, s) }
+    s.add(g.home as string); s.add(g.away as string)
+    countOnDay.set(day, (countOnDay.get(day) ?? 0) + 1)
+    placed.push({ home: g.home, away: g.away, day })
+  }
+
+  // 3. Emit in (day, then stable) order with sequential ids.
+  placed.sort((x, y) => x.day - y.day || (x.home as string).localeCompare(y.home as string))
+  return placed.map((g, i) => ({
+    id: asGameId(`g${i}`),
+    season,
+    day: g.day,
+    homeTeamId: g.home,
+    awayTeamId: g.away,
+    result: null,
+  }))
+}
+
 export const freshStanding = (teamId: TeamId): Standing => ({
   teamId,
   gamesPlayed: 0,

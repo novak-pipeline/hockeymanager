@@ -153,10 +153,11 @@ export interface GoalieSeasonLine {
   shotsAgainst: number
 }
 
-/** ISO date string for a given season year + match day (Oct 1 + (day-1)*2). */
+/** ISO date string for a given season year + match day (Oct 1 + (day-1) days),
+ *  so a realistic ~184 match-day season spans Oct → early April. */
 export function dayToDateISO(year: number, day: number): string {
   const d = new Date(Date.UTC(year, 9, 1))
-  d.setUTCDate(d.getUTCDate() + Math.max(0, day - 1) * 2)
+  d.setUTCDate(d.getUTCDate() + Math.max(0, day - 1))
   return d.toISOString().slice(0, 10)
 }
 

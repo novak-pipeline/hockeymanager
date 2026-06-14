@@ -16,7 +16,7 @@
  * career seed. Wall-clock time only ever appears in save metadata.
  */
 import type { LeagueData } from '@data/generate'
-import { buildSchedule } from '@data/generate'
+import { buildSchedule, buildWeightedSchedule } from '@data/generate'
 import {
   asGameId,
   asPlayerId,
@@ -3383,7 +3383,16 @@ export class Career {
 
     const newYear = this.year + 1
     this.data.league.season.year = newYear
-    this.data.league.schedule = buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
+    // Rebuild next season's schedule, preserving the weighted NHL format when the
+    // league has a conference/division structure (else flat round-robins).
+    const schedTeams = this.data.league.teams
+      .map((id) => this.data.teams.get(id))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined)
+      .map((t) => ({ id: t.id, conferenceId: t.conferenceId, divisionId: t.divisionId }))
+    const structured = new Set(schedTeams.map((t) => t.divisionId)).size >= 2 && schedTeams.length >= 24
+    this.data.league.schedule = structured
+      ? buildWeightedSchedule(schedTeams, newYear)
+      : buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
     this.data.league.season.standings = this.data.league.teams.map(freshStanding)
     this.refreshMatchDays()
 

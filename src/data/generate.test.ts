@@ -1,7 +1,76 @@
 import { describe, expect, it } from 'vitest'
 import { overall } from '@engine/ratings/composites'
-import { generateLeague } from './generate'
-import type { Player } from '@domain'
+import { generateLeague, buildWeightedSchedule, type ScheduleTeam } from './generate'
+import type { Player, TeamId } from '@domain'
+
+describe('buildWeightedSchedule', () => {
+  // 2 conferences × 2 divisions × 8 teams = 32, like the NHL.
+  const teams: ScheduleTeam[] = []
+  for (let c = 0; c < 2; c++)
+    for (let d = 0; d < 2; d++)
+      for (let t = 0; t < 8; t++)
+        teams.push({
+          id: `c${c}d${d}t${t}` as unknown as TeamId,
+          conferenceId: `conf${c}`,
+          divisionId: `conf${c}-div${d}`,
+        })
+
+  const games = buildWeightedSchedule(teams, 2025)
+
+  function countsFor(teamId: string): { total: number; home: number; away: number } {
+    let total = 0, home = 0, away = 0
+    for (const g of games) {
+      if ((g.homeTeamId as string) === teamId) { total++; home++ }
+      else if ((g.awayTeamId as string) === teamId) { total++; away++ }
+    }
+    return { total, home, away }
+  }
+
+  it('gives every team ~82 games (84 with default 4/3/2 weighting)', () => {
+    for (const t of teams) {
+      const { total } = countsFor(t.id as string)
+      expect(total).toBe(84)
+    }
+  })
+
+  it('balances home and away within a couple of games', () => {
+    for (const t of teams) {
+      const { home, away } = countsFor(t.id as string)
+      expect(Math.abs(home - away)).toBeLessThanOrEqual(3)
+    }
+  })
+
+  it('weights division > conference > inter-conference meetings', () => {
+    const a = teams[0]! // conf0-div0
+    const meet = (other: ScheduleTeam): number =>
+      games.filter((g) =>
+        (g.homeTeamId === a.id && g.awayTeamId === other.id) ||
+        (g.awayTeamId === a.id && g.homeTeamId === other.id)).length
+    const divRival = teams.find((t) => t.id !== a.id && t.divisionId === a.divisionId)!
+    const confRival = teams.find((t) => t.conferenceId === a.conferenceId && t.divisionId !== a.divisionId)!
+    const interRival = teams.find((t) => t.conferenceId !== a.conferenceId)!
+    expect(meet(divRival)).toBe(4)
+    expect(meet(confRival)).toBe(3)
+    expect(meet(interRival)).toBe(2)
+  })
+
+  it('never schedules a team twice on the same day', () => {
+    const perDay = new Map<number, Set<string>>()
+    for (const g of games) {
+      const s = perDay.get(g.day) ?? new Set<string>()
+      expect(s.has(g.homeTeamId as string)).toBe(false)
+      expect(s.has(g.awayTeamId as string)).toBe(false)
+      s.add(g.homeTeamId as string); s.add(g.awayTeamId as string)
+      perDay.set(g.day, s)
+    }
+  })
+
+  it('is deterministic', () => {
+    const again = buildWeightedSchedule(teams, 2025)
+    expect(again.map((g) => `${g.day}:${g.homeTeamId}-${g.awayTeamId}`))
+      .toEqual(games.map((g) => `${g.day}:${g.homeTeamId}-${g.awayTeamId}`))
+  })
+})
 
 describe('generateLeague', () => {
   it('is deterministic for a given seed', () => {
