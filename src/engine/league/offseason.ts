@@ -132,6 +132,52 @@ function toGamesLookup(
 }
 
 /**
+ * Boom/bust ceiling drift for young players (≤23). A player's potential is NOT a
+ * fixed promise: each developmental year his ceiling can drift up or down,
+ * driven by his work ethic (ambition/professionalism/determination), how he
+ * performed vs expectation, and a luck term. Over a few seasons this compounds
+ * into realistic outcomes — most prospects land near their projection, a minority
+ * bust well below it, and a rare few break out above it (including low-rated
+ * players who "pop"). Mutates p.potential (the growth cap) and p.basePotential
+ * (the projection anchor). Returns the overall-equivalent drift this year.
+ */
+function driftYouthCeiling(
+  p: Player,
+  seasonAge: number,
+  perfRatio: number,
+  hadSample: boolean,
+  rng: Rng
+): number {
+  if (seasonAge > 23) return 0
+  const persona =
+    (p.personality.ambition + p.personality.professionalism + p.personality.determination) / 3
+  const personaBias = (persona - 11) * 0.18 // hard workers trend up, low-motor down
+  let perfBias = 0
+  if (hadSample) {
+    if (perfRatio > 1.4) perfBias = Math.min(4, (perfRatio - 1.4) * 5) // exceeding → ceiling up
+    else if (perfRatio < 0.7) perfBias = Math.max(-4, (perfRatio - 0.7) * 6) // failing → down
+  }
+  // Slight negative mean: more prospects fall short of their ceiling than exceed
+  // it (busts outnumber breakouts), matching real draft outcomes.
+  const luck = rng.normal(-0.5, 2.2)
+  const youthMult = seasonAge <= 19 ? 1 : seasonAge <= 21 ? 0.8 : 0.55
+  const delta = Math.round((personaBias + perfBias + luck) * youthMult)
+  if (delta === 0) return 0
+
+  const curOvr = overall(p.composites, p.position)
+  for (const g of groupsOf(p.potential)) {
+    for (const k in g) {
+      if (k === 'height') continue
+      g[k] = Math.max(1, Math.min(99, g[k] + delta))
+    }
+  }
+  if (p.basePotential !== undefined) {
+    p.basePotential = Math.max(curOvr, Math.min(99, Math.round(p.basePotential + delta)))
+  }
+  return delta
+}
+
+/**
  * Calibrated expected points-per-game curve for skaters, parameterised by
  * overall rating (0–100), position, and role. Defensemen produce ~55% of
  * forward output. Representative anchors (forward):
@@ -215,6 +261,8 @@ export function developPlayers(args: {
     let growthMult = 1.0
     let declineExtraPass = false
     let moraleSwing = 0
+    let perfRatio = 1.0
+    let hadSample = false
 
     if (args.performance) {
       const perf = args.performance(p.id)
@@ -236,6 +284,8 @@ export function developPlayers(args: {
             : expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
           ratio = expPpg > 0 ? ppg / expPpg : 1.0
         }
+        perfRatio = ratio
+        hadSample = true
 
         const devMod = args.devModifier ? args.devModifier(p.id) : 1.0
 
@@ -270,7 +320,10 @@ export function developPlayers(args: {
       growthMult = args.devModifier(p.id)
     }
 
-    // ── growth / decline ──────────────────────────────────────────────────
+    // ── ceiling drift (boom/bust) then growth / decline ───────────────────
+    // Revise the young player's ceiling first, so this year's growth chases the
+    // updated target — a breakout opens new room, a bust shuts it down.
+    driftYouthCeiling(p, seasonAge, perfRatio, hadSample, rng)
 
     if (seasonAge < 26) {
       const persona =

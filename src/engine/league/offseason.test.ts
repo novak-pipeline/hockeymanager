@@ -309,6 +309,43 @@ function devWithPerf(
   })
 }
 
+describe('developPlayers — boom/bust ceiling drift', () => {
+  const potOvr = (p: Player): number =>
+    overall(computeComposites(p.potential, p.role, p.position), p.position)
+
+  it('young prospects boom and bust at realistic rates, busts > booms', () => {
+    const N = 240
+    const players = new Map<PlayerId, Player>()
+    for (let i = 0; i < N; i++) {
+      players.set(
+        asPlayerId('pr' + i),
+        testPlayer({ id: 'pr' + i, age: 18, current: 55, potential: 78, personality: 10 })
+      )
+    }
+    // Five developmental seasons with no NHL sample (drift = work ethic + luck).
+    for (let y = 0; y < 5; y++) dev(players, 1000 + y, 0)
+
+    const ceilings = [...players.values()].map(potOvr)
+    const busts = ceilings.filter((c) => c <= 78 - 8).length // ceiling fell ≥8
+    const booms = ceilings.filter((c) => c >= 78 + 6).length // ceiling rose ≥6
+
+    // Both tails exist; busts outnumber booms; neither is runaway.
+    expect(busts).toBeGreaterThan(0)
+    expect(booms).toBeGreaterThan(0)
+    expect(busts).toBeGreaterThanOrEqual(booms)
+    expect(busts / N).toBeLessThan(0.4)
+    expect(booms / N).toBeLessThan(0.25)
+  })
+
+  it('leaves established (26+) players ceilings untouched', () => {
+    const p = testPlayer({ id: 'vet', age: 28, current: 75, potential: 85 })
+    const before = potOvr(p)
+    const players = new Map<PlayerId, Player>([[p.id, p]])
+    for (let y = 0; y < 3; y++) dev(players, 5000 + y, 60)
+    expect(potOvr(p)).toBe(before)
+  })
+})
+
 describe('developPlayers — performance-relative development', () => {
   // ── back-compat snapshot ─────────────────────────────────────────────────
   it('back-compat: calling WITHOUT performance args produces identical results to a snapshot', () => {
