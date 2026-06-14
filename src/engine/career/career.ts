@@ -528,6 +528,8 @@ export class Career {
   private interactionCounter = 0
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
+  /** Scheduled interviews awaiting their calendar date. */
+  private pendingInterviews: Array<{ playerId: string; dueDay: number; year: number }> = []
   /** Per-club legends registry — notable retirees, "where are they now". */
   private legends = new Map<TeamId, ClubLegend[]>()
   /** Staff-meeting agenda — topics the GM marked for discussion. */
@@ -2441,6 +2443,7 @@ export class Career {
       if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
     }
     this.emitScoutReports()
+    this.resolveDueInterviews(day)
     // In-season development: a continuous bi-weekly micro-pass so current ability
     // and ceilings (and the profile's live trend arrows) drift through the season
     // rather than only jumping at the offseason. Bounded by a per-season budget;
@@ -4481,6 +4484,8 @@ export class Career {
         .filter((q) => !asked.includes(q.id))
         .map((q) => ({ id: q.id, prompt: q.prompt }))
       profile.interview = { answers, available }
+      const pendingInt = this.pendingInterviews.find((i) => i.playerId === playerId)
+      if (pendingInt) profile.interviewScheduled = dayToDateISO(pendingInt.year, pendingInt.dueDay)
 
       // System fit vs the player's team's current tactics (skaters only).
       const team = playerTeamId ? this.data.teams.get(playerTeamId) : undefined
@@ -4627,20 +4632,56 @@ export class Career {
   }
 
   /** GM asks a player one interview question; records it and sharpens knowledge. */
-  conductInterview(playerId: string, questionId: string): { ok: boolean; message?: string } {
+  /**
+   * Schedule a sit-down interview with a player a few days out. It lands on the
+   * calendar and resolves into an inbox report (revealing intangibles +
+   * sharpening the read) when the day arrives. Returns the scheduled date.
+   */
+  requestInterview(playerId: string): { ok: boolean; message?: string; dueDate?: string } {
     const pid = asPlayerId(playerId)
     const player = this.data.players.get(pid)
     if (!player) return { ok: false, message: 'Player not found.' }
-    if (!INTERVIEW_QUESTIONS.some((q) => q.id === questionId)) {
-      return { ok: false, message: 'Unknown question.' }
+    if (this.pendingInterviews.some((i) => i.playerId === playerId)) {
+      return { ok: false, message: 'An interview with this player is already scheduled.' }
     }
     const asked = this.interviews.get(playerId) ?? []
-    if (asked.includes(questionId)) return { ok: false, message: 'Already asked.' }
-    asked.push(questionId)
-    this.interviews.set(playerId, asked)
-    // Sitting down with a player sharpens the read on him.
-    addKnowledge(this.scouting, playerId, 6)
-    return { ok: true }
+    if (asked.length >= INTERVIEW_QUESTIONS.length) {
+      return { ok: false, message: 'Your staff have already interviewed him thoroughly.' }
+    }
+    const dueDay = this.currentDay + 4
+    this.pendingInterviews.push({ playerId, dueDay, year: this.year })
+    return { ok: true, dueDate: dayToDateISO(this.year, dueDay) }
+  }
+
+  /** Resolve any interviews whose scheduled day has arrived (called per day). */
+  private resolveDueInterviews(day: number): void {
+    if (this.pendingInterviews.length === 0) return
+    const due = this.pendingInterviews.filter((i) => i.year < this.year || (i.year === this.year && i.dueDay <= day))
+    if (due.length === 0) return
+    this.pendingInterviews = this.pendingInterviews.filter((i) => !due.includes(i))
+    for (const item of due) {
+      const pid = asPlayerId(item.playerId)
+      const player = this.data.players.get(pid)
+      if (!player) continue
+      // Ask up to three previously-unasked questions in this sit-down.
+      const asked = this.interviews.get(item.playerId) ?? []
+      const fresh = INTERVIEW_QUESTIONS.filter((q) => !asked.includes(q.id)).slice(0, 3)
+      const answers = fresh
+        .map((q) => answerInterviewQuestion(player, q.id))
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+      for (const q of fresh) asked.push(q.id)
+      this.interviews.set(item.playerId, asked)
+      addKnowledge(this.scouting, item.playerId, 10)
+
+      const first = player.name.split(' ')[0] ?? player.name
+      const reveals = answers.map((a) => a.reveal)
+      const summary = reveals.length > 0
+        ? `Reads: ${reveals.join(', ')}.`
+        : 'Little new ground — the staff already had a strong read.'
+      const qa = answers.map((a) => `“${a.prompt}” — ${a.answer} (${a.reveal})`).join('\n\n')
+      const body = `Our staff sat down with ${player.name} (${player.position}, age ${player.age}).\n\n${qa}\n\n${summary} The interview sharpens our read and informs where our scouts have him.`
+      this.pushNews('scouting', `Interview: ${player.name}`, body, { playerId: item.playerId })
+    }
   }
 
   /** NHL roster + AHL-affiliate player ids (the user's whole organisation). */
@@ -5022,6 +5063,10 @@ export class Career {
       ...this.ctx(),
       deadlineDay: this.deadlineDay,
       playoffsStartDay,
+      interviewDates: this.pendingInterviews.map((i) => ({
+        dateISO: dayToDateISO(i.year, i.dueDay),
+        label: `Interview: ${this.data.players.get(asPlayerId(i.playerId))?.name ?? 'Player'}`,
+      })),
     }
     return buildCalendarView(ctx)
   }
@@ -6460,6 +6505,7 @@ export class Career {
       interactions: this.interactions.map((i) => structuredClone(i)),
       interactionCounter: this.interactionCounter,
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
+      pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       legends: [...this.legends.entries()].map(([k, v]) => [k as string, v.map((l) => structuredClone(l))] as [string, ClubLegend[]]),
       agenda: this.agenda.map((a) => ({ ...a })),
       agendaCounter: this.agendaCounter,
@@ -6567,6 +6613,9 @@ export class Career {
     career.interactionCounter = snapshot.interactionCounter ?? 0
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
+    }
+    if (snapshot.pendingInterviews) {
+      career.pendingInterviews = snapshot.pendingInterviews.map((i) => ({ ...i }))
     }
     if (snapshot.legends) {
       career.legends = new Map(snapshot.legends.map(([k, v]) => [asTeamId(k), v.map((l) => structuredClone(l))]))

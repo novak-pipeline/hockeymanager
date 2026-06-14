@@ -1371,6 +1371,8 @@ export interface CalendarCtx extends ViewCtx {
   deadlineDay: number
   /** First match day of the playoffs (null when still regular season or not started). */
   playoffsStartDay: number | null
+  /** Scheduled GM interviews to mark on the calendar. */
+  interviewDates?: Array<{ dateISO: string; label: string }>
 }
 
 /**
@@ -1453,6 +1455,11 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
     entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-07-01`, label: 'Free Agency Opens' })
   } else if (ctx.deadlineDay > 0) {
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })
+  }
+
+  // ── scheduled GM interviews ──
+  for (const iv of ctx.interviewDates ?? []) {
+    entries.push({ kind: 'keydate', dateISO: iv.dateISO, label: iv.label })
   }
 
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))

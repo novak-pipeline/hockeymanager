@@ -155,9 +155,9 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.message ?? 'Could not respond.')
       return { id: req.id, type: 'ok' }
     }
-    case 'conductInterview': {
-      const res = must().conductInterview(req.playerId, req.questionId)
-      if (!res.ok) throw new Error(res.message ?? 'Could not conduct interview.')
+    case 'requestInterview': {
+      const res = must().requestInterview(req.playerId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not schedule interview.')
       return { id: req.id, type: 'ok' }
     }
     case 'requestCoachReport': {

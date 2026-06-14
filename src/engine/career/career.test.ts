@@ -44,6 +44,29 @@ describe('Career — regular season', () => {
     expect(inbox.items.some((n) => n.category === 'result')).toBe(true)
   })
 
+  it('schedules an interview and resolves it into the inbox a few days later', () => {
+    const data = generateLeague({ seed: 11 })
+    const userId = data.league.teams[1]
+    const career = new Career(data, 11, userId)
+    const pid = data.teams.get(userId)!.roster[0]! as string
+
+    const res = career.requestInterview(pid)
+    expect(res.ok).toBe(true)
+    expect(res.dueDate).toBeTruthy()
+    // Scheduled but not yet resolved.
+    expect(career.getPlayer(pid).interviewScheduled).toBeTruthy()
+    expect(career.getPlayer(pid).interview?.answers.length ?? 0).toBe(0)
+    // Can't double-book.
+    expect(career.requestInterview(pid).ok).toBe(false)
+
+    for (let i = 0; i < 10 && career.advanceDay(); i++) { /* advance past the due day */ }
+
+    const prof = career.getPlayer(pid)
+    expect(prof.interviewScheduled).toBeUndefined()
+    expect(prof.interview?.answers.length ?? 0).toBeGreaterThan(0)
+    expect(career.getInbox().items.some((n) => n.headline.startsWith('Interview:'))).toBe(true)
+  })
+
   it('runs the whole season then flips into the playoffs', () => {
     const data = generateLeague({ seed: 5 })
     const career = new Career(data, 5, data.league.teams[0])

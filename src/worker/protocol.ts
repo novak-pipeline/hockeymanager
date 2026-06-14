@@ -193,7 +193,7 @@ export type WorkerRequestBody =
   | { type: 'setTactics'; tactics: TeamTactics }
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
-  | { type: 'conductInterview'; playerId: string; questionId: string }
+  | { type: 'requestInterview'; playerId: string }
   | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }

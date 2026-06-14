@@ -205,8 +205,8 @@ export class SimClient {
     return this.send({ type: 'respondToInteraction', interactionId, optionId })
   }
 
-  conductInterview(playerId: string, questionId: string): Promise<WorkerResponse> {
-    return this.send({ type: 'conductInterview', playerId, questionId })
+  requestInterview(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'requestInterview', playerId })
   }
 
   requestCoachReport(playerId: string): Promise<WorkerResponse> {

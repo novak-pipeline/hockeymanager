@@ -455,6 +455,8 @@ export interface PlayerProfileView extends PlayerBadge {
    * the GM hasn't asked yet. Present whenever the player can be interviewed.
    */
   interview?: InterviewView
+  /** ISO date a sit-down interview is scheduled for (pending resolution). */
+  interviewScheduled?: string
   /**
    * How well the player fits his team's current tactical system. Skaters only
    * (absent for goalies and players without team tactics).
@@ -1302,6 +1304,8 @@ export interface CareerSnapshot {
   interactionCounter?: number
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
+  /** Scheduled (not-yet-resolved) interviews. Optional/additive. */
+  pendingInterviews?: Array<{ playerId: string; dueDay: number; year: number }>
   /** [teamId, ClubLegend[]][] — per-club legends registry. Optional/additive. */
   legends?: Array<[string, ClubLegend[]]>
   /** Staff-meeting agenda items. Optional/additive. */

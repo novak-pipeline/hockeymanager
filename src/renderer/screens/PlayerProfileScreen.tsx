@@ -500,59 +500,74 @@ function MindsetPanel({ mindset }: { mindset: MindsetView }): JSX.Element {
   )
 }
 
-/* ── Interview panel: ask questions to reveal hidden qualities ── */
+/* ── Interview as a scheduled GM action (request → calendar → inbox report) ── */
 function InterviewPanel({
   interview,
+  scheduledDate,
   playerId,
+  playerName,
   client,
   onChanged,
 }: {
   interview: InterviewView
+  scheduledDate?: string
   playerId: string
+  playerName: string
   client: ReturnType<typeof useClient>
   onChanged: () => void
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const exhausted = interview.available.length === 0
 
-  async function ask(questionId: string): Promise<void> {
+  async function request(): Promise<void> {
     if (busy) return
-    setBusy(true)
-    await client.conductInterview(playerId, questionId)
+    setBusy(true); setError(null)
+    const res = await client.requestInterview(playerId)
     setBusy(false)
-    onChanged()
+    if (res.type === 'error') setError(res.message ?? 'Could not schedule.')
+    else onChanged()
   }
 
+  const fmtDate = (iso: string): string =>
+    new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+
   return (
-    <Panel title="Interview">
+    <Panel title="Player Interactions">
       <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-        {interview.answers.length === 0 && (
-          <span className="muted small">
-            Sit down with the player — pick a question to learn what raw ratings don’t show.
-          </span>
-        )}
-        {interview.answers.map((a) => (
-          <div key={a.questionId} style={{ borderLeft: '3px solid var(--violet-h)', paddingLeft: 'var(--sp-3)' }}>
-            <div className="muted small" style={{ fontStyle: 'italic' }}>{a.prompt}</div>
-            <div style={{ fontSize: 13, lineHeight: 1.5, margin: '2px 0' }}>{a.answer}</div>
-            <div className="small" style={{ color: 'var(--violet-h)', fontWeight: 700 }}>
-              Read: {a.reveal}
-            </div>
+        {/* Action row */}
+        {scheduledDate ? (
+          <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-2)' }}>
+            <span className="chip" style={{ background: 'rgba(108,92,231,0.18)', color: 'var(--violet-h)', fontWeight: 700 }}>
+              🗓 Interview scheduled
+            </span>
+            <span className="muted small">{fmtDate(scheduledDate)} — your staff will file a report to your inbox.</span>
           </div>
-        ))}
-        {interview.available.length > 0 && (
-          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
-            {interview.available.map((q) => (
-              <button
-                key={q.id}
-                type="button"
-                className="btn btn-sm"
-                disabled={busy}
-                onClick={() => void ask(q.id)}
-                title="Ask this question"
-              >
-                {q.prompt}
-              </button>
-            ))}
+        ) : (
+          <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-sm btn-primary" disabled={busy || exhausted} onClick={() => void request()}>
+              {busy ? 'Scheduling…' : 'Request Interview'}
+            </button>
+            <span className="muted small">
+              {exhausted
+                ? `Your staff have already interviewed ${playerName.split(' ')[0]} thoroughly.`
+                : 'Books a sit-down on your calendar; the report lands in your inbox a few days later.'}
+            </span>
+          </div>
+        )}
+        {error && <span className="small" style={{ color: 'var(--danger)' }}>{error}</span>}
+
+        {/* What we've learned so far — compact reveal chips */}
+        {interview.answers.length > 0 && (
+          <div>
+            <div className="stat-label" style={{ marginBottom: 5 }}>What we’ve learned</div>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 4 }}>
+              {interview.answers.map((a) => (
+                <span key={a.questionId} className="chip" style={{ fontSize: 10 }} title={`${a.prompt} — ${a.answer}`}>
+                  {a.reveal}
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -902,14 +917,19 @@ function TabProfile({
             )}
           </div>
         </div>
-      </div>
 
-      {/* Trait badges — the player's loud calling cards */}
-      {d.scoutReport.traits.length > 0 && (
-        <div style={{ padding: 'var(--sp-2) var(--sp-1)' }}>
-          <TraitBadges traits={d.scoutReport.traits} size={48} />
-        </div>
-      )}
+        {/* Calling-card trait badges — full-width strip inside the identity card */}
+        {d.scoutReport.traits.length > 0 && (
+          <div style={{
+            gridColumn: '1 / -1',
+            display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-4)',
+            borderTop: '1px solid var(--line)', paddingTop: 'var(--sp-3)', marginTop: 2,
+          }}>
+            <span className="pp-band-label" style={{ alignSelf: 'center', marginRight: 4 }}>Calling Cards</span>
+            <TraitBadges traits={d.scoutReport.traits} size={46} />
+          </div>
+        )}
+      </div>
 
       {/* Injury notice (full width, above body) */}
       {d.injury && (
@@ -1068,15 +1088,23 @@ function TabProfile({
           })()}
 
           {d.mindset && <MindsetPanel mindset={d.mindset} />}
-        </div>
-      </div>
 
-      {/* ════ Interview (GM action) ════ */}
-      {d.interview && (
-        <InterviewPanel interview={d.interview} playerId={d.playerId} client={client} onChanged={onChanged} />
-      )}
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <MarkForMeeting playerId={d.playerId} client={client} />
+          {/* Interview as a scheduled GM action */}
+          {d.interview && (
+            <InterviewPanel
+              interview={d.interview}
+              {...(d.interviewScheduled !== undefined ? { scheduledDate: d.interviewScheduled } : {})}
+              playerId={d.playerId}
+              playerName={d.name}
+              client={client}
+              onChanged={onChanged}
+            />
+          )}
+
+          <div className="row" style={{ justifyContent: 'flex-end' }}>
+            <MarkForMeeting playerId={d.playerId} client={client} />
+          </div>
+        </div>
       </div>
     </div>
   )
