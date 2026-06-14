@@ -138,7 +138,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const client = useClient()
   const teamTheme = useGlobalTeamTheme(props.team.teamId)
   const themeMode = useUiStore((s) => s.themeMode)
-  const appTheme = themeMode === 'team' ? teamTheme : THEME_PRESETS[themeMode]
+  const baseTheme = themeMode === 'team' ? teamTheme : THEME_PRESETS[themeMode]
+  // The hero CTA (Continue) is ALWAYS the club's colour, whatever UI theme is
+  // selected, so it reads as "your team". Falls back to the active accent.
+  const tt = teamTheme as Record<string, string> | undefined
+  const appTheme = {
+    ...(baseTheme ?? {}),
+    ...(tt?.['--accent-rgb'] ? { '--hero-rgb': tt['--accent-rgb'] } : {}),
+    ...(tt?.['--accent-ink'] ? { '--hero-ink': tt['--accent-ink'] } : {}),
+  } as typeof baseTheme
   const [nav, setNav] = useState<{ screen: ScreenId; params: NavParams }>({
     screen: 'dashboard',
     params: {},

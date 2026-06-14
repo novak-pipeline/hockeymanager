@@ -30,10 +30,12 @@
   /* legible ink on top of a solid accent fill (dark for bright accents) */
   --accent-ink: #fff;
 
-  /* ── hero action: defaults to the team accent (recoloured live) ── */
+  /* ── hero action: ALWAYS the managed club's colour (set live on .app-shell) ── */
+  --hero-rgb: var(--accent-rgb);
+  --hero-ink: var(--accent-ink);
+  --grad-hero: linear-gradient(100deg, rgb(var(--hero-rgb)), rgba(var(--hero-rgb), 0.78));
   --pink:    #ec4899;
   --orange:  #f97316;
-  --grad-hero: linear-gradient(100deg, var(--accent), var(--violet-h));
 
   /* ── secondary accents ── */
   --cyan:   #22d3ee;
@@ -181,19 +183,19 @@ a:hover { text-decoration: underline; }
   border-color: transparent;
 }
 
-/* hero: team-accent gradient */
+/* hero: always the managed club's colour */
 .btn-hero {
-  background: var(--grad-hero);
+  background: linear-gradient(100deg, rgb(var(--hero-rgb)), rgba(var(--hero-rgb), 0.78));
   border-color: transparent;
-  color: var(--accent-ink);
+  color: var(--hero-ink);
   font-weight: 700;
-  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 0 18px rgba(var(--hero-rgb), 0.35);
 }
 .btn-hero:hover:not(:disabled) {
   border-color: transparent;
   filter: brightness(1.08);
   transform: scale(1.02);
-  box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.50);
+  box-shadow: 0 0 28px rgba(var(--hero-rgb), 0.50);
 }
 
 .btn-ghost {
