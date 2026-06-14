@@ -64,6 +64,12 @@ import {
 } from '@engine/league/offseason'
 import { tickInSeasonDevelopment } from '@engine/league/inSeasonDevelopment'
 import {
+  initWorldSimState,
+  resetWorldSim,
+  simWorldDay,
+  type WorldSimState,
+} from '@engine/league/worldSim'
+import {
   createArc,
   createInitialArcsState,
   resolveArc,
@@ -489,6 +495,9 @@ export class Career {
   /** AHL season totals — kept separate from NHL totals so the two never mix
    *  in leaders/standings/profile, but still feed prospect development. */
   private readonly ahlTotals = new Map<PlayerId, GamePlayerStat>()
+  /** Wider-world quick-sim state (other leagues' standings + player stats).
+   *  Empty for the generated league / mods without competitions. */
+  private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map() }
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
@@ -591,6 +600,10 @@ export class Career {
     this.seed = seed
     this.userTeamId = userTeamId
     this.refreshMatchDays()
+    // Wider-world quick-sim: standings reference the (fresh or restored) Standing
+    // objects on each competition; player gp/totals are restored from the
+    // snapshot below for loaded careers.
+    this.worldSim = initWorldSimState(this.data.league.competitions ?? [])
     this.playerCounter = this.computePlayerCounter()
     if (!restored) {
       for (const teamId of data.league.teams) this.standings.set(teamId, freshStanding(teamId))
@@ -2550,9 +2563,27 @@ export class Career {
         }
       }
     }
+    // ── wider world: sim other leagues' games on this match day ──────────
+    this.tickWorld(nextDay)
     // ────────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return true
+  }
+
+  /** Quick-sim the wider world's (other leagues') games scheduled on `day`.
+   *  No-op when the league has no competitions (generated league / plain mods). */
+  private tickWorld(day: number): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    simWorldDay({
+      competitions: comps,
+      day,
+      teams: this.data.teams,
+      resolve: this.resolve,
+      state: this.worldSim,
+      seedBase: this.seed ^ 0x5eed0001,
+      year: this.year,
+    })
   }
 
   /** Advance up to `days` match days (default 1). Returns days actually played. */
@@ -2680,6 +2711,8 @@ export class Career {
         }
       }
     }
+    // ── wider world ────────────────────────────────────────────────────
+    this.tickWorld(nextDay)
     // ─────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return watched
@@ -3470,6 +3503,11 @@ export class Career {
     }
     this.ahlGp.clear()
     this.ahlTotals.clear()
+
+    // Reset the wider world for the new season (standings, stats, game results).
+    if (this.data.league.competitions) {
+      resetWorldSim(this.worldSim, this.data.league.competitions)
+    }
 
     this.totals.clear()
     this.gp.clear()
@@ -5959,6 +5997,9 @@ export class Career {
       ahlStandings: serializeMap(this.ahlStandings as unknown as Map<string, unknown>),
       ahlGp: serializeMap(this.ahlGp as unknown as Map<string, number>),
       ahlTotals: serializeMap(this.ahlTotals as unknown as Map<string, unknown>),
+      // Wider-world player stats (standings persist on league.competitions).
+      worldGp: serializeMap(this.worldSim.gp as unknown as Map<string, number>),
+      worldTotals: serializeMap(this.worldSim.totals as unknown as Map<string, unknown>),
       opinionHistory: [...this.opinionHistory.entries()].map(([k, v]) => [k, v.map((s) => ({ ...s }))] as [string, OpinionSnapshot[]]),
     }
   }
@@ -6149,6 +6190,14 @@ export class Career {
       for (const [k, v] of snapshot.ahlTotals) {
         career.ahlTotals.set(asPlayerId(k), v as GamePlayerStat)
       }
+    }
+    // Wider-world player stats (standings already rebuilt from league.competitions
+    // by the constructor's initWorldSimState).
+    if (snapshot.worldGp) {
+      for (const [k, v] of snapshot.worldGp) career.worldSim.gp.set(asPlayerId(k), v)
+    }
+    if (snapshot.worldTotals) {
+      for (const [k, v] of snapshot.worldTotals) career.worldSim.totals.set(asPlayerId(k), v as GamePlayerStat)
     }
     if (snapshot.opinionHistory) {
       for (const [k, v] of snapshot.opinionHistory) {

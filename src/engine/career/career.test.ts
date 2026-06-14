@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
+import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
 import { Career, buildTeamList } from './career'
 
 describe('buildTeamList', () => {
@@ -1500,5 +1501,46 @@ describe('Career — per-team staff', () => {
     const a = mk(506)
     const b = mk(506)
     expect(a).toEqual(b)
+  })
+})
+
+describe('Career — wider-world quick-sim', () => {
+  function withCompetitions(seed: number): ReturnType<typeof generateLeague> {
+    const data = generateLeague({ seed })
+    const teamIds = data.league.teams.slice(0, 6)
+    const comps: RawCompetition[] = [
+      { id: 'shl', name: 'Swedish Hockey League', abbrev: 'SHL', nation: 'Sweden', level: 1, reputation: 17 },
+    ]
+    data.league.competitions = buildCompetitions({
+      comps,
+      membership: teamIds.map((teamId) => ({ teamId, competitionId: 'shl' })),
+      season: 2025,
+    })
+    return data
+  }
+
+  it('sims other leagues during the season — standings + player stats accrue', () => {
+    const data = withCompetitions(31)
+    const career = new Career(data, 31, data.league.teams[7]!)
+    for (let i = 0; i < 40; i++) career.advanceDay()
+    const shl = data.league.competitions![0]!
+    const gpSum = shl.standings.reduce((s, st) => s + st.gamesPlayed, 0)
+    expect(gpSum).toBeGreaterThan(0)
+    expect(shl.standings.some((s) => s.points > 0)).toBe(true)
+  })
+
+  it('persists wider-world standings + stats across save/load', () => {
+    const data = withCompetitions(32)
+    const career = new Career(data, 32, data.league.teams[7]!)
+    for (let i = 0; i < 40; i++) career.advanceDay()
+    const snap = career.exportSnapshot('t', '2026-06-14')
+    const gpBefore = snap.leagueData.league.competitions![0]!.standings.reduce((s, st) => s + st.gamesPlayed, 0)
+    expect(gpBefore).toBeGreaterThan(0)
+    expect((snap.worldGp ?? []).length).toBeGreaterThan(0)
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    expect(restored.advanceDay()).toBe(true)
+    const reSnap = restored.exportSnapshot('t2', '2026-06-14')
+    const gpAfter = reSnap.leagueData.league.competitions![0]!.standings.reduce((s, st) => s + st.gamesPlayed, 0)
+    expect(gpAfter).toBeGreaterThanOrEqual(gpBefore)
   })
 })

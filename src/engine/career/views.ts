@@ -1200,6 +1200,11 @@ export interface CareerSnapshot {
   ahlGp?: Array<[string, number]>
   /** AHL season totals, kept separate from NHL playerTotals. Optional. */
   ahlTotals?: Array<[string, unknown]>
+  /** Wider-world (other leagues') player games-played counters. Optional;
+   *  standings persist on leagueData.league.competitions. */
+  worldGp?: Array<[string, number]>
+  /** Wider-world player season totals. Optional. */
+  worldTotals?: Array<[string, unknown]>
   /** Per-player opinion timeline (rating/stars/knowledge over time). Optional. */
   opinionHistory?: Array<[string, import('@engine/career/opinionTracker').OpinionSnapshot[]]>
 }
