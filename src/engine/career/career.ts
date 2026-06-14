@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, draftEligibility, perceivedCeiling, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, draftEligibility, perceivedCeiling, productionPremium, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
@@ -5336,6 +5336,25 @@ export class Career {
   /** NHL analyst draft rankings: the consensus board of the draft-eligible class
    *  (under-19, undrafted) across the world's leagues, weighted and shuffled per
    *  the current phase (preliminary / mid-season / final). */
+  /** Production premium for a prospect's perceived ceiling: blend this season's
+   *  scoring pace (live world-sim stats) with last season's from the historical
+   *  record, then weight by league strength. Early in the year it leans on last
+   *  season (so the preliminary board already reflects what he did); as games
+   *  accrue it shifts to the current campaign. */
+  private prospectProductionPremium(p: Player, leagueStrength: number): number {
+    const pid = p.id as PlayerId
+    const liveGp = this.worldSim.gp.get(pid) ?? 0
+    const liveT = this.worldSim.totals.get(pid)
+    const livePpg = liveGp > 0 ? ((liveT?.goals ?? 0) + (liveT?.assists ?? 0)) / liveGp : 0
+    const hist = (p.careerHistory ?? []).filter((h) => h.gamesPlayed > 0)
+    const last = hist.length > 0 ? hist.reduce((a, b) => (b.year > a.year ? b : a)) : null
+    const lastPpg = last ? (last.goals + last.assists) / last.gamesPlayed : 0
+    const w = Math.min(1, liveGp / 30) // ramp from last-season to this-season over ~30 GP
+    const ppg = livePpg * w + lastPpg * (1 - w)
+    const isD = p.position === 'D'
+    return productionPremium(ppg, isD, leagueStrength)
+  }
+
   /** Gather the draft-eligible cohort (candidates + radar rows). Shared by the
    *  rankings view and the phase-transition movement snapshot. */
   private buildDraftBoard(): {
@@ -5355,10 +5374,12 @@ export class Career {
           const elig = draftEligibility(p.age, !!p.nhlDrafted)
           if (elig === null) continue
           const id = p.id as string
-          // Perceived ceiling = hidden true ceiling + pre-draft analyst optimism.
-          // The board ranks and shows this; the true ceiling stays hidden and is
-          // what development pays out (so the board misses on reaches/sleepers).
-          const perceived = perceivedCeiling(agedPotential(p), p.age)
+          // Perceived ceiling = hidden true ceiling + pre-draft analyst optimism
+          // + a production premium (analysts rank on what he's DONE when the book
+          // is generic). Production blends this season's pace with last season's
+          // from the historical record, converted to an NHL-equivalent rate. The
+          // true ceiling stays hidden and is what development pays out.
+          const perceived = perceivedCeiling(agedPotential(p), p.age, this.prospectProductionPremium(p, c.strength))
           const row: Omit<DraftRankRowView, 'rank'> = {
             playerId: id,
             name: p.name,

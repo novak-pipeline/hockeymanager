@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, perceivedCeiling, projectionHedge, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
 
 describe('draftEligibility', () => {
   it('buckets by age and excludes drafted / out-of-range', () => {
@@ -54,6 +54,25 @@ describe('analystRank', () => {
     for (const ph of ['preliminary', 'midseason', 'final'] as const) {
       expect(analystRank(inputs, ph).indexOf('f')).toBeLessThan(analystRank(inputs, ph).indexOf('g'))
     }
+  })
+
+  it('productionPremium rewards producers and dings non-producers', () => {
+    // Strong junior producer (1.3 PPG forward in a 0.30-strength league) → real lift.
+    expect(productionPremium(1.3, false, 0.30)).toBeGreaterThanOrEqual(6)
+    // A defenceman needs less scoring to impress.
+    expect(productionPremium(0.9, true, 0.30)).toBeGreaterThan(productionPremium(0.9, false, 0.30))
+    // Low producer → negative.
+    expect(productionPremium(0.3, false, 0.30)).toBeLessThan(0)
+    // Same rate in a tougher league is worth more.
+    expect(productionPremium(0.6, false, 0.50)).toBeGreaterThan(productionPremium(0.6, false, 0.25))
+    // No sample → neutral.
+    expect(productionPremium(0, false, 0.30)).toBe(0)
+    // Bounded — can't override pedigree.
+    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(14)
+  })
+
+  it('production feeds the perceived ceiling', () => {
+    expect(perceivedCeiling(70, 18, 8)).toBe(perceivedCeiling(70, 18, 0) + 8)
   })
 
   it('perceivedCeiling adds an optimism premium that fades with age', () => {

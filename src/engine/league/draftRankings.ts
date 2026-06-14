@@ -89,9 +89,29 @@ export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[
  * overrate the class — kept separate from the hidden true potential development
  * actually pays out, so reaches and sleepers emerge as players prove out.
  */
-export function perceivedCeiling(trueCeiling: number, age: number): number {
+export function perceivedCeiling(trueCeiling: number, age: number, productionBonus = 0): number {
   const hype = 4 + Math.max(0, 19 - age) * 2 // 17→8, 18→6, 19→4, 20+→4
-  return Math.min(99, trueCeiling + hype)
+  return Math.max(0, Math.min(99, trueCeiling + hype + productionBonus))
+}
+
+/**
+ * How much a prospect's PRODUCTION moves analysts off the book. When the rating
+ * is generic, scouts rank on what a kid does on the ice — a teenager dominating
+ * a junior (or, better, a pro) league rockets up boards; a low producer slides.
+ * Points are converted to an NHL-equivalent rate via league strength, compared
+ * to a positional par, and bounded so production tilts the read without
+ * overriding genuine pedigree.
+ *
+ * @param ppg            points per game (blend of this + last season)
+ * @param isD            defenceman (lower scoring par)
+ * @param leagueStrength NHL-equivalency of the league he produces in (0,1]
+ */
+export function productionPremium(ppg: number, isD: boolean, leagueStrength: number): number {
+  if (ppg <= 0) return 0 // no sample → no opinion either way
+  const nhlePpg = ppg * Math.max(0.05, leagueStrength)
+  const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
+  const ratio = nhlePpg / par
+  return Math.max(-6, Math.min(14, Math.round((ratio - 1) * 12)))
 }
 
 /** Goalies are notoriously hard to project — analysts fade them on draft boards
