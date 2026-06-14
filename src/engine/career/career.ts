@@ -241,7 +241,7 @@ import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import { buildScoutVerdict } from './scoutVerdict'
 import { buildRosterProjection, buildCoachReports, type SeasonForm } from './playerProjection'
-import { recordOpinions, type OpinionSnapshot } from './opinionTracker'
+import { recordOpinions, shiftHeadline, type OpinionSnapshot } from './opinionTracker'
 import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
@@ -2393,7 +2393,7 @@ export class Career {
     this.emitScoutReports()
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
     if (day % 15 === 0) {
-      recordOpinions({
+      const shifts = recordOpinions({
         history: this.opinionHistory,
         players: this.data.players,
         scouting: this.scouting,
@@ -2401,6 +2401,18 @@ export class Career {
         day,
         year: this.year,
       })
+      // Surface a few meaningful shifts to the inbox (own players first; only
+      // well-scouted league players qualify, and cap to avoid flooding).
+      const ordered = shifts
+        .filter((s) => s.ownOrg || knowledgeOf(this.scouting, s.playerId) >= 60)
+        .sort((a, b) => Number(b.ownOrg) - Number(a.ownOrg))
+        .slice(0, 3)
+      for (const s of ordered) {
+        const p = this.data.players.get(asPlayerId(s.playerId))
+        if (!p) continue
+        const { headline, body } = shiftHeadline(p.name, s)
+        this.pushNews('scouting', headline, body, { playerId: s.playerId })
+      }
     }
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {

@@ -53,12 +53,32 @@ export interface RecordOpinionsArgs {
   maxPerPlayer?: number
 }
 
+/** A meaningful shift in the read on a player, surfaced as inbox news. */
+export interface OpinionShift {
+  playerId: string
+  ownOrg: boolean
+  /** 'up' | 'down' for tone/headline selection. */
+  direction: 'up' | 'down'
+  note: string
+}
+
+/** Notable inbox-worthy move (ceiling change or a strong overall swing). */
+function notableShift(prev: OpinionSnapshot, cur: OpinionSnapshot): OpinionShift['note'] | null {
+  if (cur.potentialStars > prev.potentialStars) return 'raised-ceiling'
+  if (cur.potentialStars < prev.potentialStars) return 'lowered-ceiling'
+  if (cur.overall - prev.overall >= 4) return 'rising'
+  if (cur.overall - prev.overall <= -4) return 'falling'
+  return null
+}
+
 /**
  * Append a snapshot for each tracked player when his read has moved since the
- * last one (rating/stars changed, knowledge shifted ≥8, or a new season began).
+ * last one (rating/stars changed, knowledge shifted ≥8, or a new season began),
+ * and return the meaningful shifts (ceiling/strong swing) for inbox surfacing.
  */
-export function recordOpinions(args: RecordOpinionsArgs): void {
+export function recordOpinions(args: RecordOpinionsArgs): OpinionShift[] {
   const max = args.maxPerPlayer ?? DEFAULT_MAX
+  const shifts: OpinionShift[] = []
   for (const [pid, p] of args.players) {
     const id = pid as string
     const own = args.ownOrgIds.has(id)
@@ -85,9 +105,37 @@ export function recordOpinions(args: RecordOpinionsArgs): void {
       last.year !== snap.year
     if (!changed) continue
 
+    // Note a meaningful shift (only when comparing within the same season).
+    if (last && last.year === snap.year) {
+      const note = notableShift(last, snap)
+      if (note) {
+        shifts.push({
+          playerId: id,
+          ownOrg: own,
+          direction: note === 'raised-ceiling' || note === 'rising' ? 'up' : 'down',
+          note,
+        })
+      }
+    }
+
     arr.push(snap)
     if (arr.length > max) arr.splice(0, arr.length - max)
     args.history.set(id, arr)
+  }
+  return shifts
+}
+
+/** Inbox headline + body for a meaningful opinion shift. */
+export function shiftHeadline(name: string, shift: OpinionShift): { headline: string; body: string } {
+  switch (shift.note) {
+    case 'raised-ceiling':
+      return { headline: `Scouts raise their ceiling on ${name}`, body: `The staff now project a higher long-term ceiling for ${name} after his recent development and play.` }
+    case 'lowered-ceiling':
+      return { headline: `Doubts grow over ${name}'s ceiling`, body: `The staff have tempered their long-term projection for ${name}.` }
+    case 'rising':
+      return { headline: `${name} is trending up`, body: `${name}'s stock is rising — the staff like what they have seen of late.` }
+    default:
+      return { headline: `${name} is trending down`, body: `Concerns about ${name}'s recent level have the staff lowering their read.` }
   }
 }
 
