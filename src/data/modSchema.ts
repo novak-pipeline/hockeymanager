@@ -262,6 +262,8 @@ export interface ModStaff {
   judgment?: number
   /** Optional specialty label, e.g. "Defense", "Prospects". */
   specialty?: string
+  /** Per-discipline attributes (EHM 1–20) from the source DB. */
+  attributes?: import('@engine/league/staff').StaffAttributes
   /** Facepack image key resolved to faces/<faceId>.png. */
   faceId?: string
 }
@@ -1036,6 +1038,7 @@ function buildTeamStaffFromMod(
       judgment: j,
       demeanor: dm,
       ...(spec !== undefined ? { specialty: spec } : {}),
+      ...(ms.attributes !== undefined ? { attributes: ms.attributes } : {}),
       ...(ms.faceId !== undefined ? { faceId: ms.faceId } : {}),
     }
   }

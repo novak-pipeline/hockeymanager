@@ -4682,6 +4682,7 @@ export class Career {
       if (m.specialty !== undefined) row.specialty = m.specialty
       if (m.demeanor !== undefined) row.demeanorLabel = DEMEANOR_LABELS[m.demeanor]
       if (m.faceId !== undefined) row.faceId = m.faceId
+      if (m.attributes !== undefined) row.attributes = m.attributes
       return row
     }
 

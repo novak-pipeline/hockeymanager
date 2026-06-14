@@ -379,6 +379,82 @@ const DEMEANOR_COLOR: Record<string, string> = {
   Pragmatic:  'var(--amber, #f59e0b)',
 }
 
+/* Staff attribute groups (EHM 1–20), shown when a staff member is expanded. */
+const STAFF_ATTR_GROUPS: Array<{ title: string; attrs: Array<[keyof NonNullable<StaffView['scouts'][number]['attributes']>, string]> }> = [
+  { title: 'Coaching', attrs: [['coachingForwards', 'Forwards'], ['coachingDefensemen', 'Defensemen'], ['coachingGoaltenders', 'Goaltenders'], ['coachingTechnique', 'Technique'], ['attacking', 'Attacking'], ['physical', 'Physical'], ['powerplay', 'Power Play'], ['penaltyKill', 'Penalty Kill'], ['tactics', 'Tactics'], ['lineMatching', 'Line Matching'], ['freeRoles', 'Free Roles'], ['directness', 'Directness']] },
+  { title: 'Evaluation', attrs: [['judgingPlayers', 'Judging Players'], ['judgingPotential', 'Judging Potential']] },
+  { title: 'Management', attrs: [['manManagement', 'Man Management'], ['motivating', 'Motivating'], ['discipline', 'Discipline'], ['developingYoungsters', 'Developing Youngsters']] },
+  { title: 'Medical & Business', attrs: [['physiotherapy', 'Physiotherapy'], ['business', 'Business'], ['patience', 'Patience'], ['resources', 'Resources']] },
+]
+
+function staffAttrColor(v: number): string {
+  if (v >= 17) return 'var(--success)'
+  if (v >= 14) return 'rgba(52,211,153,0.85)'
+  if (v >= 8) return 'var(--accent2)'
+  return 'var(--danger)'
+}
+
+function StaffRow(props: { m: StaffView['scouts'][number] }): JSX.Element {
+  const { m } = props
+  const [open, setOpen] = useState(false)
+  const attrs = m.attributes
+  const hasAttrs = attrs && Object.keys(attrs).length > 0
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <button
+        type="button"
+        onClick={() => hasAttrs && setOpen((o) => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', width: '100%',
+          padding: 'var(--sp-2) 0', background: 'none', border: 'none', color: 'var(--text)',
+          font: 'inherit', textAlign: 'left', cursor: hasAttrs ? 'pointer' : 'default',
+        }}
+      >
+        <PlayerFace faceId={m.faceId} name={m.name} size={44} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>
+            {m.name}
+            {hasAttrs && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{open ? '▾' : '▸'}</span>}
+          </div>
+          <div className="muted small">{m.roleLabel}{m.specialty ? ` · ${m.specialty}` : ''}</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+            <span className="small muted">Rating</span>
+            <span className="mono small">{m.rating}</span>
+            <span className="small muted">Judgment</span>
+            <span className="mono small">{m.judgment}</span>
+          </div>
+          {m.demeanorLabel && (
+            <span className="chip" style={{ fontSize: 10, color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)', background: 'var(--bg3)', padding: '1px 6px', borderRadius: 'var(--radius-sm)' }}>
+              {m.demeanorLabel}
+            </span>
+          )}
+        </div>
+      </button>
+      {open && hasAttrs && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)', padding: '0 0 var(--sp-3) 56px' }}>
+          {STAFF_ATTR_GROUPS.map((g) => {
+            const rows = g.attrs.filter(([k]) => attrs![k] !== undefined)
+            if (rows.length === 0) return null
+            return (
+              <div key={g.title}>
+                <div className="pp-attr-head">{g.title}</div>
+                {rows.map(([k, label]) => (
+                  <div key={k} className="pp-attr-row">
+                    <span className="pp-attr-name">{label}</span>
+                    <span className="pp-attr-val" style={{ color: staffAttrColor(attrs![k]!) }}>{attrs![k]}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StaffSection(props: {
   title: string
   members: StaffView['scouts'] // StaffRowView[]
@@ -386,47 +462,8 @@ function StaffSection(props: {
   if (props.members.length === 0) return <></>
   return (
     <Panel title={props.title}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-        {props.members.map((m) => (
-          <div
-            key={m.id}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sp-3)',
-              padding: 'var(--sp-2) 0',
-              borderBottom: '1px solid var(--border)',
-            }}
-          >
-            <PlayerFace faceId={m.faceId} name={m.name} size={44} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{m.name}</div>
-              <div className="muted small">{m.roleLabel}{m.specialty ? ` · ${m.specialty}` : ''}</div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-                <span className="small muted">Rating</span>
-                <span className="mono small" style={{ color: 'var(--fg)' }}>{m.rating}</span>
-                <span className="small muted">Judgment</span>
-                <span className="mono small" style={{ color: 'var(--fg)' }}>{m.judgment}</span>
-              </div>
-              {m.demeanorLabel && (
-                <span
-                  className="chip"
-                  style={{
-                    fontSize: 10,
-                    color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)',
-                    background: 'var(--bg3)',
-                    padding: '1px 6px',
-                    borderRadius: 'var(--radius-sm)',
-                  }}
-                >
-                  {m.demeanorLabel}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {props.members.map((m) => <StaffRow key={m.id} m={m} />)}
       </div>
     </Panel>
   )

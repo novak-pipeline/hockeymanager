@@ -479,6 +479,27 @@ def map_staff_role(job_str):
     return None  # skip all other front-office roles
 
 
+# Non-player attribute columns (EHM 1-20) -> our StaffAttributes keys.
+STAFF_ATTR_COLS = {
+    "attacking": 109, "directness": 110, "freeRoles": 111, "lineMatching": 112,
+    "penaltyKill": 113, "physical": 114, "powerplay": 115,
+    "coachingGoaltenders": 116, "coachingDefensemen": 117, "coachingForwards": 118,
+    "coachingTechnique": 119, "judgingPlayers": 120, "judgingPotential": 121,
+    "tactics": 122, "physiotherapy": 123, "business": 124, "patience": 125,
+    "resources": 126, "discipline": 127, "manManagement": 129, "motivating": 130,
+    "developingYoungsters": 131,
+}
+
+def staff_attrs(r):
+    """Per-discipline staff attributes (1-20), omitting zeros."""
+    out = {}
+    for key, col in STAFF_ATTR_COLS.items():
+        v = to_int(r[col], 0)
+        if v > 0:
+            out[key] = v
+    return out
+
+
 def staff_specialty(r, role):
     """Specialty from the EHM non-player coaching/judging columns."""
     if role in ("headCoach", "assistantCoach"):
@@ -697,6 +718,9 @@ def main():
                             staff_obj["judgment"] = judgment
                         if specialty is not None:
                             staff_obj["specialty"] = specialty
+                        attrs = staff_attrs(r)
+                        if attrs:
+                            staff_obj["attributes"] = attrs
                         if face_id is not None:
                             staff_obj["_faceId"] = face_id  # resolved below
                         nhl_staff[nhl_nick].append(staff_obj)

@@ -1399,6 +1399,8 @@ export interface StaffRowView {
   demeanorLabel?: string
   /** Facepack image key (faces/<faceId>.png). Absent when no facepack. */
   faceId?: string
+  /** Per-discipline attributes (EHM 1–20) from the source DB. */
+  attributes?: import('@engine/league/staff').StaffAttributes
 }
 
 /**

@@ -17,10 +17,38 @@ import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 
 /* ─────────────────────────── types ─────────────────────────── */
 
+/** Per-discipline staff attributes (EHM 1–20). All optional; absent on fictional staff. */
+export interface StaffAttributes {
+  attacking?: number
+  directness?: number
+  freeRoles?: number
+  lineMatching?: number
+  penaltyKill?: number
+  physical?: number
+  powerplay?: number
+  coachingGoaltenders?: number
+  coachingDefensemen?: number
+  coachingForwards?: number
+  coachingTechnique?: number
+  judgingPlayers?: number
+  judgingPotential?: number
+  tactics?: number
+  physiotherapy?: number
+  business?: number
+  patience?: number
+  resources?: number
+  discipline?: number
+  manManagement?: number
+  motivating?: number
+  developingYoungsters?: number
+}
+
 export interface StaffMember {
   id: string
   name: string
   role: 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner'
+  /** Per-discipline attributes from the source DB (display-only). */
+  attributes?: StaffAttributes
   /** 40–90 quality. Governs how effective the staff member is at their job. */
   rating: number
   /** 0–100. Higher = the AGM's player reads track closer to true values. */
