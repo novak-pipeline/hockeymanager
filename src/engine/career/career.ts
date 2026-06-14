@@ -77,6 +77,8 @@ import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
+import { projectProspect, type ProspectProjection } from '@engine/career/prospectModel'
+import { nhleFactorByAbbrev } from '@engine/league/leagueStrength'
 import { scoutDraftBias } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
@@ -5365,12 +5367,14 @@ export class Career {
   /** NHL analyst draft rankings: the consensus board of the draft-eligible class
    *  (under-19, undrafted) across the world's leagues, weighted and shuffled per
    *  the current phase (preliminary / mid-season / final). */
-  /** Production premium for a prospect's perceived ceiling: blend this season's
-   *  scoring pace (live world-sim stats) with last season's from the historical
-   *  record, then weight by league strength. Early in the year it leans on last
-   *  season (so the preliminary board already reflects what he did); as games
-   *  accrue it shifts to the current campaign. */
-  private prospectProductionPremium(p: Player, leagueStrength: number): number {
+  /** NHLe-based prospect evaluation: blend this season's scoring pace (live
+   *  world-sim stats) with last season's from the historical record, translate
+   *  to an NHL-equivalent rate via the league's NHLe factor, and run it through
+   *  the projection model. Returns the analyst production premium plus the
+   *  outcome projection (P(NHLer) / P(star)). Early in the year it leans on last
+   *  season (so the preliminary board already reflects production); it shifts to
+   *  the current campaign as games accrue. */
+  private prospectEval(p: Player, abbrev: string): { premium: number; projection: ProspectProjection } {
     const pid = p.id as PlayerId
     const liveGp = this.worldSim.gp.get(pid) ?? 0
     const liveT = this.worldSim.totals.get(pid)
@@ -5381,7 +5385,11 @@ export class Career {
     const w = Math.min(1, liveGp / 30) // ramp from last-season to this-season over ~30 GP
     const ppg = livePpg * w + lastPpg * (1 - w)
     const isD = p.position === 'D'
-    return productionPremium(ppg, isD, leagueStrength)
+    const leagueFactor = nhleFactorByAbbrev(abbrev)
+    return {
+      premium: productionPremium(ppg, isD, leagueFactor),
+      projection: projectProspect({ ppg, leagueFactor, age: p.age, isD }),
+    }
   }
 
   /** Gather the draft-eligible cohort (candidates + radar rows). Shared by the
@@ -5411,7 +5419,9 @@ export class Career {
           // Currently-injured prospects take a small availability/durability
           // ding (missed viewings + health questions) — injuries move the board.
           const injuryDing = p.injuryStatus ? 4 : 0
-          const perceived = perceivedCeiling(agedPotential(p), p.age, this.prospectProductionPremium(p, c.strength) - injuryDing)
+          const evalRes = this.prospectEval(p, c.abbrev)
+          const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing)
+          const isSkater = p.position !== 'G'
           const row: Omit<DraftRankRowView, 'rank'> = {
             playerId: id,
             name: p.name,
@@ -5424,6 +5434,7 @@ export class Career {
             eligibility: elig,
             currentStars: overallToStars(ratedOverall(p)),
             potentialStars: overallToStars(perceived),
+            ...(isSkater ? { pNHLer: evalRes.projection.pNHLer, pStar: evalRes.projection.pStar } : {}),
           }
           if (elig === 'radar') radarRows.push(row)
           else board.set(id, { input: { id, ceiling: perceived, current: ratedOverall(p), position: p.position, eligibility: elig }, row, player: p })

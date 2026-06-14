@@ -121,6 +121,8 @@ export function DraftRankingsScreen(): JSX.Element {
                 <th style={{ textAlign: 'left' }}>Team</th>
                 <th style={{ textAlign: 'left' }}>Ability</th>
                 <th style={{ textAlign: 'left' }}>Potential</th>
+                <th title="NHLe projection: chance of becoming a regular NHLer">NHLer</th>
+                <th title="NHLe projection: chance of becoming an impact/star player">Star</th>
               </tr>
             </thead>
             <tbody>
@@ -143,6 +145,8 @@ export function DraftRankingsScreen(): JSX.Element {
                   <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
                   <td><Stars value={p.currentStars} /></td>
                   <td><Stars value={p.potentialStars} /></td>
+                  <td style={{ textAlign: 'center' }}><Pct value={p.pNHLer} /></td>
+                  <td style={{ textAlign: 'center' }}><Pct value={p.pStar} accent /></td>
                 </tr>
               ))}
             </tbody>
@@ -186,6 +190,15 @@ export function DraftRankingsScreen(): JSX.Element {
       )}
     </div>
   )
+}
+
+/** NHLe projection percentage (blank for goalies / unknown). */
+function Pct({ value, accent }: { value: number | undefined; accent?: boolean }): JSX.Element {
+  if (value === undefined) return <span className="muted" style={{ fontSize: 11 }}>—</span>
+  const color = accent
+    ? (value >= 50 ? 'var(--success, #4caf72)' : value >= 25 ? 'var(--accent2, #e0b341)' : 'var(--muted)')
+    : (value >= 80 ? 'var(--success, #4caf72)' : value >= 50 ? 'var(--accent2, #e0b341)' : 'var(--muted)')
+  return <span style={{ color, fontWeight: 700, fontSize: 12 }}>{value}%</span>
 }
 
 /** Movement chip: ▲N if your scouts have him higher than consensus, ▼N lower. */

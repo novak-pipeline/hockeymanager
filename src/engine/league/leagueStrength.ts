@@ -125,3 +125,10 @@ export function leagueTranslationFactor(s: LeagueStrength): number {
 export function nhlEquivalent(value: number, factor: number): number {
   return value * factor
 }
+
+/** NHLe factor for a league abbreviation alone (board rows carry only abbrev).
+ *  Falls back to a junior-ish 0.30 for unrecognised leagues. */
+export function nhleFactorByAbbrev(abbrev: string): number {
+  const key = (abbrev || '').trim().toUpperCase()
+  return NHLE_BY_ABBREV[key] ?? 0.30
+}

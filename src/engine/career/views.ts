@@ -790,6 +790,10 @@ export interface DraftRankRowView {
   /** Analyst rank movement vs the previous phase's board (+ rose, − slid).
    *  Present on the analyst rankings from mid-season on; omitted at preliminary. */
   movement?: number
+  /** NHLe projection: probability (0–100) he becomes a regular NHLer. Skaters only. */
+  pNHLer?: number
+  /** NHLe projection: probability (0–100) he becomes an impact/"star" player. Skaters only. */
+  pStar?: number
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
