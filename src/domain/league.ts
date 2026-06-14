@@ -57,6 +57,46 @@ export interface SeasonState {
   news: string[]
 }
 
+/**
+ * Sim/UI fidelity for a competition in the wider world, EHM/FBM-style:
+ *  - 'active'    — the league you manage in (the NHL): full match fidelity.
+ *  - 'simulated' — quick-sim with standings + per-player counting stats and
+ *                  active roster/FA AI (feeders & majors: AHL, CHL, NCAA, Euro).
+ *  - 'background'— navigable rosters + light results, minimal sim (obscure tiers).
+ * All tiers still track enough per-player production to feed development.
+ */
+export type CompetitionTier = 'active' | 'simulated' | 'background'
+
+/**
+ * A league in the wider hockey world beyond the managed NHL — its feeders (AHL/
+ * ECHL/CHL/USHL/NCAA) and the international leagues (KHL/SHL/Liiga/…). The NHL
+ * itself stays represented by League's own teams/schedule/season; `competitions`
+ * carries the additional, scoutable, developing world. Additive — absent on old
+ * saves and tolerated everywhere.
+ */
+export interface Competition {
+  id: string
+  name: string
+  abbrev: string
+  /** Host nation (display + scouting region). */
+  nation: string
+  /** Division level within its nation: 1 = top tier, 2, 3 … */
+  level: number
+  /** EHM league reputation (~0–20; higher = stronger). */
+  reputation: number
+  /** NHL-equivalency strength factor in (0,1]; NHL = 1.0. See leagueStrength.ts. */
+  strength: number
+  /** How deeply this league is simulated/shown. */
+  tier: CompetitionTier
+  /** Parent/affiliate competition id (e.g. an AHL league's NHL parent), if any. */
+  parentId?: string
+  /** Junior age cap, if a junior league — drives prospect eligibility. */
+  upperAgeLimit?: number
+  teamIds: TeamId[]
+  schedule: ScheduledGame[]
+  standings: Standing[]
+}
+
 export interface League {
   id: LeagueId
   name: string
@@ -84,4 +124,11 @@ export interface League {
    * Initialised as fresh Standing objects; updated in parallel with NHL standings.
    */
   ahlStandings?: Standing[]
+  /**
+   * The wider hockey world: feeders + international leagues beyond the NHL,
+   * each a quick-sim/background competition with its own teams/schedule/
+   * standings/strength. Additive — absent on old saves and on the
+   * generated (non-mod) league. Teams referenced here live in LeagueData.teams.
+   */
+  competitions?: Competition[]
 }
