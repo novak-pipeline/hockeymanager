@@ -196,6 +196,24 @@ export function InboxScreen(): JSX.Element {
     return b.id.localeCompare(a.id)
   })
 
+  // FM-style date grouping: newest day first; within a day, unread first then id desc.
+  const dayGroups: Array<{ day: number; year: number; items: NewsItem[] }> = []
+  {
+    const byDay = new Map<number, NewsItem[]>()
+    for (const it of visible) {
+      const arr = byDay.get(it.day)
+      if (arr) arr.push(it)
+      else byDay.set(it.day, [it])
+    }
+    for (const day of [...byDay.keys()].sort((a, b) => b - a)) {
+      const its = byDay.get(day)!.sort((a, b) => {
+        if (a.read !== b.read) return a.read ? 1 : -1
+        return b.id.localeCompare(a.id)
+      })
+      dayGroups.push({ day, year: its[0]!.year, items: its })
+    }
+  }
+
   async function handleSelect(item: NewsItem) {
     setSelected(item)
     if (!item.read) {
@@ -308,13 +326,32 @@ export function InboxScreen(): JSX.Element {
             </div>
           ) : (
             <div style={{ display: 'grid' }}>
-              {sorted.map((item, idx) => {
-                const meta = CATEGORY_META[item.category]
-                const isSelected = selected?.id === item.id
-                const isLast = idx === sorted.length - 1
+              {dayGroups.map((group) => (
+                <div key={group.day} style={{ display: 'grid' }}>
+                  <div
+                    style={{
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      padding: '5px var(--sp-3)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      textTransform: 'uppercase',
+                      color: 'var(--muted)',
+                      background: 'var(--panel, #1a1a24)',
+                      borderBottom: '1px solid var(--line)',
+                    }}
+                  >
+                    Day {group.day} · {fmtDate(`${group.year}-10-01`)}
+                  </div>
+                  {group.items.map((item, idx) => {
+                    const meta = CATEGORY_META[item.category]
+                    const isSelected = selected?.id === item.id
+                    const isLast = idx === group.items.length - 1
 
-                return (
-                  <button
+                    return (
+                      <button
                     key={item.id}
                     type="button"
                     onClick={() => handleSelect(item)}
@@ -413,8 +450,10 @@ export function InboxScreen(): JSX.Element {
                       </div>
                     </span>
                   </button>
-                )
-              })}
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           )}
         </div>
