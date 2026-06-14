@@ -32,6 +32,7 @@ export type ScreenId =
   | 'teamDynamics'
   | 'teamMedical'
   | 'teamDevelopment'
+  | 'teamPlanner'
   // League section
   | 'leagueOverview'
   | 'standings'
@@ -79,6 +80,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'teamDynamics':
     case 'teamMedical':
     case 'teamDevelopment':
+    case 'teamPlanner':
       return 'team'
     case 'leagueOverview':
     case 'standings':

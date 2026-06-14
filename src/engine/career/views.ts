@@ -1275,6 +1275,15 @@ export interface MedicalView {
 /** Development Center re-exports (builder owns the shapes). Response to 'getDevelopment'. */
 export type { DevelopmentRow, DevelopmentCenterView } from './developmentCenter'
 
+/** Squad Planner re-exports (builder owns the shapes). Response to 'getSquadPlanner'. */
+export type {
+  SquadPlannerView,
+  PlannerPlayer,
+  PositionDepth,
+  CareerStage,
+  PosGroup,
+} from './squadPlanner'
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

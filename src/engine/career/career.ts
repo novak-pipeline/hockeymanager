@@ -239,6 +239,7 @@ import {
 import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
+import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
   buildAhlSquadView,
@@ -4423,6 +4424,13 @@ export class Career {
       affiliate,
       stars,
     })
+  }
+
+  /** Squad Planner: experience matrix + depth/age/contract report for the user club. */
+  getSquadPlanner(): SquadPlannerView {
+    const team = this.data.teams.get(this.userTeamId)
+    const roster = (team?.roster ?? []).map((id) => this.resolve(id))
+    return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster })
   }
 
   /** Legends registry for a club, most recent first. */

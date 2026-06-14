@@ -65,6 +65,7 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
       defaultScreen: 'squad',
       subTabs: [
         { id: 'squad',        label: 'Roster' },
+        { id: 'teamPlanner',  label: 'Planner' },
         { id: 'teamStats',    label: 'Statistics' },
         { id: 'teamDataHub',  label: 'Analytics' },
         { id: 'teamDynamics', label: 'Dynamics' },
@@ -333,7 +334,7 @@ export function TopNav(props: {
         <nav className="topnav-row3">
           {currentSection.subTabs.map((tab) => {
             // Management-only tabs are disabled when browsing another team
-            const isManagementTab = ['report', 'personnel', 'practice', 'tactics', 'finances', 'teamMedical', 'teamDevelopment'].includes(tab.id)
+            const isManagementTab = ['report', 'personnel', 'practice', 'tactics', 'finances', 'teamMedical', 'teamDevelopment', 'teamPlanner'].includes(tab.id)
             const disabledForOtherTeam = isViewingOtherTeam && isManagementTab
             return (
               <button
