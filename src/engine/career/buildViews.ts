@@ -515,6 +515,34 @@ export interface MindsetBuildCtx {
   isOwn: boolean
 }
 
+/**
+ * EHM-style position proficiency: natural first, then secondary positions a
+ * player can fill, graded by versatility. A high-versatility winger can be
+ * "Accomplished" on the off wing; a low one only "Unproved".
+ */
+function buildPositions(p: Player): Array<{ pos: string; level: 'Natural' | 'Accomplished' | 'Competent' | 'Unproved' }> {
+  const v = p.versatility ?? 35 // 0–99
+  const score = (base: number): number => Math.min(99, Math.max(0, base + (v - 35) * 0.6))
+  const lvl = (s: number): 'Natural' | 'Accomplished' | 'Competent' | 'Unproved' =>
+    s >= 82 ? 'Natural' : s >= 62 ? 'Accomplished' : s >= 42 ? 'Competent' : 'Unproved'
+  const out: Array<{ pos: string; level: 'Natural' | 'Accomplished' | 'Competent' | 'Unproved' }> = []
+  const push = (pos: string, s: number): void => { out.push({ pos, level: lvl(s) }) }
+  switch (p.position) {
+    case 'C':  push('C', 100); push('LW', score(58)); push('RW', score(58)); break
+    case 'LW': push('LW', 100); push('RW', score(55)); push('C', score(46)); break
+    case 'RW': push('RW', 100); push('LW', score(55)); push('C', score(46)); break
+    case 'W':  push(p.handedness === 'R' ? 'RW' : 'LW', 100); push(p.handedness === 'R' ? 'LW' : 'RW', score(70)); push('C', score(42)); break
+    case 'D': {
+      const nat = p.handedness === 'R' ? 'RD' : 'LD'
+      const off = p.handedness === 'R' ? 'LD' : 'RD'
+      push(nat, 100); push(off, score(60)); break
+    }
+    case 'G':  push('G', 100); break
+    default:   push(p.position, 100)
+  }
+  return out
+}
+
 export function buildPlayerProfile(
   ctx: ViewCtx,
   playerId: PlayerId,
@@ -598,6 +626,48 @@ export function buildPlayerProfile(
           : null,
     }))
 
+  // Real season-by-season career history imported from the source DB (older
+  // years only, so it sits below the in-sim seasons). Display-only.
+  const clubAbbr = (name: string): string => {
+    const words = name.replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/)
+    const last = words[words.length - 1] ?? name
+    return last.slice(0, 3).toUpperCase()
+  }
+  const dbHistory = (p.careerHistory ?? [])
+    .filter((s) => s.year < ctx.year)
+    .map((s) => ({
+      year: s.year,
+      teamAbbr: clubAbbr(s.club),
+      skater:
+        p.position === 'G'
+          ? null
+          : {
+              gamesPlayed: s.gamesPlayed,
+              goals: s.goals,
+              assists: s.assists,
+              points: s.goals + s.assists,
+              plusMinus: s.plusMinus,
+              penaltyMinutes: s.penaltyMinutes,
+              shots: 0,
+              toiPerGame: 0,
+              ppGoals: 0,
+              ppAssists: 0,
+            },
+      goalie:
+        p.position === 'G'
+          ? {
+              gamesPlayed: s.gamesPlayed,
+              wins: s.wins,
+              losses: s.losses,
+              savePct: s.saves + s.goalsAgainst > 0 ? s.saves / (s.saves + s.goalsAgainst) : 0,
+              goalsAgainstAverage: s.minutes > 0 ? (s.goalsAgainst * 60) / s.minutes : 0,
+              shutouts: s.shutouts,
+              saves: s.saves,
+              shotsAgainst: s.saves + s.goalsAgainst,
+            }
+          : null,
+    }))
+
   // Phase B: radar, personalityReads, bio, honours, profileContract, scoutReport
   const radar: RadarView = computeRadar(p.ratings, p.composites)
   const personalityReads: PersonalityReadView =
@@ -620,7 +690,8 @@ export function buildPlayerProfile(
     ? buildScoutVerdict(
         p,
         Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2)),
-        potStars
+        potStars,
+        teamId !== null,
       )
     : undefined
 
@@ -643,6 +714,7 @@ export function buildPlayerProfile(
     ...badge(p, fog),
     teamId,
     teamName,
+    positions: buildPositions(p),
     ...(teamColors !== undefined ? { teamColors } : {}),
     handedness: p.handedness,
     role: p.role,
@@ -661,7 +733,7 @@ export function buildPlayerProfile(
       label,
       value: Math.round((p.composites as unknown as Record<string, number>)[key] ?? 0),
     })),
-    seasons: [currentSeason, ...history],
+    seasons: [currentSeason, ...history, ...dbHistory],
     // Phase B additions
     radar,
     personalityReads,

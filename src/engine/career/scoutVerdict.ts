@@ -48,20 +48,39 @@ function comp(p: Player, key: string): number {
   return (p.composites as unknown as Record<string, number>)[key] ?? 50
 }
 
-/** Build the verdict. `currentStars` / `potentialStars` come from the caller. */
-export function buildScoutVerdict(p: Player, currentStars: number, potentialStars: number): ScoutVerdict {
+/**
+ * Build the verdict. `currentStars` / `potentialStars` come from the caller.
+ * `signed` — when true the player is already on a club, so the headline reads as
+ * an assessment of his value to the roster rather than a transfer recommendation.
+ */
+export function buildScoutVerdict(
+  p: Player,
+  currentStars: number,
+  potentialStars: number,
+  signed = false,
+): ScoutVerdict {
   const ovr = overall(p.composites, p.position)
   const arch = classifyArchetype(p)
   const meta = ARCHETYPE_META[arch.archetype]
 
-  // Recommendation from ceiling + current, nudged by age.
+  // Recommendation: assessment phrasing for rostered players, signing phrasing
+  // for free agents / acquisition targets.
   let recommendation: string
-  const ceiling = Math.max(currentStars, potentialStars)
-  if (ceiling >= 4.5) recommendation = 'Would be a marquee signing.'
-  else if (ceiling >= 4) recommendation = 'Would be an excellent signing.'
-  else if (ceiling >= 3) recommendation = 'Would be a solid addition.'
-  else if (ceiling >= 2) recommendation = 'A useful depth option.'
-  else recommendation = 'Not worth pursuing at this level.'
+  if (signed) {
+    const young = p.age <= 23 && potentialStars > currentStars
+    if (currentStars >= 4.5) recommendation = 'A franchise cornerstone.'
+    else if (currentStars >= 4) recommendation = 'A genuine top-line talent.'
+    else if (currentStars >= 3) recommendation = young ? 'A rising contributor with more to come.' : 'A solid, dependable contributor.'
+    else if (currentStars >= 2) recommendation = young ? 'A developing prospect worth patience.' : 'A useful depth player.'
+    else recommendation = young ? 'A raw project for the system.' : 'A fringe roster player.'
+  } else {
+    const ceiling = Math.max(currentStars, potentialStars)
+    if (ceiling >= 4.5) recommendation = 'Would be a marquee signing.'
+    else if (ceiling >= 4) recommendation = 'Would be an excellent signing.'
+    else if (ceiling >= 3) recommendation = 'Would be a solid addition.'
+    else if (ceiling >= 2) recommendation = 'A useful depth option.'
+    else recommendation = 'Not worth pursuing at this level.'
+  }
 
   const pros: string[] = []
   const cons: string[] = []

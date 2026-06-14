@@ -5,6 +5,30 @@
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+/** Nation name (as imported from the EHM DB) → ISO-3166 alpha-2 for flag emoji. */
+const NATION_ISO: Record<string, string> = {
+  canada: 'CA', 'united states': 'US', usa: 'US', america: 'US', russia: 'RU',
+  sweden: 'SE', finland: 'FI', 'czech republic': 'CZ', czechia: 'CZ', czech: 'CZ',
+  slovakia: 'SK', switzerland: 'CH', germany: 'DE', denmark: 'DK', norway: 'NO',
+  latvia: 'LV', austria: 'AT', france: 'FR', belarus: 'BY', slovenia: 'SI',
+  kazakhstan: 'KZ', ukraine: 'UA', 'great britain': 'GB', 'united kingdom': 'GB',
+  england: 'GB', italy: 'IT', netherlands: 'NL', poland: 'PL', japan: 'JP',
+  'south korea': 'KR', korea: 'KR', china: 'CN', australia: 'AU', estonia: 'EE',
+  lithuania: 'LT', hungary: 'HU', croatia: 'HR', ireland: 'IE', spain: 'ES',
+}
+
+/**
+ * Country flag emoji for a nation name. Returns '' when unknown so callers can
+ * fall back to the plain text label.
+ */
+export function flagEmoji(nationality?: string): string {
+  if (!nationality) return ''
+  const iso = NATION_ISO[nationality.trim().toLowerCase()]
+  if (!iso) return ''
+  const A = 0x1f1e6
+  return String.fromCodePoint(A + (iso.charCodeAt(0) - 65), A + (iso.charCodeAt(1) - 65))
+}
+
 /** '2026-10-12' → '12 Oct 2026'. Returns the input unchanged if malformed. */
 export function fmtDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)

@@ -346,9 +346,17 @@ export interface ProfileContractView extends ContractView {
   freeAgentStatus: 'RFA' | 'UFA' | null
 }
 
+/** EHM-style position proficiency for one position. */
+export interface PositionProficiencyView {
+  pos: string
+  level: 'Natural' | 'Accomplished' | 'Competent' | 'Unproved'
+}
+
 export interface PlayerProfileView extends PlayerBadge {
   teamId: string | null
   teamName: string | null
+  /** Positions the player can play, with proficiency (natural first). */
+  positions: PositionProficiencyView[]
   /** Team jersey colors as 0xRRGGBB ints — absent when player is a free agent. */
   teamColors?: { primary: number; secondary: number }
   handedness: 'L' | 'R'

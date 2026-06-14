@@ -471,6 +471,95 @@ a:hover { text-decoration: underline; }
    APP SHELL — top-nav layout
    ═══════════════════════════════════════ */
 
+/* ════════════ Player Profile (FM-style overview) ════════════ */
+.pp-headband {
+  display: grid;
+  grid-template-columns: auto 1.1fr 1.1fr 1.4fr auto;
+  gap: var(--sp-4);
+  align-items: start;
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+}
+.pp-photo {
+  position: relative; flex-shrink: 0; overflow: hidden;
+  width: 132px; min-height: 150px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px 8px 8px;
+  border-radius: var(--radius);
+  background: linear-gradient(160deg, var(--bg2) 0%, rgba(0,0,0,0.3) 100%);
+  border: 1px solid var(--line);
+}
+.pp-photo-watermark {
+  position: absolute; top: -6px; right: 4px;
+  font-size: 64px; font-weight: 900; line-height: 1;
+  color: rgba(255,255,255,0.12); pointer-events: none; user-select: none;
+}
+.pp-photo-name {
+  font-size: 11px; font-weight: 700; color: #fff; text-align: center;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6); z-index: 1;
+}
+.pp-band-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pp-band-row { font-size: 13px; }
+.pp-band-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--muted); margin-bottom: 2px;
+}
+.pp-band-abilities { gap: var(--sp-3); }
+.pp-ability { display: flex; flex-direction: column; gap: 2px; }
+
+.pp-body {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.pp-attr-head {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--accent2); font-weight: 700;
+  border-bottom: 1px solid var(--line); padding-bottom: 3px; margin-bottom: 4px;
+}
+.pp-attr-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; padding: 1.5px 0; font-size: 12px;
+}
+.pp-attr-name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-attr-val { font-weight: 700; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+.pp-meta-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px var(--sp-4);
+  border-top: 1px solid var(--line); margin-top: var(--sp-3); padding-top: var(--sp-3);
+}
+.pp-meta-grid > div { display: flex; justify-content: space-between; font-size: 12px; }
+
+.pp-proscons { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.pp-pros-head, .pp-cons-head {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 3px 8px; border-radius: 4px; margin-bottom: 6px; color: #fff;
+}
+.pp-pros-head { background: var(--success); }
+.pp-cons-head { background: var(--danger); }
+.pp-pro, .pp-con { font-size: 11.5px; line-height: 1.5; }
+.pp-pro { color: var(--text); }
+.pp-con { color: var(--text); }
+
+.pp-vitals { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); text-align: center; }
+.pp-vital { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+
+.pp-role-row { display: flex; align-items: center; gap: 6px; }
+.pp-role-name { font-size: 12px; font-weight: 600; }
+
+.pp-stats-band { display: grid; grid-template-columns: 1.5fr 1fr 0.7fr; gap: var(--sp-3); align-items: start; }
+
+/* position proficiency list under the rink */
+.pp-pos-list { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: 2px; }
+.pp-pos-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; padding: 1px 0; }
+.pp-pos-tag { font-weight: 700; color: var(--text); }
+.pp-pos-level { font-size: 11px; font-weight: 600; }
+
 .app-shell {
   display: flex;
   flex-direction: column;

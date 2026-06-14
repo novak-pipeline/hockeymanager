@@ -211,6 +211,28 @@ export interface ModPlayer {
 
   /** Preferred junior league / development pathway string. */
   juniorPreference?: string
+
+  /** Real season-by-season career history (newest first). Display-only. */
+  careerHistory?: ModCareerSeason[]
+}
+
+/** One historical season row as emitted by the EHM importer (raw field names). */
+export interface ModCareerSeason {
+  year: number
+  club: string
+  league: string
+  gp: number
+  g: number
+  a: number
+  pim: number
+  plusMinus: number
+  mins: number
+  ga: number
+  so: number
+  w: number
+  l: number
+  otl: number
+  saves: number
 }
 
 /**
@@ -842,7 +864,27 @@ function bioFields(mp: ModPlayer): Partial<Player> {
     ...(mp.nhlDraftEligible !== undefined ? { nhlDraftEligible: mp.nhlDraftEligible } : {}),
     ...(mp.nhlDrafted !== undefined ? { nhlDrafted: mp.nhlDrafted } : {}),
     // Junior preference
-    ...(mp.juniorPreference !== undefined ? { juniorPreference: mp.juniorPreference } : {})
+    ...(mp.juniorPreference !== undefined ? { juniorPreference: mp.juniorPreference } : {}),
+    // Real season-by-season career history (importer raw names → domain names)
+    ...(mp.careerHistory !== undefined ? {
+      careerHistory: mp.careerHistory.map((s) => ({
+        year: s.year,
+        club: s.club,
+        league: s.league,
+        gamesPlayed: s.gp,
+        goals: s.g,
+        assists: s.a,
+        penaltyMinutes: s.pim,
+        plusMinus: s.plusMinus,
+        minutes: s.mins,
+        goalsAgainst: s.ga,
+        shutouts: s.so,
+        wins: s.w,
+        losses: s.l,
+        otLosses: s.otl,
+        saves: s.saves,
+      })),
+    } : {})
   }
 }
 

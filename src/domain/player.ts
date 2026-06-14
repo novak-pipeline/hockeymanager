@@ -164,4 +164,30 @@ export interface Player {
 
   /** Preferred junior league / development pathway string from source DB. */
   juniorPreference?: string
+
+  /**
+   * Real season-by-season career history imported from the source DB. Newest
+   * first. Absent on fictional players. Display-only — the sim never reads it.
+   */
+  careerHistory?: CareerSeasonRecord[]
+}
+
+/** One historical season row from the source DB (skater + goalie fields). */
+export interface CareerSeasonRecord {
+  year: number
+  club: string
+  league: string
+  gamesPlayed: number
+  goals: number
+  assists: number
+  penaltyMinutes: number
+  plusMinus: number
+  /** Goalie: minutes played. */
+  minutes: number
+  goalsAgainst: number
+  shutouts: number
+  wins: number
+  losses: number
+  otLosses: number
+  saves: number
 }

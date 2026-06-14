@@ -480,6 +480,76 @@ def staff_specialty(r, role):
     return None
 
 
+# player_career_history.xlsx column indices (positional).
+CH_FIRST, CH_SECOND, CH_DOB = 1, 2, 3
+CH_ONLOAN, CH_PLAYOFFS, CH_YEAR, CH_CLUB, CH_COMP = 4, 5, 6, 7, 8
+CH_GP, CH_G, CH_A, CH_PIM, CH_PM = 9, 10, 11, 12, 13
+CH_MINS, CH_GA, CH_SO, CH_W, CH_L, CH_TOT, CH_SAVES = 14, 15, 16, 17, 18, 19, 20
+
+
+def find_career_history(input_xlsx):
+    """Locate player_career_history.xlsx: sibling of the input, the repo's
+    'mods/spreadsheet exports' folder, or the EHM_CAREER_HISTORY env override."""
+    env = os.environ.get("EHM_CAREER_HISTORY")
+    if env and os.path.exists(env):
+        return env
+    sibling = os.path.join(os.path.dirname(os.path.abspath(input_xlsx)), "player_career_history.xlsx")
+    if os.path.exists(sibling):
+        return sibling
+    repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    guess = os.path.join(repo, "mods", "spreadsheet exports", "player_career_history.xlsx")
+    return guess if os.path.exists(guess) else None
+
+
+def load_career_history(path, keep_keys):
+    """Stream the (large) career-history sheet, keeping regular-season rows only
+    for players in keep_keys (norm first_last_dob). Returns key -> [season dicts]."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it)  # header
+    out = {}
+    for r in it:
+        if str(r[CH_PLAYOFFS] or "").strip().lower() == "y":
+            continue  # regular season only
+        first = str(r[CH_FIRST] or "").strip()
+        last = str(r[CH_SECOND] or "").strip()
+        dob = str(r[CH_DOB] or "")
+        parts = dob.split(".")
+        if len(parts) != 3:
+            continue
+        key = norm(f"{first}_{last}_{'_'.join(parts)}")
+        if key not in keep_keys:
+            continue
+        gp = to_int(r[CH_GP], 0)
+        if gp <= 0:
+            continue
+        out.setdefault(key, []).append({
+            "year": to_int(r[CH_YEAR], 0),
+            "club": str(r[CH_CLUB] or "").strip(),
+            "league": str(r[CH_COMP] or "").strip(),
+            "gp": gp,
+            "g": to_int(r[CH_G], 0),
+            "a": to_int(r[CH_A], 0),
+            "pim": to_int(r[CH_PIM], 0),
+            "plusMinus": to_int(r[CH_PM], 0),
+            "mins": to_int(r[CH_MINS], 0),
+            "ga": to_int(r[CH_GA], 0),
+            "so": to_int(r[CH_SO], 0),
+            "w": to_int(r[CH_W], 0),
+            "l": to_int(r[CH_L], 0),
+            "otl": to_int(r[CH_TOT], 0),
+            "saves": to_int(r[CH_SAVES], 0),
+        })
+    wb.close()
+    # Newest first, cap to a sane number of seasons per player.
+    for k in out:
+        out[k].sort(key=lambda s: -s["year"])
+        del out[k][25:]
+    return out
+
+
 def main():
     xlsx, out_dir = sys.argv[1], sys.argv[2]
     facedirs = sys.argv[3:]
@@ -575,6 +645,7 @@ def main():
             "faceId": face_id,
             "_ca": ca,
             "_pa": pa,
+            "_key": face_id,  # norm(first_last_dob) — joins to player_career_history
             **extended,
         }
         contract = contract_from_row(r)
@@ -599,6 +670,25 @@ def main():
             nhl_teams[nhl_nick].append(player)
         else:
             ahl_teams[ahl_kw].append(player)
+
+    # Attach real season-by-season career history from the DB export, for the
+    # players we actually kept (NHL rosters + AHL affiliates + overflow).
+    all_players = [p for plist in nhl_teams.values() for p in plist] + \
+                  [p for plist in ahl_teams.values() for p in plist]
+    keep_keys = {p["_key"] for p in all_players if p.get("_key")}
+    hist_path = find_career_history(xlsx)
+    if hist_path:
+        print(f"  career history: {hist_path}")
+        career = load_career_history(hist_path, keep_keys)
+        attached = 0
+        for p in all_players:
+            k = p.get("_key")
+            if k and k in career:
+                p["careerHistory"] = career[k]
+                attached += 1
+        print(f"  career history attached to {attached}/{len(all_players)} players")
+    else:
+        print("  career history: not found (skipping) — set EHM_CAREER_HISTORY or place player_career_history.xlsx beside the export")
 
     # Build face index from the facepack dirs (filename without .png -> path).
     face_index = {}
