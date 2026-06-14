@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import type { AhlStandingsView, StandingRowView, StandingsView } from '../../worker/protocol'
-import { crestColor } from '../components/format'
+import { useMemo, useState } from 'react'
+import type { AhlStandingsView, LeagueTeamsView, StandingsView } from '../../worker/protocol'
+import type { StandingRowView } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { CrestView } from '../components/Crest'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
 import { useUserTeamId } from '../components/UserTeamContext'
@@ -156,6 +157,16 @@ function StandingsTable(props: {
   const { rows, playoffLine } = props
   const nav = useNav()
   const userTeamId = useUserTeamId()
+  const client = useClient()
+  const { data: leagueTeams } = useScreenData<LeagueTeamsView>(
+    () => client.getLeagueTeams(),
+    (r) => (r.type === 'leagueTeams' ? r.teams : null)
+  )
+  const colorOf = useMemo(() => {
+    const m = new Map<string, { primary: number; secondary: number }>()
+    if (leagueTeams) for (const t of [...leagueTeams.nhl, ...leagueTeams.ahl]) if (t.colors) m.set(t.teamId, t.colors)
+    return m
+  }, [leagueTeams])
 
   return (
     <div className="table-wrap">
@@ -195,19 +206,13 @@ function StandingsTable(props: {
                 <td className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
                 <td>
                   <span className="row" style={{ gap: 'var(--sp-2)' }}>
-                    <span
+                    <CrestView
                       className="crest"
-                      style={{
-                        background: crestColor(row.teamId),
-                        width: 20,
-                        height: 20,
-                        fontSize: 9,
-                        border: 'none',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {row.abbreviation.slice(0, 2)}
-                    </span>
+                      teamId={row.teamId}
+                      abbr={row.abbreviation.slice(0, 2)}
+                      {...(colorOf.get(row.teamId) ? { colors: colorOf.get(row.teamId)! } : {})}
+                      style={{ width: 20, height: 20, fontSize: 9, flexShrink: 0 }}
+                    />
                     <button
                       type="button"
                       className="player-link"
