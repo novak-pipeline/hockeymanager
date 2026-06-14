@@ -846,11 +846,20 @@ function TabProfile({
                 <div className="pp-attr-head">{group.name}</div>
                 {group.attributes.map((a) => {
                   const v20 = to20(a.value)
+                  // Always show the scout's best estimate once scouted at all;
+                  // an uncertain read is muted (and carries the lo–hi range on hover).
+                  const band = a.masked && a.lo !== undefined && a.hi !== undefined
+                    ? `Estimate — scouts peg him ${to20(a.lo)}–${to20(a.hi)}`
+                    : undefined
                   return (
                     <div key={a.label} className="pp-attr-row">
                       <span className="pp-attr-name">{a.label}</span>
-                      <span className="pp-attr-val" style={{ color: a.masked ? 'var(--muted)' : attrColor20(v20) }}>
-                        {a.masked ? '?' : v20}
+                      <span
+                        className="pp-attr-val"
+                        title={band}
+                        style={{ color: a.masked ? 'var(--muted)' : attrColor20(v20) }}
+                      >
+                        {v20}{a.masked ? '*' : ''}
                       </span>
                     </div>
                   )
@@ -1198,6 +1207,18 @@ function repTier(v: number): string {
   if (v < 175) return 'World Class'
   if (v < 190) return 'Superstar'
   return 'Global Icon'
+}
+
+/** Plain-English read of how well a player is known (0–100 scouting knowledge),
+ *  instead of a raw percentage. */
+function knowledgeProse(k: number): string {
+  if (k >= 95) return 'Know him inside out'
+  if (k >= 82) return 'Very well scouted'
+  if (k >= 68) return 'Well scouted'
+  if (k >= 52) return 'A decent read — could use another look'
+  if (k >= 38) return 'A rough read so far'
+  if (k >= 22) return 'Only had a few looks'
+  return 'Barely scouted yet'
 }
 
 /** Map an overall (40–99) onto the 0–200 reputation scale (40→70, 99→200). */
@@ -1603,7 +1624,7 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
                   <span className="muted small">–</span>
                   <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={20} />
                   <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
-                    {sr.knowledge}% scouted
+                    {knowledgeProse(sr.knowledge)}
                   </span>
                 </div>
               ) : (
@@ -1643,9 +1664,9 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
           {sr.generalImpressions}
         </p>
-        {sr.knowledge < 50 && (
+        {sr.knowledge < 68 && (
           <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
-            Scout knowledge is limited at {sr.knowledge}%. Assign a scout to this player for a more complete picture.
+            {knowledgeProse(sr.knowledge)} — the attribute reads are estimates (marked *). Assign a scout for a sharper picture.
           </p>
         )}
       </Panel>
