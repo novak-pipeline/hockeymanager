@@ -21,7 +21,7 @@ import type {
 export type { RadarAxes, RadarView } from '@engine/ratings/radar'
 export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
-export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection, AttributeGrades } from '@engine/career/scoutReport'
+export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
 export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 export type { OpinionSnapshot } from '@engine/career/opinionTracker'

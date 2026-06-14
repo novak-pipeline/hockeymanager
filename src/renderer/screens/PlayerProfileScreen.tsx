@@ -13,7 +13,7 @@
  * (dropdown) → overlays their radar via client.compareRadar() and shows
  * key-stat lines side by side.
  */
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
 import type {
   SkaterSeasonLine,
@@ -26,7 +26,6 @@ import type {
   ScoutPanel,
   ScoutRead,
   RiskBand,
-  AttributeGrades,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -304,76 +303,87 @@ function InfoRow({ label, value }: { label: string; value: string | number | nul
 
 /* ── Report card grade display ── */
 function gradeColor(g: ReportGrade): string {
-  if (g === 'A+' || g === 'A') return 'var(--success)'
-  if (g === 'B+' || g === 'B') return 'rgba(52,211,153,0.85)'
-  if (g === 'C+' || g === 'C') return 'var(--accent2)'
-  return 'var(--danger)'
+  if (g === 'A+' || g === 'A') return 'var(--success, #4caf72)'
+  if (g === 'B+' || g === 'B') return 'rgba(52,211,153,0.9)'
+  if (g === 'C+' || g === 'C') return 'var(--accent2, #e0b341)'
+  if (g === 'D') return '#e08a3c'
+  return 'var(--danger, #d8584f)'
 }
 
-function ReportCardRow({ label, grade }: { label: string; grade: ReportGrade }): JSX.Element {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderTop: '1px solid var(--line)' }}>
-      <span className="muted small">{label}</span>
-      <span style={{ fontWeight: 700, fontSize: 14, color: gradeColor(grade), minWidth: 28, textAlign: 'right' }}>{grade}</span>
-    </div>
-  )
+const GRADE_ORDER: ReportGrade[] = ['F', 'D', 'C', 'C+', 'B', 'B+', 'A', 'A+']
+/** Bar fill fraction for a letter grade (F ≈ 0.13 … A+ = 1.0). */
+function gradeFill(g: ReportGrade): number {
+  return (GRADE_ORDER.indexOf(g) + 1) / GRADE_ORDER.length
 }
 
-function ReportCardPanel({ card, isGoalie }: { card: ReportCard; isGoalie: boolean }): JSX.Element {
+/** One EP-style graded tile: area label, big letter grade, fill bar. */
+function GradeTile({ label, grade }: { label: string; grade: ReportGrade }): JSX.Element {
+  const color = gradeColor(grade)
   return (
-    <div>
-      <ReportCardRow label="Hockey Sense" grade={card.hockeyIQ} />
-      <ReportCardRow label="Skating" grade={card.skating} />
-      {isGoalie
-        ? <ReportCardRow label="Goaltending" grade={card.goaltending ?? 'C'} />
-        : <>
-            <ReportCardRow label="Shot / Scoring" grade={card.shotScoring} />
-            <ReportCardRow label="Puck Handling" grade={card.puckhandling} />
-            <ReportCardRow label="Defence" grade={card.defence} />
-            <ReportCardRow label="Physicality" grade={card.physicality} />
-          </>}
-    </div>
-  )
-}
-
-/** EP draft-guide-style 1–9 attribute grade row. */
-function AttributeGradeRow({ grades, isGoalie }: { grades: AttributeGrades; isGoalie: boolean }): JSX.Element {
-  const cells: Array<{ label: string; value: number }> = isGoalie
-    ? [
-        { label: 'Skating', value: grades.skating },
-        { label: 'Hockey Sense', value: grades.hockeySense },
-        { label: 'Goaltending', value: grades.goaltending ?? 5 },
-        { label: 'Physical', value: grades.physical },
-      ]
-    : [
-        { label: 'Skating', value: grades.skating },
-        { label: 'Shooting', value: grades.shooting },
-        { label: 'Passing', value: grades.passing },
-        { label: 'Puckhandling', value: grades.puckhandling },
-        { label: 'Hockey Sense', value: grades.hockeySense },
-        { label: 'Physical', value: grades.physical },
-      ]
-  // Colour ramp: 1 (poor) → red, 5 (avg) → muted, 9 (elite) → green.
-  const colorFor = (v: number): string =>
-    v >= 7 ? 'var(--success, #4caf72)' : v >= 5 ? 'var(--accent2, #e0b341)' : v >= 3.5 ? 'var(--muted)' : 'var(--danger, #d8584f)'
-  const fmt = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(1))
-  return (
-    <div>
-      <div className="stat-label" style={{ marginBottom: 6 }}>Attribute Grades (1–9)</div>
-      <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-        {cells.map((c) => (
-          <div key={c.label} style={{ textAlign: 'center', minWidth: 64, flex: '1 1 64px' }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: colorFor(c.value), lineHeight: 1.1 }}>{fmt(c.value)}</div>
-            <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{c.label}</div>
-            <div style={{ height: 3, marginTop: 4, borderRadius: 2, background: 'var(--line)' }}>
-              <div style={{ height: 3, borderRadius: 2, width: `${(c.value / 9) * 100}%`, background: colorFor(c.value) }} />
-            </div>
-          </div>
-        ))}
+    <div style={{
+      flex: '1 1 0', minWidth: 78, textAlign: 'center',
+      padding: '10px 6px 8px', borderRadius: 'var(--radius-sm)',
+      background: 'rgba(255,255,255,0.025)', border: '1px solid var(--line)',
+    }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{grade}</div>
+      <div className="muted" style={{ fontSize: 10, margin: '5px 0 6px', letterSpacing: 0.2 }}>{label}</div>
+      <div style={{ height: 3, borderRadius: 2, background: 'var(--line)' }}>
+        <div style={{ height: 3, borderRadius: 2, width: `${gradeFill(grade) * 100}%`, background: color }} />
       </div>
     </div>
   )
 }
+
+/** EP draft-guide-style graded attribute strip (letter grades, not numbers). */
+function ReportCardStrip({ card, isGoalie }: { card: ReportCard; isGoalie: boolean }): JSX.Element {
+  const tiles: Array<{ label: string; grade: ReportGrade }> = isGoalie
+    ? [
+        { label: 'Hockey Sense', grade: card.hockeyIQ },
+        { label: 'Skating', grade: card.skating },
+        { label: 'Goaltending', grade: card.goaltending ?? 'C' },
+        { label: 'Physical', grade: card.physicality },
+      ]
+    : [
+        { label: 'Hockey Sense', grade: card.hockeyIQ },
+        { label: 'Skating', grade: card.skating },
+        { label: 'Shot / Scoring', grade: card.shotScoring },
+        { label: 'Puckhandling', grade: card.puckhandling },
+        { label: 'Defence', grade: card.defence },
+        { label: 'Physical', grade: card.physicality },
+      ]
+  return (
+    <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+      {tiles.map((t) => <GradeTile key={t.label} label={t.label} grade={t.grade} />)}
+    </div>
+  )
+}
+
+/** A single "prospect grade" letter from potential stars (EP-style A+ … F). */
+function prospectGrade(stars: number): ReportGrade {
+  if (stars >= 4.75) return 'A+'
+  if (stars >= 4.25) return 'A'
+  if (stars >= 3.75) return 'B+'
+  if (stars >= 3.25) return 'B'
+  if (stars >= 2.75) return 'C+'
+  if (stars >= 2.25) return 'C'
+  if (stars >= 1.5) return 'D'
+  return 'F'
+}
+
+/** A bordered verdict tile (label over a value) for the report header. */
+function VerdictTile({ label, children, accent }: { label: string; children: ReactNode; accent?: string }): JSX.Element {
+  return (
+    <div style={{
+      flex: '1 1 0', minWidth: 110, textAlign: 'center',
+      padding: '9px 10px', borderRadius: 'var(--radius-sm)',
+      background: 'rgba(255,255,255,0.025)', border: `1px solid ${accent ?? 'var(--line)'}`,
+    }}>
+      <div className="muted" style={{ fontSize: 9, letterSpacing: 0.6, marginBottom: 5 }}>{label}</div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 20 }}>{children}</div>
+    </div>
+  )
+}
+
 
 /* ── Mindset panel ── */
 function mindsetToneColor(tone: MindsetView['tone']): string {
@@ -1687,77 +1697,77 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </Panel>
       )}
 
-      {/* ── Scout's Assessment header ── */}
-      <Panel title="Scout's Assessment">
-        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-          {/* Elevator pitch — one-line read on what he is */}
-          <div style={{
-            fontSize: 13.5,
-            fontStyle: 'italic',
-            lineHeight: 1.5,
-            color: 'var(--text)',
-            borderLeft: '3px solid var(--accent, #6c5ce7)',
-            paddingLeft: 10,
-          }}>
-            “{sr.elevatorPitch}”
+      {/* ── Scouting Report ── */}
+      <Panel title="Scouting Report">
+        <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+          {/* Hero: prospect grade badge + elevator pitch */}
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+            <div style={{
+              flex: '0 0 auto', width: 78, textAlign: 'center',
+              padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
+              background: `${gradeColor(prospectGrade(d.potentialStars))}1f`,
+              border: `1.5px solid ${gradeColor(prospectGrade(d.potentialStars))}`,
+            }}>
+              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: gradeColor(prospectGrade(d.potentialStars)) }}>
+                {prospectGrade(d.potentialStars)}
+              </div>
+              <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
+                “{sr.elevatorPitch}”
+              </div>
+              <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
+            </div>
           </div>
-          {/* Rating + potential */}
-          <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div className="stat">
+
+          {/* Verdict tiles: current / potential / projection */}
+          <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <VerdictTile label="CURRENT">
               {d.scouted && !d.scouted.exact ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={20} />
+                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={16} />
                   <span className="muted small">–</span>
-                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={20} />
-                  <span className="chip chip-warn" style={{ marginLeft: 6, fontSize: 9 }}>
-                    {knowledgeProse(sr.knowledge)}
-                  </span>
+                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={16} />
                 </div>
               ) : (
-                <StarRating stars={overallToStars(d.overall)} size={22} />
+                <StarRating stars={overallToStars(d.overall)} size={18} />
               )}
-              <div className="stat-label" style={{ marginTop: 4 }}>Rating</div>
-            </div>
-            <div className="stack" style={{ gap: 'var(--sp-1)' }}>
+            </VerdictTile>
+            <VerdictTile label="POTENTIAL">
               <PotentialStars count={d.potentialStars} />
-              <span className="muted small">Potential</span>
-            </div>
-            {/* Projection tier chip */}
-            <span style={{
-              display: 'inline-block',
-              padding: '3px 12px',
-              borderRadius: 'var(--radius-sm)',
-              background: 'rgba(0,0,0,0.25)',
-              border: `1px solid ${tierColor}`,
-              color: tierColor,
-              fontWeight: 700,
-              fontSize: 12,
-              letterSpacing: 0.5,
-            }}>
-              {sr.tierLabel}
-            </span>
+            </VerdictTile>
+            <VerdictTile label="PROJECTION" accent={tierColor}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: tierColor }}>{sr.tierLabel}</span>
+            </VerdictTile>
           </div>
 
-          {/* What the tier means, in hockey terms */}
-          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-            <span style={{ fontWeight: 700, color: tierColor }}>{sr.tierLabel}:</span> {sr.tierBlurb}
-          </div>
+          {/* What the projection means, in hockey terms */}
+          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{sr.tierBlurb}</div>
 
-          {/* 1–9 attribute grades (EP draft-guide style) */}
-          <AttributeGradeRow grades={sr.grades} isGoalie={isGoalie} />
+          {/* Report card — EP-style graded strip */}
+          <div>
+            <div className="stat-label" style={{ marginBottom: 7 }}>Scouting Grades</div>
+            <ReportCardStrip card={sr.reportCard} isGoalie={isGoalie} />
+          </div>
 
           {/* "Shades of …" comparison */}
           {d.scoutComp && (
-            <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
-              <span style={{ fontWeight: 700, color: 'var(--accent2, #e0b341)' }}>Comparison: </span>
+            <div style={{
+              padding: '9px 12px', borderRadius: 'var(--radius-sm)',
+              background: 'rgba(255,255,255,0.03)', border: '1px solid var(--line)',
+              fontSize: 12.5, lineHeight: 1.5,
+            }}>
+              <span style={{ fontWeight: 700, color: 'var(--accent2, #e0b341)' }}>Shades of · </span>
               <span style={{ color: 'var(--text)' }}>{d.scoutComp.summary}</span>
             </div>
           )}
 
-          {/* Season outlook */}
-          <span className="muted small" style={{ fontStyle: 'italic' }}>
-            {sr.seasonProjection.line}
-          </span>
+          {sr.knowledge < 68 && (
+            <div className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>
+              {knowledgeProse(sr.knowledge)} — these grades are estimates until your scouts log more viewings.
+            </div>
+          )}
         </div>
       </Panel>
 
@@ -1780,68 +1790,58 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
           {sr.generalImpressions}
         </p>
-        {sr.knowledge < 68 && (
-          <p style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
-            {knowledgeProse(sr.knowledge)} — the attribute reads are estimates (marked *). Assign a scout for a sharper picture.
-          </p>
-        )}
-        {d.analystProjection && (
-          <div style={{
-            margin: '12px 0 0',
-            padding: '10px 12px',
-            borderLeft: '3px solid var(--accent2, #e0b341)',
-            background: 'rgba(0,0,0,0.18)',
-            borderRadius: 'var(--radius-sm)',
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
-              ANALYST DRAFT PROJECTION
-            </div>
-            <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
-              {d.analystProjection}
-            </p>
-            {d.scoutDraftRead && (
-              <p style={{
-                margin: '8px 0 0',
-                paddingTop: 8,
-                borderTop: '1px solid var(--line)',
-                fontSize: 12.5,
-                lineHeight: 1.6,
-                color: 'var(--text)',
-              }}>
-                <span style={{
-                  fontWeight: 700,
-                  color: d.scoutDraftRead.verdict === 'higher' ? 'var(--success, #4caf72)'
-                    : d.scoutDraftRead.verdict === 'lower' ? 'var(--danger, #d8584f)'
-                    : 'var(--muted)',
-                }}>
-                  YOUR SCOUTS{d.scoutDraftRead.verdict === 'higher' ? ' ▲' : d.scoutDraftRead.verdict === 'lower' ? ' ▼' : ''}:{' '}
-                </span>
-                {d.scoutDraftRead.blurb}
-              </p>
-            )}
-          </div>
-        )}
       </Panel>
 
-      <div className="grid grid-2" style={{ alignItems: 'start' }}>
-        {/* ── Report card ── */}
-        <Panel title="Report Card">
-          <ReportCardPanel card={sr.reportCard} isGoalie={isGoalie} />
-        </Panel>
-
-        {/* ── Radar axes ── */}
-        <Panel title="Radar Axes">
-          <div className="stack" style={{ gap: 6 }}>
-            {RADAR_AXES.map((key) => (
-              <AttrBar
-                key={key}
-                label={AXIS_LABELS[key] ?? key}
-                value={d.radar[key]}
-              />
-            ))}
+      {/* ── Draft Projection (analyst consensus + your scouts) ── */}
+      {d.analystProjection && (
+        <Panel title="Draft Projection">
+          <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+            <div style={{ width: 4, borderRadius: 2, background: 'var(--accent2, #e0b341)', flex: '0 0 auto' }} />
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
+                ANALYST CONSENSUS
+              </div>
+              <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
+                {d.analystProjection}
+              </p>
+            </div>
           </div>
+          {d.scoutDraftRead && (
+            <div style={{ display: 'flex', gap: 'var(--sp-3)', marginTop: 12 }}>
+              <div style={{
+                width: 4, borderRadius: 2, flex: '0 0 auto',
+                background: d.scoutDraftRead.verdict === 'higher' ? 'var(--success, #4caf72)'
+                  : d.scoutDraftRead.verdict === 'lower' ? 'var(--danger, #d8584f)' : 'var(--muted)',
+              }} />
+              <div>
+                <div style={{
+                  fontSize: 11, fontWeight: 700, letterSpacing: 0.5, marginBottom: 4,
+                  color: d.scoutDraftRead.verdict === 'higher' ? 'var(--success, #4caf72)'
+                    : d.scoutDraftRead.verdict === 'lower' ? 'var(--danger, #d8584f)' : 'var(--muted)',
+                }}>
+                  YOUR SCOUTS{d.scoutDraftRead.verdict === 'higher' ? ' ▲' : d.scoutDraftRead.verdict === 'lower' ? ' ▼' : ''}
+                </div>
+                <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
+                  {d.scoutDraftRead.blurb}
+                </p>
+              </div>
+            </div>
+          )}
         </Panel>
-      </div>
+      )}
+
+      {/* ── Attribute profile ── */}
+      <Panel title="Attribute Profile">
+        <div className="stack" style={{ gap: 6 }}>
+          {RADAR_AXES.map((key) => (
+            <AttrBar
+              key={key}
+              label={AXIS_LABELS[key] ?? key}
+              value={d.radar[key]}
+            />
+          ))}
+        </div>
+      </Panel>
 
       {/* ── Multi-scout panel ── */}
       <ScoutPanelBlock panel={d.scoutPanel} />
