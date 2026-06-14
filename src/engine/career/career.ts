@@ -4554,7 +4554,7 @@ export class Career {
         pool: [...this.data.players.values()],
         knowledge: profile.scoutReport.knowledge,
       })
-      if (comp) profile.scoutComp = { names: comp.names, differentiator: comp.differentiator, summary: comp.summary }
+      if (comp) profile.scoutComp = { names: comp.names, ids: comp.ids, differentiator: comp.differentiator, summary: comp.summary }
 
       // Season bio write-up — what he's done this season.
       const totals = this.totals.get(pid)

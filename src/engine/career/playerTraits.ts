@@ -10,19 +10,34 @@ import type { Player } from '@domain'
 
 export type TraitCategory = 'offense' | 'defense' | 'physical' | 'skating' | 'goalie' | 'intangible'
 
+/** How exceptional the trait is — drives the badge colour/treatment. */
+export type TraitRarity = 'common' | 'notable' | 'rare' | 'elite'
+
 export interface PlayerTrait {
   key: string
   /** Display name, e.g. "Hammer". */
   label: string
   /** Emoji icon for the badge. */
   icon: string
-  /** Category → drives the badge colour. */
+  /** Category (playing-style group) — shown in the tooltip. */
   category: TraitCategory
+  /** Rarity tier — drives the badge colour and glow. */
+  rarity: TraitRarity
+  /** 0–100 strength of the trait. */
+  strength: number
   /** One-line meaning (tooltip). */
   blurb: string
 }
 
-interface TraitDef extends PlayerTrait {
+/** Strength → rarity tier. */
+function rarityOf(score: number): TraitRarity {
+  if (score >= 88) return 'elite'
+  if (score >= 80) return 'rare'
+  if (score >= 73) return 'notable'
+  return 'common'
+}
+
+interface TraitDef extends Omit<PlayerTrait, 'rarity' | 'strength'> {
   /** 0–100 strength; trait shows when ≥ threshold. Null = not applicable. */
   score: (ctx: TraitCtx) => number | null
   threshold: number
@@ -153,7 +168,8 @@ export function playerTraits(player: Player, max = 3): PlayerTrait[] {
     if (s !== null && s >= def.threshold) scored.push({ def, score: s })
   }
   scored.sort((a, b) => b.score - a.score)
-  return scored.slice(0, max).map(({ def }) => ({
-    key: def.key, label: def.label, icon: def.icon, category: def.category, blurb: def.blurb,
+  return scored.slice(0, max).map(({ def, score }) => ({
+    key: def.key, label: def.label, icon: def.icon, category: def.category,
+    rarity: rarityOf(score), strength: Math.round(score), blurb: def.blurb,
   }))
 }

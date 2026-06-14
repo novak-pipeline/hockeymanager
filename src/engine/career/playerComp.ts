@@ -104,6 +104,8 @@ const DIFF_AXES: DiffAxis[] = [
 export interface PlayerComp {
   /** 1–2 comparables, best first. */
   names: string[]
+  /** Player ids of the comparables (parallel to `names`) — for profile links. */
+  ids: string[]
   /** "but with a bigger frame and faster feet" — empty string if none stood out. */
   differentiator: string
   /** Archetype the prospect classifies as (drives the "shades of" framing). */
@@ -158,6 +160,9 @@ export function buildPlayerComp({ prospect, pool, knowledge }: BuildPlayerCompAr
   // A second comp only if it's nearly as close (keeps "shades of A, B" tight).
   const secondary = scored[1] && scored[1].dist - primary.dist < 14 ? scored[1] : undefined
   const names = secondary ? [primary.player.name, secondary.player.name] : [primary.player.name]
+  const ids = secondary
+    ? [primary.player.id as string, secondary.player.id as string]
+    : [primary.player.id as string]
 
   // Differentiator vs the PRIMARY comp: the 1–2 widest, above-threshold gaps.
   const diffs = DIFF_AXES
@@ -177,7 +182,7 @@ export function buildPlayerComp({ prospect, pool, knowledge }: BuildPlayerCompAr
     ? `Shades of ${shadesOf} — ${differentiator}.`
     : `Shades of ${shadesOf}.`
 
-  return { names, differentiator, archetype: arch.archetype, summary }
+  return { names, ids, differentiator, archetype: arch.archetype, summary }
 }
 
 function joinPhrases(phrases: string[]): string {

@@ -27,11 +27,11 @@ import type {
   ScoutRead,
   RiskBand,
   PlayerTrait,
-  TraitCategory,
+  TraitRarity,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
-import { useNav, TeamLink } from '../components/NavContext'
+import { useNav, TeamLink, PlayerLink } from '../components/NavContext'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -360,48 +360,50 @@ function ReportCardStrip({ card, isGoalie }: { card: ReportCard; isGoalie: boole
   )
 }
 
-/* ── Trait badges (EP-style hexagons) ── */
-const TRAIT_COLORS: Record<TraitCategory, string> = {
-  offense: 'var(--accent2, #e0b341)',
-  defense: '#4f8ef7',
-  physical: 'var(--danger, #d8584f)',
-  skating: '#2bb8a3',
-  goalie: '#9b6cf0',
-  intangible: 'var(--accent, #6c5ce7)',
+/* ── Trait badges (EP-style hexagons, coloured by rarity) ── */
+const RARITY_STYLE: Record<TraitRarity, { color: string; label: string; border: number; glow: boolean }> = {
+  elite:   { color: '#f5c542', label: 'Elite',   border: 2,   glow: true },   // gold
+  rare:    { color: '#b06cf0', label: 'Rare',    border: 2,   glow: true },   // purple
+  notable: { color: '#4f8ef7', label: 'Notable', border: 1.5, glow: false },  // blue
+  common:  { color: '#6f7891', label: 'Trait',   border: 1.5, glow: false },  // slate
 }
 
-/** A row of EP-style hexagon trait badges (icon in a hex, label beneath). */
-function TraitBadges({ traits }: { traits: PlayerTrait[] }): JSX.Element | null {
-  if (traits.length === 0) return null
+/** One hexagon trait badge — rarity colour, rarity glow, icon, label, rarity tag. */
+function TraitBadge({ trait, size = 56 }: { trait: PlayerTrait; size?: number }): JSX.Element {
   const hex = '50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%'
+  const r = RARITY_STYLE[trait.rarity]
+  const h = Math.round(size * 1.12)
   return (
-    <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-      {traits.map((t) => {
-        const color = TRAIT_COLORS[t.category]
-        return (
-          <div key={t.key} title={t.blurb} style={{ textAlign: 'center', width: 64 }}>
-            <div style={{
-              width: 52, height: 58, margin: '0 auto',
-              clipPath: `polygon(${hex})`,
-              background: `${color}22`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              position: 'relative',
-            }}>
-              {/* hex border via a slightly larger clipped layer behind */}
-              <div style={{
-                position: 'absolute', inset: 0, clipPath: `polygon(${hex})`,
-                background: color, zIndex: 0,
-              }} />
-              <div style={{
-                position: 'absolute', inset: 1.5, clipPath: `polygon(${hex})`,
-                background: 'var(--panel, #1a1d27)', zIndex: 1,
-              }} />
-              <span style={{ position: 'relative', zIndex: 2, fontSize: 22 }}>{t.icon}</span>
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 4, lineHeight: 1.1 }}>{t.label}</div>
-          </div>
-        )
-      })}
+    <div title={`${trait.label} — ${r.label} · ${trait.blurb}`} style={{ textAlign: 'center', width: size + 12 }}>
+      <div style={{
+        width: size, height: h, margin: '0 auto', position: 'relative',
+        filter: r.glow ? `drop-shadow(0 0 6px ${r.color}66)` : 'none',
+      }}>
+        {/* rarity-coloured border layer */}
+        <div style={{ position: 'absolute', inset: 0, clipPath: `polygon(${hex})`, background: r.color, zIndex: 0 }} />
+        {/* inner fill with a faint rarity tint gradient */}
+        <div style={{
+          position: 'absolute', inset: r.border, clipPath: `polygon(${hex})`, zIndex: 1,
+          background: `radial-gradient(circle at 50% 35%, ${r.color}33, var(--panel, #1a1d27) 75%)`,
+        }} />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2 }}>
+          <span style={{ fontSize: Math.round(size * 0.42) }}>{trait.icon}</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: r.color, marginTop: 4, lineHeight: 1.1 }}>{trait.label}</div>
+      <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.4, marginTop: 1 }}>
+        {trait.rarity === 'common' ? '' : r.label.toUpperCase()}
+      </div>
+    </div>
+  )
+}
+
+/** A row of trait badges. */
+function TraitBadges({ traits, size }: { traits: PlayerTrait[]; size?: number }): JSX.Element | null {
+  if (traits.length === 0) return null
+  return (
+    <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+      {traits.map((t) => <TraitBadge key={t.key} trait={t} {...(size !== undefined ? { size } : {})} />)}
     </div>
   )
 }
@@ -901,6 +903,13 @@ function TabProfile({
           </div>
         </div>
       </div>
+
+      {/* Trait badges — the player's loud calling cards */}
+      {d.scoutReport.traits.length > 0 && (
+        <div style={{ padding: 'var(--sp-2) var(--sp-1)' }}>
+          <TraitBadges traits={d.scoutReport.traits} size={48} />
+        </div>
+      )}
 
       {/* Injury notice (full width, above body) */}
       {d.injury && (
@@ -1805,7 +1814,7 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <ReportCardStrip card={sr.reportCard} isGoalie={isGoalie} />
           </div>
 
-          {/* "Shades of …" comparison */}
+          {/* "Shades of …" comparison — clickable comparables */}
           {d.scoutComp && (
             <div style={{
               padding: '9px 12px', borderRadius: 'var(--radius-sm)',
@@ -1813,7 +1822,15 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               fontSize: 12.5, lineHeight: 1.5,
             }}>
               <span style={{ fontWeight: 700, color: 'var(--accent2, #e0b341)' }}>Shades of · </span>
-              <span style={{ color: 'var(--text)' }}>{d.scoutComp.summary}</span>
+              {d.scoutComp.names.map((nm, i) => (
+                <span key={d.scoutComp!.ids[i] ?? nm}>
+                  {i > 0 && <span style={{ color: 'var(--muted)' }}> and </span>}
+                  <PlayerLink playerId={d.scoutComp!.ids[i] ?? ''} name={nm} />
+                </span>
+              ))}
+              {d.scoutComp.differentiator && (
+                <span style={{ color: 'var(--text)' }}> — {d.scoutComp.differentiator}.</span>
+              )}
             </div>
           )}
 

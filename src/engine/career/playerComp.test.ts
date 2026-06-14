@@ -32,7 +32,9 @@ describe('buildPlayerComp', () => {
     const comp = buildPlayerComp({ prospect, pool: players, knowledge: 100 })
     expect(comp).not.toBeNull()
     expect(comp!.names.length).toBeGreaterThanOrEqual(1)
+    expect(comp!.ids.length).toBe(comp!.names.length)
     expect(comp!.names).not.toContain(prospect.name)
+    expect(comp!.ids).not.toContain(prospect.id as string)
     expect(comp!.summary.startsWith('Shades of')).toBe(true)
   })
 
