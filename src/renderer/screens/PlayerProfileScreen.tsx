@@ -26,6 +26,7 @@ import type {
   ScoutPanel,
   ScoutRead,
   RiskBand,
+  AttributeGrades,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -331,6 +332,45 @@ function ReportCardPanel({ card, isGoalie }: { card: ReportCard; isGoalie: boole
             <ReportCardRow label="Defence" grade={card.defence} />
             <ReportCardRow label="Physicality" grade={card.physicality} />
           </>}
+    </div>
+  )
+}
+
+/** EP draft-guide-style 1–9 attribute grade row. */
+function AttributeGradeRow({ grades, isGoalie }: { grades: AttributeGrades; isGoalie: boolean }): JSX.Element {
+  const cells: Array<{ label: string; value: number }> = isGoalie
+    ? [
+        { label: 'Skating', value: grades.skating },
+        { label: 'Hockey Sense', value: grades.hockeySense },
+        { label: 'Goaltending', value: grades.goaltending ?? 5 },
+        { label: 'Physical', value: grades.physical },
+      ]
+    : [
+        { label: 'Skating', value: grades.skating },
+        { label: 'Shooting', value: grades.shooting },
+        { label: 'Passing', value: grades.passing },
+        { label: 'Puckhandling', value: grades.puckhandling },
+        { label: 'Hockey Sense', value: grades.hockeySense },
+        { label: 'Physical', value: grades.physical },
+      ]
+  // Colour ramp: 1 (poor) → red, 5 (avg) → muted, 9 (elite) → green.
+  const colorFor = (v: number): string =>
+    v >= 7 ? 'var(--success, #4caf72)' : v >= 5 ? 'var(--accent2, #e0b341)' : v >= 3.5 ? 'var(--muted)' : 'var(--danger, #d8584f)'
+  const fmt = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(1))
+  return (
+    <div>
+      <div className="stat-label" style={{ marginBottom: 6 }}>Attribute Grades (1–9)</div>
+      <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+        {cells.map((c) => (
+          <div key={c.label} style={{ textAlign: 'center', minWidth: 64, flex: '1 1 64px' }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: colorFor(c.value), lineHeight: 1.1 }}>{fmt(c.value)}</div>
+            <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{c.label}</div>
+            <div style={{ height: 3, marginTop: 4, borderRadius: 2, background: 'var(--line)' }}>
+              <div style={{ height: 3, borderRadius: 2, width: `${(c.value / 9) * 100}%`, background: colorFor(c.value) }} />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1650,6 +1690,17 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
       {/* ── Scout's Assessment header ── */}
       <Panel title="Scout's Assessment">
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          {/* Elevator pitch — one-line read on what he is */}
+          <div style={{
+            fontSize: 13.5,
+            fontStyle: 'italic',
+            lineHeight: 1.5,
+            color: 'var(--text)',
+            borderLeft: '3px solid var(--accent, #6c5ce7)',
+            paddingLeft: 10,
+          }}>
+            “{sr.elevatorPitch}”
+          </div>
           {/* Rating + potential */}
           <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div className="stat">
@@ -1669,7 +1720,7 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             </div>
             <div className="stack" style={{ gap: 'var(--sp-1)' }}>
               <PotentialStars count={d.potentialStars} />
-              <span className="muted small">Ceiling</span>
+              <span className="muted small">Potential</span>
             </div>
             {/* Projection tier chip */}
             <span style={{
@@ -1692,6 +1743,17 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <span style={{ fontWeight: 700, color: tierColor }}>{sr.tierLabel}:</span> {sr.tierBlurb}
           </div>
 
+          {/* 1–9 attribute grades (EP draft-guide style) */}
+          <AttributeGradeRow grades={sr.grades} isGoalie={isGoalie} />
+
+          {/* "Shades of …" comparison */}
+          {d.scoutComp && (
+            <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+              <span style={{ fontWeight: 700, color: 'var(--accent2, #e0b341)' }}>Comparison: </span>
+              <span style={{ color: 'var(--text)' }}>{d.scoutComp.summary}</span>
+            </div>
+          )}
+
           {/* Season outlook */}
           <span className="muted small" style={{ fontStyle: 'italic' }}>
             {sr.seasonProjection.line}
@@ -1701,6 +1763,20 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
 
       {/* ── General Impressions prose ── */}
       <Panel title="General Impressions">
+        {d.seasonBio && (
+          <p style={{
+            margin: '0 0 12px',
+            padding: '10px 12px',
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: 'var(--text)',
+            background: 'rgba(0,0,0,0.18)',
+            borderRadius: 'var(--radius-sm)',
+            fontWeight: 500,
+          }}>
+            {d.seasonBio}
+          </p>
+        )}
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
           {sr.generalImpressions}
         </p>

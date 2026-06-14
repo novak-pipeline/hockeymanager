@@ -21,7 +21,7 @@ import type {
 export type { RadarAxes, RadarView } from '@engine/ratings/radar'
 export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
-export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
+export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection, AttributeGrades } from '@engine/career/scoutReport'
 export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 export type { OpinionSnapshot } from '@engine/career/opinionTracker'
@@ -411,6 +411,17 @@ export interface PlayerProfileView extends PlayerBadge {
    * draft-eligible / on-the-radar young players; omitted for everyone else.
    */
   analystProjection?: string
+  /**
+   * "Shades of …" player comparison — closest established comparable in the DB
+   * plus an auto-generated differentiator. Omitted at low knowledge or when no
+   * suitable comparable exists.
+   */
+  scoutComp?: { names: string[]; differentiator: string; summary: string }
+  /**
+   * Season bio write-up — narrative recap of what the player did this season.
+   * Omitted before he has played a game.
+   */
+  seasonBio?: string
   /**
    * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
    * Always present when PlayerProfileView is built.

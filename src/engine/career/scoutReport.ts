@@ -192,6 +192,79 @@ function buildReportCard(p: Player, knowledge: number): ReportCard {
   return card
 }
 
+/* ───────────────────── 1–9 attribute grades (EP-style) ───────────────────── */
+
+/**
+ * Draft-guide-style 1.0–9.0 grades, mirroring EliteProspects' "Attribute
+ * Ratings (1-to-9)" row. Same component scores as the letter report card, just
+ * on the scouting-services scale (1 = poor, 5 = average, 9 = elite). Coarsened
+ * to whole numbers at low knowledge.
+ */
+export interface AttributeGrades {
+  skating: number
+  shooting: number
+  passing: number
+  puckhandling: number
+  hockeySense: number
+  physical: number
+  /** Only present for goalies. */
+  goaltending?: number
+}
+
+/** Map a 0–100 score to a 1.0–9.0 grade (50 ≈ 5.0), rounded to 0.5. */
+function gradeNine(score: number, knowledge: number): number {
+  const raw = 1 + (Math.max(0, Math.min(100, score)) / 100) * 8
+  // Low knowledge → round to whole numbers; otherwise half-steps.
+  const step = knowledge < 55 ? 1 : 0.5
+  return Math.round(raw / step) * step
+}
+
+function buildAttributeGrades(p: Player, knowledge: number): AttributeGrades {
+  const c = p.composites as unknown as Record<string, number>
+  const m = p.ratings.mental as unknown as Record<string, number>
+  const t = p.ratings.technical as unknown as Record<string, number>
+
+  const skating = c['skating'] ?? 50
+  const shooting = ((t['wristShot'] ?? 50) + (t['slapShot'] ?? 50) + (c['scoring'] ?? 50)) / 3
+  const passing = ((t['passing'] ?? 50) + (c['playmaking'] ?? 50)) / 2
+  const puckhandling = ((t['stickhandling'] ?? 50) + (c['puckControl'] ?? 50)) / 2
+  const hockeySense = ((m['offensiveIQ'] ?? 50) + (m['defensiveIQ'] ?? 50) + (m['vision'] ?? 50) + (m['anticipation'] ?? 50)) / 4
+  const phys = p.ratings.physical as unknown as Record<string, number>
+  const physical = ((c['hitting'] ?? 50) + (c['blocking'] ?? 50) + (phys['strength'] ?? 50)) / 3
+
+  const grades: AttributeGrades = {
+    skating: gradeNine(skating, knowledge),
+    shooting: gradeNine(shooting, knowledge),
+    passing: gradeNine(passing, knowledge),
+    puckhandling: gradeNine(puckhandling, knowledge),
+    hockeySense: gradeNine(hockeySense, knowledge),
+    physical: gradeNine(physical, knowledge),
+  }
+  if (p.position === 'G' && p.ratings.goalie) {
+    const g = p.ratings.goalie as unknown as Record<string, number>
+    const goalieScore = ((g['reflexes'] ?? 50) + (g['positioningG'] ?? 50) + (g['reboundControl'] ?? 50) + (g['glove'] ?? 50) + (g['blocker'] ?? 50)) / 5
+    grades.goaltending = gradeNine(goalieScore, knowledge)
+  }
+  return grades
+}
+
+/* ───────────────────────── elevator pitch ───────────────────────── */
+
+/**
+ * The one-line "elevator pitch" — a punchy summary of what the player IS, drawn
+ * from his archetype and his standout traits. Mirrors the EP draft-guide
+ * "Elevator Pitch" box.
+ */
+function buildElevatorPitch(p: Player): string {
+  const arch = classifyArchetype(p)
+  const meta = ARCHETYPE_META[arch.archetype]
+  const traits = arch.descriptors.slice(0, 2)
+  const label = meta.label.toLowerCase()
+  if (traits.length === 0) return `A ${label} still rounding out his game.`
+  if (traits.length === 1) return `A ${label} who ${traits[0]}.`
+  return `A ${label} who ${traits[0]} and ${traits[1]}.`
+}
+
 /* ────────────────────────── prose generation ────────────────────────── */
 
 interface PhraseSet {
@@ -382,6 +455,10 @@ export interface ScoutReportView {
   seasonProjection: SeasonProjection
   /** A+..F report card per area (fogged at low knowledge). */
   reportCard: ReportCard
+  /** EP-style 1–9 attribute grades (fogged at low knowledge). */
+  grades: AttributeGrades
+  /** One-line "elevator pitch" summary of what the player is. */
+  elevatorPitch: string
   /** 0–100 scouting knowledge at time of report generation. */
   knowledge: number
 }
@@ -399,6 +476,8 @@ export function buildScoutReport(
   const tierLabel = TIER_LABELS[tier]
   const tierBlurb = TIER_BLURBS[tier]
   const reportCard = buildReportCard(player, knowledge)
+  const grades = buildAttributeGrades(player, knowledge)
+  const elevatorPitch = buildElevatorPitch(player)
 
   const seasonProjection: SeasonProjection =
     player.position === 'G'
@@ -415,6 +494,8 @@ export function buildScoutReport(
     tierBlurb,
     seasonProjection,
     reportCard,
+    grades,
+    elevatorPitch,
     knowledge: Math.round(knowledge),
   }
 }

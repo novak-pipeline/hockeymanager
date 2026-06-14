@@ -73,6 +73,8 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { buildPlayerComp } from '@engine/career/playerComp'
+import { buildSeasonBio } from '@engine/career/seasonBio'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -4532,9 +4534,83 @@ export class Career {
         })
         if (proj) profile.analystProjection = proj
       }
+
+      // "Shades of …" comp — closest established comparable in the DB.
+      const comp = buildPlayerComp({
+        prospect: player,
+        pool: [...this.data.players.values()],
+        knowledge: profile.scoutReport.knowledge,
+      })
+      if (comp) profile.scoutComp = { names: comp.names, differentiator: comp.differentiator, summary: comp.summary }
+
+      // Season bio write-up — what he's done this season.
+      const totals = this.totals.get(pid)
+      const sf = this.seasonFormOf(player)
+      if (sf.gamesPlayed > 0) {
+        const teamName = playerTeamId ? (this.data.teams.get(playerTeamId)?.name ?? '') : ''
+        const { leagueLabel, teamIds } = this.leagueContextOf(playerTeamId)
+        const finalPhase = this.phase === 'offseason' || this.phase === 'playoffs' || this.draftRankPhase() === 'final'
+        const rank = player.position !== 'G' && teamIds.length > 0
+          ? this.scoringRankOf(pid, teamIds)
+          : undefined
+        const bio = buildSeasonBio({
+          firstName: player.name.split(' ')[0] ?? player.name,
+          position: player.position,
+          age: player.age,
+          teamName,
+          league: leagueLabel,
+          gamesPlayed: sf.gamesPlayed,
+          goals: totals?.goals ?? 0,
+          assists: totals?.assists ?? 0,
+          ...(sf.expectedPoints !== undefined ? { expectedPoints: sf.expectedPoints } : {}),
+          ...(rank !== undefined ? { leagueScoringRank: rank } : {}),
+          ...(player.intlApps !== undefined ? { intlApps: player.intlApps } : {}),
+          ...(player.nationality !== undefined ? { nation: player.nationality } : {}),
+          final: finalPhase,
+        })
+        if (bio) profile.seasonBio = bio
+      }
     }
 
     return profile
+  }
+
+  /** League label + the set of team ids that make up the player's league
+   *  (for season-bio context and same-league scoring ranks). */
+  private leagueContextOf(teamId?: TeamId): { leagueLabel: string; teamIds: string[] } {
+    if (!teamId) return { leagueLabel: '', teamIds: [] }
+    const team = this.data.teams.get(teamId)
+    if (!team) return { leagueLabel: '', teamIds: [] }
+    for (const c of this.data.league.competitions ?? []) {
+      if (c.teamIds.includes(teamId)) {
+        return { leagueLabel: c.name || c.abbrev, teamIds: c.teamIds.map((t) => t as string) }
+      }
+    }
+    if (team.tier === 'ahl') {
+      const ahl = [...this.data.teams.values()].filter((t) => t.tier === 'ahl').map((t) => t.id as string)
+      return { leagueLabel: 'AHL', teamIds: ahl }
+    }
+    return { leagueLabel: 'NHL', teamIds: this.data.league.teams.map((t) => t as string) }
+  }
+
+  /** 1-based points rank of a skater among all rostered skaters in a league. */
+  private scoringRankOf(pid: PlayerId, teamIds: string[]): number {
+    const idSet = new Set(teamIds)
+    const pointsOf = (id: PlayerId): number => {
+      const t = this.totals.get(id)
+      return (t?.goals ?? 0) + (t?.assists ?? 0)
+    }
+    const mine = pointsOf(pid)
+    let greater = 0
+    for (const [tid, team] of this.data.teams) {
+      if (!idSet.has(tid as string)) continue
+      for (const rid of team.roster) {
+        const pl = this.data.players.get(rid)
+        if (!pl || pl.position === 'G') continue
+        if (pointsOf(rid) > mine) greater++
+      }
+    }
+    return greater + 1
   }
 
   /** GM asks a player one interview question; records it and sharpens knowledge. */
