@@ -8,6 +8,7 @@ import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
+import { SideNav } from './components/SideNav'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
@@ -315,20 +316,25 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         ) : (
           <div className="app-shell">
             <PressConference />
-            <TopNav
-              teamId={props.team.teamId}
-              clubName={props.team.name}
-              clubAbbr={props.team.abbreviation}
-              dashboard={dashboard}
-              busy={busy}
-              engineVersion={props.engineVersion}
-              onSave={onSave}
-              onLoad={onLoad}
-            />
-            <div className="shell-main">
-              <ScreenBoundary screen={nav.screen}>
-                <ScreenRouter screen={nav.screen} params={nav.params} />
-              </ScreenBoundary>
+            <div className="app-body">
+              <SideNav dashboard={dashboard} />
+              <div className="app-right">
+                <TopNav
+                  teamId={props.team.teamId}
+                  clubName={props.team.name}
+                  clubAbbr={props.team.abbreviation}
+                  dashboard={dashboard}
+                  busy={busy}
+                  engineVersion={props.engineVersion}
+                  onSave={onSave}
+                  onLoad={onLoad}
+                />
+                <div className="shell-main">
+                  <ScreenBoundary screen={nav.screen}>
+                    <ScreenRouter screen={nav.screen} params={nav.params} />
+                  </ScreenBoundary>
+                </div>
+              </div>
             </div>
           </div>
         )}
