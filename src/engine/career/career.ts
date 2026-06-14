@@ -73,6 +73,7 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { selectNationalTeam } from '@engine/league/nationalTeam'
 import {
   createArc,
   createInitialArcsState,
@@ -5064,7 +5065,22 @@ export class Career {
           potentialStars: overallToStars(agedPotential(p)),
         }
       })
-      nations.push({ nation, rank: 0, rating, playerCount: players.length, topPlayers })
+      const toNotable = (p: Player): CompetitionNotableView => {
+        const tm = teamOfPlayer.get(p.id as string)
+        return {
+          playerId: p.id as string,
+          name: p.name,
+          teamId: tm?.teamId ?? '',
+          teamAbbr: tm?.abbr ?? 'FA',
+          position: p.position,
+          age: p.age,
+          currentStars: overallToStars(ratedOverall(p)),
+          potentialStars: overallToStars(agedPotential(p)),
+        }
+      }
+      const seniorSquad = selectNationalTeam(players).map((pick) => toNotable(pick.player))
+      const u20Squad = selectNationalTeam(players, { maxAge: 19 }).map((pick) => toNotable(pick.player))
+      nations.push({ nation, rank: 0, rating, playerCount: players.length, topPlayers, seniorSquad, u20Squad })
     }
     nations.sort((a, b) => b.rating - a.rating)
     nations.forEach((n, i) => { n.rank = i + 1 })

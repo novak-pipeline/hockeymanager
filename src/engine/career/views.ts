@@ -705,6 +705,10 @@ export interface NationView {
   playerCount: number
   /** Best players of this nation (reuses the scout-flavoured notable row). */
   topPlayers: CompetitionNotableView[]
+  /** Selected senior national team (best available, 14F/7D/2G). */
+  seniorSquad: CompetitionNotableView[]
+  /** Selected U20 (World Juniors) team. */
+  u20Squad: CompetitionNotableView[]
 }
 
 export interface WorldJuniorsStandoutView {

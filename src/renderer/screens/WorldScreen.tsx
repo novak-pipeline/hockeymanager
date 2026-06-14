@@ -5,7 +5,7 @@
  * getCompetitions (League.competitions). Empty when the active DB is NHL-only.
  */
 import { useState } from 'react'
-import type { CompetitionNotableView, CompetitionView } from '../../engine/career/views'
+import type { CompetitionNotableView, CompetitionView, NationView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -421,18 +421,49 @@ function InternationalPanel(): JSX.Element {
             </table>
           </Panel>
 
-          {/* Best players of the selected nation */}
-          {current && (
-            <Panel title={`${current.nation} — best players`}>
-              <div className="muted small" style={{ marginBottom: 8 }}>
-                #{current.rank} in the world · strength {current.rating} · {current.playerCount} players
-              </div>
-              <NotableTable rows={current.topPlayers} showAge />
-            </Panel>
-          )}
+          {/* Selected nation: profile + senior / U20 squads */}
+          {current && <NationDetail nation={current} />}
         </div>
       )}
     </div>
+  )
+}
+
+function NationDetail({ nation }: { nation: NationView }): JSX.Element {
+  const [tab, setTab] = useState<'best' | 'senior' | 'u20'>('senior')
+  const rows =
+    tab === 'senior' ? nation.seniorSquad : tab === 'u20' ? nation.u20Squad : nation.topPlayers
+  const title =
+    tab === 'senior' ? `Team ${nation.nation}`
+    : tab === 'u20' ? `${nation.nation} Under-20`
+    : `${nation.nation} — best players`
+  const tabBtn = (id: 'best' | 'senior' | 'u20', label: string): JSX.Element => (
+    <button
+      onClick={() => setTab(id)}
+      style={{
+        padding: '3px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+        border: '1px solid var(--line)',
+        background: tab === id ? 'var(--accent-soft, rgba(120,120,255,0.16))' : 'transparent',
+        color: 'inherit', fontWeight: tab === id ? 700 : 400,
+      }}
+    >{label}</button>
+  )
+  return (
+    <Panel title={title}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <span className="muted small">
+          #{nation.rank} in the world · strength {nation.rating} · {nation.playerCount} players
+        </span>
+        <span style={{ display: 'inline-flex', gap: 4 }}>
+          {tabBtn('senior', 'Team')}
+          {tabBtn('u20', 'Under-20')}
+          {tabBtn('best', 'Best')}
+        </span>
+      </div>
+      {rows.length === 0
+        ? <div className="muted small">Not enough eligible players to ice this team.</div>
+        : <NotableTable rows={rows} showAge />}
+    </Panel>
   )
 }
 
