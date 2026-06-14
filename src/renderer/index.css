@@ -583,56 +583,56 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
 }
 
-/* ── left icon rail (FM-style) ── */
-.rail {
+/* ── left sidebar (FM-style labelled list) ── */
+.sidebar {
   flex-shrink: 0;
-  width: 60px;
+  width: 192px;
   background: var(--bg0);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   z-index: 20;
 }
-.rail-scroll {
+.sidebar-scroll {
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: var(--sp-3) 0;
+  gap: 1px;
+  padding: var(--sp-2) var(--sp-2);
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none;
+  scrollbar-width: thin;
 }
-.rail-scroll::-webkit-scrollbar { display: none; }
-
-.rail-btn {
+.sidebar-item {
   position: relative;
-  width: 42px;
-  height: 42px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--muted);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.1s ease, color 0.1s ease;
 }
-.rail-btn:hover { background: var(--bg2); color: var(--text); }
-.rail-btn.active {
+.sidebar-item:hover { background: var(--bg2); color: var(--text); }
+.sidebar-item.active {
   background: var(--violet-dim);
   color: var(--violet-h);
   box-shadow: inset 3px 0 0 var(--accent);
 }
-.rail-badge {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
+.sidebar-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   border-radius: 999px;
   background: var(--pink);
   color: #fff;
@@ -641,12 +641,6 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.rail-divider {
-  width: 24px;
-  height: 1px;
-  background: var(--line);
-  margin: var(--sp-2) 0;
 }
 
 /* ── in-page sub-tab bar ── */

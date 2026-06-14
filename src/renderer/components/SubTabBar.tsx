@@ -1,7 +1,7 @@
 import type { DashboardView } from '../../worker/protocol'
 import { useNav, sectionOf, type ScreenId } from './NavContext'
 import { useUserTeamId } from './UserTeamContext'
-import { buildSections } from './navConfig'
+import { buildNav } from './navConfig'
 
 /** Management sub-tabs that only make sense for your own club. */
 const MANAGEMENT: ReadonlySet<string> = new Set([
@@ -9,20 +9,20 @@ const MANAGEMENT: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Horizontal tab strip for the active section's sub-screens — sits under the
- * topbar (FM puts the page-level tabs here, not in the rail). Hidden for
- * sections with a single screen (News).
+ * Page-level tab strip under the topbar for the active sidebar destination's
+ * sub-views (FM puts these here, not in the sidebar). Hidden when the active
+ * destination has one screen.
  */
 export function SubTabBar(props: { dashboard: DashboardView | null }): JSX.Element | null {
   const nav = useNav()
   const userTeamId = useUserTeamId()
   const phase = props.dashboard?.phase ?? 'regularSeason'
-  const section = buildSections(phase).find((s) => s.id === sectionOf(nav.screen))
-  if (!section || section.subTabs.length <= 1) return null
+  const item = buildNav(phase).find((i) => i.match.includes(nav.screen))
+  if (!item || !item.subTabs || item.subTabs.length <= 1) return null
 
   const viewedTeamId = nav.params.teamId
   const isViewingOtherTeam =
-    section.id === 'team' && viewedTeamId !== undefined && viewedTeamId !== userTeamId
+    sectionOf(nav.screen) === 'team' && viewedTeamId !== undefined && viewedTeamId !== userTeamId
 
   function go(screenId: ScreenId): void {
     if (isViewingOtherTeam && sectionOf(screenId) === 'team') nav.navigate(screenId, { teamId: viewedTeamId })
@@ -31,7 +31,7 @@ export function SubTabBar(props: { dashboard: DashboardView | null }): JSX.Eleme
 
   return (
     <nav className="subtabbar">
-      {section.subTabs.map((tab) => {
+      {item.subTabs.map((tab) => {
         const disabled = isViewingOtherTeam && MANAGEMENT.has(tab.id)
         return (
           <button
