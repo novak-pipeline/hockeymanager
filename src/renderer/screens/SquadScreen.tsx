@@ -200,6 +200,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('line')
   const [sortAsc, setSortAsc] = useState(true)
+  const [colView, setColView] = useState<'general' | 'contract' | 'stats'>('general')
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -310,7 +311,15 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                     )}
                   </button>
                 ))}
-                <span className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', paddingRight: 8 }}>
+                <label className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  View:
+                  <select className="select" value={colView} onChange={(e) => setColView(e.target.value as 'general' | 'contract' | 'stats')} style={{ fontSize: 12 }}>
+                    <option value="general">General</option>
+                    <option value="contract">Contract</option>
+                    <option value="stats">Statistics</option>
+                  </select>
+                </label>
+                <span className="muted small" style={{ alignSelf: 'center', paddingRight: 8 }}>
                   {filtered.length} player{filtered.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -324,31 +333,45 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         <SortTh label="Age" sortKey="age" {...sharedSortProps} align="right" />
                         <SortTh label="Pos" sortKey="pos" {...sharedSortProps} />
                         <SortTh label="Role" sortKey="line" {...sharedSortProps} />
-                        <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
-                        <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
-                        <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
-                        <th title="Form trend">Form</th>
-                        <th>Inj</th>
-                        <SortTh label="Contract" sortKey="salary" {...sharedSortProps} align="right" />
-                        {/* Stats headers */}
-                        <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
-                        {isGoalieView || hasGoalies ? (
+                        {colView === 'general' && (
                           <>
-                            <th className="num" title="Wins (G) or Goals (S)">W/G</th>
-                            <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
-                            <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
-                            <th className="num" title="Shutouts / +/-">SO/±</th>
-                            <th className="num">PIM</th>
-                            <th className="num">TOI</th>
+                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
+                            <th title="Form trend">Form</th>
+                            <th>Inj</th>
                           </>
-                        ) : (
+                        )}
+                        {colView === 'contract' && (
                           <>
-                            <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
-                            <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
-                            <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
-                            <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
-                            <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
-                            <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
+                            <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" />
+                            <th className="num">Years</th>
+                            <th className="num">Expires</th>
+                            <th>Clauses</th>
+                          </>
+                        )}
+                        {colView === 'stats' && (
+                          <>
+                            <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
+                            {isGoalieView || hasGoalies ? (
+                              <>
+                                <th className="num" title="Wins (G) or Goals (S)">W/G</th>
+                                <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
+                                <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
+                                <th className="num" title="Shutouts / +/-">SO/±</th>
+                                <th className="num">PIM</th>
+                                <th className="num">TOI</th>
+                              </>
+                            ) : (
+                              <>
+                                <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
+                                <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
+                                <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
+                                <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
+                                <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
+                                <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
+                              </>
+                            )}
                           </>
                         )}
                         <th style={{ width: 80 }}>Action</th>
@@ -384,18 +407,28 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                 <span className="muted small" style={{ marginLeft: 6 }}>{row.role}</span>
                               )}
                             </td>
-                            <td className="num"><OvrChip value={row.overall} /></td>
-                            <td><CondBar value={row.condition} /></td>
-                            <td style={{ color: moraleColor(row.morale), fontWeight: 600, fontSize: 12 }}>{moraleWord(row.morale)}</td>
-                            <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
-                            <td><InjuryBadge row={row} /></td>
-                            <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                              <span>{fmtMoney(row.contract.salary)}</span>
-                              <span className="muted small" style={{ marginLeft: 4 }}>×{row.contract.yearsRemaining}</span>
-                            </td>
-                            {isGoalie
-                              ? <GoalieCols row={row} />
-                              : <SkaterCols row={row} />}
+                            {colView === 'general' && (
+                              <>
+                                <td className="num"><OvrChip value={row.overall} /></td>
+                                <td><CondBar value={row.condition} /></td>
+                                <td style={{ color: moraleColor(row.morale), fontWeight: 600, fontSize: 12 }}>{moraleWord(row.morale)}</td>
+                                <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
+                                <td><InjuryBadge row={row} /></td>
+                              </>
+                            )}
+                            {colView === 'contract' && (
+                              <>
+                                <td className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(row.contract.salary)}</td>
+                                <td className="num muted">{row.contract.yearsRemaining}</td>
+                                <td className="num muted">{row.contract.expiryYear}</td>
+                                <td>
+                                  {row.contract.noTradeClause && <span className="chip chip-warn" style={{ fontSize: 9 }}>NTC</span>}
+                                  {row.contract.twoWay && <span className="chip" style={{ fontSize: 9, marginLeft: 2 }}>2-way</span>}
+                                  {!row.contract.noTradeClause && !row.contract.twoWay && <span className="muted">—</span>}
+                                </td>
+                              </>
+                            )}
+                            {colView === 'stats' && (isGoalie ? <GoalieCols row={row} /> : <SkaterCols row={row} />)}
                             <td>
                               {!isReadOnly && row.contract.twoWay && (
                                 <button
