@@ -374,18 +374,21 @@ def s20(row, col):
     """EHM 1-20 attribute -> our 1-99 scale."""
     return clamp(round(to_int(row[col], 0) / 20.0 * 99), 1, 99)
 
-# EHM negative Potential-Ability range codes -1..-10 -> CA-scale bands (1-200).
-# More negative = higher ceiling. The game rolls a real value within the band
-# per career (option B), so the same prospect can boom or bust across saves.
-PA_BANDS = {1: (95, 115), 2: (110, 135), 3: (125, 150), 4: (140, 160), 5: (150, 170),
-            6: (160, 180), 7: (170, 188), 8: (178, 194), 9: (188, 198), 10: (195, 200)}
+def resolve_potential(pa, ca, age):
+    """Return (single_ca, band_or_None) on the 1-200 CA scale.
 
-def resolve_potential(pa, ca):
-    """Return (single_ca, band_or_None). Positive PA is fixed; negative PA yields
-    a [lo,hi] band (>= current ability) for the engine to roll per career."""
+    Positive PA is an explicit ceiling, used as-is. Negative PA is an OPAQUE
+    range code in this DB (it spans -1..-20 and its magnitude is not a reliable
+    'higher = better' signal — the most common codes are mid players). So for
+    negatives we derive a realistic ceiling from CURRENT ability + youth
+    headroom: a player only projects as a star if he's already strong for his
+    age. The engine rolls within the [lo,hi] band per career (option B)."""
     if pa is None or pa >= 0:
         return max(pa or ca, ca), None
-    lo, hi = PA_BANDS.get(min(10, abs(pa)), (130, 160))
+    base = (46 if age <= 18 else 38 if age == 19 else 30 if age == 20 else
+            23 if age == 21 else 16 if age == 22 else 11 if age == 23 else 7)
+    lo = min(200, ca + round(base * 0.55))
+    hi = min(200, ca + round(base * 1.15))
     lo = max(lo, ca); hi = max(hi, lo)
     return (lo + hi) // 2, (lo, hi)
 
@@ -746,7 +749,7 @@ def main():
         year = to_int(parts[2]) if len(parts) == 3 else 0
         age = clamp(SEASON_YEAR - year if year else 25, 16, 45)
         ca = to_int(r[C_CA], 50)
-        pa_single, pa_band = resolve_potential(to_int(r[C_PA], ca), ca)
+        pa_single, pa_band = resolve_potential(to_int(r[C_PA], ca), ca, age)
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
         pos = position(r)
         extended = extended_fields_from_row(r)
