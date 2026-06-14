@@ -1218,6 +1218,12 @@ export interface PlayerInteractionView {
   options: InteractionOptionView[]
 }
 
+/** Data-analyst hire screen: who's hired + the hiring market. */
+export interface DataAnalystView {
+  hired: { id: string; name: string; rating: number; judgment: number; specialty: string } | null
+  candidates: Array<{ id: string; name: string; rating: number; judgment: number; specialty: string; salary: number }>
+}
+
 export interface InboxView {
   items: NewsItem[]
   unread: number
@@ -1317,6 +1323,8 @@ export interface CareerSnapshot {
   prevDraftBoard?: Array<[string, number]>
   /** Draft-rank phase last observed. Optional/additive. */
   draftPhaseSeen?: 'preliminary' | 'midseason' | 'final'
+  /** Hired data analyst (unlocks the Data Hub). Optional/additive. */
+  dataAnalyst?: { id: string; name: string; role: string; rating: number; judgment: number; specialty?: string; demeanor?: string } | null
   /** [teamId, ClubLegend[]][] — per-club legends registry. Optional/additive. */
   legends?: Array<[string, ClubLegend[]]>
   /** Staff-meeting agenda items. Optional/additive. */

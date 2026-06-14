@@ -92,6 +92,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'international', international: must().getInternational() }
     case 'getDraftRankings':
       return { id: req.id, type: 'draftRankings', draftRankings: must().getDraftRankings() }
+    case 'getDataAnalyst':
+      return { id: req.id, type: 'dataAnalyst', dataAnalyst: must().getDataAnalyst() }
+    case 'hireDataAnalyst': {
+      const res = must().hireDataAnalyst(req.candidateId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not hire analyst.')
+      return { id: req.id, type: 'dataAnalyst', dataAnalyst: must().getDataAnalyst() }
+    }
     case 'getStats':
       return { id: req.id, type: 'stats', stats: must().getStats() }
     case 'getTrades':

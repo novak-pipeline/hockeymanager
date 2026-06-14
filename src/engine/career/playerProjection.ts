@@ -224,7 +224,7 @@ export interface StaffLike {
   demeanor?: string
 }
 
-type StaffMemberRole = 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner'
+type StaffMemberRole = 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner' | 'dataAnalyst'
 
 /* ────────────────────────── roster projection ────────────────────────── */
 

@@ -67,6 +67,28 @@ describe('Career — regular season', () => {
     expect(career.getInbox().items.some((n) => n.headline.startsWith('Interview:'))).toBe(true)
   })
 
+  it('gates the Data Hub behind hiring a Data Analyst', () => {
+    const data = generateLeague({ seed: 14 })
+    const career = new Career(data, 14, data.league.teams[0]!)
+    expect(career.hasDataAnalyst()).toBe(false)
+    const market = career.getDataAnalyst()
+    expect(market.hired).toBeNull()
+    expect(market.candidates.length).toBeGreaterThan(0)
+
+    const pick = market.candidates[0]!
+    expect(career.hireDataAnalyst(pick.id).ok).toBe(true)
+    expect(career.hasDataAnalyst()).toBe(true)
+    const after = career.getDataAnalyst()
+    expect(after.hired?.id).toBe(pick.id)
+    expect(after.candidates.some((c) => c.id === pick.id)).toBe(false) // hired one leaves the market
+
+    // Survives save/load.
+    const snap = career.exportSnapshot('t', '2026-06-14')
+    const reloaded = Career.fromSnapshot(snap, data)
+    expect(reloaded.hasDataAnalyst()).toBe(true)
+    expect(reloaded.getDataAnalyst().hired?.id).toBe(pick.id)
+  })
+
   it('runs the whole season then flips into the playoffs', () => {
     const data = generateLeague({ seed: 5 })
     const career = new Career(data, 5, data.league.teams[0])

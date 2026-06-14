@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type {
   DataHubView,
+  DataAnalystView,
   TeamDataHubView,
   TeamAnalyticsRow,
   PlayerAnalyticsRow,
@@ -1117,6 +1118,62 @@ export function TeamDataHubBody({ teamId }: { teamId: string }): JSX.Element {
   )
 }
 
+/** The locked-state hiring market shown until a Data Analyst is on staff. */
+function HireAnalystPanel({
+  candidates, onHire, hireBusy,
+}: {
+  candidates: DataAnalystView['candidates']
+  onHire: (id: string) => void
+  hireBusy: string | null
+}): JSX.Element {
+  const fmtSalary = (n: number): string => `$${(n / 1e6).toFixed(2)}M`
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      <ScreenHeader title="Data Hub — Locked">
+        <span className="muted small">Hire a Data Analyst to unlock analytics</span>
+      </ScreenHeader>
+      <Panel title="Analytics department">
+        <p style={{ margin: '0 0 4px', fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
+          Your front office has no analytics staff. Hire a <strong>Data Analyst</strong> to open the Data Hub —
+          team & player radars, shot maps, xG and percentile tables, plus the NHLe projection models that inform
+          draft, trade and lineup decisions.
+        </p>
+        <div className="muted small">The better the analyst, the sharper the models.</div>
+      </Panel>
+      <Panel title="Available analysts">
+        <table className="data-table" style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>Analyst</th>
+              <th style={{ textAlign: 'left' }}>Specialty</th>
+              <th>Rating</th>
+              <th>Judgment</th>
+              <th>Salary</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((c) => (
+              <tr key={c.id}>
+                <td style={{ fontWeight: 600 }}>{c.name}</td>
+                <td className="muted">{c.specialty}</td>
+                <td style={{ textAlign: 'center', fontWeight: 700 }}>{c.rating}</td>
+                <td style={{ textAlign: 'center' }}>{c.judgment}</td>
+                <td style={{ textAlign: 'center' }} className="muted">{fmtSalary(c.salary)}/yr</td>
+                <td style={{ textAlign: 'right' }}>
+                  <button type="button" className="btn btn-sm btn-primary" disabled={hireBusy !== null} onClick={() => onHire(c.id)}>
+                    {hireBusy === c.id ? 'Hiring…' : 'Hire'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  )
+}
+
 export function DataHubScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
@@ -1165,12 +1222,36 @@ export function DataHubScreen(): JSX.Element {
     })
   }, [scope, effectiveTeamId])
 
+  // Data Hub access is gated behind hiring a Data Analyst.
+  const [analyst, setAnalyst] = useState<DataAnalystView | null>(null)
+  const [analystLoaded, setAnalystLoaded] = useState(false)
+  const [hireBusy, setHireBusy] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    client.getDataAnalyst().then((r) => {
+      if (live && r.type === 'dataAnalyst') { setAnalyst(r.dataAnalyst); setAnalystLoaded(true) }
+    })
+    return () => { live = false }
+  }, [])
+  function hire(id: string): void {
+    setHireBusy(id)
+    client.hireDataAnalyst(id).then((r) => {
+      setHireBusy(null)
+      if (r.type === 'dataAnalyst') setAnalyst(r.dataAnalyst)
+    }).catch(() => setHireBusy(null))
+  }
+
   function navigateToPlayer(playerId: string): void {
     nav.navigate('player', { playerId })
   }
 
   const loading = scope === 'league' ? leagueLoading : teamLoading
   const error = scope === 'league' ? leagueError : teamError
+
+  // Locked until a Data Analyst is on staff.
+  if (analystLoaded && analyst && !analyst.hired) {
+    return <HireAnalystPanel candidates={analyst.candidates} onHire={hire} hireBusy={hireBusy} />
+  }
 
   return (
     <section className="stack">

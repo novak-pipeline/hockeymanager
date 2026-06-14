@@ -46,7 +46,7 @@ export interface StaffAttributes {
 export interface StaffMember {
   id: string
   name: string
-  role: 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner'
+  role: 'headCoach' | 'assistantCoach' | 'assistantGM' | 'scout' | 'physio' | 'owner' | 'dataAnalyst'
   /** Per-discipline attributes from the source DB (display-only). */
   attributes?: StaffAttributes
   /** 40–90 quality. Governs how effective the staff member is at their job. */
@@ -381,6 +381,41 @@ export function generateTeamStaff(rng: Rng, opts?: GenerateTeamStaffOpts): TeamS
   }
 
   return { headCoach, assistantCoaches, assistantGM, scouts, physios, owner }
+}
+
+const ANALYST_SPECIALTIES = ['Microstats / tracking', 'Projection modelling', 'Goalie analytics', 'Draft modelling', 'Cap & roster optimisation']
+const ANALYST_FIRST = ['Nate', 'Dom', 'Micah', 'Cole', 'Shayna', 'Meghan', 'Priya', 'Hadi', 'Evan', 'Lukas', 'Sasha', 'Renaud']
+const ANALYST_LAST = ['Tulsky', 'Luszczyszyn', 'Blashill', 'Tyrrell', 'Bourne', 'Pettapiece', 'Rao', 'Sznajder', 'Sprigings', 'Perry', 'Vollman', 'Desjardins']
+
+/**
+ * A market of data analysts the GM can hire to unlock the analytics Data Hub.
+ * Quality (rating/judgment) spreads from junior to elite; a better analyst means
+ * sharper models. Deterministic from the rng so the candidate list is stable.
+ */
+export function generateDataAnalysts(rng: Rng, count = 4): StaffMember[] {
+  const out: StaffMember[] = []
+  const used = new Set<string>()
+  for (let i = 0; i < count; i++) {
+    let nm = ''
+    for (let t = 0; t < 20; t++) {
+      const cand = `${ANALYST_FIRST[rng.int(ANALYST_FIRST.length)]} ${ANALYST_LAST[rng.int(ANALYST_LAST.length)]}`
+      if (!used.has(cand)) { nm = cand; break }
+    }
+    if (!nm) nm = `Analyst ${i + 1}`
+    used.add(nm)
+    const r = Math.round(Math.max(45, Math.min(92, rng.normal(64, 13))))
+    const j = Math.round(Math.max(45, Math.min(97, rng.normal(70, 13))))
+    out.push({
+      id: `analyst-${nm.replace(/\s+/g, '-').toLowerCase()}`,
+      name: nm,
+      role: 'dataAnalyst',
+      rating: r,
+      judgment: j,
+      specialty: ANALYST_SPECIALTIES[rng.int(ANALYST_SPECIALTIES.length)]!,
+      demeanor: 'analytical',
+    })
+  }
+  return out.sort((a, b) => b.rating - a.rating)
 }
 
 /**

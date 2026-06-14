@@ -208,6 +208,7 @@ import { buildTeamDynamics } from '@engine/career/dynamics'
 import {
   generateStaff,
   generateTeamStaff,
+  generateDataAnalysts,
   buildAgmReport,
   hireRetiredPlayer,
   type StaffMember,
@@ -538,6 +539,8 @@ export class Career {
   private prevDraftBoard = new Map<string, number>()
   /** The draft-rank phase last observed (to detect phase transitions). */
   private draftPhaseSeen: DraftRankPhase | null = null
+  /** The data analyst the GM has hired (unlocks the Data Hub). Null until hired. */
+  private dataAnalyst: import('@engine/league/staff').StaffMember | null = null
   /** Per-club legends registry — notable retirees, "where are they now". */
   private legends = new Map<TeamId, ClubLegend[]>()
   /** Staff-meeting agenda — topics the GM marked for discussion. */
@@ -5630,6 +5633,7 @@ export class Career {
       scout:          'Scout',
       physio:         'Physio',
       owner:          'Owner',
+      dataAnalyst:    'Data Analyst',
     }
 
     function toRow(m: import('@engine/league/staff').StaffMember): StaffRowView {
@@ -5656,6 +5660,48 @@ export class Career {
       physios:         ts.physios.map(toRow),
       owner:           toRow(ts.owner),
     }
+  }
+
+  /** Estimated annual salary for an analyst of a given quality (flavour). */
+  private analystSalary(rating: number): number {
+    return Math.round((250_000 + Math.max(0, rating - 45) * 28_000) / 1000) * 1000
+  }
+
+  /** The data-analyst hire screen: who you've hired (if anyone) + the market. */
+  getDataAnalyst(): import('./views').DataAnalystView {
+    const hired = this.dataAnalyst
+    const candidates = generateDataAnalysts(this.rngFor(7700), 5)
+      .filter((c) => c.id !== hired?.id)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        rating: c.rating,
+        judgment: c.judgment,
+        specialty: c.specialty ?? 'Analytics',
+        salary: this.analystSalary(c.rating),
+      }))
+    return {
+      hired: hired
+        ? { id: hired.id, name: hired.name, rating: hired.rating, judgment: hired.judgment, specialty: hired.specialty ?? 'Analytics' }
+        : null,
+      candidates,
+    }
+  }
+
+  /** Hire a data analyst from the market, unlocking the Data Hub. */
+  hireDataAnalyst(candidateId: string): { ok: boolean; message?: string } {
+    const cand = generateDataAnalysts(this.rngFor(7700), 5).find((c) => c.id === candidateId)
+    if (!cand) return { ok: false, message: 'That analyst is no longer available.' }
+    this.dataAnalyst = cand
+    this.pushNews('frontOffice', `Hired ${cand.name} as Data Analyst`,
+      `${cand.name} joins the front office as our Data Analyst (${cand.specialty}). The analytics Data Hub — models, charts and projections — is now available to inform our decisions.`,
+      {})
+    return { ok: true }
+  }
+
+  /** Whether the GM has unlocked the analytics Data Hub. */
+  hasDataAnalyst(): boolean {
+    return this.dataAnalyst !== null
   }
 
   getDataHubView(): DataHubView {
@@ -6643,6 +6689,7 @@ export class Career {
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
       ...(this.draftPhaseSeen !== null ? { draftPhaseSeen: this.draftPhaseSeen } : {}),
+      dataAnalyst: this.dataAnalyst ? { ...this.dataAnalyst } : null,
       legends: [...this.legends.entries()].map(([k, v]) => [k as string, v.map((l) => structuredClone(l))] as [string, ClubLegend[]]),
       agenda: this.agenda.map((a) => ({ ...a })),
       agendaCounter: this.agendaCounter,
@@ -6756,6 +6803,7 @@ export class Career {
     }
     if (snapshot.prevDraftBoard) career.prevDraftBoard = new Map(snapshot.prevDraftBoard)
     if (snapshot.draftPhaseSeen) career.draftPhaseSeen = snapshot.draftPhaseSeen
+    if (snapshot.dataAnalyst) career.dataAnalyst = { ...snapshot.dataAnalyst } as import('@engine/league/staff').StaffMember
     if (snapshot.legends) {
       career.legends = new Map(snapshot.legends.map(([k, v]) => [asTeamId(k), v.map((l) => structuredClone(l))]))
     }

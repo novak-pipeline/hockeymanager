@@ -29,6 +29,7 @@ export type {
   CareerSnapshot,
   CompareRadarView,
   DataHubView,
+  DataAnalystView,
   TeamDataHubView,
   TeamPlayerAnalyticsRow,
   GoalieAnalyticsRow,
@@ -102,6 +103,7 @@ import type {
   CalendarView,
   CareerSnapshot,
   DataHubView,
+  DataAnalystView,
   TeamDataHubView,
   DashboardView,
   DraftView,
@@ -170,6 +172,8 @@ export type WorkerRequestBody =
   | { type: 'getCompetitions' }
   | { type: 'getInternational' }
   | { type: 'getDraftRankings' }
+  | { type: 'getDataAnalyst' }
+  | { type: 'hireDataAnalyst'; candidateId: string }
   | { type: 'getStats' }
   | { type: 'getTrades' }
   | { type: 'getDraft' }
@@ -319,6 +323,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'competitions'; competitions: CompetitionsView }
   | { type: 'international'; international: InternationalView }
   | { type: 'draftRankings'; draftRankings: DraftRankingsView }
+  | { type: 'dataAnalyst'; dataAnalyst: DataAnalystView }
   | { type: 'stats'; stats: StatsView }
   | { type: 'trades'; trades: TradesView }
   | { type: 'draft'; draft: DraftView }

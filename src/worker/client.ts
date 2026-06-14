@@ -155,6 +155,14 @@ export class SimClient {
     return this.send({ type: 'getDraftRankings' })
   }
 
+  getDataAnalyst(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDataAnalyst' })
+  }
+
+  hireDataAnalyst(candidateId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireDataAnalyst', candidateId })
+  }
+
   getStats(): Promise<WorkerResponse> {
     return this.send({ type: 'getStats' })
   }
