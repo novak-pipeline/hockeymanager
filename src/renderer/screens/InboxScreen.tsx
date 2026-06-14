@@ -22,11 +22,12 @@ const CATEGORY_META: Record<
   league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)' },
   milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
   playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
+  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)' },
 }
 
 const ALL_CATEGORIES: NewsCategory[] = [
   'result', 'injury', 'trade', 'contract', 'draft',
-  'award', 'league', 'milestone', 'playoffs',
+  'award', 'league', 'milestone', 'playoffs', 'scouting',
 ]
 
 /** Convert a 0xRRGGBB integer to a CSS hex string. */

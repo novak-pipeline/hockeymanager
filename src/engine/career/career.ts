@@ -239,6 +239,7 @@ import {
 import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
+import { buildScoutVerdict } from './scoutVerdict'
 import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
@@ -513,6 +514,9 @@ export class Career {
   private matchDays: number[] = []
   private playerCounter = 0
   private scouting!: ScoutingState
+  /** Players already reported on in the inbox (avoids re-reporting). Seeded lazily. */
+  private scoutReported = new Set<string>()
+  private scoutReportSeeded = false
 
   /* ── story layer (Wave 1) ── */
   private arcsState!: ArcsState
@@ -804,6 +808,51 @@ export class Career {
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
+  }
+
+  /**
+   * When a scout's work makes a notable player well-known (knowledge ≥ 80 for
+   * the first time), drop a short scout report into the inbox. Capped at 2/day
+   * to avoid flooding; only notable players (high ceiling/ability) qualify.
+   * On the first call (incl. after load) it seeds from existing intel without
+   * reporting, so loading a save never spams reports for already-known players.
+   */
+  private emitScoutReports(): void {
+    const KNOWN = 80
+    if (!this.scoutReportSeeded) {
+      for (const [pid, k] of this.scouting.knowledge) {
+        if (k >= KNOWN) this.scoutReported.add(pid as string)
+      }
+      this.scoutReportSeeded = true
+      return
+    }
+    const fresh: Array<{ id: string; p: Player; pot: number }> = []
+    for (const [pid, k] of this.scouting.knowledge) {
+      if (k < KNOWN) continue
+      const id = pid as string
+      if (this.scoutReported.has(id)) continue
+      this.scoutReported.add(id) // mark regardless so we never re-scan
+      const p = this.data.players.get(pid as PlayerId)
+      if (!p) continue
+      // Don't report the user's own players — this is acquisition intel.
+      if (this.userTeam.roster.includes(pid as PlayerId)) continue
+      const pot = potentialStars(p)
+      const ovr = overall(p.composites, p.position)
+      if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
+    }
+    if (fresh.length === 0) return
+    fresh.sort((a, b) => b.pot - a.pot)
+    for (const f of fresh.slice(0, 2)) {
+      const cur = Math.max(0, Math.min(5, Math.round((overall(f.p.composites, f.p.position) / 20) * 2) / 2))
+      const v = buildScoutVerdict(f.p, cur, f.pot)
+      const pro = v.pros[0] ? ` ${v.pros[0]}.` : ''
+      this.pushNews(
+        'scouting',
+        `Scout report: ${f.p.name}`,
+        `Our scouts have filed a full report on ${f.p.name} (${f.p.position}, age ${f.p.age}). ${v.recommendation}${pro} Best deployed as ${v.bestRole}.`,
+        { playerId: f.id },
+      )
+    }
   }
 
   /**
@@ -2337,6 +2386,7 @@ export class Career {
       freeAgentIds: this.currentFaIds(),
       rng: this.rngFor(7008, day),
     })
+    this.emitScoutReports()
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
       const offers = generateAiOffers({

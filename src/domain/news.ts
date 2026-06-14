@@ -13,6 +13,7 @@ export type NewsCategory =
   | 'league'
   | 'milestone'
   | 'playoffs'
+  | 'scouting'
 
 export interface NewsItem {
   /** Unique within a career, e.g. "n42". */
