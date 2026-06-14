@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Competition, Player, PlayerId, TeamId } from '@domain'
 import { generateLeague } from '@data'
 import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
-import { initWorldSimState, resetWorldSim, simWorldDay, worldMatchDays } from './worldSim'
+import type { GamePlayerStat } from '@engine/shared/outcome'
+import { combinedDevProduction, initWorldSimState, resetWorldSim, simWorldDay, worldMatchDays } from './worldSim'
 
 /** Build a small simulated competition over a slice of a generated league's
  *  teams, so quickSimGame has real rosters to play with. */
@@ -86,5 +87,42 @@ describe('worldSim', () => {
     const state = initWorldSimState(competitions)
     expect(state.standings.size).toBe(0)
     expect(worldMatchDays(competitions)).toHaveLength(0)
+  })
+})
+
+describe('combinedDevProduction (cross-league development input)', () => {
+  const line = (goals: number, assists: number): GamePlayerStat => ({
+    playerId: 'p' as unknown as GamePlayerStat['playerId'],
+    goals, assists, shots: 0, penaltyMinutes: 0, toi: 1000,
+    saves: 0, shotsAgainst: 0, goalsAgainst: 0, hits: 0, blockedShots: 0, takeaways: 0, giveaways: 0,
+  })
+
+  it('counts NHL + AHL production 1:1 and sums games played', () => {
+    const r = combinedDevProduction({
+      nhl: line(10, 10), ahl: line(5, 5),
+      nhlGp: 40, ahlGp: 20, worldGp: 0, worldStrength: 1, position: 'C',
+    })
+    expect(r.points).toBe(30)
+    expect(r.gamesPlayed).toBe(60)
+  })
+
+  it('translates wider-world points to an NHL-equivalent rate by league strength', () => {
+    const strong = combinedDevProduction({
+      world: line(20, 20), nhlGp: 0, ahlGp: 0, worldGp: 50, worldStrength: 0.6, position: 'C',
+    })
+    const weak = combinedDevProduction({
+      world: line(20, 20), nhlGp: 0, ahlGp: 0, worldGp: 50, worldStrength: 0.25, position: 'C',
+    })
+    // Same raw 40 points, but the stronger league translates to more NHL-equiv.
+    expect(strong.points).toBeCloseTo(40 * 0.6)
+    expect(weak.points).toBeCloseTo(40 * 0.25)
+    expect(strong.points).toBeGreaterThan(weak.points)
+    expect(strong.gamesPlayed).toBe(50)
+  })
+
+  it('combines goalie save% across tiers', () => {
+    const g: GamePlayerStat = { ...line(0, 0), saves: 90, shotsAgainst: 100 }
+    const r = combinedDevProduction({ world: g, nhlGp: 0, ahlGp: 0, worldGp: 30, worldStrength: 0.5, position: 'G' })
+    expect(r.savePct).toBeCloseTo(0.9)
   })
 })

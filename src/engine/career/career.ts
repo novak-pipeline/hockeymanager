@@ -64,6 +64,7 @@ import {
 } from '@engine/league/offseason'
 import { tickInSeasonDevelopment } from '@engine/league/inSeasonDevelopment'
 import {
+  combinedDevProduction,
   initWorldSimState,
   resetWorldSim,
   simWorldDay,
@@ -2429,25 +2430,13 @@ export class Career {
     if (this.phase === 'regularSeason' && day > 0 && day % 14 === 0) {
       const developIds = new Set<PlayerId>()
       for (const t of this.data.teams.values()) for (const id of t.roster) developIds.add(id)
+      const inSeasonWorldStrength = this.worldStrengthByPlayer()
       tickInSeasonDevelopment({
         players: this.data.players,
         developIds,
-        gamesPlayedById: (id) => (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0),
+        gamesPlayedById: (id) => this.combinedDevGames(id),
         rng: this.rngFor(7009, day),
-        performance: (id) => {
-          const t = this.totals.get(id)
-          const at = this.ahlTotals.get(id)
-          const p = this.data.players.get(id)!
-          const combinedGp = (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0)
-          const goals = (t?.goals ?? 0) + (at?.goals ?? 0)
-          const assists = (t?.assists ?? 0) + (at?.assists ?? 0)
-          const saves = (t?.saves ?? 0) + (at?.saves ?? 0)
-          const shotsAgainst = (t?.shotsAgainst ?? 0) + (at?.shotsAgainst ?? 0)
-          const base = { points: goals + assists, gamesPlayed: combinedGp, position: p.position }
-          return p.position === 'G' && shotsAgainst > 0
-            ? { ...base, savePct: saves / shotsAgainst }
-            : base
-        },
+        performance: (id) => this.combinedDevPerformance(id, inSeasonWorldStrength),
         expectations: (id) => {
           const p = this.data.players.get(id)!
           return expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
@@ -2584,6 +2573,55 @@ export class Career {
       seedBase: this.seed ^ 0x5eed0001,
       year: this.year,
     })
+  }
+
+  /** playerId → NHLe strength of the simulated competition he plays in (for
+   *  translating his production to an NHL-equivalent rate in development). Built
+   *  per dev pass; empty when the league has no competitions. */
+  private worldStrengthByPlayer(): Map<string, number> {
+    const m = new Map<string, number>()
+    for (const comp of this.data.league.competitions ?? []) {
+      if (comp.tier !== 'simulated') continue
+      for (const tid of comp.teamIds) {
+        const team = this.data.teams.get(tid)
+        if (!team) continue
+        for (const pid of team.roster) m.set(pid as string, comp.strength)
+      }
+    }
+    return m
+  }
+
+  /**
+   * A player's season production for development, combining every tier he played
+   * — NHL, AHL, and the wider world — with wider-world points translated to an
+   * NHL-equivalent rate by that league's strength, so dominating a strong league
+   * means more than padding stats in a weak one. NHL/AHL keep their existing
+   * weighting (1:1) to preserve calibration; only the new world tiers are scaled.
+   */
+  private combinedDevPerformance(
+    id: PlayerId,
+    worldStrength: Map<string, number>
+  ): { points: number; gamesPlayed: number; position: Position; savePct?: number } {
+    const p = this.data.players.get(id)!
+    const args: Parameters<typeof combinedDevProduction>[0] = {
+      nhlGp: this.gp.get(id) ?? 0,
+      ahlGp: this.ahlGp.get(id) ?? 0,
+      worldGp: this.worldSim.gp.get(id) ?? 0,
+      worldStrength: worldStrength.get(id as string) ?? 1,
+      position: p.position,
+    }
+    const t = this.totals.get(id)
+    const at = this.ahlTotals.get(id)
+    const wt = this.worldSim.totals.get(id)
+    if (t) args.nhl = t
+    if (at) args.ahl = at
+    if (wt) args.world = wt
+    return combinedDevProduction(args)
+  }
+
+  /** Combined games played across NHL + AHL + wider world (ice-time for dev). */
+  private combinedDevGames(id: PlayerId): number {
+    return (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0) + (this.worldSim.gp.get(id) ?? 0)
   }
 
   /** Advance up to `days` match days (default 1). Returns days actually played. */
@@ -2982,40 +3020,23 @@ export class Career {
         // playing heavy AHL minutes develops at full rate, while a scratched
         // player (0 NHL + 0 AHL) stagnates. The gamesPlayedById callback feeds
         // developPlayers' internal gamesFactor curve (0 GP → 0.6, 60+ GP → 1.0).
+        // Development judges a player on his production across EVERY tier he
+        // played — NHL, AHL, and the wider world — so a prospect lighting up the
+        // AHL or a junior/Euro league still develops. Wider-world points are
+        // translated to an NHL-equivalent rate by league strength (see
+        // combinedDevPerformance); ice-time (gamesPlayed) combines all tiers, so
+        // a scratched player (0 games anywhere) stagnates.
+        const offseasonWorldStrength = this.worldStrengthByPlayer()
         const dev = developPlayers({
           players: this.data.players,
-          gamesPlayedById: (id) => (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0),
+          gamesPlayedById: (id) => this.combinedDevGames(id),
           year: this.year,
           rng,
           // In-season development already delivered part of this year's growth
           // continuously; the summer pass takes the remaining share so annual
           // totals stay calibrated. See inSeasonDevelopment.ts.
           growthScale: 0.65,
-          performance: (id) => {
-            const t = this.totals.get(id)
-            const at = this.ahlTotals.get(id)
-            const p = this.data.players.get(id)!
-            // NHL and AHL totals are kept separate so they never mix in
-            // leaders/standings, but development judges a player on his total
-            // production across both tiers (a prospect lighting up the AHL still
-            // develops well). Likewise gamesPlayed combines both tiers, so a
-            // scratched player (0 NHL + 0 AHL) stagnates.
-            const nhlGp = this.gp.get(id) ?? 0
-            const ahlGp = this.ahlGp.get(id) ?? 0
-            const combinedGp = nhlGp + ahlGp
-            const goals = (t?.goals ?? 0) + (at?.goals ?? 0)
-            const assists = (t?.assists ?? 0) + (at?.assists ?? 0)
-            const saves = (t?.saves ?? 0) + (at?.saves ?? 0)
-            const shotsAgainst = (t?.shotsAgainst ?? 0) + (at?.shotsAgainst ?? 0)
-            const base = {
-              points: goals + assists,
-              gamesPlayed: combinedGp,
-              position: p.position,
-            }
-            return p.position === 'G' && shotsAgainst > 0
-              ? { ...base, savePct: saves / shotsAgainst }
-              : base
-          },
+          performance: (id) => this.combinedDevPerformance(id, offseasonWorldStrength),
           expectations: (id) => {
             const p = this.data.players.get(id)!
             return expectedPointsFor(overall(p.composites, p.position), p.position, p.role)

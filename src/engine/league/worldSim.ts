@@ -14,7 +14,7 @@
  * The state's Standing objects are the SAME references held on each Competition,
  * so a league's `standings` stays live as games are played.
  */
-import type { Competition, Player, PlayerId, Standing, Team, TeamId } from '@domain'
+import type { Competition, Player, PlayerId, Position, Standing, Team, TeamId } from '@domain'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { applyGameResult, gameSeed, mergePlayerStats } from '@engine/quick/season'
 import type { GamePlayerStat } from '@engine/shared/outcome'
@@ -100,6 +100,35 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
     }
   }
   return { gamesPlayed }
+}
+
+/**
+ * Combine a player's season production across every tier he played — NHL, AHL,
+ * and the wider world — into a single line for the development engine. NHL and
+ * AHL count 1:1 (preserving existing calibration); wider-world points are
+ * translated to an NHL-equivalent rate by that league's strength factor, so
+ * dominating a strong league means more than padding stats in a weak one. Games
+ * played sum across all tiers (a player scratched everywhere stagnates).
+ */
+export function combinedDevProduction(args: {
+  nhl?: GamePlayerStat
+  ahl?: GamePlayerStat
+  world?: GamePlayerStat
+  nhlGp: number
+  ahlGp: number
+  worldGp: number
+  /** NHLe factor for the wider-world league this player competed in (1 = NHL). */
+  worldStrength: number
+  position: Position
+}): { points: number; gamesPlayed: number; position: Position; savePct?: number } {
+  const { nhl, ahl, world, worldStrength, position } = args
+  const goals = (nhl?.goals ?? 0) + (ahl?.goals ?? 0) + (world?.goals ?? 0) * worldStrength
+  const assists = (nhl?.assists ?? 0) + (ahl?.assists ?? 0) + (world?.assists ?? 0) * worldStrength
+  const saves = (nhl?.saves ?? 0) + (ahl?.saves ?? 0) + (world?.saves ?? 0)
+  const shotsAgainst = (nhl?.shotsAgainst ?? 0) + (ahl?.shotsAgainst ?? 0) + (world?.shotsAgainst ?? 0)
+  const gamesPlayed = args.nhlGp + args.ahlGp + args.worldGp
+  const base = { points: goals + assists, gamesPlayed, position }
+  return position === 'G' && shotsAgainst > 0 ? { ...base, savePct: saves / shotsAgainst } : base
 }
 
 /** All distinct match days across simulated competitions, ascending. */

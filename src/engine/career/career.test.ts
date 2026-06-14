@@ -1529,6 +1529,17 @@ describe('Career — wider-world quick-sim', () => {
     expect(shl.standings.some((s) => s.points > 0)).toBe(true)
   })
 
+  it('runs a season with competitions through to the next year without error', () => {
+    const data = withCompetitions(33)
+    const career = new Career(data, 33, data.league.teams[7]!)
+    // Play the whole regular season; the wider world sims alongside.
+    let guard = 0
+    while (career.advanceDay() && guard++ < 400) { /* advance */ }
+    // The world's standings accumulated a full slate.
+    const shl = data.league.competitions![0]!
+    expect(shl.standings.reduce((s, st) => s + st.gamesPlayed, 0)).toBeGreaterThan(0)
+  })
+
   it('persists wider-world standings + stats across save/load', () => {
     const data = withCompetitions(32)
     const career = new Career(data, 32, data.league.teams[7]!)
