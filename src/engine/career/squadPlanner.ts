@@ -9,6 +9,7 @@
 
 import type { Player } from '@domain'
 import { ratedOverall, overallToStars } from '@engine/ratings/composites'
+import { buildProgressRows } from './progressView'
 
 export type CareerStage = 'Prospect' | 'Developing' | 'Peak' | 'Veteran'
 
@@ -51,6 +52,8 @@ export interface SquadPlannerView {
   depth: PositionDepth[]
   /** Plain-English summary lines (expiring deals, age skew, thin spots). */
   summary: string[]
+  /** Whole-roster season progress (ability/ceiling change per player). */
+  progress: import('./progressView').ProgressRowView[]
 }
 
 const GROUP_LABEL: Record<PosGroup, string> = {
@@ -154,5 +157,7 @@ export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView
   if (thin.length > 0) summary.push(`Depth concerns: ${thin.join(', ')}.`)
   else summary.push('No glaring depth holes across the position groups.')
 
-  return { teamName: args.teamName, stages: STAGE_ORDER, matrix, ageProfile, depth, summary }
+  const progress = buildProgressRows(args.roster)
+
+  return { teamName: args.teamName, stages: STAGE_ORDER, matrix, ageProfile, depth, summary, progress }
 }

@@ -3,9 +3,11 @@
  * players across the NHL roster and the AHL affiliate, with a current/potential
  * star read, projection tier and a plain-English development note. Read-only.
  */
+import { useState } from 'react'
 import type { DevelopmentCenterView, DevelopmentRow } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
+import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -47,6 +49,8 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
     (r) => (r.type === 'development' ? r.development : null)
   )
 
+  const [tab, setTab] = useState<'prospects' | 'progress'>('prospects')
+
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
   if (!data) return <Notice kind="info">No development data.</Notice>
@@ -60,6 +64,21 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
         </span>
       </ScreenHeader>
 
+      <div className="row" style={{ gap: 'var(--sp-2)' }}>
+        <button type="button" className={`btn btn-sm${tab === 'prospects' ? ' btn-primary' : ''}`} onClick={() => setTab('prospects')}>Prospects</button>
+        <button type="button" className={`btn btn-sm${tab === 'progress' ? ' btn-primary' : ''}`} onClick={() => setTab('progress')}>U23 Progress</button>
+      </div>
+
+      {tab === 'progress' && (
+        <Panel title="U23 Progress — season ability & ceiling change">
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            How your under-23 organisation players have developed this season (biggest risers first).
+          </div>
+          <ProgressTable rows={d.progress} />
+        </Panel>
+      )}
+
+      {tab === 'prospects' && (
       <Panel title="Prospects (NHL + Affiliate)">
         <div className="table-wrap">
           <table className="table">
@@ -107,6 +126,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
           </table>
         </div>
       </Panel>
+      )}
     </section>
   )
 }

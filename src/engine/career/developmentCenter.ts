@@ -11,6 +11,7 @@
 import type { Player } from '@domain'
 import { agedPotential, ratedOverall } from '@engine/ratings/composites'
 import { ceilingRoleShort } from '@engine/league/draftRankings'
+import { buildProgressRows } from './progressView'
 import { projectionTier, TIER_LABELS, type ProjectionTier } from './scoutReport'
 
 export interface DevelopmentRow {
@@ -41,6 +42,8 @@ export interface DevelopmentCenterView {
   /** How many are top-tier (Star/Prospect/Key). */
   highCeiling: number
   rows: DevelopmentRow[]
+  /** U23 organisation players' season progress (ability/ceiling change). */
+  progress: import('./progressView').ProgressRowView[]
 }
 
 function devNote(p: Player, location: 'NHL' | 'AHL', upside: number, tier: ProjectionTier): string {
@@ -114,5 +117,9 @@ export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentC
     (r) => r.tier === 'Star' || r.tier === 'Prospect' || r.tier === 'Key',
   ).length
 
-  return { teamName: args.teamName, count: rows.length, highCeiling, rows }
+  // U23 progress roll-up (true ratings — these are the user's own org players).
+  const u23 = [...args.roster, ...args.affiliate].filter((p) => p.age <= maxAge)
+  const progress = buildProgressRows(u23)
+
+  return { teamName: args.teamName, count: rows.length, highCeiling, rows, progress }
 }

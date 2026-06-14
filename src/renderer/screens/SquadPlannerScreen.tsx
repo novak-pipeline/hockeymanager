@@ -3,8 +3,10 @@
  * group × career stage) plus a Squad Report (depth verdicts, age profile and a
  * plain-English summary). Read-only.
  */
+import { useState } from 'react'
 import type { SquadPlannerView, PlannerPlayer, PositionDepth } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
+import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -42,6 +44,8 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
     (r) => (r.type === 'squadPlanner' ? r.squadPlanner : null)
   )
 
+  const [tab, setTab] = useState<'planner' | 'progress'>('planner')
+
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading squad planner…</Notice>
   if (!data) return <Notice kind="info">No squad data.</Notice>
@@ -54,6 +58,21 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
         <span className="muted small">Experience matrix · ⧗ = expiring deal</span>
       </ScreenHeader>
 
+      <div className="row" style={{ gap: 'var(--sp-2)' }}>
+        <button type="button" className={`btn btn-sm${tab === 'planner' ? ' btn-primary' : ''}`} onClick={() => setTab('planner')}>Planner</button>
+        <button type="button" className={`btn btn-sm${tab === 'progress' ? ' btn-primary' : ''}`} onClick={() => setTab('progress')}>Team Progress</button>
+      </div>
+
+      {tab === 'progress' && (
+        <Panel title="Team Progress — season ability & ceiling change">
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            How the whole roster has developed this season — risers at the top, sliders at the bottom.
+          </div>
+          <ProgressTable rows={d.progress} />
+        </Panel>
+      )}
+
+      {tab === 'planner' && (<>
       <Panel title="Experience Matrix">
         <div className="table-wrap">
           <table className="table">
@@ -117,6 +136,7 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
           </div>
         </Panel>
       </div>
+      </>)}
     </section>
   )
 }

@@ -53,7 +53,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'contract',    label: 'Contract' },
   { id: 'history',     label: 'History' },
   { id: 'scout',       label: 'Scout Report' },
-  { id: 'opinion',     label: 'Opinion' },
+  { id: 'opinion',     label: 'Progress' },
 ]
 
 /* ═══════════════════════════ SUB-COMPONENTS ═══════════════════════════ */
@@ -1963,9 +1963,9 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
   const timeline = d.opinionTimeline ?? []
   if (timeline.length === 0) {
     return (
-      <Panel title="Opinion Over Time">
+      <Panel title="Progress Over Time">
         <span className="muted small">
-          No opinion history yet — it builds through the season as {d.name} plays, develops, and is scouted. Check back after a few weeks.
+          No progress history yet — it builds through the season as {d.name} plays, develops, and is scouted. Check back after a few weeks.
         </span>
       </Panel>
     )
@@ -1994,7 +1994,7 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
         </svg>
       </Panel>
 
-      <Panel title="Opinion Log">
+      <Panel title="Progress Log">
         <div className="table-wrap">
           <table className="table">
             <thead>
