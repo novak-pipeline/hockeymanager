@@ -879,6 +879,52 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
   for (const t of ctx.teams.values()) {
     for (const id of t.roster) leagueTotal += ctx.players.get(id)?.contract.salary ?? 0
   }
+  // Salary by position group.
+  const groupOfPos = (pos: string): 'Forwards' | 'Defense' | 'Goaltending' =>
+    pos === 'G' ? 'Goaltending' : pos === 'D' ? 'Defense' : 'Forwards'
+  const groupAgg = new Map<string, { total: number; count: number }>()
+  for (const g of ['Forwards', 'Defense', 'Goaltending']) groupAgg.set(g, { total: 0, count: 0 })
+  for (const p of roster) {
+    const g = groupAgg.get(groupOfPos(p.position))!
+    g.total += p.contract.salary
+    g.count += 1
+  }
+  const byPosition = ['Forwards', 'Defense', 'Goaltending'].map((group) => ({
+    group,
+    total: groupAgg.get(group)!.total,
+    count: groupAgg.get(group)!.count,
+  }))
+
+  // Committed cap going forward: a player counts in year offset k if his deal
+  // still runs that far (yearsRemaining > k).
+  const commitments = [0, 1, 2, 3].map((offset) => ({
+    year: ctx.year + offset,
+    committed: roster.reduce((s, p) => s + (p.contract.yearsRemaining > offset ? p.contract.salary : 0), 0),
+    players: roster.filter((p) => p.contract.yearsRemaining > offset).length,
+  }))
+
+  // Estimated revenue: deterministic market size from a stable hash of the team id.
+  let h = 2166136261
+  for (let i = 0; i < team.id.length; i++) { h ^= team.id.charCodeAt(i); h = Math.imul(h, 16777619) }
+  const marketTier = Math.abs(h) % 5 // 0..4
+  const MARKET_LABELS = ['Small market', 'Modest market', 'Mid market', 'Large market', 'Major market']
+  const marketMult = 0.8 + marketTier * 0.18 // 0.8 .. 1.52
+  const base = team.finances.salaryCap
+  const gate = Math.round(base * 0.42 * marketMult)
+  const broadcast = Math.round(base * 0.30 * marketMult)
+  const sponsorship = Math.round(base * 0.18 * marketMult)
+  const merchandise = Math.round(base * 0.08 * marketMult)
+  const revenue = {
+    marketSizeLabel: MARKET_LABELS[marketTier]!,
+    estimatedRevenue: gate + broadcast + sponsorship + merchandise,
+    lines: [
+      { source: 'Gate receipts', amount: gate },
+      { source: 'Broadcast', amount: broadcast },
+      { source: 'Sponsorship', amount: sponsorship },
+      { source: 'Merchandise', amount: merchandise },
+    ],
+  }
+
   return {
     salaryCap: team.finances.salaryCap,
     capUsed,
@@ -887,6 +933,9 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),
     leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, ctx.teams.size)),
+    byPosition,
+    commitments,
+    revenue,
   }
 }
 

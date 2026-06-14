@@ -44,6 +44,54 @@ function FinancesBody(props: { data: FinanceView }): JSX.Element {
         />
       </Panel>
 
+      {/* ── salary by position + revenue ── */}
+      {(d.byPosition || d.revenue) && (
+        <div className="grid-2">
+          {d.byPosition && (
+            <Panel title="Salary by position">
+              <BySegment rows={d.byPosition.map((b) => ({ label: `${b.group} (${b.count})`, amount: b.total }))} total={d.capUsed} />
+            </Panel>
+          )}
+          {d.revenue && (
+            <Panel title={`Revenue · ${d.revenue.marketSizeLabel}`}>
+              <BySegment rows={d.revenue.lines.map((l) => ({ label: l.source, amount: l.amount }))} total={d.revenue.estimatedRevenue} />
+              <div className="row-between small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                <span className="muted">Estimated total</span>
+                <strong>{fmtMoney(d.revenue.estimatedRevenue)}</strong>
+              </div>
+            </Panel>
+          )}
+        </div>
+      )}
+
+      {/* ── multi-year wage commitments ── */}
+      {d.commitments && (
+        <Panel title="Wage commitments">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Season</th><th className="num">Committed</th><th className="num">Players</th><th className="num">Cap space</th></tr>
+              </thead>
+              <tbody>
+                {d.commitments.map((c) => (
+                  <tr key={c.year}>
+                    <td>{c.year}–{(c.year + 1) % 100}</td>
+                    <td className="num"><strong>{fmtMoney(c.committed)}</strong></td>
+                    <td className="num muted">{c.players}</td>
+                    <td className="num" style={{ color: d.salaryCap - c.committed < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                      {fmtMoney(d.salaryCap - c.committed)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="small muted" style={{ marginTop: 6 }}>
+            Committed = salary still on the books that season (assumes a flat cap). Excludes future re-signings and entry-level deals.
+          </p>
+        </Panel>
+      )}
+
       {/* ── payroll table ── */}
       <Panel title="Payroll">
         <PayrollTable rows={sorted} />
@@ -112,6 +160,28 @@ function CapHeader(props: {
         <span>Used: {pct.toFixed(1)}%</span>
         <span>League avg: {fmtMoney(leagueAvg)}</span>
       </div>
+    </div>
+  )
+}
+
+/** A simple labelled bar breakdown summing to `total`. */
+function BySegment(props: { rows: Array<{ label: string; amount: number }>; total: number }): JSX.Element {
+  const max = Math.max(1, ...props.rows.map((r) => r.amount))
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 'var(--sp-1)' }}>
+      {props.rows.map((r) => {
+        const pct = props.total > 0 ? (r.amount / props.total) * 100 : 0
+        return (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="small" style={{ width: 110 }}>{r.label}</span>
+            <span className="meter" style={{ flex: 1, height: 10 }}>
+              <span className="meter-fill" style={{ width: `${(r.amount / max) * 100}%`, background: 'var(--violet, #8b5cf6)' }} />
+            </span>
+            <span className="small" style={{ width: 86, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(r.amount)}</span>
+            <span className="small muted" style={{ width: 36, textAlign: 'right' }}>{pct.toFixed(0)}%</span>
+          </div>
+        )
+      })}
     </div>
   )
 }

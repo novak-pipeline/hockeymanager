@@ -832,6 +832,16 @@ export interface FinanceView {
   expiring: PayrollRowView[]
   /** League average payroll for context. */
   leagueAvgPayroll: number
+  /** Salary split by position group (Forwards / Defense / Goaltending). */
+  byPosition?: Array<{ group: string; total: number; count: number }>
+  /** Committed cap hit for the current season and the next few years. */
+  commitments?: Array<{ year: number; committed: number; players: number }>
+  /** Estimated revenue / sponsorship picture (market-derived, deterministic). */
+  revenue?: {
+    marketSizeLabel: string
+    estimatedRevenue: number
+    lines: Array<{ source: string; amount: number }>
+  }
 }
 
 /* ────────────────────────── playoffs ────────────────────────── */
