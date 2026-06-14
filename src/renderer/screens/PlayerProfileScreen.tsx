@@ -1653,6 +1653,11 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             </span>
           </div>
 
+          {/* What the tier means, in hockey terms */}
+          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+            <span style={{ fontWeight: 700, color: tierColor }}>{sr.tierLabel}:</span> {sr.tierBlurb}
+          </div>
+
           {/* Season outlook */}
           <span className="muted small" style={{ fontStyle: 'italic' }}>
             {sr.seasonProjection.line}

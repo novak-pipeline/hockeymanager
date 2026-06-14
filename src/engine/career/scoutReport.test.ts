@@ -11,6 +11,7 @@ import {
   buildScoutReport,
   projectionTier,
   TIER_LABELS,
+  TIER_BLURBS,
   type ProjectionTier,
 } from './scoutReport'
 import type { Player } from '@domain'
@@ -117,10 +118,11 @@ describe('projectionTier', () => {
     expect(projectionTier(62, 4, 19)).toBe('Prospect')
   })
 
-  it('TIER_LABELS covers all tiers', () => {
+  it('TIER_LABELS and TIER_BLURBS cover all tiers', () => {
     const tiers: ProjectionTier[] = ['Star', 'Key', 'Core', 'Depth', 'Fringe', 'Prospect']
     for (const t of tiers) {
       expect(TIER_LABELS[t]).toBeTruthy()
+      expect(TIER_BLURBS[t].length).toBeGreaterThan(20)
     }
   })
 })

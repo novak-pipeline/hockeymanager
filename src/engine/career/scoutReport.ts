@@ -16,7 +16,7 @@
 import type { Player } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf } from '@engine/league/scouting'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { ARCHETYPE_META, classifyArchetype } from '@engine/league/archetypes'
 
 /* ────────────────────────── deterministic hash ────────────────────────── */
@@ -67,17 +67,34 @@ function gradeFrom(score: number, knowledge: number): ReportGrade {
 
 export type ProjectionTier = 'Fringe' | 'Depth' | 'Core' | 'Key' | 'Star' | 'Prospect'
 
+/**
+ * Where a player slots in an NHL roster, as a single label. Bands are anchored to
+ * the DB-calibrated overall (0–100) and mirror real roster construction — a club
+ * carries ~2–3 stars, ~3–4 key players, a core of everyday regulars, a depth
+ * tier rounding out the lineup, and fringe tweeners on the margins:
+ *
+ *   Star   80+  — franchise-calibre; drives results (1st line / #1 pair / starter)
+ *   Key    70+  — high-end regular leaned on nightly (top-six / top-four / starter)
+ *   Core   61+  — dependable everyday middle-of-the-lineup player
+ *   Depth  52+  — bottom-six / 3rd pair / backup; useful in a limited role
+ *   Fringe <52  — replacement-level NHL/AHL tweener
+ *
+ * Young players (≤21) with real upside are shown as Prospect — judged on ceiling,
+ * not current role — but only when they aren't already established (Core+).
+ */
 export function projectionTier(
   ovr: number,
   potentialStars: number,
   age: number
 ): ProjectionTier {
-  // Young prospects assessed differently
+  // Already-elite players are Stars regardless of age…
+  if (ovr >= 80 || (ovr >= 74 && potentialStars >= 5)) return 'Star'
+  // …a young, not-yet-elite player with real upside is framed as a Prospect…
   if (age <= 21 && potentialStars >= 3) return 'Prospect'
-  if (ovr >= 80 || (ovr >= 72 && potentialStars >= 4)) return 'Star'
-  if (ovr >= 68 || (ovr >= 60 && potentialStars >= 4)) return 'Key'
-  if (ovr >= 58) return 'Core'
-  if (ovr >= 46) return 'Depth'
+  // …everyone else is tiered on what they are now.
+  if (ovr >= 70 || (ovr >= 63 && potentialStars >= 4)) return 'Key'
+  if (ovr >= 60) return 'Core'
+  if (ovr >= 48) return 'Depth'
   return 'Fringe'
 }
 
@@ -89,6 +106,16 @@ export const TIER_LABELS: Record<ProjectionTier, string> = {
   Core: 'Core Player',
   Depth: 'Depth Player',
   Fringe: 'Fringe Player',
+}
+
+/** One-line definition of each tier, in hockey terms (shown on the profile). */
+export const TIER_BLURBS: Record<ProjectionTier, string> = {
+  Star: 'A franchise-calibre talent who drives results — a first-line forward, number-one defenceman, or a starting goalie you build around.',
+  Key: 'A high-end regular the team leans on every night — a top-six forward, top-four defenceman, or a clear starter.',
+  Core: 'A dependable everyday player through the middle of the lineup — reliable minutes, rarely a liability.',
+  Depth: 'Rounds out the roster — a bottom-six forward, third-pair defenceman, or a backup; valuable in a defined role.',
+  Fringe: 'Replacement-level — an NHL/AHL tweener battling to hold down a job.',
+  Prospect: 'Young and unproven, judged on his upside rather than his current role.',
 }
 
 /* ────────────────────────── season projection ────────────────────────── */
@@ -349,6 +376,8 @@ export interface ScoutReportView {
   /** Projection tier label. */
   tier: ProjectionTier
   tierLabel: string
+  /** One-line definition of the tier (what it means in hockey terms). */
+  tierBlurb: string
   /** Season outlook line. */
   seasonProjection: SeasonProjection
   /** A+..F report card per area (fogged at low knowledge). */
@@ -365,9 +394,10 @@ export function buildScoutReport(
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
 
-  const ovr = overall(player.composites, player.position)
+  const ovr = ratedOverall(player)
   const tier = projectionTier(ovr, potStars, player.age)
   const tierLabel = TIER_LABELS[tier]
+  const tierBlurb = TIER_BLURBS[tier]
   const reportCard = buildReportCard(player, knowledge)
 
   const seasonProjection: SeasonProjection =
@@ -382,6 +412,7 @@ export function buildScoutReport(
     generalImpressions: prose,
     tier,
     tierLabel,
+    tierBlurb,
     seasonProjection,
     reportCard,
     knowledge: Math.round(knowledge),
