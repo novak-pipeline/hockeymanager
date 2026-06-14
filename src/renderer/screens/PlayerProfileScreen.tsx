@@ -26,6 +26,8 @@ import type {
   ScoutPanel,
   ScoutRead,
   RiskBand,
+  PlayerTrait,
+  TraitCategory,
 } from '../../engine/career/views'
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
@@ -354,6 +356,52 @@ function ReportCardStrip({ card, isGoalie }: { card: ReportCard; isGoalie: boole
   return (
     <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
       {tiles.map((t) => <GradeTile key={t.label} label={t.label} grade={t.grade} />)}
+    </div>
+  )
+}
+
+/* ── Trait badges (EP-style hexagons) ── */
+const TRAIT_COLORS: Record<TraitCategory, string> = {
+  offense: 'var(--accent2, #e0b341)',
+  defense: '#4f8ef7',
+  physical: 'var(--danger, #d8584f)',
+  skating: '#2bb8a3',
+  goalie: '#9b6cf0',
+  intangible: 'var(--accent, #6c5ce7)',
+}
+
+/** A row of EP-style hexagon trait badges (icon in a hex, label beneath). */
+function TraitBadges({ traits }: { traits: PlayerTrait[] }): JSX.Element | null {
+  if (traits.length === 0) return null
+  const hex = '50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%'
+  return (
+    <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+      {traits.map((t) => {
+        const color = TRAIT_COLORS[t.category]
+        return (
+          <div key={t.key} title={t.blurb} style={{ textAlign: 'center', width: 64 }}>
+            <div style={{
+              width: 52, height: 58, margin: '0 auto',
+              clipPath: `polygon(${hex})`,
+              background: `${color}22`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              position: 'relative',
+            }}>
+              {/* hex border via a slightly larger clipped layer behind */}
+              <div style={{
+                position: 'absolute', inset: 0, clipPath: `polygon(${hex})`,
+                background: color, zIndex: 0,
+              }} />
+              <div style={{
+                position: 'absolute', inset: 1.5, clipPath: `polygon(${hex})`,
+                background: 'var(--panel, #1a1d27)', zIndex: 1,
+              }} />
+              <span style={{ position: 'relative', zIndex: 2, fontSize: 22 }}>{t.icon}</span>
+            </div>
+            <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 4, lineHeight: 1.1 }}>{t.label}</div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1700,6 +1748,12 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
       {/* ── Scouting Report ── */}
       <Panel title="Scouting Report">
         <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+          {/* Trait badges — the loud calling cards */}
+          {sr.traits.length > 0 && (
+            <div style={{ paddingBottom: 'var(--sp-1)', borderBottom: '1px solid var(--line)' }}>
+              <TraitBadges traits={sr.traits} />
+            </div>
+          )}
           {/* Hero: prospect grade badge + elevator pitch */}
           <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
             <div style={{

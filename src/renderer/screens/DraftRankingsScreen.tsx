@@ -36,6 +36,7 @@ export function DraftRankingsScreen(): JSX.Element {
   )
   const rows = data?.rankings ?? []
   const [board, setBoard] = useState<'analyst' | 'scouts'>('analyst')
+  const [scoutId, setScoutId] = useState<string>('') // '' = staff consensus
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
@@ -60,9 +61,27 @@ export function DraftRankingsScreen(): JSX.Element {
         </div>
       )}
 
-      {data && board === 'scouts' && (
-        <ScoutBoardPanel rows={data.scoutBoard} draftYear={data.draftYear} />
-      )}
+      {data && board === 'scouts' && (() => {
+        const picked = scoutId ? data.scoutBoards.find((b) => b.scoutId === scoutId) : null
+        const rows = picked ? picked.rows : data.scoutBoard
+        const who = picked ? picked.scoutName : 'Staff consensus'
+        return (
+          <>
+            {data.scoutBoards.length > 0 && (
+              <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <span className="muted small">Board:</span>
+                <select className="select select-sm" value={scoutId} onChange={(e) => setScoutId(e.target.value)}>
+                  <option value="">Staff consensus</option>
+                  {data.scoutBoards.map((b) => (
+                    <option key={b.scoutId} value={b.scoutId}>{b.scoutName}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <ScoutBoardPanel rows={rows} draftYear={data.draftYear} who={who} />
+          </>
+        )
+      })()}
 
       {data && board === 'analyst' && rows.length > 0 && (
         <Panel title={`NHL Draft Prospect Rankings — ${data.draftYear} class`}>
@@ -156,7 +175,7 @@ function Movement({ value }: { value: number }): JSX.Element {
   )
 }
 
-function ScoutBoardPanel({ rows, draftYear }: { rows: ScoutBoardRowView[]; draftYear: number }): JSX.Element {
+function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; draftYear: number; who: string }): JSX.Element {
   if (rows.length === 0) {
     return (
       <Panel title="Your Scouts’ Board">
@@ -168,11 +187,11 @@ function ScoutBoardPanel({ rows, draftYear }: { rows: ScoutBoardRowView[]; draft
     )
   }
   return (
-    <Panel title={`Your Scouts’ Board — ${draftYear} class`}>
+    <Panel title={`${who} — ${draftYear} class`}>
       <div className="muted small" style={{ marginBottom: 8 }}>
-        Your staff’s own ranking, re-ordered from the consensus by what they’ve seen — intangibles, interviews, and the
-        underlying game. <strong style={{ color: 'var(--success, #4caf72)' }}>▲</strong> means they’re higher on him than the
-        board; <strong style={{ color: 'var(--danger, #d8584f)' }}>▼</strong> lower. Unseen prospects sit at consensus.
+        {who === 'Staff consensus' ? 'Your staff’s' : `${who}’s`} own ranking, re-ordered from the consensus by what they’ve
+        seen — intangibles, interviews, and the underlying game. <strong style={{ color: 'var(--success, #4caf72)' }}>▲</strong> means
+        higher than the board; <strong style={{ color: 'var(--danger, #d8584f)' }}>▼</strong> lower. Unseen prospects sit at consensus.
       </div>
       <table className="data-table" style={{ width: '100%' }}>
         <thead>

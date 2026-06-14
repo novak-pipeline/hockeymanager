@@ -22,6 +22,7 @@ export type { RadarAxes, RadarView } from '@engine/ratings/radar'
 export { RADAR_AXES } from '@engine/ratings/radar'
 export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence } from '@engine/career/personalityRead'
 export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
+export type { PlayerTrait, TraitCategory } from '@engine/career/playerTraits'
 export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 export type { OpinionSnapshot } from '@engine/career/opinionTracker'
@@ -809,8 +810,10 @@ export interface DraftRankingsView {
   rankings: DraftRankRowView[]
   /** Younger talent (14–16) on the radar but not yet draft-eligible. */
   radar: DraftRankRowView[]
-  /** YOUR scouts' own board — re-ranked by what your staff has seen. */
+  /** YOUR scouts' own board — the staff consensus, re-ranked by what they've seen. */
   scoutBoard: ScoutBoardRowView[]
+  /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
+  scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[] }[]
 }
 
 export interface StatsView {

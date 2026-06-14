@@ -76,6 +76,7 @@ import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, 
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { scoutDraftBias } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -5301,34 +5302,55 @@ export class Career {
     // your staff's signal (intangibles + underlying game, knowledge-scaled)
     // re-ranks it. Because elite prospects sit on big value gaps, the same
     // signal barely moves them but swings the bunched mid/late board — so your
-    // edge naturally grows the deeper you go.
+    // edge naturally grows the deeper you go. Each individual scout then layers
+    // their own specialty bias + judgment-scaled noise on top → distinct boards.
     const cands = [...board.values()]
     const consensusValueOf = (c: Cand): number => c.input.ceiling * 0.74 + c.input.current * 0.26
-    const scoutMeta = new Map<string, { scoutValue: number; knowledge: number }>()
+    const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
     for (const c of cands) {
       const id = c.row.playerId
       const isOwn = this.userTeam.roster.includes(asPlayerId(id))
       const knowledge = isOwn ? 100 : knowledgeOf(this.scouting, id)
-      const signal = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
-      scoutMeta.set(id, { scoutValue: consensusValueOf(c) + signal * (knowledge / 100), knowledge })
+      const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
+      meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
     }
     const consensusRankOf = new Map<string, number>()
     ;[...cands].sort((a, b) => consensusValueOf(b) - consensusValueOf(a))
       .forEach((c, i) => consensusRankOf.set(c.row.playerId, i + 1))
-    const scoutBoard: ScoutBoardRowView[] = [...cands]
-      .sort((a, b) => scoutMeta.get(b.row.playerId)!.scoutValue - scoutMeta.get(a.row.playerId)!.scoutValue)
-      .slice(0, 64)
-      .map((c, i) => {
-        const id = c.row.playerId
-        const yourRank = i + 1
-        const consensusRank = consensusRankOf.get(id) ?? yourRank
-        const movement = consensusRank - yourRank
-        const meta = scoutMeta.get(id)!
-        const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
-        return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: meta.knowledge >= 35 }
-      })
 
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard }
+    // Build a board (top 64) from a per-candidate value function.
+    const buildBoard = (valueOf: (c: Cand) => number): ScoutBoardRowView[] =>
+      [...cands]
+        .sort((a, b) => valueOf(b) - valueOf(a))
+        .slice(0, 64)
+        .map((c, i) => {
+          const id = c.row.playerId
+          const yourRank = i + 1
+          const consensusRank = consensusRankOf.get(id) ?? yourRank
+          const movement = consensusRank - yourRank
+          const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
+          return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
+        })
+
+    // Staff consensus board: department signal, knowledge-scaled.
+    const scoutBoard = buildBoard((c) => {
+      const m = meta.get(c.row.playerId)!
+      return consensusValueOf(c) + m.deptRaw * (m.knowledge / 100)
+    })
+
+    // Per-scout boards: each scout adds their own bias + judgment-scaled noise.
+    const scouts = this.getTeamStaff(this.userTeamId as string).scouts
+    const scoutBoards = scouts.map((s) => ({
+      scoutId: s.id as string,
+      scoutName: s.name,
+      rows: buildBoard((c) => {
+        const m = meta.get(c.row.playerId)!
+        const bias = scoutDraftBias(s, c.player, m.composites)
+        return consensusValueOf(c) + (m.deptRaw + bias) * (m.knowledge / 100)
+      }),
+    }))
+
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards }
   }
 
   getStats(): StatsView {

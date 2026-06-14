@@ -18,6 +18,7 @@ import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf } from '@engine/league/scouting'
 import { ratedOverall } from '@engine/ratings/composites'
 import { ARCHETYPE_META, classifyArchetype } from '@engine/league/archetypes'
+import { playerTraits, type PlayerTrait } from '@engine/career/playerTraits'
 
 /* ────────────────────────── deterministic hash ────────────────────────── */
 
@@ -401,6 +402,8 @@ export interface ScoutReportView {
   reportCard: ReportCard
   /** One-line "elevator pitch" summary of what the player is. */
   elevatorPitch: string
+  /** Up to 3 standout trait badges (EP-style "Hammer / Play Killer"). */
+  traits: PlayerTrait[]
   /** 0–100 scouting knowledge at time of report generation. */
   knowledge: number
 }
@@ -419,6 +422,7 @@ export function buildScoutReport(
   const tierBlurb = TIER_BLURBS[tier]
   const reportCard = buildReportCard(player, knowledge)
   const elevatorPitch = buildElevatorPitch(player)
+  const traits = playerTraits(player)
 
   const seasonProjection: SeasonProjection =
     player.position === 'G'
@@ -436,6 +440,7 @@ export function buildScoutReport(
     seasonProjection,
     reportCard,
     elevatorPitch,
+    traits,
     knowledge: Math.round(knowledge),
   }
 }

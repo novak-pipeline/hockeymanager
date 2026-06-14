@@ -1632,6 +1632,16 @@ describe('Career — wider-world quick-sim', () => {
       expect(['higher', 'inline', 'lower']).toContain(r.verdict)
       expect(typeof r.seen).toBe('boolean')
     })
+    // Per-scout boards: one per staff scout, each a valid re-ranked board.
+    expect(Array.isArray(view.scoutBoards)).toBe(true)
+    view.scoutBoards.forEach((b) => {
+      expect(b.scoutId).toBeTruthy()
+      expect(b.scoutName).toBeTruthy()
+      b.rows.forEach((r, i) => {
+        expect(r.rank).toBe(i + 1)
+        expect(r.movement).toBe(r.consensusRank - r.rank)
+      })
+    })
   })
 
   it('persists wider-world standings + stats across save/load', () => {

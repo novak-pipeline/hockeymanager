@@ -89,6 +89,25 @@ function specialtyBias(
   return 0
 }
 
+/**
+ * A single scout's personal bias on a draft prospect's VALUE (0–100 units),
+ * relative to the staff consensus — so each scout builds a different board.
+ * Combines their specialty lean, demeanor, and a deterministic judgment-scaled
+ * noise (worse scouts are noisier and diverge more). Caller still gates this by
+ * scouting knowledge (no opinion on a player nobody has seen).
+ */
+export function scoutDraftBias(
+  scout: StaffMember,
+  player: Player,
+  composites: Record<string, number>
+): number {
+  const specVal = specialtyBias(scout, player, composites) * 1.5 // tier units → value units
+  const noiseMag = (1 - scout.judgment / 100) * 12
+  const noise = (hash01(scout.id + ':' + (player.id as string) + ':board') * 2 - 1) * noiseMag
+  const demeanorVal = scout.demeanor === 'motivator' ? 2 : scout.demeanor === 'fiery' ? -1.5 : 0
+  return specVal + noise + demeanorVal
+}
+
 /* ─────────────────────── per-scout tier estimate ─────────────────────── */
 
 /**
