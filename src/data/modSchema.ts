@@ -820,7 +820,13 @@ function rollPotentialOverall(mp: ModPlayer, currentOverall: number, rng: Rng): 
   if (mp.potentialRange) {
     const lo = Math.max(mp.potentialRange[0], currentOverall)
     const hi = Math.max(mp.potentialRange[1], lo)
-    return rng.range(lo, hi)
+    if (hi <= lo) return lo
+    // Center-weighted roll (mean of 3 uniform draws ≈ triangular/normal): the
+    // outcome clusters near the EHM-assigned expectation, with full busts/booms
+    // at the band edges being rare — matching how most prospects pan out roughly
+    // to projection and only the tail over/under-performs. Not a coin-flip.
+    const avg = (rng.range(lo, hi) + rng.range(lo, hi) + rng.range(lo, hi)) / 3
+    return Math.round(avg)
   }
   if (mp.potential !== undefined) return Math.max(mp.potential, currentOverall)
   return null
