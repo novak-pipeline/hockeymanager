@@ -34,10 +34,25 @@ export interface ProjectInput {
   leagueFactor: number
   age: number
   isD: boolean
+  /**
+   * Estimation noise in projected-peak points (0 = a perfect read). A weaker
+   * analytics department reads the projection less precisely; scale this by your
+   * Data Analyst's quality. Applied as a deterministic per-player perturbation.
+   */
+  noise?: number
+  /** Stable seed for the noise perturbation (e.g. playerId + phase). */
+  seed?: string
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 const logistic = (x: number, mid: number, slope: number): number => 1 / (1 + Math.exp(-(x - mid) / slope))
+
+/** Deterministic [-1, 1) from a string (FNV-1a). */
+function hashSigned(s: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  return ((h >>> 0) / 0xffffffff) * 2 - 1
+}
 
 /**
  * Age multiplier from draft-age production to NHL peak. A 17-year-old's scoring
@@ -54,7 +69,8 @@ function peakMultiplier(age: number): number {
 export function projectProspect(input: ProjectInput): ProspectProjection {
   const { ppg, leagueFactor, age, isD } = input
   const nhleNow = Math.max(0, ppg) * 82 * Math.max(0.05, leagueFactor)
-  const projectedPeak = nhleNow * peakMultiplier(age)
+  const noisePts = (input.noise ?? 0) * hashSigned(input.seed ?? `${ppg}:${age}`)
+  const projectedPeak = Math.max(0, nhleNow * peakMultiplier(age) + noisePts)
 
   // Defencemen reach NHL-regular / star status at lower point totals.
   const nhlerMid = isD ? 16 : 24

@@ -141,6 +141,24 @@ function toGamesLookup(
  * players who "pop"). Mutates p.potential (the growth cap) and p.basePotential
  * (the projection anchor). Returns the overall-equivalent drift this year.
  */
+/**
+ * Persistent per-player development arc — a hidden, stable trait (seeded by id)
+ * for how well a player converts opportunity into growth. Most land near 1.0; a
+ * tail under-develops (busts) and a tail over-achieves. This is what makes two
+ * prospects with the SAME true ceiling end up in different places — outcomes are
+ * a distribution, not a deterministic march to potential. Center-weighted via
+ * the average of two hashes; bounded [0.55, 1.4].
+ */
+function devArc(id: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  const a = ((h >>> 0) / 0xffffffff)
+  h ^= 0x9e3779b9; h = Math.imul(h, 0x85ebca6b)
+  const b = ((h >>> 0) / 0xffffffff)
+  const t = (a + b) / 2 // triangular, centered at 0.5
+  return 0.55 + t * 0.85 // [0.55, 1.40]
+}
+
 function driftYouthCeiling(
   p: Player,
   seasonAge: number,
@@ -336,7 +354,9 @@ export function developPlayers(args: {
       const gamesFactor = 0.6 + 0.4 * Math.min(1, gamesPlayed(p.id) / 60)
       const baseRate = 0.12 + 0.03 * (26 - seasonAge)
       const growthScale = args.growthScale ?? 1
-      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale, rng)
+      // Persistent per-player arc: busts under-develop, late bloomers over-develop.
+      const arc = devArc(p.id as unknown as string)
+      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng)
     } else if (seasonAge >= 30) {
       applyDecline(p.ratings, seasonAge, rng)
       // Second pass for vet underperformers (accelerated −50% decline).

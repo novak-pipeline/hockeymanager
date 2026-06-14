@@ -502,7 +502,9 @@ describe('developPlayers — performance-relative development', () => {
     // to the default growthMult=1.0 vs many also at 1.0, but they should be close)
     // The key invariant: few's supergiant points don't produce a huge boost.
     // We verify by comparing against a third twin with no performance arg at all.
-    const base = testPlayer({ id: 'base', age: 21, current: 55, potential: 80 })
+    // Same id as `few` so the per-player development arc is identical — this
+    // isolates the code path (perf <20gp vs no perf arg), not the arc.
+    const base = testPlayer({ id: 'few', age: 21, current: 55, potential: 80 })
     dev(new Map([[base.id, base]]), 55)
 
     // few (10 gp ignored) should develop similarly to base (no perf arg).

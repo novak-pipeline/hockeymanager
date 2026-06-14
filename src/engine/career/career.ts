@@ -5377,7 +5377,7 @@ export class Career {
    *  outcome projection (P(NHLer) / P(star)). Early in the year it leans on last
    *  season (so the preliminary board already reflects production); it shifts to
    *  the current campaign as games accrue. */
-  private prospectEval(p: Player, abbrev: string): { premium: number; projection: ProspectProjection } {
+  private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; projection: ProspectProjection } {
     const pid = p.id as PlayerId
     const liveGp = this.worldSim.gp.get(pid) ?? 0
     const liveT = this.worldSim.totals.get(pid)
@@ -5391,8 +5391,17 @@ export class Career {
     const leagueFactor = nhleFactorByAbbrev(abbrev)
     return {
       premium: productionPremium(ppg, isD, leagueFactor),
-      projection: projectProspect({ ppg, leagueFactor, age: p.age, isD }),
+      projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: pid as string }),
     }
+  }
+
+  /** Estimation noise for the projection model (projected-peak points), set by
+   *  the hired Data Analyst's quality. No analyst → projections stay hidden. */
+  private analystProjectionNoise(): number {
+    const a = this.dataAnalyst
+    if (!a) return 0
+    const acc = (a.rating * 0.5 + a.judgment * 0.5) / 100 // ~0.45–0.95
+    return (1 - acc) * 14 // elite ≈ ±1.4 pts, weak ≈ ±7 pts
   }
 
   /** Gather the draft-eligible cohort (candidates + radar rows). Shared by the
@@ -5404,6 +5413,8 @@ export class Career {
     const comps = this.data.league.competitions ?? []
     const board = new Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>()
     const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = []
+    const hasAnalyst = this.hasDataAnalyst()
+    const analystNoise = this.analystProjectionNoise()
     for (const c of comps) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
@@ -5422,9 +5433,11 @@ export class Career {
           // Currently-injured prospects take a small availability/durability
           // ding (missed viewings + health questions) — injuries move the board.
           const injuryDing = p.injuryStatus ? 4 : 0
-          const evalRes = this.prospectEval(p, c.abbrev)
+          const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing)
-          const isSkater = p.position !== 'G'
+          // Projection probabilities are the Data Analyst's product — shown only
+          // when one is on staff, and noisier the weaker the analyst.
+          const isSkater = p.position !== 'G' && hasAnalyst
           const row: Omit<DraftRankRowView, 'rank'> = {
             playerId: id,
             name: p.name,
