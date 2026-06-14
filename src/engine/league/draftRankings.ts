@@ -82,6 +82,18 @@ export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[
     .map((x) => x.id)
 }
 
+/**
+ * Pre-draft analyst optimism: the perceived ceiling sits ABOVE the true ceiling,
+ * by a youth premium that fades with age (a 17-year-old is all projection; a
+ * passed-over 20-year-old far less so). This is the perception layer — analysts
+ * overrate the class — kept separate from the hidden true potential development
+ * actually pays out, so reaches and sleepers emerge as players prove out.
+ */
+export function perceivedCeiling(trueCeiling: number, age: number): number {
+  const hype = 4 + Math.max(0, 19 - age) * 2 // 17→8, 18→6, 19→4, 20+→4
+  return Math.min(99, trueCeiling + hype)
+}
+
 /** Goalies are notoriously hard to project — analysts fade them on draft boards
  *  (an elite goalie ceiling rarely cracks the top 10). Skaters are unaffected. */
 function positionFactor(position?: string): number {

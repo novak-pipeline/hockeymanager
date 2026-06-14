@@ -60,7 +60,7 @@ AHL->NHL parent map (32 affiliates):
 Usage:
     py scripts/dev/import_ehm.py <export.xlsx> <out_dir> [facepack_dir ...]
 """
-import sys, os, io, json, unicodedata, glob, shutil
+import sys, os, io, json, unicodedata, glob, shutil, zlib
 
 # Column indices (0-based) for the full "Players and non-players" EHM export
 # (two header rows: section markers on row 0, field names on row 1; data row 2+).
@@ -416,34 +416,45 @@ def compute_neg_pa_ceilings(xlsx):
     return out
 
 
-def resolve_potential(pa, ca, age):
-    """Return (single_ca, band_or_None) on the 1-200 CA scale.
+def _roll_unit(seed):
+    """Deterministic center-weighted [0,1) for a player (avg of two hashes →
+    triangular: most land mid-band, few at the extremes — how a cohort's true
+    ceilings actually distribute)."""
+    a = (zlib.crc32((seed + "|pa1").encode("utf-8")) % 100000) / 100000.0
+    b = (zlib.crc32((seed + "|pa2").encode("utf-8")) % 100000) / 100000.0
+    return (a + b) / 2.0
 
-    Positive PA is an explicit ceiling, used as-is. Negative PA -1..-10 is a
-    GRADED potential band (see NEG_PA_BANDS) — used directly so a young, low-CA
-    blue-chipper (e.g. an 18-year-old at -10) still projects elite. Other
-    negative codes (-11..-20, the ordinary/legacy bulk) fall back to a CA +
-    youth-headroom estimate."""
+
+def resolve_potential(pa, ca, age, seed=""):
+    """Return (true_pa, band) on the 1-200 CA scale — the player's INVISIBLE TRUE
+    ceiling (what development aims at), not what anyone perceives.
+
+    A PA code is a *band*, not a point: positive PA is an exact ceiling; a
+    negative code names a range and we roll each player an individual, center-
+    weighted true PA inside it (deterministic per player). This is how EHM/FM
+    actually work, and it de-clusters the generic bulk codes the DB author left
+    un-individualised (the cause of hundreds of prospects sharing one potential).
+    Analyst optimism/noise is a SEPARATE perception layer applied at ranking
+    time — it is deliberately NOT baked into this truth."""
     if pa is None or pa >= 0:
         return max(pa or ca, ca), None
+    # Determine the band [lo, hi] this code represents.
     band = NEG_PA_BANDS.get(pa)
-    if band is not None:
-        lo, hi = band
-        lo = max(lo, ca); hi = max(hi, lo)  # ceiling never below current ability
-        return (lo + hi) // 2, (lo, hi)
-    # Other negative codes (-11..-20): use the empirical ceiling for that code.
-    ceiling = NEG_PA_CEILINGS.get(pa, 0)
-    if ceiling > ca:
-        hi = min(200, ceiling)
-        lo = max(ca, hi - 28)
-        return (lo + hi) // 2, (lo, hi)
-    # Last resort (code unseen in the DB / ceiling not above current): CA + headroom.
-    base = (46 if age <= 18 else 38 if age == 19 else 30 if age == 20 else
-            23 if age == 21 else 16 if age == 22 else 11 if age == 23 else 7)
-    lo = min(200, ca + round(base * 0.55))
-    hi = min(200, ca + round(base * 1.15))
-    lo = max(lo, ca); hi = max(hi, lo)
-    return (lo + hi) // 2, (lo, hi)
+    if band is None:
+        ceiling = NEG_PA_CEILINGS.get(pa, 0)
+        if ceiling > ca:
+            hi = min(200, ceiling)
+            lo = round(hi * 0.62)                      # band floor a touch below the reach
+        else:
+            # Unseen code: a CA + age-scaled headroom band.
+            room = (90 if age <= 17 else 80 if age == 18 else 64 if age == 19 else
+                    48 if age == 20 else 34 if age == 21 else 22 if age == 22 else 12)
+            lo, hi = ca + round(room * 0.3), ca + room
+        band = (lo, hi)
+    lo, hi = band
+    lo = max(lo, ca); hi = max(hi, lo)                  # ceiling never below current ability
+    true_pa = round(lo + _roll_unit(seed) * (hi - lo)) # individual draw within the band
+    return true_pa, (lo, hi)
 
 def avg20(row, *cols):
     """Average of several EHM 1-20 attributes -> our 1-99 scale."""
@@ -931,7 +942,7 @@ def main():
         year = to_int(parts[2]) if len(parts) == 3 else 0
         age = clamp(SEASON_YEAR - year if year else 25, 16, 45)
         ca = to_int(r[C_CA], 50)
-        pa_single, pa_band = resolve_potential(to_int(r[C_PA], ca), ca, age)
+        pa_single, pa_band = resolve_potential(to_int(r[C_PA], ca), ca, age, seed=f"{first}|{last}|{dob}")
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
         pos = position(r)
         extended = extended_fields_from_row(r)

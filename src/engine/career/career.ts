@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, draftEligibility, perceivedCeiling, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
@@ -5355,6 +5355,10 @@ export class Career {
           const elig = draftEligibility(p.age, !!p.nhlDrafted)
           if (elig === null) continue
           const id = p.id as string
+          // Perceived ceiling = hidden true ceiling + pre-draft analyst optimism.
+          // The board ranks and shows this; the true ceiling stays hidden and is
+          // what development pays out (so the board misses on reaches/sleepers).
+          const perceived = perceivedCeiling(agedPotential(p), p.age)
           const row: Omit<DraftRankRowView, 'rank'> = {
             playerId: id,
             name: p.name,
@@ -5366,10 +5370,10 @@ export class Career {
             age: p.age,
             eligibility: elig,
             currentStars: overallToStars(ratedOverall(p)),
-            potentialStars: overallToStars(agedPotential(p)),
+            potentialStars: overallToStars(perceived),
           }
           if (elig === 'radar') radarRows.push(row)
-          else board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p), position: p.position, eligibility: elig }, row, player: p })
+          else board.set(id, { input: { id, ceiling: perceived, current: ratedOverall(p), position: p.position, eligibility: elig }, row, player: p })
         }
       }
     }

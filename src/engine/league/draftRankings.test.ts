@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, projectionHedge, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, perceivedCeiling, projectionHedge, type RankInput } from './draftRankings'
 
 describe('draftEligibility', () => {
   it('buckets by age and excludes drafted / out-of-range', () => {
@@ -54,6 +54,13 @@ describe('analystRank', () => {
     for (const ph of ['preliminary', 'midseason', 'final'] as const) {
       expect(analystRank(inputs, ph).indexOf('f')).toBeLessThan(analystRank(inputs, ph).indexOf('g'))
     }
+  })
+
+  it('perceivedCeiling adds an optimism premium that fades with age', () => {
+    // Younger prospects carry more hype above their true ceiling.
+    expect(perceivedCeiling(70, 17)).toBeGreaterThan(perceivedCeiling(70, 20))
+    expect(perceivedCeiling(70, 17)).toBeGreaterThan(70) // always optimistic vs truth
+    expect(perceivedCeiling(99, 17)).toBe(99)            // clamped at the top
   })
 
   it('docks re-entry prospects vs equal first-time-eligible ones', () => {
