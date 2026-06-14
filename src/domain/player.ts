@@ -165,12 +165,24 @@ export interface Player {
   basePotential?: number
 
   /**
-   * Most recent development pass's overall change (signed). Drives the FM-style
-   * improving/declining trend arrow. Absent until the first offseason develops.
+   * Recent development direction (signed overall change). Drives the FM-style
+   * improving/declining trend arrow. During the season this holds the
+   * season-to-date in-season change; at the offseason it is overwritten with
+   * that pass's change. Absent until the first development happens.
    */
   devTrend?: number
-  /** Most recent ceiling drift (signed) — his projection trending up/down. */
+  /** Recent ceiling drift (signed) — his projection trending up/down. Same
+   *  season-to-date vs offseason semantics as devTrend. */
   ceilingTrend?: number
+  /**
+   * Cumulative in-season overall change so far this season (signed). Reset to 0
+   * each offseason. Internal accumulator behind the live trend arrow; bounded by
+   * a per-season budget so continuous micro-development can't run away.
+   */
+  seasonDevAccrued?: number
+  /** Cumulative in-season ceiling drift so far this season (signed). Reset each
+   *  offseason. */
+  seasonCeilDrift?: number
 
   /**
    * Draft status flags from the source DB.

@@ -62,6 +62,7 @@ import {
   generateDraftClass,
   processRetirements,
 } from '@engine/league/offseason'
+import { tickInSeasonDevelopment } from '@engine/league/inSeasonDevelopment'
 import {
   createArc,
   createInitialArcsState,
@@ -2408,6 +2409,43 @@ export class Career {
       if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
     }
     this.emitScoutReports()
+    // In-season development: a continuous bi-weekly micro-pass so current ability
+    // and ceilings (and the profile's live trend arrows) drift through the season
+    // rather than only jumping at the offseason. Bounded by a per-season budget;
+    // the offseason pass scales its growth down to keep annual totals calibrated.
+    if (this.phase === 'regularSeason' && day > 0 && day % 14 === 0) {
+      const developIds = new Set<PlayerId>()
+      for (const t of this.data.teams.values()) for (const id of t.roster) developIds.add(id)
+      tickInSeasonDevelopment({
+        players: this.data.players,
+        developIds,
+        gamesPlayedById: (id) => (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0),
+        rng: this.rngFor(7009, day),
+        performance: (id) => {
+          const t = this.totals.get(id)
+          const at = this.ahlTotals.get(id)
+          const p = this.data.players.get(id)!
+          const combinedGp = (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0)
+          const goals = (t?.goals ?? 0) + (at?.goals ?? 0)
+          const assists = (t?.assists ?? 0) + (at?.assists ?? 0)
+          const saves = (t?.saves ?? 0) + (at?.saves ?? 0)
+          const shotsAgainst = (t?.shotsAgainst ?? 0) + (at?.shotsAgainst ?? 0)
+          const base = { points: goals + assists, gamesPlayed: combinedGp, position: p.position }
+          return p.position === 'G' && shotsAgainst > 0
+            ? { ...base, savePct: saves / shotsAgainst }
+            : base
+        },
+        expectations: (id) => {
+          const p = this.data.players.get(id)!
+          return expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+        },
+        devModifier: (id) => {
+          const tid = this.teamOf(id)
+          const lr = tid ? this.lockerRooms.get(tid) : undefined
+          return lr ? developmentModifier(lr, id as string) : 1
+        },
+      })
+    }
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
     if (day % 15 === 0) {
       const shifts = recordOpinions({
@@ -2916,6 +2954,10 @@ export class Career {
           gamesPlayedById: (id) => (this.gp.get(id) ?? 0) + (this.ahlGp.get(id) ?? 0),
           year: this.year,
           rng,
+          // In-season development already delivered part of this year's growth
+          // continuously; the summer pass takes the remaining share so annual
+          // totals stay calibrated. See inSeasonDevelopment.ts.
+          growthScale: 0.65,
           performance: (id) => {
             const t = this.totals.get(id)
             const at = this.ahlTotals.get(id)

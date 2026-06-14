@@ -240,6 +240,10 @@ export function developPlayers(args: {
   expectations?: (id: PlayerId) => number
   /** Optional: locker-room mentorship multiplier per player [0.9–1.15]. Defaults to 1. */
   devModifier?: (id: PlayerId) => number
+  /** Optional: scale on the U26 growth rate, [0..1]. When in-season development
+   *  is active the caller passes <1 so the summer pass only delivers the share
+   *  not already gained continuously, keeping annual totals calibrated. Default 1. */
+  growthScale?: number
 }): { newsSeeds: Array<{ playerId: PlayerId; kind: 'breakout' | 'decline' | 'confidenceBoost' | 'crisisOfConfidence' }> } {
   const { players, rng } = args
   const gamesPlayed = toGamesLookup(args.gamesPlayedById)
@@ -331,7 +335,8 @@ export function developPlayers(args: {
       const personaFactor = 0.5 + (persona / 20) * 0.8
       const gamesFactor = 0.6 + 0.4 * Math.min(1, gamesPlayed(p.id) / 60)
       const baseRate = 0.12 + 0.03 * (26 - seasonAge)
-      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult, rng)
+      const growthScale = args.growthScale ?? 1
+      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale, rng)
     } else if (seasonAge >= 30) {
       applyDecline(p.ratings, seasonAge, rng)
       // Second pass for vet underperformers (accelerated −50% decline).
@@ -342,6 +347,10 @@ export function developPlayers(args: {
     p.fatigue = 0
     p.form *= 0.3
     if (Math.abs(p.form) < 0.25) p.form = 0
+    // Clear the in-season accumulators: next season's continuous development
+    // starts from zero, and the offseason trend below supersedes them.
+    p.seasonDevAccrued = 0
+    p.seasonCeilDrift = 0
 
     const devDelta = overall(p.composites, p.position) - before
     p.devTrend = devDelta
