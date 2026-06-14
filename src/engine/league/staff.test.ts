@@ -183,21 +183,21 @@ describe('buildAgmReport – structure', () => {
     const report = buildAgmReport({ roster, players: data.players, agm, rng: new Rng(4) })
 
     for (const p of report.topProspects) {
-      expect(p.age).toBeLessThan(23)
+      expect(p.age).toBeLessThanOrEqual(24)
     }
   })
 
-  it('topProspects are sorted descending by judgedPotential', () => {
+  it('topProspects are sorted descending by scout value (potential-weighted + youth)', () => {
     const data = makeLeague(5)
     const team = [...data.teams.values()][0]!
     const roster = team.roster.map((id) => data.players.get(id)!).filter(Boolean)
     const agm = makeAgm(80)
     const report = buildAgmReport({ roster, players: data.players, agm, rng: new Rng(5) })
 
+    const value = (p: { judgedPotential: number; judgedOverall: number; age: number }): number =>
+      p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 24 - p.age) * 0.6
     for (let i = 1; i < report.topProspects.length; i++) {
-      expect(report.topProspects[i - 1]!.judgedPotential).toBeGreaterThanOrEqual(
-        report.topProspects[i]!.judgedPotential
-      )
+      expect(value(report.topProspects[i - 1]!)).toBeGreaterThanOrEqual(value(report.topProspects[i]!))
     }
   })
 })

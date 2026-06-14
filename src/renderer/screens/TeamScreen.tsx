@@ -62,6 +62,14 @@ const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
   prospect: 'var(--green)',
 }
 
+/** Where a player sits in the org → colour + short tag. NHL / AHL / elsewhere. */
+function locationStyle(location?: string): { color: string; tag: string } {
+  const loc = (location ?? 'NHL').toUpperCase()
+  if (loc === 'NHL') return { color: 'var(--violet-h)', tag: 'NHL' }
+  if (loc === 'AHL') return { color: 'var(--green, #22c55e)', tag: 'AHL' }
+  return { color: 'var(--amber, #f59e0b)', tag: loc.slice(0, 3) }
+}
+
 /** Fog-friendly star string from a 0–99 judged rating (no raw numbers shown). */
 function starStr(judged0to99: number): string {
   const n = Math.max(1, Math.min(5, Math.round(judged0to99 / 20)))
@@ -199,6 +207,18 @@ function ReportTab(): JSX.Element {
 
       {/* Five-column depth chart */}
       <Panel title="Depth chart">
+        <div className="row" style={{ gap: 'var(--sp-3)', marginBottom: 'var(--sp-2)', fontSize: 11 }}>
+          <span className="muted">Where based:</span>
+          {(['NHL', 'AHL', 'Junior/Other'] as const).map((l) => {
+            const s = locationStyle(l === 'Junior/Other' ? 'WHL' : l)
+            return (
+              <span key={l} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, display: 'inline-block' }} />
+                <span className="muted">{l}</span>
+              </span>
+            )
+          })}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 'var(--sp-3)' }}>
           <DepthColumn title="Goalies"    players={dc.goalies} />
           <DepthColumn title="Defence"    players={dc.defensemen} />
@@ -224,32 +244,37 @@ function ReportTab(): JSX.Element {
           </div>
         </Panel>
 
-        <Panel title="Top prospects (U23)">
+        <Panel title="Top Prospects (by scout value)">
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
+                  <th className="num">#</th>
                   <th>Player</th>
                   <th className="num">Pos</th>
                   <th className="num">Age</th>
-                  <th>Plays</th>
+                  <th>Based</th>
                   <th className="num">OVR</th>
                   <th className="num">POT</th>
                 </tr>
               </thead>
               <tbody>
-                {data.topProspects.map((p) => (
+                {data.topProspects.map((p, i) => {
+                  const loc = locationStyle(p.location)
+                  return (
                   <tr key={p.playerId}>
+                    <td className="num muted">{i + 1}</td>
                     <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                     <td className="num muted">{p.position}</td>
                     <td className="num">{p.age}</td>
-                    <td className="small muted">{p.location ?? 'NHL'}</td>
+                    <td><span style={{ fontSize: 10, fontWeight: 800, color: loc.color }}>{loc.tag}</span></td>
                     <td className="num">
                       <span style={{ color: TIER_COLOR[p.tier], letterSpacing: -1 }}>{starStr(p.judgedOverall)}</span>
                     </td>
                     <td className="num muted" style={{ letterSpacing: -1 }}>{starStr(p.judgedPotential)}</td>
                   </tr>
-                ))}
+                  )
+                })}
                 {data.topProspects.length === 0 && (
                   <tr>
                     <td colSpan={6} className="muted">No prospects ranked.</td>
@@ -283,7 +308,9 @@ function DepthColumn(props: {
         {props.title}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {props.players.map((p) => (
+        {props.players.map((p) => {
+          const loc = locationStyle(p.location)
+          return (
           <div
             key={p.playerId}
             style={{
@@ -293,9 +320,15 @@ function DepthColumn(props: {
               padding: '4px 6px',
               borderRadius: 'var(--radius-sm)',
               background: 'var(--bg2)',
-              borderLeft: `3px solid ${TIER_COLOR[p.tier]}`,
+              borderLeft: `3px solid ${loc.color}`,
             }}
           >
+            <span
+              title={`Based: ${loc.tag}`}
+              style={{ fontSize: 8, fontWeight: 800, color: loc.color, width: 22, flexShrink: 0 }}
+            >
+              {loc.tag}
+            </span>
             <PlayerLink
               playerId={p.playerId}
               name={p.name}
@@ -303,13 +336,14 @@ function DepthColumn(props: {
             />
             <span
               className="small"
-              style={{ marginLeft: 'auto', color: TIER_COLOR[p.tier], letterSpacing: -1 }}
+              style={{ marginLeft: 'auto', color: 'var(--muted)', letterSpacing: -1 }}
               title="Scouted projection"
             >
               {starStr(p.judgedOverall)}
             </span>
           </div>
-        ))}
+          )
+        })}
         {props.players.length === 0 && (
           <span className="muted small">—</span>
         )}

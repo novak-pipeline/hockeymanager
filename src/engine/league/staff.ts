@@ -576,8 +576,8 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
     return { player, trueOverall: trueOvr, truePotential: truePot, judgedOverall: jOvr, judgedPotential: jPot, tier }
   })
 
-  // ── 2. Depth chart ─────────────────────────────────────────────────────────
-  const toRanked = (entry: RosterEntry): AgmRankedPlayer => ({
+  // ── 2. Depth chart (whole org: NHL roster + AHL/pool, tagged by location) ────
+  const toRanked = (entry: RosterEntry, location: string): AgmRankedPlayer => ({
     playerId: entry.player.id as string,
     name: entry.player.name,
     position: entry.player.position,
@@ -585,25 +585,39 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
     judgedOverall: entry.judgedOverall,
     judgedPotential: entry.judgedPotential,
     tier: entry.tier,
+    location,
   })
 
-  const byPosition = (pos: string) =>
-    entries
-      .filter((e) => e.player.position === pos)
-      .sort((a, b) => b.judgedOverall - a.judgedOverall || rng.int(3) - 1)
-      .map(toRanked)
+  // The wider org pool (AHL affiliate + other-team prospects), judged by the AGM.
+  const poolRanked: AgmRankedPlayer[] = (args.prospectPool ?? []).map(({ player, location }) => ({
+    playerId: player.id as string,
+    name: player.name,
+    position: player.position,
+    age: player.age,
+    judgedOverall: judgedValue(overall(player.composites, player.position), agm.judgment, player.id as string, 1),
+    judgedPotential: judgedValue(potentialOverall(player), agm.judgment, player.id as string, 2),
+    tier: 'prospect' as const,
+    location,
+  }))
 
-  // W maps to both LW and RW slots — split by whether playerId hash is even/odd
-  const wings = entries.filter((e) => e.player.position === 'W')
-  const leftWingEntries = wings.filter((_, i) => i % 2 === 0).sort((a, b) => b.judgedOverall - a.judgedOverall)
-  const rightWingEntries = wings.filter((_, i) => i % 2 === 1).sort((a, b) => b.judgedOverall - a.judgedOverall)
+  const colFor = (pos: string): AgmRankedPlayer[] =>
+    [
+      ...entries.filter((e) => e.player.position === pos).map((e) => toRanked(e, 'NHL')),
+      ...poolRanked.filter((p) => p.position === pos),
+    ].sort((a, b) => b.judgedOverall - a.judgedOverall)
+
+  // W maps to both LW and RW slots — split even/odd after merging NHL + pool wings.
+  const allWings = [
+    ...entries.filter((e) => e.player.position === 'W').map((e) => toRanked(e, 'NHL')),
+    ...poolRanked.filter((p) => p.position === 'W'),
+  ].sort((a, b) => b.judgedOverall - a.judgedOverall)
 
   const depthChart: AgmReport['depthChart'] = {
-    goalies: byPosition('G'),
-    defensemen: byPosition('D'),
-    centers: byPosition('C'),
-    leftWings: leftWingEntries.map(toRanked),
-    rightWings: rightWingEntries.map(toRanked),
+    goalies: colFor('G'),
+    defensemen: colFor('D'),
+    centers: colFor('C'),
+    leftWings: allWings.filter((_, i) => i % 2 === 0),
+    rightWings: allWings.filter((_, i) => i % 2 === 1),
   }
 
   // ── 3. Category bests ──────────────────────────────────────────────────────
@@ -707,30 +721,18 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
     }
   }
 
-  // ── 4. Top prospects (NHL roster young players + the wider org pool) ─────────
+  // ── 4. Top prospects — ranked by the AGM's view of overall VALUE ─────────────
+  // Value weights ceiling most, current ability next, and rewards youth (a
+  // younger player at the same ceiling is more valuable). Whole org: NHL kids +
+  // AHL affiliate + other-team prospects.
   const rosterProspects = entries
-    .filter((e) => e.player.age < 23)
-    .map((e) => ({ ...toRanked(e), location: 'NHL' as string }))
-
-  const poolProspects = (args.prospectPool ?? [])
-    .filter((p) => p.player.age < 23)
-    .map(({ player, location }) => {
-      const trueOvr = overall(player.composites, player.position)
-      const truePot = potentialOverall(player)
-      return {
-        playerId: player.id as string,
-        name: player.name,
-        position: player.position,
-        age: player.age,
-        judgedOverall: judgedValue(trueOvr, agm.judgment, player.id as string, 1),
-        judgedPotential: judgedValue(truePot, agm.judgment, player.id as string, 2),
-        tier: 'prospect' as const,
-        location,
-      }
-    })
-
+    .filter((e) => e.player.age <= 24)
+    .map((e) => toRanked(e, 'NHL'))
+  const poolProspects = poolRanked.filter((p) => p.age <= 24)
+  const prospectValue = (p: AgmRankedPlayer): number =>
+    p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 24 - p.age) * 0.6
   const topProspects = [...rosterProspects, ...poolProspects]
-    .sort((a, b) => b.judgedPotential - a.judgedPotential)
+    .sort((a, b) => prospectValue(b) - prospectValue(a))
     .slice(0, 12)
 
   return { depthChart, categoryBests, topProspects }
