@@ -62,46 +62,48 @@ Usage:
 """
 import sys, os, io, json, unicodedata, glob, shutil
 
-# Column indices (0-based) from the EHM editor xlsx export (two header rows;
-# field names live on row 1). Verified against xECK29x's Premier Pivot DB.
+# Column indices (0-based) for the full "Players and non-players" EHM export
+# (two header rows: section markers on row 0, field names on row 1; data row 2+).
+# Mapped against mods/spreadsheet exports/players_&_non-players.xlsx (133 cols).
 C_FIRST, C_SECOND, C_DOB, C_NATION = 1, 2, 3, 4
-C_JOB, C_CLUB = 9, 11
-C_CA, C_PA = 37, 38
-C_GOALIE, C_LD, C_RD, C_LW, C_C, C_RW = 42, 43, 44, 45, 46, 47
-C_HAND = 51
-C_EXPIRES = 13      # "Contract Expires Club", e.g. "30.6.2027"
-C_WAGE = 14         # "Estimated Wage" = annual salary (accurate, e.g. 8700000)
-C_ROLE = 50         # "Role", e.g. "Centre: Playmaker", "Defenceman: Defensive"
+C_JOB = 9           # "Job For Club" — "Player" for players
+C_CLUB = 12         # "Club Playing" — current club (routes AHL/loan players correctly)
+C_CA, C_PA = 39, 40
+C_GOALIE, C_LD, C_RD, C_LW, C_C, C_RW = 44, 45, 46, 47, 48, 49
+C_HAND = 53
+C_EXPIRES = 15      # "Contract Expires Club", e.g. "30.6.2027"
+C_WAGE = 16         # "Estimated Wage" = annual salary (accurate, e.g. 8700000)
+C_ROLE = 52         # "Role", e.g. "Centre: Playmaker", "Defenceman: Defensive"
 C_BIRTHTOWN = 7     # "Birth Town", e.g. "cole harbour:ns:can"
-C_FAV_NUM, C_SQUAD_NUM = 52, 53   # favourite / squad jersey number
+C_FAV_NUM, C_SQUAD_NUM = 54, 55   # favourite / squad jersey number
 # FM-style personality (each 1-20), maps 1:1 onto our Personality scale.
-C_AMBITION, C_DETERMINATION, C_LOYALTY, C_PROFESSIONALISM, C_TEMPERAMENT = 30, 31, 32, 34, 36
-C_ADAPTABILITY, C_PRESSURE, C_SPORTSMANSHIP = 29, 33, 35
-C_INTL_APPS, C_INTL_GOALS, C_INTL_ASSISTS, C_STANLEY_CUPS = 21, 22, 23, 25
-C_HOME_REP, C_CURRENT_REP, C_WORLD_REP = 39, 40, 41
-C_JUNIOR_PREF = 57
-C_NHL_DRAFT_ELIGIBLE, C_NHL_DRAFTED = 139, 140
+C_AMBITION, C_DETERMINATION, C_LOYALTY, C_PROFESSIONALISM, C_TEMPERAMENT = 32, 33, 34, 36, 38
+C_ADAPTABILITY, C_PRESSURE, C_SPORTSMANSHIP = 31, 35, 37
+C_INTL_APPS, C_INTL_GOALS, C_INTL_ASSISTS, C_STANLEY_CUPS = 23, 24, 25, 27
+C_HOME_REP, C_CURRENT_REP, C_WORLD_REP = 41, 42, 43
+C_JUNIOR_PREF = 59
+C_NHL_DRAFT_ELIGIBLE, C_NHL_DRAFTED = 29, 30
 
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
-C_HEIGHT_CM, C_WEIGHT_KG = 55, 56
-C_AGGRESSION, C_ANTICIPATION, C_BRAVERY, C_CONSISTENCY, C_DECISIONS = 58, 59, 60, 61, 62
-C_DIRTINESS, C_FLAIR, C_IMPORTANT, C_LEADERSHIP, C_MORALE = 63, 64, 65, 66, 67
-C_PASS_TENDENCY, C_TEAMWORK, C_CREATIVITY, C_WORKRATE = 68, 69, 70, 71
-C_ACCELERATION, C_AGILITY, C_BALANCE, C_FIGHTING, C_HITTING = 72, 73, 74, 75, 76
-C_INJURY_PRONE, C_NAT_FITNESS, C_PACE, C_STAMINA, C_STRENGTH = 77, 78, 79, 80, 81
-C_AGITATION, C_CHECKING, C_DEFLECTIONS, C_DEKING, C_FACEOFFS = 82, 83, 84, 85, 86
-C_MOVEMENT, C_ONEONONE, C_PASSING, C_POKECHECK, C_POSITIONING = 87, 88, 89, 90, 91
-C_SLAPSHOT, C_STICKHANDLING, C_VERSATILITY, C_WRISTSHOT = 92, 93, 94, 95
-C_BLOCKER, C_GLOVE, C_REBOUNDS, C_RECOVERY, C_REFLEXES = 96, 97, 98, 99, 100
+C_HEIGHT_CM, C_WEIGHT_KG = 57, 58
+C_AGGRESSION, C_ANTICIPATION, C_BRAVERY, C_CONSISTENCY, C_DECISIONS = 60, 61, 62, 63, 64
+C_DIRTINESS, C_FLAIR, C_IMPORTANT, C_LEADERSHIP, C_MORALE = 65, 66, 67, 68, 69
+C_PASS_TENDENCY, C_TEAMWORK, C_CREATIVITY, C_WORKRATE = 70, 71, 72, 73
+C_ACCELERATION, C_AGILITY, C_BALANCE, C_FIGHTING, C_HITTING = 74, 75, 76, 77, 78
+C_INJURY_PRONE, C_NAT_FITNESS, C_PACE, C_STAMINA, C_STRENGTH = 79, 80, 81, 82, 83
+C_AGITATION, C_CHECKING, C_DEFLECTIONS, C_DEKING, C_FACEOFFS = 84, 85, 86, 87, 88
+C_MOVEMENT, C_ONEONONE, C_PASSING, C_POKECHECK, C_POSITIONING = 89, 90, 91, 92, 93
+C_SLAPSHOT, C_STICKHANDLING, C_VERSATILITY, C_WRISTSHOT = 94, 95, 96, 97
+C_BLOCKER, C_GLOVE, C_REBOUNDS, C_RECOVERY, C_REFLEXES = 98, 99, 100, 101, 102
 
 # Non-player (staff) columns — coaches/scouts/GMs/owners use THESE, not the
 # player CA/attribute columns (which are blank for staff).
-C_NP_CA = 101            # non-player Current Ability (e.g. Dan Muse 160)
-C_JUDGEMENT, C_JUDGING_POT = 118, 119   # judging ability / potential (1-20)
-C_COACH_G, C_COACH_D, C_COACH_F = 114, 115, 116   # coaching goalies/def/fwd
-C_COACH_TECH, C_TACTICS_KNOW = 117, 120
-C_PHYSIO_SKILL = 121
+C_NP_CA = 103            # non-player Current Ability
+C_JUDGEMENT, C_JUDGING_POT = 120, 121   # judging ability / potential (1-20)
+C_COACH_G, C_COACH_D, C_COACH_F = 116, 117, 118   # coaching goalies/def/fwd
+C_COACH_TECH, C_TACTICS_KNOW = 119, 122
+C_PHYSIO_SKILL = 123
 
 SEASON_YEAR = 2025
 
@@ -372,6 +374,20 @@ def s20(row, col):
     """EHM 1-20 attribute -> our 1-99 scale."""
     return clamp(round(to_int(row[col], 0) / 20.0 * 99), 1, 99)
 
+def pa_ceiling(pa, ca):
+    """Resolve an EHM Potential Ability into a concrete CA-scale ceiling.
+
+    EHM (like CM/FM) stores young players' PA as a NEGATIVE range code: more
+    negative = higher ceiling band. Positive PA is used as-is. The result is
+    always at least the current ability."""
+    if pa is None:
+        return ca
+    if pa >= 0:
+        return max(pa, ca)
+    # Negative range codes -1..-10 -> ceiling bands (CA-scale, 1-200).
+    bands = {1: 110, 2: 125, 3: 140, 4: 150, 5: 160, 6: 170, 7: 180, 8: 188, 9: 195, 10: 200}
+    return max(ca, bands.get(min(10, abs(pa)), 150))
+
 def avg20(row, *cols):
     """Average of several EHM 1-20 attributes -> our 1-99 scale."""
     vals = [to_int(row[c], 0) for c in cols]
@@ -624,7 +640,7 @@ def main():
         year = to_int(parts[2]) if len(parts) == 3 else 0
         age = clamp(SEASON_YEAR - year if year else 25, 16, 45)
         ca = to_int(r[C_CA], 50)
-        pa = to_int(r[C_PA], ca)
+        pa = pa_ceiling(to_int(r[C_PA], ca), ca)
         face_id = norm(f"{first}_{last}_{'_'.join(parts)}") if len(parts) == 3 else None
         pos = position(r)
         extended = extended_fields_from_row(r)
@@ -636,7 +652,7 @@ def main():
             "handedness": "L" if str(r[C_HAND] or "Right").lower().startswith("l") else "R",
             # overall is a caliber fallback only; the loader derives the shown
             # overall from the real attributes below. potential (PA) is the DB's
-            # single potential-ability number, halved to our 1-99 scale.
+            # potential-ability number (negative = range code), halved to 1-99.
             "overall": clamp(round(ca / 2), 1, 99),
             "potential": clamp(round(pa / 2), 1, 99),
             "attributes": build_attributes(r, pos),
