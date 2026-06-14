@@ -7,9 +7,10 @@
  */
 import { useState } from 'react'
 import type { ScoutingView } from '../../worker/protocol'
-import type { ScoutCardView, TeamKnowledgeSummary } from '../../engine/career/views'
+import type { ScoutCardView, TeamKnowledgeSummary, ScoutedPlayerRow } from '../../engine/career/views'
 import type { ScoutTarget } from '@domain/scouting'
 import { PlayerLink } from '../components/NavContext'
+import { fmtMoney, flagEmoji } from '../components/format'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -209,6 +210,97 @@ function TeamKnowledgeRow({ row }: { row: TeamKnowledgeSummary }): JSX.Element {
   )
 }
 
+/* ── scouted-players recommendations table ─────────────────────────────────── */
+
+const REC_COLOR: Record<ScoutedPlayerRow['rec'], string> = {
+  'A+': 'var(--success)',
+  A: 'rgba(52,211,153,0.85)',
+  B: 'var(--accent2)',
+  C: 'var(--amber, #f59e0b)',
+  D: 'var(--muted)',
+}
+
+function stars5(v: number): string {
+  const full = Math.floor(v)
+  return '★'.repeat(full) + (v - full >= 0.5 ? '½' : '')
+}
+
+type ScoutSort = 'rec' | 'potential' | 'current' | 'age' | 'knowledge'
+
+function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
+  const [pos, setPos] = useState<string>('ALL')
+  const [topOnly, setTopOnly] = useState(false)
+  const [sort, setSort] = useState<ScoutSort>('rec')
+
+  const positions = ['ALL', 'C', 'LW', 'RW', 'D', 'G']
+  const recOrder: Record<string, number> = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
+  let view = rows.filter((r) => (pos === 'ALL' || r.position === pos) && (!topOnly || r.rec === 'A+' || r.rec === 'A'))
+  view = [...view].sort((a, b) => {
+    switch (sort) {
+      case 'potential': return b.potentialStars - a.potentialStars
+      case 'current': return b.currentStars - a.currentStars
+      case 'age': return a.age - b.age
+      case 'knowledge': return b.knowledge - a.knowledge
+      default: return recOrder[a.rec]! - recOrder[b.rec]! || b.potentialStars - a.potentialStars
+    }
+  })
+
+  return (
+    <Panel title={`Scouting Recommendations (${view.length})`}>
+      <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-2)', alignItems: 'center' }}>
+        {positions.map((p) => (
+          <button key={p} className={`chip${pos === p ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setPos(p)}>{p}</button>
+        ))}
+        <span style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 4px' }} />
+        <button className={`chip${topOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setTopOnly((t) => !t)}>Top targets only</button>
+        <label className="small muted" style={{ marginLeft: 'auto' }}>Sort:&nbsp;
+          <select className="select" value={sort} onChange={(e) => setSort(e.target.value as ScoutSort)} style={{ fontSize: 12 }}>
+            <option value="rec">Recommendation</option>
+            <option value="potential">Potential</option>
+            <option value="current">Current</option>
+            <option value="knowledge">Knowledge</option>
+            <option value="age">Age</option>
+          </select>
+        </label>
+      </div>
+      {view.length === 0 ? (
+        <p className="muted small">No scouted players yet — assign scouts to build intel.</p>
+      ) : (
+        <div className="table-wrap" style={{ maxHeight: 460, overflowY: 'auto' }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
+                <th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.map((r) => (
+                <tr key={r.playerId}>
+                  <td><span style={{ fontWeight: 800, color: REC_COLOR[r.rec] }}>{r.rec}</span></td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {r.nationality && flagEmoji(r.nationality) && <span style={{ fontSize: 11 }}>{flagEmoji(r.nationality)}</span>}
+                      <PlayerLink playerId={r.playerId} name={r.name} />
+                    </span>
+                  </td>
+                  <td className="num muted">{r.position}</td>
+                  <td className="num muted">{r.age}</td>
+                  <td className="muted small">{r.teamAbbr}</td>
+                  <td style={{ color: 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.currentStars) || '–'}</td>
+                  <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.potentialStars) || '–'}</td>
+                  <td className="num muted small">{r.knowledge}%</td>
+                  <td className="num small">{fmtMoney(r.salary)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 /* ── main screen ───────────────────────────────────────────────────────────── */
 
 export function ScoutingScreen(): JSX.Element {
@@ -246,6 +338,9 @@ export function ScoutingScreen(): JSX.Element {
               />
             ))}
           </div>
+
+          {/* ── Scouting recommendations table ── */}
+          <ScoutedTable rows={data.scoutedPlayers} />
 
           <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
             {/* ── League knowledge overview ── */}

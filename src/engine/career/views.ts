@@ -1214,8 +1214,31 @@ export interface TeamKnowledgeSummary {
  * Full scouting hub view — scout cards, assignment options, knowledge summaries.
  * Carried as the response to a 'getScouting' request.
  */
+/** One row in the scouted-players recommendations table. */
+export interface ScoutedPlayerRow {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  teamAbbr: string
+  nationality?: string
+  /** Fog-aware current ability, 0–5 stars. */
+  currentStars: number
+  /** Fog-aware potential, 0–5 stars. */
+  potentialStars: number
+  /** 0–100 scouting knowledge. */
+  knowledge: number
+  /** Recommendation grade. */
+  rec: 'A+' | 'A' | 'B' | 'C' | 'D'
+  /** Current salary (≈ transfer/asset value proxy). */
+  salary: number
+  faceId?: string
+}
+
 export interface ScoutingView {
   scouts: ScoutCardView[]
+  /** Scouted players with recommendation grades (most recommendable first). */
+  scoutedPlayers: ScoutedPlayerRow[]
   /** All teams as assignment options. */
   teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
   /** All divisions as assignment options. */

@@ -1096,8 +1096,53 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   topGains.sort((a, b) => b.knowledge - a.knowledge)
   topGains.splice(20)
 
+  // Scouted-players recommendations table: everyone the user has meaningful
+  // knowledge of, graded. Fog-aware (stars from scouting confidence).
+  const abbrOf = new Map<string, string>()
+  for (const [, team] of teams) {
+    for (const id of team.roster) abbrOf.set(id as string, team.abbreviation)
+  }
+  const scoutedPlayers: import('./views').ScoutedPlayerRow[] = []
+  for (const [pid, k] of scouting.knowledge) {
+    if (k < 15) continue
+    const p = players.get(pid as PlayerId)
+    if (!p) continue
+    const cur = Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2))
+    const pot = potentialStars(p)
+    const ceiling = Math.max(cur, pot)
+    const young = p.age <= 23
+    const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =
+      ceiling >= 4.5 ? 'A+'
+      : ceiling >= 4 ? (young ? 'A+' : 'A')
+      : ceiling >= 3 ? (young ? 'A' : 'B')
+      : ceiling >= 2 ? 'C'
+      : 'D'
+    scoutedPlayers.push({
+      playerId: pid as string,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      teamAbbr: abbrOf.get(pid as string) ?? 'FA',
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      currentStars: cur,
+      potentialStars: pot,
+      knowledge: Math.round(k),
+      rec,
+      salary: p.contract.salary,
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+    })
+  }
+  const recOrder = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
+  scoutedPlayers.sort((a, b) =>
+    recOrder[a.rec] - recOrder[b.rec] ||
+    b.potentialStars - a.potentialStars ||
+    b.currentStars - a.currentStars,
+  )
+  scoutedPlayers.splice(300)
+
   return {
     scouts,
+    scoutedPlayers,
     teams: teamsOpts,
     divisions: divisionsOpts,
     hasDraftClass: draftProspectIds.size > 0,
