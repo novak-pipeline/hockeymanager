@@ -1272,6 +1272,9 @@ export interface MedicalView {
   rows: MedicalRow[]
 }
 
+/** Development Center re-exports (builder owns the shapes). Response to 'getDevelopment'. */
+export type { DevelopmentRow, DevelopmentCenterView } from './developmentCenter'
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

@@ -27,6 +27,7 @@ import { LeagueStatsTableScreen } from './LeagueStatsTableScreen'
 import { TeamDataHubBody } from './DataHubScreen'
 import { DynamicsScreen } from './DynamicsScreen'
 import { MedicalScreen } from './MedicalScreen'
+import { DevelopmentScreen } from './DevelopmentScreen'
 import { TacticsScreen } from './TacticsScreen'
 import { FinancesScreen } from './FinancesScreen'
 import { HistoryScreen } from './HistoryScreen'
@@ -49,6 +50,7 @@ type TeamTab =
   | 'teamDataHub'
   | 'teamDynamics'
   | 'teamMedical'
+  | 'teamDevelopment'
 
 /* ── tier color mapping ── */
 const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
@@ -89,7 +91,7 @@ const FOCUS_DESC: Record<PracticeFocus, string> = {
 
 /** Management-only tabs: hidden when browsing another team. */
 const MANAGEMENT_TABS: ReadonlySet<TeamTab> = new Set([
-  'report', 'practice', 'tactics', 'finances', 'teamMedical',
+  'report', 'practice', 'tactics', 'finances', 'teamMedical', 'teamDevelopment',
 ])
 
 export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
@@ -140,6 +142,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
       case 'teamDynamics': return <DynamicsScreen teamId={viewedTeamId} />
       case 'teamMedical': return <MedicalScreen />
+      case 'teamDevelopment': return <DevelopmentScreen />
       case 'report':      return <ReportTab />
       case 'personnel':   return <PersonnelTab teamId={viewedTeamId} />
       case 'practice':    return <PracticeTab />

@@ -79,6 +79,8 @@ export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/
 import type { TeamDynamicsView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
+export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
+import type { DevelopmentCenterView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -163,6 +165,7 @@ export type WorkerRequestBody =
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
   | { type: 'getMedical' }
+  | { type: 'getDevelopment' }
   | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
@@ -305,6 +308,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
   | { type: 'medical'; medical: MedicalView }
+  | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'agenda'; items: AgendaItem[] }

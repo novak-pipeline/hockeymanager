@@ -122,6 +122,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
+    case 'getDevelopment':
+      return { id: req.id, type: 'development', development: must().getDevelopment() }
     case 'getLeagueStatTable':
       return { id: req.id, type: 'leagueStatTable', table: must().getLeagueStatTable(req.teamId) }
     case 'suggestToCoach': {

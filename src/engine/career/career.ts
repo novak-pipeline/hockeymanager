@@ -238,6 +238,7 @@ import {
 } from '@engine/league/practice'
 import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
+import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import {
   badge,
   buildAhlSquadView,
@@ -4401,6 +4402,27 @@ export class Career {
     // Most at-risk / injured first.
     rows.sort((a, b) => b.risk - a.risk)
     return { teamName: team?.name ?? 'Team', injuredCount, rows }
+  }
+
+  /** Development Center: the org's young / high-upside players (NHL + AHL). */
+  getDevelopment(): DevelopmentCenterView {
+    const team = this.data.teams.get(this.userTeamId)
+    const roster = (team?.roster ?? []).map((id) => this.resolve(id))
+    const affiliateId = this.userTeam.affiliateId
+    const ahlTeam = affiliateId ? this.data.teams.get(affiliateId as TeamId) : undefined
+    const affiliate = (ahlTeam?.roster ?? [])
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => p !== undefined)
+    const stars = (p: Player): [number, number] => [
+      Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2)),
+      potentialStars(p),
+    ]
+    return buildDevelopmentCenter({
+      teamName: team?.name ?? 'Team',
+      roster,
+      affiliate,
+      stars,
+    })
   }
 
   /** Legends registry for a club, most recent first. */
