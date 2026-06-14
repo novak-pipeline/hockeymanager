@@ -241,6 +241,7 @@ import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import { buildScoutVerdict } from './scoutVerdict'
 import { buildRosterProjection, buildCoachReports, type SeasonForm } from './playerProjection'
+import { recordOpinions, type OpinionSnapshot } from './opinionTracker'
 import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
@@ -518,6 +519,8 @@ export class Career {
   /** Players already reported on in the inbox (avoids re-reporting). Seeded lazily. */
   private scoutReported = new Set<string>()
   private scoutReportSeeded = false
+  /** Per-player opinion timeline (rating/stars/knowledge over the season). */
+  private opinionHistory = new Map<string, OpinionSnapshot[]>()
 
   /* ── story layer (Wave 1) ── */
   private arcsState!: ArcsState
@@ -2388,6 +2391,17 @@ export class Career {
       rng: this.rngFor(7008, day),
     })
     this.emitScoutReports()
+    // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
+    if (day % 15 === 0) {
+      recordOpinions({
+        history: this.opinionHistory,
+        players: this.data.players,
+        scouting: this.scouting,
+        ownOrgIds: this.ownOrgIds(),
+        day,
+        year: this.year,
+      })
+    }
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
       const offers = generateAiOffers({
@@ -4312,6 +4326,10 @@ export class Career {
           // Coach reports are no longer inline — request them (delivered to inbox).
         }
       }
+
+      // Opinion timeline — how the read on him has moved this/last season.
+      const timeline = this.opinionHistory.get(playerId)
+      if (timeline && timeline.length > 0) profile.opinionTimeline = timeline.map((s) => ({ ...s }))
     }
 
     return profile
@@ -4332,6 +4350,15 @@ export class Career {
     // Sitting down with a player sharpens the read on him.
     addKnowledge(this.scouting, playerId, 6)
     return { ok: true }
+  }
+
+  /** NHL roster + AHL-affiliate player ids (the user's whole organisation). */
+  private ownOrgIds(): Set<string> {
+    const ids = new Set<string>(this.userTeam.roster.map((id) => id as string))
+    const affId = this.userTeam.affiliateId
+    const ahl = affId !== undefined ? this.data.teams.get(affId) : undefined
+    if (ahl) for (const id of ahl.roster) ids.add(id as string)
+    return ids
   }
 
   /** In-season signals (form/morale/injury/production) for staff opinion. */
@@ -5852,6 +5879,7 @@ export class Career {
       ahlStandings: serializeMap(this.ahlStandings as unknown as Map<string, unknown>),
       ahlGp: serializeMap(this.ahlGp as unknown as Map<string, number>),
       ahlTotals: serializeMap(this.ahlTotals as unknown as Map<string, unknown>),
+      opinionHistory: [...this.opinionHistory.entries()].map(([k, v]) => [k, v.map((s) => ({ ...s }))] as [string, OpinionSnapshot[]]),
     }
   }
 
@@ -6040,6 +6068,11 @@ export class Career {
     if (snapshot.ahlTotals) {
       for (const [k, v] of snapshot.ahlTotals) {
         career.ahlTotals.set(asPlayerId(k), v as GamePlayerStat)
+      }
+    }
+    if (snapshot.opinionHistory) {
+      for (const [k, v] of snapshot.opinionHistory) {
+        career.opinionHistory.set(k, v.map((s) => ({ ...s })))
       }
     }
 

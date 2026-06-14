@@ -41,7 +41,7 @@ import { ThemeScope } from '../components/ThemeScope'
 
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
-type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout'
+type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout' | 'opinion'
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'profile',     label: 'Profile' },
@@ -50,6 +50,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'contract',    label: 'Contract' },
   { id: 'history',     label: 'History' },
   { id: 'scout',       label: 'Scout Report' },
+  { id: 'opinion',     label: 'Opinion' },
 ]
 
 /* ═══════════════════════════ SUB-COMPONENTS ═══════════════════════════ */
@@ -1697,6 +1698,92 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
   )
 }
 
+/* ─────────────────────────── Opinion tab ─────────────────────────── */
+
+function opinionNote(prev: { overall: number; potentialStars: number; knowledge: number }, cur: { overall: number; potentialStars: number; knowledge: number }): string | null {
+  if (cur.potentialStars > prev.potentialStars) return 'Raised his ceiling'
+  if (cur.potentialStars < prev.potentialStars) return 'Lowered his ceiling'
+  if (cur.overall - prev.overall >= 3) return 'Trending up'
+  if (cur.overall - prev.overall <= -3) return 'Trending down'
+  if (cur.knowledge - prev.knowledge >= 12) return 'Getting a clearer read'
+  return null
+}
+
+function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
+  const timeline = d.opinionTimeline ?? []
+  if (timeline.length === 0) {
+    return (
+      <Panel title="Opinion Over Time">
+        <span className="muted small">
+          No opinion history yet — it builds through the season as {d.name} plays, develops, and is scouted. Check back after a few weeks.
+        </span>
+      </Panel>
+    )
+  }
+
+  // Sparkline of rated overall across the series.
+  const W = 520, H = 90, PAD = 8
+  const ovr = timeline.map((s) => s.overall)
+  const lo = Math.min(...ovr) - 2, hi = Math.max(...ovr) + 2
+  const span = Math.max(1, hi - lo)
+  const x = (i: number) => PAD + (timeline.length === 1 ? W / 2 : (i / (timeline.length - 1)) * (W - 2 * PAD))
+  const y = (v: number) => PAD + (1 - (v - lo) / span) * (H - 2 * PAD)
+  const path = timeline.map((s, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(s.overall).toFixed(1)}`).join(' ')
+
+  const rows = [...timeline].reverse()
+
+  return (
+    <div className="stack">
+      <Panel title="Rating Trend">
+        <div className="muted small" style={{ marginBottom: 6 }}>Rated overall as the season has unfolded.</div>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          <path d={path} fill="none" stroke="var(--accent)" strokeWidth={2} />
+          {timeline.map((s, i) => (
+            <circle key={i} cx={x(i)} cy={y(s.overall)} r={2.5} fill="var(--violet-h)" />
+          ))}
+        </svg>
+      </Panel>
+
+      <Panel title="Opinion Log">
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th className="num">Overall</th>
+                <th>Current</th>
+                <th>Ceiling</th>
+                <th>Read</th>
+                <th>Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s, i) => {
+                const prev = rows[i + 1]
+                const note = prev ? opinionNote(prev, s) : 'First read'
+                return (
+                  <tr key={`${s.year}-${s.day}`}>
+                    <td className="muted small">{s.year} · GD{s.day}</td>
+                    <td className="num" style={{ fontWeight: 700 }}>{s.overall}</td>
+                    <td><StarRating stars={s.currentStars} size={13} /></td>
+                    <td><StarRating stars={s.potentialStars} size={13} /></td>
+                    <td className="muted small">{knowledgeProse(s.knowledge)}</td>
+                    <td className="small" style={{
+                      color: note === 'Trending up' || note === 'Raised his ceiling' ? 'var(--success)'
+                        : note === 'Trending down' || note === 'Lowered his ceiling' ? 'var(--danger)'
+                        : 'var(--muted)',
+                    }}>{note ?? '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
 /* ═══════════════════════════ MAIN SCREEN ═══════════════════════════ */
 
 export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
@@ -1834,6 +1921,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       {activeTab === 'contract' && <TabContract d={d} />}
       {activeTab === 'history' && <TabHistory d={d} />}
       {activeTab === 'scout' && <TabScout d={d} client={client} />}
+      {activeTab === 'opinion' && <TabOpinion d={d} />}
     </section>
     </ThemeScope>
   )

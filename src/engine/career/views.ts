@@ -24,6 +24,7 @@ export type { PersonalityTraitRead, PersonalityReadView, PersonalityConfidence }
 export type { ScoutReportView, ReportCard, ReportGrade, ProjectionTier, SeasonProjection } from '@engine/career/scoutReport'
 export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@engine/career/multiScout'
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
+export type { OpinionSnapshot } from '@engine/career/opinionTracker'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
@@ -437,6 +438,11 @@ export interface PlayerProfileView extends PlayerBadge {
    * players / sufficiently scouted players whose club is known.
    */
   rosterProjection?: import('@engine/career/playerProjection').RosterProjection
+  /**
+   * How the read on this player has moved over time (rating/stars/knowledge
+   * snapshots). Present when any history has accrued.
+   */
+  opinionTimeline?: import('@engine/career/opinionTracker').OpinionSnapshot[]
 }
 
 /** A notable retiree recorded in a club's legends registry. */
@@ -1186,6 +1192,8 @@ export interface CareerSnapshot {
   ahlGp?: Array<[string, number]>
   /** AHL season totals, kept separate from NHL playerTotals. Optional. */
   ahlTotals?: Array<[string, unknown]>
+  /** Per-player opinion timeline (rating/stars/knowledge over time). Optional. */
+  opinionHistory?: Array<[string, import('@engine/career/opinionTracker').OpinionSnapshot[]]>
 }
 
 export interface SaveSlotInfo {
