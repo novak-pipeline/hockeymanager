@@ -57,7 +57,7 @@ describe('createInitialScouting', () => {
     }
   })
 
-  it('other rostered players get knowledge in [20,45]', () => {
+  it('other rostered players get renown-driven knowledge in [20,95]', () => {
     const { data, userTeamId, rng } = makeArgs(3)
     const state = createInitialScouting({
       userTeamId,
@@ -73,10 +73,10 @@ describe('createInitialScouting', () => {
       if (tid as string === userTeamId) continue
       for (const pid of team.roster) {
         const k = knowledgeOf(state, pid as string)
-        // Not own roster, not draft prospect, should be in 5-45 range
+        // Not own roster, not draft prospect: known in proportion to renown.
         if (!userRosterSet.has(pid as string)) {
-          expect(k).toBeGreaterThanOrEqual(5)
-          expect(k).toBeLessThanOrEqual(45)
+          expect(k).toBeGreaterThanOrEqual(20)
+          expect(k).toBeLessThanOrEqual(95)
           checked++
         }
       }
@@ -85,7 +85,7 @@ describe('createInitialScouting', () => {
     expect(checked).toBeGreaterThan(10)
   })
 
-  it('draft prospects get knowledge in [5,15]', () => {
+  it('draft prospects get knowledge in [5,18]', () => {
     const { data, userTeamId, rng, draftProspectIds } = makeArgs(4)
     const state = createInitialScouting({
       userTeamId,
@@ -100,7 +100,7 @@ describe('createInitialScouting', () => {
       if (userTeam.roster.some((id) => id as string === pid)) continue
       const k = knowledgeOf(state, pid)
       expect(k).toBeGreaterThanOrEqual(5)
-      expect(k).toBeLessThanOrEqual(15)
+      expect(k).toBeLessThanOrEqual(18)
       checked++
       if (checked > 10) break
     }

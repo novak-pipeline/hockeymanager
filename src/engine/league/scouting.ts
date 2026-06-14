@@ -180,12 +180,44 @@ export interface CreateScoutingArgs {
 }
 
 /**
+ * A player's "renown" (0–200): how widely known he is. Blends his reputation
+ * (from the source DB) with his ability, so an inflated DB reputation can't make
+ * a fringe player famous, and a quietly excellent player still registers. When
+ * no DB reputation is present we fall back to ability alone.
+ */
+export function renownOf(player: Player): number {
+  const ovr = overall(player.composites, player.position)
+  // Map overall 40→70, 99→~200 so ability contributes on the same 0–200 scale.
+  const ovrRenown = 70 + (Math.max(40, Math.min(99, ovr)) - 40) * (130 / 59)
+  const rep = (player as { currentReputation?: number }).currentReputation ?? 0
+  return rep > 0 ? rep * 0.6 + ovrRenown * 0.4 : ovrRenown
+}
+
+/**
+ * Initial scouting knowledge for a non-roster, non-prospect player, derived from
+ * his renown. Established stars are essentially fully known; depth NHLers are
+ * mostly known; AHL/fringe players stay foggier — the "gems" left to uncover.
+ */
+function renownKnowledge(renown: number, rng: Rng): number {
+  let base: number
+  if (renown >= 174) base = 92
+  else if (renown >= 160) base = 84
+  else if (renown >= 148) base = 74
+  else if (renown >= 136) base = 64
+  else if (renown >= 124) base = 54
+  else if (renown >= 110) base = 45
+  else base = 36
+  return Math.max(20, Math.min(95, base + rng.range(-4, 4)))
+}
+
+/**
  * Build the initial ScoutingState for a new career.
  *
  * - 3 scouts, ratings 55–75, all assigned to watch the user's division
- * - Own roster: knowledge 100
- * - Other rostered players: 25–40 (public reputation, overall-based noise)
- * - Draft prospects: 5–15
+ * - Own roster: knowledge 100 (we know our own players well)
+ * - Other rostered players: renown-driven (stars ~known, depth mostly known,
+ *   AHL/fringe foggier)
+ * - Draft prospects: 5–18 (this is where the fog and discovery live)
  */
 export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
   const { userTeamId, teams, players, rng } = args
@@ -225,13 +257,11 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
     if (userRosterSet.has(pidStr)) {
       knowledge.push([pidStr, 100])
     } else if (draftProspectIds.has(pidStr)) {
-      knowledge.push([pidStr, rng.range(5, 15)])
+      // Draft-eligible prospects are where the fog (and the discovery) lives.
+      knowledge.push([pidStr, rng.range(5, 18)])
     } else {
-      // Public info: roughly correlated with overall so elite players are more known
-      const ovr = overall(player.composites, player.position)
-      const base = ovr >= 80 ? 35 : ovr >= 65 ? 28 : 20
-      const noise = rng.range(-5, 5)
-      knowledge.push([pidStr, Math.max(5, Math.min(45, base + noise))])
+      // Everyone else: known in proportion to renown (reputation + ability).
+      knowledge.push([pidStr, renownKnowledge(renownOf(player), rng)])
     }
   }
 

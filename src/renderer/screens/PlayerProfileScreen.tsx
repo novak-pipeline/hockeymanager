@@ -1172,7 +1172,7 @@ function TabInformation({ d }: { d: PlayerProfileView }): JSX.Element {
           {hasRep && (
             <>
               <InfoRow label="Home rep." value={h.homeReputation > 0 ? repTier(h.homeReputation) : undefined} />
-              <InfoRow label="Current rep." value={h.currentReputation > 0 ? repTier(h.currentReputation) : undefined} />
+              <InfoRow label="Current rep." value={h.currentReputation > 0 ? currentRepTier(h.currentReputation, d.overall) : undefined} />
               <InfoRow label="World rep." value={h.worldReputation > 0 ? repTier(h.worldReputation) : undefined} />
             </>
           )}
@@ -1183,16 +1183,34 @@ function TabInformation({ d }: { d: PlayerProfileView }): JSX.Element {
 }
 
 /** EHM-style reputation tier from a 0–200 reputation rating. A GM reads "World
- *  Class", not a raw number. */
+ *  Class", not a raw number.
+ *
+ *  Thresholds are calibrated to the real-roster DB, where NHL reputations cluster
+ *  high (102–200, median ~143). The elite labels are pushed up so "World Class"
+ *  and above stay rare (roughly the top tenth), not half the league. */
 function repTier(v: number): string {
   if (v <= 0) return 'Unknown'
-  if (v < 40) return 'Obscure'
-  if (v < 75) return 'Regional'
-  if (v < 110) return 'National'
-  if (v < 140) return 'Continental'
-  if (v < 165) return 'World Class'
-  if (v < 185) return 'Superstar'
+  if (v < 90) return 'Obscure'
+  if (v < 118) return 'Regional'
+  if (v < 138) return 'National'
+  if (v < 158) return 'Continental'
+  if (v < 175) return 'World Class'
+  if (v < 190) return 'Superstar'
   return 'Global Icon'
+}
+
+/** Map an overall (40–99) onto the 0–200 reputation scale (40→70, 99→200). */
+function overallToRep(ovr: number): number {
+  return 70 + (Math.max(40, Math.min(99, ovr)) - 40) * (130 / 59)
+}
+
+/**
+ * Current-reputation tier blended with ability, so an inflated DB reputation
+ * can't make an average journeyman read as "World Class". Ability gets 40% of
+ * the say; the headline reputation keeps 60%.
+ */
+function currentRepTier(rep: number, overall: number): string {
+  return repTier(rep * 0.6 + overallToRep(overall) * 0.4)
 }
 
 function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {

@@ -235,13 +235,13 @@ describe('Career — scouting', () => {
       expect(knowledgeMap.get(pid)).toBe(100)
     }
 
-    // All other team players should have partial knowledge
+    // All other team players should have renown-driven (partial) knowledge.
     for (const [teamId, team] of data.teams) {
       if (teamId === userId) continue
       for (const pid of team.roster) {
         const k = knowledgeMap.get(pid) ?? 0
         expect(k).toBeGreaterThanOrEqual(5)
-        expect(k).toBeLessThanOrEqual(45)
+        expect(k).toBeLessThanOrEqual(95)
       }
     }
   })
