@@ -76,7 +76,7 @@ function buildSections(phase: DashboardView['phase'], unread: number): Section[]
         { id: 'practice',    label: 'Practice' },
         { id: 'tactics',     label: 'Tactics' },
         { id: 'finances',    label: 'Finances' },
-        { id: 'teamInfo',    label: 'Team Info' },
+        { id: 'teamInfo',    label: 'Club Info' },
         { id: 'teamHistory', label: 'History' },
       ],
     },

@@ -274,6 +274,7 @@ import {
   type BoardView,
   type BoxScoreView,
   type CalendarView,
+  type ClubInfoView,
   type CareerPhase,
   type CareerSnapshot,
   type CompareRadarView,
@@ -5430,6 +5431,54 @@ export class Career {
       ...summary,
       currentRank,
       fired: this.boardState.firedAtYear !== null,
+    }
+  }
+
+  /** FM-style Club Info: profile + board vision + rivals for the user club. */
+  getClubInfo(): ClubInfoView {
+    const team = this.data.teams.get(this.userTeamId)!
+    const sorted = sortStandings([...this.standings.values()])
+    const leagueRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    const divName = new Map(this.data.league.divisions.map((d) => [d.id, d.name]))
+    const confName = new Map(this.data.league.conferences.map((c) => [c.id, c.name]))
+    // Division rank: standings order restricted to division-mates.
+    const divisionRank =
+      sorted.filter((s) => this.data.teams.get(s.teamId)?.divisionId === team.divisionId)
+        .findIndex((s) => s.teamId === this.userTeamId) + 1
+    const st = this.standings.get(this.userTeamId)
+    const affiliateTeam = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    const board = this.getBoard()
+    const rivals = this.getRivalries().rivalries
+      .filter((r) => r.teamAId === (this.userTeamId as unknown as string) || r.teamBId === (this.userTeamId as unknown as string))
+      .slice(0, 3)
+      .map((r) => {
+        const isA = r.teamAId === (this.userTeamId as unknown as string)
+        return { teamId: isA ? r.teamBId : r.teamAId, abbreviation: isA ? r.teamBAbbr : r.teamAAbbr, label: r.label }
+      })
+    return {
+      teamId: this.userTeamId as unknown as string,
+      name: team.name,
+      abbreviation: team.abbreviation,
+      city: team.city,
+      conferenceName: confName.get(team.conferenceId) ?? '—',
+      divisionName: divName.get(team.divisionId) ?? '—',
+      leagueRank,
+      divisionRank,
+      record: {
+        wins: st?.wins ?? 0,
+        losses: st?.losses ?? 0,
+        overtimeLosses: st?.overtimeLosses ?? 0,
+        points: st?.points ?? 0,
+        gamesPlayed: st?.gamesPlayed ?? 0,
+      },
+      affiliate: affiliateTeam
+        ? { teamId: affiliateTeam.id as unknown as string, name: affiliateTeam.name, abbreviation: affiliateTeam.abbreviation }
+        : null,
+      mandate: board.mandate,
+      mandateText: board.mandateText,
+      targetRank: board.targetRank,
+      confidenceLabel: board.confidenceLabel,
+      rivals,
     }
   }
 

@@ -264,6 +264,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── franchise drama + League hub (Wave 4) ── */
     case 'getBoard':
       return { id: req.id, type: 'board', board: must().getBoard() }
+    case 'getClubInfo':
+      return { id: req.id, type: 'clubInfo', clubInfo: must().getClubInfo() }
     case 'getRivalries':
       return { id: req.id, type: 'rivalries', rivalries: must().getRivalries() }
     case 'getLeagueStats':

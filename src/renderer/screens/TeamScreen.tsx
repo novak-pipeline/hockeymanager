@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import type {
   AgmReportView,
+  ClubInfoView,
   PracticeView,
   SquadView,
   StaffView,
@@ -609,37 +610,85 @@ function PracticeTab(): JSX.Element {
 
 function TeamInfoTab(): JSX.Element {
   const client = useClient()
-  const { data, loading, error } = useScreenData<SquadView>(
-    () => client.getSquad(),
-    (r) => (r.type === 'squad' ? r.squad : null)
+  const nav = useNav()
+  const { data: club, loading, error } = useScreenData<ClubInfoView>(
+    () => client.getClubInfo(),
+    (r) => (r.type === 'clubInfo' ? r.clubInfo : null)
   )
   const { data: finances } = useScreenData(
     () => client.getFinances(),
     (r) => (r.type === 'finances' ? r.finances : null)
   )
 
+  const ordinal = (n: number): string => {
+    if (n <= 0) return '—'
+    const s = ['th', 'st', 'nd', 'rd']
+    const v = n % 100
+    return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]!)
+  }
+
   return (
     <section className="stack">
-      <ScreenHeader title="Team Info" />
+      <ScreenHeader title="Club Info" />
       <ScreenStateNotices
-        loading={loading && !data}
+        loading={loading && !club}
         error={error}
-        empty={!loading && !error && !data}
-        emptyText="No team data."
+        empty={!loading && !error && !club}
+        emptyText="No club data."
       />
-      {data && (
-        <Panel title={data.teamName}>
-          <div className="list">
-            <div className="row-between small">
-              <span className="muted">Roster players</span>
-              <strong>{data.rosterCount}</strong>
+      {club && (
+        <>
+          <Panel title={club.name}>
+            <div className="list">
+              <div className="row-between small"><span className="muted">City</span><strong>{club.city}</strong></div>
+              <div className="row-between small"><span className="muted">Conference</span><strong>{club.conferenceName}</strong></div>
+              <div className="row-between small"><span className="muted">Division</span><strong>{club.divisionName}</strong></div>
+              <div className="row-between small"><span className="muted">League position</span><strong>{ordinal(club.leagueRank)}</strong></div>
+              <div className="row-between small"><span className="muted">Division position</span><strong>{ordinal(club.divisionRank)}</strong></div>
+              <div className="row-between small">
+                <span className="muted">Record</span>
+                <strong>{club.record.wins}–{club.record.losses}–{club.record.overtimeLosses} · {club.record.points} pts</strong>
+              </div>
             </div>
-            <div className="row-between small">
-              <span className="muted">Dressed players</span>
-              <strong>{data.dressedCount}</strong>
+          </Panel>
+
+          <Panel title="Vision & Objectives">
+            <div className="list">
+              <div className="row-between small"><span className="muted">Board mandate</span><strong>{club.mandate}</strong></div>
+              <p className="small muted" style={{ margin: '4px 0' }}>{club.mandateText}</p>
+              <div className="row-between small"><span className="muted">Target finish</span><strong>{ordinal(club.targetRank)}</strong></div>
+              <div className="row-between small"><span className="muted">Board confidence</span><strong>{club.confidenceLabel}</strong></div>
             </div>
-          </div>
-        </Panel>
+          </Panel>
+
+          <Panel title="Affiliate">
+            {club.affiliate ? (
+              <button
+                className="row-between small"
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                onClick={() => nav.navigate('squad', { teamId: club.affiliate!.teamId })}
+              >
+                <span className="muted">AHL affiliate</span>
+                <strong style={{ color: 'var(--violet, #8b5cf6)' }}>{club.affiliate.name} ({club.affiliate.abbreviation}) ›</strong>
+              </button>
+            ) : (
+              <p className="small muted">No affiliate club.</p>
+            )}
+          </Panel>
+
+          {club.rivals.length > 0 && (
+            <Panel title="Rivals">
+              <div className="list">
+                {club.rivals.map((r) => (
+                  <div key={r.teamId} className="row-between small">
+                    <span className="muted">{r.abbreviation}</span>
+                    <span className="chip" style={{ fontSize: 10 }}>{r.label}</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+        </>
       )}
       {finances && (
         <Panel title="Finances">

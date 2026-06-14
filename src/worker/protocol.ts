@@ -23,6 +23,7 @@ export type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  ClubInfoView,
   CalendarView,
   CareerPhase,
   CareerSnapshot,
@@ -94,6 +95,7 @@ import type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  ClubInfoView,
   CalendarView,
   CareerSnapshot,
   DataHubView,
@@ -248,6 +250,7 @@ export type WorkerRequestBody =
   /* ── franchise drama + League hub (Wave 4) ── */
   /** Owner/board mandate, confidence, patience, hot-seat status. */
   | { type: 'getBoard' }
+  | { type: 'getClubInfo' }
   /** All current rivalries sorted by intensity. */
   | { type: 'getRivalries' }
   /** Team special-teams table (PP% / PK%). */
@@ -340,6 +343,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'teamLeaders'; leaders: import('@engine/league/playerRating').TeamLeadersView }
   /* ── franchise drama + League hub (Wave 4) ── */
   | { type: 'board'; board: BoardView }
+  | { type: 'clubInfo'; clubInfo: ClubInfoView }
   | { type: 'rivalries'; rivalries: RivalriesView }
   | { type: 'leagueStats'; stats: LeagueStatsView }
   | { type: 'transactions'; transactions: TransactionsView }

@@ -1486,6 +1486,34 @@ export interface BoardView {
   fired: boolean
 }
 
+/* ────────────────────────── club info view ────────────────────────── */
+
+/**
+ * FM-style Club Info: profile (city, conference/division, affiliate) plus the
+ * board's vision/mandate and the club's fiercest rivals. Response to 'getClubInfo'.
+ */
+export interface ClubInfoView {
+  teamId: string
+  name: string
+  abbreviation: string
+  city: string
+  conferenceName: string
+  divisionName: string
+  /** Overall league rank (1 = first). */
+  leagueRank: number
+  /** Rank within the team's division (1 = first). */
+  divisionRank: number
+  record: { wins: number; losses: number; overtimeLosses: number; points: number; gamesPlayed: number }
+  affiliate: { teamId: string; name: string; abbreviation: string } | null
+  /** Board vision / objectives. */
+  mandate: string
+  mandateText: string
+  targetRank: number
+  confidenceLabel: string
+  /** Top rivals (most intense first). */
+  rivals: Array<{ teamId: string; abbreviation: string; label: string }>
+}
+
 /* ────────────────────────── rivalries view ────────────────────────── */
 
 export interface RivalryView {

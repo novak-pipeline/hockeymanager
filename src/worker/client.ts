@@ -217,6 +217,10 @@ export class SimClient {
     return this.send({ type: 'getSquadPlanner' })
   }
 
+  getClubInfo(): Promise<WorkerResponse> {
+    return this.send({ type: 'getClubInfo' })
+  }
+
   getLeagueStatTable(teamId?: string): Promise<WorkerResponse> {
     return this.send(teamId ? { type: 'getLeagueStatTable', teamId } : { type: 'getLeagueStatTable' })
   }
