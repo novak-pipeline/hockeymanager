@@ -70,6 +70,7 @@ import {
   simWorldDay,
   type WorldSimState,
 } from '@engine/league/worldSim'
+import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import {
   createArc,
   createInitialArcsState,
@@ -2564,6 +2565,35 @@ export class Career {
     return true
   }
 
+  /** Global free-agent market: after NHL free agency, the wider world signs the
+   *  leftovers — aging vets land in Europe, fringe players drop to other leagues.
+   *  No-op without competitions. Mutates rosters/contracts and pushes a few
+   *  notable signings to the inbox. */
+  private runWorldFreeAgency(): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    const res = worldFreeAgencySweep({
+      competitions: comps,
+      teams: this.data.teams,
+      players: this.data.players,
+      faPool: this.faPool,
+      year: this.year,
+      rng: this.rngFor(8006),
+    })
+    this.faPool = res.remaining
+    const notable = res.signings.filter((s) => s.notable).slice(0, 6)
+    for (const s of notable) {
+      const p = this.data.players.get(s.playerId)
+      if (!p) continue
+      this.pushNews(
+        'contract',
+        `${p.name} heads overseas to the ${s.competitionName}`,
+        `${p.name} (${p.age}) — unsigned in the NHL — has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
+        { playerId: s.playerId as string, teamId: s.teamId as string }
+      )
+    }
+  }
+
   /** Quick-sim the wider world's (other leagues') games scheduled on `day`.
    *  No-op when the league has no competitions (generated league / plain mods). */
   private tickWorld(day: number): void {
@@ -3343,7 +3373,10 @@ export class Career {
           )
         }
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
-        if (os.faDay >= FA_WINDOW_DAYS) os.stage = 'preseason'
+        if (os.faDay >= FA_WINDOW_DAYS) {
+          this.runWorldFreeAgency()
+          os.stage = 'preseason'
+        }
         return true
       }
       case 'preseason': {
