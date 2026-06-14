@@ -77,7 +77,18 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
   )
 }
 
-export function WorldScreen(): JSX.Element {
+export function WorldScreen(props: { tab?: 'leagues' | 'international' }): JSX.Element {
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      <ScreenHeader title="World">
+        <span className="muted small">The wider hockey world — leagues, juniors &amp; international</span>
+      </ScreenHeader>
+      {props.tab === 'international' ? <InternationalPanel /> : <LeaguesPanel />}
+    </div>
+  )
+}
+
+function LeaguesPanel(): JSX.Element {
   const client = useClient()
   const { data, loading, error } = useScreenData(
     () => client.getCompetitions(),
@@ -90,9 +101,6 @@ export function WorldScreen(): JSX.Element {
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-      <ScreenHeader title="World">
-        <span className="muted small">The wider hockey world — feeders, juniors &amp; international leagues</span>
-      </ScreenHeader>
       <ScreenStateNotices
         loading={loading}
         error={error}
@@ -227,5 +235,83 @@ export function WorldScreen(): JSX.Element {
         </>
       )}
     </div>
+  )
+}
+
+function InternationalPanel(): JSX.Element {
+  const client = useClient()
+  const { data, loading, error } = useScreenData(
+    () => client.getInternational(),
+    (r) => (r.type === 'international' ? r.international : null)
+  )
+  const [selected, setSelected] = useState<string | null>(null)
+
+  const nations = data?.nations ?? []
+  const current = nations.find((n) => n.nation === selected) ?? nations[0] ?? null
+
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      <ScreenStateNotices
+        loading={loading}
+        error={error}
+        empty={!loading && nations.length === 0}
+        emptyText="No nationality data in this database. Load a multi-league database to see national-team power rankings."
+      />
+
+      {nations.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
+          {/* National-team power rankings */}
+          <Panel title="National team power rankings">
+            <table className="data-table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th style={{ textAlign: 'left' }}>Nation</th>
+                  <th>Players</th>
+                  <th style={{ textAlign: 'left' }}>Strength</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nations.map((n) => (
+                  <tr
+                    key={n.nation}
+                    onClick={() => setSelected(n.nation)}
+                    style={{ cursor: 'pointer', background: current?.nation === n.nation ? 'var(--accent-soft, rgba(120,120,255,0.12))' : undefined }}
+                  >
+                    <td className="muted" style={{ textAlign: 'center' }}>{n.rank}</td>
+                    <td style={{ fontWeight: 700 }}>{n.nation}</td>
+                    <td style={{ textAlign: 'center' }} className="muted">{n.playerCount}</td>
+                    <td><NationStrengthBar rating={n.rating} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Panel>
+
+          {/* Best players of the selected nation */}
+          {current && (
+            <Panel title={`${current.nation} — best players`}>
+              <div className="muted small" style={{ marginBottom: 8 }}>
+                #{current.rank} in the world · strength {current.rating} · {current.playerCount} players
+              </div>
+              <NotableTable rows={current.topPlayers} showAge />
+            </Panel>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NationStrengthBar({ rating }: { rating: number }): JSX.Element {
+  // Map a 0–100 ability average onto a bar; elite pools sit ~70+.
+  const pct = Math.max(4, Math.min(100, Math.round(((rating - 40) / 50) * 100)))
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ width: 72, height: 6, borderRadius: 3, background: 'var(--line)', overflow: 'hidden' }}>
+        <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: 'var(--accent2, #e0b341)' }} />
+      </span>
+      <span className="muted small">{rating}</span>
+    </span>
   )
 }

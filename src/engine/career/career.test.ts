@@ -1565,6 +1565,28 @@ describe('Career — wider-world quick-sim', () => {
     expect(shl.prospects.every((p) => p.age <= 22)).toBe(true)
   })
 
+  it('getInternational ranks nations by their player pool and lists best players', () => {
+    const data = generateLeague({ seed: 35 })
+    // Assign nationalities so there are rankable pools.
+    const ids = data.league.players
+    ids.forEach((pid, i) => {
+      const p = data.players.get(pid)
+      if (p) p.nationality = i % 2 === 0 ? 'Canada' : 'Sweden'
+    })
+    const career = new Career(data, 35, data.league.teams[0]!)
+    const view = career.getInternational()
+    expect(view.nations.length).toBeGreaterThanOrEqual(2)
+    // Ranked best-first by rating; ranks are 1..n.
+    expect(view.nations[0]!.rank).toBe(1)
+    for (let i = 1; i < view.nations.length; i++) {
+      expect(view.nations[i - 1]!.rating).toBeGreaterThanOrEqual(view.nations[i]!.rating)
+    }
+    const can = view.nations.find((n) => n.nation === 'Canada')!
+    expect(can.playerCount).toBeGreaterThan(0)
+    expect(can.topPlayers.length).toBeGreaterThan(0)
+    expect(can.topPlayers[0]!.currentStars).toBeGreaterThanOrEqual(can.topPlayers[can.topPlayers.length - 1]!.currentStars)
+  })
+
   it('persists wider-world standings + stats across save/load', () => {
     const data = withCompetitions(32)
     const career = new Career(data, 32, data.league.teams[7]!)

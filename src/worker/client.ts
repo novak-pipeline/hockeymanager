@@ -147,6 +147,10 @@ export class SimClient {
     return this.send({ type: 'getCompetitions' })
   }
 
+  getInternational(): Promise<WorkerResponse> {
+    return this.send({ type: 'getInternational' })
+  }
+
   getStats(): Promise<WorkerResponse> {
     return this.send({ type: 'getStats' })
   }

@@ -44,6 +44,7 @@ export type ScreenId =
   | 'leagueScoreboard'
   | 'leagueHistory'
   | 'world'
+  | 'worldInternational'
   | 'scouting'
   | 'dataHub'
   // Contextual (phase-gated)
@@ -93,6 +94,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'leagueScoreboard':
     case 'leagueHistory':
     case 'world':
+    case 'worldInternational':
     case 'scouting':
     case 'dataHub':
     case 'draft':

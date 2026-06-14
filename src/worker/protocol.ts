@@ -60,6 +60,7 @@ export type {
   ScoutingView,
   SquadView,
   CompetitionsView,
+  InternationalView,
   StandingsView,
   StatsView,
   TacticsView,
@@ -122,6 +123,7 @@ import type {
   ScoutingView,
   SquadView,
   CompetitionsView,
+  InternationalView,
   StandingsView,
   StatsView,
   TacticsView,
@@ -164,6 +166,7 @@ export type WorkerRequestBody =
   | { type: 'getSchedule' }
   | { type: 'getStandings' }
   | { type: 'getCompetitions' }
+  | { type: 'getInternational' }
   | { type: 'getStats' }
   | { type: 'getTrades' }
   | { type: 'getDraft' }
@@ -311,6 +314,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'schedule'; schedule: ScheduleView }
   | { type: 'standings'; standings: StandingsView }
   | { type: 'competitions'; competitions: CompetitionsView }
+  | { type: 'international'; international: InternationalView }
   | { type: 'stats'; stats: StatsView }
   | { type: 'trades'; trades: TradesView }
   | { type: 'draft'; draft: DraftView }

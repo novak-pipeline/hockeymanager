@@ -693,6 +693,24 @@ export interface CompetitionsView {
   competitions: CompetitionView[]
 }
 
+/* ──── international (national-team power rankings) ──── */
+
+export interface NationView {
+  nation: string
+  /** Power ranking, 1 = strongest national pool. */
+  rank: number
+  /** 0–100 strength rating (avg current ability of the best ~23). */
+  rating: number
+  /** Total players of this nationality across the world DB. */
+  playerCount: number
+  /** Best players of this nation (reuses the scout-flavoured notable row). */
+  topPlayers: CompetitionNotableView[]
+}
+
+export interface InternationalView {
+  nations: NationView[]
+}
+
 export interface StatsView {
   points: LeaderRowView[]
   goals: LeaderRowView[]

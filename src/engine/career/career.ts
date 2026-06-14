@@ -295,6 +295,8 @@ import {
   type CompetitionStandingRowView,
   type CompetitionScorerRowView,
   type CompetitionNotableView,
+  type InternationalView,
+  type NationView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -5016,6 +5018,53 @@ export class Career {
       }
     })
     return { competitions: out }
+  }
+
+  /** International: national-team power rankings + best players per nation (#95).
+   *  Pools every player by nationality across the whole world DB. */
+  getInternational(): InternationalView {
+    const MIN_PLAYERS = 12 // a "hockey nation" needs a real player pool
+    const ROSTER = 23 // national-team size for the strength rating
+
+    // playerId -> team for the notable rows.
+    const teamOfPlayer = new Map<string, { teamId: string; abbr: string }>()
+    for (const t of this.data.teams.values()) {
+      for (const pid of t.roster) teamOfPlayer.set(pid as string, { teamId: t.id as string, abbr: t.abbreviation })
+    }
+
+    const byNation = new Map<string, Player[]>()
+    for (const p of this.data.players.values()) {
+      const nat = (p.nationality ?? '').trim()
+      if (!nat || nat === '[None]') continue
+      let list = byNation.get(nat)
+      if (!list) { list = []; byNation.set(nat, list) }
+      list.push(p)
+    }
+
+    const nations: NationView[] = []
+    for (const [nation, players] of byNation) {
+      if (players.length < MIN_PLAYERS) continue
+      const sorted = [...players].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+      const best = sorted.slice(0, ROSTER)
+      const rating = Math.round(best.reduce((s, p) => s + ratedOverall(p), 0) / best.length)
+      const topPlayers: CompetitionNotableView[] = sorted.slice(0, 10).map((p) => {
+        const tm = teamOfPlayer.get(p.id as string)
+        return {
+          playerId: p.id as string,
+          name: p.name,
+          teamId: tm?.teamId ?? '',
+          teamAbbr: tm?.abbr ?? 'FA',
+          position: p.position,
+          age: p.age,
+          currentStars: overallToStars(ratedOverall(p)),
+          potentialStars: overallToStars(agedPotential(p)),
+        }
+      })
+      nations.push({ nation, rank: 0, rating, playerCount: players.length, topPlayers })
+    }
+    nations.sort((a, b) => b.rating - a.rating)
+    nations.forEach((n, i) => { n.rank = i + 1 })
+    return { nations }
   }
 
   getStats(): StatsView {
