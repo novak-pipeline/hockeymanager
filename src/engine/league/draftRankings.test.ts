@@ -44,6 +44,25 @@ describe('analystRank', () => {
     const order = analystRank(pool, 'preliminary')
     expect(new Set(order).size).toBe(pool.length)
   })
+
+  it('fades goalies below an equal-ceiling skater', () => {
+    const inputs: RankInput[] = [
+      { id: 'g', ceiling: 90, current: 70, position: 'G' },
+      { id: 'f', ceiling: 90, current: 70, position: 'C' },
+    ]
+    // Across phases the skater should consistently rank ahead of the goalie.
+    for (const ph of ['preliminary', 'midseason', 'final'] as const) {
+      expect(analystRank(inputs, ph).indexOf('f')).toBeLessThan(analystRank(inputs, ph).indexOf('g'))
+    }
+  })
+
+  it('docks re-entry prospects vs equal first-time-eligible ones', () => {
+    const inputs: RankInput[] = [
+      { id: 're', ceiling: 85, current: 70, position: 'C', eligibility: 'reentry' },
+      { id: 'el', ceiling: 85, current: 70, position: 'C', eligibility: 'eligible' },
+    ]
+    expect(analystRank(inputs, 'final').indexOf('el')).toBeLessThan(analystRank(inputs, 'final').indexOf('re'))
+  })
 })
 
 describe('ceilingRole', () => {

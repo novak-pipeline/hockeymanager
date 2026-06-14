@@ -40,6 +40,10 @@ export interface RankInput {
   ceiling: number
   /** Current ability, 0–100. */
   current: number
+  /** Position — used to fade goalies (analysts are wary of projecting them high). */
+  position?: string
+  /** Draft eligibility — re-entry (passed-over) prospects are docked. */
+  eligibility?: DraftEligibility
 }
 
 /** Deterministic [-1, 1) from a string (FNV-1a hash). */
@@ -70,12 +74,24 @@ function phaseWeights(phase: DraftRankPhase): { ceilingWeight: number; noise: nu
 export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[] {
   const { ceilingWeight, noise } = phaseWeights(phase)
   return [...inputs]
-    .map((x) => ({
-      id: x.id,
-      score: x.ceiling * ceilingWeight + x.current * (1 - ceilingWeight) + hashUnit(`${x.id}|${phase}`) * noise,
-    }))
+    .map((x) => {
+      const base = x.ceiling * ceilingWeight + x.current * (1 - ceilingWeight)
+      return { id: x.id, score: base * positionFactor(x.position) - reentryPenalty(x.eligibility) + hashUnit(`${x.id}|${phase}`) * noise }
+    })
     .sort((a, b) => b.score - a.score)
     .map((x) => x.id)
+}
+
+/** Goalies are notoriously hard to project — analysts fade them on draft boards
+ *  (an elite goalie ceiling rarely cracks the top 10). Skaters are unaffected. */
+function positionFactor(position?: string): number {
+  return position === 'G' ? 0.86 : 1
+}
+
+/** Re-entry prospects (19–20, passed over once already) are docked — they're
+ *  older and the league has seen them before. */
+function reentryPenalty(eligibility?: DraftEligibility): number {
+  return eligibility === 'reentry' ? 9 : 0
 }
 
 /**

@@ -5369,7 +5369,7 @@ export class Career {
             potentialStars: overallToStars(agedPotential(p)),
           }
           if (elig === 'radar') radarRows.push(row)
-          else board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row, player: p })
+          else board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p), position: p.position, eligibility: elig }, row, player: p })
         }
       }
     }
