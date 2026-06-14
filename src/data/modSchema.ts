@@ -38,6 +38,7 @@ import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { buildSchedule, freshStanding } from './generate'
 import type { LeagueData } from './generate'
+import { FIRST_NAMES, LAST_NAMES } from './names'
 import {
   demeanor,
   generateTeamStaff,
@@ -1216,7 +1217,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     const years = ahlRng.range(1, 3)
     const player: Player = {
       id: playerId,
-      name: `Player AHL${ahlPlayerNum}`,
+      name: `${ahlRng.pick(FIRST_NAMES)} ${ahlRng.pick(LAST_NAMES)}`,
       age,
       position: pos,
       handedness: ahlRng.chance(0.65) ? 'L' : 'R',
@@ -1377,7 +1378,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           const years = ahlRng.range(1, 3)
           const player: Player = {
             id: playerId,
-            name: `Player AHL${ahlPlayerNum}`,
+            name: `${ahlRng.pick(FIRST_NAMES)} ${ahlRng.pick(LAST_NAMES)}`,
             age,
             position: pos,
             handedness: ahlRng.chance(0.65) ? 'L' : 'R',

@@ -4397,7 +4397,7 @@ export class Career {
         riskLabel,
         risk,
         ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-        ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining } : {}),
+        ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining, injuryKind: p.injuryStatus.kind } : {}),
       }
       rows.push(row)
     }

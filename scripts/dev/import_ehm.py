@@ -574,6 +574,7 @@ def main():
             "personality": personality_from_row(r),
             "faceId": face_id,
             "_ca": ca,
+            "_pa": pa,
             **extended,
         }
         contract = contract_from_row(r)
@@ -685,18 +686,31 @@ def main():
         if aff_kw is not None:
             aff_info = AHL_CLUBS[aff_kw]  # (parent_abbr, city, nickname, abbr3, prim, sec)
             _, aff_city, aff_nick, aff_abbr, aff_prim, aff_sec = aff_info
-            aff_roster = sorted(ahl_teams[aff_kw], key=lambda p: -p["_ca"])
+            # Affiliate pool = players whose club matched the AHL keyword PLUS the
+            # NHL org's overflow (players beyond the 23-man NHL roster). Folding
+            # overflow in keeps real org prospects (e.g. recently-signed kids on
+            # the NHL club's reserve list) instead of dropping them on the floor.
+            # Dedupe by identity so a player is never on both NHL and AHL rosters.
+            aff_pool = list(ahl_teams[aff_kw]) + list(overflow)
+            # Prefer keeping young, high-potential players: rank by a blend of
+            # current ability and upside (younger + higher PA scores higher) so
+            # the caps below cut aging depth rather than prospects.
+            def _aff_rank(p):
+                ca = p.get("_ca", 0)
+                pa = p.get("_pa", ca)
+                age = p.get("age", 27)
+                youth_bonus = max(0, 24 - age) * 1.5
+                return -(ca * 0.5 + pa * 0.5 + youth_bonus)
+            aff_roster = sorted(aff_pool, key=_aff_rank)
             aff_goalies = [p for p in aff_roster if p["position"] == "G"][:3]
-            aff_d = [p for p in aff_roster if p["position"] == "D"][:8]
-            aff_fwd = [p for p in aff_roster if p["position"] in ("C", "W")][:12]
+            aff_d = [p for p in aff_roster if p["position"] == "D"][:10]
+            aff_fwd = [p for p in aff_roster if p["position"] in ("C", "W")][:16]
             aff_chosen = aff_goalies[:max(2, len(aff_goalies))] + aff_d + aff_fwd
 
             if len(aff_goalies) < 2 or len(aff_d) < 5 or len(aff_fwd) < 9:
-                # Emit only the real AHL players we matched; the game's loader
-                # tops every affiliate up to valid minimums with synthesised
-                # depth fillers. We do NOT pad from the NHL parent here — that
-                # would duplicate the same real player onto two teams.
-                print(f"  note AHL {aff_kw}: G{len(aff_goalies)} D{len(aff_d)} F{len(aff_fwd)} — loader will fill the rest")
+                # The game's loader tops every affiliate up to valid minimums
+                # with synthesised depth fillers when still thin after overflow.
+                print(f"  note AHL {aff_kw}: G{len(aff_goalies)} D{len(aff_d)} F{len(aff_fwd)} (incl. NHL overflow) — loader will fill the rest")
 
             clean_aff = resolve_faces(aff_chosen, faces_out, ahl_total, ahl_matched)
 

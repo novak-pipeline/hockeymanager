@@ -1270,6 +1270,8 @@ export interface MedicalRow {
   /** Injury description if currently injured. */
   injuryDescription?: string
   injuryGamesRemaining?: number
+  /** Injury body region, for the medical body diagram. */
+  injuryKind?: 'upperBody' | 'lowerBody' | 'concussion' | 'illness'
   /** Injury-risk band + 0–100 score. */
   riskLabel: 'Low' | 'Increased' | 'High'
   risk: number
