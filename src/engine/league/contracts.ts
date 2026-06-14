@@ -27,7 +27,7 @@
  * asks the same terms all offseason without threading an Rng through the UI.
  */
 import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { deriveSeed, Rng } from '@engine/shared/rng'
 
 /** Cheapest legal contract; asks never fall below this. */
@@ -51,7 +51,7 @@ const FA_DECISIONS_PER_DAY = 3
 const groupOf = (p: Player): PositionGroup =>
   p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
 
-const playerOverall = (p: Player): number => overall(p.composites, p.position)
+const playerOverall = (p: Player): number => ratedOverall(p)
 
 const byId = (a: { id: string }, b: { id: string }): number =>
   a.id < b.id ? -1 : a.id > b.id ? 1 : 0

@@ -25,7 +25,7 @@
 
 import type { Player, Lines } from '@domain'
 import type { Rng } from '@engine/shared/rng'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 
 /* ─────────────────────── public types ─────────────────────── */
 
@@ -131,7 +131,7 @@ function captainCandidates(skaters: Player[], scoreOf: (p: Player) => number): P
  * Factors: age (seniority), overall rating, and leadership personality.
  */
 function computeInfluence(p: Player): number {
-  const ovr = overall(p.composites, p.position)
+  const ovr = ratedOverall(p)
   // age influence plateaus around 35+
   const ageFactor = clamp((p.age - 18) / 17, 0, 1) // 0 at 18, 1 at 35+
   const personalityFactor = leadershipScore(p) / 60 // max 60 points

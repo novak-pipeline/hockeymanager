@@ -26,7 +26,7 @@
  * a hard requirement (docs/ARCHITECTURE.md §7).
  */
 import type { DraftPick, Player, PlayerId, Position, Team, TeamId } from '@domain'
-import { computeComposites, overall } from '@engine/ratings/composites'
+import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -86,16 +86,13 @@ const fairSalaryFor = (ovr: number): number =>
  *  - Small discounts for current injury and poor morale.
  */
 export function playerValue(player: Player): number {
-  const ovr = overall(player.composites, player.position)
+  const ovr = ratedOverall(player)
 
   // U24 upside: price in a slice of the gap to potential, fading to nothing
   // by age 24 — buyers pay for projection, but never the full ceiling.
   let effective = ovr
   if (player.age < 24) {
-    const potOvr = overall(
-      computeComposites(player.potential, player.role, player.position),
-      player.position
-    )
+    const potOvr = ratedPotential(player)
     const upside = Math.max(0, potOvr - ovr)
     const youth = clamp((24 - player.age) / 6, 0, 1)
     effective = ovr + upside * 0.55 * youth
@@ -258,7 +255,7 @@ function philosophyGainBias(
   }
   // player asset
   const p = asset.player
-  const ovr = overall(p.composites, p.position)
+  const ovr = ratedOverall(p)
   const isYoung = p.age < 24
   const isVet = p.age >= 30
   if (philosophy === 'WinNow') {
@@ -673,7 +670,7 @@ function weakestGroup(team: Team, players: Map<PlayerId, Player>): PositionGroup
     const p = players.get(id)
     if (!p) continue
     const g = groupOf(p.position)
-    sums[g].total += overall(p.composites, p.position)
+    sums[g].total += ratedOverall(p)
     sums[g].n++
   }
   let worst: PositionGroup = 'F'
@@ -701,7 +698,7 @@ function strengthRanks(
     for (const id of t.roster) {
       const p = players.get(id)
       if (!p) continue
-      total += overall(p.composites, p.position)
+      total += ratedOverall(p)
       n++
     }
     means.push([t.id, n === 0 ? 0 : total / n])

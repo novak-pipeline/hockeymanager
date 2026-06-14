@@ -18,7 +18,7 @@
  */
 import { asPlayerId } from '@domain'
 import type { Lines, Player, PlayerId, Position, Team } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import type { StaffMember } from '@engine/league/staff'
 import { Rng } from '@engine/shared/rng'
 
@@ -69,7 +69,7 @@ function positionRank(prefer: Position, pos: Position): number {
 function bySlotPreference(prefer: Position) {
   return (a: Player, b: Player): number =>
     positionRank(prefer, a.position) - positionRank(prefer, b.position) ||
-    overall(b.composites, b.position) - overall(a.composites, a.position) ||
+    ratedOverall(b) - ratedOverall(a) ||
     cmpId(a, b)
 }
 
@@ -238,7 +238,7 @@ export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean
     return pool
       .slice()
       .sort(
-        (a, b) => overall(a.composites, a.position) - overall(b.composites, b.position) || cmpId(a, b)
+        (a, b) => ratedOverall(a) - ratedOverall(b) || cmpId(a, b)
       )[0]
   }
 
@@ -366,7 +366,7 @@ export function coachSetLineup(args: {
   }
 
   function coachScore(p: Player): number {
-    const trueOvr = overall(p.composites, p.position)
+    const trueOvr = ratedOverall(p)
     // Base composite weighting — specialty shifts this
     let specialtyBonus = 0
     const spec = coach.specialty ?? ''
