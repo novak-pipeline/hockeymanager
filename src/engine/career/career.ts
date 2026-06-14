@@ -75,6 +75,7 @@ import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
+import { buildScoutDraftRead } from '@engine/career/scoutDraftRead'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -4533,6 +4534,16 @@ export class Career {
           draftYear: board.draftYear,
         })
         if (proj) profile.analystProjection = proj
+
+        // Your scouts' own read — can diverge from the consensus (more so the
+        // deeper the prospect is ranked), driven by intangibles + underlying game.
+        const read = buildScoutDraftRead({
+          player,
+          knowledge: profile.scoutReport.knowledge,
+          ...(rank !== undefined ? { analystRank: rank } : {}),
+          interviews: (this.interviews.get(playerId) ?? []).length,
+        })
+        if (read) profile.scoutDraftRead = { verdict: read.verdict, confidence: read.confidence, blurb: read.blurb }
       }
 
       // "Shades of …" comp — closest established comparable in the DB.

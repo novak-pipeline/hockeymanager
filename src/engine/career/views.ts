@@ -412,6 +412,11 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   analystProjection?: string
   /**
+   * Your scouts' OWN draft read — can differ from the analyst consensus. Present
+   * for draft-relevant prospects once your staff has seen enough of him.
+   */
+  scoutDraftRead?: { verdict: 'higher' | 'inline' | 'lower'; confidence: 'low' | 'medium' | 'high'; blurb: string }
+  /**
    * "Shades of …" player comparison — closest established comparable in the DB
    * plus an auto-generated differentiator. Omitted at low knowledge or when no
    * suitable comparable exists.

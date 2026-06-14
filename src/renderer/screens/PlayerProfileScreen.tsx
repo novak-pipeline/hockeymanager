@@ -1799,6 +1799,26 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
               {d.analystProjection}
             </p>
+            {d.scoutDraftRead && (
+              <p style={{
+                margin: '8px 0 0',
+                paddingTop: 8,
+                borderTop: '1px solid var(--line)',
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                color: 'var(--text)',
+              }}>
+                <span style={{
+                  fontWeight: 700,
+                  color: d.scoutDraftRead.verdict === 'higher' ? 'var(--success, #4caf72)'
+                    : d.scoutDraftRead.verdict === 'lower' ? 'var(--danger, #d8584f)'
+                    : 'var(--muted)',
+                }}>
+                  YOUR SCOUTS{d.scoutDraftRead.verdict === 'higher' ? ' ▲' : d.scoutDraftRead.verdict === 'lower' ? ' ▼' : ''}:{' '}
+                </span>
+                {d.scoutDraftRead.blurb}
+              </p>
+            )}
           </div>
         )}
       </Panel>

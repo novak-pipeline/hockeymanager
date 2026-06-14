@@ -13,7 +13,18 @@
  */
 import type { Player } from '@domain'
 import { classifyArchetype, type Archetype } from '@engine/league/archetypes'
-import { ratedOverall } from '@engine/ratings/composites'
+import { agedPotential, ratedOverall } from '@engine/ratings/composites'
+
+/**
+ * A comp is a PROJECTION tool — "this kid could become like X". Once a player
+ * has reached his prime (established at his level, no real headroom left), there
+ * is nothing to project, so the comparison goes away. Pre-prime = young, or
+ * still carrying meaningful potential headroom.
+ */
+export function isPrePrime(p: Player): boolean {
+  if (p.age <= 23) return true
+  return agedPotential(p) - ratedOverall(p) >= 5 && p.age <= 27
+}
 
 /** Position bucket for like-for-like comparison. */
 type PosGroup = 'F' | 'D' | 'G'
@@ -115,6 +126,8 @@ export interface BuildPlayerCompArgs {
  */
 export function buildPlayerComp({ prospect, pool, knowledge }: BuildPlayerCompArgs): PlayerComp | null {
   if (knowledge < 50) return null
+  // Comps are a projection device — drop them once a player has hit his prime.
+  if (!isPrePrime(prospect)) return null
 
   const group = posGroup(prospect.position)
   const arch = classifyArchetype(prospect)

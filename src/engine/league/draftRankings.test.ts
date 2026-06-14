@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, projectionHedge, type RankInput } from './draftRankings'
 
 describe('draftEligibility', () => {
   it('buckets by age and excludes drafted / out-of-range', () => {
@@ -80,5 +80,20 @@ describe('analystProjection', () => {
   it('handles an eligible prospect who missed the published board', () => {
     const s = analystProjection({ ...base, eligibility: 'eligible' })
     expect(s).toMatch(/outside their published board/)
+  })
+
+  it('hedges harder the deeper the projection', () => {
+    expect(analystProjection({ ...base, eligibility: 'eligible', rank: 2 })).toMatch(/high-confidence/)
+    expect(analystProjection({ ...base, eligibility: 'eligible', rank: 50 })).toMatch(/wide range of outcomes/)
+  })
+})
+
+describe('projectionHedge', () => {
+  it('is confident at the top and murky at the bottom', () => {
+    expect(projectionHedge(1)).toMatch(/high-confidence/)
+    expect(projectionHedge(20)).toMatch(/first-round/)
+    expect(projectionHedge(50)).toMatch(/wide range/)
+    expect(projectionHedge(120)).toMatch(/best guess/)
+    expect(projectionHedge(undefined)).toMatch(/enormous/)
   })
 })

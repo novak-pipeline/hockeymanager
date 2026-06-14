@@ -141,5 +141,19 @@ export function analystProjection(p: AnalystProjectionInput): string | null {
   const lead = reentry
     ? `Passed over once and re-entry eligible; analysts ${where}`
     : `Analyst consensus (${p.phaseLabel.toLowerCase()}) ${where}`
-  return `${lead}. Their projection: tops out as ${role}.`
+  return `${lead}. Their projection: tops out as ${role}.${projectionHedge(p.rank)}`
+}
+
+/**
+ * Projections are reliable at the very top of the board and get murkier the
+ * deeper you go — top picks are ranked there for a reason; later picks are a
+ * crapshoot where outcomes scatter wildly from the projection. This returns the
+ * confidence caveat appended to the analyst projection.
+ */
+export function projectionHedge(rank?: number): string {
+  if (rank === undefined) return ' Off the board, the range of outcomes is enormous.'
+  if (rank <= 10) return ' A high-confidence projection at the top of the class.'
+  if (rank <= 31) return ' A first-round projection, though some spread remains.'
+  if (rank <= 64) return ' Projections this deep carry a wide range of outcomes.'
+  return ' This late, the projection is little more than a best guess.'
 }
