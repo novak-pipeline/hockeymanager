@@ -15,23 +15,24 @@ export const THEME_OPTIONS: Array<{ id: string; label: string; swatch: string }>
   { id: 'gold', label: 'Gold', swatch: '#fbbf24' },
 ]
 
-/** Neutral dark surface ramp shared by the fixed-accent presets. */
+/** Neutral dark surface ramp shared by the fixed-accent presets (matches :root). */
 const NEUTRAL = {
-  '--bg0': '#0d0f14',
-  '--bg1': '#161922',
-  '--bg2': '#1f2430',
-  '--bg3': '#28303d',
-  '--line': '#303847',
-  '--muted': '#8893a5',
+  '--bg0': '#0b0d11',
+  '--bg1': '#14171e',
+  '--bg2': '#1d212b',
+  '--bg3': '#262c38',
+  '--line': '#2c3340',
+  '--muted': '#828c9e',
 }
 
-function preset(rgb: string, hex: string, hi: string): CSSProperties {
+function preset(rgb: string, hex: string, hi: string, ink = '#fff'): CSSProperties {
   return {
     ...NEUTRAL,
     '--accent-rgb': rgb,
     '--violet': hex,
     '--violet-h': hi,
     '--accent': hex,
+    '--accent-ink': ink,
     '--violet-dim': `rgba(${rgb}, 0.15)`,
     '--violet-glow': `0 4px 24px rgba(${rgb}, 0.10)`,
     '--team-primary': hex,
@@ -44,5 +45,5 @@ export const THEME_PRESETS: Record<string, CSSProperties | undefined> = {
   slate: preset('56, 189, 248', '#38bdf8', '#7dd3fc'),
   crimson: preset('244, 63, 94', '#fb5e76', '#fda4af'),
   emerald: preset('52, 211, 153', '#34d399', '#6ee7b7'),
-  gold: preset('251, 191, 36', '#fbbf24', '#fde68a'),
+  gold: preset('251, 191, 36', '#fbbf24', '#fde68a', '#10131a'),
 }

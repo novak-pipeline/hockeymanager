@@ -10,16 +10,16 @@
   color-scheme: dark;
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 
-  /* ── surfaces (deep indigo) ── */
-  --bg0:   #0d0a16; /* app background */
-  --bg1:   #161126; /* panels / cards */
-  --bg2:   #1e1733; /* raised elements */
-  --bg3:   #251d3e; /* hover / selected */
-  --line:  #2a2240; /* hairlines */
+  /* ── surfaces (neutral dark, FM-style; team accent layers on top) ── */
+  --bg0:   #0b0d11; /* app background */
+  --bg1:   #14171e; /* panels / cards */
+  --bg2:   #1d212b; /* raised elements */
+  --bg3:   #262c38; /* hover / selected */
+  --line:  #2c3340; /* hairlines */
 
   /* ── ink ── */
-  --text:  #e8e4f4;
-  --muted: #7c6fa0;
+  --text:  #e8eaf0;
+  --muted: #828c9e;
 
   /* ── primary: violet (recoloured to the managed team via --accent-rgb) ── */
   --accent-rgb:  139, 92, 246;
@@ -27,11 +27,13 @@
   --violet-h:    #a78bfa;
   --violet-dim:  rgba(var(--accent-rgb), 0.15);
   --violet-glow: 0 4px 24px rgba(var(--accent-rgb), 0.10);
+  /* legible ink on top of a solid accent fill (dark for bright accents) */
+  --accent-ink: #fff;
 
-  /* ── hero action: pink→orange ── */
+  /* ── hero action: defaults to the team accent (recoloured live) ── */
   --pink:    #ec4899;
   --orange:  #f97316;
-  --grad-hero: linear-gradient(90deg, #ec4899, #f97316);
+  --grad-hero: linear-gradient(100deg, var(--accent), var(--violet-h));
 
   /* ── secondary accents ── */
   --cyan:   #22d3ee;
@@ -179,19 +181,19 @@ a:hover { text-decoration: underline; }
   border-color: transparent;
 }
 
-/* hero: pink→orange gradient */
+/* hero: team-accent gradient */
 .btn-hero {
   background: var(--grad-hero);
   border-color: transparent;
-  color: #fff;
+  color: var(--accent-ink);
   font-weight: 700;
-  box-shadow: 0 0 18px rgba(236,72,153,0.35);
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.35);
 }
 .btn-hero:hover:not(:disabled) {
   border-color: transparent;
   filter: brightness(1.08);
   transform: scale(1.02);
-  box-shadow: 0 0 28px rgba(236,72,153,0.50);
+  box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.50);
 }
 
 .btn-ghost {
@@ -627,6 +629,12 @@ a:hover { text-decoration: underline; }
   background: var(--violet-dim);
   color: var(--violet-h);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+.sidebar-divider {
+  height: 1px;
+  margin: 7px 10px;
+  background: var(--line);
+  opacity: 0.7;
 }
 .sidebar-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-badge {

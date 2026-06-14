@@ -95,36 +95,6 @@ export function teamColorHex(color: number): string {
  * brightens it for legibility, and overrides --violet / --violet-h / --accent.
  * Apply the returned object as inline style on the app shell root.
  */
-/** RGB (0–255) → HSL (h 0–360, s/l 0–1). */
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-  const R = r / 255, G = g / 255, B = b / 255
-  const max = Math.max(R, G, B), min = Math.min(R, G, B), d = max - min
-  const l = (max + min) / 2
-  let h = 0, s = 0
-  if (d !== 0) {
-    s = d / (1 - Math.abs(2 * l - 1))
-    h = max === R ? (((G - B) / d) % 6) : max === G ? (B - R) / d + 2 : (R - G) / d + 4
-    h *= 60
-    if (h < 0) h += 360
-  }
-  return { h, s, l }
-}
-
-/** HSL → #hex. */
-function hslToHex(h: number, s: number, l: number): string {
-  const c = (1 - Math.abs(2 * l - 1)) * s
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
-  const m = l - c / 2
-  let r = 0, g = 0, b = 0
-  if (h < 60) [r, g, b] = [c, x, 0]
-  else if (h < 120) [r, g, b] = [x, c, 0]
-  else if (h < 180) [r, g, b] = [0, c, x]
-  else if (h < 240) [r, g, b] = [0, x, c]
-  else if (h < 300) [r, g, b] = [x, 0, c]
-  else [r, g, b] = [c, 0, x]
-  return toHex(Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255))
-}
-
 export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
   const colors = useTeamColors(teamId)
   return useMemo(() => {
@@ -141,10 +111,10 @@ export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
       Math.round(a.g + (255 - a.g) * 0.38),
       Math.round(a.b + (255 - a.b) * 0.38),
     )
-    // Surfaces: tint the dark palette toward the team's PRIMARY hue (subtle, so it
-    // stays a dark UI). A near-black primary → neutral charcoal (Pittsburgh = black).
-    const ph = rgbToHsl(p.r, p.g, p.b)
-    const sSurf = Math.min(ph.s, 0.30) * 0.55 // capped, low saturation for backgrounds
+    // Surfaces stay neutral dark (from :root) — FM-style. The team colour only
+    // layers on as accent splashes (active nav, buttons, highlights, the hero).
+    // Pick legible ink for a solid accent fill: dark text on bright accents.
+    const ink = luminance(a.r, a.g, a.b) > 0.62 ? '#10131a' : '#ffffff'
     return {
       '--accent-rgb': `${a.r}, ${a.g}, ${a.b}`,
       '--violet': hex,
@@ -152,13 +122,8 @@ export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
       '--violet-dim': `rgba(${a.r},${a.g},${a.b},0.15)`,
       '--violet-glow': `0 4px 24px rgba(${a.r},${a.g},${a.b},0.12)`,
       '--accent': hex,
+      '--accent-ink': ink,
       '--team-primary': hex,
-      '--bg0': hslToHex(ph.h, sSurf, 0.055),
-      '--bg1': hslToHex(ph.h, sSurf, 0.085),
-      '--bg2': hslToHex(ph.h, sSurf, 0.12),
-      '--bg3': hslToHex(ph.h, sSurf, 0.16),
-      '--line': hslToHex(ph.h, sSurf, 0.22),
-      '--muted': hslToHex(ph.h, Math.min(ph.s, 0.18), 0.56),
     } as CSSProperties
   }, [colors])
 }

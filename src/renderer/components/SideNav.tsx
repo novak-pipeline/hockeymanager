@@ -18,21 +18,24 @@ export function SideNav(props: { dashboard: DashboardView | null }): JSX.Element
   return (
     <nav className="sidebar">
       <div className="sidebar-scroll">
-        {items.map((item) => {
+        {items.map((item, i) => {
           const active = item.match.includes(nav.screen)
+          const newSection = i > 0 && items[i - 1]!.section !== item.section
           return (
-            <button
-              key={item.id}
-              className={active ? 'sidebar-item active' : 'sidebar-item'}
-              onClick={() => nav.navigate(item.screen)}
-              title={item.label}
-            >
-              <NavIcon name={item.icon} />
-              <span className="sidebar-label">{item.label}</span>
-              {item.badge === 'unread' && unread > 0 && (
-                <span className="sidebar-badge">{unread > 9 ? '9+' : unread}</span>
-              )}
-            </button>
+            <div key={item.id}>
+              {newSection && <div className="sidebar-divider" />}
+              <button
+                className={active ? 'sidebar-item active' : 'sidebar-item'}
+                onClick={() => nav.navigate(item.screen)}
+                title={item.label}
+              >
+                <NavIcon name={item.icon} />
+                <span className="sidebar-label">{item.label}</span>
+                {item.badge === 'unread' && unread > 0 && (
+                  <span className="sidebar-badge">{unread > 9 ? '9+' : unread}</span>
+                )}
+              </button>
+            </div>
           )
         })}
       </div>
