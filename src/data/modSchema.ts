@@ -37,6 +37,8 @@ import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { buildSchedule, buildWeightedSchedule, freshStanding, type ScheduleTeam } from './generate'
+import { buildCompetitions, type RawCompetition } from './leagueWorld'
+import type { Competition } from '@domain'
 import type { LeagueData } from './generate'
 import { FIRST_NAMES, LAST_NAMES } from './names'
 import {
@@ -355,10 +357,36 @@ export interface ModMeta {
  *  - All per-attribute overrides must be in 1–99.
  *  - age must be 16–45.
  */
+/**
+ * A wider-world league (#95): the NHL's feeders (AHL/ECHL/CHL/USHL/NCAA) and the
+ * international leagues (KHL/SHL/Liiga/…). Imported as quick-sim/background
+ * competitions; the loader builds their teams + players and assembles
+ * League.competitions via buildCompetitions. Optional and additive.
+ */
+export interface ModCompetition {
+  /** Stable id, e.g. "ontario-hockey-league". */
+  id: string
+  name: string
+  /** League abbrev recognised by the NHLe strength model (e.g. "OHL", "KHL"). */
+  abbrev: string
+  nation: string
+  /** Division level within its nation: 1 = top tier, 2, 3 … */
+  level: number
+  /** EHM league reputation (~0–20). */
+  reputation: number
+  parentId?: string
+  /** Junior age cap, if a junior league. */
+  upperAgeLimit?: number
+  /** Member clubs. Each needs >= 2 G, 5 D, 9 F to ice quick-sim lines. */
+  teams: ModTeam[]
+}
+
 export interface ModDatabase {
   formatVersion: 1
   meta: ModMeta
   conferences: ModConference[]
+  /** Optional wider-world leagues beyond the NHL. Absent on NHL-only mods. */
+  competitions?: ModCompetition[]
 }
 
 /* ─────────────────────────── Validation ─────────────────────────── */
@@ -705,6 +733,15 @@ export function validateModDatabase(x: unknown): ModDatabase {
     }
   }
 
+  // Optional wider-world competitions (lenient — these are quick-sim leagues).
+  let competitions: ModCompetition[] | undefined
+  if (r['competitions'] !== undefined) {
+    assertArray(r['competitions'], 'ModDatabase.competitions')
+    competitions = (r['competitions'] as unknown[]).map((c, i) =>
+      validateCompetition(c, `competitions[${i}]`)
+    )
+  }
+
   return {
     formatVersion: 1,
     meta: {
@@ -712,8 +749,53 @@ export function validateModDatabase(x: unknown): ModDatabase {
       ...(meta['author'] !== undefined ? { author: meta['author'] as string } : {}),
       ...(meta['season'] !== undefined ? { season: meta['season'] as string } : {})
     },
-    conferences
+    conferences,
+    ...(competitions !== undefined ? { competitions } : {})
   }
+}
+
+/** Lenient team parse for wider-world competitions: validates players and
+ *  colors but imposes no roster-size minimum and pads short abbreviations. */
+function validateCompetitionTeam(raw: unknown, path: string): ModTeam {
+  assertObject(raw, path)
+  const r = raw as Record<string, unknown>
+  assertString(r['externalId'], `${path}.externalId`)
+  assertString(r['city'], `${path}.city`)
+  assertString(r['nickname'], `${path}.nickname`)
+  assertString(r['abbreviation'], `${path}.abbreviation`)
+  const abbr = (r['abbreviation'] as string).toUpperCase().padEnd(3, 'X').slice(0, 3)
+  assertString(r['primary'], `${path}.primary`)
+  assertString(r['secondary'], `${path}.secondary`)
+  const primary = parseColor(r['primary'] as string) !== null ? (r['primary'] as string) : '#444444'
+  const secondary = parseColor(r['secondary'] as string) !== null ? (r['secondary'] as string) : '#cccccc'
+  assertArray(r['players'], `${path}.players`)
+  const players: ModPlayer[] = (r['players'] as unknown[]).map((p, i) =>
+    validatePlayer(p, `${path}.players[${i}]`)
+  )
+  return { ...(r as object), abbreviation: abbr, primary, secondary, players } as ModTeam
+}
+
+function validateCompetition(raw: unknown, path: string): ModCompetition {
+  assertObject(raw, path)
+  const r = raw as Record<string, unknown>
+  assertString(r['id'], `${path}.id`)
+  assertString(r['name'], `${path}.name`)
+  assertString(r['abbrev'], `${path}.abbrev`)
+  assertArray(r['teams'], `${path}.teams`)
+  const teams = (r['teams'] as unknown[]).map((t, i) => validateCompetitionTeam(t, `${path}.teams[${i}]`))
+  const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+  const comp: ModCompetition = {
+    id: r['id'] as string,
+    name: r['name'] as string,
+    abbrev: r['abbrev'] as string,
+    nation: typeof r['nation'] === 'string' ? (r['nation'] as string) : '',
+    level: num(r['level'], 1),
+    reputation: num(r['reputation'], 10),
+    teams,
+  }
+  if (typeof r['parentId'] === 'string') comp.parentId = r['parentId']
+  if (typeof r['upperAgeLimit'] === 'number') comp.upperAgeLimit = r['upperAgeLimit'] as number
+  return comp
 }
 
 /* ─────────────────────────── Loader ─────────────────────────── */
@@ -1109,6 +1191,83 @@ function buildTeamStaffFromMod(
   }
 }
 
+/**
+ * Build a domain Player from a ModPlayer. Shared by the NHL/affiliate paths and
+ * the wider-world competition path so all imported players are constructed
+ * identically. Determinism: callers must invoke this in roster order with the
+ * same Rng so the attribute/role/contract rolls land in the same sequence.
+ */
+function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, startYear: number): Player {
+  const caliber = clampAttr(modPlayer.overall ?? 55)
+  const raw = synthesiseAttributes(rng, caliber, modPlayer.position, modPlayer.attributes ?? {})
+
+  const role: PlayerRole =
+    modPlayer.role ??
+    (modPlayer.position === 'G'
+      ? 'starter'
+      : modPlayer.position === 'D'
+        ? rng.pick(DEFENSE_ROLES)
+        : pickWeightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS))
+
+  const composites = computeComposites(raw, role, modPlayer.position)
+  const ovr = overall(composites, modPlayer.position)
+
+  let potentialRaw: RawAttributes
+  const paOverall = rollPotentialOverall(modPlayer, ovr, rng)
+  if (paOverall !== null) {
+    potentialRaw = synthesiseAttributes(rng, paOverall, modPlayer.position, {})
+  } else {
+    potentialRaw = synthesisePotential(rng, raw, modPlayer.age)
+  }
+
+  let contract: Contract
+  if (modPlayer.contract) {
+    contract = {
+      salary: modPlayer.contract.salary,
+      yearsRemaining: modPlayer.contract.years,
+      expiryYear: startYear + modPlayer.contract.years,
+      noTradeClause: ovr > 80 && rng.chance(0.4),
+      twoWay: ovr < 55 && rng.chance(0.5)
+    }
+  } else {
+    const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
+    const salary = Math.round(base * 1e6)
+    const years = rng.range(1, 6)
+    contract = {
+      salary,
+      yearsRemaining: years,
+      expiryYear: startYear + years,
+      noTradeClause: ovr > 80 && rng.chance(0.4),
+      twoWay: ovr < 55 && rng.chance(0.5)
+    }
+  }
+
+  return {
+    id: playerId,
+    name: modPlayer.name,
+    age: modPlayer.age,
+    position: modPlayer.position,
+    handedness: modPlayer.handedness,
+    role,
+    ratings: raw,
+    potential: potentialRaw,
+    composites,
+    personality: modPlayer.personality ?? makeDefaultPersonality(rng),
+    contract,
+    stats: [],
+    fatigue: 0,
+    morale: rng.range(50, 80),
+    injuryStatus: null,
+    form: 0,
+    externalId: modPlayer.externalId,
+    ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
+    ...(modPlayer.overall !== undefined ? { baseOverall: modPlayer.overall } : {}),
+    ...(paOverall !== null ? { basePotential: paOverall }
+      : modPlayer.potential !== undefined ? { basePotential: modPlayer.potential } : {}),
+    ...bioFields(modPlayer)
+  }
+}
+
 export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueData {
   const { seed, startYear = 2025, roundRobins = 4 } = opts
   const rng = new Rng(seed)
@@ -1150,83 +1309,12 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
 
         for (const modPlayer of modTeam.players) {
           const playerId = asPlayerId(`p${playerNum++}`)
-          const caliber = clampAttr(modPlayer.overall ?? 55)
-          const raw = synthesiseAttributes(rng, caliber, modPlayer.position, modPlayer.attributes ?? {})
-
-          const role: PlayerRole =
-            modPlayer.role ??
-            (modPlayer.position === 'G'
-              ? 'starter'
-              : modPlayer.position === 'D'
-                ? rng.pick(DEFENSE_ROLES)
-                : pickWeightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS))
-
-          const composites = computeComposites(raw, role, modPlayer.position)
-          const ovr = overall(composites, modPlayer.position)
-
-          // Potential: rolled from range (per career) / mod-specified / synthesised.
-          let potentialRaw: RawAttributes
-          const paOverall = rollPotentialOverall(modPlayer, ovr, rng)
-          if (paOverall !== null) {
-            potentialRaw = synthesiseAttributes(rng, paOverall, modPlayer.position, {})
-          } else {
-            potentialRaw = synthesisePotential(rng, raw, modPlayer.age)
-          }
-
-          // Contract: mod-specified or generated from overall.
-          let contract: Contract
-          if (modPlayer.contract) {
-            contract = {
-              salary: modPlayer.contract.salary,
-              yearsRemaining: modPlayer.contract.years,
-              expiryYear: startYear + modPlayer.contract.years,
-              noTradeClause: ovr > 80 && rng.chance(0.4),
-              twoWay: ovr < 55 && rng.chance(0.5)
-            }
-          } else {
-            const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
-            const salary = Math.round(base * 1e6)
-            const years = rng.range(1, 6)
-            contract = {
-              salary,
-              yearsRemaining: years,
-              expiryYear: startYear + years,
-              noTradeClause: ovr > 80 && rng.chance(0.4),
-              twoWay: ovr < 55 && rng.chance(0.5)
-            }
-          }
-
-          const player: Player = {
-            id: playerId,
-            name: modPlayer.name,
-            age: modPlayer.age,
-            position: modPlayer.position,
-            handedness: modPlayer.handedness,
-            role,
-            ratings: raw,
-            potential: potentialRaw,
-            composites,
-            personality: modPlayer.personality ?? makeDefaultPersonality(rng),
-            contract,
-            stats: [],
-            fatigue: 0,
-            morale: rng.range(50, 80),
-            injuryStatus: null,
-            form: 0,
-            externalId: modPlayer.externalId,
-            ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
-            ...(modPlayer.overall !== undefined ? { baseOverall: modPlayer.overall } : {}),
-            ...(paOverall !== null ? { basePotential: paOverall }
-              : modPlayer.potential !== undefined ? { basePotential: modPlayer.potential } : {}),
-            ...bioFields(modPlayer)
-          }
-
+          const player = buildModPlayer(modPlayer, playerId, rng, startYear)
           // Demote second+ goalie's role label.
           const goaliesBefore = roster.filter((p) => p.position === 'G').length
           if (modPlayer.position === 'G' && goaliesBefore > 0) {
             player.role = 'backup'
           }
-
           roster.push(player)
           players.set(playerId, player)
         }
@@ -1548,6 +1636,63 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   const ahlStandings = ahlTeamIds.map(freshStanding)
   // ─── End AHL Generation ───────────────────────────────────────────────────
 
+  // ─── Wider-world competitions (#95) ─────────────────────────────────────
+  // Build each competition's teams + players into LeagueData, then assemble
+  // League.competitions (strength/tier/schedule/standings) via buildCompetitions.
+  let competitions: Competition[] | undefined
+  if (mod.competitions && mod.competitions.length > 0) {
+    const rawComps: RawCompetition[] = []
+    const membership: Array<{ teamId: TeamId; competitionId: string }> = []
+    for (const mc of mod.competitions) {
+      rawComps.push({
+        id: mc.id,
+        name: mc.name,
+        abbrev: mc.abbrev,
+        nation: mc.nation,
+        level: mc.level,
+        reputation: mc.reputation,
+        ...(mc.parentId !== undefined ? { parentId: mc.parentId } : {}),
+        ...(mc.upperAgeLimit !== undefined ? { upperAgeLimit: mc.upperAgeLimit } : {}),
+      })
+      for (const mt of mc.teams) {
+        const teamId = asTeamId(`t${teamNum++}`)
+        const roster: Player[] = []
+        for (const mp of mt.players) {
+          const playerId = asPlayerId(`p${playerNum++}`)
+          const player = buildModPlayer(mp, playerId, rng, startYear)
+          const goaliesBefore = roster.filter((p) => p.position === 'G').length
+          if (mp.position === 'G' && goaliesBefore > 0) player.role = 'backup'
+          roster.push(player)
+          players.set(playerId, player)
+        }
+        const team: Team = {
+          id: teamId,
+          name: `${mt.city} ${mt.nickname}`,
+          abbreviation: mt.abbreviation,
+          city: mt.city,
+          colors: { primary: parseColor(mt.primary)!, secondary: parseColor(mt.secondary)! },
+          conferenceId: mc.id,
+          divisionId: mc.id,
+          roster: roster.map((p) => p.id),
+          lines: buildLinesFromRoster(roster),
+          tactics: structuredClone(DEFAULT_TACTICS),
+          finances: {
+            budget: 20e6,
+            salaryCap: 0,
+            capUsed: roster.reduce((s, p) => s + p.contract.salary, 0),
+            revenue: 0,
+          },
+          staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
+          externalId: mt.externalId,
+          tier: 'world',
+        }
+        teams.set(teamId, team)
+        membership.push({ teamId, competitionId: mc.id })
+      }
+    }
+    competitions = buildCompetitions({ comps: rawComps, membership, season: startYear })
+  }
+
   const league: League = {
     id: asLeagueId('lg0'),
     name: mod.meta.name,
@@ -1566,6 +1711,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     ahlTeams: ahlTeamIds,
     ahlSchedule,
     ahlStandings,
+    ...(competitions !== undefined ? { competitions } : {}),
   }
 
   return {

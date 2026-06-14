@@ -590,6 +590,106 @@ def load_clubs(path):
     return out
 
 
+# ── Multi-league world (#95) ────────────────────────────────────────────
+# Top-level league names (exact, from club_competitions / clubs "Division")
+# to import as quick-sim/background competitions, mapped to the abbrev the
+# engine's NHLe leagueStrength model recognises. NCAA is split into conferences
+# in the DB; each is imported as its own competition tagged 'NCAA' for strength.
+COMP_LEAGUES = {
+    "Ontario Hockey League": "OHL",
+    "Western Hockey League": "WHL",
+    "United States Hockey League": "USHL",
+    "Kontinental Hockey League": "KHL",
+    "Swedish Hockey League": "SHL",
+    "Finnish Liiga": "LIIGA",
+    "Swiss National League": "NL",
+    "Czech Tipsport Extraliga": "EXTRALIGA",
+    "Deutsche Eishockey Liga": "DEL",
+    "ECHL": "ECHL",
+    "Swedish HockeyAllsvenskan": "HA",
+    "NCAA Hockey East Division": "NCAA",
+    "NCAA Central Collegiate Hockey Association": "NCAA",
+    "NCAA Eastern Collegiate Athletic Conference": "NCAA",
+    "NCAA Big Ten Conference": "NCAA",
+    "NCAA National Collegiate Hockey Conference": "NCAA",
+    "NCAA Atlantic Hockey Association": "NCAA",
+}
+COMP_BY_LOWER = {k.lower(): k for k in COMP_LEAGUES}
+
+# Deterministic team color palette ('#RRGGBB' primary, secondary) for imported
+# competition clubs (the source DB has no per-club colors).
+COMP_PALETTE = [
+    ("#1f4e8c", "#c8d6e5"), ("#8c1f2f", "#e5c8cc"), ("#1f8c5a", "#c8e5d6"),
+    ("#8c6a1f", "#e5dcc8"), ("#4a1f8c", "#d6c8e5"), ("#1f7d8c", "#c8e1e5"),
+    ("#8c3d1f", "#e5d2c8"), ("#5a8c1f", "#d8e5c8"), ("#2b2f38", "#cfd4dc"),
+    ("#8c1f6a", "#e5c8dc"),
+]
+
+
+def match_comp_league(div):
+    """Canonical whitelisted league name for a club's Division, or None."""
+    dl = str(div or "").strip().lower()
+    if not dl:
+        return None
+    if dl in COMP_BY_LOWER:
+        return COMP_BY_LOWER[dl]
+    for low, proper in COMP_BY_LOWER.items():
+        if dl.startswith(low):
+            return proper
+    return None
+
+
+def load_competition_meta(path):
+    """club_competitions.xlsx -> name(lower) -> {abbrev, nation, level, reputation, ageLimit}."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True); next(it)
+    out = {}
+    for r in it:
+        name = str(r[2] or "").strip()
+        if not name:
+            continue
+        out[name.lower()] = {
+            "abbrev": str(r[4] or "").strip(),
+            "nation": str(r[6] or "").strip(),
+            "level": to_int(r[8], 1),
+            "reputation": to_int(r[10], 10),
+            "ageLimit": to_int(r[11], 0),
+        }
+    wb.close()
+    return out
+
+
+def load_club_league_map(path):
+    """clubs.xlsx -> club-name(lower) -> {name, nickname, abbr, city, nation, league}
+    for clubs whose Division is a whitelisted competition league."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True); next(it)
+    out = {}
+    for r in it:
+        league = match_comp_league(r[5])
+        if league is None:
+            continue
+        name = str(r[1] or "").strip()
+        if not name:
+            continue
+        # HomeCity is "city:region:country" — take the city segment, title-cased.
+        raw_city = str(r[11] or "").strip().split(":")[0].replace("_", " ").strip()
+        out[name.lower()] = {
+            "name": name,
+            "nickname": str(r[3] or "").strip() or name.split()[-1],
+            "abbr": (str(r[4] or "").strip() or name[:3]).upper()[:3],
+            "city": raw_city.title(),
+            "nation": str(r[12] or "").strip(),
+            "league": league,
+        }
+    wb.close()
+    return out
+
+
 def load_retired_numbers(path):
     """retired_numbers.xlsx (2 header rows) -> full-club-name(lower) -> [{number, player}]."""
     import openpyxl
@@ -687,6 +787,15 @@ def main():
     # NHL nickname -> list of staff dicts (ModStaff shape)
     nhl_staff = {nick: [] for nick in NHL}
 
+    # Multi-league world: load club->league + league metadata up front so the
+    # player loop can route non-NHL/AHL players into their competition club.
+    _clubs_path = _sibling(xlsx, "clubs.xlsx", "EHM_CLUBS")
+    _comps_path = _sibling(xlsx, "club_competitions.xlsx", "EHM_CLUB_COMPETITIONS")
+    club_league_map = load_club_league_map(_clubs_path) if _clubs_path else {}
+    comp_meta = load_competition_meta(_comps_path) if _comps_path else {}
+    # league(proper) -> club-name -> {"info": club_info, "players": [...]}
+    comp_clubs = {}
+
     for r in it:
         job = r[C_JOB]
         job_str = str(job or "")
@@ -738,8 +847,12 @@ def main():
         ahl_kw = match_ahl_club(club)
         nhl_nick = None if ahl_kw else match_nhl_club(club)
 
+        # Route non-NHL/AHL players into a whitelisted competition club, if any.
+        comp_club_info = None
         if nhl_nick is None and ahl_kw is None:
-            continue
+            comp_club_info = club_league_map.get(str(club or "").strip().lower())
+            if comp_club_info is None:
+                continue
 
         first, last = str(r[C_FIRST] or "").strip(), str(r[C_SECOND] or "").strip()
         if not first and not last:
@@ -794,13 +907,20 @@ def main():
             player["weightKg"] = wt
         if nhl_nick:
             nhl_teams[nhl_nick].append(player)
-        else:
+        elif ahl_kw:
             ahl_teams[ahl_kw].append(player)
+        else:
+            league = comp_club_info["league"]
+            cname = comp_club_info["name"]
+            bucket = comp_clubs.setdefault(league, {}).setdefault(
+                cname, {"info": comp_club_info, "players": []})
+            bucket["players"].append(player)
 
     # Attach real season-by-season career history from the DB export, for the
     # players we actually kept (NHL rosters + AHL affiliates + overflow).
     all_players = [p for plist in nhl_teams.values() for p in plist] + \
-                  [p for plist in ahl_teams.values() for p in plist]
+                  [p for plist in ahl_teams.values() for p in plist] + \
+                  [p for clubs in comp_clubs.values() for b in clubs.values() for p in b["players"]]
     keep_keys = {p["_key"] for p in all_players if p.get("_key")}
     hist_path = find_career_history(xlsx)
     if hist_path:
@@ -992,6 +1112,55 @@ def main():
 
         confs.setdefault(conf, {}).setdefault(div, []).append(team_obj)
 
+    # ── Build the wider-world competitions (#95) ────────────────────────────
+    import zlib
+    MIN_COMP_ROSTER = 16  # need >= 2 G, 5 D, 9 F to ice quick-sim lines
+    competitions_out = []
+    comp_total, comp_matched = [0], [0]
+    for league_proper, abbrev in COMP_LEAGUES.items():
+        clubs_in = comp_clubs.get(league_proper)
+        if not clubs_in:
+            continue
+        meta = comp_meta.get(league_proper.lower(), {})
+        teams_out = []
+        for club_name, bundle in sorted(clubs_in.items()):
+            plist = bundle["players"]
+            if len(plist) < MIN_COMP_ROSTER:
+                continue
+            info = bundle["info"]
+            roster = sorted(plist, key=lambda p: -p["_ca"])
+            g = [p for p in roster if p["position"] == "G"][:3]
+            d = [p for p in roster if p["position"] == "D"][:8]
+            fwd = [p for p in roster if p["position"] in ("C", "W")][:14]
+            if len(g) < 2 or len(d) < 5 or len(fwd) < 9:
+                continue
+            chosen = g[:max(2, len(g))] + d + fwd
+            clean = resolve_faces(chosen, faces_out, comp_total, comp_matched)
+            prim, sec = COMP_PALETTE[zlib.crc32(club_name.encode("utf-8")) % len(COMP_PALETTE)]
+            teams_out.append({
+                "externalId": f"ehm-{abbrev.lower()}-{norm(club_name)}",
+                "city": info["city"] or club_name,
+                "nickname": info["nickname"],
+                "abbreviation": info["abbr"],
+                "primary": prim,
+                "secondary": sec,
+                "players": clean,
+            })
+        if len(teams_out) < 2:
+            continue
+        comp_obj = {
+            "id": norm(league_proper),
+            "name": league_proper,
+            "abbrev": abbrev,
+            "nation": meta.get("nation", ""),
+            "level": meta.get("level", 1),
+            "reputation": meta.get("reputation", 10),
+            "teams": teams_out,
+        }
+        if meta.get("ageLimit", 0) > 0:
+            comp_obj["upperAgeLimit"] = meta["ageLimit"]
+        competitions_out.append(comp_obj)
+
     db = {
         "formatVersion": 1,
         "meta": {"name": "NHL (EHM import, dev)", "author": "local", "season": "2025-26"},
@@ -1000,6 +1169,7 @@ def main():
                                           for dname, dteams in divs.items()]}
             for cname, divs in confs.items()
         ],
+        "competitions": competitions_out,
     }
     os.makedirs(out_dir, exist_ok=True)
     io.open(os.path.join(out_dir, "database.json"), "w", encoding="utf-8").write(
@@ -1010,6 +1180,10 @@ def main():
     print(f"NHL players: {total[0]}  faces matched: {matched[0]} ({100*matched[0]//max(1,total[0])}%)")
     print(f"AHL players: {ahl_total[0]}  faces matched: {ahl_matched[0]} ({100*ahl_matched[0]//max(1,ahl_total[0])}%)")
     print(f"Staff: {staff_total[0]}  faces matched: {staff_matched[0]} ({100*staff_matched[0]//max(1,staff_total[0])}%)")
+    print(f"Competitions: {len(competitions_out)}  "
+          f"teams: {sum(len(c['teams']) for c in competitions_out)}  players: {comp_total[0]}")
+    for c in competitions_out:
+        print(f"  {c['abbrev']:6} {c['name'][:36]:36} teams={len(c['teams']):2}")
 
 if __name__ == "__main__":
     main()

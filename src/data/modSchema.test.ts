@@ -676,3 +676,70 @@ describe('modded league end-to-end sim', () => {
     expect(sniper!.composites.scoring).toBeGreaterThan(75)
   })
 })
+
+describe('loadModDatabase — wider-world competitions (#95)', () => {
+  function modWithCompetition(): ModDatabase {
+    const db = makeFixtureMod(4)
+    db.competitions = [
+      {
+        id: 'shl',
+        name: 'Swedish Hockey League',
+        abbrev: 'SHL',
+        nation: 'Sweden',
+        level: 1,
+        reputation: 17,
+        teams: [makeTeam(50), makeTeam(51)],
+      },
+      {
+        id: 'ohl',
+        name: 'Ontario Hockey League',
+        abbrev: 'OHL',
+        nation: 'Canada',
+        level: 1,
+        reputation: 13,
+        upperAgeLimit: 20,
+        teams: [makeTeam(60), makeTeam(61)],
+      },
+    ]
+    return db
+  }
+
+  it('validates a database with competitions', () => {
+    expect(() => validateModDatabase(modWithCompetition())).not.toThrow()
+    const v = validateModDatabase(modWithCompetition())
+    expect(v.competitions).toHaveLength(2)
+    expect(v.competitions![0]!.abbrev).toBe('SHL')
+  })
+
+  it('loads competitions into League.competitions with strength, teams, standings', () => {
+    const data = loadModDatabase(validateModDatabase(modWithCompetition()), { seed: 7 })
+    const comps = data.league.competitions
+    expect(comps).toBeDefined()
+    expect(comps!).toHaveLength(2)
+    const shl = comps!.find((c) => c.id === 'shl')!
+    const ohl = comps!.find((c) => c.id === 'ohl')!
+    // NHLe strength ordered SHL > OHL.
+    expect(shl.strength).toBeGreaterThan(ohl.strength)
+    expect(ohl.upperAgeLimit).toBe(20)
+    // Teams + standings wired; simulated tier gets a schedule.
+    expect(shl.teamIds).toHaveLength(2)
+    expect(shl.standings).toHaveLength(2)
+    expect(shl.tier).toBe('simulated')
+    expect(shl.schedule.length).toBeGreaterThan(0)
+  })
+
+  it("places competition teams in LeagueData.teams as tier 'world', excluded from league.teams", () => {
+    const data = loadModDatabase(validateModDatabase(modWithCompetition()), { seed: 7 })
+    const worldTeams = [...data.teams.values()].filter((t) => t.tier === 'world')
+    expect(worldTeams).toHaveLength(4) // 2 SHL + 2 OHL
+    for (const t of worldTeams) {
+      expect(data.league.teams).not.toContain(t.id)
+      expect(t.roster.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('NHL-only mods (no competitions) leave League.competitions undefined', () => {
+    const data = loadModDatabase(validateModDatabase(makeFixtureMod(4)), { seed: 7 })
+    expect(data.league.competitions).toBeUndefined()
+  })
+})

@@ -62,9 +62,10 @@ export interface Team {
   /**
    * League tier. Absent or 'nhl' = top-level NHL team (back-compat default).
    * 'ahl' = minor-league affiliate that lives in leagueData.teams but NOT in
-   * league.teams; it appears in league.ahlTeams instead.
+   * league.teams; it appears in league.ahlTeams instead. 'world' = a wider-world
+   * competition team (KHL/SHL/CHL/…) referenced from league.competitions only.
    */
-  tier?: 'nhl' | 'ahl'
+  tier?: 'nhl' | 'ahl' | 'world'
   /**
    * Set on AHL teams only. Points to the NHL parent's TeamId.
    * Drives call-up/send-down routing and UI grouping.
