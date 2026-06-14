@@ -780,7 +780,7 @@ function TabProfile({
         {/* ── LEFT: positions + role & duty + vitals ── */}
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
           <Panel title="Position">
-            <PositionRink position={d.position} />
+            <PositionRink positions={d.positions} />
             <div className="pp-pos-list">
               {d.positions.map((pp) => (
                 <div key={pp.pos} className="pp-pos-row">
@@ -969,23 +969,31 @@ const POS_LEVEL_COLOR: Record<string, string> = {
   Unproved: 'var(--muted)',
 }
 
-/** Small hockey rink with the player's position marked. */
-function PositionRink({ position }: { position: string }): JSX.Element {
-  const pos = position.toUpperCase()
-  const spot: Record<string, [number, number]> = {
-    G: [50, 86], D: [50, 70], LD: [33, 70], RD: [67, 70],
-    C: [50, 48], LW: [30, 30], RW: [70, 30], W: [50, 30], F: [50, 36],
-  }
-  const [cx, cy] = spot[pos] ?? [50, 50]
+const POS_SPOT: Record<string, [number, number]> = {
+  G: [50, 86], D: [50, 68], LD: [34, 68], RD: [66, 68],
+  C: [50, 42], LW: [26, 28], RW: [74, 28], W: [50, 28], F: [50, 34],
+}
+
+/** Rink with every position the player can play, dot-coloured by proficiency. */
+function PositionRink({ positions }: { positions: Array<{ pos: string; level: string }> }): JSX.Element {
   return (
-    <svg viewBox="0 0 100 100" width="100%" style={{ maxWidth: 180, display: 'block', margin: '0 auto' }}>
+    <svg viewBox="0 0 100 100" width="100%" style={{ maxWidth: 190, display: 'block', margin: '0 auto' }}>
       <rect x="6" y="4" width="88" height="92" rx="16" fill="rgba(120,170,255,0.06)" stroke="var(--line)" strokeWidth="1.2" />
       <line x1="6" y1="50" x2="94" y2="50" stroke="#d0463b" strokeWidth="1.4" opacity="0.7" />
       <line x1="6" y1="34" x2="94" y2="34" stroke="#3b6dd0" strokeWidth="1.1" opacity="0.6" />
       <line x1="6" y1="66" x2="94" y2="66" stroke="#3b6dd0" strokeWidth="1.1" opacity="0.6" />
       <circle cx="50" cy="50" r="8" fill="none" stroke="#d0463b" strokeWidth="1" opacity="0.5" />
-      <circle cx={cx} cy={cy} r="6.5" fill="var(--accent)" stroke="#fff" strokeWidth="1.4" />
-      <text x={cx} y={cy + 2.6} textAnchor="middle" fontSize="6.5" fontWeight="700" fill="#fff">{pos}</text>
+      {positions.map((pp) => {
+        const [cx, cy] = POS_SPOT[pp.pos.toUpperCase()] ?? [50, 50]
+        const col = POS_LEVEL_COLOR[pp.level] ?? 'var(--muted)'
+        const natural = pp.level === 'Natural'
+        return (
+          <g key={pp.pos}>
+            <circle cx={cx} cy={cy} r="7" fill={col} stroke="#fff" strokeWidth={natural ? 1.6 : 1} opacity={natural ? 1 : 0.85} />
+            <text x={cx} y={cy + 2.6} textAnchor="middle" fontSize="6.5" fontWeight="700" fill="#fff">{pp.pos}</text>
+          </g>
+        )
+      })}
     </svg>
   )
 }
@@ -1066,54 +1074,51 @@ function CareerTotals({ seasons, isGoalie }: { seasons: PlayerProfileView['seaso
 
 function TabPositions({ d }: { d: PlayerProfileView }): JSX.Element {
   return (
-    <div className="stack">
-      <Panel title="Position & Role">
-        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-            <span className="muted small" style={{ width: 90 }}>Position</span>
-            <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{d.position}</span>
-          </div>
-          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-            <span className="muted small" style={{ width: 90 }}>Role</span>
-            <span className="chip" style={{ fontSize: 13, padding: '4px 14px' }}>{d.role}</span>
-          </div>
-          {d.handedness && (
-            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-              <span className="muted small" style={{ width: 90 }}>Shot</span>
-              <span className="chip">{d.handedness} shot</span>
+    <div className="grid-2" style={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: 'var(--sp-3)', alignItems: 'start' }}>
+      {/* Positions the player can play */}
+      <Panel title="Positions">
+        <PositionRink positions={d.positions} />
+        <div className="pp-pos-list">
+          {d.positions.map((pp) => (
+            <div key={pp.pos} className="pp-pos-row">
+              <span className="pp-pos-tag">{pp.pos}</span>
+              <span className="pp-pos-level" style={{ color: POS_LEVEL_COLOR[pp.level] }}>{pp.level}</span>
             </div>
-          )}
+          ))}
         </div>
       </Panel>
 
-      {d.archetype && (
-        <Panel title="Archetype">
+      {/* Role & playing style */}
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        <Panel title="Role & Style">
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            <ArchetypeChip archetype={d.archetype} />
-            {d.archetype.descriptors.length > 0 && (
-              <div>
-                <div className="panel-title" style={{ marginBottom: 6 }}>Style traits</div>
-                <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
-                  {d.archetype.descriptors.map((desc) => (
-                    <span key={desc} className="chip">{desc}</span>
-                  ))}
-                </div>
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+              <span className="muted small" style={{ width: 80 }}>Role</span>
+              <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{d.role}</span>
+            </div>
+            <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+              <span className="muted small" style={{ width: 80 }}>Shot</span>
+              <span className="chip">{d.handedness === 'L' ? 'Left' : 'Right'}-handed</span>
+            </div>
+            {d.archetype && (
+              <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <span className="muted small" style={{ width: 80 }}>Archetype</span>
+                <ArchetypeChip archetype={d.archetype} />
               </div>
             )}
           </div>
         </Panel>
-      )}
 
-      {/* Composites as suitability indicators */}
-      {d.composites.length > 0 && (
-        <Panel title="Composites">
-          <div className="stack" style={{ gap: 8 }}>
-            {d.composites.map((c) => (
-              <AttrBar key={c.label} label={c.label} value={c.value} />
-            ))}
-          </div>
-        </Panel>
-      )}
+        {d.archetype && d.archetype.descriptors.length > 0 && (
+          <Panel title="Style Traits">
+            <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+              {d.archetype.descriptors.map((desc) => (
+                <span key={desc} className="chip">{desc}</span>
+              ))}
+            </div>
+          </Panel>
+        )}
+      </div>
     </div>
   )
 }
