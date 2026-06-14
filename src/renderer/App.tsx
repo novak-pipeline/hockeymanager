@@ -11,6 +11,7 @@ import { TopNav } from './components/TopNav'
 import { SideNav } from './components/SideNav'
 import { SubTabBar } from './components/SubTabBar'
 import { useGlobalTeamTheme } from './components/ThemeScope'
+import { THEME_PRESETS } from './components/themes'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
@@ -136,6 +137,8 @@ export function App(): JSX.Element {
 function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const client = useClient()
   const teamTheme = useGlobalTeamTheme(props.team.teamId)
+  const themeMode = useUiStore((s) => s.themeMode)
+  const appTheme = themeMode === 'team' ? teamTheme : THEME_PRESETS[themeMode]
   const [nav, setNav] = useState<{ screen: ScreenId; params: NavParams }>({
     screen: 'dashboard',
     params: {},
@@ -317,7 +320,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             <MatchViewer game={watched} onClose={closeViewer} />
           </div>
         ) : (
-          <div className="app-shell" style={teamTheme}>
+          <div className="app-shell" style={appTheme}>
             <PressConference />
             <div className="app-body">
               <SideNav dashboard={dashboard} />

@@ -25,11 +25,19 @@ export interface UiStore {
   toasts: ToastItem[]
   pushToast: (message: string, kind?: ToastKind) => void
   dismissToast: (id: number) => void
+  /** UI theme preset id: 'team' (default) | 'indigo' | 'slate' | 'crimson' | … */
+  themeMode: string
+  setThemeMode: (mode: string) => void
 }
 
 const TOAST_LIFETIME_MS = 4_000
+const THEME_KEY = 'hm.themeMode'
 
 let toastId = 0
+
+function loadThemeMode(): string {
+  try { return localStorage.getItem(THEME_KEY) ?? 'team' } catch { return 'team' }
+}
 
 export const useUiStore = create<UiStore>((set) => ({
   version: 0,
@@ -43,6 +51,11 @@ export const useUiStore = create<UiStore>((set) => ({
     }, TOAST_LIFETIME_MS)
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  themeMode: loadThemeMode(),
+  setThemeMode: (mode) => {
+    try { localStorage.setItem(THEME_KEY, mode) } catch { /* ignore */ }
+    set({ themeMode: mode })
+  },
 }))
 
 /** Bump the refresh bus from anywhere (event handlers, async flows). */

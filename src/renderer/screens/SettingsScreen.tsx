@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Panel, ScreenHeader } from '../components/ui'
 import { getPressSettings, setPressSettings } from '../lib/press'
+import { useUiStore } from '../components/store'
+import { THEME_OPTIONS } from '../components/themes'
 
 type KeyStatus = 'unknown' | 'present' | 'absent' | 'saving' | 'testing'
 
@@ -85,9 +87,41 @@ export function SettingsScreen(): JSX.Element {
   const statusColor = keyStatus === 'present' ? 'var(--green)' : keyStatus === 'absent' ? 'var(--amber)' : 'var(--muted)'
   const statusLabel = keyStatus === 'present' ? 'Key configured' : keyStatus === 'absent' ? 'No key' : keyStatus === 'saving' ? 'Saving…' : keyStatus === 'testing' ? 'Checking…' : '—'
 
+  const themeMode = useUiStore((s) => s.themeMode)
+  const setThemeMode = useUiStore((s) => s.setThemeMode)
+
   return (
     <section className="stack">
       <ScreenHeader title="Settings" />
+
+      {/* ── APPEARANCE ── */}
+      <Panel title="Appearance">
+        <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
+          Theme — colours the whole UI. "Team Colours" follows the club you manage.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+          {THEME_OPTIONS.map((opt) => {
+            const active = themeMode === opt.id
+            return (
+              <button
+                key={opt.id}
+                onClick={() => setThemeMode(opt.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                  background: active ? 'var(--violet-dim)' : 'var(--bg2)',
+                  border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
+                  color: 'var(--text)', font: 'inherit', fontSize: 13, fontWeight: 600,
+                }}
+              >
+                <span style={{ width: 14, height: 14, borderRadius: 4, background: opt.swatch, boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }} />
+                {opt.label}
+                {active && <span style={{ color: 'var(--violet-h)' }}>✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      </Panel>
 
       {/* ── PRESS PASS ── */}
       <Panel>
