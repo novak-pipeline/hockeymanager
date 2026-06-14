@@ -8,7 +8,7 @@
  */
 
 import type { Player } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { classifyArchetype, ARCHETYPE_META } from '@engine/league/archetypes'
 
 export interface ScoutVerdict {
@@ -59,7 +59,7 @@ export function buildScoutVerdict(
   potentialStars: number,
   signed = false,
 ): ScoutVerdict {
-  const ovr = overall(p.composites, p.position)
+  const ovr = ratedOverall(p)
   const arch = classifyArchetype(p)
   const meta = ARCHETYPE_META[arch.archetype]
 

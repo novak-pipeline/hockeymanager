@@ -11,7 +11,7 @@
  */
 
 import type { Player, PlayerId } from '@domain'
-import { computeComposites, overall } from '@engine/ratings/composites'
+import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 
@@ -162,8 +162,7 @@ function judgedValue(
  * We re-use the same overall() function but against the potential composites.
  */
 function potentialOverall(player: Player): number {
-  const potentialComposites = computeComposites(player.potential, player.role, player.position)
-  return overall(potentialComposites, player.position)
+  return ratedPotential(player)
 }
 
 /* ─────────────────────────── name pool helpers ─────────────────────────── */
@@ -446,7 +445,7 @@ export function hireRetiredPlayer(args: {
   const { player, role, rng } = args
 
   // Derive rating from playing overall + personality
-  const playingOverall = overall(player.composites, player.position)
+  const playingOverall = ratedOverall(player)
   const personalityBonus =
     (player.personality.professionalism + player.personality.determination) / 2 - 10
   // Elite players bring cachet; average ones need more genuine coaching talent
@@ -553,7 +552,7 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
   }
 
   const entries: RosterEntry[] = roster.map((player) => {
-    const trueOvr = overall(player.composites, player.position)
+    const trueOvr = ratedOverall(player)
     const truePot = potentialOverall(player)
 
     // Salt 1 = judgedOverall, Salt 2 = judgedPotential
@@ -594,7 +593,7 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
     name: player.name,
     position: player.position,
     age: player.age,
-    judgedOverall: judgedValue(overall(player.composites, player.position), agm.judgment, player.id as string, 1),
+    judgedOverall: judgedValue(ratedOverall(player), agm.judgment, player.id as string, 1),
     judgedPotential: judgedValue(potentialOverall(player), agm.judgment, player.id as string, 2),
     tier: 'prospect' as const,
     location,

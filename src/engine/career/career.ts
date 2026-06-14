@@ -37,7 +37,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { overall, ratedOverall } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -838,13 +838,13 @@ export class Career {
       // Don't report the user's own players — this is acquisition intel.
       if (this.userTeam.roster.includes(pid as PlayerId)) continue
       const pot = potentialStars(p)
-      const ovr = overall(p.composites, p.position)
+      const ovr = ratedOverall(p)
       if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
     }
     if (fresh.length === 0) return
     fresh.sort((a, b) => b.pot - a.pot)
     for (const f of fresh.slice(0, 2)) {
-      const cur = Math.max(0, Math.min(5, Math.round((overall(f.p.composites, f.p.position) / 20) * 2) / 2))
+      const cur = Math.max(0, Math.min(5, Math.round((ratedOverall(f.p) / 20) * 2) / 2))
       const v = buildScoutVerdict(f.p, cur, f.pot)
       const pro = v.pros[0] ? ` ${v.pros[0]}.` : ''
       this.pushNews(
@@ -4172,7 +4172,7 @@ export class Career {
         playerId: featuredId as string,
         name: fp.name,
         position: fp.position,
-        overall: overall(fp.composites, fp.position),
+        overall: ratedOverall(fp),
         seasonLine,
         gameRatingForm: formString(fpRatings),
         avgRating: seasonAvgRating(fpRatings),
@@ -5761,7 +5761,7 @@ export class Career {
             name: p.name,
             position: p.position,
             age: p.age,
-            overall: overall(p.composites, p.position),
+            overall: ratedOverall(p),
             gamesPlayed: this.gp.get(id) ?? 0,
             goals: t?.goals ?? 0,
             assists: t?.assists ?? 0,

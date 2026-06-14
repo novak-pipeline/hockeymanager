@@ -183,3 +183,39 @@ export function overall(c: CompositeRatings, position: Position): Rating {
       0.15 * c.defensiveZone
   )
 }
+
+/**
+ * Authoritative display rating (0–100). When the player carries a source-DB
+ * `baseOverall` (a properly-weighted rating that captures intangibles the
+ * composite formula under-values), anchor to it — mostly the DB rating, with a
+ * minority pull from the live composites so development/aging still move it.
+ * Generated players (no baseOverall) fall back to the composite overall.
+ *
+ * This is why a 38-year-old franchise centre still reads as elite: his DB rating
+ * stays high even though the composite formula would dock him for declined
+ * defensive/positional numbers.
+ */
+export function ratedOverall(p: {
+  composites: CompositeRatings
+  position: Position
+  baseOverall?: number
+}): number {
+  const computed = overall(p.composites, p.position)
+  if (p.baseOverall === undefined) return computed
+  return Math.round(0.7 * p.baseOverall + 0.3 * computed)
+}
+
+/**
+ * Authoritative potential rating (0–100). Anchors to the source-DB
+ * `basePotential` (ceiling) when present; else derives from potential composites.
+ */
+export function ratedPotential(p: {
+  potential: RawAttributes
+  role: PlayerRole
+  position: Position
+  basePotential?: number
+}): number {
+  const computed = overall(computeComposites(p.potential, p.role, p.position), p.position)
+  if (p.basePotential === undefined) return computed
+  return Math.round(0.7 * p.basePotential + 0.3 * computed)
+}

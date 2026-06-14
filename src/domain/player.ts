@@ -155,6 +155,16 @@ export interface Player {
   worldReputation?: number
 
   /**
+   * Authoritative current ability (0–100) from the source DB. This is the
+   * properly-weighted rating (includes intangibles/mental the composite formula
+   * under-captures), so display ratings/stars anchor to it. Absent for
+   * procedurally-generated players (they fall back to the composite overall).
+   */
+  baseOverall?: number
+  /** Authoritative potential ability (0–100) from the source DB (the ceiling). */
+  basePotential?: number
+
+  /**
    * Draft status flags from the source DB.
    */
   /** Player is currently eligible for the NHL entry draft. */

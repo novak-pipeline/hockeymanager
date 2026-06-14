@@ -8,7 +8,7 @@
  */
 
 import type { Player } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 
 export type CareerStage = 'Prospect' | 'Developing' | 'Peak' | 'Veteran'
 
@@ -85,7 +85,7 @@ function groupOf(p: Player): PosGroup {
 }
 
 function stars(p: Player): number {
-  return Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2))
+  return Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2))
 }
 
 export interface BuildSquadPlannerArgs {

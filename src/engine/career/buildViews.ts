@@ -14,7 +14,7 @@ import type {
   Team,
   TeamId,
 } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import { computeRadar } from '@engine/ratings/radar'
 import type { RadarView } from '@engine/ratings/radar'
 import {
@@ -141,7 +141,7 @@ function archetypeInfo(p: Player, fog?: FogCtx): ArchetypeInfo | undefined {
 
 export function badge(p: Player, fog?: FogCtx): PlayerBadge {
   const pid = p.id as string
-  const ovr = overall(p.composites, p.position)
+  const ovr = ratedOverall(p)
   const archetype = archetypeInfo(p, fog)
   const faceIdProp = p.faceId !== undefined ? { faceId: p.faceId } : {}
   if (!fog || isExact(fog, pid)) {
@@ -433,13 +433,9 @@ function groupView(
   }
 }
 
-/** 1–5 stars from remaining upside (and current quality for the ceiling). */
+/** 1–5 stars from the player's ceiling (DB-anchored when available). */
 export function potentialStars(p: Player): number {
-  const cur = overall(p.composites, p.position)
-  const groups = [p.potential.technical, p.potential.physical, p.potential.mental, p.potential.defensive]
-  const vals = groups.flatMap((g) => Object.values(g))
-  const potAvg = vals.reduce((s, v) => s + v, 0) / Math.max(1, vals.length)
-  const score = Math.max(cur, potAvg)
+  const score = Math.max(ratedOverall(p), ratedPotential(p))
   if (score >= 82) return 5
   if (score >= 72) return 4
   if (score >= 62) return 3
@@ -693,7 +689,7 @@ export function buildPlayerProfile(
   const scoutVerdict = archetypeKnown
     ? buildScoutVerdict(
         p,
-        Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2)),
+        Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2)),
         potStars,
         teamId !== null,
       )
@@ -768,8 +764,8 @@ export function buildCompareRadar(
   if (!pA) throw new Error(`unknown player ${playerIdA}`)
   if (!pB) throw new Error(`unknown player ${playerIdB}`)
 
-  const ovrA = overall(pA.composites, pA.position)
-  const ovrB = overall(pB.composites, pB.position)
+  const ovrA = ratedOverall(pA)
+  const ovrB = ratedOverall(pB)
 
   return {
     playerA: {
@@ -1107,7 +1103,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     if (k < 15) continue
     const p = players.get(pid as PlayerId)
     if (!p) continue
-    const cur = Math.max(0, Math.min(5, Math.round((overall(p.composites, p.position) / 20) * 2) / 2))
+    const cur = Math.max(0, Math.min(5, Math.round((ratedOverall(p) / 20) * 2) / 2))
     const pot = potentialStars(p)
     const ceiling = Math.max(cur, pot)
     const young = p.age <= 23

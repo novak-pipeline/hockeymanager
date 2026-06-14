@@ -9,7 +9,7 @@
  */
 
 import type { Player } from '@domain'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { projectionTier, TIER_LABELS, type ProjectionTier } from './scoutReport'
 
 export interface DevelopmentRow {
@@ -76,7 +76,7 @@ export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentC
     if (p.age > maxAge) return
     const [cur, pot] = args.stars(p)
     const upside = Math.max(0, pot - cur)
-    const ovr = overall(p.composites, p.position)
+    const ovr = ratedOverall(p)
     const tier = projectionTier(ovr, pot, p.age)
     rows.push({
       playerId: p.id as unknown as string,

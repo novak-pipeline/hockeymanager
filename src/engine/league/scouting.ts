@@ -10,7 +10,7 @@
  */
 import type { Player, PlayerId, Team, TeamId } from '@domain'
 import type { ScoutingState, ScoutAssignment, ScoutTarget } from '@domain/scouting'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 
@@ -186,7 +186,7 @@ export interface CreateScoutingArgs {
  * no DB reputation is present we fall back to ability alone.
  */
 export function renownOf(player: Player): number {
-  const ovr = overall(player.composites, player.position)
+  const ovr = ratedOverall(player)
   // Map overall 40→70, 99→~200 so ability contributes on the same 0–200 scale.
   const ovrRenown = 70 + (Math.max(40, Math.min(99, ovr)) - 40) * (130 / 59)
   const rep = (player as { currentReputation?: number }).currentReputation ?? 0

@@ -17,7 +17,7 @@
  */
 
 import type { Player } from '@domain'
-import { computeComposites, overall } from '@engine/ratings/composites'
+import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 
 /* ────────────────────────── deterministic hash ────────────────────────── */
 
@@ -55,9 +55,9 @@ function positionNoun(position: string): string {
   }
 }
 
-/** Potential-based overall (his ceiling), via the same overall() function. */
+/** Potential-based overall (his ceiling), DB-anchored when available. */
 export function potentialOverallOf(p: Player): number {
-  return overall(computeComposites(p.potential, p.role, p.position), p.position)
+  return ratedPotential(p)
 }
 
 /* ────────────────────────── depth-slot mapping ────────────────────────── */
@@ -70,7 +70,7 @@ function depthIndex(ovr: number, group: Player[], selfId: string): number {
   let ahead = 0
   for (const t of group) {
     if ((t.id as string) === selfId) continue
-    if (overall(t.composites, t.position) > ovr) ahead++
+    if (ratedOverall(t) > ovr) ahead++
   }
   return ahead
 }
@@ -242,7 +242,7 @@ export function buildRosterProjection(args: {
   const { player, teamName, clubRoster, coachName, season } = args
   const group = groupOf(player.position)
   const peers = clubRoster.filter((p) => groupOf(p.position) === group)
-  const curOvr = overall(player.composites, player.position)
+  const curOvr = ratedOverall(player)
   const potOvr = potentialOverallOf(player)
 
   const idx = depthIndex(curOvr, peers, player.id as string)
@@ -341,7 +341,7 @@ function roleLabel(role: StaffMemberRole): string {
  * coach's demeanour; a trait line is appended when something stands out.
  */
 export function buildCoachReports(player: Player, coaches: StaffLike[], season?: SeasonForm): CoachReport[] {
-  const curOvr = overall(player.composites, player.position)
+  const curOvr = ratedOverall(player)
   const potOvr = potentialOverallOf(player)
   const ceiling = Math.max(curOvr, potOvr)
   const young = player.age <= 23

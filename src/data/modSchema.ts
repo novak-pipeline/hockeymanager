@@ -1215,6 +1215,9 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
             form: 0,
             externalId: modPlayer.externalId,
             ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
+            ...(modPlayer.overall !== undefined ? { baseOverall: modPlayer.overall } : {}),
+            ...(paOverall !== null ? { basePotential: paOverall }
+              : modPlayer.potential !== undefined ? { basePotential: modPlayer.potential } : {}),
             ...bioFields(modPlayer)
           }
 

@@ -20,7 +20,7 @@ import type { Player } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
 import type { StaffMember } from '@engine/league/staff'
 import { knowledgeOf } from '@engine/league/scouting'
-import { overall } from '@engine/ratings/composites'
+import { ratedOverall } from '@engine/ratings/composites'
 import { classifyArchetype } from '@engine/league/archetypes'
 import { projectionTier, type ProjectionTier, TIER_LABELS } from './scoutReport'
 
@@ -302,7 +302,7 @@ export function computeRisk(
   trueTier: ProjectionTier,
   reads: ScoutRead[]
 ): BoomBustRisk {
-  const ovr = overall(player.composites, player.position)
+  const ovr = ratedOverall(player)
   const ceiling = potStars
 
   // Potential-vs-current gap: high ceiling + low current = high variance
@@ -439,7 +439,7 @@ export function buildScoutPanel(
 ): ScoutPanel {
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
-  const ovr = overall(player.composites, player.position)
+  const ovr = ratedOverall(player)
   const composites = player.composites as unknown as Record<string, number>
 
   // True tier (hidden from the player; scouts' estimates vary around this)
