@@ -726,11 +726,11 @@ export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
   // younger player at the same ceiling is more valuable). Whole org: NHL kids +
   // AHL affiliate + other-team prospects.
   const rosterProspects = entries
-    .filter((e) => e.player.age <= 24)
+    .filter((e) => e.player.age <= 23)
     .map((e) => toRanked(e, 'NHL'))
-  const poolProspects = poolRanked.filter((p) => p.age <= 24)
+  const poolProspects = poolRanked.filter((p) => p.age <= 23)
   const prospectValue = (p: AgmRankedPlayer): number =>
-    p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 24 - p.age) * 0.6
+    p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 23 - p.age) * 0.6
   const topProspects = [...rosterProspects, ...poolProspects]
     .sort((a, b) => prospectValue(b) - prospectValue(a))
     .slice(0, 12)

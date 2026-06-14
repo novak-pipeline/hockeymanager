@@ -62,19 +62,20 @@ export interface BuildDevelopmentArgs {
   affiliate: Player[]
   /** Caller-supplied star reader (fog-aware). Returns [current, potential]. */
   stars: (p: Player) => [number, number]
-  /** Max age to treat as a development-tracked prospect (default 24). */
+  /** Max age to treat as a development-tracked prospect (inclusive; default 23). */
   maxAge?: number
 }
 
 export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentCenterView {
-  const maxAge = args.maxAge ?? 24
+  const maxAge = args.maxAge ?? 23
   const rows: DevelopmentRow[] = []
 
   const consider = (p: Player, location: 'NHL' | 'AHL'): void => {
+    // Prospect status is age-gated: 23 and under. Past that you're an
+    // established pro, not a development project — regardless of upside.
+    if (p.age > maxAge) return
     const [cur, pot] = args.stars(p)
     const upside = Math.max(0, pot - cur)
-    // Track if young, OR has meaningful remaining upside regardless of age.
-    if (p.age > maxAge && upside < 1) return
     const ovr = overall(p.composites, p.position)
     const tier = projectionTier(ovr, pot, p.age)
     rows.push({

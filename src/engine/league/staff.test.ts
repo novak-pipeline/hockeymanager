@@ -175,7 +175,7 @@ describe('buildAgmReport – structure', () => {
     }
   })
 
-  it('topProspects are all under age 23', () => {
+  it('topProspects are all 23 and under', () => {
     const data = makeLeague(4)
     const team = [...data.teams.values()][0]!
     const roster = team.roster.map((id) => data.players.get(id)!).filter(Boolean)
@@ -183,7 +183,7 @@ describe('buildAgmReport – structure', () => {
     const report = buildAgmReport({ roster, players: data.players, agm, rng: new Rng(4) })
 
     for (const p of report.topProspects) {
-      expect(p.age).toBeLessThanOrEqual(24)
+      expect(p.age).toBeLessThanOrEqual(23)
     }
   })
 
@@ -195,7 +195,7 @@ describe('buildAgmReport – structure', () => {
     const report = buildAgmReport({ roster, players: data.players, agm, rng: new Rng(5) })
 
     const value = (p: { judgedPotential: number; judgedOverall: number; age: number }): number =>
-      p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 24 - p.age) * 0.6
+      p.judgedPotential * 0.7 + p.judgedOverall * 0.3 + Math.max(0, 23 - p.age) * 0.6
     for (let i = 1; i < report.topProspects.length; i++) {
       expect(value(report.topProspects[i - 1]!)).toBeGreaterThanOrEqual(value(report.topProspects[i]!))
     }
