@@ -786,6 +786,18 @@ export interface DraftRankRowView {
   potentialStars: number
 }
 
+/** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
+export interface ScoutBoardRowView extends DraftRankRowView {
+  /** Where the analyst/media consensus has him. */
+  consensusRank: number
+  /** Rank movement on your board (consensusRank − yourRank; + = you're higher). */
+  movement: number
+  /** 'higher' | 'inline' | 'lower' relative to the consensus board. */
+  verdict: 'higher' | 'inline' | 'lower'
+  /** Whether your staff has actually seen enough of him to hold an opinion. */
+  seen: boolean
+}
+
 export interface DraftRankingsView {
   /** preliminary | midseason | final. */
   phase: 'preliminary' | 'midseason' | 'final'
@@ -797,6 +809,8 @@ export interface DraftRankingsView {
   rankings: DraftRankRowView[]
   /** Younger talent (14–16) on the radar but not yet draft-eligible. */
   radar: DraftRankRowView[]
+  /** YOUR scouts' own board — re-ranked by what your staff has seen. */
+  scoutBoard: ScoutBoardRowView[]
 }
 
 export interface StatsView {

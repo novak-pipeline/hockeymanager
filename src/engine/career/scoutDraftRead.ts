@@ -45,6 +45,35 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 /**
+ * The components of your scouts' independent signal on a player, BEFORE any
+ * rank/knowledge damping:
+ *  - intangibleAdj: maturity / drive / character (lifted by interviews).
+ *  - twoWayAdj: an underlying two-way/IQ game the production-weighted board
+ *    underrates.
+ * Shared by the per-player read and the scout-built board so they stay
+ * consistent. Units are 0–100 value points.
+ */
+export function scoutSignalParts(player: Player, interviews = 0): {
+  intangibleAdj: number; twoWayAdj: number; raw: number
+} {
+  const p = player.personality
+  const character = ((p.professionalism - 50) + (p.determination - 50) + (p.ambition - 50)) / 3
+  const temperamentPenalty = p.temperament < 40 ? (40 - p.temperament) * 0.15 : 0
+  const interviewBoost = Math.min(3, interviews)
+  const intangibleAdj = clamp(
+    character * 0.14 + Math.sign(character) * interviewBoost * 0.4 - temperamentPenalty,
+    -7, 7,
+  )
+  const c = player.composites as unknown as Record<string, number>
+  const m = player.ratings.mental as unknown as Record<string, number>
+  const iq = ((m['offensiveIQ'] ?? 50) + (m['defensiveIQ'] ?? 50)) / 2
+  const twoWay = ((c['defensiveZone'] ?? 50) + (c['takeaway'] ?? 50) + iq) / 3
+  const scoring = c['scoring'] ?? 50
+  const twoWayAdj = clamp((twoWay - scoring) * 0.06, -3, 4)
+  return { intangibleAdj, twoWayAdj, raw: intangibleAdj + twoWayAdj }
+}
+
+/**
  * Build your scouts' draft read, or null if they haven't seen enough of him to
  * hold an independent opinion (assign a scout to change that).
  */
@@ -52,27 +81,7 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
   const { player, knowledge } = a
   if (knowledge < 35) return null
 
-  // ── Intangibles: maturity / drive lift the read; attitude concerns lower it.
-  // Personality fields are 0–100; 50 ≈ neutral.
-  const p = player.personality
-  const character = ((p.professionalism - 50) + (p.determination - 50) + (p.ambition - 50)) / 3
-  const temperamentPenalty = p.temperament < 40 ? (40 - p.temperament) * 0.15 : 0
-  const interviewBoost = Math.min(3, a.interviews)
-  const intangibleAdj = clamp(
-    character * 0.14 + Math.sign(character) * interviewBoost * 0.4 - temperamentPenalty,
-    -7, 7,
-  )
-
-  // ── Underlying-game edge: a two-way/IQ game the production-weighted consensus
-  // underrates (the "doesn't show on the scoresheet" prospect).
-  const c = player.composites as unknown as Record<string, number>
-  const m = player.ratings.mental as unknown as Record<string, number>
-  const iq = ((m['offensiveIQ'] ?? 50) + (m['defensiveIQ'] ?? 50)) / 2
-  const twoWay = ((c['defensiveZone'] ?? 50) + (c['takeaway'] ?? 50) + iq) / 3
-  const scoring = c['scoring'] ?? 50
-  const twoWayAdj = clamp((twoWay - scoring) * 0.06, -3, 4)
-
-  const rawDelta = intangibleAdj + twoWayAdj
+  const { intangibleAdj, twoWayAdj, raw: rawDelta } = scoutSignalParts(player, a.interviews)
 
   // ── Damping: agreement at the top, divergence deep; and you must have watched.
   const rank = a.analystRank ?? 70

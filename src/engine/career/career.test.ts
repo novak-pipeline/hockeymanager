@@ -1624,6 +1624,14 @@ describe('Career — wider-world quick-sim', () => {
       expect(r.age).toBeGreaterThanOrEqual(14)
       expect(r.age).toBeLessThanOrEqual(16)
     })
+    // Your scouts' board: same cohort, re-ranked, with consensus + movement.
+    expect(view.scoutBoard.length).toBeGreaterThan(0)
+    view.scoutBoard.forEach((r, i) => {
+      expect(r.rank).toBe(i + 1)
+      expect(r.movement).toBe(r.consensusRank - r.rank)
+      expect(['higher', 'inline', 'lower']).toContain(r.verdict)
+      expect(typeof r.seen).toBe('boolean')
+    })
   })
 
   it('persists wider-world standings + stats across save/load', () => {

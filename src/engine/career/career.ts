@@ -75,7 +75,7 @@ import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystProjection, analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
-import { buildScoutDraftRead } from '@engine/career/scoutDraftRead'
+import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -305,6 +305,7 @@ import {
   type NationView,
   type DraftRankingsView,
   type DraftRankRowView,
+  type ScoutBoardRowView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -5245,6 +5246,7 @@ export class Career {
     interface Cand {
       row: Omit<DraftRankRowView, 'rank'>
       input: RankInput
+      player: Player
     }
     const board = new Map<string, Cand>() // eligible + reentry → analyst-ranked
     const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = [] // 14–16 watch list
@@ -5274,7 +5276,7 @@ export class Career {
           if (elig === 'radar') {
             radarRows.push(row)
           } else {
-            board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row })
+            board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row, player: p })
           }
         }
       }
@@ -5293,7 +5295,40 @@ export class Career {
       phase === 'preliminary' ? 'Preliminary ranking'
       : phase === 'midseason' ? 'Mid-season ranking'
       : 'Final pre-draft ranking'
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar }
+
+    // ── Your scouts' own board ──────────────────────────────────────────────
+    // Consensus value (noise-free, ceiling-weighted) gives the baseline rank;
+    // your staff's signal (intangibles + underlying game, knowledge-scaled)
+    // re-ranks it. Because elite prospects sit on big value gaps, the same
+    // signal barely moves them but swings the bunched mid/late board — so your
+    // edge naturally grows the deeper you go.
+    const cands = [...board.values()]
+    const consensusValueOf = (c: Cand): number => c.input.ceiling * 0.74 + c.input.current * 0.26
+    const scoutMeta = new Map<string, { scoutValue: number; knowledge: number }>()
+    for (const c of cands) {
+      const id = c.row.playerId
+      const isOwn = this.userTeam.roster.includes(asPlayerId(id))
+      const knowledge = isOwn ? 100 : knowledgeOf(this.scouting, id)
+      const signal = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
+      scoutMeta.set(id, { scoutValue: consensusValueOf(c) + signal * (knowledge / 100), knowledge })
+    }
+    const consensusRankOf = new Map<string, number>()
+    ;[...cands].sort((a, b) => consensusValueOf(b) - consensusValueOf(a))
+      .forEach((c, i) => consensusRankOf.set(c.row.playerId, i + 1))
+    const scoutBoard: ScoutBoardRowView[] = [...cands]
+      .sort((a, b) => scoutMeta.get(b.row.playerId)!.scoutValue - scoutMeta.get(a.row.playerId)!.scoutValue)
+      .slice(0, 64)
+      .map((c, i) => {
+        const id = c.row.playerId
+        const yourRank = i + 1
+        const consensusRank = consensusRankOf.get(id) ?? yourRank
+        const movement = consensusRank - yourRank
+        const meta = scoutMeta.get(id)!
+        const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
+        return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: meta.knowledge >= 35 }
+      })
+
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard }
   }
 
   getStats(): StatsView {
