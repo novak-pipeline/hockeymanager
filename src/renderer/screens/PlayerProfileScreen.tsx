@@ -1143,11 +1143,15 @@ function TabInformation({ d }: { d: PlayerProfileView }): JSX.Element {
       </Panel>
 
       {/* Draft */}
-      <Panel title="Draft Status">
+      <Panel title="Draft">
         <InfoRow
-          label="NHL Draft"
+          label="Status"
           value={h.nhlDrafted ? 'Drafted' : h.nhlDraftEligible ? 'Draft eligible' : 'Not eligible'}
         />
+        {h.draftYear !== undefined && <InfoRow label="Year" value={h.draftYear} />}
+        {h.draftRound !== undefined && <InfoRow label="Round" value={`Round ${h.draftRound}`} />}
+        {h.draftOverall !== undefined && <InfoRow label="Overall pick" value={`#${h.draftOverall}`} />}
+        {h.draftClub && <InfoRow label="Drafted by" value={h.draftClub} />}
         <InfoRow label="Junior preference" value={h.juniorPreference} />
       </Panel>
 
@@ -1245,19 +1249,8 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
     )
   }
 
-  const h = d.honours
   return (
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-      {h.draftYear !== undefined && (
-        <Panel title="Draft">
-          <div className="row" style={{ gap: 'var(--sp-5, 28px)', flexWrap: 'wrap', alignItems: 'baseline' }}>
-            <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>{h.draftYear}</div><div className="stat-label">Year</div></div>
-            {h.draftRound !== undefined && <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>R{h.draftRound}</div><div className="stat-label">Round</div></div>}
-            {h.draftOverall !== undefined && <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>#{h.draftOverall}</div><div className="stat-label">Overall</div></div>}
-            {h.draftClub && <div className="stat"><div className="stat-value" style={{ fontSize: 14 }}>{h.draftClub}</div><div className="stat-label">Drafted by</div></div>}
-          </div>
-        </Panel>
-      )}
       <Panel title="Career Totals">
         <CareerTotals seasons={d.seasons} isGoalie={isGoalie} />
       </Panel>
