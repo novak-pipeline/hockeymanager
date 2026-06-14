@@ -1557,6 +1557,12 @@ describe('Career — wider-world quick-sim', () => {
     // Simulated tier accrues scorers.
     expect(shl.scorers.length).toBeGreaterThan(0)
     expect(shl.scorers[0]!.points).toBeGreaterThanOrEqual(shl.scorers[shl.scorers.length - 1]!.points)
+    // Strength ranking + notable players/prospects.
+    expect(shl.strengthRank).toBeGreaterThanOrEqual(1)
+    expect(shl.teamCount).toBe(6)
+    expect(shl.notables.length).toBeGreaterThan(0)
+    expect(shl.notables[0]!.currentStars).toBeGreaterThanOrEqual(shl.notables[shl.notables.length - 1]!.currentStars)
+    expect(shl.prospects.every((p) => p.age <= 22)).toBe(true)
   })
 
   it('persists wider-world standings + stats across save/load', () => {

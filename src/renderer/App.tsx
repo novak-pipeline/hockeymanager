@@ -28,6 +28,7 @@ import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
 import { LeagueScreen } from './screens/LeagueScreen'
+import { WorldScreen } from './screens/WorldScreen'
 import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
@@ -462,12 +463,15 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueTransactions':
     case 'leagueScoreboard':
     case 'leagueHistory':
-    case 'leagueWorld':
     case 'scouting':
     case 'draft':
     case 'offseason':
     case 'playoffs':
       return <LeagueScreen tab={props.screen} />
+
+    // ── World (wider-world competitions) ──
+    case 'world':
+      return <WorldScreen />
 
     // ── Data Hub (Analytics) ──
     case 'dataHub':

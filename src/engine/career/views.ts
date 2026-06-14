@@ -649,6 +649,19 @@ export interface CompetitionScorerRowView {
   points: number
 }
 
+/** A notable player or prospect playing in a competition (scout-flavoured). */
+export interface CompetitionNotableView {
+  playerId: string
+  name: string
+  teamAbbr: string
+  position: string
+  age: number
+  /** Current ability stars (0.5–5). */
+  currentStars: number
+  /** Projected ceiling stars (0.5–5). */
+  potentialStars: number
+}
+
 export interface CompetitionView {
   id: string
   name: string
@@ -657,9 +670,17 @@ export interface CompetitionView {
   tier: 'active' | 'simulated' | 'background'
   /** NHL-equivalency strength factor (0–1; NHL = 1). */
   strength: number
+  /** 1 = strongest of the world competitions (by NHLe strength). */
+  strengthRank: number
+  teamCount: number
+  playerCount: number
   standings: CompetitionStandingRowView[]
   /** Top scorers (simulated tier only; empty for background leagues). */
   scorers: CompetitionScorerRowView[]
+  /** Best established players by current ability. */
+  notables: CompetitionNotableView[]
+  /** Top young prospects (U23) by projected ceiling. */
+  prospects: CompetitionNotableView[]
 }
 
 export interface CompetitionsView {

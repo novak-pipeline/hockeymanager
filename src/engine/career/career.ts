@@ -37,7 +37,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall, ratedOverall, overallToStars } from '@engine/ratings/composites'
+import { overall, ratedOverall, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -293,6 +293,7 @@ import {
   type CompetitionView,
   type CompetitionStandingRowView,
   type CompetitionScorerRowView,
+  type CompetitionNotableView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -4882,9 +4883,15 @@ export class Career {
     return buildStandingsView(this.ctx())
   }
 
-  /** The wider-world competitions: standings + top scorers per league (#95). */
+  /** The wider-world competitions: standings, leaders, strength ranking, and
+   *  notable players + prospects per league (#95). */
   getCompetitions(): CompetitionsView {
     const comps = this.data.league.competitions ?? []
+    // Strength ranking across all world competitions (1 = strongest).
+    const rankById = new Map<string, number>()
+    ;[...comps]
+      .sort((a, b) => b.strength - a.strength)
+      .forEach((c, i) => rankById.set(c.id, i + 1))
     const out: CompetitionView[] = comps.map((c) => {
       // playerId -> team abbreviation, for scorer rows.
       const teamAbbrByPlayer = new Map<string, string>()
@@ -4925,6 +4932,34 @@ export class Career {
         })
         .sort((a, b) => b.points - a.points || b.goals - a.goals)
         .slice(0, 10)
+      // Notable players + prospects from the league's rosters.
+      const pool: Player[] = []
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (p) pool.push(p)
+        }
+      }
+      const toNotable = (p: Player): CompetitionNotableView => ({
+        playerId: p.id as string,
+        name: p.name,
+        teamAbbr: teamAbbrByPlayer.get(p.id as string) ?? '?',
+        position: p.position,
+        age: p.age,
+        currentStars: overallToStars(ratedOverall(p)),
+        potentialStars: overallToStars(agedPotential(p)),
+      })
+      const notables = [...pool]
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+        .slice(0, 8)
+        .map(toNotable)
+      const prospects = pool
+        .filter((p) => p.age <= 22)
+        .sort((a, b) => agedPotential(b) - agedPotential(a))
+        .slice(0, 8)
+        .map(toNotable)
       return {
         id: c.id,
         name: c.name,
@@ -4932,8 +4967,13 @@ export class Career {
         nation: c.nation,
         tier: c.tier,
         strength: c.strength,
+        strengthRank: rankById.get(c.id) ?? 0,
+        teamCount: c.teamIds.length,
+        playerCount: pool.length,
         standings,
         scorers,
+        notables,
+        prospects,
       }
     })
     return { competitions: out }

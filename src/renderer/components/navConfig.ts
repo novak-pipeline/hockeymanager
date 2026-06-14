@@ -5,7 +5,7 @@ import type { ScreenId } from './NavContext'
 export type IconKey =
   | 'home' | 'inbox' | 'squad' | 'squadPlanner' | 'dynamics' | 'tactics'
   | 'dataHub' | 'staff' | 'training' | 'medical' | 'devCenter'
-  | 'schedule' | 'competitions' | 'scouting' | 'transfers'
+  | 'schedule' | 'competitions' | 'world' | 'scouting' | 'transfers'
   | 'clubInfo' | 'clubVision' | 'finances' | 'match'
 
 export interface SubTab { id: ScreenId; label: string }
@@ -55,7 +55,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
     { id: 'schedule', label: 'Schedule', icon: 'schedule', section: 'competition', screen: 'calendar', match: ['calendar', 'matchcenter'],
       subTabs: [{ id: 'calendar', label: 'Calendar' }, { id: 'matchcenter', label: 'Match' }] },
     { id: 'competitions', label: 'Competitions', icon: 'competitions', section: 'competition', screen: 'leagueOverview',
-      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'leagueWorld', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
+      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
       subTabs: [
         { id: 'leagueOverview', label: 'Overview' },
         { id: 'standings', label: 'Standings' },
@@ -64,10 +64,10 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
         { id: 'leagueTeamStats', label: 'Team Stats' },
         { id: 'leagueTransactions', label: 'Transactions' },
         { id: 'leagueScoreboard', label: 'Scoreboard' },
-        { id: 'leagueWorld', label: 'World' },
         { id: 'leagueHistory', label: 'History' },
         ...compExtra,
       ] },
+    { id: 'world', label: 'World', icon: 'world', section: 'competition', screen: 'world', match: ['world'] },
     { id: 'scouting', label: 'Scouting', icon: 'scouting', section: 'competition', screen: 'scouting', match: ['scouting'] },
     { id: 'transfers', label: 'Transfers', icon: 'transfers', section: 'competition', screen: 'trades', match: ['trades'] },
     { id: 'clubInfo', label: 'Club Info', icon: 'clubInfo', section: 'club', screen: 'teamInfo', match: ['teamInfo', 'teamHistory'],

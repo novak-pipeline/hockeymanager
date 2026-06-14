@@ -15,6 +15,7 @@ const PATHS: Record<IconKey, JSX.Element> = {
   devCenter: <><path d="M4 19c4-1 5-5 5-9" /><path d="M9 10c4 0 7-2 9-6c-5 0-9 1-9 6z" /><path d="M9 13c-3 0-5-2-6-5c4 0 6 1 6 5z" /></>,
   schedule: <><rect x="3" y="4.5" width="18" height="16" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="8" y1="2.5" x2="8" y2="6.5" /><line x1="16" y1="2.5" x2="16" y2="6.5" /></>,
   competitions: <><path d="M7 4h10v3a5 5 0 0 1-10 0z" /><path d="M7 5H4v1a3 3 0 0 0 3 3M17 5h3v1a3 3 0 0 1-3 3" /><line x1="12" y1="12" x2="12" y2="17" /><path d="M8.5 20h7l-.7-3h-5.6z" /></>,
+  world: <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="4.5" y1="7.5" x2="19.5" y2="7.5" /><line x1="4.5" y1="16.5" x2="19.5" y2="16.5" /></>,
   scouting: <><circle cx="10.5" cy="10.5" r="6" /><line x1="15" y1="15" x2="20" y2="20" /></>,
   transfers: <><path d="M7 7h12l-3-3" /><path d="M7 7l3 3" /><path d="M17 17H5l3 3" /><path d="M17 17l-3-3" /></>,
   clubInfo: <><path d="M12 3l8 3v6c0 5-3.5 8-8 9c-4.5-1-8-4-8-9V6z" /><line x1="12" y1="10" x2="12" y2="15" /><line x1="12" y1="7.5" x2="12" y2="7.51" /></>,
