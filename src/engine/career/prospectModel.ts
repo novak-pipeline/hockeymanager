@@ -47,8 +47,9 @@ export interface ProjectInput {
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 const logistic = (x: number, mid: number, slope: number): number => 1 / (1 + Math.exp(-(x - mid) / slope))
 
-/** Deterministic [-1, 1) from a string (FNV-1a). */
-function hashSigned(s: string): number {
+/** Deterministic [-1, 1) from a string (FNV-1a). Exported for reuse (consensus
+ *  scouting error on the draft board). */
+export function hashSigned(s: string): number {
   let h = 0x811c9dc5
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) }
   return ((h >>> 0) / 0xffffffff) * 2 - 1
@@ -72,7 +73,13 @@ export function projectProspect(input: ProjectInput): ProspectProjection {
   const noisePts = (input.noise ?? 0) * hashSigned(input.seed ?? `${ppg}:${age}`)
   const projectedPeak = Math.max(0, nhleNow * peakMultiplier(age) + noisePts)
 
-  // Defencemen reach NHL-regular / star status at lower point totals.
+  // Outcome thresholds anchored to NHL production tiers (points/82 at peak),
+  // not tuned by feel. A forward who projects to a 4th-line/bottom-six peak
+  // (~24 pts) is a coin-flip NHL regular; a ~58-pt peak (solid top-six) is the
+  // "star"/impact midpoint. Defencemen produce less for the same value, so both
+  // midpoints drop: ~16 pts = borderline bottom-pair regular, ~40 pts = clear
+  // top-pair/PP-quarterback impact. Slopes set so the curve spans roughly one
+  // production tier (≈ ±1 line) from 12%→88%.
   const nhlerMid = isD ? 16 : 24
   const nhlerSlope = isD ? 6 : 8
   const starMid = isD ? 40 : 58

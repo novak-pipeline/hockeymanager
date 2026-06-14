@@ -156,7 +156,7 @@ function devArc(id: string): number {
   h ^= 0x9e3779b9; h = Math.imul(h, 0x85ebca6b)
   const b = ((h >>> 0) / 0xffffffff)
   const t = (a + b) / 2 // triangular, centered at 0.5
-  return 0.55 + t * 0.85 // [0.55, 1.40]
+  return 0.40 + t * 1.15 // [0.40, 1.55] — wide enough for real bust/boom variance
 }
 
 function driftYouthCeiling(
