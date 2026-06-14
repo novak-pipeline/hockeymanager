@@ -585,30 +585,31 @@ a:hover { text-decoration: underline; }
 /* ── left navigation rail ── */
 .sidenav {
   flex-shrink: 0;
-  width: 208px;
-  background: var(--bg1);
+  width: 210px;
+  background: var(--bg0, var(--bg1));
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 16px rgba(0,0,0,0.35);
   z-index: 20;
-  transition: width 0.15s ease;
+  transition: width 0.14s ease;
 }
-.sidenav.collapsed { width: 52px; }
+.sidenav.collapsed { width: 50px; }
 
 .sidenav-collapse {
   flex-shrink: 0;
-  height: 32px;
+  height: 30px;
   border: none;
   border-bottom: 1px solid var(--line);
   background: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   text-align: right;
-  padding: 0 14px;
+  padding: 0 16px;
+  opacity: 0.6;
 }
-.sidenav-collapse:hover { color: var(--text); }
+.sidenav-collapse:hover { color: var(--text); opacity: 1; }
+.sidenav.collapsed .sidenav-collapse { text-align: center; padding: 0; }
 
 .sidenav-scroll {
   flex: 1;
@@ -640,11 +641,15 @@ a:hover { text-decoration: underline; }
 .sidenav-section:hover { background: var(--bg2); }
 .sidenav-section.active {
   border-left-color: var(--accent);
-  background: rgba(139,92,246,0.10);
-  color: var(--violet-h, #b39dff);
+  background: var(--violet-dim);
+  color: var(--violet-h);
 }
 .sidenav-icon { width: 18px; text-align: center; flex-shrink: 0; font-size: 14px; }
 .sidenav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+/* Collapsed rail: centre the icons, drop labels/sub-tabs (handled in JSX). */
+.sidenav.collapsed .sidenav-section { justify-content: center; gap: 0; padding: 10px 0; }
+.sidenav.collapsed .sidenav-divider { margin: var(--sp-2) 12px; }
 
 .sidenav-sub {
   display: flex;

@@ -88,6 +88,39 @@ export function teamColorHex(color: number): string {
   return toHex(adj.r, adj.g, adj.b)
 }
 
+/**
+ * Global team theme: recolours the whole app accent (the violet tokens) to the
+ * MANAGED team's colours. Picks the more accent-able of primary/secondary (a
+ * very dark primary like Pittsburgh's black falls back to the gold secondary),
+ * brightens it for legibility, and overrides --violet / --violet-h / --accent.
+ * Apply the returned object as inline style on the app shell root.
+ */
+export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
+  const colors = useTeamColors(teamId)
+  return useMemo(() => {
+    if (!colors) return undefined
+    const p = intToRgb(colors.primary)
+    // A very dark primary reads as black on our dark UI — use the secondary instead.
+    const chosen = luminance(p.r, p.g, p.b) < 0.22 ? colors.secondary : colors.primary
+    const { r, g, b } = intToRgb(chosen)
+    const a = ensureReadable(r, g, b)
+    const hex = toHex(a.r, a.g, a.b)
+    const hi = toHex(
+      Math.round(a.r + (255 - a.r) * 0.38),
+      Math.round(a.g + (255 - a.g) * 0.38),
+      Math.round(a.b + (255 - a.b) * 0.38),
+    )
+    return {
+      '--violet': hex,
+      '--violet-h': hi,
+      '--violet-dim': `rgba(${a.r},${a.g},${a.b},0.15)`,
+      '--violet-glow': `0 4px 24px rgba(${a.r},${a.g},${a.b},0.12)`,
+      '--accent': hex,
+      '--team-primary': hex,
+    } as CSSProperties
+  }, [colors])
+}
+
 interface ThemeScopeProps {
   colors?: { primary: number; secondary: number }
   children: ReactNode

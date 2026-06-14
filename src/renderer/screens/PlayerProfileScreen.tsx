@@ -830,6 +830,10 @@ function TabProfile({
               </div>
             </div>
           </Panel>
+
+          <Panel title={`This Season — ${d.seasons[0]?.year ?? ''}`}>
+            <ThisSeasonStrip season={d.seasons[0]} isGoalie={isGoalie} />
+          </Panel>
         </div>
 
         {/* ── CENTER: attributes (3 cols) + meta ── */}
@@ -913,11 +917,6 @@ function TabProfile({
           {d.mindset && <MindsetPanel mindset={d.mindset} />}
         </div>
       </div>
-
-      {/* ════ THIS SEASON (current only — full history lives in the History tab) ════ */}
-      <Panel title={`This Season — ${d.seasons[0]?.year ?? ''}`}>
-        <ThisSeasonStrip season={d.seasons[0]} isGoalie={isGoalie} />
-      </Panel>
 
       {/* ════ Interview (GM action) ════ */}
       {d.interview && (

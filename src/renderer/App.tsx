@@ -9,6 +9,7 @@ import { NavContext, type NavApi, type NavParams, type ScreenId } from './compon
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
 import { SideNav } from './components/SideNav'
+import { useGlobalTeamTheme } from './components/ThemeScope'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
@@ -133,6 +134,7 @@ export function App(): JSX.Element {
 
 function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const client = useClient()
+  const teamTheme = useGlobalTeamTheme(props.team.teamId)
   const [nav, setNav] = useState<{ screen: ScreenId; params: NavParams }>({
     screen: 'dashboard',
     params: {},
@@ -314,7 +316,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             <MatchViewer game={watched} onClose={closeViewer} />
           </div>
         ) : (
-          <div className="app-shell">
+          <div className="app-shell" style={teamTheme}>
             <PressConference />
             <div className="app-body">
               <SideNav dashboard={dashboard} />
