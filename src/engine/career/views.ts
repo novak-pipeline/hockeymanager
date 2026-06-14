@@ -1537,6 +1537,11 @@ export interface ClubInfoView {
   confidenceLabel: string
   /** Top rivals (most intense first). */
   rivals: Array<{ teamId: string; abbreviation: string; label: string }>
+  /** Home arena (from the source DB). */
+  arena?: string
+  arenaCapacity?: number
+  /** Retired jersey numbers (from the source DB). */
+  retiredNumbers?: Array<{ number: number; player: string }>
 }
 
 /* ────────────────────────── rivalries view ────────────────────────── */

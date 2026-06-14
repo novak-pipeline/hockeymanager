@@ -5479,6 +5479,9 @@ export class Career {
       targetRank: board.targetRank,
       confidenceLabel: board.confidenceLabel,
       rivals,
+      ...(team.arena !== undefined ? { arena: team.arena } : {}),
+      ...(team.arenaCapacity !== undefined ? { arenaCapacity: team.arenaCapacity } : {}),
+      ...(team.retiredNumbers !== undefined ? { retiredNumbers: team.retiredNumbers } : {}),
     }
   }
 

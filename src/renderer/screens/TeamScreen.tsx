@@ -652,6 +652,29 @@ function TeamInfoTab(): JSX.Element {
             </div>
           </Panel>
 
+          {(club.arena || (club.retiredNumbers && club.retiredNumbers.length > 0)) && (
+            <Panel title="Arena & Honours">
+              {club.arena && (
+                <div className="row-between small"><span className="muted">Home arena</span><strong>{club.arena}</strong></div>
+              )}
+              {club.arenaCapacity !== undefined && club.arenaCapacity > 0 && (
+                <div className="row-between small"><span className="muted">Capacity</span><strong>{club.arenaCapacity.toLocaleString()}</strong></div>
+              )}
+              {club.retiredNumbers && club.retiredNumbers.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="pp-band-label">Retired numbers</div>
+                  <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                    {club.retiredNumbers.slice().sort((a, b) => a.number - b.number).map((r) => (
+                      <span key={r.number} className="chip" style={{ fontSize: 11 }} title={r.player}>
+                        #{r.number} {r.player}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Panel>
+          )}
+
           <Panel title="Vision & Objectives">
             <div className="list">
               <div className="row-between small"><span className="muted">Board mandate</span><strong>{club.mandate}</strong></div>

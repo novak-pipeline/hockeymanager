@@ -318,6 +318,12 @@ export interface ModTeam {
    * (e.g. no owner in the import) are synthesised so every slot is always filled.
    */
   staff?: ModStaff[]
+  /** Home arena name from the source DB. */
+  arena?: string
+  /** Home arena capacity from the source DB. */
+  arenaCapacity?: number
+  /** Retired jersey numbers from the source DB. */
+  retiredNumbers?: Array<{ number: number; player: string }>
 }
 
 export interface ModDivision {
@@ -1240,7 +1246,10 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           },
           staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
           externalId: modTeam.externalId,
-          ...(modTeam.logoId !== undefined ? { logoId: modTeam.logoId } : {})
+          ...(modTeam.logoId !== undefined ? { logoId: modTeam.logoId } : {}),
+          ...(modTeam.arena !== undefined ? { arena: modTeam.arena } : {}),
+          ...(modTeam.arenaCapacity !== undefined ? { arenaCapacity: modTeam.arenaCapacity } : {}),
+          ...(modTeam.retiredNumbers !== undefined ? { retiredNumbers: modTeam.retiredNumbers } : {})
         }
 
         teams.set(teamId, team)

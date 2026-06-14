@@ -75,4 +75,10 @@ export interface Team {
    * Drives call-up/send-down routing and UI grouping.
    */
   affiliateId?: TeamId
+  /** Home arena name from the source DB (display-only). */
+  arena?: string
+  /** Home arena capacity from the source DB (display-only). */
+  arenaCapacity?: number
+  /** Retired jersey numbers from the source DB (display-only). */
+  retiredNumbers?: Array<{ number: number; player: string }>
 }

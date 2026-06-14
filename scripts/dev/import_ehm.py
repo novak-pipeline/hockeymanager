@@ -543,6 +543,48 @@ def load_draft_history(path, keep_keys):
     return out
 
 
+def load_clubs(path):
+    """clubs.xlsx (1 header row) -> full-name(lower) -> {arena, capacity} for NHL clubs.
+    Cols: Name1 Abbreviation4 Division5 Arena13 MaxAttendance19 Cash20 PlayerBudget21."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it)
+    out = {}
+    for r in it:
+        if str(r[5] or "").strip() != "National Hockey League":
+            continue
+        name = str(r[1] or "").strip()
+        if not name:
+            continue
+        out[name.lower()] = {
+            "arena": str(r[13] or "").strip(),
+            "capacity": to_int(r[19], 0),
+        }
+    wb.close()
+    return out
+
+
+def load_retired_numbers(path):
+    """retired_numbers.xlsx (2 header rows) -> full-club-name(lower) -> [{number, player}]."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it); next(it)
+    out = {}
+    for r in it:
+        club = str(r[0] or "").strip()
+        num = to_int(r[1], 0)
+        player = str(r[2] or "").strip()
+        if not club or num <= 0:
+            continue
+        out.setdefault(club.lower(), []).append({"number": num, "player": player})
+    wb.close()
+    return out
+
+
 def find_career_history(input_xlsx):
     """Locate player_career_history.xlsx: sibling of the input, the repo's
     'mods/spreadsheet exports' folder, or the EHM_CAREER_HISTORY env override."""
@@ -811,6 +853,25 @@ def main():
     # Build reverse lookup: NHL abbreviation -> NHL nickname key.
     abbr_to_nick = {v[1]: k for k, v in NHL.items()}
 
+    # Club arena/capacity + retired numbers from the DB (matched by full name
+    # ending in our NHL nickname, e.g. "Pittsburgh Penguins" -> "Penguins").
+    clubs_path = _sibling(xlsx, "clubs.xlsx", "EHM_CLUBS")
+    retired_path = _sibling(xlsx, "retired_numbers.xlsx", "EHM_RETIRED")
+    clubs = load_clubs(clubs_path) if clubs_path else {}
+    retired = load_retired_numbers(retired_path) if retired_path else {}
+    def club_meta(nick):
+        nl = nick.lower()
+        for name, meta in clubs.items():
+            if name.endswith(nl):
+                return meta
+        return None
+    def club_retired(nick):
+        nl = nick.lower()
+        for name, lst in retired.items():
+            if name.endswith(nl):
+                return lst
+        return None
+
     # Assemble conferences/divisions/teams; per NHL team take a sensible roster.
     confs = {}
     faces_out = {}
@@ -893,6 +954,14 @@ def main():
             team_obj["affiliate"] = affiliate_obj
         if clean_staff:
             team_obj["staff"] = clean_staff
+        meta = club_meta(nick)
+        if meta and meta.get("arena"):
+            team_obj["arena"] = meta["arena"]
+            if meta.get("capacity"):
+                team_obj["arenaCapacity"] = meta["capacity"]
+        rn = club_retired(nick)
+        if rn:
+            team_obj["retiredNumbers"] = rn
 
         confs.setdefault(conf, {}).setdefault(div, []).append(team_obj)
 
