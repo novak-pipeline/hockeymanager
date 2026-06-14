@@ -22,6 +22,7 @@ import { StandingsScreen } from './StandingsScreen'
 import { StatsScreen } from './StatsScreen'
 import { LeagueStatsTableScreen } from './LeagueStatsTableScreen'
 import { HistoryScreen } from './HistoryScreen'
+import { CompetitionsScreen } from './CompetitionsScreen'
 import { ScoutingScreen } from './ScoutingScreen'
 import { DraftScreen } from './DraftScreen'
 import { OffseasonScreen } from './OffseasonScreen'
@@ -38,6 +39,7 @@ type LeagueTab =
   | 'leagueTransactions'
   | 'leagueScoreboard'
   | 'leagueHistory'
+  | 'leagueWorld'
   | 'scouting'
   | 'draft'
   | 'offseason'
@@ -77,6 +79,7 @@ export function LeagueScreen(props: { tab: LeagueTab }): JSX.Element {
     case 'leagueTransactions': return <LeagueTransactionsTab />
     case 'leagueScoreboard':   return <LeagueScoreboardTab />
     case 'leagueHistory':      return <HistoryScreen />
+    case 'leagueWorld':        return <CompetitionsScreen />
     case 'scouting':           return <ScoutingScreen />
     case 'draft':              return <DraftScreen />
     case 'offseason':          return <OffseasonScreen />

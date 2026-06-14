@@ -55,7 +55,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
     { id: 'schedule', label: 'Schedule', icon: 'schedule', section: 'competition', screen: 'calendar', match: ['calendar', 'matchcenter'],
       subTabs: [{ id: 'calendar', label: 'Calendar' }, { id: 'matchcenter', label: 'Match' }] },
     { id: 'competitions', label: 'Competitions', icon: 'competitions', section: 'competition', screen: 'leagueOverview',
-      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
+      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'leagueWorld', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
       subTabs: [
         { id: 'leagueOverview', label: 'Overview' },
         { id: 'standings', label: 'Standings' },
@@ -64,6 +64,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
         { id: 'leagueTeamStats', label: 'Team Stats' },
         { id: 'leagueTransactions', label: 'Transactions' },
         { id: 'leagueScoreboard', label: 'Scoreboard' },
+        { id: 'leagueWorld', label: 'World' },
         { id: 'leagueHistory', label: 'History' },
         ...compExtra,
       ] },

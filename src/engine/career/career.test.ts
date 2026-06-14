@@ -1540,6 +1540,25 @@ describe('Career — wider-world quick-sim', () => {
     expect(shl.standings.reduce((s, st) => s + st.gamesPlayed, 0)).toBeGreaterThan(0)
   })
 
+  it('getCompetitions returns leagues with standings and (after sim) scorers', () => {
+    const data = withCompetitions(34)
+    const career = new Career(data, 34, data.league.teams[7]!)
+    for (let i = 0; i < 40; i++) career.advanceDay()
+    const view = career.getCompetitions()
+    expect(view.competitions.length).toBeGreaterThan(0)
+    const shl = view.competitions.find((c) => c.id === 'shl')!
+    expect(shl.abbrev).toBe('SHL')
+    expect(shl.strength).toBeGreaterThan(0)
+    expect(shl.standings.length).toBe(6)
+    // Standings sorted best-first by points.
+    for (let i = 1; i < shl.standings.length; i++) {
+      expect(shl.standings[i - 1]!.points).toBeGreaterThanOrEqual(shl.standings[i]!.points)
+    }
+    // Simulated tier accrues scorers.
+    expect(shl.scorers.length).toBeGreaterThan(0)
+    expect(shl.scorers[0]!.points).toBeGreaterThanOrEqual(shl.scorers[shl.scorers.length - 1]!.points)
+  })
+
   it('persists wider-world standings + stats across save/load', () => {
     const data = withCompetitions(32)
     const career = new Career(data, 32, data.league.teams[7]!)

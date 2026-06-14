@@ -143,6 +143,10 @@ export class SimClient {
     return this.send({ type: 'getStandings' })
   }
 
+  getCompetitions(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCompetitions' })
+  }
+
   getStats(): Promise<WorkerResponse> {
     return this.send({ type: 'getStats' })
   }

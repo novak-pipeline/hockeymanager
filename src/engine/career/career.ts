@@ -289,6 +289,10 @@ import {
   type CareerPhase,
   type CareerSnapshot,
   type CompareRadarView,
+  type CompetitionsView,
+  type CompetitionView,
+  type CompetitionStandingRowView,
+  type CompetitionScorerRowView,
   type DashboardView,
   type DraftView,
   type FinanceView,
@@ -4876,6 +4880,63 @@ export class Career {
 
   getStandings(): StandingsView {
     return buildStandingsView(this.ctx())
+  }
+
+  /** The wider-world competitions: standings + top scorers per league (#95). */
+  getCompetitions(): CompetitionsView {
+    const comps = this.data.league.competitions ?? []
+    const out: CompetitionView[] = comps.map((c) => {
+      // playerId -> team abbreviation, for scorer rows.
+      const teamAbbrByPlayer = new Map<string, string>()
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) teamAbbrByPlayer.set(pid as string, t.abbreviation)
+      }
+      const standings: CompetitionStandingRowView[] = sortStandings([...c.standings]).map((s) => {
+        const t = this.data.teams.get(s.teamId)
+        return {
+          teamId: s.teamId as string,
+          abbreviation: t?.abbreviation ?? '?',
+          name: t?.name ?? '?',
+          gamesPlayed: s.gamesPlayed,
+          wins: s.wins,
+          losses: s.losses,
+          overtimeLosses: s.overtimeLosses,
+          points: s.points,
+          goalsFor: s.goalsFor,
+          goalsAgainst: s.goalsAgainst,
+          colors: t?.colors ?? { primary: 0x888888, secondary: 0xcccccc },
+        }
+      })
+      const scorers: CompetitionScorerRowView[] = [...this.worldSim.totals.entries()]
+        .filter(([pid]) => teamAbbrByPlayer.has(pid as string))
+        .map(([pid, st]) => {
+          const p = this.data.players.get(pid)
+          return {
+            playerId: pid as string,
+            name: p?.name ?? '?',
+            teamAbbr: teamAbbrByPlayer.get(pid as string) ?? '?',
+            gamesPlayed: this.worldSim.gp.get(pid) ?? 0,
+            goals: st.goals,
+            assists: st.assists,
+            points: st.goals + st.assists,
+          }
+        })
+        .sort((a, b) => b.points - a.points || b.goals - a.goals)
+        .slice(0, 10)
+      return {
+        id: c.id,
+        name: c.name,
+        abbrev: c.abbrev,
+        nation: c.nation,
+        tier: c.tier,
+        strength: c.strength,
+        standings,
+        scorers,
+      }
+    })
+    return { competitions: out }
   }
 
   getStats(): StatsView {

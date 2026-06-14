@@ -623,6 +623,49 @@ export interface LeaderRowView extends PlayerBadge {
   value: number
 }
 
+/* ──── wider-world competitions (#95) ──── */
+
+export interface CompetitionStandingRowView {
+  teamId: string
+  abbreviation: string
+  name: string
+  gamesPlayed: number
+  wins: number
+  losses: number
+  overtimeLosses: number
+  points: number
+  goalsFor: number
+  goalsAgainst: number
+  colors: { primary: number; secondary: number }
+}
+
+export interface CompetitionScorerRowView {
+  playerId: string
+  name: string
+  teamAbbr: string
+  gamesPlayed: number
+  goals: number
+  assists: number
+  points: number
+}
+
+export interface CompetitionView {
+  id: string
+  name: string
+  abbrev: string
+  nation: string
+  tier: 'active' | 'simulated' | 'background'
+  /** NHL-equivalency strength factor (0–1; NHL = 1). */
+  strength: number
+  standings: CompetitionStandingRowView[]
+  /** Top scorers (simulated tier only; empty for background leagues). */
+  scorers: CompetitionScorerRowView[]
+}
+
+export interface CompetitionsView {
+  competitions: CompetitionView[]
+}
+
 export interface StatsView {
   points: LeaderRowView[]
   goals: LeaderRowView[]
