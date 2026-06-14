@@ -660,11 +660,23 @@ COMP_LEAGUES = {
     "Deutsche Eishockey Liga": "DEL",
     "ECHL": "ECHL",
     "Swedish HockeyAllsvenskan": "HA",
+    # CHL major-junior: Quebec league (Villeneuve, Shilov, etc. play here).
+    "Québec Maritimes Junior Hockey League": "QMJHL",
     # NCAA Division I — clubs file under this umbrella name (where US college
     # draft prospects like Gavin McKenna play).
     "National Collegiate Athletic Association": "NCAA",
 }
 COMP_BY_LOWER = {k.lower(): k for k in COMP_LEAGUES}
+
+# Leagues the DB splits across "… <Region> Division" sub-rows. We match these by
+# prefix so the FULL league is captured (the umbrella row alone misses ~half the
+# clubs). Maps lowercase prefix -> canonical league name. NCAA stays exact-only
+# (prefix would drag in Division II/III).
+PREFIX_LEAGUES = {
+    "ontario hockey league": "Ontario Hockey League",
+    "western hockey league": "Western Hockey League",
+    "québec maritimes junior hockey league": "Québec Maritimes Junior Hockey League",
+}
 
 # Deterministic team color palette ('#RRGGBB' primary, secondary) for imported
 # competition clubs (the source DB has no per-club colors).
@@ -677,9 +689,19 @@ COMP_PALETTE = [
 
 
 def match_comp_league(div):
-    """Canonical whitelisted league name for a club's Division (exact match), or
-    None. Exact-only avoids pulling in sub-tiers like 'NCAA … Division III'."""
-    return COMP_BY_LOWER.get(str(div or "").strip().lower())
+    """Canonical whitelisted league name for a club's Division, or None.
+    Exact match first (covers NCAA without dragging in Division II/III); then a
+    prefix match for leagues the DB splits into '… <Region> Division' sub-rows
+    (OHL/WHL/QMJHL), so the full league is captured."""
+    s = str(div or "").strip()
+    exact = COMP_BY_LOWER.get(s.lower())
+    if exact:
+        return exact
+    low = s.lower()
+    for prefix, proper in PREFIX_LEAGUES.items():
+        if low.startswith(prefix):
+            return proper
+    return None
 
 
 def load_competition_meta(path):
