@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { analystRank, type RankInput } from './draftRankings'
+import { analystRank, draftEligibility, type RankInput } from './draftRankings'
+
+describe('draftEligibility', () => {
+  it('buckets by age and excludes drafted / out-of-range', () => {
+    expect(draftEligibility(13, false)).toBeNull()
+    expect(draftEligibility(14, false)).toBe('radar')
+    expect(draftEligibility(16, false)).toBe('radar')
+    expect(draftEligibility(17, false)).toBe('eligible')
+    expect(draftEligibility(18, false)).toBe('eligible')
+    expect(draftEligibility(19, false)).toBe('reentry')
+    expect(draftEligibility(20, false)).toBe('reentry')
+    expect(draftEligibility(21, false)).toBeNull()
+    expect(draftEligibility(18, true)).toBeNull() // already drafted
+  })
+})
 
 const pool: RankInput[] = Array.from({ length: 40 }, (_, i) => ({
   id: `p${i}`,

@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystRank, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import {
   createArc,
   createInitialArcsState,
@@ -5105,43 +5105,54 @@ export class Career {
       row: Omit<DraftRankRowView, 'rank'>
       input: RankInput
     }
-    const cands = new Map<string, Cand>()
+    const board = new Map<string, Cand>() // eligible + reentry → analyst-ranked
+    const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = [] // 14–16 watch list
     for (const c of comps) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
         if (!t) continue
         for (const pid of t.roster) {
           const p = this.data.players.get(pid)
-          if (!p || p.nhlDrafted || p.age > 18) continue // draft-eligible cohort
+          if (!p) continue
+          const elig = draftEligibility(p.age, !!p.nhlDrafted)
+          if (elig === null) continue
           const id = p.id as string
-          cands.set(id, {
-            input: { id, ceiling: agedPotential(p), current: ratedOverall(p) },
-            row: {
-              playerId: id,
-              name: p.name,
-              teamId: t.id as string,
-              teamAbbr: t.abbreviation,
-              leagueAbbr: c.abbrev,
-              nation: p.nationality ?? '',
-              position: p.position,
-              age: p.age,
-              currentStars: overallToStars(ratedOverall(p)),
-              potentialStars: overallToStars(agedPotential(p)),
-            },
-          })
+          const row: Omit<DraftRankRowView, 'rank'> = {
+            playerId: id,
+            name: p.name,
+            teamId: t.id as string,
+            teamAbbr: t.abbreviation,
+            leagueAbbr: c.abbrev,
+            nation: p.nationality ?? '',
+            position: p.position,
+            age: p.age,
+            eligibility: elig,
+            currentStars: overallToStars(ratedOverall(p)),
+            potentialStars: overallToStars(agedPotential(p)),
+          }
+          if (elig === 'radar') {
+            radarRows.push(row)
+          } else {
+            board.set(id, { input: { id, ceiling: agedPotential(p), current: ratedOverall(p) }, row })
+          }
         }
       }
     }
-    const ordered = analystRank([...cands.values()].map((c) => c.input), phase)
+    const ordered = analystRank([...board.values()].map((c) => c.input), phase)
     const rankings: DraftRankRowView[] = ordered.slice(0, 64).map((id, i) => ({
       rank: i + 1,
-      ...cands.get(id)!.row,
+      ...board.get(id)!.row,
     }))
+    // Radar: youngest standouts by projected ceiling — they're "on the radar".
+    const radar: DraftRankRowView[] = radarRows
+      .sort((a, b) => b.potentialStars - a.potentialStars || b.currentStars - a.currentStars)
+      .slice(0, 20)
+      .map((row, i) => ({ rank: i + 1, ...row }))
     const phaseLabel =
       phase === 'preliminary' ? 'Preliminary ranking'
       : phase === 'midseason' ? 'Mid-season ranking'
       : 'Final pre-draft ranking'
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings }
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar }
   }
 
   getStats(): StatsView {

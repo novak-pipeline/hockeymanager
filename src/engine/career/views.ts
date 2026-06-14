@@ -744,6 +744,8 @@ export interface DraftRankRowView {
   nation: string
   position: string
   age: number
+  /** 'eligible' (17–18) | 'reentry' (19–20 undrafted) | 'radar' (14–16 watch). */
+  eligibility: 'eligible' | 'reentry' | 'radar'
   currentStars: number
   potentialStars: number
 }
@@ -755,7 +757,10 @@ export interface DraftRankingsView {
   phaseLabel: string
   /** Draft year these prospects are eligible for. */
   draftYear: number
+  /** The draft board proper — draft-eligible + re-entry, analyst-ranked. */
   rankings: DraftRankRowView[]
+  /** Younger talent (14–16) on the radar but not yet draft-eligible. */
+  radar: DraftRankRowView[]
 }
 
 export interface StatsView {

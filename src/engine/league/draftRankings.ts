@@ -12,6 +12,28 @@
  */
 export type DraftRankPhase = 'preliminary' | 'midseason' | 'final'
 
+/**
+ * Draft status of a young player relative to the upcoming entry draft. We scout
+ * from age 14, but only ~draft-age players are actually selectable:
+ *  - 'radar'    : 14–16, too young to draft — on the radar / watch list only.
+ *  - 'eligible' : 17–18, first-time draft-eligible — the board's focus.
+ *  - 'reentry'  : 19–20 and still undrafted — re-entry eligible.
+ * Already-drafted or 21+ undrafted players return null (off the board).
+ *
+ * (Age is our season-coarse proxy for the real "turns 18 by Sep 15 of the draft
+ * year" birthday rule; precise DOB handling can refine this later.)
+ */
+export type DraftEligibility = 'radar' | 'eligible' | 'reentry'
+
+export function draftEligibility(age: number, drafted: boolean): DraftEligibility | null {
+  if (drafted) return null
+  if (age <= 13) return null
+  if (age <= 16) return 'radar'
+  if (age <= 18) return 'eligible'
+  if (age <= 20) return 'reentry'
+  return null
+}
+
 export interface RankInput {
   id: string
   /** Projected ceiling, 0–100. */

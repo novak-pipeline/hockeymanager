@@ -134,13 +134,53 @@ function DraftBoardPanel(): JSX.Element {
               {rows.map((p) => (
                 <tr key={p.playerId}>
                   <td className="muted" style={{ textAlign: 'center', fontWeight: 700 }}>{p.rank}</td>
-                  <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                  <td>
+                    <PlayerLink playerId={p.playerId} name={p.name} />
+                    {p.eligibility === 'reentry' && (
+                      <span className="muted small" title="Re-entry eligible (passed over)"> · RE</span>
+                    )}
+                  </td>
                   <td style={{ textAlign: 'center' }}>{p.age}</td>
                   <td style={{ textAlign: 'center' }}>{p.position}</td>
                   <td className="muted">{p.nation}</td>
                   <td className="muted">{p.leagueAbbr}</td>
                   <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
                   <td><Stars value={p.currentStars} /></td>
+                  <td><Stars value={p.potentialStars} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+
+      {data && data.radar.length > 0 && (
+        <Panel title="On the radar — U17 watch list (not yet draft-eligible)">
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            Scouted early (14–16) and tracked for future drafts — ranked by projected ceiling.
+          </div>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th style={{ textAlign: 'left' }}>Player</th>
+                <th>Age</th><th>Pos</th>
+                <th style={{ textAlign: 'left' }}>Nation</th>
+                <th style={{ textAlign: 'left' }}>League</th>
+                <th style={{ textAlign: 'left' }}>Team</th>
+                <th style={{ textAlign: 'left' }}>Ceiling</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.radar.map((p) => (
+                <tr key={p.playerId}>
+                  <td className="muted" style={{ textAlign: 'center' }}>{p.rank}</td>
+                  <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                  <td style={{ textAlign: 'center' }}>{p.age}</td>
+                  <td style={{ textAlign: 'center' }}>{p.position}</td>
+                  <td className="muted">{p.nation}</td>
+                  <td className="muted">{p.leagueAbbr}</td>
+                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
                   <td><Stars value={p.potentialStars} /></td>
                 </tr>
               ))}

@@ -1606,8 +1606,17 @@ describe('Career — wider-world quick-sim', () => {
     expect(view.rankings.length).toBeGreaterThan(0)
     view.rankings.forEach((r, i) => {
       expect(r.rank).toBe(i + 1) // ranks are 1..n in order
-      expect(r.age).toBeLessThanOrEqual(18)
+      // The board is draft-eligible (17–18) or re-entry (19–20), never radar.
+      expect(['eligible', 'reentry']).toContain(r.eligibility)
+      expect(r.age).toBeGreaterThanOrEqual(17)
+      expect(r.age).toBeLessThanOrEqual(20)
       expect(r.leagueAbbr).toBeTruthy()
+    })
+    // Radar = 14–16 watch-list only.
+    view.radar.forEach((r) => {
+      expect(r.eligibility).toBe('radar')
+      expect(r.age).toBeGreaterThanOrEqual(14)
+      expect(r.age).toBeLessThanOrEqual(16)
     })
   })
 
