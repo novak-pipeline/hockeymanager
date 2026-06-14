@@ -111,6 +111,7 @@ export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
       Math.round(a.b + (255 - a.b) * 0.38),
     )
     return {
+      '--accent-rgb': `${a.r}, ${a.g}, ${a.b}`,
       '--violet': hex,
       '--violet-h': hi,
       '--violet-dim': `rgba(${a.r},${a.g},${a.b},0.15)`,

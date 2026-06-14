@@ -422,7 +422,7 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
               className="btn btn-ghost"
               style={{
                 width: '100%', textAlign: 'left', justifyContent: 'flex-start',
-                background: current?.playerId === p.playerId ? 'rgba(139,92,246,0.14)' : undefined,
+                background: current?.playerId === p.playerId ? 'rgba(var(--accent-rgb),0.14)' : undefined,
                 borderColor: current?.playerId === p.playerId ? 'var(--accent)' : undefined,
                 gap: 'var(--sp-3)', marginBottom: 2,
               }}
@@ -517,7 +517,7 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
                 fontSize: 12,
                 borderRadius: 0,
                 borderColor: 'transparent',
-                background: current?.playerId === p.playerId ? 'rgba(139,92,246,0.18)' : 'transparent',
+                background: current?.playerId === p.playerId ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                 fontWeight: current?.playerId === p.playerId ? 600 : 400,
               }}
               onClick={() => { onSelect(p); setOpen(false) }}
@@ -608,7 +608,7 @@ function SlotButton({
         padding: '6px 8px',
         gap: 2,
         background: dragOver
-          ? 'rgba(139,92,246,0.18)'
+          ? 'rgba(var(--accent-rgb),0.18)'
           : p
             ? 'var(--bg2)'
             : 'var(--bg0)',
@@ -1410,7 +1410,7 @@ export function TacticsScreen(): JSX.Element {
                   border: scratchDragOver
                     ? '1px solid var(--accent)'
                     : '1px solid var(--line)',
-                  background: scratchDragOver ? 'rgba(139,92,246,0.08)' : 'var(--bg1)',
+                  background: scratchDragOver ? 'rgba(var(--accent-rgb),0.08)' : 'var(--bg1)',
                   padding: 'var(--sp-4)',
                   transition: 'border-color 0.12s, background 0.12s',
                 }}
@@ -1785,7 +1785,7 @@ export function TacticsScreen(): JSX.Element {
                           gap: 6,
                           padding: '4px 8px',
                           borderColor: hasInstructions ? 'var(--accent)' : 'transparent',
-                          background: hasInstructions ? 'rgba(139,92,246,0.08)' : undefined,
+                          background: hasInstructions ? 'rgba(var(--accent-rgb),0.08)' : undefined,
                           width: '100%',
                         }}
                         onClick={() => setPtPlayer(p)}

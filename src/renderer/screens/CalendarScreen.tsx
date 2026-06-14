@@ -295,7 +295,7 @@ function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
     height: 118,
     border: '1px solid var(--line)',
     background: inMonth
-      ? hasEntries ? 'rgba(139,92,246,0.04)' : 'var(--bg1)'
+      ? hasEntries ? 'rgba(var(--accent-rgb),0.04)' : 'var(--bg1)'
       : 'var(--bg0)',
   }
 }
@@ -322,8 +322,8 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
         gap: 1,
         padding: '2px 3px',
         borderRadius: 3,
-        background: isNext ? 'rgba(139,92,246,0.18)' : 'transparent',
-        border: isNext ? '1px solid rgba(139,92,246,0.5)' : '1px solid transparent',
+        background: isNext ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
+        border: isNext ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid transparent',
         boxSizing: 'border-box',
       }}
     >

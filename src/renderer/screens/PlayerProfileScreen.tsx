@@ -77,7 +77,7 @@ function ArchetypeChip({ archetype }: { archetype: ArchetypeInfo | undefined }):
             <span
               key={d}
               style={{
-                background: 'rgba(139,92,246,0.18)',
+                background: 'rgba(var(--accent-rgb),0.18)',
                 borderRadius: 3,
                 padding: '1px 5px',
                 fontSize: 10,

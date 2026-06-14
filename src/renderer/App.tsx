@@ -9,6 +9,7 @@ import { NavContext, type NavApi, type NavParams, type ScreenId } from './compon
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
 import { SideNav } from './components/SideNav'
+import { SubTabBar } from './components/SubTabBar'
 import { useGlobalTeamTheme } from './components/ThemeScope'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
@@ -331,6 +332,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   onSave={onSave}
                   onLoad={onLoad}
                 />
+                <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <ScreenBoundary screen={nav.screen}>
                     <ScreenRouter screen={nav.screen} params={nav.params} />

@@ -280,8 +280,8 @@ function LotteryBanner(props: { lottery: NonNullable<TentpoleView['lottery']> })
     <div
       style={{
         padding: '12px 16px',
-        background: 'linear-gradient(90deg, rgba(139,92,246,0.18), rgba(236,72,153,0.10))',
-        border: '1px solid rgba(139,92,246,0.4)',
+        background: 'linear-gradient(90deg, rgba(var(--accent-rgb),0.18), rgba(236,72,153,0.10))',
+        border: '1px solid rgba(var(--accent-rgb),0.4)',
         borderRadius: 'var(--radius-sm)',
       }}
     >
@@ -307,8 +307,8 @@ function LotteryBanner(props: { lottery: NonNullable<TentpoleView['lottery']> })
             alignItems: 'center',
             gap: 8,
             padding: '6px 12px',
-            background: 'rgba(139,92,246,0.14)',
-            border: '1px solid rgba(139,92,246,0.35)',
+            background: 'rgba(var(--accent-rgb),0.14)',
+            border: '1px solid rgba(var(--accent-rgb),0.35)',
             borderRadius: 'var(--radius-sm)',
             marginBottom: 10,
             fontSize: 13,

@@ -110,7 +110,7 @@ function SeriesCard(props: { series: SeriesView; winsNeeded: number }): JSX.Elem
     <div
       style={{
         background: 'var(--bg1)',
-        border: `1px solid ${series.involvesUser ? 'rgba(139,92,246,0.45)' : 'var(--line)'}`,
+        border: `1px solid ${series.involvesUser ? 'rgba(var(--accent-rgb),0.45)' : 'var(--line)'}`,
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
       }}

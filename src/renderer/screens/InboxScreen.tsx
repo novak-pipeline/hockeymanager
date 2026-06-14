@@ -364,10 +364,10 @@ export function InboxScreen(): JSX.Element {
                       padding: '10px var(--sp-3)',
                       borderBottom: isLast ? 'none' : '1px solid var(--line)',
                       background: isSelected
-                        ? 'rgba(139,92,246,0.13)'
+                        ? 'rgba(var(--accent-rgb),0.13)'
                         : item.read
                         ? 'transparent'
-                        : 'rgba(139,92,246,0.04)',
+                        : 'rgba(var(--accent-rgb),0.04)',
                       borderLeft: `3px solid ${
                         isSelected
                           ? 'var(--accent)'
