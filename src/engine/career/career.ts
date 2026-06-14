@@ -73,7 +73,7 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystRank, draftEligibility, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
-import { selectNationalTeam } from '@engine/league/nationalTeam'
+import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
   createArc,
   createInitialArcsState,
@@ -5030,6 +5030,7 @@ export class Career {
   getInternational(): InternationalView {
     const MIN_PLAYERS = 12 // a "hockey nation" needs a real player pool
     const ROSTER = 23 // national-team size for the strength rating
+    const comps = this.data.league.competitions ?? []
 
     // playerId -> team for the notable rows.
     const teamOfPlayer = new Map<string, { teamId: string; abbr: string }>()
@@ -5046,41 +5047,60 @@ export class Career {
       list.push(p)
     }
 
+    // Competitions grouped by host nation (for the nation page's leagues/clubs).
+    const compsByNation = new Map<string, typeof comps>()
+    for (const c of comps) {
+      let arr = compsByNation.get(c.nation)
+      if (!arr) { arr = []; compsByNation.set(c.nation, arr) }
+      arr.push(c)
+    }
+
+    const toNotable = (p: Player): CompetitionNotableView => {
+      const tm = teamOfPlayer.get(p.id as string)
+      return {
+        playerId: p.id as string,
+        name: p.name,
+        teamId: tm?.teamId ?? '',
+        teamAbbr: tm?.abbr ?? 'FA',
+        position: p.position,
+        age: p.age,
+        currentStars: overallToStars(ratedOverall(p)),
+        potentialStars: overallToStars(agedPotential(p)),
+      }
+    }
+
     const nations: NationView[] = []
     for (const [nation, players] of byNation) {
       if (players.length < MIN_PLAYERS) continue
       const sorted = [...players].sort((a, b) => ratedOverall(b) - ratedOverall(a))
       const best = sorted.slice(0, ROSTER)
       const rating = Math.round(best.reduce((s, p) => s + ratedOverall(p), 0) / best.length)
-      const topPlayers: CompetitionNotableView[] = sorted.slice(0, 10).map((p) => {
-        const tm = teamOfPlayer.get(p.id as string)
-        return {
-          playerId: p.id as string,
-          name: p.name,
-          teamId: tm?.teamId ?? '',
-          teamAbbr: tm?.abbr ?? 'FA',
-          position: p.position,
-          age: p.age,
-          currentStars: overallToStars(ratedOverall(p)),
-          potentialStars: overallToStars(agedPotential(p)),
-        }
-      })
-      const toNotable = (p: Player): CompetitionNotableView => {
-        const tm = teamOfPlayer.get(p.id as string)
-        return {
-          playerId: p.id as string,
-          name: p.name,
-          teamId: tm?.teamId ?? '',
-          teamAbbr: tm?.abbr ?? 'FA',
-          position: p.position,
-          age: p.age,
-          currentStars: overallToStars(ratedOverall(p)),
-          potentialStars: overallToStars(agedPotential(p)),
-        }
-      }
+      const topPlayers = sorted.slice(0, 10).map(toNotable)
+      const topYouth = sorted
+        .filter((p) => p.age <= 18)
+        .sort((a, b) => agedPotential(b) - agedPotential(a))
+        .slice(0, 8)
+        .map(toNotable)
       const seniorSquad = selectNationalTeam(players).map((pick) => toNotable(pick.player))
       const u20Squad = selectNationalTeam(players, { maxAge: 19 }).map((pick) => toNotable(pick.player))
-      nations.push({ nation, rank: 0, rating, playerCount: players.length, topPlayers, seniorSquad, u20Squad })
+      const info = nationInfo(nation)
+      const nationComps = [...(compsByNation.get(nation) ?? [])].sort((a, b) => b.strength - a.strength)
+      const topLeagues = nationComps.map((c) => ({
+        id: c.id, abbrev: c.abbrev, name: c.name, level: c.level, strength: c.strength,
+      }))
+      const majorClubs = nationComps
+        .flatMap((c) => c.teamIds.map((tid) => ({ tid, leagueAbbr: c.abbrev })))
+        .map(({ tid, leagueAbbr }) => {
+          const t = this.data.teams.get(tid)
+          return t ? { teamId: t.id as string, abbreviation: t.abbreviation, name: t.name, leagueAbbr } : null
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null)
+        .slice(0, 10)
+      nations.push({
+        nation, rank: 0, rating, playerCount: players.length,
+        capital: info.capital, continent: info.continent, languages: info.languages,
+        topLeagues, majorClubs, topPlayers, topYouth, seniorSquad, u20Squad,
+      })
     }
     nations.sort((a, b) => b.rating - a.rating)
     nations.forEach((n, i) => { n.rank = i + 1 })

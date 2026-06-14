@@ -1584,6 +1584,12 @@ describe('Career — wider-world quick-sim', () => {
     const can = view.nations.find((n) => n.nation === 'Canada')!
     expect(can.playerCount).toBeGreaterThan(0)
     expect(can.topPlayers.length).toBeGreaterThan(0)
+    // Nation-page profile fields populated from the built-in table.
+    expect(can.capital).toBe('Ottawa')
+    expect(can.continent).toBe('North America')
+    expect(Array.isArray(can.topLeagues)).toBe(true)
+    expect(Array.isArray(can.majorClubs)).toBe(true)
+    expect(can.seniorSquad.length).toBeGreaterThan(0)
     expect(can.topPlayers[0]!.currentStars).toBeGreaterThanOrEqual(can.topPlayers[can.topPlayers.length - 1]!.currentStars)
   })
 

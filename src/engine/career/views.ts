@@ -703,8 +703,18 @@ export interface NationView {
   rating: number
   /** Total players of this nationality across the world DB. */
   playerCount: number
+  /** Nation-page profile fields. */
+  capital: string
+  continent: string
+  languages: string[]
+  /** Leagues based in this nation (its competitions), strongest first. */
+  topLeagues: Array<{ id: string; abbrev: string; name: string; level: number; strength: number }>
+  /** Notable clubs based in this nation. */
+  majorClubs: Array<{ teamId: string; abbreviation: string; name: string; leagueAbbr: string }>
   /** Best players of this nation (reuses the scout-flavoured notable row). */
   topPlayers: CompetitionNotableView[]
+  /** Best youth players (U18) of this nation. */
+  topYouth: CompetitionNotableView[]
   /** Selected senior national team (best available, 14F/7D/2G). */
   seniorSquad: CompetitionNotableView[]
   /** Selected U20 (World Juniors) team. */

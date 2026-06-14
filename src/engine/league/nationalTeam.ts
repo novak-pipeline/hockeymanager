@@ -48,3 +48,37 @@ export function rosterStrength(picks: NationalTeamPick[]): number {
   if (picks.length === 0) return 0
   return Math.round(picks.reduce((s, p) => s + ratedOverall(p.player), 0) / picks.length)
 }
+
+/** Display profile for a hockey nation (the EHM nation-page header fields). */
+export interface NationInfo {
+  capital: string
+  continent: string
+  languages: string[]
+}
+
+/** Built-in profiles for the main hockey nations (source DB has no nation page
+ *  data). Keyed by the nationality string the importer writes. */
+const NATION_INFO: Record<string, NationInfo> = {
+  'Canada': { capital: 'Ottawa', continent: 'North America', languages: ['English', 'French'] },
+  'United States': { capital: 'Washington', continent: 'North America', languages: ['English'] },
+  'USA': { capital: 'Washington', continent: 'North America', languages: ['English'] },
+  'Sweden': { capital: 'Stockholm', continent: 'Europe', languages: ['Swedish'] },
+  'Finland': { capital: 'Helsinki', continent: 'Europe', languages: ['Finnish'] },
+  'Russia': { capital: 'Moscow', continent: 'Europe', languages: ['Russian'] },
+  'Czechia': { capital: 'Prague', continent: 'Europe', languages: ['Czech'] },
+  'Czech Republic': { capital: 'Prague', continent: 'Europe', languages: ['Czech'] },
+  'Slovakia': { capital: 'Bratislava', continent: 'Europe', languages: ['Slovak'] },
+  'Switzerland': { capital: 'Bern', continent: 'Europe', languages: ['German', 'French', 'Italian'] },
+  'Germany': { capital: 'Berlin', continent: 'Europe', languages: ['German'] },
+  'Latvia': { capital: 'Riga', continent: 'Europe', languages: ['Latvian'] },
+  'Denmark': { capital: 'Copenhagen', continent: 'Europe', languages: ['Danish'] },
+  'Norway': { capital: 'Oslo', continent: 'Europe', languages: ['Norwegian'] },
+  'Austria': { capital: 'Vienna', continent: 'Europe', languages: ['German'] },
+  'Belarus': { capital: 'Minsk', continent: 'Europe', languages: ['Belarusian', 'Russian'] },
+  'France': { capital: 'Paris', continent: 'Europe', languages: ['French'] },
+  'Slovenia': { capital: 'Ljubljana', continent: 'Europe', languages: ['Slovene'] },
+}
+
+export function nationInfo(nation: string): NationInfo {
+  return NATION_INFO[nation] ?? { capital: '', continent: '', languages: [] }
+}

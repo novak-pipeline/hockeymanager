@@ -326,14 +326,8 @@ function InternationalPanel(): JSX.Element {
 }
 
 function NationDetail({ nation }: { nation: NationView }): JSX.Element {
-  const [tab, setTab] = useState<'best' | 'senior' | 'u20'>('senior')
-  const rows =
-    tab === 'senior' ? nation.seniorSquad : tab === 'u20' ? nation.u20Squad : nation.topPlayers
-  const title =
-    tab === 'senior' ? `Team ${nation.nation}`
-    : tab === 'u20' ? `${nation.nation} Under-20`
-    : `${nation.nation} — best players`
-  const tabBtn = (id: 'best' | 'senior' | 'u20', label: string): JSX.Element => (
+  const [tab, setTab] = useState<'overview' | 'senior' | 'u20'>('overview')
+  const tabBtn = (id: 'overview' | 'senior' | 'u20', label: string): JSX.Element => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -345,20 +339,89 @@ function NationDetail({ nation }: { nation: NationView }): JSX.Element {
     >{label}</button>
   )
   return (
-    <Panel title={title}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+    <Panel title={`${nation.nation}${tab === 'senior' ? ' — Team' : tab === 'u20' ? ' — Under-20' : ''}`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
         <span className="muted small">
           #{nation.rank} in the world · strength {nation.rating} · {nation.playerCount} players
         </span>
         <span style={{ display: 'inline-flex', gap: 4 }}>
+          {tabBtn('overview', 'Overview')}
           {tabBtn('senior', 'Team')}
           {tabBtn('u20', 'Under-20')}
-          {tabBtn('best', 'Best')}
         </span>
       </div>
-      {rows.length === 0
-        ? <div className="muted small">Not enough eligible players to ice this team.</div>
-        : <NotableTable rows={rows} showAge />}
+
+      {tab === 'overview' && (
+        <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+          {/* Nation profile */}
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13 }}>
+            <span><span className="muted">Capital</span> {nation.capital || '—'}</span>
+            <span><span className="muted">Continent</span> {nation.continent || '—'}</span>
+            <span><span className="muted">World ranking</span> #{nation.rank}</span>
+            <span><span className="muted">Languages</span> {nation.languages.length ? nation.languages.join(', ') : '—'}</span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
+            {/* Top leagues */}
+            <div>
+              <div className="muted small" style={{ marginBottom: 4 }}>Top leagues</div>
+              {nation.topLeagues.length === 0 ? (
+                <div className="muted small">No domestic leagues modelled.</div>
+              ) : (
+                <table className="data-table" style={{ width: '100%' }}>
+                  <tbody>
+                    {nation.topLeagues.map((l) => (
+                      <tr key={l.id}>
+                        <td style={{ fontWeight: 700 }}>{l.abbrev}</td>
+                        <td className="muted">{l.name}</td>
+                        <td className="muted" style={{ textAlign: 'right' }} title="NHL-equivalent strength">{Math.round(l.strength * 100)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {/* Major clubs */}
+            <div>
+              <div className="muted small" style={{ marginBottom: 4 }}>Major clubs</div>
+              {nation.majorClubs.length === 0 ? (
+                <div className="muted small">No clubs modelled.</div>
+              ) : (
+                <table className="data-table" style={{ width: '100%' }}>
+                  <tbody>
+                    {nation.majorClubs.map((c) => (
+                      <tr key={c.teamId}>
+                        <td><TeamLink teamId={c.teamId} name={c.name} /></td>
+                        <td className="muted" style={{ textAlign: 'right' }}>{c.leagueAbbr}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
+            <div>
+              <div className="muted small" style={{ marginBottom: 4 }}>Top players</div>
+              <NotableTable rows={nation.topPlayers} />
+            </div>
+            <div>
+              <div className="muted small" style={{ marginBottom: 4 }}>Top youth players</div>
+              {nation.topYouth.length === 0
+                ? <div className="muted small">No notable youth.</div>
+                : <NotableTable rows={nation.topYouth} showAge />}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab !== 'overview' && (() => {
+        const rows = tab === 'senior' ? nation.seniorSquad : nation.u20Squad
+        return rows.length === 0
+          ? <div className="muted small">Not enough eligible players to ice this team.</div>
+          : <NotableTable rows={rows} showAge />
+      })()}
     </Panel>
   )
 }

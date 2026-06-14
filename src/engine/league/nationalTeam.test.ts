@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Player } from '@domain'
 import { generateLeague } from '@data'
-import { selectNationalTeam, rosterStrength } from './nationalTeam'
+import { selectNationalTeam, rosterStrength, nationInfo } from './nationalTeam'
+
+describe('nationInfo', () => {
+  it('returns profile fields for known nations and a blank for unknowns', () => {
+    expect(nationInfo('Canada')).toEqual({ capital: 'Ottawa', continent: 'North America', languages: ['English', 'French'] })
+    expect(nationInfo('Sweden').continent).toBe('Europe')
+    expect(nationInfo('Atlantis')).toEqual({ capital: '', continent: '', languages: [] })
+  })
+})
 
 /** A deep player pool (one "nation") drawn from a generated league. */
 function pool(seed: number): Player[] {
