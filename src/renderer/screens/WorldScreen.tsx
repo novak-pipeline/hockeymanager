@@ -77,117 +77,13 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
   )
 }
 
-export function WorldScreen(props: { tab?: 'leagues' | 'international' | 'draft' }): JSX.Element {
+export function WorldScreen(props: { tab?: 'leagues' | 'international' }): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
       <ScreenHeader title="World">
         <span className="muted small">The wider hockey world — leagues, juniors &amp; international</span>
       </ScreenHeader>
-      {props.tab === 'international' ? <InternationalPanel />
-        : props.tab === 'draft' ? <DraftBoardPanel />
-        : <LeaguesPanel />}
-    </div>
-  )
-}
-
-const DRAFT_PHASE_BLURB: Record<'preliminary' | 'midseason' | 'final', string> = {
-  preliminary: 'Early-season consensus, heavy on projection — expect big swings.',
-  midseason: 'The board firms up as the season’s body of work grows.',
-  final: 'The final pre-draft consensus, weighting production and readiness.',
-}
-
-function DraftBoardPanel(): JSX.Element {
-  const client = useClient()
-  const { data, loading, error } = useScreenData(
-    () => client.getDraftRankings(),
-    (r) => (r.type === 'draftRankings' ? r.draftRankings : null)
-  )
-  const rows = data?.rankings ?? []
-  return (
-    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-      <ScreenStateNotices
-        loading={loading}
-        error={error}
-        empty={!loading && rows.length === 0}
-        emptyText="No draft-eligible prospects to rank. Load a multi-league database to scout the draft class across the OHL, USHL, Liiga and beyond."
-      />
-      {data && rows.length > 0 && (
-        <Panel title={`NHL analyst draft rankings — ${data.draftYear} class`}>
-          <div className="muted small" style={{ marginBottom: 8 }}>
-            <strong style={{ color: 'var(--accent2, #e0b341)' }}>{data.phaseLabel}</strong>
-            {' · '}{DRAFT_PHASE_BLURB[data.phase]}
-          </div>
-          <table className="data-table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th style={{ textAlign: 'left' }}>Player</th>
-                <th>Age</th><th>Pos</th>
-                <th style={{ textAlign: 'left' }}>Nation</th>
-                <th style={{ textAlign: 'left' }}>League</th>
-                <th style={{ textAlign: 'left' }}>Team</th>
-                <th style={{ textAlign: 'left' }}>Ability</th>
-                <th style={{ textAlign: 'left' }}>Ceiling</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((p) => (
-                <tr key={p.playerId}>
-                  <td className="muted" style={{ textAlign: 'center', fontWeight: 700 }}>{p.rank}</td>
-                  <td>
-                    <PlayerLink playerId={p.playerId} name={p.name} />
-                    {p.eligibility === 'reentry' && (
-                      <span className="muted small" title="Re-entry eligible (passed over)"> · RE</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'center' }}>{p.age}</td>
-                  <td style={{ textAlign: 'center' }}>{p.position}</td>
-                  <td className="muted">{p.nation}</td>
-                  <td className="muted">{p.leagueAbbr}</td>
-                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
-                  <td><Stars value={p.currentStars} /></td>
-                  <td><Stars value={p.potentialStars} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-      )}
-
-      {data && data.radar.length > 0 && (
-        <Panel title="On the radar — U17 watch list (not yet draft-eligible)">
-          <div className="muted small" style={{ marginBottom: 8 }}>
-            Scouted early (14–16) and tracked for future drafts — ranked by projected ceiling.
-          </div>
-          <table className="data-table" style={{ width: '100%' }}>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th style={{ textAlign: 'left' }}>Player</th>
-                <th>Age</th><th>Pos</th>
-                <th style={{ textAlign: 'left' }}>Nation</th>
-                <th style={{ textAlign: 'left' }}>League</th>
-                <th style={{ textAlign: 'left' }}>Team</th>
-                <th style={{ textAlign: 'left' }}>Ceiling</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.radar.map((p) => (
-                <tr key={p.playerId}>
-                  <td className="muted" style={{ textAlign: 'center' }}>{p.rank}</td>
-                  <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-                  <td style={{ textAlign: 'center' }}>{p.age}</td>
-                  <td style={{ textAlign: 'center' }}>{p.position}</td>
-                  <td className="muted">{p.nation}</td>
-                  <td className="muted">{p.leagueAbbr}</td>
-                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
-                  <td><Stars value={p.potentialStars} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-      )}
+      {props.tab === 'international' ? <InternationalPanel /> : <LeaguesPanel />}
     </div>
   )
 }

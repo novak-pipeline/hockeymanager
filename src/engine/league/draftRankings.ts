@@ -57,9 +57,9 @@ function hashUnit(s: string): number {
  *  disagree (noise), per phase. */
 function phaseWeights(phase: DraftRankPhase): { ceilingWeight: number; noise: number } {
   switch (phase) {
-    case 'preliminary': return { ceilingWeight: 0.85, noise: 5 }
-    case 'midseason': return { ceilingWeight: 0.78, noise: 3 }
-    case 'final': return { ceilingWeight: 0.68, noise: 1.5 }
+    case 'preliminary': return { ceilingWeight: 0.85, noise: 3 }
+    case 'midseason': return { ceilingWeight: 0.78, noise: 2 }
+    case 'final': return { ceilingWeight: 0.68, noise: 1 }
   }
 }
 

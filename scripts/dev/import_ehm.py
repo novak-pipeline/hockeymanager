@@ -607,12 +607,9 @@ COMP_LEAGUES = {
     "Deutsche Eishockey Liga": "DEL",
     "ECHL": "ECHL",
     "Swedish HockeyAllsvenskan": "HA",
-    "NCAA Hockey East Division": "NCAA",
-    "NCAA Central Collegiate Hockey Association": "NCAA",
-    "NCAA Eastern Collegiate Athletic Conference": "NCAA",
-    "NCAA Big Ten Conference": "NCAA",
-    "NCAA National Collegiate Hockey Conference": "NCAA",
-    "NCAA Atlantic Hockey Association": "NCAA",
+    # NCAA Division I — clubs file under this umbrella name (where US college
+    # draft prospects like Gavin McKenna play).
+    "National Collegiate Athletic Association": "NCAA",
 }
 COMP_BY_LOWER = {k.lower(): k for k in COMP_LEAGUES}
 
@@ -627,16 +624,9 @@ COMP_PALETTE = [
 
 
 def match_comp_league(div):
-    """Canonical whitelisted league name for a club's Division, or None."""
-    dl = str(div or "").strip().lower()
-    if not dl:
-        return None
-    if dl in COMP_BY_LOWER:
-        return COMP_BY_LOWER[dl]
-    for low, proper in COMP_BY_LOWER.items():
-        if dl.startswith(low):
-            return proper
-    return None
+    """Canonical whitelisted league name for a club's Division (exact match), or
+    None. Exact-only avoids pulling in sub-tiers like 'NCAA … Division III'."""
+    return COMP_BY_LOWER.get(str(div or "").strip().lower())
 
 
 def load_competition_meta(path):

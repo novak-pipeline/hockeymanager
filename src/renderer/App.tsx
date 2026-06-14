@@ -464,6 +464,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
+    case 'scoutingDraft':
     case 'draft':
     case 'offseason':
     case 'playoffs':
@@ -474,8 +475,6 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <WorldScreen tab="leagues" />
     case 'worldInternational':
       return <WorldScreen tab="international" />
-    case 'worldDraft':
-      return <WorldScreen tab="draft" />
 
     // ── Data Hub (Analytics) ──
     case 'dataHub':
