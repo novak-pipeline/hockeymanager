@@ -471,6 +471,10 @@ function buildHonours(p: Player): PlayerHonoursView {
     nhlDraftEligible: p.nhlDraftEligible ?? false,
     nhlDrafted: p.nhlDrafted ?? false,
     ...(p.juniorPreference !== undefined ? { juniorPreference: p.juniorPreference } : {}),
+    ...(p.draftYear !== undefined ? { draftYear: p.draftYear } : {}),
+    ...(p.draftRound !== undefined ? { draftRound: p.draftRound } : {}),
+    ...(p.draftOverall !== undefined ? { draftOverall: p.draftOverall } : {}),
+    ...(p.draftClub !== undefined ? { draftClub: p.draftClub } : {}),
   }
 }
 

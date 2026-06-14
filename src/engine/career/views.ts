@@ -331,6 +331,11 @@ export interface PlayerHonoursView {
   nhlDrafted: boolean
   /** Preferred development pathway string (e.g. "QMJHL"). */
   juniorPreference?: string
+  /** Entry-draft record from the source DB (absent = undrafted/unknown). */
+  draftYear?: number
+  draftRound?: number
+  draftOverall?: number
+  draftClub?: string
 }
 
 /** Contract block on the profile, with RFA/UFA derivation. */

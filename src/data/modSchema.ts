@@ -219,6 +219,12 @@ export interface ModPlayer {
   /** Preferred junior league / development pathway string. */
   juniorPreference?: string
 
+  /** Entry-draft record from the source DB. */
+  draftYear?: number
+  draftRound?: number
+  draftOverall?: number
+  draftClub?: string
+
   /** Real season-by-season career history (newest first). Display-only. */
   careerHistory?: ModCareerSeason[]
 }
@@ -888,6 +894,11 @@ function bioFields(mp: ModPlayer): Partial<Player> {
     ...(mp.nhlDrafted !== undefined ? { nhlDrafted: mp.nhlDrafted } : {}),
     // Junior preference
     ...(mp.juniorPreference !== undefined ? { juniorPreference: mp.juniorPreference } : {}),
+    // Entry-draft record
+    ...(mp.draftYear !== undefined ? { draftYear: mp.draftYear } : {}),
+    ...(mp.draftRound !== undefined ? { draftRound: mp.draftRound } : {}),
+    ...(mp.draftOverall !== undefined ? { draftOverall: mp.draftOverall } : {}),
+    ...(mp.draftClub !== undefined ? { draftClub: mp.draftClub } : {}),
     // Real season-by-season career history (importer raw names → domain names)
     ...(mp.careerHistory !== undefined ? {
       careerHistory: mp.careerHistory.map((s) => ({

@@ -504,6 +504,45 @@ CH_GP, CH_G, CH_A, CH_PIM, CH_PM = 9, 10, 11, 12, 13
 CH_MINS, CH_GA, CH_SO, CH_W, CH_L, CH_TOT, CH_SAVES = 14, 15, 16, 17, 18, 19, 20
 
 
+def _sibling(input_xlsx, name, env):
+    e = os.environ.get(env)
+    if e and os.path.exists(e):
+        return e
+    sib = os.path.join(os.path.dirname(os.path.abspath(input_xlsx)), name)
+    if os.path.exists(sib):
+        return sib
+    repo = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    guess = os.path.join(repo, "mods", "spreadsheet exports", name)
+    return guess if os.path.exists(guess) else None
+
+
+def load_draft_history(path, keep_keys):
+    """draft_history.xlsx -> key -> {year, round, overall, club}. Keyed name+DOB.
+    Cols: Draft1 Year2 Round3 Overall4 Club5 First6 Second7 DOB8."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it)
+    out = {}
+    for r in it:
+        first = str(r[6] or "").strip(); last = str(r[7] or "").strip()
+        parts = str(r[8] or "").split(".")
+        if len(parts) != 3:
+            continue
+        key = norm(f"{first}_{last}_{'_'.join(parts)}")
+        if key not in keep_keys or key in out:
+            continue
+        out[key] = {
+            "draftYear": to_int(r[2], 0),
+            "draftRound": to_int(r[3], 0),
+            "draftOverall": to_int(r[4], 0),
+            "draftClub": str(r[5] or "").strip(),
+        }
+    wb.close()
+    return out
+
+
 def find_career_history(input_xlsx):
     """Locate player_career_history.xlsx: sibling of the input, the repo's
     'mods/spreadsheet exports' folder, or the EHM_CAREER_HISTORY env override."""
@@ -705,6 +744,16 @@ def main():
                 p["careerHistory"] = career[k]
                 attached += 1
         print(f"  career history attached to {attached}/{len(all_players)} players")
+        # Draft history (which club drafted each player, year/round/overall).
+        draft_path = _sibling(xlsx, "draft_history.xlsx", "EHM_DRAFT_HISTORY")
+        if draft_path:
+            draft = load_draft_history(draft_path, keep_keys)
+            dn = 0
+            for p in all_players:
+                k = p.get("_key")
+                if k and k in draft:
+                    p.update(draft[k]); dn += 1
+            print(f"  draft history attached to {dn}/{len(all_players)} players")
     else:
         print("  career history: not found (skipping) — set EHM_CAREER_HISTORY or place player_career_history.xlsx beside the export")
 

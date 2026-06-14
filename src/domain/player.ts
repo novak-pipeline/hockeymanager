@@ -165,6 +165,12 @@ export interface Player {
   /** Preferred junior league / development pathway string from source DB. */
   juniorPreference?: string
 
+  /** Entry-draft record from the source DB (display-only). */
+  draftYear?: number
+  draftRound?: number
+  draftOverall?: number
+  draftClub?: string
+
   /**
    * Real season-by-season career history imported from the source DB. Newest
    * first. Absent on fictional players. Display-only — the sim never reads it.

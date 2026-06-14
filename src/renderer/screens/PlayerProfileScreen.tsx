@@ -862,7 +862,7 @@ function TabProfile({
           </div>
         </Panel>
 
-        {/* ── RIGHT: pros / cons + ratings radar ── */}
+        {/* ── RIGHT: evaluation — pros/cons, radar, fit, mindset ── */}
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
           <Panel>
             <div className="pp-proscons">
@@ -880,62 +880,84 @@ function TabProfile({
               </div>
             </div>
           </Panel>
-        </div>
-      </div>
 
-      {/* ════ BOTTOM: season stats | radar | career totals ════ */}
-      <div className="pp-stats-band">
-        <Panel title="Season Stats">
-          <SeasonStatsTable seasons={d.seasons} isGoalie={isGoalie} />
-        </Panel>
-        <CompareControl
-          currentId={d.playerId}
-          currentName={d.name}
-          currentRadar={d.radar}
-          onCompare={(id) => { void handleCompare(id) }}
-          compareResult={compareResult}
-          comparing={comparing}
-          squadRows={squadRows}
-        />
-        <Panel title="Career">
-          <CareerTotals seasons={d.seasons} isGoalie={isGoalie} />
-        </Panel>
-      </div>
+          <CompareControl
+            currentId={d.playerId}
+            currentName={d.name}
+            currentRadar={d.radar}
+            onCompare={(id) => { void handleCompare(id) }}
+            compareResult={compareResult}
+            comparing={comparing}
+            squadRows={squadRows}
+          />
 
-      {/* ════ COACHING & NOTES (our extras, kept separate from the FM core) ════ */}
-      {(d.systemFit || d.mindset || d.interview) && (
-        <div className="pp-body" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {d.systemFit && (() => {
-              const s = d.systemFit.score
-              const color = s >= 80 ? 'var(--success)' : s >= 66 ? 'var(--green)' : s >= 50 ? 'var(--accent2, var(--violet-h))' : 'var(--danger)'
-              return (
-                <Panel title="System Fit">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 46 }}>
-                      <span className="mono" style={{ fontSize: 18, fontWeight: 800, color }}>{s}</span>
-                      <span className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>Fit</span>
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color }}>{d.systemFit.label} · {d.systemFit.styleLabel}</div>
-                      <div className="muted small" style={{ lineHeight: 1.4 }}>{d.systemFit.reason}</div>
-                    </div>
+          {d.systemFit && (() => {
+            const s = d.systemFit.score
+            const color = s >= 80 ? 'var(--success)' : s >= 66 ? 'var(--green)' : s >= 50 ? 'var(--accent2, var(--violet-h))' : 'var(--danger)'
+            return (
+              <Panel title="System Fit">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 46 }}>
+                    <span className="mono" style={{ fontSize: 18, fontWeight: 800, color }}>{s}</span>
+                    <span className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 0.5 }}>Fit</span>
                   </div>
-                </Panel>
-              )
-            })()}
-            {d.mindset && <MindsetPanel mindset={d.mindset} />}
-          </div>
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {d.interview && (
-              <InterviewPanel interview={d.interview} playerId={d.playerId} client={client} onChanged={onChanged} />
-            )}
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <MarkForMeeting playerId={d.playerId} client={client} />
-            </div>
-          </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color }}>{d.systemFit.label} · {d.systemFit.styleLabel}</div>
+                    <div className="muted small" style={{ lineHeight: 1.4 }}>{d.systemFit.reason}</div>
+                  </div>
+                </div>
+              </Panel>
+            )
+          })()}
+
+          {d.mindset && <MindsetPanel mindset={d.mindset} />}
         </div>
+      </div>
+
+      {/* ════ THIS SEASON (current only — full history lives in the History tab) ════ */}
+      <Panel title={`This Season — ${d.seasons[0]?.year ?? ''}`}>
+        <ThisSeasonStrip season={d.seasons[0]} isGoalie={isGoalie} />
+      </Panel>
+
+      {/* ════ Interview (GM action) ════ */}
+      {d.interview && (
+        <InterviewPanel interview={d.interview} playerId={d.playerId} client={client} onChanged={onChanged} />
       )}
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <MarkForMeeting playerId={d.playerId} client={client} />
+      </div>
+    </div>
+  )
+}
+
+/** Compact current-season stat tiles for the overview. */
+function ThisSeasonStrip({ season, isGoalie }: { season: PlayerProfileView['seasons'][number] | undefined; isGoalie: boolean }): JSX.Element {
+  if (!season) return <span className="muted small">No games yet this season.</span>
+  const tiles = isGoalie && season.goalie
+    ? [
+        { label: 'GP', value: season.goalie.gamesPlayed },
+        { label: 'W', value: season.goalie.wins },
+        { label: 'L', value: season.goalie.losses },
+        { label: 'SV%', value: `.${Math.round(season.goalie.savePct * 1000)}` },
+        { label: 'GAA', value: season.goalie.goalsAgainstAverage.toFixed(2) },
+        { label: 'SO', value: season.goalie.shutouts },
+      ]
+    : season.skater
+      ? [
+          { label: 'GP', value: season.skater.gamesPlayed },
+          { label: 'G', value: season.skater.goals },
+          { label: 'A', value: season.skater.assists },
+          { label: 'PTS', value: season.skater.points },
+          { label: '±', value: season.skater.plusMinus > 0 ? `+${season.skater.plusMinus}` : season.skater.plusMinus },
+          { label: 'TOI/g', value: fmtToi(season.skater.toiPerGame) },
+        ]
+      : null
+  if (!tiles) return <span className="muted small">No games yet this season.</span>
+  return (
+    <div className="row" style={{ gap: 'var(--sp-5, 28px)', flexWrap: 'wrap' }}>
+      {tiles.map(({ label, value }) => (
+        <div key={label} className="stat"><div className="stat-value" style={{ fontSize: 22 }}>{value}</div><div className="stat-label">{label}</div></div>
+      ))}
     </div>
   )
 }
@@ -1219,7 +1241,22 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
     )
   }
 
+  const h = d.honours
   return (
+    <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+      {h.draftYear !== undefined && (
+        <Panel title="Draft">
+          <div className="row" style={{ gap: 'var(--sp-5, 28px)', flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>{h.draftYear}</div><div className="stat-label">Year</div></div>
+            {h.draftRound !== undefined && <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>R{h.draftRound}</div><div className="stat-label">Round</div></div>}
+            {h.draftOverall !== undefined && <div className="stat"><div className="stat-value" style={{ fontSize: 20 }}>#{h.draftOverall}</div><div className="stat-label">Overall</div></div>}
+            {h.draftClub && <div className="stat"><div className="stat-value" style={{ fontSize: 14 }}>{h.draftClub}</div><div className="stat-label">Drafted by</div></div>}
+          </div>
+        </Panel>
+      )}
+      <Panel title="Career Totals">
+        <CareerTotals seasons={d.seasons} isGoalie={isGoalie} />
+      </Panel>
     <Panel title="Career Stats">
       <div className="table-wrap">
         <table className="table">
@@ -1268,6 +1305,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
         </table>
       </div>
     </Panel>
+    </div>
   )
 }
 
