@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest'
 import type { Player, Position, RawAttributes } from '@domain'
 import { computeComposites } from '@engine/ratings/composites'
-import { buildRosterProjection, buildCoachReports, type StaffLike } from './playerProjection'
+import { buildRosterProjection, buildCoachReports, type StaffLike, type SeasonForm } from './playerProjection'
 
 function raw(v: number): RawAttributes {
   return {
@@ -72,5 +72,23 @@ describe('buildCoachReports', () => {
     expect(a[0]!.text.length).toBeGreaterThan(0)
     expect(a[0]!.coachRole).toBe('Head Coach')
     expect(a).toEqual(b) // deterministic
+  })
+
+  it('in-season form changes what the coaches say', () => {
+    const p = player({ id: 'dyn', cur: 65, pot: 70, age: 26 })
+    const hot: SeasonForm = { form: 4, morale: 80, injured: false, gamesPlayed: 20, points: 30, expectedPoints: 40 }
+    const cold: SeasonForm = { form: -4, morale: 50, injured: false, gamesPlayed: 20, points: 5, expectedPoints: 40 }
+    const hotText = buildCoachReports(p, [coach], hot)[0]!.text
+    const coldText = buildCoachReports(p, [coach], cold)[0]!.text
+    expect(hotText).not.toBe(coldText)
+    expect(hotText.toLowerCase()).toMatch(/form|hot|reliable|outproduc|ahead/)
+    expect(coldText.toLowerCase()).toMatch(/quiet|rut|dipped|lag|behind/)
+  })
+
+  it('injury is reflected in the report', () => {
+    const p = player({ id: 'inj', cur: 70, pot: 72, age: 28 })
+    const hurt: SeasonForm = { form: 0, morale: 60, injured: true, gamesPlayed: 5, points: 2, expectedPoints: 40 }
+    const text = buildCoachReports(p, [coach], hurt)[0]!.text
+    expect(text.toLowerCase()).toContain('injury')
   })
 })

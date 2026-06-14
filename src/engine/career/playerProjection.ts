@@ -162,6 +162,60 @@ export interface CoachReport {
   text: string
 }
 
+/**
+ * In-season signals that make staff opinion change over the year: hot/cold form,
+ * morale, injury, and production vs expectation. All update as games are simmed.
+ */
+export interface SeasonForm {
+  /** Hot/cold streak, −5..5. */
+  form: number
+  /** 0..100. */
+  morale: number
+  injured: boolean
+  gamesPlayed: number
+  points: number
+  /** Full-season point expectation (skaters); absent for goalies. */
+  expectedPoints?: number
+}
+
+const FORM_HOT = [
+  'He has been in excellent form lately',
+  'He is red-hot at the moment',
+  'He has been one of our most reliable performers of late',
+]
+const FORM_COLD = [
+  'He has gone a little quiet recently',
+  'He is in a bit of a rut at the moment',
+  'His game has dipped over the last stretch',
+]
+const PACE_UP = [
+  'and he is outproducing expectations so far this season',
+  'and his numbers are ahead of where we projected',
+]
+const PACE_DOWN = [
+  'though his production has lagged behind what we hoped for this season',
+  'though the points have not come as freely as expected',
+]
+
+/** A factual in-season clause that shifts the report as the year unfolds. */
+function seasonClause(s: SeasonForm | undefined, isGoalie: boolean, key: string): string {
+  if (!s) return ''
+  if (s.injured) return 'He is currently working his way back from injury.'
+  if (!isGoalie && s.gamesPlayed >= 10 && s.expectedPoints && s.expectedPoints > 0) {
+    const pace = (s.points / s.gamesPlayed) * 82
+    if (pace >= s.expectedPoints * 1.25) {
+      return `${pick(FORM_HOT, key + ':hot')} ${pick(PACE_UP, key + ':up')}.`
+    }
+    if (pace <= s.expectedPoints * 0.7) {
+      return `${pick(FORM_COLD, key + ':cold')} ${pick(PACE_DOWN, key + ':down')}.`
+    }
+  }
+  if (s.form >= 2) return `${pick(FORM_HOT, key + ':hot')}.`
+  if (s.form <= -2) return `${pick(FORM_COLD, key + ':cold')}.`
+  if (s.morale <= 35) return 'He has seemed a little unsettled of late.'
+  return ''
+}
+
 export interface StaffLike {
   name: string
   role: StaffMemberRole
@@ -182,8 +236,10 @@ export function buildRosterProjection(args: {
   clubRoster: Player[]
   /** Head coach making the call. */
   coachName: string
+  /** In-season form, so the suggested status reflects how he's playing now. */
+  season?: SeasonForm
 }): RosterProjection {
-  const { player, teamName, clubRoster, coachName } = args
+  const { player, teamName, clubRoster, coachName, season } = args
   const group = groupOf(player.position)
   const peers = clubRoster.filter((p) => groupOf(p.position) === group)
   const curOvr = overall(player.composites, player.position)
@@ -193,10 +249,17 @@ export function buildRosterProjection(args: {
   const slot = slotFor(group, idx)
   const ceilingRole = ceilingRoleFor(group, potOvr)
 
-  // Suggested status (now).
-  const suggestedStatus = slot.nhl
+  // Suggested status (now), with an in-season form tail so it reads live.
+  const formTail = season
+    ? season.injured ? ' He is currently injured.'
+      : season.form >= 2 ? ' He is in strong form.'
+      : season.form <= -2 ? ' He is in a rough patch right now.'
+      : ''
+    : ''
+  const suggestedStatus = (slot.nhl
     ? `${coachName} would slot ${player.name} in as a ${slot.label} for ${teamName}.`
-    : `${coachName} feels ${player.name} isn't ready for ${teamName}'s lineup yet — ticketed for the AHL to develop.`
+    : `${coachName} feels ${player.name} isn't ready for ${teamName}'s lineup yet — ticketed for the AHL to develop.`)
+    + formTail
 
   // Projected status (ceiling). Frame as growth for the young, as a settled
   // ceiling for the older.
@@ -277,12 +340,13 @@ function roleLabel(role: StaffMemberRole): string {
  * One short report per coach. Tone keys off the player's quality/age and the
  * coach's demeanour; a trait line is appended when something stands out.
  */
-export function buildCoachReports(player: Player, coaches: StaffLike[]): CoachReport[] {
+export function buildCoachReports(player: Player, coaches: StaffLike[], season?: SeasonForm): CoachReport[] {
   const curOvr = overall(player.composites, player.position)
   const potOvr = potentialOverallOf(player)
   const ceiling = Math.max(curOvr, potOvr)
   const young = player.age <= 23
   const noun = positionNoun(player.position)
+  const isGoalie = player.position === 'G'
   const name = player.name
 
   return coaches.map((coach) => {
@@ -307,9 +371,12 @@ export function buildCoachReports(player: Player, coaches: StaffLike[]): CoachRe
       ? pick(matches, key + ':twhich').line(name.split(' ').slice(-1)[0]!)
       : ''
 
+    // In-season clause — shifts the report as form/results change over the year.
+    const inSeason = seasonClause(season, isGoalie, key)
+
     const descriptor = young ? `young ${noun}` : noun
     const head = `${coach.name} feels that ${descriptor} ${name} ${opener}.`
-    const text = [head, ceilingLine, traitLine].filter(Boolean).join(' ')
+    const text = [head, ceilingLine, inSeason, traitLine].filter(Boolean).join(' ')
 
     return {
       coachName: coach.name,

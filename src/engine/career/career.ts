@@ -240,7 +240,7 @@ import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMa
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import { buildScoutVerdict } from './scoutVerdict'
-import { buildRosterProjection, buildCoachReports } from './playerProjection'
+import { buildRosterProjection, buildCoachReports, type SeasonForm } from './playerProjection'
 import { buildSquadPlanner, type SquadPlannerView } from './squadPlanner'
 import {
   badge,
@@ -4307,18 +4307,9 @@ export class Career {
             teamName: club.name,
             clubRoster,
             coachName: staff.headCoach.name,
+            season: this.seasonFormOf(player),
           })
-          const coachList = [staff.headCoach, ...staff.assistantCoaches.slice(0, 2)]
-          profile.coachReports = buildCoachReports(
-            player,
-            coachList.map((c) => ({
-              name: c.name,
-              role: c.role,
-              judgment: c.judgment,
-              ...(c.faceId !== undefined ? { faceId: c.faceId } : {}),
-              ...(c.demeanor !== undefined ? { demeanor: c.demeanor } : {}),
-            })),
-          )
+          // Coach reports are no longer inline — request them (delivered to inbox).
         }
       }
     }
@@ -4340,6 +4331,68 @@ export class Career {
     this.interviews.set(playerId, asked)
     // Sitting down with a player sharpens the read on him.
     addKnowledge(this.scouting, playerId, 6)
+    return { ok: true }
+  }
+
+  /** In-season signals (form/morale/injury/production) for staff opinion. */
+  private seasonFormOf(player: Player): SeasonForm {
+    const pid = player.id as PlayerId
+    const t = this.totals.get(pid)
+    const points = (t?.goals ?? 0) + (t?.assists ?? 0)
+    const gp = this.gp.get(pid) ?? 0
+    const expected = player.position !== 'G'
+      ? expectedPointsFor(overall(player.composites, player.position), player.position, player.role)
+      : undefined
+    return {
+      form: player.form,
+      morale: player.morale,
+      injured: player.injuryStatus !== null,
+      gamesPlayed: gp,
+      points,
+      ...(expected !== undefined ? { expectedPoints: expected } : {}),
+    }
+  }
+
+  /**
+   * GM requests written reports from the coaching staff on one of his players.
+   * Each coach (head coach + assistants) files a report into the inbox, with a
+   * take that reflects the player's current form and production this season.
+   */
+  requestCoachReports(playerId: string): { ok: boolean; message?: string } {
+    const pid = asPlayerId(playerId)
+    const player = this.data.players.get(pid)
+    if (!player) return { ok: false, message: 'Player not found.' }
+
+    // Coaches only assess players in your own organisation (NHL + AHL affiliate).
+    const affId = this.userTeam.affiliateId
+    const inOrg = this.userTeam.roster.includes(pid) ||
+      (affId !== undefined && (this.data.teams.get(affId)?.roster.includes(pid) ?? false))
+    if (!inOrg) {
+      return { ok: false, message: 'Your coaches only report on players in your organisation.' }
+    }
+
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const coachList = [staff.headCoach, ...staff.assistantCoaches.slice(0, 2)]
+    const reports = buildCoachReports(
+      player,
+      coachList.map((c) => ({
+        name: c.name,
+        role: c.role,
+        judgment: c.judgment,
+        ...(c.faceId !== undefined ? { faceId: c.faceId } : {}),
+        ...(c.demeanor !== undefined ? { demeanor: c.demeanor } : {}),
+      })),
+      this.seasonFormOf(player),
+    )
+
+    const lastName = player.name.split(' ').slice(-1)[0] ?? player.name
+    for (const r of reports) {
+      this.pushNews('scouting', `${r.coachName} files his report on ${lastName}`, r.text, {
+        playerId,
+        speaker: r.coachName,
+        ...(r.faceId !== undefined ? { speakerFaceId: r.faceId } : {}),
+      })
+    }
     return { ok: true }
   }
 

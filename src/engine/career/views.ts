@@ -437,11 +437,6 @@ export interface PlayerProfileView extends PlayerBadge {
    * players / sufficiently scouted players whose club is known.
    */
   rosterProjection?: import('@engine/career/playerProjection').RosterProjection
-  /**
-   * Per-coach scouting reports (head coach + assistants), tone varying by the
-   * coach. Present for own players / sufficiently scouted players.
-   */
-  coachReports?: import('@engine/career/playerProjection').CoachReport[]
 }
 
 /** A notable retiree recorded in a club's legends registry. */

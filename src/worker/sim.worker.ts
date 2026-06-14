@@ -154,6 +154,11 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.message ?? 'Could not conduct interview.')
       return { id: req.id, type: 'ok' }
     }
+    case 'requestCoachReport': {
+      const res = must().requestCoachReports(req.playerId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not request coach reports.')
+      return { id: req.id, type: 'ok' }
+    }
     case 'proposeTrade':
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
     case 'acceptTrade':

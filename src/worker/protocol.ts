@@ -185,6 +185,7 @@ export type WorkerRequestBody =
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'conductInterview'; playerId: string; questionId: string }
+  | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
   | { type: 'acceptTrade'; offerId: string }

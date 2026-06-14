@@ -197,6 +197,10 @@ export class SimClient {
     return this.send({ type: 'conductInterview', playerId, questionId })
   }
 
+  requestCoachReport(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'requestCoachReport', playerId })
+  }
+
   getTeamLegends(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamLegends', teamId })
   }

@@ -34,6 +34,7 @@ import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { toast, bumpRefresh } from '../components/store'
 import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
 import { ThemeScope } from '../components/ThemeScope'
@@ -1461,9 +1462,22 @@ function ScoutPanelBlock({ panel }: { panel: ScoutPanel }): JSX.Element {
   )
 }
 
-function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
+function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<typeof useClient> }): JSX.Element {
   const sr = d.scoutReport
   const isGoalie = d.position === 'G'
+  const [reqBusy, setReqBusy] = useState(false)
+
+  async function requestCoachReports(): Promise<void> {
+    if (reqBusy) return
+    setReqBusy(true)
+    try {
+      const res = await client.requestCoachReport(d.playerId)
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast('Coaching staff reports filed to your inbox.', 'success'); bumpRefresh() }
+    } finally {
+      setReqBusy(false)
+    }
+  }
 
   // Tier chip colour
   const tierColor =
@@ -1567,28 +1581,12 @@ function TabScout({ d }: { d: PlayerProfileView }): JSX.Element {
                 {d.rosterProjection.projectedStatus}
               </p>
             </div>
-          </div>
-        </Panel>
-      )}
-
-      {/* ── Coaching staff reports ── */}
-      {d.coachReports && d.coachReports.length > 0 && (
-        <Panel title="Coaching Staff Reports">
-          <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-            {d.coachReports.map((r, i) => (
-              <div key={i} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
-                <PlayerFace faceId={r.faceId} name={r.coachName} size={40} />
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 13 }}>
-                    {r.coachName}{' '}
-                    <span className="muted small" style={{ fontWeight: 500 }}>· {r.coachRole}</span>
-                  </div>
-                  <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.65, color: 'var(--text)' }}>
-                    {r.text}
-                  </p>
-                </div>
-              </div>
-            ))}
+            <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', marginTop: 'var(--sp-1)' }}>
+              <button type="button" className="btn btn-sm" disabled={reqBusy} onClick={requestCoachReports}>
+                {reqBusy ? 'Requesting…' : 'Request coach reports'}
+              </button>
+              <span className="muted small">Your coaching staff file their reports to your inbox.</span>
+            </div>
           </div>
         </Panel>
       )}
@@ -1814,7 +1812,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       {activeTab === 'information' && <TabInformation d={d} />}
       {activeTab === 'contract' && <TabContract d={d} />}
       {activeTab === 'history' && <TabHistory d={d} />}
-      {activeTab === 'scout' && <TabScout d={d} />}
+      {activeTab === 'scout' && <TabScout d={d} client={client} />}
     </section>
     </ThemeScope>
   )
