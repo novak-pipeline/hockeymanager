@@ -1099,6 +1099,8 @@ export interface ScoutingViewCtx extends ViewCtx {
   nextOpponentId: string | null
   /** Hireable scouts on the market. */
   scoutMarket: ScoutCandidate[]
+  /** Soft cap on the scouting department size. */
+  maxScouts: number
 }
 
 function assignmentLabel(
@@ -1133,8 +1135,8 @@ function assignmentLabel(
   }
 }
 
-const FOCUS_LABEL: Record<string, string> = { youth: 'Youth', senior: 'Senior', all: 'All players' }
-const SCOUT_YOUTH_MAX_AGE = 20
+const FOCUS_LABEL: Record<string, string> = { youth: 'U23', senior: 'Senior', all: 'All players' }
+const SCOUT_YOUTH_MAX_AGE = 23
 
 export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const { scouting, teams, divisions, players, draftProspectIds } = ctx
@@ -1385,7 +1387,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     teamKnowledge,
     topGains,
     scoutMarket: scoutMarketRows,
-    maxScouts: 8,
+    maxScouts: ctx.maxScouts,
   }
 }
 

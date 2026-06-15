@@ -104,7 +104,7 @@ function ScopeDropdown(props: {
 /* ── assignment: focus segmented control ───────────────────────────────────── */
 
 const FOCI: Array<{ key: ScoutFocus; label: string }> = [
-  { key: 'youth', label: 'Youth' },
+  { key: 'youth', label: 'U23' },
   { key: 'senior', label: 'Senior' },
   { key: 'all', label: 'All' },
 ]

@@ -203,8 +203,9 @@ import {
   knowledgeOf,
   tickScouting,
   generateScoutCandidates,
-  hireScout,
-  fireScout,
+  syncAssignmentsToScouts,
+  scoutSalary,
+  SCOUT_SPECIALTY_NATIONS,
   DISCOVERY_THRESHOLD,
   type ScoutingCompetition,
 } from '@engine/league/scouting'
@@ -679,6 +680,8 @@ export class Career {
       // that namespace; the existing this.staff (headCoach + agm) continues to be
       // the user-facing accessor for backward compat.
       this.generateAllTeamStaff()
+      // Make every staff scout deployable (replaces the placeholder scout roster).
+      this.syncScoutRoster()
 
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
@@ -2432,6 +2435,7 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    this.syncScoutRoster()
     tickScouting({
       state: this.scouting,
       userTeamId: this.userTeamId as string,
@@ -5168,7 +5172,32 @@ export class Career {
     return comp?.abbrev ?? 'NHL'
   }
 
+  /** Max scouts the club will carry (soft cap for the Job Market). */
+  private maxScouts(): number {
+    return Math.max(12, this.userScoutStaff().length)
+  }
+
+  /** The user club's staff scouts — the deployable scouting roster. */
+  private userScoutStaff(): StaffMember[] {
+    return this.getTeamStaff(this.userTeamId as string).scouts
+  }
+
+  /** Keep the deployable assignment roster in lock-step with the staff scouts,
+   *  so every hired scout (incl. imported ones) is assignable. */
+  private syncScoutRoster(): void {
+    const nations = SCOUT_SPECIALTY_NATIONS as readonly string[]
+    syncAssignmentsToScouts(this.scouting, this.userScoutStaff().map((s) => ({
+      id: s.id,
+      name: s.name,
+      rating: s.rating,
+      judgment: s.judgment,
+      ...(s.specialty && nations.includes(s.specialty) ? { specialtyNation: s.specialty } : {}),
+      salary: scoutSalary(s.rating),
+    })))
+  }
+
   getScouting(): ScoutingView {
+    this.syncScoutRoster()
     return buildScoutingView({
       ...this.ctx(),
       scouting: this.scouting,
@@ -5176,6 +5205,7 @@ export class Career {
       competitions: this.scoutingCompetitions(),
       competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
       nextOpponentId: this.nextOpponentTeamId(),
+      maxScouts: this.maxScouts(),
       scoutMarket: generateScoutCandidates(this.rngFor(7720), 6).filter(
         (c) => !this.scouting.assignments.some((s) => s.scoutId === c.id)
       ),
@@ -5186,30 +5216,40 @@ export class Career {
     assignScout(this.scouting, scoutId, target, focus)
   }
 
-  /** Hire a scout from the market (capped at 8 active scouts). */
+  /** Hire a scout from the market — joins the club's staff and becomes deployable. */
   hireScoutFromMarket(candidateId: string): { ok: boolean; message?: string } {
-    if (this.scouting.assignments.length >= 8) {
-      return { ok: false, message: 'Your scouting department is full (max 8 scouts).' }
+    if (this.userScoutStaff().length >= this.maxScouts()) {
+      return { ok: false, message: `Your scouting department is full (max ${this.maxScouts()} scouts).` }
     }
     const cand = generateScoutCandidates(this.rngFor(7720), 6).find((c) => c.id === candidateId)
-    if (!cand || this.scouting.assignments.some((s) => s.scoutId === candidateId)) {
+    if (!cand || this.userScoutStaff().some((s) => s.id === candidateId)) {
       return { ok: false, message: 'That scout is no longer available.' }
     }
-    hireScout(this.scouting, cand)
+    this.userScoutStaff().push({
+      id: cand.id,
+      name: cand.name,
+      role: 'scout',
+      rating: cand.rating,
+      judgment: cand.judgment,
+      ...(cand.specialtyNation ? { specialty: cand.specialtyNation } : {}),
+      demeanor: 'analytical',
+    })
+    this.syncScoutRoster()
     this.pushNews('scouting', `Hired ${cand.name} as a scout`,
       `${cand.name} joins the scouting department${cand.specialtyNation ? ` (specialises in ${cand.specialtyNation})` : ''}. Assign him a region or league from the Scouting screen.`,
       {})
     return { ok: true }
   }
 
-  /** Release a scout from the department. */
+  /** Release a scout from the club's staff. */
   fireScoutFromStaff(scoutId: string): { ok: boolean; message?: string } {
-    if (this.scouting.assignments.length <= 1) {
-      return { ok: false, message: 'You must keep at least one scout.' }
-    }
-    const scout = this.scouting.assignments.find((s) => s.scoutId === scoutId)
-    if (!scout) return { ok: false, message: 'No such scout.' }
-    fireScout(this.scouting, scoutId)
+    const staff = this.userScoutStaff()
+    if (staff.length <= 1) return { ok: false, message: 'You must keep at least one scout.' }
+    const i = staff.findIndex((s) => s.id === scoutId)
+    if (i < 0) return { ok: false, message: 'No such scout.' }
+    staff.splice(i, 1)
+    this.scouting.assignments = this.scouting.assignments.filter((s) => s.scoutId !== scoutId)
+    this.syncScoutRoster()
     return { ok: true }
   }
 
@@ -7162,6 +7202,8 @@ export class Career {
         return !!p && p.age < 38
       })
     }
+    // Ensure every staff scout is deployable (adds any not yet in the roster).
+    career.syncScoutRoster()
     return career
   }
 }

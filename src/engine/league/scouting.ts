@@ -358,8 +358,8 @@ export interface TickScoutingArgs {
   rng: Rng
 }
 
-/** Youth = draft-age / prospect (≤20). A scout's focus narrows his target set. */
-const YOUTH_MAX_AGE = 20
+/** 'youth' focus = U23 (≤23). A scout's focus narrows his target set. */
+const YOUTH_MAX_AGE = 23
 function passesFocus(player: Player, focus: ScoutFocus | undefined): boolean {
   if (!focus || focus === 'all') return true
   const youth = player.age <= YOUTH_MAX_AGE
@@ -502,4 +502,42 @@ export function hireScout(state: ScoutingState, candidate: ScoutCandidate): void
 export function fireScout(state: ScoutingState, scoutId: string): void {
   const i = state.assignments.findIndex((s) => s.scoutId === scoutId)
   if (i >= 0) state.assignments.splice(i, 1)
+}
+
+/** A scout from the club's staff that can be deployed. */
+export interface ScoutRosterMember {
+  id: string
+  name: string
+  rating: number
+  judgment?: number
+  specialtyNation?: string
+  salary?: number
+}
+
+/**
+ * Reconcile the deployable scout roster to the club's actual staff scouts: one
+ * assignment per staff scout, preserving each scout's existing target/focus and
+ * refreshing his identity fields. New scouts get a sensible default deployment.
+ * Mutates state in place.
+ */
+export function syncAssignmentsToScouts(state: ScoutingState, scouts: ScoutRosterMember[]): void {
+  const byId = new Map(state.assignments.map((a) => [a.scoutId, a]))
+  let hasOpponentScout = scouts.some((s) => byId.get(s.id)?.target.kind === 'nextOpponent')
+  const next: ScoutAssignment[] = scouts.map((s, i) => {
+    const ex = byId.get(s.id)
+    const identity = {
+      scoutId: s.id,
+      name: s.name,
+      rating: s.rating,
+      ...(s.judgment !== undefined ? { judgment: s.judgment } : {}),
+      ...(s.specialtyNation ? { specialtyNation: s.specialtyNation } : {}),
+      ...(s.salary !== undefined ? { salary: s.salary } : {}),
+    }
+    if (ex) return { ...identity, target: ex.target, focus: ex.focus ?? 'all' }
+    // New scout: first undeployed one watches the next opponent, the rest scout youth.
+    let target: ScoutTarget = { kind: 'draftClass' }
+    if (!hasOpponentScout && i === 0) { target = { kind: 'nextOpponent' }; hasOpponentScout = true }
+    return { ...identity, target, focus: 'youth' as ScoutFocus }
+  })
+  state.assignments = next
 }

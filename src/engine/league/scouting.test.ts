@@ -467,8 +467,8 @@ describe('scout scopes, focus and market', () => {
     const { data, userTeamId, draftProspectIds } = makeArgs(63)
     const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(63), draftProspectIds })
     const ids = [...draftProspectIds]
-    const youth = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 99) <= 20)
-    const senior = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 0) >= 22)
+    const youth = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 99) <= 23)
+    const senior = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 0) >= 24)
     expect(youth).toBeTruthy(); expect(senior).toBeTruthy()
     state.assignments.forEach((s) => { s.target = { kind: 'draftClass' }; s.focus = 'youth' })
     const yBefore = knowledgeOf(state, youth!)
