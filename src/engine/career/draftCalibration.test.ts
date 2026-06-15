@@ -91,6 +91,7 @@ describe('draft calibration simulation', () => {
     const rows = board.map((r) => ({
       rank: r.rank,
       name: r.name,
+      playerId: r.playerId,
       truePA: truePA.get(r.playerId) ?? 0,
     })).filter((r) => r.truePA > 0)
 
@@ -130,22 +131,57 @@ describe('draft calibration simulation', () => {
     }
     const payoutCorr = pearson(trueArr, finalArr) // true PA ↔ where they ended up
 
+    // ── OUTCOMES: end-to-end draft-rank ↔ realised ability, + base rates by
+    // board tier. Real-world targets (public draft-research base rates):
+    //   • draft-pick ↔ career-value correlation ≈ 0.40–0.50 (Spearman). Ours is
+    //     measured rank↔final; we want |r| in roughly that band.
+    //   • NHLer rate falls steeply by tier; busts among 1st-rounders are common.
+    const outcome = new Map<string, number>() // playerId → final overall
+    for (const p of cohort) outcome.set(p.id as unknown as string, ratedOverall(p))
+    const finalByRank = rows.map((r) => outcome.get(r.playerId ?? '') ?? 0)
+    const rankOutcomeCorr = pearson(rows.map((r) => r.rank), finalByRank)
+
+    const NHLER = 58 // ~ a regular NHLer (depth/3rd-line) on the 0–100 scale
+    const STAR = 76 //  ~ a top-six forward / top-pair defenceman
+    const tierRate = (lo: number, hi: number, thresh: number): number => {
+      const slice = rows.slice(lo, hi)
+      if (slice.length === 0) return 0
+      const hit = slice.filter((r) => (outcome.get(r.playerId) ?? 0) >= thresh).length
+      return hit / slice.length
+    }
+    const top10NHLer = tierRate(0, 10, NHLER)
+    const midNHLer = tierRate(10, 32, NHLER)
+    const lateNHLer = tierRate(32, rows.length, NHLER)
+    const top10Star = tierRate(0, 10, STAR)
+    const top10Bust = 1 - top10NHLer // first-tier picks who never became NHLers
+
     // ── Report (process.stdout so it shows even on a passing run) ─────────────
+    const pct = (x: number): string => `${Math.round(x * 100)}%`
     const lines = [
       '\n=== DRAFT CALIBRATION ===',
       `cohort=${cohort.length}  board=${rows.length}  seasonsSimmed=${career.year - startYear}`,
-      `SIGNAL : top-third true PA ${topTrue.toFixed(1)} vs bottom-third ${botTrue.toFixed(1)}  (rank↔truePA r=${rankTrueCorr.toFixed(2)})`,
+      `SIGNAL  : top-third true PA ${topTrue.toFixed(1)} vs bottom-third ${botTrue.toFixed(1)}  (rank↔truePA r=${rankTrueCorr.toFixed(2)})`,
       `VARIANCE: ${reaches} reaches, ${sleepers} sleepers of ${rows.length}`,
-      `PAYOUT : truePA↔final-ability r=${payoutCorr.toFixed(2)}  (avg gain ${mean(gains).toFixed(1)} over ${career.year - startYear} seasons)`,
+      `PAYOUT  : truePA↔final r=${payoutCorr.toFixed(2)}  (avg gain ${mean(gains).toFixed(1)})`,
+      `OUTCOME : rank↔final r=${rankOutcomeCorr.toFixed(2)}  (real target ≈ −0.45)`,
+      `NHLer%  : top10 ${pct(top10NHLer)} · 11–32 ${pct(midNHLer)} · 33+ ${pct(lateNHLer)}`,
+      `top10   : star ${pct(top10Star)} · bust ${pct(top10Bust)}`,
     ]
     process.stdout.write(lines.join('\n') + '\n')
 
-    // ── Sanity assertions (loose — this is a calibration probe, not a unit) ──
-    expect(topTrue).toBeGreaterThan(botTrue)          // the board has real signal
-    expect(rankTrueCorr).toBeLessThan(0)              // better rank ⇒ higher true PA
-    expect(reaches + sleepers).toBeGreaterThanOrEqual(0)
-    expect(payoutCorr).toBeGreaterThan(0.3)           // truth still drives outcomes (signal)
-    expect(payoutCorr).toBeLessThan(0.95)             // …but not deterministically (real variance)
-    expect(mean(gains)).toBeGreaterThan(4)            // prospects actually develop with headroom
+    // ── Calibration assertions vs real-world structure ──
+    expect(topTrue).toBeGreaterThan(botTrue)              // board has signal
+    expect(rankTrueCorr).toBeLessThan(0)                 // better rank ⇒ higher true PA
+    // End-to-end predictability in the real ~0.45 band (not deterministic, not noise).
+    expect(Math.abs(rankOutcomeCorr)).toBeGreaterThan(0.30)
+    expect(Math.abs(rankOutcomeCorr)).toBeLessThan(0.65)
+    // Development is probabilistic, not destiny.
+    expect(payoutCorr).toBeGreaterThan(0.45)
+    expect(payoutCorr).toBeLessThan(0.92)
+    expect(mean(gains)).toBeGreaterThan(4)               // prospects actually develop
+    // Outcome base rates fall by tier, and top picks still bust sometimes.
+    expect(top10NHLer).toBeGreaterThanOrEqual(midNHLer)
+    expect(midNHLer).toBeGreaterThanOrEqual(lateNHLer)
+    expect(top10Bust).toBeGreaterThan(0)
   }, 120_000)
 })

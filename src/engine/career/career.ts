@@ -77,7 +77,7 @@ import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
-import { projectProspect, type ProspectProjection } from '@engine/career/prospectModel'
+import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
 import { nhleFactorByAbbrev } from '@engine/league/leagueStrength'
 import { scoutDraftBias } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
@@ -5434,7 +5434,11 @@ export class Career {
           // ding (missed viewings + health questions) — injuries move the board.
           const injuryDing = p.injuryStatus ? 4 : 0
           const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
-          const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing)
+          // Consensus scouting error: even the aggregate board misreads talent —
+          // a persistent per-player miss (±~16 ceiling pts) that, with development
+          // variance, brings draft-rank↔outcome down to the real ~0.45 range.
+          const consensusError = hashSigned(id + ':consensus') * 16
+          const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
           // when one is on staff, and noisier the weaker the analyst.
           const isSkater = p.position !== 'G' && hasAnalyst
