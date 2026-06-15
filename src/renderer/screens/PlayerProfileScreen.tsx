@@ -1739,47 +1739,16 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </Panel>
       )}
 
-      {/* ── Roster Projection (EHM-style suggested / projected status) ── */}
+      {/* Coach reports request — projection itself lives in the verdict tiles
+          (our scouts) and the Draft Projection panel (analysts vs your scouts).
+          We deliberately don't show depth-chart slotting on other clubs. */}
       {d.rosterProjection && (
-        <Panel title="Projection">
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-              <div>
-                <div className="field-label">Current role</div>
-                <div style={{ fontWeight: 700, fontSize: 14, textTransform: 'capitalize' }}>
-                  {d.rosterProjection.currentRole}
-                </div>
-                <div className="muted small" style={{ marginTop: 2 }}>
-                  {d.rosterProjection.nhlReady ? 'Ready for the NHL roster' : 'Not yet NHL-ready'}
-                </div>
-              </div>
-              <div>
-                <div className="field-label">Ceiling</div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--violet-h)', textTransform: 'capitalize' }}>
-                  {d.rosterProjection.ceilingRole}
-                </div>
-              </div>
-            </div>
-            <div>
-              <div className="field-label">Suggested status with {d.rosterProjection.teamName}</div>
-              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
-                {d.rosterProjection.suggestedStatus}
-              </p>
-            </div>
-            <div>
-              <div className="field-label">Projected status with {d.rosterProjection.teamName}</div>
-              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
-                {d.rosterProjection.projectedStatus}
-              </p>
-            </div>
-            <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', marginTop: 'var(--sp-1)' }}>
-              <button type="button" className="btn btn-sm" disabled={reqBusy} onClick={requestCoachReports}>
-                {reqBusy ? 'Requesting…' : 'Request coach reports'}
-              </button>
-              <span className="muted small">Your coaching staff file their reports to your inbox.</span>
-            </div>
-          </div>
-        </Panel>
+        <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <button type="button" className="btn btn-sm" disabled={reqBusy} onClick={requestCoachReports}>
+            {reqBusy ? 'Requesting…' : 'Request coach reports'}
+          </button>
+          <span className="muted small">Your coaching staff file their reports to your inbox.</span>
+        </div>
       )}
 
       {/* ── Scouting Report ── */}
