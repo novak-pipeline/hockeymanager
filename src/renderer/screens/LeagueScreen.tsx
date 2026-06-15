@@ -40,6 +40,10 @@ type LeagueTab =
   | 'leagueScoreboard'
   | 'leagueHistory'
   | 'scouting'
+  | 'scoutingCentre'
+  | 'scoutingPlayers'
+  | 'scoutingFocus'
+  | 'scoutingCoverage'
   | 'scoutingDraft'
   | 'draft'
   | 'offseason'
@@ -79,7 +83,11 @@ export function LeagueScreen(props: { tab: LeagueTab }): JSX.Element {
     case 'leagueTransactions': return <LeagueTransactionsTab />
     case 'leagueScoreboard':   return <LeagueScoreboardTab />
     case 'leagueHistory':      return <HistoryScreen />
-    case 'scouting':           return <ScoutingScreen />
+    case 'scouting':           return <ScoutingScreen tab="overview" />
+    case 'scoutingCentre':     return <ScoutingScreen tab="centre" />
+    case 'scoutingPlayers':    return <ScoutingScreen tab="players" />
+    case 'scoutingFocus':      return <ScoutingScreen tab="focus" />
+    case 'scoutingCoverage':   return <ScoutingScreen tab="coverage" />
     case 'scoutingDraft':      return <DraftRankingsScreen />
     case 'draft':              return <DraftScreen />
     case 'offseason':          return <OffseasonScreen />

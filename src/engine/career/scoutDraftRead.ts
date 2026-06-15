@@ -38,6 +38,12 @@ export interface ScoutDraftReadArgs {
   analystRank?: number
   /** Interview questions your staff has put to him (intangible read). */
   interviews: number
+  /** Your scouts' grounded ceiling estimate (0–100) and its role label. */
+  scoutsCeiling?: number
+  scoutsRole?: string
+  /** The analysts' (hype-inflated) ceiling estimate (0–100) and role label. */
+  analystCeiling?: number
+  analystRole?: string
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -87,7 +93,14 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
   const rank = a.analystRank ?? 70
   const chaos = 0.3 + 0.7 * clamp((rank - 1) / 40, 0, 1)
   const knowledgeFactor = clamp(knowledge / 100, 0, 1)
-  const delta = rawDelta * chaos * knowledgeFactor
+  // Ceiling gap: how far our grounded read sits from the (optimistic) board, in
+  // value points. The board systematically over-projects via draft hype, so a
+  // sober scouting dept will often read a touch lower — strong intangibles can
+  // pull them back level or above.
+  const ceilingGap = (a.scoutsCeiling !== undefined && a.analystCeiling !== undefined)
+    ? a.scoutsCeiling - a.analystCeiling
+    : 0
+  const delta = (rawDelta * chaos + ceilingGap * 0.4) * knowledgeFactor
 
   const confidence: ScoutDraftRead['confidence'] =
     knowledge >= 70 ? 'high' : knowledge >= 50 ? 'medium' : 'low'
@@ -102,6 +115,11 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
     }
     return 'the overall package'
   }
+  // When our role read differs from the board's, name both so the card is
+  // self-consistent (no "we agree" while showing a lower projection).
+  const roleClause = (a.scoutsRole && a.analystRole && a.scoutsRole !== a.analystRole)
+    ? ` — they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees`
+    : ''
 
   const THRESH = 2.2
   let verdict: ScoutVerdict = 'inline'
@@ -110,9 +128,9 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
 
   let blurb: string
   if (verdict === 'higher') {
-    blurb = `Your scouting staff is higher on him than the consensus board — ${reason()}. They'd be comfortable taking him earlier than his ranking suggests.`
+    blurb = `Your scouting staff is higher on him than the consensus board — ${reason()}. They'd take him earlier than his ranking suggests.`
   } else if (verdict === 'lower') {
-    blurb = `Your staff is cooler on him than the board — ${reason()}. They'd let him slide rather than reach.`
+    blurb = `Your staff is more cautious than the board${roleClause || ` — ${reason()}`}. They'd let him slide rather than reach.`
   } else {
     blurb = `Your scouts' read lines up with the consensus${confidence === 'low' ? ', though they want more viewings to be sure' : ''}.`
   }

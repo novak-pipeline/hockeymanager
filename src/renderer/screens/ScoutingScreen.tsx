@@ -386,23 +386,51 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
   )
 }
 
+function WatchListPanel({ data }: { data: ScoutingView }): JSX.Element {
+  return (
+    <Panel title="Watch List">
+      {data.topGains.length === 0 ? (
+        <p className="muted small">Assign scouts to start building intelligence.</p>
+      ) : (
+        <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
+          <table className="table">
+            <thead><tr><th>Player</th><th>Pos</th><th className="num">Knowledge</th></tr></thead>
+            <tbody>
+              {data.topGains.map((p) => (
+                <tr key={p.playerId}>
+                  <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                  <td className="muted">{p.position}</td>
+                  <td><KnowledgeBar value={p.knowledge} small /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 function OverviewTab({ data }: { data: ScoutingView }): JSX.Element {
-  const mapNations: WorldMapNation[] = data.nationCoverage.map((c) => ({
+  return (
+    <div className="stack">
+      <HeaderStrip data={data} />
+      <ScoutAssignmentList scouts={data.scouts} />
+      <WatchListPanel data={data} />
+    </div>
+  )
+}
+
+function buildMapNations(data: ScoutingView): WorldMapNation[] {
+  const map: WorldMapNation[] = data.nationCoverage.map((c) => ({
     nation: c.nation ?? c.label,
     scouted: data.scoutedNations.includes(c.nation ?? c.label),
     knowledge: c.avgKnowledge,
   }))
-  // Ensure scouted nations always appear even if coverage row is missing.
   for (const n of data.scoutedNations) {
-    if (!mapNations.some((m) => m.nation === n)) mapNations.push({ nation: n, scouted: true, knowledge: 0 })
+    if (!map.some((m) => m.nation === n)) map.push({ nation: n, scouted: true, knowledge: 0 })
   }
-  return (
-    <div className="stack">
-      <HeaderStrip data={data} />
-      <WorldMap nations={mapNations} />
-      <ScoutAssignmentList scouts={data.scouts} />
-    </div>
-  )
+  return map
 }
 
 /* ── Scouting Centre: surfaced recommendations (fills over time) ────────────── */
@@ -480,19 +508,18 @@ function ScoutPickerCell({ playerId, scouts, onPick }: {
 
 /* ── main screen ───────────────────────────────────────────────────────────── */
 
-type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage' | 'shortlist'
-const FM_TABS: Array<{ id: FmTab; label: string }> = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'centre', label: 'Scouting Centre' },
-  { id: 'players', label: 'Players' },
-  { id: 'focus', label: 'Recruitment Focus' },
-  { id: 'coverage', label: 'Scouting Coverage' },
-  { id: 'shortlist', label: 'Shortlist' },
-]
+export type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage'
 
-export function ScoutingScreen(): JSX.Element {
+const TAB_TITLE: Record<FmTab, string> = {
+  overview: 'Scouting — Overview',
+  centre: 'Scouting Centre',
+  players: 'Scouting — Players',
+  focus: 'Recruitment Focus',
+  coverage: 'Scouting Coverage',
+}
+
+export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
   const client = useClient()
-  const [tab, setTab] = useState<FmTab>('overview')
   const { data, loading, error, refetch } = useScreenData<ScoutingView>(
     () => client.getScouting(),
     (r) => (r.type === 'scouting' ? r.scouting : null)
@@ -514,88 +541,43 @@ export function ScoutingScreen(): JSX.Element {
 
   return (
     <section className="stack">
-      <ScreenHeader title="Scouting" />
+      <ScreenHeader title={TAB_TITLE[tab]} />
       <ScreenStateNotices loading={loading} error={error} empty={!data} emptyText="No scouting data." />
 
-      {data && (
-        <>
-          {/* FM-style in-screen tab bar */}
-          <div className="row" style={{ gap: 4, borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
-            {FM_TABS.map((t) => (
-              <button
-                key={t.id}
-                className="btn btn-ghost"
-                style={{
-                  padding: '8px 14px', borderRadius: 0, fontWeight: tab === t.id ? 700 : 500,
-                  color: tab === t.id ? 'var(--accent, #f5b301)' : 'var(--muted)',
-                  borderBottom: tab === t.id ? '2px solid var(--accent, #f5b301)' : '2px solid transparent',
-                }}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-              </button>
+      {data && tab === 'overview' && <OverviewTab data={data} />}
+
+      {data && tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} />}
+
+      {data && tab === 'players' && (
+        <ScoutedTable rows={data.scoutedPlayers} scouts={data.scouts} onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }} />
+      )}
+
+      {data && tab === 'focus' && (
+        <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
+          <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Aim each scout at a region/league and set who they focus on. Hire more scouts under Staff → Job Market.</p>
+          <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+            {data.scouts.map((scout) => (
+              <ScoutCard
+                key={scout.scoutId}
+                scout={scout}
+                view={data}
+                canFire={data.scouts.length > 1}
+                onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
+                onFire={(id) => { void handleFire(id) }}
+              />
             ))}
           </div>
+        </Panel>
+      )}
 
-          {tab === 'overview' && <OverviewTab data={data} />}
-
-          {tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} />}
-
-          {tab === 'players' && (
-            <ScoutedTable rows={data.scoutedPlayers} scouts={data.scouts} onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }} />
-          )}
-
-          {tab === 'focus' && (
-            <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
-              <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Aim each scout at a region/league and set who they focus on. Hire more scouts under Staff → Job Market.</p>
-              <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-                {data.scouts.map((scout) => (
-                  <ScoutCard
-                    key={scout.scoutId}
-                    scout={scout}
-                    view={data}
-                    canFire={data.scouts.length > 1}
-                    onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
-                    onFire={(id) => { void handleFire(id) }}
-                  />
-                ))}
-              </div>
-            </Panel>
-          )}
-
-          {tab === 'coverage' && (
-            <div className="stack">
-              <WorldMap nations={data.nationCoverage.map((c) => ({ nation: c.nation ?? c.label, scouted: data.scoutedNations.includes(c.nation ?? c.label), knowledge: c.avgKnowledge }))} />
-              <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-                <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
-                <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
-              </div>
-            </div>
-          )}
-
-          {tab === 'shortlist' && (
-            <Panel title="Shortlist / Watch List">
-              {data.topGains.length === 0 ? (
-                <p className="muted small">Assign scouts to start building intelligence.</p>
-              ) : (
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead><tr><th>Player</th><th>Pos</th><th className="num">Knowledge</th></tr></thead>
-                    <tbody>
-                      {data.topGains.map((p) => (
-                        <tr key={p.playerId}>
-                          <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-                          <td className="muted">{p.position}</td>
-                          <td><KnowledgeBar value={p.knowledge} small /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-          )}
-        </>
+      {data && tab === 'coverage' && (
+        <div className="stack">
+          <WorldMap nations={buildMapNations(data)} />
+          <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+            <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
+            <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
+          </div>
+        </div>
       )}
     </section>
   )

@@ -33,8 +33,6 @@ import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
 import { JobMarketScreen } from './screens/JobMarketScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
-import { PressConference } from './components/PressConference'
-import { pollPress } from './lib/press'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -206,11 +204,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     (r) => (r.type === 'dashboard' ? r.dashboard : null)
   )
 
-  // Press pump: fire on every refresh bump (version change).
-  const version = useUiStore((s) => s.version)
-  useEffect(() => {
-    void pollPress(client)
-  }, [version, client])
+  // Press-conference pop-up disabled for now (got in the way of testing).
+  // To re-enable: restore the pollPress pump + <PressConference /> render below.
 
   /** Serialize world-mutating calls; toast errors; bump the refresh bus. */
   const run = useCallback(
@@ -355,7 +350,6 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         ) : (
           <div className="app-shell" style={appTheme}>
-            <PressConference />
             <div className="app-body">
               <SideNav dashboard={dashboard} />
               <div className="app-right">
@@ -469,6 +463,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
+    case 'scoutingCentre':
+    case 'scoutingPlayers':
+    case 'scoutingFocus':
+    case 'scoutingCoverage':
     case 'scoutingDraft':
     case 'draft':
     case 'offseason':

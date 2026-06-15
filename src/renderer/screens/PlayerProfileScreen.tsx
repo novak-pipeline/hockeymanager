@@ -1928,6 +1928,13 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
                 }}>
                   YOUR SCOUTS{d.scoutDraftRead.verdict === 'higher' ? ' ▲' : d.scoutDraftRead.verdict === 'lower' ? ' ▼' : ''}
                 </div>
+                {d.scoutsCeilingRole && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span className="muted" style={{ fontSize: 11 }}>Our ceiling:</span>
+                    <StarRating stars={d.potentialStars} size={13} />
+                    <span className="muted small">{d.scoutsCeilingRole}</span>
+                  </div>
+                )}
                 <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
                   {d.scoutDraftRead.blurb}
                 </p>

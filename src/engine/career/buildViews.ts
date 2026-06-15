@@ -600,7 +600,9 @@ export function buildPlayerProfile(
   fog?: FogCtx,
   mindsetCtx?: MindsetBuildCtx,
   /** The user team's scouts — used to build the multi-scout panel. */
-  userScouts?: StaffMember[]
+  userScouts?: StaffMember[],
+  /** The league the player plays in — used to frame his point projection. */
+  playerLeague?: { factor: number; name: string }
 ): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
@@ -752,7 +754,7 @@ export function buildPlayerProfile(
       })()
     : undefined
   const potStars = potentialStars(p)
-  const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
+  const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague)
   const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
   // FM-style Overall Report verdict (own players / reliably scouted opponents).
   const scoutVerdict = archetypeKnown

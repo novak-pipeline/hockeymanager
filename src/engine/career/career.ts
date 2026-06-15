@@ -4517,7 +4517,12 @@ export class Career {
     }
 
     const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
-    const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
+    const playerForLeague = this.data.players.get(pid)
+    const leagueAbbrev = playerForLeague ? this.leagueAbbrevForPlayer(playerForLeague) : 'NHL'
+    const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts, {
+      factor: nhleFactorByAbbrev(leagueAbbrev),
+      name: leagueAbbrev,
+    })
 
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
@@ -4638,12 +4643,19 @@ export class Career {
         if (proj) profile.analystProjection = proj
 
         // Your scouts' own read — can diverge from the consensus (more so the
-        // deeper the prospect is ranked), driven by intangibles + underlying game.
+        // deeper the prospect is ranked), driven by intangibles + underlying game
+        // + how their grounded ceiling read compares to the board's optimism.
+        const ourCeiling = agedPotential(player)
+        const theirCeiling = analystRow?.perceivedCeiling ?? ourCeiling
         const read = buildScoutDraftRead({
           player,
           knowledge: profile.scoutReport.knowledge,
           ...(rank !== undefined ? { analystRank: rank } : {}),
           interviews: (this.interviews.get(playerId) ?? []).length,
+          scoutsCeiling: ourCeiling,
+          scoutsRole: ceilingRoleShort(ourCeiling, player.position),
+          analystCeiling: theirCeiling,
+          analystRole: ceilingRoleShort(theirCeiling, player.position),
         })
         if (read) profile.scoutDraftRead = { verdict: read.verdict, confidence: read.confidence, blurb: read.blurb }
       }
