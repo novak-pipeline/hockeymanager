@@ -1447,9 +1447,49 @@ export interface ScoutCardView {
   scoutId: string
   name: string
   rating: number
-  /** Human-readable label for current assignment. */
+  /** 0–100 judgment of the qualitative read. */
+  judgment?: number
+  /** Nation the scout knows best. */
+  specialtyNation?: string
+  /** Annual salary. */
+  salary?: number
+  /** Human-readable label for current assignment scope. */
   assignmentLabel: string
+  /** Human-readable focus ('Youth' / 'Senior' / 'All players'). */
+  focusLabel: string
   target: ScoutAssignment['target']
+  focus: 'youth' | 'senior' | 'all'
+  /** How many players currently fall under his assignment (post-focus). */
+  coverage: number
+}
+
+/** A scope option for the assignment dropdowns. */
+export interface ScoutScopeOption {
+  /** 'nation' | 'competition' | 'team' | 'nextOpponent' | 'draftClass' | 'freeAgents' */
+  kind: string
+  /** Stable id (nation name, competition id, team id) — empty for singletons. */
+  id: string
+  label: string
+}
+
+/** Average scouting knowledge across a league/nation, with a youth split. */
+export interface ScoutCoverageRow {
+  id: string
+  label: string
+  nation?: string
+  avgKnowledge: number
+  youthAvgKnowledge: number
+  playerCount: number
+}
+
+/** A hireable scout in the job market. */
+export interface ScoutMarketRow {
+  id: string
+  name: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary: number
 }
 
 /** Per-team knowledge summary for the scouting overview panel. */
@@ -1494,12 +1534,26 @@ export interface ScoutingView {
   teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
   /** All divisions as assignment options. */
   divisions: Array<{ divisionId: string; divisionName: string }>
+  /** Nations (regions) you can assign a scout to cover. */
+  nations: ScoutScopeOption[]
+  /** Leagues/competitions you can assign a scout to (incl. NHL/AHL). */
+  competitions: ScoutScopeOption[]
+  /** The user's next opponent's name (for the Next Opponent scope label), or null. */
+  nextOpponentName: string | null
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
   hasDraftClass: boolean
+  /** Knowledge coverage by league (avg + youth split). */
+  leagueCoverage: ScoutCoverageRow[]
+  /** Knowledge coverage by nation (avg + youth split). */
+  nationCoverage: ScoutCoverageRow[]
   /** Per-team knowledge summary. */
   teamKnowledge: TeamKnowledgeSummary[]
   /** Recently improved players (highest delta-knowledge), for watch-list panel. */
   topGains: Array<PlayerBadge & { knowledge: number }>
+  /** Hireable scouts on the market. */
+  scoutMarket: ScoutMarketRow[]
+  /** Cap on active scouts. */
+  maxScouts: number
 }
 
 /* ────────────────────────── story layer: history / locker room / tentpoles ────────────────────────── */

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Rng } from '@engine/shared/rng'
-import { overall } from '@engine/ratings/composites'
 import {
   assignScout,
   createInitialScouting,
@@ -9,6 +8,9 @@ import {
   maskAttribute,
   maskedOverall,
   tickScouting,
+  generateScoutCandidates,
+  hireScout,
+  fireScout,
 } from './scouting'
 
 /* ────────────────────────── helpers ────────────────────────── */
@@ -26,7 +28,7 @@ function makeArgs(seed = 42) {
 /* ────────────────────────── createInitialScouting ────────────────────────── */
 
 describe('createInitialScouting', () => {
-  it('creates 3 scouts with ratings in [55,75]', () => {
+  it('creates 3 scouts with ratings in [45,92] and a default focus', () => {
     const { data, userTeamId, rng } = makeArgs(1)
     const state = createInitialScouting({
       userTeamId,
@@ -36,11 +38,14 @@ describe('createInitialScouting', () => {
     })
     expect(state.assignments).toHaveLength(3)
     for (const s of state.assignments) {
-      expect(s.rating).toBeGreaterThanOrEqual(55)
-      expect(s.rating).toBeLessThanOrEqual(75)
+      expect(s.rating).toBeGreaterThanOrEqual(45)
+      expect(s.rating).toBeLessThanOrEqual(92)
       expect(s.name).toBeTruthy()
       expect(s.scoutId).toBeTruthy()
+      expect(s.focus).toBeTruthy()
     }
+    // Youth-leaning default deployment (≥2 of 3 scouts on youth).
+    expect(state.assignments.filter((s) => s.focus === 'youth').length).toBeGreaterThanOrEqual(2)
   })
 
   it('own roster gets knowledge 100', () => {
@@ -404,6 +409,112 @@ describe('assignScout', () => {
       rng: new Rng(6),
     })
     expect(() => assignScout(state, 'nonexistent-scout', { kind: 'draftClass' })).toThrow()
+  })
+})
+
+/* ────────────────────────── scopes + focus + market (redesign) ────────────────────────── */
+
+describe('scout scopes, focus and market', () => {
+  const teamsMap = (data: ReturnType<typeof makeArgs>['data']) =>
+    data.teams as Map<import('@domain').TeamId, { roster: import('@domain').PlayerId[]; divisionId?: string }>
+
+  it('competition scope raises knowledge of that league\'s rosters', () => {
+    const { data, userTeamId } = makeArgs(60)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(60) })
+    const compTeamId = data.league.teams.find((t) => t as string !== userTeamId)! as string
+    const competitions = [{ id: 'testlge', nation: 'Testland', teamIds: [compTeamId] }]
+    state.assignments[0]!.target = { kind: 'competition', competitionId: 'testlge' }
+    state.assignments[0]!.focus = 'all'
+    const pid = data.teams.get(compTeamId as import('@domain').TeamId)!.roster[0]! as string
+    const before = knowledgeOf(state, pid)
+    for (let i = 0; i < 15; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), competitions, nextOpponentId: null, rng: new Rng(i + 700) })
+    }
+    expect(knowledgeOf(state, pid)).toBeGreaterThan(before)
+  })
+
+  it('nation scope covers every league hosted by that nation', () => {
+    const { data, userTeamId } = makeArgs(61)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(61) })
+    const tid = data.league.teams.find((t) => t as string !== userTeamId)! as string
+    const competitions = [{ id: 'l1', nation: 'Eastland', teamIds: [tid] }]
+    state.assignments[0]!.target = { kind: 'nation', nation: 'Eastland' }
+    state.assignments[0]!.focus = 'all'
+    const pid = data.teams.get(tid as import('@domain').TeamId)!.roster[0]! as string
+    const before = knowledgeOf(state, pid)
+    for (let i = 0; i < 15; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), competitions, nextOpponentId: null, rng: new Rng(i + 720) })
+    }
+    expect(knowledgeOf(state, pid)).toBeGreaterThan(before)
+  })
+
+  it('nextOpponent scope follows the supplied opponent id', () => {
+    const { data, userTeamId } = makeArgs(62)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(62) })
+    const oppId = data.league.teams.find((t) => t as string !== userTeamId)! as string
+    state.assignments[0]!.target = { kind: 'nextOpponent' }
+    state.assignments[0]!.focus = 'all'
+    const pid = data.teams.get(oppId as import('@domain').TeamId)!.roster[0]! as string
+    const before = knowledgeOf(state, pid)
+    for (let i = 0; i < 15; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), competitions: [], nextOpponentId: oppId, rng: new Rng(i + 740) })
+    }
+    expect(knowledgeOf(state, pid)).toBeGreaterThan(before)
+  })
+
+  it('youth focus skips senior players in scope', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(63)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(63), draftProspectIds })
+    const ids = [...draftProspectIds]
+    const youth = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 99) <= 20)
+    const senior = ids.find((id) => (data.players.get(id as import('@domain').PlayerId)?.age ?? 0) >= 22)
+    expect(youth).toBeTruthy(); expect(senior).toBeTruthy()
+    state.assignments.forEach((s) => { s.target = { kind: 'draftClass' }; s.focus = 'youth' })
+    const yBefore = knowledgeOf(state, youth!)
+    const sBefore = knowledgeOf(state, senior!)
+    for (let i = 0; i < 12; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 760) })
+    }
+    expect(knowledgeOf(state, youth!)).toBeGreaterThan(yBefore)
+    expect(knowledgeOf(state, senior!)).toBe(sBefore) // senior untouched under youth focus
+  })
+
+  it('specialty nation gives a knowledge bonus over a generalist', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(64)
+    const probe = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(64), draftProspectIds })
+    // A low-knowledge prospect; give him a known nationality so the bonus applies.
+    const pid = [...draftProspectIds].find((id) => knowledgeOf(probe, id) < 40)!
+    const nat = 'Canada'
+    ;(data.players.get(pid as import('@domain').PlayerId) as { nationality?: string }).nationality = nat
+    const run = (specialty?: string): number => {
+      const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(64), draftProspectIds })
+      const s = state.assignments[0]!
+      s.target = { kind: 'draftClass' }; s.focus = 'all'; s.rating = 55
+      if (specialty) s.specialtyNation = specialty; else delete s.specialtyNation
+      state.assignments = [s] // isolate: only this scout scouts the prospect
+      const before = knowledgeOf(state, pid)
+      for (let i = 0; i < 4; i++) {
+        tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 780) })
+      }
+      return knowledgeOf(state, pid) - before
+    }
+    expect(run(nat)).toBeGreaterThan(run(undefined))
+  })
+
+  it('market generates distinct candidates; hire adds and fire removes', () => {
+    const { data, userTeamId } = makeArgs(65)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(65) })
+    const market = generateScoutCandidates(new Rng(7720), 6)
+    expect(market).toHaveLength(6)
+    expect(new Set(market.map((c) => c.name)).size).toBeGreaterThan(1) // names vary
+    const n0 = state.assignments.length
+    hireScout(state, market[0]!)
+    expect(state.assignments).toHaveLength(n0 + 1)
+    expect(state.assignments.some((s) => s.scoutId === market[0]!.id)).toBe(true)
+    hireScout(state, market[0]!) // idempotent — no duplicate
+    expect(state.assignments).toHaveLength(n0 + 1)
+    fireScout(state, market[0]!.id)
+    expect(state.assignments.some((s) => s.scoutId === market[0]!.id)).toBe(false)
   })
 })
 

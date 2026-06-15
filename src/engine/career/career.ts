@@ -202,6 +202,10 @@ import {
   createInitialScouting,
   knowledgeOf,
   tickScouting,
+  generateScoutCandidates,
+  hireScout,
+  fireScout,
+  type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
 import { buildTeamDynamics } from '@engine/career/dynamics'
@@ -357,7 +361,7 @@ import {
   type StaffView,
   type StaffRowView,
 } from './views'
-import type { ScoutingState, ScoutTarget } from '@domain/scouting'
+import type { ScoutingState, ScoutTarget, ScoutFocus } from '@domain/scouting'
 
 /* ────────────────────────── legacy v1 view types (kept for compat) ────────────────────────── */
 
@@ -2434,6 +2438,8 @@ export class Career {
       players: this.data.players,
       draftProspectIds: this.allDraftProspectIds(),
       freeAgentIds: this.currentFaIds(),
+      competitions: this.scoutingCompetitions(),
+      nextOpponentId: this.nextOpponentTeamId(),
       rng: this.rngFor(7008, day),
     })
     // Games reveal players: anyone who suits up becomes better known, so the
@@ -5030,16 +5036,74 @@ export class Career {
     return buildCompareRadar(this.ctx(), playerIdA, playerIdB)
   }
 
+  /** Leagues the scouting engine can target — synthetic NHL + AHL + every
+   *  feeder/international competition, each with its host nation and teams. */
+  private scoutingCompetitions(): ScoutingCompetition[] {
+    const out: ScoutingCompetition[] = []
+    out.push({ id: 'nhl', nation: 'North America', teamIds: this.data.league.teams.map((id) => id as string) })
+    const comps = this.data.league.competitions ?? []
+    const hasAhlComp = comps.some((c) => c.abbrev === 'AHL')
+    if (!hasAhlComp && this.data.league.ahlTeams?.length) {
+      out.push({ id: 'ahl', nation: 'North America', teamIds: this.data.league.ahlTeams.map((id) => id as string) })
+    }
+    for (const c of comps) {
+      out.push({ id: c.id, nation: c.nation, teamIds: c.teamIds.map((id) => id as string) })
+    }
+    return out
+  }
+
+  /** The user's next scheduled opponent (regular season or playoffs), or null. */
+  private nextOpponentTeamId(): string | null {
+    const sched = this.data.league.schedule.find(
+      (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
+    )
+    if (!sched) return null
+    return (sched.homeTeamId === this.userTeamId ? sched.awayTeamId : sched.homeTeamId) as string
+  }
+
   getScouting(): ScoutingView {
     return buildScoutingView({
       ...this.ctx(),
       scouting: this.scouting,
       draftProspectIds: this.allDraftProspectIds(),
+      competitions: this.scoutingCompetitions(),
+      competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
+      nextOpponentId: this.nextOpponentTeamId(),
+      scoutMarket: generateScoutCandidates(this.rngFor(7720), 6).filter(
+        (c) => !this.scouting.assignments.some((s) => s.scoutId === c.id)
+      ),
     })
   }
 
-  assignScoutTarget(scoutId: string, target: ScoutTarget): void {
-    assignScout(this.scouting, scoutId, target)
+  assignScoutTarget(scoutId: string, target: ScoutTarget, focus?: ScoutFocus): void {
+    assignScout(this.scouting, scoutId, target, focus)
+  }
+
+  /** Hire a scout from the market (capped at 8 active scouts). */
+  hireScoutFromMarket(candidateId: string): { ok: boolean; message?: string } {
+    if (this.scouting.assignments.length >= 8) {
+      return { ok: false, message: 'Your scouting department is full (max 8 scouts).' }
+    }
+    const cand = generateScoutCandidates(this.rngFor(7720), 6).find((c) => c.id === candidateId)
+    if (!cand || this.scouting.assignments.some((s) => s.scoutId === candidateId)) {
+      return { ok: false, message: 'That scout is no longer available.' }
+    }
+    hireScout(this.scouting, cand)
+    this.pushNews('scouting', `Hired ${cand.name} as a scout`,
+      `${cand.name} joins the scouting department${cand.specialtyNation ? ` (specialises in ${cand.specialtyNation})` : ''}. Assign him a region or league from the Scouting screen.`,
+      {})
+    return { ok: true }
+  }
+
+  /** Release a scout from the department. */
+  fireScoutFromStaff(scoutId: string): { ok: boolean; message?: string } {
+    if (this.scouting.assignments.length <= 1) {
+      return { ok: false, message: 'You must keep at least one scout.' }
+    }
+    const scout = this.scouting.assignments.find((s) => s.scoutId === scoutId)
+    if (!scout) return { ok: false, message: 'No such scout.' }
+    fireScout(this.scouting, scoutId)
+    return { ok: true }
   }
 
   getTactics(): TacticsView {

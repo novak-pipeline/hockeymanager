@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, maskAttribute, maskedOverall } from '@engine/league/scouting'
+import { knowledgeOf, maskAttribute, maskedOverall, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -1089,11 +1089,19 @@ export interface ScoutingViewCtx extends ViewCtx {
   scouting: ScoutingState
   /** All draft class prospect ids across all years. */
   draftProspectIds: Set<string>
+  /** Leagues for `competition`/`nation` scopes (synthetic NHL/AHL included). */
+  competitions: ScoutingCompetition[]
+  /** Display metadata for feeder/international competitions. */
+  competitionMeta: Array<{ id: string; name: string; abbrev: string; nation: string }>
+  /** The user's next-opponent team id, or null. */
+  nextOpponentId: string | null
+  /** Hireable scouts on the market. */
+  scoutMarket: ScoutCandidate[]
 }
 
 function assignmentLabel(
-  target: { kind: string; teamId?: string; divisionId?: string },
-  ctx: ViewCtx
+  target: { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string },
+  ctx: ScoutingViewCtx
 ): string {
   switch (target.kind) {
     case 'team': {
@@ -1104,6 +1112,16 @@ function assignmentLabel(
       const d = ctx.divisions.find((div) => div.id === target.divisionId)
       return d ? `Watching ${d.name} division` : 'Watching division'
     }
+    case 'competition': {
+      if (target.competitionId === 'nhl') return 'Covering the NHL'
+      if (target.competitionId === 'ahl') return 'Covering the AHL'
+      const c = ctx.competitionMeta.find((m) => m.id === target.competitionId)
+      return c ? `Covering the ${c.abbrev}` : 'Covering a league'
+    }
+    case 'nation':
+      return `Covering ${target.nation}`
+    case 'nextOpponent':
+      return 'Advance-scouting next opponent'
     case 'draftClass':
       return 'Scouting draft class'
     case 'freeAgents':
@@ -1113,17 +1131,76 @@ function assignmentLabel(
   }
 }
 
+const FOCUS_LABEL: Record<string, string> = { youth: 'Youth', senior: 'Senior', all: 'All players' }
+const SCOUT_YOUTH_MAX_AGE = 20
+
 export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const { scouting, teams, divisions, players, draftProspectIds } = ctx
 
+  const { competitions, competitionMeta, nextOpponentId, scoutMarket } = ctx
+
+  // Resolve a scope (+focus) to the set of player ids it covers — mirrors the
+  // engine's resolveTarget so the cards/coverage match what actually ticks.
+  const isYouth = (pid: string): boolean => {
+    const p = players.get(pid as PlayerId)
+    return !!p && p.age <= SCOUT_YOUTH_MAX_AGE
+  }
+  const rostersOf = (teamIds: Iterable<string>): string[] => {
+    const ids: string[] = []
+    for (const tid of teamIds) {
+      const t = teams.get(tid as TeamId)
+      if (t) for (const id of t.roster) ids.push(id as string)
+    }
+    return ids
+  }
+  const resolveScope = (target: { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string }): string[] => {
+    switch (target.kind) {
+      case 'team': return target.teamId ? rostersOf([target.teamId]) : []
+      case 'division': {
+        const ids: string[] = []
+        for (const [tid, t] of teams) {
+          if ((t as { divisionId?: string }).divisionId === target.divisionId) ids.push(...rostersOf([tid as string]))
+        }
+        return ids
+      }
+      case 'competition': {
+        const c = competitions.find((x) => x.id === target.competitionId)
+        return c ? rostersOf(c.teamIds) : []
+      }
+      case 'nation': {
+        const set = new Set<string>()
+        for (const c of competitions) if (c.nation === target.nation) for (const t of c.teamIds) set.add(t)
+        return rostersOf(set)
+      }
+      case 'nextOpponent': return nextOpponentId ? rostersOf([nextOpponentId]) : []
+      case 'draftClass': return [...draftProspectIds]
+      case 'freeAgents': return [] // FA coverage isn't league-bounded; skip the count
+      default: return []
+    }
+  }
+  const coverageOf = (target: { kind: string }, focus: string | undefined): number => {
+    const ids = resolveScope(target as { kind: string })
+    if (!focus || focus === 'all') return ids.length
+    return ids.filter((id) => (focus === 'youth' ? isYouth(id) : !isYouth(id))).length
+  }
+
   // Scout cards
-  const scouts = scouting.assignments.map((s) => ({
-    scoutId: s.scoutId,
-    name: s.name,
-    rating: s.rating,
-    assignmentLabel: assignmentLabel(s.target as { kind: string; teamId?: string; divisionId?: string }, ctx),
-    target: s.target,
-  }))
+  const scouts = scouting.assignments.map((s) => {
+    const focus = (s.focus ?? 'all') as 'youth' | 'senior' | 'all'
+    return {
+      scoutId: s.scoutId,
+      name: s.name,
+      rating: s.rating,
+      ...(s.judgment !== undefined ? { judgment: s.judgment } : {}),
+      ...(s.specialtyNation !== undefined ? { specialtyNation: s.specialtyNation } : {}),
+      ...(s.salary !== undefined ? { salary: s.salary } : {}),
+      assignmentLabel: assignmentLabel(s.target as { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string }, ctx),
+      focusLabel: FOCUS_LABEL[focus] ?? 'All players',
+      target: s.target,
+      focus,
+      coverage: coverageOf(s.target as { kind: string }, focus),
+    }
+  })
 
   // Teams list for dropdown options
   const teamsOpts = [...teams.values()].map((t) => ({
@@ -1137,6 +1214,41 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     divisionId: d.id,
     divisionName: d.name,
   }))
+
+  // Scope options — nations (regions) and leagues (competitions, incl. NHL/AHL).
+  const nationSet = new Set<string>()
+  for (const c of competitions) if (c.nation && c.nation !== 'North America') nationSet.add(c.nation)
+  const nations: import('./views').ScoutScopeOption[] = [...nationSet].sort()
+    .map((n) => ({ kind: 'nation', id: n, label: n }))
+  const compLabel = (id: string): string =>
+    id === 'nhl' ? 'NHL' : id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === id)?.abbrev ?? id.toUpperCase())
+  const competitionsOpts: import('./views').ScoutScopeOption[] = competitions.map((c) => ({
+    kind: 'competition', id: c.id, label: compLabel(c.id),
+  }))
+
+  // Coverage by league + nation (avg knowledge, plus a youth-only split).
+  const coverageRow = (id: string, label: string, nation: string | undefined, teamIds: string[]): import('./views').ScoutCoverageRow => {
+    const ids = rostersOf(teamIds)
+    const ks = ids.map((pid) => knowledgeOf(scouting, pid))
+    const youthKs = ids.filter(isYouth).map((pid) => knowledgeOf(scouting, pid))
+    const mean = (arr: number[]): number => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0)
+    return { id, label, ...(nation ? { nation } : {}), avgKnowledge: mean(ks), youthAvgKnowledge: mean(youthKs), playerCount: ids.length }
+  }
+  const leagueCoverage = competitions
+    .map((c) => coverageRow(c.id, c.id === 'nhl' ? 'NHL' : c.id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === c.id)?.name ?? compLabel(c.id)), c.nation, c.teamIds))
+    .filter((r) => r.playerCount > 0)
+  const nationCoverage = [...nationSet].sort().map((n) => {
+    const teamIds = new Set<string>()
+    for (const c of competitions) if (c.nation === n) for (const t of c.teamIds) teamIds.add(t)
+    return coverageRow(n, n, n, [...teamIds])
+  }).filter((r) => r.playerCount > 0)
+
+  const scoutMarketRows: import('./views').ScoutMarketRow[] = scoutMarket.map((c) => ({
+    id: c.id, name: c.name, rating: c.rating, judgment: c.judgment,
+    ...(c.specialtyNation ? { specialtyNation: c.specialtyNation } : {}),
+    salary: c.salary,
+  }))
+  const nextOpponentName = nextOpponentId ? (teams.get(nextOpponentId as TeamId)?.name ?? null) : null
 
   // Per-team knowledge summary
   const teamKnowledge: TeamKnowledgeSummary[] = []
@@ -1213,9 +1325,16 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     scoutedPlayers,
     teams: teamsOpts,
     divisions: divisionsOpts,
+    nations,
+    competitions: competitionsOpts,
+    nextOpponentName,
     hasDraftClass: draftProspectIds.size > 0,
+    leagueCoverage,
+    nationCoverage,
     teamKnowledge,
     topGains,
+    scoutMarket: scoutMarketRows,
+    maxScouts: 8,
   }
 }
 

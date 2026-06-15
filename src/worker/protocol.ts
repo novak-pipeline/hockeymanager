@@ -139,7 +139,7 @@ import type {
   TeamPlayerStatsView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView, StaffView, StaffRowView } from '@engine/career/views'
@@ -217,7 +217,9 @@ export type WorkerRequestBody =
   | { type: 'importSave'; snapshot: CareerSnapshot }
   /* ── scouting ── */
   | { type: 'getScouting' }
-  | { type: 'assignScout'; scoutId: string; target: ScoutTarget }
+  | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus }
+  | { type: 'hireScout'; candidateId: string }
+  | { type: 'fireScout'; scoutId: string }
   /* ── story layer ── */
   /** All-time record boards, season archive, awards, legends/Hall of Fame. */
   | { type: 'getHistory' }

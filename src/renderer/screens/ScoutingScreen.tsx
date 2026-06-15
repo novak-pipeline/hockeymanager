@@ -1,18 +1,21 @@
 /**
- * Scouting hub screen — scout assignment management and league-wide knowledge overview.
+ * Scouting hub — FM-style scout deployment.
  *
- * Scout cards show current assignment with a dropdown to reassign.
- * Knowledge progress bars show per-team intel. Top-gains panel shows
- * recently improved players.
+ * Each scout gets a SCOPE (a nation/region, a league, the next opponent, the
+ * draft class or free agents) and a FOCUS (youth / senior / all). Coverage is
+ * reported by nation and by league (with a youth split), and a job market lets
+ * the GM hire and release scouts.
  */
 import { useState } from 'react'
 import type { ScoutingView } from '../../worker/protocol'
-import type { ScoutCardView, TeamKnowledgeSummary, ScoutedPlayerRow } from '../../engine/career/views'
-import type { ScoutTarget } from '@domain/scouting'
+import type {
+  ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutMarketRow,
+} from '../../engine/career/views'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { PlayerLink } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
-import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 import { bumpRefresh } from '../components/store'
@@ -36,127 +39,88 @@ function KnowledgeBar({ value, small }: { value: number; small?: boolean }): JSX
   )
 }
 
-/* ── target label ──────────────────────────────────────────────────────────── */
+/* ── assignment: scope dropdown ────────────────────────────────────────────── */
 
-function targetLabel(target: ScoutTarget, view: ScoutingView): string {
-  switch (target.kind) {
-    case 'team': {
-      const t = view.teams.find((x) => x.teamId === target.teamId)
-      return t ? t.teamAbbr : target.teamId
-    }
-    case 'division': {
-      const d = view.divisions.find((x) => x.divisionId === target.divisionId)
-      return d ? d.divisionName : target.divisionId
-    }
-    case 'draftClass':
-      return 'Draft class'
-    case 'freeAgents':
-      return 'Free agents'
-  }
-}
-
-/* ── assignment dropdown ───────────────────────────────────────────────────── */
-
-function AssignmentDropdown(props: {
+function ScopeDropdown(props: {
   scout: ScoutCardView
   view: ScoutingView
-  onAssign: (scoutId: string, target: ScoutTarget) => void
+  onAssign: (target: ScoutTarget) => void
 }): JSX.Element {
   const { scout, view, onAssign } = props
   const [open, setOpen] = useState(false)
-
-  const currentLabel = targetLabel(scout.target, view)
+  const Group = ({ label }: { label: string }): JSX.Element => (
+    <div className="muted small" style={{ padding: '7px 10px 2px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+  )
+  const Item = ({ label, target }: { label: string; target: ScoutTarget }): JSX.Element => (
+    <button
+      className="btn-ghost"
+      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
+      onClick={() => { onAssign(target); setOpen(false) }}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <div style={{ position: 'relative' }}>
       <button
         className="btn btn-ghost small"
         onClick={() => setOpen((o) => !o)}
-        style={{ minWidth: 160, textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
-        <span>{currentLabel}</span>
+        <span>{scout.assignmentLabel}</span>
         <span className="muted" style={{ fontSize: 10 }}>{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
         <div
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            zIndex: 50,
-            background: 'var(--bg2)',
-            border: '1px solid var(--line)',
-            borderRadius: 6,
-            minWidth: 220,
-            maxHeight: 320,
-            overflowY: 'auto',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            position: 'absolute', top: '100%', left: 0, zIndex: 50,
+            background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6,
+            minWidth: 240, maxHeight: 360, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
           }}
         >
-          {/* Teams */}
-          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Teams</div>
-          {view.teams.map((t) => (
-            <button
-              key={t.teamId}
-              className="btn-ghost"
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
-              onClick={() => {
-                onAssign(scout.scoutId, { kind: 'team', teamId: t.teamId })
-                setOpen(false)
-              }}
-            >
-              {t.teamAbbr} — {t.teamName}
-            </button>
+          <Group label="Priorities" />
+          <Item label="Next opponent" target={{ kind: 'nextOpponent' }} />
+          {view.hasDraftClass && <Item label="Whole draft class" target={{ kind: 'draftClass' }} />}
+          <Item label="Free agents" target={{ kind: 'freeAgents' }} />
+
+          {view.nations.length > 0 && <Group label="Regions" />}
+          {view.nations.map((n) => (
+            <Item key={`nation-${n.id}`} label={n.label} target={{ kind: 'nation', nation: n.id }} />
           ))}
 
-          {/* Divisions */}
-          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Divisions</div>
-          {view.divisions.map((d) => (
-            <button
-              key={d.divisionId}
-              className="btn-ghost"
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
-              onClick={() => {
-                onAssign(scout.scoutId, { kind: 'division', divisionId: d.divisionId })
-                setOpen(false)
-              }}
-            >
-              {d.divisionName} division
-            </button>
+          {view.competitions.length > 0 && <Group label="Leagues" />}
+          {view.competitions.map((c) => (
+            <Item key={`comp-${c.id}`} label={c.label} target={{ kind: 'competition', competitionId: c.id }} />
           ))}
-
-          {/* Draft class */}
-          {view.hasDraftClass && (
-            <>
-              <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Prospects</div>
-              <button
-                className="btn-ghost"
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
-                onClick={() => {
-                  onAssign(scout.scoutId, { kind: 'draftClass' })
-                  setOpen(false)
-                }}
-              >
-                Draft class
-              </button>
-            </>
-          )}
-
-          {/* Free agents */}
-          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>Other</div>
-          <button
-            className="btn-ghost"
-            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
-            onClick={() => {
-              onAssign(scout.scoutId, { kind: 'freeAgents' })
-              setOpen(false)
-            }}
-          >
-            Free agents
-          </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ── assignment: focus segmented control ───────────────────────────────────── */
+
+const FOCI: Array<{ key: ScoutFocus; label: string }> = [
+  { key: 'youth', label: 'Youth' },
+  { key: 'senior', label: 'Senior' },
+  { key: 'all', label: 'All' },
+]
+
+function FocusControl({ focus, onFocus }: { focus: ScoutFocus; onFocus: (f: ScoutFocus) => void }): JSX.Element {
+  return (
+    <div className="row" style={{ gap: 4 }}>
+      {FOCI.map((f) => (
+        <button
+          key={f.key}
+          className={`chip${focus === f.key ? ' chip-accent' : ''}`}
+          style={{ cursor: 'pointer', border: 'none', fontSize: 11, flex: 1 }}
+          onClick={() => onFocus(f.key)}
+        >
+          {f.label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -166,9 +130,11 @@ function AssignmentDropdown(props: {
 function ScoutCard(props: {
   scout: ScoutCardView
   view: ScoutingView
-  onAssign: (scoutId: string, target: ScoutTarget) => void
+  onAssign: (scoutId: string, target: ScoutTarget, focus: ScoutFocus) => void
+  onFire: (scoutId: string) => void
+  canFire: boolean
 }): JSX.Element {
-  const { scout } = props
+  const { scout, view, onAssign, onFire, canFire } = props
   const ratingColor =
     scout.rating >= 80 ? 'var(--success)' :
     scout.rating >= 65 ? 'var(--accent)' :
@@ -179,35 +145,129 @@ function ScoutCard(props: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ fontWeight: 600 }}>{scout.name}</div>
-          <div className="muted small" style={{ marginTop: 2 }}>{scout.assignmentLabel}</div>
+          <div className="muted small" style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
+            {scout.specialtyNation && <FlagIcon nationality={scout.specialtyNation} size={13} />}
+            {scout.specialtyNation ? `${scout.specialtyNation} specialist` : 'Generalist'}
+          </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: ratingColor }}>{scout.rating}</div>
-          <div className="muted small">Rating</div>
+          <div className="muted small">Ability{scout.judgment !== undefined ? ` · JA ${scout.judgment}` : ''}</div>
         </div>
       </div>
 
       <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Assignment</div>
-        <AssignmentDropdown {...props} />
+        <div className="muted small" style={{ marginBottom: 4 }}>Region / League</div>
+        <ScopeDropdown scout={scout} view={view} onAssign={(target) => onAssign(scout.scoutId, target, scout.focus)} />
+      </div>
+
+      <div>
+        <div className="muted small" style={{ marginBottom: 4 }}>Focus</div>
+        <FocusControl focus={scout.focus} onFocus={(f) => onAssign(scout.scoutId, scout.target, f)} />
+      </div>
+
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+        <span className="muted">Covering <b style={{ color: 'var(--text)' }}>{scout.coverage}</b> players</span>
+        <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+          {scout.salary !== undefined && <span className="muted">{fmtMoney(scout.salary)}/yr</span>}
+          <button
+            className="btn btn-ghost small"
+            disabled={!canFire}
+            title={canFire ? 'Release this scout' : 'You must keep at least one scout'}
+            style={{ color: canFire ? 'var(--danger, #d8584f)' : 'var(--muted)', padding: '2px 8px' }}
+            onClick={() => onFire(scout.scoutId)}
+          >
+            Release
+          </button>
+        </span>
       </div>
     </div>
   )
 }
 
-/* ── team knowledge row ────────────────────────────────────────────────────── */
+/* ── coverage table ────────────────────────────────────────────────────────── */
 
-function TeamKnowledgeRow({ row }: { row: TeamKnowledgeSummary }): JSX.Element {
+function CoverageTable({ title, rows }: { title: string; rows: ScoutCoverageRow[] }): JSX.Element {
   return (
-    <tr>
-      <td>
-        <span className="chip" style={{ fontSize: 11, marginRight: 6 }}>{row.teamAbbr}</span>
-        <span className="muted small">{row.teamName}</span>
-      </td>
-      <td style={{ width: 180 }}>
-        <KnowledgeBar value={row.avgKnowledge} small />
-      </td>
-    </tr>
+    <Panel title={title}>
+      {rows.length === 0 ? (
+        <p className="muted small">No data yet.</p>
+      ) : (
+        <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{title.includes('Nation') ? 'Nation' : 'League'}</th>
+                <th className="num">Players</th>
+                <th style={{ width: 150 }}>All</th>
+                <th style={{ width: 150 }}>Youth</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      {r.nation && <FlagIcon nationality={r.nation} size={14} />}
+                      <span className="small">{r.label}</span>
+                    </span>
+                  </td>
+                  <td className="num muted small">{r.playerCount}</td>
+                  <td><KnowledgeBar value={r.avgKnowledge} small /></td>
+                  <td><KnowledgeBar value={r.youthAvgKnowledge} small /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/* ── scout market ──────────────────────────────────────────────────────────── */
+
+function ScoutMarketPanel({ rows, full, onHire }: {
+  rows: ScoutMarketRow[]
+  full: boolean
+  onHire: (candidateId: string) => void
+}): JSX.Element {
+  return (
+    <Panel title="Scout Market">
+      {full && <p className="muted small" style={{ marginBottom: 8 }}>Your department is full — release a scout to hire another.</p>}
+      {rows.length === 0 ? (
+        <p className="muted small">No scouts available to hire right now.</p>
+      ) : (
+        <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Scout</th><th>Specialty</th><th className="num">Ability</th><th className="num">Judgment</th><th className="num">Salary</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ fontWeight: 600 }}>{c.name}</td>
+                  <td className="small">
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      {c.specialtyNation && <FlagIcon nationality={c.specialtyNation} size={13} />}
+                      {c.specialtyNation ?? 'Generalist'}
+                    </span>
+                  </td>
+                  <td className="num">{c.rating}</td>
+                  <td className="num muted">{c.judgment}</td>
+                  <td className="num small">{fmtMoney(c.salary)}/yr</td>
+                  <td className="num">
+                    <button className="btn btn-ghost small" disabled={full} onClick={() => onHire(c.id)}>Hire</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
   )
 }
 
@@ -281,7 +341,7 @@ function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
                   <td><span style={{ fontWeight: 800, color: REC_COLOR[r.rec] }}>{r.rec}</span></td>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <FlagIcon nationality={r.nationality} size={15} />
+                      {r.nationality && <FlagIcon nationality={r.nationality} size={15} />}
                       <PlayerLink playerId={r.playerId} name={r.name} />
                     </span>
                   </td>
@@ -311,88 +371,85 @@ export function ScoutingScreen(): JSX.Element {
     (r) => (r.type === 'scouting' ? r.scouting : null)
   )
 
-  const handleAssign = async (scoutId: string, target: ScoutTarget): Promise<void> => {
-    const res = await client.assignScout(scoutId, target)
-    if (res.type === 'error') {
-      toast(res.message, 'error')
-    } else {
-      bumpRefresh()
-      refetch()
-    }
+  const handleAssign = async (scoutId: string, target: ScoutTarget, focus: ScoutFocus): Promise<void> => {
+    const res = await client.assignScout(scoutId, target, focus)
+    if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
+  }
+  const handleHire = async (candidateId: string): Promise<void> => {
+    const res = await client.hireScout(candidateId)
+    if (res.type === 'error') { toast(res.message, 'error') } else { toast('Scout hired', 'success'); bumpRefresh(); refetch() }
+  }
+  const handleFire = async (scoutId: string): Promise<void> => {
+    const res = await client.fireScout(scoutId)
+    if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
   }
 
   return (
     <section className="stack">
       <ScreenHeader title="Scouting" />
-      <ScreenStateNotices loading={loading} error={error} />
+      <ScreenStateNotices loading={loading} error={error} empty={!data} emptyText="No scouting data." />
 
       {data && (
         <>
-          {/* ── Scout cards ── */}
-          <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-            {data.scouts.map((scout) => (
-              <ScoutCard
-                key={scout.scoutId}
-                scout={scout}
-                view={data}
-                onAssign={(id, target) => { void handleAssign(id, target) }}
-              />
-            ))}
+          {/* ── Scout deployment cards ── */}
+          <Panel title={`Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
+            <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+              {data.scouts.map((scout) => (
+                <ScoutCard
+                  key={scout.scoutId}
+                  scout={scout}
+                  view={data}
+                  canFire={data.scouts.length > 1}
+                  onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
+                  onFire={(id) => { void handleFire(id) }}
+                />
+              ))}
+            </div>
+          </Panel>
+
+          {/* ── Coverage by nation / league ── */}
+          <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+            <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
+            <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
           </div>
+
+          {/* ── Scout market ── */}
+          <ScoutMarketPanel
+            rows={data.scoutMarket}
+            full={data.scouts.length >= data.maxScouts}
+            onHire={(id) => { void handleHire(id) }}
+          />
 
           {/* ── Scouting recommendations table ── */}
           <ScoutedTable rows={data.scoutedPlayers} />
 
-          <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-            {/* ── League knowledge overview ── */}
-            <Panel title="League Knowledge">
+          {/* ── Watch list / top gains ── */}
+          <Panel title="Watch List">
+            {data.topGains.length === 0 ? (
+              <p className="muted small">Assign scouts to start building intelligence.</p>
+            ) : (
               <div className="table-wrap">
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Team</th>
-                      <th className="num">Avg knowledge</th>
+                      <th>Player</th>
+                      <th>Pos</th>
+                      <th className="num">Knowledge</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.teamKnowledge.map((row) => (
-                      <TeamKnowledgeRow key={row.teamId} row={row} />
+                    {data.topGains.map((p) => (
+                      <tr key={p.playerId}>
+                        <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                        <td className="muted">{p.position}</td>
+                        <td><KnowledgeBar value={p.knowledge} small /></td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </Panel>
-
-            {/* ── Watch list / top gains ── */}
-            <Panel title="Watch List">
-              {data.topGains.length === 0 ? (
-                <p className="muted small">Assign scouts to start building intelligence.</p>
-              ) : (
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Player</th>
-                        <th>Pos</th>
-                        <th className="num">Knowledge</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.topGains.map((p) => (
-                        <tr key={p.playerId}>
-                          <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-                          <td className="muted">{p.position}</td>
-                          <td>
-                            <KnowledgeBar value={p.knowledge} small />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-          </div>
+            )}
+          </Panel>
         </>
       )}
     </section>

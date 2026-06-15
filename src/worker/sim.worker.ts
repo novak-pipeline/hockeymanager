@@ -221,8 +221,18 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'getScouting':
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     case 'assignScout':
-      must().assignScoutTarget(req.scoutId, req.target)
-      return { id: req.id, type: 'ok' }
+      must().assignScoutTarget(req.scoutId, req.target, req.focus)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'hireScout': {
+      const res = must().hireScoutFromMarket(req.candidateId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not hire scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'fireScout': {
+      const res = must().fireScoutFromStaff(req.scoutId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not release scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
 
     /* ── story layer ── */
     case 'getHistory':

@@ -8,8 +8,8 @@
  *   maskAttribute          — return a deterministic lo/hi band for a hidden attribute
  *   maskedOverall          — same for overall rating
  */
-import type { Player, PlayerId, Team, TeamId } from '@domain'
-import type { ScoutingState, ScoutAssignment, ScoutTarget } from '@domain/scouting'
+import type { Player, PlayerId, TeamId } from '@domain'
+import type { ScoutingState, ScoutAssignment, ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { ratedOverall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
@@ -165,9 +165,56 @@ function generateScoutName(rng: Rng, index: number): string {
   if (index < SCOUT_NAMES.length) {
     return `${SCOUT_NAMES[index]![0]} ${SCOUT_NAMES[index]![1]}`
   }
-  const first = FIRST_NAMES[rng.int(0, FIRST_NAMES.length - 1)]!
-  const last = LAST_NAMES[rng.int(0, LAST_NAMES.length - 1)]!
+  const first = FIRST_NAMES[rng.int(FIRST_NAMES.length)]!
+  const last = LAST_NAMES[rng.int(LAST_NAMES.length)]!
   return `${first} ${last}`
+}
+
+/** Nations a scout can specialise in (a small knowledge bonus there). */
+export const SCOUT_SPECIALTY_NATIONS = ['Canada', 'USA', 'Sweden', 'Finland', 'Russia', 'Czechia'] as const
+
+/** Annual salary for a scout of the given quality (rounded to the nearest 1k). */
+export function scoutSalary(rating: number): number {
+  return Math.round((140_000 + Math.max(0, rating - 45) * 12_000) / 1000) * 1000
+}
+
+/** Roll a scout's hidden attributes deterministically from the rng. */
+function scoutAttributes(rng: Rng): { rating: number; judgment: number; specialtyNation?: string } {
+  const rating = Math.max(45, Math.min(92, Math.round(rng.normal(64, 12))))
+  const judgment = Math.max(45, Math.min(95, Math.round(rng.normal(68, 12))))
+  // ~60% of scouts have a national specialty.
+  const spec = rng.range(0, 9) < 6 ? SCOUT_SPECIALTY_NATIONS[rng.int(SCOUT_SPECIALTY_NATIONS.length)] : undefined
+  return spec ? { rating, judgment, specialtyNation: spec } : { rating, judgment }
+}
+
+export interface ScoutCandidate {
+  id: string
+  name: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary: number
+}
+
+/**
+ * The scout job market — a stable, deterministically-generated pool of hireable
+ * scouts (regenerated from the same seed each call, like the analyst market).
+ * The caller filters out anyone already on staff by id.
+ */
+export function generateScoutCandidates(rng: Rng, count = 6): ScoutCandidate[] {
+  const out: ScoutCandidate[] = []
+  for (let i = 0; i < count; i++) {
+    const a = scoutAttributes(rng)
+    out.push({
+      id: `scout-mkt-${i}`,
+      name: generateScoutName(rng, i + 16),
+      rating: a.rating,
+      judgment: a.judgment,
+      ...(a.specialtyNation ? { specialtyNation: a.specialtyNation } : {}),
+      salary: scoutSalary(a.rating),
+    })
+  }
+  return out.sort((x, y) => y.rating - x.rating)
 }
 
 export interface CreateScoutingArgs {
@@ -229,18 +276,28 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
   const opponentTeamIds = [...teams.keys()]
     .map((id) => id as string)
     .filter((id) => id !== userTeamId)
-  const assignments: ScoutAssignment[] = []
-  for (let i = 0; i < 3; i++) {
-    const name = generateScoutName(rng, i)
-    const rating = rng.range(55, 75)
-    const targetTeamId = opponentTeamIds[i % opponentTeamIds.length] ?? userTeamId
-    assignments.push({
+  void opponentTeamIds
+  // Default deployment leans on youth discovery (the bulk of scouting) plus an
+  // advance scout on the next opponent — the user re-aims them by nation/league
+  // from the Scouting screen.
+  const defaults: Array<{ target: ScoutTarget; focus: ScoutFocus }> = [
+    { target: { kind: 'nextOpponent' }, focus: 'all' },
+    { target: { kind: 'draftClass' }, focus: 'youth' },
+    { target: { kind: 'draftClass' }, focus: 'youth' },
+  ]
+  const assignments: ScoutAssignment[] = defaults.map((d, i) => {
+    const cand = scoutAttributes(rng)
+    return {
       scoutId: `scout-${i}`,
-      name,
-      rating,
-      target: { kind: 'team', teamId: targetTeamId },
-    })
-  }
+      name: generateScoutName(rng, i),
+      rating: cand.rating,
+      judgment: cand.judgment,
+      ...(cand.specialtyNation ? { specialtyNation: cand.specialtyNation } : {}),
+      salary: scoutSalary(cand.rating),
+      target: d.target,
+      focus: d.focus,
+    }
+  })
 
   // Build initial knowledge
   const knowledge: Array<[string, number]> = []
@@ -270,6 +327,13 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
 
 /* ────────────────────────── tick ────────────────────────── */
 
+/** A league/competition as the scouting engine sees it (incl. synthetic NHL/AHL). */
+export interface ScoutingCompetition {
+  id: string
+  nation: string
+  teamIds: string[]
+}
+
 export interface TickScoutingArgs {
   state: ScoutingState
   userTeamId: string
@@ -279,39 +343,31 @@ export interface TickScoutingArgs {
   draftProspectIds: Set<string>
   /** Current FA pool (player ids not on any roster) */
   freeAgentIds: Set<string>
+  /** Leagues for `competition` / `nation` scopes (synthetic 'nhl'/'ahl' included). */
+  competitions?: ScoutingCompetition[]
+  /** The user's next-opponent team id, for the `nextOpponent` scope. */
+  nextOpponentId?: string | null
   rng: Rng
 }
 
+/** Youth = draft-age / prospect (≤20). A scout's focus narrows his target set. */
+const YOUTH_MAX_AGE = 20
+function passesFocus(player: Player, focus: ScoutFocus | undefined): boolean {
+  if (!focus || focus === 'all') return true
+  const youth = player.age <= YOUTH_MAX_AGE
+  return focus === 'youth' ? youth : !youth
+}
+
 /**
- * Advance scouting by one match day.
- *
- * Each scout's assignment determines which players gain knowledge:
- *   team      → that team's roster
- *   division  → all teams in that division
- *   draftClass→ all known draft prospects
- *   freeAgents→ all free agents
- *
- * Knowledge gain per scout per player = (rating / 25) ± noise,
- * with diminishing returns above 80 (gain halved above 80, quartered above 90).
+ * Advance scouting by one match day. Each scout's SCOPE (target) resolves to a
+ * candidate set; his FOCUS (youth / senior / all) filters it; knowledge then
+ * accrues at (rating / 25) ± noise, with diminishing returns above 80, and a
+ * small bonus on players from his specialty nation.
  */
 export function tickScouting(args: TickScoutingArgs): void {
   const { state, teams, players, draftProspectIds, freeAgentIds, rng } = args
-
-  // Build lookup: teamId → divisionId
-  const teamDivision = new Map<string, string>()
-  for (const [tid, team] of teams) {
-    if ((team as { divisionId?: string }).divisionId) {
-      teamDivision.set(tid as string, (team as { divisionId: string }).divisionId)
-    }
-  }
-
-  // Build lookup: divisionId → teamIds
-  const divisionTeams = new Map<string, string[]>()
-  for (const [tid, divId] of teamDivision) {
-    const arr = divisionTeams.get(divId) ?? []
-    arr.push(tid)
-    divisionTeams.set(divId, arr)
-  }
+  const competitions = args.competitions ?? []
+  const nextOpponentId = args.nextOpponentId ?? null
 
   // Rostered player set (for freeAgents target)
   const rosteredIds = new Set<string>()
@@ -320,17 +376,22 @@ export function tickScouting(args: TickScoutingArgs): void {
   }
 
   for (const scout of state.assignments) {
-    // Determine target player set
-    const targetIds = resolveTarget(scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds)
+    const targetIds = resolveTarget(
+      scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
+    )
 
     for (const pid of targetIds) {
-      if (!players.has(pid as PlayerId)) continue
+      const player = players.get(pid as PlayerId)
+      if (!player) continue
+      if (!passesFocus(player, scout.focus)) continue
       const current = knowledgeOf(state, pid)
       if (current >= 100) continue
 
       const baseGain = scout.rating / 25
       const noise = (rng.range(0, 40) - 20) / 10  // -2.0 .. +2.0
       let gain = baseGain + noise
+      // Knows his home market: faster reads on players from his specialty nation.
+      if (scout.specialtyNation && player.nationality === scout.specialtyNation) gain *= 1.2
 
       // Diminishing returns
       if (current >= 90) gain *= 0.25
@@ -347,8 +408,18 @@ function resolveTarget(
   teams: Map<TeamId, { roster: PlayerId[] }>,
   draftProspectIds: Set<string>,
   freeAgentIds: Set<string>,
-  rosteredIds: Set<string>
+  rosteredIds: Set<string>,
+  competitions: ScoutingCompetition[],
+  nextOpponentId: string | null
 ): string[] {
+  const rostersOf = (teamIds: Iterable<string>): string[] => {
+    const ids: string[] = []
+    for (const tid of teamIds) {
+      const team = teams.get(tid as TeamId)
+      if (team) for (const id of team.roster) ids.push(id as string)
+    }
+    return ids
+  }
   switch (target.kind) {
     case 'team': {
       const team = teams.get(target.teamId as TeamId)
@@ -356,7 +427,7 @@ function resolveTarget(
     }
     case 'division': {
       const ids: string[] = []
-      for (const [tid, team] of teams) {
+      for (const [, team] of teams) {
         const t = team as { roster: PlayerId[]; divisionId?: string }
         if (t.divisionId === target.divisionId) {
           for (const id of t.roster) ids.push(id as string)
@@ -364,6 +435,17 @@ function resolveTarget(
       }
       return ids
     }
+    case 'competition': {
+      const comp = competitions.find((c) => c.id === target.competitionId)
+      return comp ? rostersOf(comp.teamIds) : []
+    }
+    case 'nation': {
+      const teamIds = new Set<string>()
+      for (const c of competitions) if (c.nation === target.nation) for (const t of c.teamIds) teamIds.add(t)
+      return rostersOf(teamIds)
+    }
+    case 'nextOpponent':
+      return nextOpponentId ? rostersOf([nextOpponentId]) : []
     case 'draftClass':
       return [...draftProspectIds]
     case 'freeAgents':
@@ -374,14 +456,40 @@ function resolveTarget(
 /* ────────────────────────── assignment mutation ────────────────────────── */
 
 /**
- * Reassign one scout to a new target. Mutates state in place.
+ * Reassign one scout to a new scope (and optionally focus). Mutates in place.
  */
 export function assignScout(
   state: ScoutingState,
   scoutId: string,
-  target: ScoutTarget
+  target: ScoutTarget,
+  focus?: ScoutFocus
 ): void {
   const scout = state.assignments.find((s) => s.scoutId === scoutId)
   if (!scout) throw new Error(`unknown scout ${scoutId}`)
   scout.target = target
+  if (focus !== undefined) scout.focus = focus
+}
+
+/**
+ * Hire a scout from the candidate market into the active staff. Mutates in place.
+ * The new scout starts on a sensible default assignment (youth draft scouting).
+ */
+export function hireScout(state: ScoutingState, candidate: ScoutCandidate): void {
+  if (state.assignments.some((s) => s.scoutId === candidate.id)) return
+  state.assignments.push({
+    scoutId: candidate.id,
+    name: candidate.name,
+    rating: candidate.rating,
+    judgment: candidate.judgment,
+    ...(candidate.specialtyNation ? { specialtyNation: candidate.specialtyNation } : {}),
+    salary: candidate.salary,
+    target: { kind: 'draftClass' },
+    focus: 'youth',
+  })
+}
+
+/** Release a scout from the active staff. Mutates in place. */
+export function fireScout(state: ScoutingState, scoutId: string): void {
+  const i = state.assignments.findIndex((s) => s.scoutId === scoutId)
+  if (i >= 0) state.assignments.splice(i, 1)
 }

@@ -10,7 +10,7 @@ import type {
   WorkerResponse,
 } from './protocol'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 
 /**
  * Minimal worker surface the client needs; lets tests inject a fake without a
@@ -317,8 +317,16 @@ export class SimClient {
     return this.send({ type: 'getScouting' })
   }
 
-  assignScout(scoutId: string, target: ScoutTarget): Promise<WorkerResponse> {
-    return this.send({ type: 'assignScout', scoutId, target })
+  assignScout(scoutId: string, target: ScoutTarget, focus?: ScoutFocus): Promise<WorkerResponse> {
+    return this.send({ type: 'assignScout', scoutId, target, ...(focus ? { focus } : {}) })
+  }
+
+  hireScout(candidateId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireScout', candidateId })
+  }
+
+  fireScout(scoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'fireScout', scoutId })
   }
 
   /* ── story layer ── */
