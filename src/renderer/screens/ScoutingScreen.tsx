@@ -9,12 +9,13 @@
 import { useState } from 'react'
 import type { ScoutingView } from '../../worker/protocol'
 import type {
-  ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow,
+  ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutFindView,
 } from '../../engine/career/views'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { PlayerLink } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
+import { WorldMap, type WorldMapNation } from '../components/WorldMap'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -242,7 +243,11 @@ function stars5(v: number): string {
 
 type ScoutSort = 'rec' | 'potential' | 'current' | 'age' | 'knowledge'
 
-function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
+function ScoutedTable({ rows, scouts, onScoutPlayer }: {
+  rows: ScoutedPlayerRow[]
+  scouts?: ScoutCardView[]
+  onScoutPlayer?: (scoutId: string, playerId: string) => void
+}): JSX.Element {
   const [pos, setPos] = useState<string>('ALL')
   const [topOnly, setTopOnly] = useState(false)
   const [sort, setSort] = useState<ScoutSort>('rec')
@@ -287,6 +292,7 @@ function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
               <tr>
                 <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
                 <th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Value</th>
+                {scouts && onScoutPlayer && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -306,6 +312,9 @@ function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
                   <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.potentialStars) || '–'}</td>
                   <td className="num muted small">{r.knowledge}%</td>
                   <td className="num small">{fmtMoney(r.salary)}</td>
+                  {scouts && onScoutPlayer && (
+                    <td className="num"><ScoutPickerCell playerId={r.playerId} scouts={scouts} onPick={onScoutPlayer} /></td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -316,10 +325,174 @@ function ScoutedTable({ rows }: { rows: ScoutedPlayerRow[] }): JSX.Element {
   )
 }
 
+/* ── FM-style header strip ─────────────────────────────────────────────────── */
+
+function HeaderCard({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
+  return (
+    <div style={{ flex: 1, minWidth: 150, padding: '12px 16px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)' }}>
+      <div className="muted" style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: 'var(--accent, #f5b301)' }}>{value}</div>
+      {sub && <div className="muted small" style={{ marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function knowledgeWord(k: number): string {
+  return k >= 80 ? 'Excellent' : k >= 60 ? 'Good' : k >= 40 ? 'Average' : k >= 20 ? 'Limited' : 'Poor'
+}
+
+function HeaderStrip({ data }: { data: ScoutingView }): JSX.Element {
+  const salaryTotal = data.scouts.reduce((s, c) => s + (c.salary ?? 0), 0)
+  return (
+    <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+      <HeaderCard label="Scouts on Assignment" value={`${data.activeScouts}/${data.scouts.length}`} sub={`Cap ${data.maxScouts}`} />
+      <HeaderCard label="World Knowledge" value={knowledgeWord(data.worldKnowledge)} sub={`${data.worldKnowledge}% average`} />
+      <HeaderCard label="Scouting Range" value="World" sub={`${data.nations.length} nations · ${data.competitions.length} leagues`} />
+      <HeaderCard label="Nations Covered" value={`${data.scoutedNations.length}`} sub={data.scoutedNations.slice(0, 3).join(', ') || 'none yet'} />
+      <HeaderCard label="Scouting Wages" value={fmtMoney(salaryTotal)} sub="per year" />
+    </div>
+  )
+}
+
+/* ── Overview: world map + assignment list ─────────────────────────────────── */
+
+function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Element {
+  return (
+    <Panel title={`Scout Assignments (${scouts.length})`}>
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
+        Each scout's current region/league focus. Re-aim them under Recruitment Focus.
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>Staff Member</th><th>Recruitment Focus</th><th className="num">Ability</th></tr></thead>
+          <tbody>
+            {scouts.map((s) => (
+              <tr key={s.scoutId}>
+                <td style={{ fontWeight: 600 }}>{s.name}<div className="muted small">Scout{s.specialtyNation ? ` · ${s.specialtyNation} specialist` : ''}</div></td>
+                <td>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {s.focusNation && <FlagIcon nationality={s.focusNation} size={15} />}
+                    <span>{s.assignmentLabel}</span>
+                    <span className="chip" style={{ fontSize: 10 }}>{s.focusLabel}</span>
+                  </span>
+                </td>
+                <td className="num" style={{ fontWeight: 700 }}>{s.rating}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
+function OverviewTab({ data }: { data: ScoutingView }): JSX.Element {
+  const mapNations: WorldMapNation[] = data.nationCoverage.map((c) => ({
+    nation: c.nation ?? c.label,
+    scouted: data.scoutedNations.includes(c.nation ?? c.label),
+    knowledge: c.avgKnowledge,
+  }))
+  // Ensure scouted nations always appear even if coverage row is missing.
+  for (const n of data.scoutedNations) {
+    if (!mapNations.some((m) => m.nation === n)) mapNations.push({ nation: n, scouted: true, knowledge: 0 })
+  }
+  return (
+    <div className="stack">
+      <HeaderStrip data={data} />
+      <WorldMap nations={mapNations} />
+      <ScoutAssignmentList scouts={data.scouts} />
+    </div>
+  )
+}
+
+/* ── Scouting Centre: surfaced recommendations (fills over time) ────────────── */
+
+function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
+  const color = REC_COLOR[find.grade]
+  return (
+    <div className="panel" style={{ background: 'var(--bg2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {find.nationality && <FlagIcon nationality={find.nationality} size={15} />}
+            <PlayerLink playerId={find.playerId} name={find.name} />
+          </div>
+          <div className="muted small">{find.age} · {find.position} · {find.teamAbbr}</div>
+        </div>
+        <div style={{ fontWeight: 800, fontSize: 22, color }}>{find.grade}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
+        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(find.currentStars) || '–'}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(find.potentialStars) || '–'}</div></div>
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{find.reason}</div>
+      <div className="muted small" style={{ borderTop: '1px solid var(--line)', paddingTop: 6, display: 'flex', justifyContent: 'space-between' }}>
+        <span>Flagged by {find.scoutName}</span><span>{find.foundDate}</span>
+      </div>
+    </div>
+  )
+}
+
+function ScoutingCentreTab({ finds }: { finds: ScoutFindView[] }): JSX.Element {
+  return (
+    <Panel title={`Scout Recommendations (${finds.length})`}>
+      {finds.length === 0 ? (
+        <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
+          Your scouts haven't surfaced anyone yet. Point them at youth leagues and the
+          draft class under <b>Recruitment Focus</b> — as they get to know prospects,
+          their finds will appear here (and land in your inbox).
+        </div>
+      ) : (
+        <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+          {finds.map((f) => <FindCard key={f.playerId} find={f} />)}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/* ── per-player "Scout" picker (assign a scout to one player) ───────────────── */
+
+function ScoutPickerCell({ playerId, scouts, onPick }: {
+  playerId: string
+  scouts: ScoutCardView[]
+  onPick: (scoutId: string, playerId: string) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <span style={{ position: 'relative' }}>
+      <button className="btn btn-ghost small" style={{ padding: '2px 8px' }} onClick={() => setOpen((o) => !o)}>Scout ▾</button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 60, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, minWidth: 170, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>Assign a scout</div>
+          {scouts.map((s) => (
+            <button key={s.scoutId} className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 12 }}
+              onClick={() => { onPick(s.scoutId, playerId); setOpen(false) }}>
+              {s.name} <span className="muted">({s.rating})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 /* ── main screen ───────────────────────────────────────────────────────────── */
+
+type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage' | 'shortlist'
+const FM_TABS: Array<{ id: FmTab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'centre', label: 'Scouting Centre' },
+  { id: 'players', label: 'Players' },
+  { id: 'focus', label: 'Recruitment Focus' },
+  { id: 'coverage', label: 'Scouting Coverage' },
+  { id: 'shortlist', label: 'Shortlist' },
+]
 
 export function ScoutingScreen(): JSX.Element {
   const client = useClient()
+  const [tab, setTab] = useState<FmTab>('overview')
   const { data, loading, error, refetch } = useScreenData<ScoutingView>(
     () => client.getScouting(),
     (r) => (r.type === 'scouting' ? r.scouting : null)
@@ -333,6 +506,11 @@ export function ScoutingScreen(): JSX.Element {
     const res = await client.fireScout(scoutId)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
   }
+  const handleScoutPlayer = async (scoutId: string, playerId: string): Promise<void> => {
+    const scout = data?.scouts.find((s) => s.scoutId === scoutId)
+    const res = await client.assignScout(scoutId, { kind: 'player', playerId }, scout?.focus ?? 'all')
+    if (res.type === 'error') { toast(res.message, 'error') } else { toast('Scout assigned to player', 'success'); bumpRefresh(); refetch() }
+  }
 
   return (
     <section className="stack">
@@ -341,58 +519,82 @@ export function ScoutingScreen(): JSX.Element {
 
       {data && (
         <>
-          {/* ── Scout deployment cards ── */}
-          <Panel title={`Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
-            <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-              {data.scouts.map((scout) => (
-                <ScoutCard
-                  key={scout.scoutId}
-                  scout={scout}
-                  view={data}
-                  canFire={data.scouts.length > 1}
-                  onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
-                  onFire={(id) => { void handleFire(id) }}
-                />
-              ))}
-            </div>
-          </Panel>
-
-          {/* ── Coverage by nation / league ── */}
-          <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-            <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
-            <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
+          {/* FM-style in-screen tab bar */}
+          <div className="row" style={{ gap: 4, borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+            {FM_TABS.map((t) => (
+              <button
+                key={t.id}
+                className="btn btn-ghost"
+                style={{
+                  padding: '8px 14px', borderRadius: 0, fontWeight: tab === t.id ? 700 : 500,
+                  color: tab === t.id ? 'var(--accent, #f5b301)' : 'var(--muted)',
+                  borderBottom: tab === t.id ? '2px solid var(--accent, #f5b301)' : '2px solid transparent',
+                }}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
 
-          {/* ── Scouting recommendations table ── */}
-          <ScoutedTable rows={data.scoutedPlayers} />
+          {tab === 'overview' && <OverviewTab data={data} />}
 
-          {/* ── Watch list / top gains ── */}
-          <Panel title="Watch List">
-            {data.topGains.length === 0 ? (
-              <p className="muted small">Assign scouts to start building intelligence.</p>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Player</th>
-                      <th>Pos</th>
-                      <th className="num">Knowledge</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.topGains.map((p) => (
-                      <tr key={p.playerId}>
-                        <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
-                        <td className="muted">{p.position}</td>
-                        <td><KnowledgeBar value={p.knowledge} small /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} />}
+
+          {tab === 'players' && (
+            <ScoutedTable rows={data.scoutedPlayers} scouts={data.scouts} onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }} />
+          )}
+
+          {tab === 'focus' && (
+            <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
+              <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Aim each scout at a region/league and set who they focus on. Hire more scouts under Staff → Job Market.</p>
+              <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+                {data.scouts.map((scout) => (
+                  <ScoutCard
+                    key={scout.scoutId}
+                    scout={scout}
+                    view={data}
+                    canFire={data.scouts.length > 1}
+                    onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
+                    onFire={(id) => { void handleFire(id) }}
+                  />
+                ))}
               </div>
-            )}
-          </Panel>
+            </Panel>
+          )}
+
+          {tab === 'coverage' && (
+            <div className="stack">
+              <WorldMap nations={data.nationCoverage.map((c) => ({ nation: c.nation ?? c.label, scouted: data.scoutedNations.includes(c.nation ?? c.label), knowledge: c.avgKnowledge }))} />
+              <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+                <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
+                <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
+              </div>
+            </div>
+          )}
+
+          {tab === 'shortlist' && (
+            <Panel title="Shortlist / Watch List">
+              {data.topGains.length === 0 ? (
+                <p className="muted small">Assign scouts to start building intelligence.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead><tr><th>Player</th><th>Pos</th><th className="num">Knowledge</th></tr></thead>
+                    <tbody>
+                      {data.topGains.map((p) => (
+                        <tr key={p.playerId}>
+                          <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
+                          <td className="muted">{p.position}</td>
+                          <td><KnowledgeBar value={p.knowledge} small /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
+          )}
         </>
       )}
     </section>
