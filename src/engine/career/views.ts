@@ -1470,6 +1470,26 @@ export interface ScoutCardView {
   focus: 'youth' | 'senior' | 'all'
   /** How many players currently fall under his assignment (post-focus). */
   coverage: number
+  /** Nation his scope maps to (for the map + flag), or null if global/unassigned. */
+  focusNation: string | null
+}
+
+/** A surfaced prospect/target in the Scouting Centre (fills over the career). */
+export interface ScoutFindView {
+  playerId: string
+  name: string
+  age: number
+  position: string
+  teamAbbr: string
+  nationality?: string
+  faceId?: string
+  currentStars: number
+  potentialStars: number
+  knowledge: number
+  grade: 'A+' | 'A' | 'B' | 'C'
+  reason: string
+  scoutName: string
+  foundDate: string
 }
 
 /** A scope option for the assignment dropdowns. */
@@ -1549,6 +1569,14 @@ export interface ScoutingView {
   competitions: ScoutScopeOption[]
   /** The user's next opponent's name (for the Next Opponent scope label), or null. */
   nextOpponentName: string | null
+  /** Nations currently covered by at least one scout (for the world map). */
+  scoutedNations: string[]
+  /** Average knowledge across all non-trivially-known players, 0–100. */
+  worldKnowledge: number
+  /** Scouts currently on a concrete assignment (vs idle). */
+  activeScouts: number
+  /** Scouts the surfaced recommendations came from + the finds themselves. */
+  recommendations: ScoutFindView[]
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
   hasDraftClass: boolean
   /** Knowledge coverage by league (avg + youth split). */

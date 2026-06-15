@@ -205,6 +205,7 @@ import {
   generateScoutCandidates,
   hireScout,
   fireScout,
+  DISCOVERY_THRESHOLD,
   type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
@@ -361,7 +362,7 @@ import {
   type StaffView,
   type StaffRowView,
 } from './views'
-import type { ScoutingState, ScoutTarget, ScoutFocus } from '@domain/scouting'
+import type { ScoutingState, ScoutTarget, ScoutFocus, ScoutRecommendation } from '@domain/scouting'
 
 /* ────────────────────────── legacy v1 view types (kept for compat) ────────────────────────── */
 
@@ -2459,6 +2460,7 @@ export class Career {
       const cur = knowledgeOf(this.scouting, id)
       if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
     }
+    this.surfaceScoutFinds(day)
     this.emitScoutReports()
     this.resolveDueInterviews(day)
     // Snapshot the analyst draft board at each phase boundary so the mid-season
@@ -5067,6 +5069,93 @@ export class Career {
     return (sched.homeTeamId === this.userTeamId ? sched.awayTeamId : sched.homeTeamId) as string
   }
 
+  /** Daily pass: surface newly-discovered prospects into the Scouting Centre.
+   *  A player is evaluated once, the first time his knowledge crosses the
+   *  discovery threshold during play — so the list starts empty and fills up. */
+  private surfaceScoutFinds(day: number): void {
+    const st = this.scouting
+    if (!st.recommendations) st.recommendations = []
+    if (!st.seen) st.seen = []
+    const seen = new Set(st.seen)
+    let added = false
+    for (const [pid, k] of st.knowledge) {
+      if (k < DISCOVERY_THRESHOLD || seen.has(pid)) continue
+      seen.add(pid)
+      if (this.userTeam.roster.includes(pid as PlayerId)) continue
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) continue
+      const rec = this.evaluateForRecommendation(p, day)
+      if (rec) { st.recommendations.push(rec); added = true }
+    }
+    if (added) {
+      // Keep the strongest finds if the board grows large.
+      const rank = { 'A+': 0, A: 1, B: 2, C: 3 } as const
+      st.recommendations.sort((a, b) => rank[a.grade] - rank[b.grade])
+      if (st.recommendations.length > 60) st.recommendations.length = 60
+    }
+    st.seen = [...seen]
+  }
+
+  /** Decide whether a freshly-known player is worth flagging — primarily youth
+   *  prospects with real upside, plus clearly-undervalued young players. Returns
+   *  the recommendation (and fires an inbox note) or null. */
+  private evaluateForRecommendation(p: Player, day: number): ScoutRecommendation | null {
+    const isYouth = p.age <= 23
+    if (!isYouth) return null
+    const current = ratedOverall(p)
+    const elig = draftEligibility(p.age, !!p.nhlDrafted)
+    const evalRes = this.prospectEval(p, this.leagueAbbrevForPlayer(p), this.analystProjectionNoise())
+    const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium)
+    const potStars = overallToStars(perceived)
+    const gap = perceived - current
+    const highCeiling = potStars >= 3.5
+    const undervalued = gap >= 8
+    if (!highCeiling && !undervalued) return null
+
+    const role = ceilingRoleShort(perceived, p.position)
+    const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
+    const reason =
+      elig ? `High-upside draft prospect — projects as a ${role}.`
+      : undervalued && !highCeiling ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
+      : `Promising young ${p.position} — ${role} upside.`
+    const scout = this.scoutCovering(p)
+    const scoutName = scout?.name ?? 'Your scouts'
+    const foundDate = dayToDateISO(this.year, day)
+
+    this.pushNews('scouting', `Scout report: ${p.name}`,
+      `${scoutName} flagged ${p.name} (${p.age}, ${p.position}) as one to watch — ${reason} Open the Scouting Centre for the full report.`,
+      { playerId: p.id as string })
+    return { playerId: p.id as string, scoutName, foundDate, reason, grade }
+  }
+
+  /** The scout whose current assignment scope covers this player, if any. */
+  private scoutCovering(p: Player): { name: string } | null {
+    const comps = this.scoutingCompetitions()
+    const pid = p.id as string
+    const teamOfPlayer = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+    const tid = teamOfPlayer ? (teamOfPlayer.id as string) : null
+    const nationOf = (cid: string): string | undefined => comps.find((c) => c.id === cid)?.nation
+    for (const s of this.scouting.assignments) {
+      const t = s.target
+      if (t.kind === 'player' && t.playerId === pid) return s
+      if (t.kind === 'draftClass' && draftEligibility(p.age, !!p.nhlDrafted)) return s
+      if (tid && t.kind === 'team' && t.teamId === tid) return s
+      if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); if (c?.teamIds.includes(tid)) return s }
+      if (tid && t.kind === 'nation') { const c = comps.find((x) => x.teamIds.includes(tid)); if (c && nationOf(c.id) === t.nation) return s }
+    }
+    return null
+  }
+
+  /** Best-guess league abbreviation for a player, for NHLe-based projection. */
+  private leagueAbbrevForPlayer(p: Player): string {
+    const team = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+    if (!team) return 'NHL'
+    const tid = team.id as string
+    if (this.data.league.teams.some((id) => id as string === tid)) return 'NHL'
+    const comp = (this.data.league.competitions ?? []).find((c) => c.teamIds.some((id) => id as string === tid))
+    return comp?.abbrev ?? 'NHL'
+  }
+
   getScouting(): ScoutingView {
     return buildScoutingView({
       ...this.ctx(),
@@ -6770,6 +6859,8 @@ export class Career {
       scouting: {
         knowledge: [...this.scouting.knowledge],
         assignments: [...this.scouting.assignments],
+        recommendations: [...(this.scouting.recommendations ?? [])],
+        seen: [...(this.scouting.seen ?? [])],
       },
       arcs: structuredClone(this.arcsState),
       records: structuredClone(this.recordsState),
@@ -6859,6 +6950,8 @@ export class Career {
       career.scouting = {
         knowledge: [...snapshot.scouting.knowledge],
         assignments: [...snapshot.scouting.assignments],
+        recommendations: [...(snapshot.scouting.recommendations ?? [])],
+        seen: [...(snapshot.scouting.seen ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({

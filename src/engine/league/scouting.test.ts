@@ -11,6 +11,7 @@ import {
   generateScoutCandidates,
   hireScout,
   fireScout,
+  DISCOVERY_THRESHOLD,
 } from './scouting'
 
 /* ────────────────────────── helpers ────────────────────────── */
@@ -499,6 +500,21 @@ describe('scout scopes, focus and market', () => {
       return knowledgeOf(state, pid) - before
     }
     expect(run(nat)).toBeGreaterThan(run(undefined))
+  })
+
+  it('Scouting Centre starts empty and seeds known players as already-processed', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(70)
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(70), draftProspectIds })
+    // No recommendations at career start.
+    expect(state.recommendations).toEqual([])
+    // Foggy draft prospects are NOT pre-seeded as seen (they're left to be discovered).
+    const seen = new Set(state.seen ?? [])
+    const unseenProspect = [...draftProspectIds].some((id) => !seen.has(id))
+    expect(unseenProspect).toBe(true)
+    // Every seeded id is genuinely well-known already (>= threshold).
+    for (const id of state.seen ?? []) {
+      expect(knowledgeOf(state, id)).toBeGreaterThanOrEqual(DISCOVERY_THRESHOLD)
+    }
   })
 
   it('market generates distinct candidates; hire adds and fire removes', () => {

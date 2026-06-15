@@ -24,6 +24,7 @@ export type ScoutTarget =
   | { kind: 'division';    divisionId: string }
   | { kind: 'competition'; competitionId: string }
   | { kind: 'nation';      nation: string }
+  | { kind: 'player';      playerId: string }
   | { kind: 'nextOpponent' }
   | { kind: 'draftClass' }
   | { kind: 'freeAgents' }
@@ -52,6 +53,22 @@ export interface ScoutAssignment {
 }
 
 /**
+ * A player a scout has surfaced as worth pursuing — a high-upside youth prospect
+ * or an undervalued target. Accumulates over the career as scouts get to know
+ * players (the Scouting Centre starts empty and fills up).
+ */
+export interface ScoutRecommendation {
+  playerId: string
+  /** The scout who surfaced him (or 'Your scouts' when no single owner). */
+  scoutName: string
+  /** ISO date he was flagged. */
+  foundDate: string
+  /** Why the scout likes him. */
+  reason: string
+  grade: 'A+' | 'A' | 'B' | 'C'
+}
+
+/**
  * Full scouting state for one career. Serialized as entry arrays so it round-
  * trips cleanly through JSON.stringify / structured clone.
  *
@@ -60,4 +77,10 @@ export interface ScoutAssignment {
 export interface ScoutingState {
   knowledge: Array<[string, KnowledgeValue]>
   assignments: ScoutAssignment[]
+  /** Players scouts have surfaced as targets (the Scouting Centre). Fills over
+   *  the career; absent on older saves. */
+  recommendations?: ScoutRecommendation[]
+  /** Player ids already evaluated for recommendation (so each is surfaced once,
+   *  and start-of-career known players never auto-populate). Absent on old saves. */
+  seen?: string[]
 }

@@ -322,8 +322,16 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
     }
   }
 
-  return { knowledge, assignments }
+  // Players already well-known at the start are not "discoveries" — seed them as
+  // already-processed so the Scouting Centre begins EMPTY and only fills as scouts
+  // raise foggy prospects past the discovery threshold during play.
+  const seen = knowledge.filter(([, k]) => k >= DISCOVERY_THRESHOLD).map(([id]) => id)
+
+  return { knowledge, assignments, recommendations: [], seen }
 }
+
+/** Knowledge a scout needs before he'll surface a player as a recommendation. */
+export const DISCOVERY_THRESHOLD = 55
 
 /* ────────────────────────── tick ────────────────────────── */
 
@@ -444,6 +452,8 @@ function resolveTarget(
       for (const c of competitions) if (c.nation === target.nation) for (const t of c.teamIds) teamIds.add(t)
       return rostersOf(teamIds)
     }
+    case 'player':
+      return [target.playerId]
     case 'nextOpponent':
       return nextOpponentId ? rostersOf([nextOpponentId]) : []
     case 'draftClass':

@@ -1184,6 +1184,19 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     return ids.filter((id) => (focus === 'youth' ? isYouth(id) : !isYouth(id))).length
   }
 
+  // Map a scout's scope to a single host nation (for the world map + flag).
+  const teamNation = new Map<string, string>()
+  for (const c of competitions) for (const t of c.teamIds) if (c.nation !== 'North America') teamNation.set(t, c.nation)
+  const playerTeam = new Map<string, string>()
+  for (const [tid, t] of teams) for (const id of t.roster) playerTeam.set(id as string, tid as string)
+  const scopeNation = (t: { kind: string; teamId?: string; competitionId?: string; nation?: string; playerId?: string }): string | null => {
+    if (t.kind === 'nation') return t.nation ?? null
+    if (t.kind === 'competition') { const c = competitions.find((x) => x.id === t.competitionId); return c && c.nation !== 'North America' ? c.nation : null }
+    if (t.kind === 'team' && t.teamId) return teamNation.get(t.teamId) ?? null
+    if (t.kind === 'player' && t.playerId) { const tid = playerTeam.get(t.playerId); return tid ? (teamNation.get(tid) ?? null) : null }
+    return null
+  }
+
   // Scout cards
   const scouts = scouting.assignments.map((s) => {
     const focus = (s.focus ?? 'all') as 'youth' | 'senior' | 'all'
@@ -1199,8 +1212,11 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       target: s.target,
       focus,
       coverage: coverageOf(s.target as { kind: string }, focus),
+      focusNation: scopeNation(s.target as { kind: string }),
     }
   })
+  const scoutedNations = [...new Set(scouts.map((s) => s.focusNation).filter((n): n is string => !!n))]
+  const activeScouts = scouting.assignments.length
 
   // Teams list for dropdown options
   const teamsOpts = [...teams.values()].map((t) => ({
@@ -1249,6 +1265,35 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     salary: c.salary,
   }))
   const nextOpponentName = nextOpponentId ? (teams.get(nextOpponentId as TeamId)?.name ?? null) : null
+
+  // World knowledge — average across all players we have any real read on.
+  const knownVals = scouting.knowledge.map(([, k]) => k).filter((k) => k > 0)
+  const worldKnowledge = knownVals.length ? Math.round(knownVals.reduce((a, b) => a + b, 0) / knownVals.length) : 0
+
+  // Scouting Centre — the surfaced finds (fills over the career).
+  const teamAbbrOf = new Map<string, string>()
+  for (const [, team] of teams) for (const id of team.roster) teamAbbrOf.set(id as string, team.abbreviation)
+  const recommendations: import('./views').ScoutFindView[] = []
+  for (const r of scouting.recommendations ?? []) {
+    const p = players.get(r.playerId as PlayerId)
+    if (!p) continue
+    recommendations.push({
+      ...badge(p),
+      age: p.age,
+      position: p.position,
+      teamAbbr: teamAbbrOf.get(r.playerId) ?? 'FA',
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      currentStars: overallToStars(ratedOverall(p)),
+      potentialStars: potentialStars(p),
+      knowledge: Math.round(knowledgeOf(scouting, r.playerId)),
+      grade: r.grade,
+      reason: r.reason,
+      scoutName: r.scoutName,
+      foundDate: r.foundDate,
+    })
+  }
+  const recRank = { 'A+': 0, A: 1, B: 2, C: 3 }
+  recommendations.sort((a, b) => recRank[a.grade] - recRank[b.grade] || b.potentialStars - a.potentialStars)
 
   // Per-team knowledge summary
   const teamKnowledge: TeamKnowledgeSummary[] = []
@@ -1328,6 +1373,10 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     nations,
     competitions: competitionsOpts,
     nextOpponentName,
+    scoutedNations,
+    worldKnowledge,
+    activeScouts,
+    recommendations,
     hasDraftClass: draftProspectIds.size > 0,
     leagueCoverage,
     nationCoverage,
