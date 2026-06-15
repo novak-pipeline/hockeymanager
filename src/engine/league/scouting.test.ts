@@ -377,6 +377,15 @@ describe('maskAttribute', () => {
     expect(exactMidpointCount).toBeLessThan(total * 0.3)
   })
 
+  it('a sharper scout (higher accuracy) gives a tighter band', () => {
+    const width = (acc: number): number => {
+      const { lo, hi } = maskAttribute(65, 50, 'p-acc', 'speed', acc)
+      return hi - lo
+    }
+    expect(width(0.9)).toBeLessThan(width(0.5))
+    expect(width(0.5)).toBeLessThan(width(0.1))
+  })
+
   it('maskedOverall delegates correctly', () => {
     const { lo, hi } = maskedOverall(75, 50, 'p-overall-test')
     expect(lo).toBeLessThanOrEqual(hi)

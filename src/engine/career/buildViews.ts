@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, maskAttribute, maskedOverall, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -156,7 +156,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
     }
   }
   const k = knowledgeOf(fog.scouting, pid)
-  const { lo, hi } = maskedOverall(ovr, k, pid)
+  const { lo, hi } = maskedOverall(ovr, k, pid, accuracyOf(fog.scouting, pid))
   const midOvr = Math.round((lo + hi) / 2)
   return {
     playerId: pid,
@@ -426,7 +426,7 @@ function groupView(
         return { label, value }
       }
       const k = knowledgeOf(fog.scouting, playerId)
-      const { lo, hi } = maskAttribute(value, k, playerId, key)
+      const { lo, hi } = maskAttribute(value, k, playerId, key, accuracyOf(fog.scouting, playerId))
       const mid = Math.round((lo + hi) / 2)
       return { label, value: mid, lo, hi, masked: true }
     }),

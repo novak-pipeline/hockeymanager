@@ -7027,6 +7027,7 @@ export class Career {
         assignments: [...this.scouting.assignments],
         recommendations: [...(this.scouting.recommendations ?? [])],
         seen: [...(this.scouting.seen ?? [])],
+        judgment: [...(this.scouting.judgment ?? [])],
       },
       arcs: structuredClone(this.arcsState),
       records: structuredClone(this.recordsState),
@@ -7118,6 +7119,7 @@ export class Career {
         assignments: [...snapshot.scouting.assignments],
         recommendations: [...(snapshot.scouting.recommendations ?? [])],
         seen: [...(snapshot.scouting.seen ?? [])],
+        judgment: [...(snapshot.scouting.judgment ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({

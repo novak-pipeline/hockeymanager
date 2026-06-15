@@ -45,6 +45,29 @@ export function addKnowledge(state: ScoutingState, playerId: string, delta: numb
   return next
 }
 
+/** Best judgment (0–100) of any scout who has watched a player; 0 if none. */
+export function judgmentOf(state: ScoutingState, playerId: string): number {
+  if (!state.judgment) return 0
+  for (const [id, j] of state.judgment) if (id === playerId) return j
+  return 0
+}
+
+function recordJudgment(state: ScoutingState, playerId: string, j: number): void {
+  if (!state.judgment) state.judgment = []
+  for (const entry of state.judgment) {
+    if (entry[0] === playerId) { if (j > entry[1]) entry[1] = j; return }
+  }
+  state.judgment.push([playerId, j])
+}
+
+/** Read accuracy 0–1 for masking: blends the best scout's judgment with a neutral
+ *  floor (players you haven't actively scouted read at ~neutral quality). */
+export function accuracyOf(state: ScoutingState, playerId: string): number {
+  const j = judgmentOf(state, playerId)
+  if (j <= 0) return 0.5
+  return Math.max(0, Math.min(1, j / 100))
+}
+
 /** Deterministic 32-bit hash combining two numbers. Used for stable per-player-per-attr offsets. */
 function deterministicHash(a: number, b: number): number {
   // FNV-1a inspired mixing — cheap, deterministic, no RNG needed
@@ -116,11 +139,17 @@ export function maskAttribute(
   value: number,
   knowledge: number,
   playerId: string,
-  attrKey: string
+  attrKey: string,
+  /** 0–1 read quality from the scout who watched him (judgment). 0.5 = neutral.
+   *  A sharp scout (→1) tightens the band and shrinks the bias; a poor one (→0)
+   *  widens it — so WHO scouts a player matters, not just how much. */
+  accuracy = 0.5
 ): { lo: number; hi: number } {
   if (knowledge >= 95) return { lo: value, hi: value }
 
-  const width = bandWidth(knowledge)
+  // Better judgment narrows the band (0.7×) ; weaker judgment widens it (1.3×).
+  const widthFactor = 1.3 - 0.6 * Math.max(0, Math.min(1, accuracy))
+  const width = bandWidth(knowledge) * widthFactor
   const half = width / 2
 
   // Stable bias: −half .. +half, derived from player+attr hash
@@ -144,9 +173,10 @@ export function maskAttribute(
 export function maskedOverall(
   ovr: number,
   knowledge: number,
-  playerId: string
+  playerId: string,
+  accuracy = 0.5
 ): { lo: number; hi: number } {
-  return maskAttribute(ovr, knowledge, playerId, '__overall__')
+  return maskAttribute(ovr, knowledge, playerId, '__overall__', accuracy)
 }
 
 /* ────────────────────────── initial state ────────────────────────── */
@@ -406,7 +436,11 @@ export function tickScouting(args: TickScoutingArgs): void {
       else if (current >= 80) gain *= 0.5
 
       const next = Math.min(100, current + gain)
-      if (next > current) setKnowledge(state, pid, next)
+      if (next > current) {
+        setKnowledge(state, pid, next)
+        // Record the best judgment that has watched him — drives read accuracy.
+        recordJudgment(state, pid, scout.judgment ?? scout.rating)
+      }
     }
   }
 }

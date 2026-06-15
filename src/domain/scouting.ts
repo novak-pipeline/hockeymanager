@@ -83,4 +83,8 @@ export interface ScoutingState {
   /** Player ids already evaluated for recommendation (so each is surfaced once,
    *  and start-of-career known players never auto-populate). Absent on old saves. */
   seen?: string[]
+  /** [playerId, 0..100] — the best JUDGMENT of any scout who has watched him.
+   *  Drives read accuracy (band tightness/bias), distinct from knowledge volume.
+   *  Absent on old saves. */
+  judgment?: Array<[string, number]>
 }
