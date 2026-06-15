@@ -23,6 +23,7 @@ export type ScreenId =
   | 'teamStats'
   | 'report'
   | 'personnel'
+  | 'jobMarket'
   | 'practice'
   | 'tactics'
   | 'finances'
@@ -74,6 +75,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'teamStats':
     case 'report':
     case 'personnel':
+    case 'jobMarket':
     case 'practice':
     case 'tactics':
     case 'finances':

@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import type { ScoutingView } from '../../worker/protocol'
 import type {
-  ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutMarketRow,
+  ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow,
 } from '../../engine/career/views'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { PlayerLink } from '../components/NavContext'
@@ -225,52 +225,6 @@ function CoverageTable({ title, rows }: { title: string; rows: ScoutCoverageRow[
   )
 }
 
-/* ── scout market ──────────────────────────────────────────────────────────── */
-
-function ScoutMarketPanel({ rows, full, onHire }: {
-  rows: ScoutMarketRow[]
-  full: boolean
-  onHire: (candidateId: string) => void
-}): JSX.Element {
-  return (
-    <Panel title="Scout Market">
-      {full && <p className="muted small" style={{ marginBottom: 8 }}>Your department is full — release a scout to hire another.</p>}
-      {rows.length === 0 ? (
-        <p className="muted small">No scouts available to hire right now.</p>
-      ) : (
-        <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Scout</th><th>Specialty</th><th className="num">Ability</th><th className="num">Judgment</th><th className="num">Salary</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr key={c.id}>
-                  <td style={{ fontWeight: 600 }}>{c.name}</td>
-                  <td className="small">
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      {c.specialtyNation && <FlagIcon nationality={c.specialtyNation} size={13} />}
-                      {c.specialtyNation ?? 'Generalist'}
-                    </span>
-                  </td>
-                  <td className="num">{c.rating}</td>
-                  <td className="num muted">{c.judgment}</td>
-                  <td className="num small">{fmtMoney(c.salary)}/yr</td>
-                  <td className="num">
-                    <button className="btn btn-ghost small" disabled={full} onClick={() => onHire(c.id)}>Hire</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Panel>
-  )
-}
-
 /* ── scouted-players recommendations table ─────────────────────────────────── */
 
 const REC_COLOR: Record<ScoutedPlayerRow['rec'], string> = {
@@ -375,10 +329,6 @@ export function ScoutingScreen(): JSX.Element {
     const res = await client.assignScout(scoutId, target, focus)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
   }
-  const handleHire = async (candidateId: string): Promise<void> => {
-    const res = await client.hireScout(candidateId)
-    if (res.type === 'error') { toast(res.message, 'error') } else { toast('Scout hired', 'success'); bumpRefresh(); refetch() }
-  }
   const handleFire = async (scoutId: string): Promise<void> => {
     const res = await client.fireScout(scoutId)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
@@ -412,13 +362,6 @@ export function ScoutingScreen(): JSX.Element {
             <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
             <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
           </div>
-
-          {/* ── Scout market ── */}
-          <ScoutMarketPanel
-            rows={data.scoutMarket}
-            full={data.scouts.length >= data.maxScouts}
-            onHire={(id) => { void handleHire(id) }}
-          />
 
           {/* ── Scouting recommendations table ── */}
           <ScoutedTable rows={data.scoutedPlayers} />

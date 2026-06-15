@@ -31,6 +31,7 @@ import { LeagueScreen } from './screens/LeagueScreen'
 import { WorldScreen } from './screens/WorldScreen'
 import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
+import { JobMarketScreen } from './screens/JobMarketScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
 import { PressConference } from './components/PressConference'
 import { pollPress } from './lib/press'
@@ -431,6 +432,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardScreen />
     case 'staffMeeting':
       return <StaffMeetingScreen />
+    case 'jobMarket':
+      return <JobMarketScreen />
 
     // ── News ──
     case 'inbox':
