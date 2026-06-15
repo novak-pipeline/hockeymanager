@@ -796,8 +796,30 @@ export class Career {
   }
 
   /** Collect all prospect ids across all known draft classes. */
+  /**
+   * The draft class scouts can target — every draft-eligible / re-entry player
+   * across the NHL, AHL and feeder/junior leagues (the same pool the analyst
+   * board ranks), plus any formal offseason draft classes. This is what makes
+   * the "Draft Class" scope cover the real class year-round, not just at the
+   * offseason when `league.draftClasses` is populated.
+   */
   private allDraftProspectIds(): Set<string> {
     const ids = new Set<string>()
+    const consider = (teamIds: readonly TeamId[]): void => {
+      for (const tid of teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (!p) continue
+          const elig = draftEligibility(p.age, !!p.nhlDrafted)
+          if (elig && elig !== 'radar') ids.add(pid as string)
+        }
+      }
+    }
+    consider(this.data.league.teams)
+    if (this.data.league.ahlTeams) consider(this.data.league.ahlTeams)
+    for (const c of this.data.league.competitions ?? []) consider(c.teamIds as readonly TeamId[])
     for (const cls of this.data.league.draftClasses) {
       for (const p of cls.prospects) ids.add(p.playerId as string)
     }
