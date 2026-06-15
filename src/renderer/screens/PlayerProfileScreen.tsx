@@ -1829,7 +1829,9 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               <PotentialStars count={d.potentialStars} />
             </VerdictTile>
             <VerdictTile label="PROJECTION" accent={tierColor}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: tierColor }}>{sr.tierLabel}</span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: tierColor }}>
+                {sr.tier === 'Prospect' && d.scoutsCeilingRole ? d.scoutsCeilingRole : sr.tierLabel}
+              </span>
             </VerdictTile>
           </div>
 

@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, draftEligibility, perceivedCeiling, productionPremium, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, perceivedCeiling, productionPremium, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
@@ -4608,6 +4608,10 @@ export class Career {
 
       // Analyst draft projection — the pundit consensus read for draft-relevant
       // prospects (rank + projected ceiling role), shown under the scout report.
+      // Our scouts' projected ceiling role (grounded read) — a real role label
+      // ("Top-pair D", "Middle-six F", "Starter"), never a vague "Prospect".
+      profile.scoutsCeilingRole = ceilingRoleShort(agedPotential(player), player.position)
+
       const elig = draftEligibility(player.age, !!player.nhlDrafted)
       if (elig) {
         const board = this.getDraftRankings()
@@ -4621,7 +4625,9 @@ export class Career {
         const proj = analystProjection({
           name: player.name,
           position: player.position,
-          ceiling: agedPotential(player),
+          // The analysts project off their (optimistic) perceived ceiling, so
+          // their projected role lines up with their stars and ranking.
+          ceiling: analystRow?.perceivedCeiling ?? agedPotential(player),
           eligibility: elig,
           ...(rank !== undefined ? { rank } : {}),
           phaseLabel: board.phaseLabel,
@@ -5524,6 +5530,7 @@ export class Career {
             eligibility: elig,
             currentStars: overallToStars(ratedOverall(p)),
             potentialStars: overallToStars(perceived),
+            perceivedCeiling: Math.round(perceived),
             ...(isSkater ? { pNHLer: evalRes.projection.pNHLer, pStar: evalRes.projection.pStar } : {}),
           }
           if (elig === 'radar') radarRows.push(row)

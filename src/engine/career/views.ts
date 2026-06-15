@@ -420,6 +420,12 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   analystPotentialStars?: number
   /**
+   * Your scouts' projected ceiling ROLE in plain hockey terms (e.g. "Top-pair D",
+   * "Middle-six F", "Starter") from their grounded read — replaces the vague
+   * "Prospect" projection label. Always present.
+   */
+  scoutsCeilingRole?: string
+  /**
    * Your scouts' OWN draft read — can differ from the analyst consensus. Present
    * for draft-relevant prospects once your staff has seen enough of him.
    */
@@ -801,6 +807,9 @@ export interface DraftRankRowView {
   pNHLer?: number
   /** NHLe projection: probability (0–100) he becomes an impact/"star" player. Skaters only. */
   pStar?: number
+  /** Raw perceived ceiling (0–100) behind the analyst stars — used to derive the
+   *  analysts' projected role consistently with their ranking. */
+  perceivedCeiling?: number
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
