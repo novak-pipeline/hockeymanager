@@ -59,6 +59,7 @@ export type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
   CompetitionsView,
   InternationalView,
@@ -124,6 +125,7 @@ import type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
   CompetitionsView,
   InternationalView,
@@ -217,6 +219,7 @@ export type WorkerRequestBody =
   | { type: 'importSave'; snapshot: CareerSnapshot }
   /* ── scouting ── */
   | { type: 'getScouting' }
+  | { type: 'getScoutProfile'; scoutId: string }
   | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
@@ -349,6 +352,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'ok' }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
+  | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
   /* ── story layer ── */
   | { type: 'history'; history: HistoryView }
   | { type: 'lockerRoom'; lockerRoom: LockerRoomView }

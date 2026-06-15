@@ -12,7 +12,7 @@ import type {
   ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutFindView,
 } from '../../engine/career/views'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
-import { PlayerLink } from '../components/NavContext'
+import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { WorldMap, type WorldMapNation } from '../components/WorldMap'
@@ -20,6 +20,16 @@ import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 import { bumpRefresh } from '../components/store'
+
+/** Clickable scout name → his profile page. */
+function ScoutLink({ scoutId, name }: { scoutId: string; name: string }): JSX.Element {
+  const nav = useNav()
+  return (
+    <a className="link" style={{ cursor: 'pointer', fontWeight: 'inherit' }} onClick={() => nav.navigate('scoutProfile', { scoutId })}>
+      {name}
+    </a>
+  )
+}
 
 /* ── knowledge bar ─────────────────────────────────────────────────────────── */
 
@@ -145,7 +155,7 @@ function ScoutCard(props: {
     <div className="panel" style={{ background: 'var(--bg2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontWeight: 600 }}>{scout.name}</div>
+          <div style={{ fontWeight: 600 }}><ScoutLink scoutId={scout.scoutId} name={scout.name} /></div>
           <div className="muted small" style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
             {scout.specialtyNation && <FlagIcon nationality={scout.specialtyNation} size={13} />}
             {scout.specialtyNation ? `${scout.specialtyNation} specialist` : 'Generalist'}
@@ -368,7 +378,7 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
           <tbody>
             {scouts.map((s) => (
               <tr key={s.scoutId}>
-                <td style={{ fontWeight: 600 }}>{s.name}<div className="muted small">Scout{s.specialtyNation ? ` · ${s.specialtyNation} specialist` : ''}</div></td>
+                <td style={{ fontWeight: 600 }}><ScoutLink scoutId={s.scoutId} name={s.name} /><div className="muted small">Scout{s.specialtyNation ? ` · ${s.specialtyNation} specialist` : ''}</div></td>
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {s.focusNation && <FlagIcon nationality={s.focusNation} size={15} />}

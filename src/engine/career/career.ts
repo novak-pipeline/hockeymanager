@@ -5263,6 +5263,98 @@ export class Career {
     return { ok: true }
   }
 
+  /** Resolve a scout's assignment scope to the player ids it covers. */
+  private resolveScopeIds(target: ScoutTarget): string[] {
+    const comps = this.scoutingCompetitions()
+    const rostersOf = (teamIds: Iterable<string>): string[] => {
+      const out: string[] = []
+      for (const tid of teamIds) { const t = this.data.teams.get(tid as TeamId); if (t) for (const id of t.roster) out.push(id as string) }
+      return out
+    }
+    switch (target.kind) {
+      case 'team': return rostersOf([target.teamId])
+      case 'division': {
+        const ids: string[] = []
+        for (const [tid, t] of this.data.teams) if ((t as { divisionId?: string }).divisionId === target.divisionId) ids.push(...rostersOf([tid as string]))
+        return ids
+      }
+      case 'competition': { const c = comps.find((x) => x.id === target.competitionId); return c ? rostersOf(c.teamIds) : [] }
+      case 'nation': { const set = new Set<string>(); for (const c of comps) if (c.nation === target.nation) for (const t of c.teamIds) set.add(t); return rostersOf(set) }
+      case 'player': return [target.playerId]
+      case 'nextOpponent': { const opp = this.nextOpponentTeamId(); return opp ? rostersOf([opp]) : [] }
+      case 'draftClass': return [...this.allDraftProspectIds()]
+      case 'freeAgents': return [...this.currentFaIds()]
+      default: return []
+    }
+  }
+
+  /** Full profile for one of the club's scouts (attributes, assignment, intel). */
+  getScoutProfile(scoutId: string): import('./views').ScoutProfileView | null {
+    this.syncScoutRoster()
+    const staff = this.userScoutStaff().find((s) => s.id === scoutId)
+    const asg = this.scouting.assignments.find((a) => a.scoutId === scoutId)
+    if (!staff || !asg) return null
+    const card = this.getScouting().scouts.find((s) => s.scoutId === scoutId)
+
+    const a = staff.attributes ?? {}
+    const ATTR: Array<[keyof typeof a, string]> = [
+      ['judgingPlayers', 'Judging Ability'], ['judgingPotential', 'Judging Potential'],
+      ['tactics', 'Tactical Knowledge'], ['developingYoungsters', 'Working w/ Youth'],
+      ['patience', 'Patience'], ['discipline', 'Discipline'],
+      ['manManagement', 'Man Management'], ['motivating', 'Determination'],
+    ]
+    const attributes = ATTR
+      .filter(([k]) => typeof a[k] === 'number')
+      .map(([k, label]) => ({ label, value: a[k] as number }))
+
+    const focus = asg.focus ?? 'all'
+    const scopeIds = this.resolveScopeIds(asg.target).filter((id) => {
+      if (focus === 'all') return true
+      const p = this.data.players.get(asPlayerId(id)); if (!p) return false
+      const youth = p.age <= 23
+      return focus === 'youth' ? youth : !youth
+    })
+    const scouted = scopeIds
+      .map((id) => ({ id, k: knowledgeOf(this.scouting, id) }))
+      .filter((x) => x.k >= 30)
+      .sort((x, y) => y.k - x.k)
+      .slice(0, 40)
+      .map(({ id, k }) => {
+        const p = this.data.players.get(asPlayerId(id))!
+        const team = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+        return {
+          playerId: id, name: p.name, position: p.position, age: p.age,
+          teamAbbr: team?.abbreviation ?? 'FA',
+          ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+          knowledge: Math.round(k),
+          currentStars: overallToStars(ratedOverall(p)),
+          potentialStars: overallToStars(agedPotential(p)),
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      })
+
+    const finds = (this.scouting.recommendations ?? [])
+      .filter((r) => r.scoutName === staff.name)
+      .map((r) => ({ playerId: r.playerId, name: this.data.players.get(asPlayerId(r.playerId))?.name ?? '—', grade: r.grade, reason: r.reason, foundDate: r.foundDate }))
+
+    return {
+      scoutId,
+      name: staff.name,
+      ...(staff.faceId !== undefined ? { faceId: staff.faceId } : {}),
+      rating: staff.rating,
+      judgment: staff.judgment,
+      ...(asg.specialtyNation ? { specialtyNation: asg.specialtyNation } : {}),
+      ...(asg.salary !== undefined ? { salary: asg.salary } : {}),
+      ...(staff.demeanor ? { demeanor: staff.demeanor } : {}),
+      attributes,
+      assignmentLabel: card?.assignmentLabel ?? '—',
+      focusLabel: card?.focusLabel ?? 'All players',
+      coverage: card?.coverage ?? scopeIds.length,
+      scouted,
+      finds,
+    }
+  }
+
   /** Release a scout from the club's staff. */
   fireScoutFromStaff(scoutId: string): { ok: boolean; message?: string } {
     const staff = this.userScoutStaff()

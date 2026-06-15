@@ -1521,6 +1521,32 @@ export interface ScoutMarketRow {
   salary: number
 }
 
+/** Full scout profile — attributes, current assignment, and who he's watching. */
+export interface ScoutProfileView {
+  scoutId: string
+  name: string
+  faceId?: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary?: number
+  demeanor?: string
+  /** Discipline attributes (label/value out of 20), display-only. */
+  attributes: Array<{ label: string; value: number }>
+  assignmentLabel: string
+  focusLabel: string
+  /** Players currently in his scope (post-focus). */
+  coverage: number
+  /** Players he has real intel on (in his scope), most-known first. */
+  scouted: Array<{
+    playerId: string; name: string; position: string; age: number
+    teamAbbr: string; nationality?: string; knowledge: number
+    currentStars: number; potentialStars: number; faceId?: string
+  }>
+  /** Prospects he has surfaced to the Scouting Centre. */
+  finds: Array<{ playerId: string; name: string; grade: string; reason: string; foundDate: string }>
+}
+
 /** Per-team knowledge summary for the scouting overview panel. */
 export interface TeamKnowledgeSummary {
   teamId: string

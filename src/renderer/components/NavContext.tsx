@@ -52,6 +52,7 @@ export type ScreenId =
   | 'scoutingFocus'
   | 'scoutingCoverage'
   | 'scoutingDraft'
+  | 'scoutProfile'
   | 'dataHub'
   // Contextual (phase-gated)
   | 'draft'
@@ -108,6 +109,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'scoutingFocus':
     case 'scoutingCoverage':
     case 'scoutingDraft':
+    case 'scoutProfile':
     case 'dataHub':
     case 'draft':
     case 'offseason':
@@ -125,6 +127,8 @@ export interface NavParams {
   playerId?: string
   /** Team being browsed in the Team section. Absent = user's own club. */
   teamId?: string
+  /** Scout being viewed in the scout profile screen. */
+  scoutId?: string
 }
 
 export interface NavApi {

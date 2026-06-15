@@ -220,6 +220,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── scouting ── */
     case 'getScouting':
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'getScoutProfile':
+      return { id: req.id, type: 'scoutProfile', scoutProfile: must().getScoutProfile(req.scoutId) }
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target, req.focus)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }

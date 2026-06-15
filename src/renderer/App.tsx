@@ -32,6 +32,7 @@ import { WorldScreen } from './screens/WorldScreen'
 import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
 import { JobMarketScreen } from './screens/JobMarketScreen'
+import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
@@ -430,6 +431,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <StaffMeetingScreen />
     case 'jobMarket':
       return <JobMarketScreen />
+    case 'scoutProfile':
+      return <ScoutProfileScreen scoutId={props.params.scoutId ?? ''} />
 
     // ── News ──
     case 'inbox':
