@@ -1898,8 +1898,14 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <div style={{ width: 4, borderRadius: 2, background: 'var(--accent2, #e0b341)', flex: '0 0 auto' }} />
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
-                ANALYST CONSENSUS
+                NHL DRAFT ANALYSTS
               </div>
+              {d.analystPotentialStars !== undefined && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>Their ceiling:</span>
+                  <StarRating stars={d.analystPotentialStars} size={13} />
+                </div>
+              )}
               <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
                 {d.analystProjection}
               </p>

@@ -413,6 +413,13 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   analystProjection?: string
   /**
+   * The NHL draft analysts' PERCEIVED potential (1–5 stars) — the hype-inflated
+   * consensus ceiling that drives the public draft board, kept separate from
+   * `potentialStars` (your own scouts' grounded read). Lets the profile show
+   * both reads side by side. Present only for draft-relevant prospects.
+   */
+  analystPotentialStars?: number
+  /**
    * Your scouts' OWN draft read — can differ from the analyst consensus. Present
    * for draft-relevant prospects once your staff has seen enough of him.
    */

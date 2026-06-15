@@ -4605,7 +4605,13 @@ export class Career {
       const elig = draftEligibility(player.age, !!player.nhlDrafted)
       if (elig) {
         const board = this.getDraftRankings()
-        const rank = board.rankings.find((r) => r.playerId === playerId)?.rank
+        // The analysts' published row (eligible board, else the radar list) — its
+        // potentialStars is the hype-inflated PERCEIVED ceiling, kept distinct
+        // from the profile's grounded `potentialStars` (our scouts' read).
+        const analystRow = board.rankings.find((r) => r.playerId === playerId)
+          ?? board.radar.find((r) => r.playerId === playerId)
+        const rank = analystRow?.eligibility === 'radar' ? undefined : analystRow?.rank
+        if (analystRow) profile.analystPotentialStars = analystRow.potentialStars
         const proj = analystProjection({
           name: player.name,
           position: player.position,
