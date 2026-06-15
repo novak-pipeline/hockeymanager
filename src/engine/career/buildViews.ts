@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, YOUTH_MAX_AGE, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -1136,7 +1136,7 @@ function assignmentLabel(
 }
 
 const FOCUS_LABEL: Record<string, string> = { youth: 'U23', senior: 'Senior', all: 'All players' }
-const SCOUT_YOUTH_MAX_AGE = 23
+const SCOUT_YOUTH_MAX_AGE = YOUTH_MAX_AGE
 
 export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const { scouting, teams, divisions, players, draftProspectIds } = ctx
@@ -1270,8 +1270,10 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   }))
   const nextOpponentName = nextOpponentId ? (teams.get(nextOpponentId as TeamId)?.name ?? null) : null
 
-  // World knowledge — average across all players we have any real read on.
-  const knownVals = scouting.knowledge.map(([, k]) => k).filter((k) => k > 0)
+  // World knowledge — average across players we have a read on, EXCLUDING our own
+  // roster (always 100%, would otherwise inflate the department KPI).
+  const ownRoster = new Set((teams.get(ctx.userTeamId)?.roster ?? []).map((id) => id as string))
+  const knownVals = scouting.knowledge.filter(([id, k]) => k > 0 && !ownRoster.has(id)).map(([, k]) => k)
   const worldKnowledge = knownVals.length ? Math.round(knownVals.reduce((a, b) => a + b, 0) / knownVals.length) : 0
 
   // Scouting Centre — the surfaced finds (fills over the career).

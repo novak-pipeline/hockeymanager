@@ -388,8 +388,9 @@ export interface TickScoutingArgs {
   rng: Rng
 }
 
-/** 'youth' focus = U23 (≤23). A scout's focus narrows his target set. */
-const YOUTH_MAX_AGE = 23
+/** 'youth' focus = U23 (≤23). A scout's focus narrows his target set. The single
+ *  source of truth for the youth age boundary across scouting code. */
+export const YOUTH_MAX_AGE = 23
 function passesFocus(player: Player, focus: ScoutFocus | undefined): boolean {
   if (!focus || focus === 'all') return true
   const youth = player.age <= YOUTH_MAX_AGE

@@ -59,6 +59,8 @@ export interface ScoutAssignment {
  */
 export interface ScoutRecommendation {
   playerId: string
+  /** Id of the scout who surfaced him (absent on older saves / no single owner). */
+  scoutId?: string
   /** The scout who surfaced him (or 'Your scouts' when no single owner). */
   scoutName: string
   /** ISO date he was flagged. */

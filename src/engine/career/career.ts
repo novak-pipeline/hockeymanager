@@ -207,6 +207,7 @@ import {
   scoutSalary,
   SCOUT_SPECIALTY_NATIONS,
   DISCOVERY_THRESHOLD,
+  YOUTH_MAX_AGE,
   type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
@@ -906,6 +907,8 @@ export class Career {
       this.scoutReportSeeded = true
       return
     }
+    const orgIds = this.ownOrgIds()
+    const surfaced = new Set((this.scouting.recommendations ?? []).map((r) => r.playerId))
     const fresh: Array<{ id: string; p: Player; pot: number }> = []
     for (const [pid, k] of this.scouting.knowledge) {
       if (k < KNOWN) continue
@@ -914,8 +917,9 @@ export class Career {
       this.scoutReported.add(id) // mark regardless so we never re-scan
       const p = this.data.players.get(pid as PlayerId)
       if (!p) continue
-      // Don't report the user's own players — this is acquisition intel.
-      if (this.userTeam.roster.includes(pid as PlayerId)) continue
+      // Don't report our own org's players (this is acquisition intel), and don't
+      // double-report a prospect the Scouting Centre already surfaced as a find.
+      if (orgIds.has(id) || surfaced.has(id)) continue
       const pot = potentialStars(p)
       const ovr = ratedOverall(p)
       if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
@@ -5114,22 +5118,27 @@ export class Career {
     const st = this.scouting
     if (!st.recommendations) st.recommendations = []
     if (!st.seen) st.seen = []
+    // `seen` = players we will NOT surface (known at start, our own org, or
+    // evaluated-and-rejected). Players we ACCEPT live in `recommendations`, not
+    // `seen`, so the cap below can never permanently bury an accepted find.
     const seen = new Set(st.seen)
+    const recIds = new Set(st.recommendations.map((r) => r.playerId))
+    const own = this.ownOrgIds()
     let added = false
     for (const [pid, k] of st.knowledge) {
-      if (k < DISCOVERY_THRESHOLD || seen.has(pid)) continue
-      seen.add(pid)
-      if (this.userTeam.roster.includes(pid as PlayerId)) continue
+      if (k < DISCOVERY_THRESHOLD || seen.has(pid) || recIds.has(pid)) continue
+      if (own.has(pid)) { seen.add(pid); continue } // don't "discover" our own org
       const p = this.data.players.get(asPlayerId(pid))
-      if (!p) continue
+      if (!p) { seen.add(pid); continue }
       const rec = this.evaluateForRecommendation(p, day)
-      if (rec) { st.recommendations.push(rec); added = true }
+      if (rec) { st.recommendations.push(rec); recIds.add(pid); added = true }
+      else seen.add(pid)
     }
     if (added) {
-      // Keep the strongest finds if the board grows large.
       const rank = { 'A+': 0, A: 1, B: 2, C: 3 } as const
       st.recommendations.sort((a, b) => rank[a.grade] - rank[b.grade])
-      if (st.recommendations.length > 60) st.recommendations.length = 60
+      // Cap generously; dropped finds are NOT marked seen, so they can return.
+      if (st.recommendations.length > 120) st.recommendations.length = 120
     }
     st.seen = [...seen]
   }
@@ -5138,8 +5147,7 @@ export class Career {
    *  prospects with real upside, plus clearly-undervalued young players. Returns
    *  the recommendation (and fires an inbox note) or null. */
   private evaluateForRecommendation(p: Player, day: number): ScoutRecommendation | null {
-    const isYouth = p.age <= 23
-    if (!isYouth) return null
+    if (p.age > YOUTH_MAX_AGE) return null
     const current = ratedOverall(p)
     const elig = draftEligibility(p.age, !!p.nhlDrafted)
     const evalRes = this.prospectEval(p, this.leagueAbbrevForPlayer(p), this.analystProjectionNoise())
@@ -5163,23 +5171,34 @@ export class Career {
     this.pushNews('scouting', `Scout report: ${p.name}`,
       `${scoutName} flagged ${p.name} (${p.age}, ${p.position}) as one to watch — ${reason} Open the Scouting Centre for the full report.`,
       { playerId: p.id as string })
-    return { playerId: p.id as string, scoutName, foundDate, reason, grade }
+    return { playerId: p.id as string, ...(scout ? { scoutId: scout.scoutId } : {}), scoutName, foundDate, reason, grade }
   }
 
-  /** The scout whose current assignment scope covers this player, if any. */
-  private scoutCovering(p: Player): { name: string } | null {
+  /** The scout whose current assignment scope+focus covers this player, if any. */
+  private scoutCovering(p: Player): { scoutId: string; name: string } | null {
     const comps = this.scoutingCompetitions()
     const pid = p.id as string
     const teamOfPlayer = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
     const tid = teamOfPlayer ? (teamOfPlayer.id as string) : null
     const nationOf = (cid: string): string | undefined => comps.find((c) => c.id === cid)?.nation
+    const oppId = this.nextOpponentTeamId()
+    const faIds = this.currentFaIds()
+    const matchesFocus = (focus: ScoutFocus | undefined): boolean => {
+      if (!focus || focus === 'all') return true
+      const youth = p.age <= YOUTH_MAX_AGE
+      return focus === 'youth' ? youth : !youth
+    }
     for (const s of this.scouting.assignments) {
       const t = s.target
-      if (t.kind === 'player' && t.playerId === pid) return s
-      if (t.kind === 'draftClass' && draftEligibility(p.age, !!p.nhlDrafted)) return s
-      if (tid && t.kind === 'team' && t.teamId === tid) return s
-      if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); if (c?.teamIds.includes(tid)) return s }
-      if (tid && t.kind === 'nation') { const c = comps.find((x) => x.teamIds.includes(tid)); if (c && nationOf(c.id) === t.nation) return s }
+      let inScope = false
+      if (t.kind === 'player') inScope = t.playerId === pid
+      else if (t.kind === 'draftClass') inScope = !!draftEligibility(p.age, !!p.nhlDrafted)
+      else if (t.kind === 'freeAgents') inScope = faIds.has(pid)
+      else if (t.kind === 'nextOpponent') inScope = !!tid && tid === oppId
+      else if (tid && t.kind === 'team') inScope = t.teamId === tid
+      else if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); inScope = !!c?.teamIds.includes(tid) }
+      else if (tid && t.kind === 'nation') { const c = comps.find((x) => x.teamIds.includes(tid)); inScope = !!c && nationOf(c.id) === t.nation }
+      if (inScope && matchesFocus(s.focus)) return { scoutId: s.scoutId, name: s.name }
     }
     return null
   }
@@ -5311,7 +5330,7 @@ export class Career {
     const scopeIds = this.resolveScopeIds(asg.target).filter((id) => {
       if (focus === 'all') return true
       const p = this.data.players.get(asPlayerId(id)); if (!p) return false
-      const youth = p.age <= 23
+      const youth = p.age <= YOUTH_MAX_AGE
       return focus === 'youth' ? youth : !youth
     })
     const scouted = scopeIds
@@ -5334,7 +5353,7 @@ export class Career {
       })
 
     const finds = (this.scouting.recommendations ?? [])
-      .filter((r) => r.scoutName === staff.name)
+      .filter((r) => (r.scoutId ? r.scoutId === scoutId : r.scoutName === staff.name))
       .map((r) => ({ playerId: r.playerId, name: this.data.players.get(asPlayerId(r.playerId))?.name ?? '—', grade: r.grade, reason: r.reason, foundDate: r.foundDate }))
 
     return {
