@@ -75,6 +75,7 @@ import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
+import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
@@ -4808,6 +4809,33 @@ export class Career {
           final: finalPhase,
         })
         if (bio) profile.seasonBio = bio
+      }
+
+      // Living scouting report — the synthesized, always-present write-up that
+      // deepens + shifts as our scouts' collective read sharpens. Production comes
+      // from the league he actually plays in (pace* computed above).
+      const { leagueLabel: sumLeague, teamIds: sumTeamIds } = this.leagueContextOf(playerTeamId)
+      const sumRank = player.position !== 'G' && sumTeamIds.length > 0 ? this.scoringRankOf(pid, sumTeamIds) : undefined
+      const summaryArgs = {
+        player,
+        knowledge: profile.scoutReport.knowledge,
+        gamesPlayed: paceGp,
+        goals: paceTot?.goals ?? 0,
+        assists: paceTot?.assists ?? 0,
+        leagueName: sumLeague || leagueAbbrev,
+        ...(sumRank !== undefined ? { leagueScoringRank: sumRank } : {}),
+        ...(profile.scoutsCeilingRole !== undefined ? { ceilingRole: profile.scoutsCeilingRole } : {}),
+        ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
+        ...(profile.scoutComp?.names !== undefined ? { compNames: profile.scoutComp.names } : {}),
+        ...(elig ? { eligibility: elig } : {}),
+        ...(profile.analystDraftLabel !== undefined ? { draftLabel: profile.analystDraftLabel } : {}),
+        draftYear: this.year + 1,
+      }
+      profile.scoutSummary = buildScoutSummary(summaryArgs)
+      // A formal end-of-season pre-draft edition for draft-eligible prospects.
+      const seasonEnd = this.phase === 'offseason' || this.phase === 'playoffs' || this.draftRankPhase() === 'final'
+      if (seasonEnd && elig && elig !== 'radar') {
+        profile.preDraftSummary = buildScoutSummary({ ...summaryArgs, preDraft: true })
       }
     }
 

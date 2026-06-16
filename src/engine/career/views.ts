@@ -448,6 +448,17 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   seasonBio?: string
   /**
+   * Living scouting report — the synthesized, always-present write-up that deepens
+   * and shifts its verdict as our scouts' collective read sharpens. Replaces the
+   * thin one-liner prose.
+   */
+  scoutSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
+   * Formal end-of-season pre-draft edition of the report — present only for
+   * draft-eligible prospects once the class is set (final ranking / offseason).
+   */
+  preDraftSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
    * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
    * Only the scouts who have actually watched this player are included; omitted
    * entirely when no scout has seen an opponent (nothing to report).

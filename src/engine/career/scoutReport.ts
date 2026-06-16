@@ -168,6 +168,30 @@ export interface ReportCard {
   goaltending?: ReportGrade
 }
 
+/** A scouting "area" with its 0–100 score — used to pick a player's standout
+ *  strengths and weaknesses for the living scouting report. */
+export interface ReportArea { key: string; label: string; score: number }
+
+/** The six (or seven, for goalies) report-card areas with raw scores. */
+export function reportCardScores(p: Player): ReportArea[] {
+  const c = p.composites as unknown as Record<string, number>
+  const m = p.ratings.mental as unknown as Record<string, number>
+  const t = p.ratings.technical as unknown as Record<string, number>
+  const areas: ReportArea[] = [
+    { key: 'iq', label: 'hockey sense', score: ((m['offensiveIQ'] ?? 50) + (m['defensiveIQ'] ?? 50) + (m['vision'] ?? 50) + (m['anticipation'] ?? 50)) / 4 },
+    { key: 'skating', label: 'skating', score: c['skating'] ?? 50 },
+    { key: 'shot', label: 'shot and scoring touch', score: ((t['wristShot'] ?? 50) + (t['slapShot'] ?? 50) + (c['scoring'] ?? 50)) / 3 },
+    { key: 'puck', label: 'puckhandling and playmaking', score: ((t['stickhandling'] ?? 50) + (t['passing'] ?? 50) + (c['playmaking'] ?? 50)) / 3 },
+    { key: 'defence', label: 'defensive game', score: ((c['defensiveZone'] ?? 50) + (c['takeaway'] ?? 50) + (m['positioning'] ?? 50)) / 3 },
+    { key: 'physical', label: 'physical game', score: ((c['hitting'] ?? 50) + (c['blocking'] ?? 50)) / 2 },
+  ]
+  if (p.position === 'G' && p.ratings.goalie) {
+    const g = p.ratings.goalie as unknown as Record<string, number>
+    areas.push({ key: 'goalie', label: 'technique in net', score: ((g['reflexes'] ?? 50) + (g['positioningG'] ?? 50) + (g['reboundControl'] ?? 50) + (g['glove'] ?? 50) + (g['blocker'] ?? 50)) / 5 })
+  }
+  return areas
+}
+
 function buildReportCard(p: Player, knowledge: number): ReportCard {
   const c = p.composites as unknown as Record<string, number>
   const m = p.ratings.mental as unknown as Record<string, number>

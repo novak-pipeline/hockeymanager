@@ -1918,26 +1918,38 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </div>
       </Panel>
 
-      {/* ── General Impressions prose ── */}
-      <Panel title="General Impressions">
-        {d.seasonBio && (
-          <p style={{
-            margin: '0 0 12px',
-            padding: '10px 12px',
-            fontSize: 13,
-            lineHeight: 1.7,
-            color: 'var(--text)',
-            background: 'rgba(0,0,0,0.18)',
-            borderRadius: 'var(--radius-sm)',
-            fontWeight: 500,
-          }}>
-            {d.seasonBio}
+      {/* ── Scouting Report prose — the living, evolving write-up ── */}
+      <Panel title="Scouting Report">
+        {d.scoutSummary ? (
+          <>
+            <div className="muted small" style={{ marginBottom: 8 }}>
+              {d.scoutSummary.confidence === 'high' ? 'Our scouts have a confident, well-formed read.'
+                : d.scoutSummary.confidence === 'medium' ? 'A developing read — sharpening with more viewings.'
+                : 'An early read — light on viewings so far.'}
+            </div>
+            <div className="stack" style={{ gap: 10 }}>
+              {d.scoutSummary.paragraphs.map((para, i) => (
+                <p key={i} style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>{para}</p>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
+            {sr.generalImpressions}
           </p>
         )}
-        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
-          {sr.generalImpressions}
-        </p>
       </Panel>
+
+      {/* ── Formal pre-draft edition (season end, eligible prospects) ── */}
+      {d.preDraftSummary && (
+        <Panel title="Pre-Draft Report">
+          <div className="stack" style={{ gap: 10, borderLeft: '3px solid var(--accent2, #e0b341)', paddingLeft: 'var(--sp-3)' }}>
+            {d.preDraftSummary.paragraphs.map((para, i) => (
+              <p key={i} style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>{para}</p>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {/* ── Draft Projection (analyst consensus + your scouts) ── */}
       {d.analystProjection && (
