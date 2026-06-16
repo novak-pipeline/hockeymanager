@@ -138,14 +138,39 @@ function FocusControl({ focus, onFocus }: { focus: ScoutFocus; onFocus: (f: Scou
 
 /* ── scout card ────────────────────────────────────────────────────────────── */
 
+type PosFilter = 'any' | 'F' | 'D' | 'G'
+
+function SegControl<T extends string | number>({ options, value, onPick }: {
+  options: Array<{ key: T; label: string }>; value: T; onPick: (v: T) => void
+}): JSX.Element {
+  return (
+    <div className="row" style={{ gap: 4 }}>
+      {options.map((o) => (
+        <button key={String(o.key)} className={`chip${value === o.key ? ' chip-accent' : ''}`}
+          style={{ cursor: 'pointer', border: 'none', fontSize: 11, flex: 1 }} onClick={() => onPick(o.key)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function ScoutCard(props: {
   scout: ScoutCardView
   view: ScoutingView
-  onAssign: (scoutId: string, target: ScoutTarget, focus: ScoutFocus) => void
+  onAssign: (scoutId: string, target: ScoutTarget, focus: ScoutFocus, positionFilter: PosFilter, minPotentialStars: number) => void
   onFire: (scoutId: string) => void
   canFire: boolean
 }): JSX.Element {
   const { scout, view, onAssign, onFire, canFire } = props
+  const apply = (patch: { target?: ScoutTarget; focus?: ScoutFocus; positionFilter?: PosFilter; minPotentialStars?: number }): void =>
+    onAssign(
+      scout.scoutId,
+      patch.target ?? scout.target,
+      patch.focus ?? scout.focus,
+      patch.positionFilter ?? scout.positionFilter,
+      patch.minPotentialStars ?? scout.minPotentialStars,
+    )
   const ratingColor =
     scout.rating >= 80 ? 'var(--success)' :
     scout.rating >= 65 ? 'var(--accent)' :
@@ -169,12 +194,30 @@ function ScoutCard(props: {
 
       <div>
         <div className="muted small" style={{ marginBottom: 4 }}>Region / League</div>
-        <ScopeDropdown scout={scout} view={view} onAssign={(target) => onAssign(scout.scoutId, target, scout.focus)} />
+        <ScopeDropdown scout={scout} view={view} onAssign={(target) => apply({ target })} />
       </div>
 
       <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Focus</div>
-        <FocusControl focus={scout.focus} onFocus={(f) => onAssign(scout.scoutId, scout.target, f)} />
+        <div className="muted small" style={{ marginBottom: 4 }}>Age focus</div>
+        <FocusControl focus={scout.focus} onFocus={(f) => apply({ focus: f })} />
+      </div>
+
+      <div>
+        <div className="muted small" style={{ marginBottom: 4 }}>Position</div>
+        <SegControl<PosFilter>
+          options={[{ key: 'any', label: 'Any' }, { key: 'F', label: 'F' }, { key: 'D', label: 'D' }, { key: 'G', label: 'G' }]}
+          value={scout.positionFilter}
+          onPick={(positionFilter) => apply({ positionFilter })}
+        />
+      </div>
+
+      <div>
+        <div className="muted small" style={{ marginBottom: 4 }}>Only flag potential ≥</div>
+        <SegControl<number>
+          options={[{ key: 0, label: 'Any' }, { key: 3, label: '3★' }, { key: 4, label: '4★' }]}
+          value={scout.minPotentialStars >= 4 ? 4 : scout.minPotentialStars >= 3 ? 3 : 0}
+          onPick={(minPotentialStars) => apply({ minPotentialStars })}
+        />
       </div>
 
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
@@ -541,8 +584,8 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
     (r) => (r.type === 'scouting' ? r.scouting : null)
   )
 
-  const handleAssign = async (scoutId: string, target: ScoutTarget, focus: ScoutFocus): Promise<void> => {
-    const res = await client.assignScout(scoutId, target, focus)
+  const handleAssign = async (scoutId: string, target: ScoutTarget, focus: ScoutFocus, positionFilter: PosFilter, minPotentialStars: number): Promise<void> => {
+    const res = await client.assignScout(scoutId, target, focus, positionFilter, minPotentialStars)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
   }
   const handleFire = async (scoutId: string): Promise<void> => {
@@ -578,7 +621,7 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
                 scout={scout}
                 view={data}
                 canFire={data.scouts.length > 1}
-                onAssign={(id, target, focus) => { void handleAssign(id, target, focus) }}
+                onAssign={(id, target, focus, pos, minPot) => { void handleAssign(id, target, focus, pos, minPot) }}
                 onFire={(id) => { void handleFire(id) }}
               />
             ))}

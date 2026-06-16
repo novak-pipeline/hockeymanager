@@ -543,6 +543,24 @@ describe('scout scopes, focus and market', () => {
     expect(narrow).toBeGreaterThan(broad)
   })
 
+  it('position filter restricts which players a scout watches', () => {
+    const { data, userTeamId } = makeArgs(81)
+    const tid = data.league.teams.find((t) => t as string !== userTeamId)! as string
+    const roster = data.teams.get(tid as import('@domain').TeamId)!.roster.map((id) => id as string)
+    const aD = roster.find((id) => data.players.get(id as import('@domain').PlayerId)?.position === 'D')!
+    const aF = roster.find((id) => { const p = data.players.get(id as import('@domain').PlayerId); return p && p.position !== 'D' && p.position !== 'G' })!
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(81) })
+    const s = state.assignments[0]!
+    s.target = { kind: 'team', teamId: tid }; s.focus = 'all'; s.positionFilter = 'D'
+    state.assignments = [s]
+    const dBefore = knowledgeOf(state, aD), fBefore = knowledgeOf(state, aF)
+    for (let i = 0; i < 10; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 950) })
+    }
+    expect(knowledgeOf(state, aD)).toBeGreaterThan(dBefore) // D watched
+    expect(knowledgeOf(state, aF)).toBe(fBefore)            // forward ignored
+  })
+
   it('market generates distinct candidates; hire adds and fire removes', () => {
     const { data, userTeamId } = makeArgs(65)
     const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(65) })

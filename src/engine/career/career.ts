@@ -5160,13 +5160,17 @@ export class Career {
     const undervalued = gap >= 8
     if (!highCeiling && !undervalued) return null
 
+    // Respect the covering scout's recruitment-focus bar — he won't bother
+    // flagging a prospect below the minimum potential the GM set for him.
+    const scout = this.scoutCovering(p)
+    if (scout && potStars < scout.minPotentialStars) return null
+
     const role = ceilingRoleShort(perceived, p.position)
     const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
     const reason =
       elig ? `High-upside draft prospect — projects as a ${role}.`
       : undervalued && !highCeiling ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
       : `Promising young ${p.position} — ${role} upside.`
-    const scout = this.scoutCovering(p)
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)
 
@@ -5176,8 +5180,8 @@ export class Career {
     return { playerId: p.id as string, ...(scout ? { scoutId: scout.scoutId } : {}), scoutName, foundDate, reason, grade }
   }
 
-  /** The scout whose current assignment scope+focus covers this player, if any. */
-  private scoutCovering(p: Player): { scoutId: string; name: string } | null {
+  /** The scout whose current assignment scope+focus+position covers this player. */
+  private scoutCovering(p: Player): { scoutId: string; name: string; minPotentialStars: number } | null {
     const comps = this.scoutingCompetitions()
     const pid = p.id as string
     const teamOfPlayer = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
@@ -5190,6 +5194,10 @@ export class Career {
       const youth = p.age <= YOUTH_MAX_AGE
       return focus === 'youth' ? youth : !youth
     }
+    const pos = p.position as string
+    const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+    const matchesPosition = (f: 'any' | 'F' | 'D' | 'G' | undefined): boolean =>
+      !f || f === 'any' ? true : f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
     for (const s of this.scouting.assignments) {
       const t = s.target
       let inScope = false
@@ -5200,7 +5208,9 @@ export class Career {
       else if (tid && t.kind === 'team') inScope = t.teamId === tid
       else if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); inScope = !!c?.teamIds.includes(tid) }
       else if (tid && t.kind === 'nation') { const c = comps.find((x) => x.teamIds.includes(tid)); inScope = !!c && nationOf(c.id) === t.nation }
-      if (inScope && matchesFocus(s.focus)) return { scoutId: s.scoutId, name: s.name }
+      if (inScope && matchesFocus(s.focus) && matchesPosition(s.positionFilter)) {
+        return { scoutId: s.scoutId, name: s.name, minPotentialStars: s.minPotentialStars ?? 0 }
+      }
     }
     return null
   }
@@ -5255,8 +5265,14 @@ export class Career {
     })
   }
 
-  assignScoutTarget(scoutId: string, target: ScoutTarget, focus?: ScoutFocus): void {
-    assignScout(this.scouting, scoutId, target, focus)
+  assignScoutTarget(
+    scoutId: string, target: ScoutTarget, focus?: ScoutFocus,
+    positionFilter?: 'any' | 'F' | 'D' | 'G', minPotentialStars?: number,
+  ): void {
+    assignScout(this.scouting, scoutId, target, focus, {
+      ...(positionFilter !== undefined ? { positionFilter } : {}),
+      ...(minPotentialStars !== undefined ? { minPotentialStars } : {}),
+    })
   }
 
   /** Hire a scout from the market — joins the club's staff and becomes deployable. */

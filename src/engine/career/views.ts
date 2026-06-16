@@ -1472,7 +1472,11 @@ export interface ScoutCardView {
   focusLabel: string
   target: ScoutAssignment['target']
   focus: 'youth' | 'senior' | 'all'
-  /** How many players currently fall under his assignment (post-focus). */
+  /** Position brief: 'any' | 'F' | 'D' | 'G'. */
+  positionFilter: 'any' | 'F' | 'D' | 'G'
+  /** Only surface prospects projecting ≥ this many stars (0 = any). */
+  minPotentialStars: number
+  /** How many players currently fall under his assignment (post-focus+position). */
   coverage: number
   /** Read speed given the scope size — Fast (focused) / Steady / Thin (spread). */
   readSpeed: 'Fast' | 'Steady' | 'Thin'

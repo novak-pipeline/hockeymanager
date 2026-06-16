@@ -321,8 +321,16 @@ export class SimClient {
     return this.send({ type: 'getScoutProfile', scoutId })
   }
 
-  assignScout(scoutId: string, target: ScoutTarget, focus?: ScoutFocus): Promise<WorkerResponse> {
-    return this.send({ type: 'assignScout', scoutId, target, ...(focus ? { focus } : {}) })
+  assignScout(
+    scoutId: string, target: ScoutTarget, focus?: ScoutFocus,
+    positionFilter?: 'any' | 'F' | 'D' | 'G', minPotentialStars?: number,
+  ): Promise<WorkerResponse> {
+    return this.send({
+      type: 'assignScout', scoutId, target,
+      ...(focus ? { focus } : {}),
+      ...(positionFilter !== undefined ? { positionFilter } : {}),
+      ...(minPotentialStars !== undefined ? { minPotentialStars } : {}),
+    })
   }
 
   hireScout(candidateId: string): Promise<WorkerResponse> {

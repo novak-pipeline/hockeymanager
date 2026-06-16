@@ -220,7 +220,7 @@ export type WorkerRequestBody =
   /* ── scouting ── */
   | { type: 'getScouting' }
   | { type: 'getScoutProfile'; scoutId: string }
-  | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus }
+  | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus; positionFilter?: 'any' | 'F' | 'D' | 'G'; minPotentialStars?: number }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
   /* ── story layer ── */

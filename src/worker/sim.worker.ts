@@ -223,7 +223,7 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'getScoutProfile':
       return { id: req.id, type: 'scoutProfile', scoutProfile: must().getScoutProfile(req.scoutId) }
     case 'assignScout':
-      must().assignScoutTarget(req.scoutId, req.target, req.focus)
+      must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     case 'hireScout': {
       const res = must().hireScoutFromMarket(req.candidateId)

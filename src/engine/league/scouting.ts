@@ -410,6 +410,17 @@ function passesFocus(player: Player, focus: ScoutFocus | undefined): boolean {
   return focus === 'youth' ? youth : !youth
 }
 
+/** Does a player match a scout's position brief ('any'/'F'/'D'/'G'). */
+export function passesPosition(player: Player, filter: 'any' | 'F' | 'D' | 'G' | undefined): boolean {
+  if (!filter || filter === 'any') return true
+  const pos = player.position as string
+  const isG = pos === 'G'
+  const isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+  if (filter === 'G') return isG
+  if (filter === 'D') return isD
+  return !isG && !isD // 'F'
+}
+
 /**
  * Advance scouting by one match day. Each scout's SCOPE (target) resolves to a
  * candidate set; his FOCUS (youth / senior / all) filters it; knowledge then
@@ -437,7 +448,7 @@ export function tickScouting(args: TickScoutingArgs): void {
     // assignment a real choice vs "just scout the biggest region".
     const inScope = targetIds.filter((pid) => {
       const pl = players.get(pid as PlayerId)
-      return !!pl && passesFocus(pl, scout.focus)
+      return !!pl && passesFocus(pl, scout.focus) && passesPosition(pl, scout.positionFilter)
     })
     const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, inScope.length)))
 
@@ -527,12 +538,15 @@ export function assignScout(
   state: ScoutingState,
   scoutId: string,
   target: ScoutTarget,
-  focus?: ScoutFocus
+  focus?: ScoutFocus,
+  opts?: { positionFilter?: 'any' | 'F' | 'D' | 'G'; minPotentialStars?: number }
 ): void {
   const scout = state.assignments.find((s) => s.scoutId === scoutId)
   if (!scout) throw new Error(`unknown scout ${scoutId}`)
   scout.target = target
   if (focus !== undefined) scout.focus = focus
+  if (opts?.positionFilter !== undefined) scout.positionFilter = opts.positionFilter
+  if (opts?.minPotentialStars !== undefined) scout.minPotentialStars = opts.minPotentialStars
 }
 
 /**
@@ -588,7 +602,11 @@ export function syncAssignmentsToScouts(state: ScoutingState, scouts: ScoutRoste
       ...(s.specialtyNation ? { specialtyNation: s.specialtyNation } : {}),
       ...(s.salary !== undefined ? { salary: s.salary } : {}),
     }
-    if (ex) return { ...identity, target: ex.target, focus: ex.focus ?? 'all' }
+    if (ex) return {
+      ...identity, target: ex.target, focus: ex.focus ?? 'all',
+      ...(ex.positionFilter ? { positionFilter: ex.positionFilter } : {}),
+      ...(ex.minPotentialStars !== undefined ? { minPotentialStars: ex.minPotentialStars } : {}),
+    }
     // New scout: first undeployed one watches the next opponent, the rest scout youth.
     let target: ScoutTarget = { kind: 'draftClass' }
     if (!hasOpponentScout && i === 0) { target = { kind: 'nextOpponent' }; hasOpponentScout = true }

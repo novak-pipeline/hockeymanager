@@ -1182,10 +1182,18 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       default: return []
     }
   }
-  const coverageOf = (target: { kind: string }, focus: string | undefined): number => {
-    const ids = resolveScope(target as { kind: string })
-    if (!focus || focus === 'all') return ids.length
-    return ids.filter((id) => (focus === 'youth' ? isYouth(id) : !isYouth(id))).length
+  const posOf = (id: string): string | undefined => players.get(id as PlayerId)?.position
+  const matchesPos = (id: string, f: 'any' | 'F' | 'D' | 'G'): boolean => {
+    if (f === 'any') return true
+    const pos = posOf(id) ?? ''
+    const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+    return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
+  }
+  const coverageOf = (target: { kind: string }, focus: string | undefined, posFilter: 'any' | 'F' | 'D' | 'G'): number => {
+    let ids = resolveScope(target as { kind: string })
+    if (focus && focus !== 'all') ids = ids.filter((id) => (focus === 'youth' ? isYouth(id) : !isYouth(id)))
+    if (posFilter !== 'any') ids = ids.filter((id) => matchesPos(id, posFilter))
+    return ids.length
   }
 
   // Map a scout's scope to a single host nation (for the world map + flag).
@@ -1204,6 +1212,8 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   // Scout cards
   const scouts = scouting.assignments.map((s) => {
     const focus = (s.focus ?? 'all') as 'youth' | 'senior' | 'all'
+    const positionFilter = (s.positionFilter ?? 'any') as 'any' | 'F' | 'D' | 'G'
+    const cov = coverageOf(s.target as { kind: string }, focus, positionFilter)
     return {
       scoutId: s.scoutId,
       name: s.name,
@@ -1215,8 +1225,10 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       focusLabel: FOCUS_LABEL[focus] ?? 'All players',
       target: s.target,
       focus,
-      coverage: coverageOf(s.target as { kind: string }, focus),
-      readSpeed: scoutReadSpeed(coverageOf(s.target as { kind: string }, focus)),
+      positionFilter,
+      minPotentialStars: s.minPotentialStars ?? 0,
+      coverage: cov,
+      readSpeed: scoutReadSpeed(cov),
       focusNation: scopeNation(s.target as { kind: string }),
     }
   })

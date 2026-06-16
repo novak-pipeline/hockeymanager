@@ -48,8 +48,13 @@ export interface ScoutAssignment {
   /** Annual salary cost of employing him. Optional on older saves. */
   salary?: number
   target: ScoutTarget
-  /** Scope filter; defaults to 'all' when absent. */
+  /** Age-band filter; defaults to 'all' when absent. */
   focus?: ScoutFocus
+  /** Position brief: only watch forwards / D / goalies. 'any' or absent = all. */
+  positionFilter?: 'any' | 'F' | 'D' | 'G'
+  /** Only SURFACE (recommend) prospects projecting at least this many stars
+   *  (0–5). 0 / absent = flag anyone worthwhile. */
+  minPotentialStars?: number
 }
 
 /**
