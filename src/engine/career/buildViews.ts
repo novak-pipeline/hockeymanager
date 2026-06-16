@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutFormBias, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import { draftRoundLabel } from '@engine/league/draftRankings'
 import {
   finalizeSpecialTeams,
@@ -448,8 +448,10 @@ export function scoutedCeiling(p: Player, scouting?: ScoutingState): number {
   const pid = p.id as string
   const k = knowledgeOf(scouting, pid)
   if (k >= 95) return ceiling
-  const { lo, hi } = maskedCeiling(ceiling, k, pid, accuracyOf(scouting, pid))
-  return Math.round((lo + hi) / 2)
+  const acc = accuracyOf(scouting, pid)
+  const { lo, hi } = maskedCeiling(ceiling, k, pid, acc)
+  const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, k, acc)
+  return Math.max(1, Math.min(99, Math.round(biased)))
 }
 
 /** Stars from our scouts' (fog-aware) read of the player's ceiling, on the
@@ -464,7 +466,8 @@ export function scoutedCeilingK(p: Player, knowledge: number, accuracy: number):
   const ceiling = agedPotential(p)
   if (knowledge >= 95) return ceiling
   const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
-  return Math.round((lo + hi) / 2)
+  const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, knowledge, accuracy)
+  return Math.max(1, Math.min(99, Math.round(biased)))
 }
 
 /** FM-style trend arrow from a signed development delta. A move of a full

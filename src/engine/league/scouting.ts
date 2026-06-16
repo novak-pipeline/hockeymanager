@@ -213,6 +213,21 @@ export function maskedCeiling(
   return maskAttribute(ceiling, knowledge, playerId, '__potential__', accuracy)
 }
 
+/**
+ * Recent-form sway on a scout's CEILING read (overall points). A prospect riding
+ * a hot streak looks better than he is to a scout who's only caught a few games —
+ * a monster night inflates the read, a stinker deflates it. The bias washes out
+ * as the scout logs more viewings (knowledge → 100) and as his judgment improves
+ * (a sharp scout sees through a one-night sample) — which is exactly why multiple
+ * independent looks matter. `form` is the hot/cold streak (−5..5).
+ */
+export function scoutFormBias(form: number, knowledge: number, accuracy: number): number {
+  const f = Math.max(-5, Math.min(5, form))
+  const looks = 1 - Math.max(0, Math.min(100, knowledge)) / 100 // 1 at first look → 0 once fully known
+  const judge = 1 - Math.max(0, Math.min(1, accuracy)) * 0.7    // a sharper scout is less fooled
+  return f * 1.3 * looks * judge
+}
+
 /* ────────────────────────── initial state ────────────────────────── */
 
 const SCOUT_NAMES = [

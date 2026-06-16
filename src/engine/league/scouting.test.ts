@@ -8,6 +8,7 @@ import {
   maskAttribute,
   maskedOverall,
   maskedCeiling,
+  scoutFormBias,
   scoutsWhoSaw,
   playersSeenByScout,
   tickScouting,
@@ -475,6 +476,20 @@ describe('maskAttribute', () => {
     expect(lo).toBeLessThanOrEqual(hi)
     expect(lo).toBeGreaterThanOrEqual(1)
     expect(hi).toBeLessThanOrEqual(99)
+  })
+
+  it('scoutFormBias: a hot game sways a fresh read, washes out with looks + judgment', () => {
+    // Hot prospect, barely scouted, average judgment → bullish bump.
+    const fresh = scoutFormBias(5, 10, 0.5)
+    expect(fresh).toBeGreaterThan(2)
+    // Same hot streak, but fully scouted → no sway (multiple looks see through it).
+    expect(scoutFormBias(5, 100, 0.5)).toBeCloseTo(0, 5)
+    // A sharper scout is less fooled by the same hot game at the same knowledge.
+    expect(scoutFormBias(5, 10, 0.9)).toBeLessThan(fresh)
+    // A cold streak swings the read the other way.
+    expect(scoutFormBias(-5, 10, 0.5)).toBeLessThan(0)
+    // Steady form → neutral.
+    expect(scoutFormBias(0, 10, 0.5)).toBe(0)
   })
 
   it('maskedCeiling fogs the ceiling on a separate channel from maskedOverall', () => {

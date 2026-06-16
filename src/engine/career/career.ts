@@ -204,6 +204,7 @@ import {
   knowledgeOf,
   accuracyOf,
   maskedCeiling,
+  scoutFormBias,
   playersSeenByScout,
   tickScouting,
   generateScoutCandidates,
@@ -5837,7 +5838,8 @@ export class Career {
     const ceiling = agedPotential(p)
     if (knowledge >= 95) return ceiling
     const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
-    return Math.round((lo + hi) / 2)
+    const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, knowledge, accuracy)
+    return Math.max(1, Math.min(99, Math.round(biased)))
   }
 
   private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; projection: ProspectProjection } {
