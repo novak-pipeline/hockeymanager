@@ -461,6 +461,21 @@ export function tickScouting(args: TickScoutingArgs): void {
     for (const id of team.roster) rosteredIds.add(id as string)
   }
 
+  // Divide-the-work: scouts on an IDENTICAL brief (same scope + focus + position)
+  // split the player pool between them instead of all re-scouting the same names.
+  // Five scouts on the draft class therefore cover ~5× the prospects (each takes a
+  // disjoint stride), not the same forty. Scouts with distinct briefs are alone in
+  // their group and keep the full pool.
+  const briefKey = (a: ScoutAssignment): string =>
+    `${a.target.kind}|${targetKeyOf(a.target)}|${a.focus ?? 'all'}|${a.positionFilter ?? 'any'}`
+  const briefGroups = new Map<string, ScoutAssignment[]>()
+  for (const a of state.assignments) {
+    const k = briefKey(a)
+    const arr = briefGroups.get(k)
+    if (arr) arr.push(a)
+    else briefGroups.set(k, [a])
+  }
+
   for (const scout of state.assignments) {
     const targetIds = resolveTarget(
       scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
@@ -469,10 +484,15 @@ export function tickScouting(args: TickScoutingArgs): void {
     // the next opponent) gets watched closely; cover a whole nation/league and he's
     // spread thin — per-player progress dilutes. This is what makes a tight
     // assignment a real choice vs "just scout the biggest region".
-    const inScope = targetIds.filter((pid) => {
+    const matched = targetIds.filter((pid) => {
       const pl = players.get(pid as PlayerId)
       return !!pl && passesFocus(pl, scout.focus) && passesPosition(pl, scout.positionFilter)
     })
+    // Partition the matched pool across scouts sharing this exact brief.
+    const group = briefGroups.get(briefKey(scout))!
+    const gSize = group.length
+    const gIdx = gSize > 1 ? group.indexOf(scout) : 0
+    const inScope = gSize > 1 ? matched.filter((_, i) => i % gSize === gIdx) : matched
     for (const pid of inScope) watchedToday.add(pid)
     const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, inScope.length)))
 
@@ -512,6 +532,19 @@ export function tickScouting(args: TickScoutingArgs): void {
     if (!player) continue
     const floor = renownFloor(player)
     if (entry[1] > floor) entry[1] = Math.max(floor, entry[1] - KNOWLEDGE_DECAY_PER_DAY)
+  }
+}
+
+/** Stable key for the id-bearing part of a scope, so two scouts on the same
+ *  brief group together for divide-the-work partitioning. */
+function targetKeyOf(t: ScoutTarget): string {
+  switch (t.kind) {
+    case 'team': return t.teamId
+    case 'division': return t.divisionId
+    case 'competition': return t.competitionId
+    case 'nation': return t.nation
+    case 'player': return t.playerId
+    default: return '' // nextOpponent / draftClass / freeAgents — keyed by kind alone
   }
 }
 

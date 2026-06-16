@@ -95,12 +95,24 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
   const knowledgeFactor = clamp(knowledge / 100, 0, 1)
   // Ceiling gap: how far our grounded read sits from the (optimistic) board, in
   // value points. The board systematically over-projects via draft hype, so a
-  // sober scouting dept will often read a touch lower — strong intangibles can
-  // pull them back level or above.
+  // sober scouting dept will often read a touch lower — but where the board has
+  // UNDER-rated a prospect (a sleeper), our grounded read sits above it.
   const ceilingGap = (a.scoutsCeiling !== undefined && a.analystCeiling !== undefined)
     ? a.scoutsCeiling - a.analystCeiling
     : 0
-  const delta = (rawDelta * chaos + ceilingGap * 0.4) * knowledgeFactor
+  const intangible = rawDelta * chaos
+  // The VERDICT direction must agree with the ceiling read we DISPLAY: if our
+  // scouts grade his ceiling clearly higher than the board, we can't also be
+  // "more cautious" — that's the contradiction we're avoiding. So a clear ceiling
+  // gap (≥ a role's worth, ~4 pts) sets the direction; intangibles can only push
+  // FURTHER in that same direction, never reverse it. When the ceilings are about
+  // level, intangibles (maturity, makeup, two-way game) decide whether we'd reach
+  // for him or let him slide at his rank.
+  const NEAR_TIE = 4
+  const delta = (Math.abs(ceilingGap) >= NEAR_TIE
+    ? ceilingGap + (Math.sign(intangible) === Math.sign(ceilingGap) ? intangible * 0.5 : 0)
+    : ceilingGap + intangible
+  ) * knowledgeFactor
 
   const confidence: ScoutDraftRead['confidence'] =
     knowledge >= 70 ? 'high' : knowledge >= 50 ? 'medium' : 'low'
@@ -120,22 +132,35 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
   if (delta >= THRESH) verdict = 'higher'
   else if (delta <= -THRESH) verdict = 'lower'
 
-  // Is the disagreement driven by a different CEILING read, or by intangibles?
-  // Pick the language to match, so the blurb never contradicts the displayed roles.
-  const ceilingDriven = Math.abs(ceilingGap * 0.4) >= Math.abs(rawDelta * chaos)
+  // The verdict direction is ceiling-driven whenever the ceiling gap was decisive
+  // (≥ a role's worth); only near-tie calls are settled on intangibles. Match the
+  // language to that so the blurb never contradicts the displayed ceiling roles.
+  const ceilingDriven = Math.abs(ceilingGap) >= NEAR_TIE
   const rolesDiffer = !!(a.scoutsRole && a.analystRole && a.scoutsRole !== a.analystRole)
+  // A makeup/two-way note pointing AGAINST a ceiling-driven verdict — surfaced as
+  // a caveat, not allowed to flip the call (e.g. "higher ceiling, but maturity
+  // questions to monitor").
+  const counterNote = (): string => {
+    if (intangibleAdj <= -1.5) return ' — though there are some maturity and attitude questions to monitor'
+    if (twoWayAdj <= -1) return ' — though the game away from the puck still needs work'
+    if (intangibleAdj >= 1.5) return ', and the character and makeup only add to the appeal'
+    return ''
+  }
 
   let blurb: string
   if (verdict === 'higher') {
-    const why = ceilingDriven && rolesDiffer
-      ? `they grade his ceiling higher — a ${a.scoutsRole} where the board has him a ${a.analystRole}`
-      : reason()
-    blurb = `Your scouts are higher on him than the consensus board — ${why}. They'd take him earlier than his ranking suggests.`
+    if (ceilingDriven && rolesDiffer) {
+      const caveat = intangible < 0 ? counterNote() : ''
+      blurb = `Your scouts are higher on him than the consensus board — they grade his ceiling higher, a ${a.scoutsRole} where the board has him a ${a.analystRole}${caveat}. They'd take him earlier than his ranking suggests.`
+    } else {
+      blurb = `Your scouts are higher on him than the consensus board — ${reason()}. They'd take him earlier than his ranking suggests.`
+    }
   } else if (verdict === 'lower') {
-    const why = ceilingDriven && rolesDiffer
-      ? `they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees`
-      : reason()
-    blurb = `Your staff is more cautious than the board — ${why}. They'd let him slide rather than reach.`
+    if (ceilingDriven && rolesDiffer) {
+      blurb = `Your staff is more cautious than the board — they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees. They'd let him slide rather than reach.`
+    } else {
+      blurb = `Your staff is more cautious than the board — ${reason()}. They'd let him slide rather than reach.`
+    }
   } else {
     blurb = `Your scouts' read lines up with the consensus${confidence === 'low' ? ', though they want more viewings to be sure' : ''}.`
   }

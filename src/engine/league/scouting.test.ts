@@ -287,6 +287,36 @@ describe('tickScouting', () => {
     expect(knowledgeOf(state, sampleId)).toBeGreaterThan(before)
   })
 
+  it('scouts on an identical brief divide the work (broader coverage, not redundant)', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(31)
+    const teams = data.teams as Map<import('@domain').TeamId, { roster: import('@domain').PlayerId[]; divisionId?: string }>
+    const ids = [...draftProspectIds]
+
+    const totalGain = (nScouts: number): number => {
+      const state = createInitialScouting({
+        userTeamId, teams, players: data.players, rng: new Rng(31), draftProspectIds,
+      })
+      // First nScouts on the draft class; the rest parked on the user's own roster
+      // (already 100% → contributes nothing) so only the draft-class scouts matter.
+      state.assignments.forEach((s, i) => {
+        if (i < nScouts) { s.target = { kind: 'draftClass' }; s.focus = 'all'; s.positionFilter = 'any' }
+        else s.target = { kind: 'team', teamId: userTeamId }
+      })
+      const before = new Map(ids.map((id) => [id, knowledgeOf(state, id)]))
+      tickScouting({
+        state, userTeamId, teams, players: data.players,
+        draftProspectIds, freeAgentIds: new Set(), rng: new Rng(999),
+      })
+      return ids.reduce((sum, id) => sum + (knowledgeOf(state, id) - (before.get(id) ?? 0)), 0)
+    }
+
+    const oneScout = totalGain(1)
+    const threeScouts = totalGain(3)
+    // Three scouts dividing the class add markedly more total knowledge than one —
+    // they cover disjoint slices instead of all re-scouting the same names.
+    expect(threeScouts).toBeGreaterThan(oneScout * 1.5)
+  })
+
   it('is deterministic: same seed → identical knowledge after ticks', () => {
     const { data, userTeamId } = makeArgs(20)
     const mk = () =>
