@@ -5925,7 +5925,7 @@ export class Career {
     const isD = p.position === 'D'
     const leagueFactor = nhleFactorByAbbrev(abbrev)
     return {
-      premium: productionPremium(ppg, isD, leagueFactor),
+      premium: productionPremium(ppg, isD, leagueFactor, p.age),
       projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: pid as string }),
     }
   }
@@ -5979,9 +5979,12 @@ export class Career {
           const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
           // Consensus scouting error: even the aggregate board misreads talent —
           // a persistent per-player miss that, with development variance, keeps
-          // draft-rank↔outcome near the real ~0.45 range. Kept modest so PRODUCTION
-          // and tools drive the board (logic), not coin-flip noise.
-          const consensusError = hashSigned(id + ':consensus') * 14
+          // draft-rank↔outcome near the real ~0.45 range. But analysts AREN'T blind
+          // to a loud season: the bigger a prospect's production premium, the less
+          // the projection error can bury him (the stats are on tape), so a genuine
+          // breakout sleeper climbs the public board too — not just our scouts'.
+          const errorScale = Math.max(0.4, 1 - Math.max(0, evalRes.premium) / 24 * 0.6)
+          const consensusError = hashSigned(id + ':consensus') * 14 * errorScale
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
           // when one is on staff, and noisier the weaker the analyst.

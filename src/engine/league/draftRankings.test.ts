@@ -79,7 +79,15 @@ describe('analystRank', () => {
     // No sample → neutral.
     expect(productionPremium(0, false, 0.30)).toBe(0)
     // Bounded — production is a strong driver but still can't fully override pedigree.
-    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(22)
+    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(24)
+  })
+  it('productionPremium is age-adjusted — a younger producer gets more credit', () => {
+    // Same NHLe-translated output: a 17-year-old is rated above a passed-over 20yo.
+    const young = productionPremium(1.2, false, 0.30, 17)
+    const older = productionPremium(1.2, false, 0.30, 20)
+    expect(young).toBeGreaterThan(older)
+    // A young no-show isn't penalised harder than an older one (it's a project).
+    expect(productionPremium(0.2, false, 0.30, 17)).toBe(productionPremium(0.2, false, 0.30, 20))
   })
 
   it('production feeds the perceived ceiling', () => {

@@ -106,16 +106,22 @@ export function perceivedCeiling(trueCeiling: number, age: number, productionBon
  * @param isD            defenceman (lower scoring par)
  * @param leagueStrength NHL-equivalency of the league he produces in (0,1]
  */
-export function productionPremium(ppg: number, isD: boolean, leagueStrength: number): number {
+export function productionPremium(ppg: number, isD: boolean, leagueStrength: number, age = 18): number {
   if (ppg <= 0) return 0 // no sample → no opinion either way
   const nhlePpg = ppg * Math.max(0.05, leagueStrength)
   const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
   const ratio = nhlePpg / par
   // Production is the DOMINANT visible driver of a real draft board, and it's
   // NHLe-translated — so a point-per-game in a strong league (NCAA, 0.40) beats a
-  // point-per-game in a weaker one (OHL, 0.30). Bounds wide enough that a dominant
+  // point-per-game in a weaker one (OHL, 0.30). It's also AGE-ADJUSTED: the same
+  // output is far more impressive from a 16/17-year-old than a passed-over 19/20,
+  // so younger producers get more credit (penalties aren't age-scaled — a young
+  // no-show is a project, not a bust). Bounds wide enough that a dominant young
   // producer genuinely climbs and a no-show genuinely slides.
-  return Math.max(-10, Math.min(22, Math.round((ratio - 1) * 16)))
+  const raw = (ratio - 1) * 16
+  const ageMult = age <= 16 ? 1.25 : age === 17 ? 1.15 : age === 18 ? 1.0 : age <= 20 ? 0.85 : 0.75
+  const adj = raw > 0 ? raw * ageMult : raw
+  return Math.max(-10, Math.min(24, Math.round(adj)))
 }
 
 /** Goalies are notoriously hard to project — boards fade them (an elite goalie
