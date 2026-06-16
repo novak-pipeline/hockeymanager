@@ -49,7 +49,10 @@ export interface DevelopmentCenterView {
 function devNote(p: Player, location: 'NHL' | 'AHL', upside: number, tier: ProjectionTier): string {
   if (p.injuryStatus) return 'Sidelined — development on hold until healthy.'
   if (location === 'AHL') {
-    if (upside >= 2.5) return 'Dominating the AHL — push for an NHL look soon.'
+    // Note frames UPSIDE (headroom), not current production — a low-current prospect
+    // with a high ceiling isn't "dominating", he's a developmental bet. (Claiming he
+    // dominates contradicts a ½-star current rating right next to it.)
+    if (upside >= 2.5) return 'High-end upside — a priority prospect to develop.'
     if (upside >= 1.5) return 'Developing well in the AHL; needs more seasoning.'
     return 'Earning his minutes in the AHL; depth projection.'
   }
