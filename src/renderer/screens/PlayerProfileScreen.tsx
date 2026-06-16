@@ -1604,10 +1604,13 @@ function ScoutReadRow({ read }: { read: ScoutRead }): JSX.Element {
       {/* Face (resolves via the mod bridge; silhouette/initials fallback) */}
       <PlayerFace faceId={read.faceId} name={read.scoutName} size={28} />
 
-      {/* Name + take */}
+      {/* Name + take + what he saw in a recent viewing */}
       <div className="stack" style={{ gap: 2 }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{read.scoutName}</span>
         <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{read.take}</span>
+        {read.watched && (
+          <span style={{ fontSize: 11, color: 'var(--accent2, #e0b341)', fontStyle: 'italic', lineHeight: 1.5 }}>“{read.watched}”</span>
+        )}
       </div>
 
       {/* Tier chip */}

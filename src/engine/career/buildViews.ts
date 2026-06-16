@@ -802,8 +802,15 @@ export function buildPlayerProfile(
   const opinionScouts = isOwnPlayer || !sawIds
     ? allScouts
     : allScouts.filter((s) => sawIds.has(s.id as string))
+  // The player's real current-season scoring pace, so each scout's report can
+  // describe what he saw the prospect do in a recent viewing.
+  const obsGp = ctx.gp.get(p.id as PlayerId) ?? 0
+  const obsTot = ctx.totals.get(p.id as PlayerId)
+  const observed = obsGp > 0
+    ? { ppg: ((obsTot?.goals ?? 0) + (obsTot?.assists ?? 0)) / obsGp }
+    : undefined
   const scoutPanel = (isOwnPlayer || !fog || opinionScouts.length > 0)
-    ? buildScoutPanel(opinionScouts, p, fog?.scouting, truePotStars)
+    ? buildScoutPanel(opinionScouts, p, fog?.scouting, truePotStars, observed)
     : undefined
   // FM-style Overall Report verdict (own players / reliably scouted opponents).
   const scoutVerdict = archetypeKnown

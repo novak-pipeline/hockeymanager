@@ -410,6 +410,9 @@ export interface ScoutRead {
   tierLabel: string
   /** One-line take from this scout. */
   take: string
+  /** What this scout saw the player do in a recent game he attended; omitted when
+   *  there's no game sample yet. */
+  watched?: string
 }
 
 export interface NhlComp {
@@ -450,11 +453,39 @@ export interface ScoutPanel {
  * @param scouting  The current scouting state (for knowledge level).
  * @param potStars  Potential stars (0–5), as computed by buildViews.potentialStars.
  */
+/**
+ * A line describing what THIS scout saw the player do in a recent viewing —
+ * anchored to his real season scoring pace, but nudged by the scout's lean (a
+ * bullish scout remembers the big night; a bearish one the quiet one) and varied
+ * per scout, so two scouts who caught different games file different reports.
+ */
+function watchedGameLine(scout: StaffMember, player: Player, ppg: number, estIdx: number, trueIdx: number): string {
+  const key = scout.id + ':' + (player.id as string) + ':watched'
+  if (player.position === 'G') {
+    const lean = estIdx > trueIdx ? 0.25 : estIdx < trueIdx ? -0.25 : 0
+    return hash01(key) + lean > 0.5
+      ? 'Watched him steal a game — square to every shot, no rebounds.'
+      : 'The night I caught him, a couple of soft ones got through.'
+  }
+  const lean = estIdx > trueIdx ? 0.6 : estIdx < trueIdx ? -0.5 : 0
+  const pts = Math.max(0, Math.round(ppg + lean + (hash01(key) * 2 - 1) * 1.1))
+  const goals = pts > 0 ? Math.min(pts, Math.round(pts * (0.3 + hash01(key + ':g') * 0.4))) : 0
+  const assists = pts - goals
+  const line = goals && assists ? `${goals}G ${assists}A` : goals ? `${goals}G` : assists ? `${assists}A` : 'no points'
+  if (pts >= 3) return `Caught a big night — ${line}, drove play every shift.`
+  if (pts === 2) return `Saw a strong showing — ${line}.`
+  if (pts === 1) return `A quiet viewing — just ${line}.`
+  return 'The game I watched, he was held off the scoresheet.'
+}
+
 export function buildScoutPanel(
   scouts: StaffMember[],
   player: Player,
   scouting: ScoutingState | undefined,
-  potStars: number
+  potStars: number,
+  /** The player's current-season scoring pace (points/game), for the "what I saw
+   *  in a recent viewing" line. Omit when there's no game sample yet. */
+  observed?: { ppg: number }
 ): ScoutPanel {
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
@@ -485,6 +516,8 @@ export function buildScoutPanel(
       tierLabel: TIER_LABELS[tier],
       take,
     }
+    // What this scout saw the player do in a recent game he attended.
+    if (observed) read.watched = watchedGameLine(scout, player, observed.ppg, tierIndex(tier), tierIndex(trueTier))
     if (scout.faceId !== undefined) {
       return { ...read, faceId: scout.faceId }
     }
