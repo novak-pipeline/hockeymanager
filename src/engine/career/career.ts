@@ -76,6 +76,7 @@ import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, dra
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutSummary } from '@engine/career/scoutSummary'
+import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
@@ -4685,6 +4686,19 @@ export class Career {
         if (fit) profile.systemFit = fit
       }
 
+      // Composite prospect grade — weighs talent + OUR team's need, system fit,
+      // position scarcity, risk and value into one verdict + pros/cons (FM-style).
+      const ourFit = player.position !== 'G' && this.userTeam.tactics ? playerStyleFit(player, this.userTeam.tactics) : null
+      profile.prospectGrade = buildProspectGrade({
+        potentialStars: profile.potentialStars,
+        currentStars: overallToStars(profile.overall),
+        position: player.position,
+        age: player.age,
+        ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
+        need: this.positionNeed(player.position),
+        ...(ourFit ? { styleFitScore: ourFit.score, styleLabel: ourFit.styleLabel } : {}),
+      })
+
       // EHM-style roster projection + per-coach reports. Same gate as the scout
       // verdict (own player / reliably scouted). Prospects on an AHL affiliate
       // are measured against the parent NHL club, as EHM does.
@@ -5867,6 +5881,25 @@ export class Career {
     const pid = p.id as string
     if (this.userTeam.roster.includes(asPlayerId(pid))) return agedPotential(p)
     return this.scoutedCeilingWith(p, knowledgeOf(this.scouting, pid), accuracyOf(this.scouting, pid))
+  }
+
+  /** How badly the user's roster needs a position group — quality bodies (overall
+   *  ≥ 68) at that group vs a target depth, for the prospect-grade need term. */
+  private positionNeed(position: string): NeedLevel {
+    const group: 'C' | 'W' | 'D' | 'G' =
+      position === 'G' ? 'G' : (position === 'D' || position === 'LD' || position === 'RD') ? 'D' : position === 'C' ? 'C' : 'W'
+    const target = group === 'C' ? 3 : group === 'W' ? 5 : group === 'D' ? 5 : 2
+    let quality = 0
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (!p || ratedOverall(p) < 68) continue
+      const g = p.position === 'G' ? 'G' : (p.position === 'D' || p.position === 'LD' || p.position === 'RD') ? 'D' : p.position === 'C' ? 'C' : 'W'
+      if (g === group) quality++
+    }
+    if (quality < target - 1) return 'urgent'
+    if (quality < target) return 'need'
+    if (quality > target + 2) return 'surplus'
+    return 'ok'
   }
 
   /** scoutedCeilingOf when knowledge + accuracy are already in hand — avoids the

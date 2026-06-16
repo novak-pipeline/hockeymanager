@@ -454,6 +454,17 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   scoutSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
   /**
+   * Composite prospect grade — weighs talent, our team's need + system fit,
+   * position scarcity, risk and value into one letter (A+…F) with the pros/cons
+   * the scouts weighed. Present for draft-relevant / scouted prospects.
+   */
+  prospectGrade?: {
+    grade: 'A+' | 'A' | 'A-' | 'B+' | 'B' | 'B-' | 'C+' | 'C' | 'C-' | 'D' | 'F'
+    score: number
+    pros: string[]
+    cons: string[]
+  }
+  /**
    * Formal end-of-season pre-draft edition of the report — present only for
    * draft-eligible prospects once the class is set (final ranking / offseason).
    */

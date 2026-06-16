@@ -371,6 +371,16 @@ function gradeColor(g: ReportGrade): string {
   return 'var(--danger, #d8584f)'
 }
 
+/** Colour for the composite prospect grade (finer scale incl. A-/B-/C-). */
+function prospectGradeColor(g: string): string {
+  const c = g.charAt(0)
+  if (c === 'A') return 'var(--success, #4caf72)'
+  if (c === 'B') return 'rgba(52,211,153,0.9)'
+  if (c === 'C') return 'var(--accent2, #e0b341)'
+  if (c === 'D') return '#e08a3c'
+  return 'var(--danger, #d8584f)'
+}
+
 const GRADE_ORDER: ReportGrade[] = ['F', 'D', 'C', 'C+', 'B', 'B+', 'A', 'A+']
 /** Bar fill fraction for a letter grade (F ≈ 0.13 … A+ = 1.0). */
 function gradeFill(g: ReportGrade): number {
@@ -1838,25 +1848,55 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             </div>
           )}
           {/* Hero: prospect grade badge + elevator pitch */}
-          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
-            <div style={{
-              flex: '0 0 auto', width: 78, textAlign: 'center',
-              padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
-              background: `${gradeColor(prospectGrade(d.potentialStars))}1f`,
-              border: `1.5px solid ${gradeColor(prospectGrade(d.potentialStars))}`,
-            }}>
-              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: gradeColor(prospectGrade(d.potentialStars)) }}>
-                {prospectGrade(d.potentialStars)}
+          {(() => {
+            const pg = d.prospectGrade?.grade ?? prospectGrade(d.potentialStars)
+            const col = prospectGradeColor(pg)
+            return (
+              <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+                <div style={{
+                  flex: '0 0 auto', width: 78, textAlign: 'center',
+                  padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
+                  background: `${col}1f`,
+                  border: `1.5px solid ${col}`,
+                }}>
+                  <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: col }}>{pg}</div>
+                  <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
+                    “{sr.elevatorPitch}”
+                  </div>
+                  <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
+                </div>
               </div>
-              <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
+            )
+          })()}
+
+          {/* Pros / cons the scouts weighed (talent, need, fit, value, risk) */}
+          {d.prospectGrade && (d.prospectGrade.pros.length > 0 || d.prospectGrade.cons.length > 0) && (
+            <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {d.prospectGrade.pros.length > 0 && (
+                <div style={{ flex: '1 1 220px' }}>
+                  <div className="stat-label" style={{ color: 'var(--success, #4caf72)', marginBottom: 4 }}>Strengths / fit</div>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {d.prospectGrade.pros.map((s, i) => (
+                      <li key={i} style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text)' }}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {d.prospectGrade.cons.length > 0 && (
+                <div style={{ flex: '1 1 220px' }}>
+                  <div className="stat-label" style={{ color: 'var(--danger, #d8584f)', marginBottom: 4 }}>Concerns</div>
+                  <ul style={{ margin: 0, paddingLeft: 16 }}>
+                    {d.prospectGrade.cons.map((s, i) => (
+                      <li key={i} style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text)' }}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
-                “{sr.elevatorPitch}”
-              </div>
-              <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
-            </div>
-          </div>
+          )}
 
           {/* Verdict tiles: current / potential / projection */}
           <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
