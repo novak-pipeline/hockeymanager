@@ -381,6 +381,45 @@ function prospectGradeColor(g: string): string {
   return 'var(--danger, #d8584f)'
 }
 
+/** The prospect-grade badge with a hover tooltip explaining what the scouts
+ *  weighed (talent, team need, system fit, position, risk, value). */
+function ProspectGradeBadge({ grade, pros, cons }: { grade: string; pros: string[]; cons: string[] }): JSX.Element {
+  const [hover, setHover] = useState(false)
+  const col = prospectGradeColor(grade)
+  const hasWhy = pros.length > 0 || cons.length > 0
+  return (
+    <div style={{ position: 'relative', flex: '0 0 auto' }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div style={{
+        width: 78, textAlign: 'center', padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
+        background: `${col}1f`, border: `1.5px solid ${col}`, cursor: hasWhy ? 'help' : 'default',
+      }}>
+        <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: col }}>{grade}</div>
+        <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
+      </div>
+      {hover && hasWhy && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 70, width: 300,
+          background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 8,
+          padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}>
+          <div className="muted" style={{ fontSize: 10, letterSpacing: 0.5, marginBottom: 6 }}>WHAT THE SCOUTS WEIGHED</div>
+          {pros.map((s, i) => (
+            <div key={`p${i}`} style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text)' }}>
+              <span style={{ color: 'var(--success, #4caf72)', fontWeight: 800 }}>+</span> {s}
+            </div>
+          ))}
+          {cons.map((s, i) => (
+            <div key={`c${i}`} style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text)' }}>
+              <span style={{ color: 'var(--danger, #d8584f)', fontWeight: 800 }}>−</span> {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const GRADE_ORDER: ReportGrade[] = ['F', 'D', 'C', 'C+', 'B', 'B+', 'A', 'A+']
 /** Bar fill fraction for a letter grade (F ≈ 0.13 … A+ = 1.0). */
 function gradeFill(g: ReportGrade): number {
@@ -1847,56 +1886,23 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               <TraitBadges traits={sr.traits} />
             </div>
           )}
-          {/* Hero: prospect grade badge + elevator pitch */}
-          {(() => {
-            const pg = d.prospectGrade?.grade ?? prospectGrade(d.potentialStars)
-            const col = prospectGradeColor(pg)
-            return (
-              <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
-                <div style={{
-                  flex: '0 0 auto', width: 78, textAlign: 'center',
-                  padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
-                  background: `${col}1f`,
-                  border: `1.5px solid ${col}`,
-                }}>
-                  <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: col }}>{pg}</div>
-                  <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
-                    “{sr.elevatorPitch}”
-                  </div>
-                  <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
-                </div>
+          {/* Hero: prospect grade badge (hover for what was weighed) + elevator pitch */}
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+            <ProspectGradeBadge
+              grade={d.prospectGrade?.grade ?? prospectGrade(d.potentialStars)}
+              pros={d.prospectGrade?.pros ?? []}
+              cons={d.prospectGrade?.cons ?? []}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
+                “{sr.elevatorPitch}”
               </div>
-            )
-          })()}
-
-          {/* Pros / cons the scouts weighed (talent, need, fit, value, risk) */}
-          {d.prospectGrade && (d.prospectGrade.pros.length > 0 || d.prospectGrade.cons.length > 0) && (
-            <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              {d.prospectGrade.pros.length > 0 && (
-                <div style={{ flex: '1 1 220px' }}>
-                  <div className="stat-label" style={{ color: 'var(--success, #4caf72)', marginBottom: 4 }}>Strengths / fit</div>
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {d.prospectGrade.pros.map((s, i) => (
-                      <li key={i} style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text)' }}>{s}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {d.prospectGrade.cons.length > 0 && (
-                <div style={{ flex: '1 1 220px' }}>
-                  <div className="stat-label" style={{ color: 'var(--danger, #d8584f)', marginBottom: 4 }}>Concerns</div>
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {d.prospectGrade.cons.map((s, i) => (
-                      <li key={i} style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text)' }}>{s}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
+              {(d.prospectGrade?.pros.length || d.prospectGrade?.cons.length) ? (
+                <div className="muted" style={{ fontSize: 10.5, marginTop: 4, fontStyle: 'italic' }}>Hover the grade for what the scouts weighed</div>
+              ) : null}
             </div>
-          )}
+          </div>
 
           {/* Verdict tiles: current / potential / projection */}
           <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
