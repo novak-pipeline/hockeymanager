@@ -506,7 +506,14 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
           </div>
           <div className="muted small">{find.age} · {find.position} · {find.teamAbbr}</div>
         </div>
-        <div style={{ fontWeight: 800, fontSize: 22, color }}>{find.grade}</div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 800, fontSize: 22, color }}>{find.grade}</div>
+          {find.fitsNeed && (
+            <span className="chip" style={{ fontSize: 9, background: 'rgba(52,211,153,0.18)', border: '1px solid var(--success)', color: 'var(--success)' }}>
+              Fills a need
+            </span>
+          )}
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
         <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(find.currentStars) || '–'}</div></div>
@@ -520,9 +527,14 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
   )
 }
 
-function ScoutingCentreTab({ finds }: { finds: ScoutFindView[] }): JSX.Element {
+function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; rosterNeeds: string[] }): JSX.Element {
   return (
     <Panel title={`Scout Recommendations (${finds.length})`}>
+      {rosterNeeds.length > 0 && (
+        <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
+          Your roster is thin at <b style={{ color: 'var(--success)' }}>{rosterNeeds.join(', ')}</b> — need-fillers are flagged and floated to the top.
+        </p>
+      )}
       {finds.length === 0 ? (
         <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
           <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
@@ -605,7 +617,7 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
 
       {data && tab === 'overview' && <OverviewTab data={data} />}
 
-      {data && tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} />}
+      {data && tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} rosterNeeds={data.rosterNeeds} />}
 
       {data && tab === 'players' && (
         <ScoutedTable rows={data.scoutedPlayers} scouts={data.scouts} onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }} />

@@ -1289,6 +1289,23 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const knownVals = scouting.knowledge.filter(([id, k]) => k > 0 && !ownRoster.has(id)).map(([, k]) => k)
   const worldKnowledge = knownVals.length ? Math.round(knownVals.reduce((a, b) => a + b, 0) / knownVals.length) : 0
 
+  // Roster needs — which position GROUPS the user is thin on NHL-quality bodies.
+  // A find that fills a need is flagged and floated to the top of the Centre.
+  const groupOf = (pos: string): 'C' | 'W' | 'D' | 'G' =>
+    pos === 'G' ? 'G' : (pos === 'D' || pos === 'LD' || pos === 'RD') ? 'D' : pos === 'C' ? 'C' : 'W'
+  const GROUP_LABEL: Record<'C' | 'W' | 'D' | 'G', string> = { C: 'Centre', W: 'Wing', D: 'Defense', G: 'Goaltending' }
+  const QUALITY_BAR = 68
+  const NEED_TARGET: Record<'C' | 'W' | 'D' | 'G', number> = { C: 3, W: 5, D: 5, G: 2 }
+  const qualityCount: Record<'C' | 'W' | 'D' | 'G', number> = { C: 0, W: 0, D: 0, G: 0 }
+  for (const id of ownRoster) {
+    const p = players.get(id as PlayerId)
+    if (p && ratedOverall(p) >= QUALITY_BAR) qualityCount[groupOf(p.position)]++
+  }
+  const needGroups = new Set<'C' | 'W' | 'D' | 'G'>(
+    (['C', 'W', 'D', 'G'] as const).filter((g) => qualityCount[g] < NEED_TARGET[g]),
+  )
+  const rosterNeeds = [...needGroups].map((g) => GROUP_LABEL[g])
+
   // Scouting Centre — the surfaced finds (fills over the career).
   const teamAbbrOf = new Map<string, string>()
   for (const [, team] of teams) for (const id of team.roster) teamAbbrOf.set(id as string, team.abbreviation)
@@ -1309,10 +1326,14 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       reason: r.reason,
       scoutName: r.scoutName,
       foundDate: r.foundDate,
+      fitsNeed: needGroups.has(groupOf(p.position)),
     })
   }
   const recRank = { 'A+': 0, A: 1, B: 2, C: 3 }
-  recommendations.sort((a, b) => recRank[a.grade] - recRank[b.grade] || b.potentialStars - a.potentialStars)
+  // Need-fillers float up (within grade), then by potential.
+  recommendations.sort((a, b) =>
+    (a.fitsNeed === b.fitsNeed ? 0 : a.fitsNeed ? -1 : 1) ||
+    recRank[a.grade] - recRank[b.grade] || b.potentialStars - a.potentialStars)
 
   // Per-team knowledge summary
   const teamKnowledge: TeamKnowledgeSummary[] = []
@@ -1396,6 +1417,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     worldKnowledge,
     activeScouts,
     recommendations,
+    rosterNeeds,
     hasDraftClass: draftProspectIds.size > 0,
     leagueCoverage,
     nationCoverage,

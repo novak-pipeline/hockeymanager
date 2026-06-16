@@ -1500,6 +1500,8 @@ export interface ScoutFindView {
   reason: string
   scoutName: string
   foundDate: string
+  /** True if he plays a position your roster is currently thin at. */
+  fitsNeed: boolean
 }
 
 /** A scope option for the assignment dropdowns. */
@@ -1613,6 +1615,8 @@ export interface ScoutingView {
   activeScouts: number
   /** Scouts the surfaced recommendations came from + the finds themselves. */
   recommendations: ScoutFindView[]
+  /** Position groups your roster is currently thin at (e.g. ['Defense','Centre']). */
+  rosterNeeds: string[]
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
   hasDraftClass: boolean
   /** Knowledge coverage by league (avg + youth split). */
