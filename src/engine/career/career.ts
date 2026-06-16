@@ -76,6 +76,7 @@ import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, per
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
 import { nhleFactorByAbbrev } from '@engine/league/leagueStrength'
@@ -570,6 +571,8 @@ export class Career {
   /** Players already reported on in the inbox (avoids re-reporting). Seeded lazily. */
   private scoutReported = new Set<string>()
   private scoutReportSeeded = false
+  /** `${oppId}:${gameDay}` matchups already given an advance-scout report (transient). */
+  private oppReported = new Set<string>()
   /** Per-player opinion timeline (rating/stars/knowledge over the season). */
   private opinionHistory = new Map<string, OpinionSnapshot[]>()
 
@@ -939,6 +942,54 @@ export class Career {
         { playerId: f.id },
       )
     }
+  }
+
+  /**
+   * If a scout is advance-scouting the next opponent, file a pre-match opposition
+   * report to the inbox when the game is within two days — once per matchup.
+   */
+  private emitOppositionReport(day: number): void {
+    const advanceScout = this.scouting.assignments.find((s) => s.target.kind === 'nextOpponent')
+    if (!advanceScout || this.phase !== 'regularSeason') return
+    const nextSched = this.data.league.schedule.find(
+      (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId),
+    )
+    if (!nextSched) return
+    const daysUntil = nextSched.day - day
+    if (daysUntil < 0 || daysUntil > 2) return
+    const oppId = (nextSched.homeTeamId === this.userTeamId ? nextSched.awayTeamId : nextSched.homeTeamId) as string
+    const key = `${oppId}:${nextSched.day}`
+    if (this.oppReported.has(key)) return
+    this.oppReported.add(key)
+
+    const opp = this.data.teams.get(oppId as TeamId)
+    if (!opp) return
+    const standing = this.standings.get(oppId as TeamId)
+    const stx = finalizeSpecialTeams(this.specialTeams).find((t) => t.teamId === oppId)
+    const keyPlayers = opp.roster
+      .map((pid) => {
+        const p = this.data.players.get(pid)
+        const t = this.totals.get(pid)
+        const goals = t?.goals ?? 0, assists = t?.assists ?? 0
+        return p ? { name: p.name, goals, assists, points: goals + assists } : null
+      })
+      .filter((x): x is { name: string; goals: number; assists: number; points: number } => !!x && x.points > 0)
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 3)
+
+    const { headline, body } = buildOppositionReport({
+      opponentName: opp.name,
+      opponentAbbr: opp.abbreviation,
+      scoutName: advanceScout.name,
+      record: {
+        wins: standing?.wins ?? 0, losses: standing?.losses ?? 0, otl: standing?.overtimeLosses ?? 0,
+        goalsFor: standing?.goalsFor ?? 0, goalsAgainst: standing?.goalsAgainst ?? 0, gamesPlayed: standing?.gamesPlayed ?? 0,
+      },
+      keyPlayers,
+      ppPct: stx?.ppPct ?? 0,
+      pkPct: stx?.pkPct ?? 0,
+    })
+    this.pushNews('scouting', headline, body, { teamId: oppId })
   }
 
   /**
@@ -2494,6 +2545,7 @@ export class Career {
       if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
     }
     this.surfaceScoutFinds(day)
+    this.emitOppositionReport(day)
     this.emitScoutReports()
     this.resolveDueInterviews(day)
     // Snapshot the analyst draft board at each phase boundary so the mid-season

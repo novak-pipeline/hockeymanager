@@ -326,11 +326,11 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
     .map((id) => id as string)
     .filter((id) => id !== userTeamId)
   void opponentTeamIds
-  // Default deployment leans on youth discovery (the bulk of scouting) plus an
-  // advance scout on the next opponent — the user re-aims them by nation/league
-  // from the Scouting screen.
+  // Default deployment leans on youth discovery (the bulk of scouting). Advance-
+  // scouting the next opponent (which files a pre-match inbox report) is opt-in —
+  // the user re-aims a scout to Next Opponent from the Scouting screen.
   const defaults: Array<{ target: ScoutTarget; focus: ScoutFocus }> = [
-    { target: { kind: 'nextOpponent' }, focus: 'all' },
+    { target: { kind: 'draftClass' }, focus: 'youth' },
     { target: { kind: 'draftClass' }, focus: 'youth' },
     { target: { kind: 'draftClass' }, focus: 'youth' },
   ]
@@ -629,8 +629,7 @@ export interface ScoutRosterMember {
  */
 export function syncAssignmentsToScouts(state: ScoutingState, scouts: ScoutRosterMember[]): void {
   const byId = new Map(state.assignments.map((a) => [a.scoutId, a]))
-  let hasOpponentScout = scouts.some((s) => byId.get(s.id)?.target.kind === 'nextOpponent')
-  const next: ScoutAssignment[] = scouts.map((s, i) => {
+  const next: ScoutAssignment[] = scouts.map((s) => {
     const ex = byId.get(s.id)
     const identity = {
       scoutId: s.id,
@@ -645,10 +644,8 @@ export function syncAssignmentsToScouts(state: ScoutingState, scouts: ScoutRoste
       ...(ex.positionFilter ? { positionFilter: ex.positionFilter } : {}),
       ...(ex.minPotentialStars !== undefined ? { minPotentialStars: ex.minPotentialStars } : {}),
     }
-    // New scout: first undeployed one watches the next opponent, the rest scout youth.
-    let target: ScoutTarget = { kind: 'draftClass' }
-    if (!hasOpponentScout && i === 0) { target = { kind: 'nextOpponent' }; hasOpponentScout = true }
-    return { ...identity, target, focus: 'youth' as ScoutFocus }
+    // New scout defaults to youth draft discovery; advance-scouting is opt-in.
+    return { ...identity, target: { kind: 'draftClass' } as ScoutTarget, focus: 'youth' as ScoutFocus }
   })
   state.assignments = next
 }

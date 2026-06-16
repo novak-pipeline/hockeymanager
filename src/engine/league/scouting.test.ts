@@ -144,8 +144,9 @@ describe('tickScouting', () => {
     const otherTeamId = data.league.teams.find((t) => t as string !== userTeamId)!
     const otherTeam = data.teams.get(otherTeamId)!
 
-    // Assign scout[0] to that team
+    // Assign scout[0] to that team (all-ages focus so any roster player counts)
     state.assignments[0]!.target = { kind: 'team', teamId: otherTeamId as string }
+    state.assignments[0]!.focus = 'all'
 
     const pid = otherTeam.roster[0]! as string
     const before = knowledgeOf(state, pid)
@@ -266,6 +267,7 @@ describe('tickScouting', () => {
     })
 
     state.assignments[0]!.target = { kind: 'draftClass' }
+    state.assignments[0]!.focus = 'all'
 
     const sampleId = [...draftProspectIds][0]!
     const before = knowledgeOf(state, sampleId)
