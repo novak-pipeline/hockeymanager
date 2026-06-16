@@ -459,23 +459,43 @@ export interface ScoutPanel {
  * bullish scout remembers the big night; a bearish one the quiet one) and varied
  * per scout, so two scouts who caught different games file different reports.
  */
+const VIEW_MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar']
+function formatTOI(minutes: number): string {
+  const m = Math.floor(minutes)
+  const s = Math.floor((minutes - m) * 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/**
+ * A scout's note from a specific game he caught: a dated box line (TOI, G, A, P —
+ * or SV%/GA for a goalie) plus a short, POSITION-AWARE read of what he picked up.
+ * Anchored to the player's real per-game pace, nudged by the scout's lean, and
+ * varied per scout so two scouts who saw different games file different lines. A
+ * defenceman's pointless night is a steady two-way shift, not a "quiet viewing".
+ */
 function watchedGameLine(scout: StaffMember, player: Player, ppg: number, estIdx: number, trueIdx: number): string {
   const key = scout.id + ':' + (player.id as string) + ':watched'
+  const date = `${stablePick(VIEW_MONTHS, key + ':m')} ${1 + Math.floor(hash01(key + ':d') * 27)}`
+
   if (player.position === 'G') {
-    const lean = estIdx > trueIdx ? 0.25 : estIdx < trueIdx ? -0.25 : 0
-    return hash01(key) + lean > 0.5
-      ? 'Watched him steal a game — square to every shot, no rebounds.'
-      : 'The night I caught him, a couple of soft ones got through.'
+    const lean = estIdx > trueIdx ? 0.012 : estIdx < trueIdx ? -0.012 : 0
+    const sv = Math.max(0.86, Math.min(0.96, 0.905 + (hash01(key + ':sv') * 2 - 1) * 0.03 + lean))
+    const ga = Math.max(0, Math.round((1 - sv) * 30))
+    const qual = sv >= 0.925 ? 'stood tall, controlled his rebounds' : sv < 0.89 ? 'a couple he’d want back' : 'a steady, composed night'
+    return `${date} · .${Math.round(sv * 1000)} SV, ${ga} GA — ${qual}`
   }
-  const lean = estIdx > trueIdx ? 0.6 : estIdx < trueIdx ? -0.5 : 0
-  const pts = Math.max(0, Math.round(ppg + lean + (hash01(key) * 2 - 1) * 1.1))
-  const goals = pts > 0 ? Math.min(pts, Math.round(pts * (0.3 + hash01(key + ':g') * 0.4))) : 0
+
+  const isD = player.position === 'D' || player.position === 'LD' || player.position === 'RD'
+  const lean = estIdx > trueIdx ? 0.5 : estIdx < trueIdx ? -0.4 : 0
+  const pts = Math.max(0, Math.round(ppg + lean + (hash01(key) * 2 - 1)))
+  const goals = pts > 0 ? Math.min(pts, Math.round(pts * (isD ? 0.25 : 0.42) + hash01(key + ':g') * 0.45)) : 0
   const assists = pts - goals
-  const line = goals && assists ? `${goals}G ${assists}A` : goals ? `${goals}G` : assists ? `${assists}A` : 'no points'
-  if (pts >= 3) return `Caught a big night — ${line}, drove play every shift.`
-  if (pts === 2) return `Saw a strong showing — ${line}.`
-  if (pts === 1) return `A quiet viewing — just ${line}.`
-  return 'The game I watched, he was held off the scoresheet.'
+  const toi = formatTOI((isD ? 20 : ppg >= 0.8 ? 16 : 12) + hash01(key + ':t') * (isD ? 6 : 4))
+  const box = `${toi} TOI · ${goals}G ${assists}A ${pts}P`
+  const qual = isD
+    ? (pts >= 2 ? 'quarterbacked the play' : pts === 1 ? 'chipped in and defended well' : 'a steady two-way night, heavy minutes')
+    : (pts >= 3 ? 'drove the game' : pts === 2 ? 'dangerous all night' : pts === 1 ? 'a quieter offensive night' : 'kept off the scoresheet')
+  return `${date} · ${box} — ${qual}`
 }
 
 export function buildScoutPanel(

@@ -6035,13 +6035,18 @@ export class Career {
       const isOwn = ownIds.has(id)
       const knowledge = isOwn ? 100 : knowledgeOf(this.scouting, id)
       const accuracy = isOwn ? 1 : accuracyOf(this.scouting, id)
-      // VALUE = current ability + our fog-aware ceiling read (the SAME numbers we
-      // display), faded for goalies + docked for re-entries like a real board. This
-      // is the PRIMARY sort key, so a skater higher in BOTH current and potential
-      // always outranks a lesser one — the scout signal only breaks near-ties.
+      // The Potential column shows OUR fog-aware read.
       const ceil = isOwn || knowledge >= 95 ? agedPotential(c.player) : this.scoutedCeilingWith(c.player, knowledge, accuracy)
       ceilingById.set(id, ceil)
-      const base = ceil * 0.74 + c.input.current * 0.26
+      // VALUE (the sort key) blends our read toward the PUBLIC consensus ceiling by
+      // how much we've actually seen him: a well-scouted prospect is ranked on our
+      // own read (so he moves off the board), but a prospect nobody has watched
+      // sits at consensus — your staff has no independent reason to move him. This
+      // is what keeps the board from flinging unseen names 100+ spots. Faded for
+      // goalies + docked for re-entries like a real board; current ability folded in.
+      const kw = isOwn ? 1 : Math.max(0, Math.min(1, knowledge / 100))
+      const valueCeil = ceil * kw + c.input.ceiling * (1 - kw)
+      const base = valueCeil * 0.74 + c.input.current * 0.26
       valueById.set(id, base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility))
       const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
       meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
