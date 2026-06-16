@@ -4688,16 +4688,20 @@ export class Career {
 
       // Composite prospect grade — weighs talent + OUR team's need, system fit,
       // position scarcity, risk and value into one verdict + pros/cons (FM-style).
-      const ourFit = player.position !== 'G' && this.userTeam.tactics ? playerStyleFit(player, this.userTeam.tactics) : null
-      profile.prospectGrade = buildProspectGrade({
-        potentialStars: profile.potentialStars,
-        currentStars: overallToStars(profile.overall),
-        position: player.position,
-        age: player.age,
-        ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
-        need: this.positionNeed(player.position),
-        ...(ourFit ? { styleFitScore: ourFit.score, styleLabel: ourFit.styleLabel } : {}),
-      })
+      // Only meaningful for prospects/young developmentals — a "PROSPECT GRADE" on a
+      // 30-year-old veteran reads wrong, so gate it to draft-age-and-developmental.
+      if (player.age <= 23) {
+        const ourFit = player.position !== 'G' && this.userTeam.tactics ? playerStyleFit(player, this.userTeam.tactics) : null
+        profile.prospectGrade = buildProspectGrade({
+          potentialStars: profile.potentialStars,
+          currentStars: overallToStars(profile.overall),
+          position: player.position,
+          age: player.age,
+          ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
+          need: this.positionNeed(player.position),
+          ...(ourFit ? { styleFitScore: ourFit.score, styleLabel: ourFit.styleLabel } : {}),
+        })
+      }
 
       // EHM-style roster projection + per-coach reports. Same gate as the scout
       // verdict (own player / reliably scouted). Prospects on an AHL affiliate

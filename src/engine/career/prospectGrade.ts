@@ -61,7 +61,7 @@ export function buildProspectGrade(a: ProspectGradeArgs): ProspectGradeResult {
   else if (a.potentialStars >= 3.5) pros.push(`Real top-end projection (${a.potentialStars.toFixed(1)}★ ceiling)`)
   else if (a.potentialStars <= 2) cons.push('Limited ceiling — projects as a depth piece')
   if (a.currentStars >= 3.5) pros.push('Already an impact player today')
-  else if (a.currentStars <= 1.5 && a.age >= 20) cons.push('Still raw for his age — a long way from ready')
+  else if (a.currentStars <= 1.5 && a.age >= 20) cons.push('Behind the curve for his age — still a long way from ready')
 
   // ── Position scarcity ──
   if (a.position === 'C') { score += 3; pros.push('Premium position — a true centre') }

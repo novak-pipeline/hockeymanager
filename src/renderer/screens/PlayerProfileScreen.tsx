@@ -516,18 +516,6 @@ function TraitBadges({ traits, size }: { traits: PlayerTrait[]; size?: number })
   )
 }
 
-/** A single "prospect grade" letter from potential stars (EP-style A+ … F). */
-function prospectGrade(stars: number): ReportGrade {
-  if (stars >= 4.75) return 'A+'
-  if (stars >= 4.25) return 'A'
-  if (stars >= 3.75) return 'B+'
-  if (stars >= 3.25) return 'B'
-  if (stars >= 2.75) return 'C+'
-  if (stars >= 2.25) return 'C'
-  if (stars >= 1.5) return 'D'
-  return 'F'
-}
-
 /** A bordered verdict tile (label over a value) for the report header. */
 function VerdictTile({ label, children, accent }: { label: string; children: ReactNode; accent?: string }): JSX.Element {
   return (
@@ -1886,13 +1874,17 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               <TraitBadges traits={sr.traits} />
             </div>
           )}
-          {/* Hero: prospect grade badge (hover for what was weighed) + elevator pitch */}
+          {/* Hero: prospect grade badge (hover for what was weighed) + elevator pitch.
+              The badge only shows for prospects — the engine omits the grade for
+              established players, so veterans don't get a misleading "PROSPECT GRADE". */}
           <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
-            <ProspectGradeBadge
-              grade={d.prospectGrade?.grade ?? prospectGrade(d.potentialStars)}
-              pros={d.prospectGrade?.pros ?? []}
-              cons={d.prospectGrade?.cons ?? []}
-            />
+            {d.prospectGrade && (
+              <ProspectGradeBadge
+                grade={d.prospectGrade.grade}
+                pros={d.prospectGrade.pros}
+                cons={d.prospectGrade.cons}
+              />
+            )}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
                 “{sr.elevatorPitch}”
