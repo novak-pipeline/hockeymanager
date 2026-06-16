@@ -46,6 +46,21 @@ export interface RankInput {
   eligibility?: DraftEligibility
 }
 
+/**
+ * A hidden, stable per-player "analyst edge": something the public consensus reads
+ * about a prospect that his raw tools/potential don't capture (pro pedigree, a
+ * projectable frame, a translatable pro skill) — and which actually pays out in
+ * development. It's what lets the ANALYST board legitimately beat your scouts on
+ * some prospects (and miss on others), rather than the analysts being a uniformly
+ * over-hyped wrong version. Range [-1, 1]; deterministic.
+ */
+export function analystEdge(playerId: string): number {
+  let h = 0x811c9dc5
+  const s = playerId + ':analystEdge'
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  return ((h >>> 0) / 0xffffffff) * 2 - 1
+}
+
 /** Deterministic [-1, 1) from a string (FNV-1a hash). */
 function hashUnit(s: string): number {
   let h = 0x811c9dc5

@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutSummary } from '@engine/career/scoutSummary'
@@ -5977,14 +5977,15 @@ export class Career {
           // ding (missed viewings + health questions) — injuries move the board.
           const injuryDing = p.injuryStatus ? 4 : 0
           const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
-          // Consensus scouting error: even the aggregate board misreads talent —
-          // a persistent per-player miss that, with development variance, keeps
-          // draft-rank↔outcome near the real ~0.45 range. But analysts AREN'T blind
-          // to a loud season: the bigger a prospect's production premium, the less
-          // the projection error can bury him (the stats are on tape), so a genuine
-          // breakout sleeper climbs the public board too — not just our scouts'.
+          // How the public board deviates from a prospect's raw tools. It is NOT all
+          // noise: part is a real "analyst edge" — a stable factor the market reads
+          // that actually pays out in development (see driftYouthCeiling) — so the
+          // analysts legitimately beat your scouts on some prospects and whiff on
+          // others, rather than being a uniformly over-hyped wrong version. The rest
+          // is genuine misread. Both shrink the louder a prospect's production is
+          // (analysts aren't blind to a monster season).
           const errorScale = Math.max(0.4, 1 - Math.max(0, evalRes.premium) / 24 * 0.6)
-          const consensusError = hashSigned(id + ':consensus') * 14 * errorScale
+          const consensusError = (analystEdge(id) * 6 + hashSigned(id + ':consensus') * 13) * errorScale
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
           // when one is on staff, and noisier the weaker the analyst.

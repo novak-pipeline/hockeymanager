@@ -42,6 +42,7 @@ import {
 } from '@domain'
 import { FIRST_NAMES, LAST_NAMES } from '@data'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { analystEdge } from '@engine/league/draftRankings'
 import type { Rng } from '@engine/shared/rng'
 
 /* ────────────────────────── shared helpers ────────────────────────── */
@@ -178,8 +179,13 @@ function driftYouthCeiling(
   // Slight negative mean: more prospects fall short of their ceiling than exceed
   // it (busts outnumber breakouts), matching real draft outcomes.
   const luck = rng.normal(-0.5, 2.2)
+  // The hidden "analyst edge" pays out here — a stable factor the PUBLIC board read
+  // (and your scouts, reading raw tools, didn't), so an analyst darling tends to
+  // rise and an analyst fade tends to slip. Modest per-offseason; accumulates over
+  // the development window. This is what lets the analysts be right vs your scouts.
+  const edgeBias = analystEdge(p.id as unknown as string) * 1.2
   const youthMult = seasonAge <= 19 ? 1 : seasonAge <= 21 ? 0.8 : 0.55
-  const delta = Math.round((personaBias + perfBias + luck) * youthMult)
+  const delta = Math.round((personaBias + perfBias + luck + edgeBias) * youthMult)
   if (delta === 0) return 0
 
   const curOvr = overall(p.composites, p.position)
