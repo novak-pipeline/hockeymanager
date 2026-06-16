@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { leagueTranslationFactor, nhlEquivalent, type LeagueStrength } from './leagueStrength'
+import { leagueTranslationFactor, nhlEquivalent, isProLeagueAbbrev, nhleFactorByAbbrev, type LeagueStrength } from './leagueStrength'
+
+describe('isProLeagueAbbrev (draft pool = amateurs only)', () => {
+  it('flags the NHL-system pro tiers, not the amateur feeder leagues', () => {
+    expect(isProLeagueAbbrev('NHL')).toBe(true)
+    expect(isProLeagueAbbrev('AHL')).toBe(true)
+    expect(isProLeagueAbbrev('ahl')).toBe(true)
+    for (const amateur of ['OHL', 'WHL', 'QMJHL', 'USHL', 'NCAA', 'SHL', 'LIIGA', 'KHL']) {
+      expect(isProLeagueAbbrev(amateur)).toBe(false)
+    }
+  })
+})
+
+describe('nhleFactorByAbbrev ordering', () => {
+  it('translates a stronger league to more NHL value (NCAA > CHL juniors)', () => {
+    expect(nhleFactorByAbbrev('NCAA')).toBeGreaterThan(nhleFactorByAbbrev('OHL'))
+    expect(nhleFactorByAbbrev('OHL')).toBeGreaterThan(nhleFactorByAbbrev('QMJHL'))
+  })
+})
 
 const L = (abbrev: string, level = 1, reputation = 15, name?: string): LeagueStrength =>
   name !== undefined ? { abbrev, level, reputation, name } : { abbrev, level, reputation }

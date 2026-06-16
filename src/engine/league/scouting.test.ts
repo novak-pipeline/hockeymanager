@@ -8,6 +8,8 @@ import {
   maskAttribute,
   maskedOverall,
   maskedCeiling,
+  scoutsWhoSaw,
+  playersSeenByScout,
   tickScouting,
   generateScoutCandidates,
   hireScout,
@@ -286,6 +288,30 @@ describe('tickScouting', () => {
     }
 
     expect(knowledgeOf(state, sampleId)).toBeGreaterThan(before)
+  })
+
+  it('records per-scout history: only scouts who watched a player are linked to him', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(41)
+    const teams = data.teams as Map<import('@domain').TeamId, { roster: import('@domain').PlayerId[]; divisionId?: string }>
+    const state = createInitialScouting({ userTeamId, teams, players: data.players, rng: new Rng(41), draftProspectIds })
+    // Two scouts on DISTINCT teams → disjoint histories (a real divide, not overlap).
+    const [t1, t2] = [...teams.keys()].filter((t) => (t as string) !== userTeamId)
+    state.assignments[0]!.target = { kind: 'team', teamId: t1 as string }
+    state.assignments[0]!.focus = 'all'
+    state.assignments[1]!.target = { kind: 'team', teamId: t2 as string }
+    state.assignments[1]!.focus = 'all'
+    for (let i = 0; i < 8; i++) {
+      tickScouting({ state, userTeamId, teams, players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), rng: new Rng(i + 700) })
+    }
+    const s0 = state.assignments[0]!.scoutId, s1 = state.assignments[1]!.scoutId
+    const seen0 = playersSeenByScout(state, s0)
+    const seen1 = playersSeenByScout(state, s1)
+    expect(seen0.length).toBeGreaterThan(0)
+    expect(seen1.length).toBeGreaterThan(0)
+    // A player scout 0 watched is linked to scout 0, and NOT to scout 1 (disjoint teams).
+    const p = seen0[0]!
+    expect(scoutsWhoSaw(state, p)).toContain(s0)
+    expect(scoutsWhoSaw(state, p)).not.toContain(s1)
   })
 
   it('scouts on an identical brief divide the work (broader coverage, not redundant)', () => {
