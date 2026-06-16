@@ -98,7 +98,16 @@ describe('analystRank', () => {
     // Younger prospects carry more hype above their true ceiling.
     expect(perceivedCeiling(70, 17)).toBeGreaterThan(perceivedCeiling(70, 20))
     expect(perceivedCeiling(70, 17)).toBeGreaterThan(70) // always optimistic vs truth
-    expect(perceivedCeiling(99, 17)).toBe(99)            // clamped at the top
+    expect(perceivedCeiling(99, 17)).toBeLessThanOrEqual(99)        // clamped
+    expect(perceivedCeiling(99, 17)).toBeGreaterThanOrEqual(88)     // an elite ceiling still reads top-tier
+  })
+
+  it('keeps FRANCHISE (5★) projections rare — hype does not push the whole top to elite', () => {
+    // A solid-but-not-elite ceiling (true ~78, a 4★) with full youth hype should
+    // NOT read as a 5★ (88+) franchise projection — it compresses into the 4–4.5★ band.
+    expect(perceivedCeiling(78, 17)).toBeLessThan(88)
+    // Only a genuinely elite true ceiling reaches the top.
+    expect(perceivedCeiling(95, 18)).toBeGreaterThanOrEqual(88)
   })
 
   it('docks re-entry prospects vs equal first-time-eligible ones', () => {

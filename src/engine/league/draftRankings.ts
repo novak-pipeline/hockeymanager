@@ -90,8 +90,15 @@ export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[
  * actually pays out, so reaches and sleepers emerge as players prove out.
  */
 export function perceivedCeiling(trueCeiling: number, age: number, productionBonus = 0): number {
-  const hype = 4 + Math.max(0, 19 - age) * 2 // 17→8, 18→6, 19→4, 20+→4
-  return Math.max(0, Math.min(99, trueCeiling + hype + productionBonus))
+  const hype = 3 + Math.max(0, 19 - age) // 17→5, 18→4, 19→3, 20+→3
+  const raw = trueCeiling + hype + productionBonus
+  // Analysts hype the class, but FRANCHISE (5★) projections stay rare — real boards
+  // don't slap top-end ceilings on the whole first round. Diminishing returns above
+  // a knee mean only a genuinely elite ceiling (or a true monster season) reads as a
+  // top-of-the-board star; everyone else compresses into the 4 / 4.5★ band.
+  const KNEE = 82
+  const perceived = raw <= KNEE ? raw : KNEE + (raw - KNEE) * 0.4
+  return Math.max(0, Math.min(99, Math.round(perceived)))
 }
 
 /**
