@@ -79,7 +79,7 @@ import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraft
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
-import { nhleFactorByAbbrev } from '@engine/league/leagueStrength'
+import { nhleFactorByAbbrev, isProLeagueAbbrev } from '@engine/league/leagueStrength'
 import { scoutDraftBias } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
 import {
@@ -204,6 +204,7 @@ import {
   knowledgeOf,
   accuracyOf,
   maskedCeiling,
+  playersSeenByScout,
   tickScouting,
   generateScoutCandidates,
   syncAssignmentsToScouts,
@@ -823,9 +824,15 @@ export class Career {
         }
       }
     }
-    consider(this.data.league.teams)
-    if (this.data.league.ahlTeams) consider(this.data.league.ahlTeams)
-    for (const c of this.data.league.competitions ?? []) consider(c.teamIds as readonly TeamId[])
+    // Draft prospects are AMATEURS only — players in junior/college/European feeder
+    // leagues. A player on an NHL or AHL roster is a signed pro and is NOT in the
+    // draft pool (you can't draft someone already under a pro contract). So we scan
+    // the wider-world competitions, EXCLUDING the pro tiers (NHL/AHL), plus any
+    // generated draft classes — never the NHL roster or the AHL farm.
+    for (const c of this.data.league.competitions ?? []) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      consider(c.teamIds as readonly TeamId[])
+    }
     for (const cls of this.data.league.draftClasses) {
       for (const p of cls.prospects) ids.add(p.playerId as string)
     }
@@ -5406,24 +5413,20 @@ export class Career {
       .filter(([k]) => typeof a[k] === 'number')
       .map(([k, label]) => ({ label, value: a[k] as number }))
 
-    const focus = asg.focus ?? 'all'
-    const scopeIds = this.resolveScopeIds(asg.target).filter((id) => {
-      if (focus === 'all') return true
-      const p = this.data.players.get(asPlayerId(id)); if (!p) return false
-      const youth = p.age <= YOUTH_MAX_AGE
-      return focus === 'youth' ? youth : !youth
-    })
-    const scouted = scopeIds
+    // The full, real history of every player THIS scout has personally watched —
+    // not the current-scope aggregate (which made one in-scope name show up on
+    // every scout's list). The client filters/sorts this list.
+    const teamByPlayer = new Map<string, { abbr: string }>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) teamByPlayer.set(id as string, { abbr: t.abbreviation })
+    const scouted = playersSeenByScout(this.scouting, scoutId)
       .map((id) => ({ id, k: knowledgeOf(this.scouting, id) }))
-      .filter((x) => x.k >= 30)
       .sort((x, y) => y.k - x.k)
-      .slice(0, 40)
       .map(({ id, k }) => {
-        const p = this.data.players.get(asPlayerId(id))!
-        const team = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p) return null
         return {
           playerId: id, name: p.name, position: p.position, age: p.age,
-          teamAbbr: team?.abbreviation ?? 'FA',
+          teamAbbr: teamByPlayer.get(id)?.abbr ?? 'FA',
           ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
           knowledge: Math.round(k),
           currentStars: overallToStars(ratedOverall(p)),
@@ -5431,6 +5434,7 @@ export class Career {
           ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         }
       })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
 
     const finds = (this.scouting.recommendations ?? [])
       .filter((r) => (r.scoutId ? r.scoutId === scoutId : r.scoutName === staff.name))
@@ -5858,16 +5862,15 @@ export class Career {
     const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = []
     const hasAnalyst = this.hasDataAnalyst()
     const analystNoise = this.analystProjectionNoise()
-    // The board ranks the SAME draft-eligible pool scouts can surface — NHL, AHL
-    // and every feeder/junior league — so no eligible prospect is "off the board"
-    // just because he plays in a tier the board didn't scan.
+    // The board ranks the AMATEUR draft pool only — junior / college / European
+    // feeder leagues. Players on NHL or AHL rosters are signed pros and are not in
+    // the draft (you can't draft a contracted player), so the pro tiers are never
+    // scanned. This matches the pool the scouts surface from (allDraftProspectIds).
     const compsRaw = this.data.league.competitions ?? []
-    const hasAhlComp = compsRaw.some((c) => c.abbrev === 'AHL')
-    const boardLeagues: Array<{ abbrev: string; teamIds: readonly TeamId[] }> = [
-      { abbrev: 'NHL', teamIds: this.data.league.teams },
-      ...(!hasAhlComp && this.data.league.ahlTeams?.length ? [{ abbrev: 'AHL', teamIds: this.data.league.ahlTeams }] : []),
-      ...compsRaw.map((c) => ({ abbrev: c.abbrev, teamIds: c.teamIds })),
-    ]
+    const boardLeagues: Array<{ abbrev: string; teamIds: readonly TeamId[] }> =
+      compsRaw
+        .filter((c) => !isProLeagueAbbrev(c.abbrev))
+        .map((c) => ({ abbrev: c.abbrev, teamIds: c.teamIds }))
     for (const c of boardLeagues) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
@@ -7175,6 +7178,7 @@ export class Career {
         recommendations: [...(this.scouting.recommendations ?? [])],
         seen: [...(this.scouting.seen ?? [])],
         judgment: [...(this.scouting.judgment ?? [])],
+        scoutHistory: (this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, [...pids]] as [string, string[]]),
       },
       arcs: structuredClone(this.arcsState),
       records: structuredClone(this.recordsState),
@@ -7267,6 +7271,7 @@ export class Career {
         recommendations: [...(snapshot.scouting.recommendations ?? [])],
         seen: [...(snapshot.scouting.seen ?? [])],
         judgment: [...(snapshot.scouting.judgment ?? [])],
+        scoutHistory: [...(snapshot.scouting.scoutHistory ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({

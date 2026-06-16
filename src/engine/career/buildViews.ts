@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -779,7 +779,19 @@ export function buildPlayerProfile(
   const truePotStars = potentialStars(p)
   const potStars = potentialStars(p, fog?.scouting)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague)
-  const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, truePotStars)
+  // Scout Opinions: only scouts who have ACTUALLY watched this player file an
+  // opinion (FM-style — a scout can't grade someone he's never seen). Own-org
+  // players are known to the whole staff. When no scout has seen an opponent, the
+  // panel is omitted entirely rather than inventing reads.
+  const isOwnPlayer = teamId !== null && teamId === ctx.userTeamId
+  const allScouts = userScouts ?? []
+  const sawIds = fog ? new Set(scoutsWhoSaw(fog.scouting, p.id as string)) : null
+  const opinionScouts = isOwnPlayer || !sawIds
+    ? allScouts
+    : allScouts.filter((s) => sawIds.has(s.id as string))
+  const scoutPanel = (isOwnPlayer || !fog || opinionScouts.length > 0)
+    ? buildScoutPanel(opinionScouts, p, fog?.scouting, truePotStars)
+    : undefined
   // FM-style Overall Report verdict (own players / reliably scouted opponents).
   const scoutVerdict = archetypeKnown
     ? buildScoutVerdict(
@@ -839,7 +851,7 @@ export function buildPlayerProfile(
     honours: buildHonours(p),
     profileContract: buildProfileContract(p, teamId !== null),
     scoutReport,
-    scoutPanel,
+    ...(scoutPanel !== undefined ? { scoutPanel } : {}),
     ...(mindset !== undefined ? { mindset } : {}),
     ...(personalityType !== undefined ? { personalityType } : {}),
     ...(scoutVerdict !== undefined ? { scoutVerdict } : {}),

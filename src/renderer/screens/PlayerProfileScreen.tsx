@@ -1950,8 +1950,8 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </div>
       </Panel>
 
-      {/* ── Multi-scout panel ── */}
-      <ScoutPanelBlock panel={d.scoutPanel} />
+      {/* ── Multi-scout panel — only when scouts have actually watched him ── */}
+      {d.scoutPanel && <ScoutPanelBlock panel={d.scoutPanel} />}
     </div>
   )
 }

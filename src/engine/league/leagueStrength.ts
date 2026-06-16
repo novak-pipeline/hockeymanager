@@ -132,3 +132,11 @@ export function nhleFactorByAbbrev(abbrev: string): number {
   const key = (abbrev || '').trim().toUpperCase()
   return NHLE_BY_ABBREV[key] ?? 0.30
 }
+
+/** NHL-system PRO tiers whose players are signed (drafted/contracted) and so are
+ *  NOT part of the amateur draft pool. The NHL and its AHL farm — every other
+ *  league (junior, college, European) can hold draft-eligible amateurs. */
+const PRO_LEAGUE_ABBREVS = new Set(['NHL', 'AHL'])
+export function isProLeagueAbbrev(abbrev: string): boolean {
+  return PRO_LEAGUE_ABBREVS.has((abbrev || '').trim().toUpperCase())
+}

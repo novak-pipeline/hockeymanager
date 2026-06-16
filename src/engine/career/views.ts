@@ -443,9 +443,10 @@ export interface PlayerProfileView extends PlayerBadge {
   seasonBio?: string
   /**
    * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
-   * Always present when PlayerProfileView is built.
+   * Only the scouts who have actually watched this player are included; omitted
+   * entirely when no scout has seen an opponent (nothing to report).
    */
-  scoutPanel: import('@engine/career/multiScout').ScoutPanel
+  scoutPanel?: import('@engine/career/multiScout').ScoutPanel
   /**
    * Staff-gathered mindset: plain-English thoughts on this player's outlook.
    * Present for own players always; present for scouted opponents when knowledge ≥ 40.

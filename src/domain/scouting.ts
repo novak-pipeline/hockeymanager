@@ -94,4 +94,8 @@ export interface ScoutingState {
    *  Drives read accuracy (band tightness/bias), distinct from knowledge volume.
    *  Absent on old saves. */
   judgment?: Array<[string, number]>
+  /** [scoutId, playerId[]] — every player each scout has personally watched.
+   *  Drives "only scouts who saw him file an opinion" + each scout's own scouted
+   *  list (not the team-wide knowledge aggregate). Absent on old saves. */
+  scoutHistory?: Array<[string, string[]]>
 }

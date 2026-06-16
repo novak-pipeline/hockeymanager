@@ -68,6 +68,23 @@ export function accuracyOf(state: ScoutingState, playerId: string): number {
   return Math.max(0, Math.min(1, j / 100))
 }
 
+/** The scout ids who have personally watched a player (from per-scout history). */
+export function scoutsWhoSaw(state: ScoutingState, playerId: string): string[] {
+  const out: string[] = []
+  for (const [sid, pids] of state.scoutHistory ?? []) {
+    if (pids.includes(playerId)) out.push(sid)
+  }
+  return out
+}
+
+/** Every player id a given scout has personally watched. */
+export function playersSeenByScout(state: ScoutingState, scoutId: string): string[] {
+  for (const [sid, pids] of state.scoutHistory ?? []) {
+    if (sid === scoutId) return pids
+  }
+  return []
+}
+
 /** Deterministic 32-bit hash combining two numbers. Used for stable per-player-per-attr offsets. */
 function deterministicHash(a: number, b: number): number {
   // FNV-1a inspired mixing — cheap, deterministic, no RNG needed
@@ -493,6 +510,18 @@ export function tickScouting(args: TickScoutingArgs): void {
     else briefGroups.set(k, [a])
   }
 
+  // Per-scout history: every player each scout has personally watched. Built into
+  // a Map of Sets for O(1) adds during the tick, then written back to the state's
+  // entry-array form. Drives "only scouts who saw him have an opinion" + the
+  // per-scout scouted list (vs the team-wide knowledge aggregate).
+  const history = new Map<string, Set<string>>()
+  for (const [sid, pids] of state.scoutHistory ?? []) history.set(sid, new Set(pids))
+  const recordSeen = (scoutId: string, pid: string): void => {
+    let set = history.get(scoutId)
+    if (!set) { set = new Set(); history.set(scoutId, set) }
+    set.add(pid)
+  }
+
   for (const scout of state.assignments) {
     const targetIds = resolveTarget(
       scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
@@ -533,9 +562,14 @@ export function tickScouting(args: TickScoutingArgs): void {
         setKnowledge(state, pid, next)
         // Record the best judgment that has watched him — drives read accuracy.
         recordJudgment(state, pid, scout.judgment ?? scout.rating)
+        // Log that THIS scout personally watched THIS player.
+        recordSeen(scout.scoutId, pid)
       }
     }
   }
+
+  // Write the per-scout history back to the serializable state.
+  state.scoutHistory = [...history].map(([sid, set]) => [sid, [...set]])
 
   // ── Knowledge decay ──────────────────────────────────────────────────────
   // A read goes stale when no scout is watching: players not watched today (and
