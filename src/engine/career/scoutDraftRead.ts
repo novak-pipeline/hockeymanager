@@ -115,22 +115,27 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
     }
     return 'the overall package'
   }
-  // When our role read differs from the board's, name both so the card is
-  // self-consistent (no "we agree" while showing a lower projection).
-  const roleClause = (a.scoutsRole && a.analystRole && a.scoutsRole !== a.analystRole)
-    ? ` — they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees`
-    : ''
-
   const THRESH = 2.2
   let verdict: ScoutVerdict = 'inline'
   if (delta >= THRESH) verdict = 'higher'
   else if (delta <= -THRESH) verdict = 'lower'
 
+  // Is the disagreement driven by a different CEILING read, or by intangibles?
+  // Pick the language to match, so the blurb never contradicts the displayed roles.
+  const ceilingDriven = Math.abs(ceilingGap * 0.4) >= Math.abs(rawDelta * chaos)
+  const rolesDiffer = !!(a.scoutsRole && a.analystRole && a.scoutsRole !== a.analystRole)
+
   let blurb: string
   if (verdict === 'higher') {
-    blurb = `Your scouting staff is higher on him than the consensus board — ${reason()}. They'd take him earlier than his ranking suggests.`
+    const why = ceilingDriven && rolesDiffer
+      ? `they grade his ceiling higher — a ${a.scoutsRole} where the board has him a ${a.analystRole}`
+      : reason()
+    blurb = `Your scouts are higher on him than the consensus board — ${why}. They'd take him earlier than his ranking suggests.`
   } else if (verdict === 'lower') {
-    blurb = `Your staff is more cautious than the board${roleClause || ` — ${reason()}`}. They'd let him slide rather than reach.`
+    const why = ceilingDriven && rolesDiffer
+      ? `they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees`
+      : reason()
+    blurb = `Your staff is more cautious than the board — ${why}. They'd let him slide rather than reach.`
   } else {
     blurb = `Your scouts' read lines up with the consensus${confidence === 'low' ? ', though they want more viewings to be sure' : ''}.`
   }

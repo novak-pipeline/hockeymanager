@@ -4714,12 +4714,15 @@ export class Career {
           ?? board.radar.find((r) => r.playerId === playerId)
         const rank = analystRow?.eligibility === 'radar' ? undefined : analystRow?.rank
         if (analystRow) profile.analystPotentialStars = analystRow.potentialStars
+        // Off the published board, the analysts rate him as an unranked longshot —
+        // a LOW ceiling, not his true upside. So a prospect your scouts like reads
+        // as you being HIGHER than the board (a sleeper), not "more cautious".
+        const ourCeiling = agedPotential(player)
+        const theirCeiling = analystRow?.perceivedCeiling ?? Math.min(62, ourCeiling - 4)
         const proj = analystProjection({
           name: player.name,
           position: player.position,
-          // The analysts project off their (optimistic) perceived ceiling, so
-          // their projected role lines up with their stars and ranking.
-          ceiling: analystRow?.perceivedCeiling ?? agedPotential(player),
+          ceiling: theirCeiling,
           eligibility: elig,
           ...(rank !== undefined ? { rank } : {}),
           phaseLabel: board.phaseLabel,
@@ -4730,8 +4733,6 @@ export class Career {
         // Your scouts' own read — can diverge from the consensus (more so the
         // deeper the prospect is ranked), driven by intangibles + underlying game
         // + how their grounded ceiling read compares to the board's optimism.
-        const ourCeiling = agedPotential(player)
-        const theirCeiling = analystRow?.perceivedCeiling ?? ourCeiling
         const read = buildScoutDraftRead({
           player,
           knowledge: profile.scoutReport.knowledge,
@@ -5831,12 +5832,21 @@ export class Career {
     board: Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>
     radarRows: Array<Omit<DraftRankRowView, 'rank'>>
   } {
-    const comps = this.data.league.competitions ?? []
     const board = new Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>()
     const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = []
     const hasAnalyst = this.hasDataAnalyst()
     const analystNoise = this.analystProjectionNoise()
-    for (const c of comps) {
+    // The board ranks the SAME draft-eligible pool scouts can surface — NHL, AHL
+    // and every feeder/junior league — so no eligible prospect is "off the board"
+    // just because he plays in a tier the board didn't scan.
+    const compsRaw = this.data.league.competitions ?? []
+    const hasAhlComp = compsRaw.some((c) => c.abbrev === 'AHL')
+    const boardLeagues: Array<{ abbrev: string; teamIds: readonly TeamId[] }> = [
+      { abbrev: 'NHL', teamIds: this.data.league.teams },
+      ...(!hasAhlComp && this.data.league.ahlTeams?.length ? [{ abbrev: 'AHL', teamIds: this.data.league.ahlTeams }] : []),
+      ...compsRaw.map((c) => ({ abbrev: c.abbrev, teamIds: c.teamIds })),
+    ]
+    for (const c of boardLeagues) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
         if (!t) continue
