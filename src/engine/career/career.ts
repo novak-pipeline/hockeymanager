@@ -203,7 +203,7 @@ import {
   createInitialScouting,
   knowledgeOf,
   accuracyOf,
-  maskedOverall,
+  maskedCeiling,
   tickScouting,
   generateScoutCandidates,
   syncAssignmentsToScouts,
@@ -4700,9 +4700,11 @@ export class Career {
 
       // Analyst draft projection — the pundit consensus read for draft-relevant
       // prospects (rank + projected ceiling role), shown under the scout report.
-      // Our scouts' projected ceiling role (grounded read) — a real role label
-      // ("Top-pair D", "Middle-six F", "Starter"), never a vague "Prospect".
-      profile.scoutsCeilingRole = ceilingRoleShort(agedPotential(player), player.position)
+      // Our scouts' projected ceiling role (fog-aware read) — a real role label
+      // ("Top-pair D", "Middle-six F", "Starter"), never a vague "Prospect". Uses
+      // the same fogged ceiling as the POTENTIAL stars/grade, so they agree.
+      const scoutedCeil = this.scoutedCeilingOf(player)
+      profile.scoutsCeilingRole = ceilingRoleShort(scoutedCeil, player.position)
 
       const elig = draftEligibility(player.age, !!player.nhlDrafted)
       if (elig) {
@@ -4717,7 +4719,7 @@ export class Career {
         // Off the published board, the analysts rate him as an unranked longshot —
         // a LOW ceiling, not his true upside. So a prospect your scouts like reads
         // as you being HIGHER than the board (a sleeper), not "more cautious".
-        const ourCeiling = agedPotential(player)
+        const ourCeiling = scoutedCeil
         const theirCeiling = analystRow?.perceivedCeiling ?? Math.min(62, ourCeiling - 4)
         const proj = analystProjection({
           name: player.name,
@@ -5803,6 +5805,20 @@ export class Career {
    *  outcome projection (P(NHLer) / P(star)). Early in the year it leans on last
    *  season (so the preliminary board already reflects production); it shifts to
    *  the current campaign as games accrue. */
+  /** Our scouts' fog-aware read of a player's ceiling (overall pts). Exact for
+   *  own/fully-scouted players; a biased, knowledge+judgment-narrowed estimate
+   *  otherwise — the same read the profile's POTENTIAL stars and grade show, so
+   *  the ceiling role and draft verdict never reveal the hidden true potential. */
+  private scoutedCeilingOf(p: Player): number {
+    const pid = p.id as string
+    const ceiling = agedPotential(p)
+    if (this.userTeam.roster.includes(asPlayerId(pid))) return ceiling
+    const k = knowledgeOf(this.scouting, pid)
+    if (k >= 95) return ceiling
+    const { lo, hi } = maskedCeiling(ceiling, k, pid, accuracyOf(this.scouting, pid))
+    return Math.round((lo + hi) / 2)
+  }
+
   private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; projection: ProspectProjection } {
     const pid = p.id as PlayerId
     const liveGp = this.worldSim.gp.get(pid) ?? 0
@@ -6359,7 +6375,7 @@ export class Career {
         // Fog-gate potential by YOUR scouting: a prospect you watched all year
         // reads sharply; one you ignored is a guess. Makes scouting matter at the draft.
         const know = knowledgeOf(this.scouting, pid)
-        const band = maskedOverall(agedPotential(p), know, pid, accuracyOf(this.scouting, pid))
+        const band = maskedCeiling(agedPotential(p), know, pid, accuracyOf(this.scouting, pid))
         return {
           ...badge(p),
           rank: pr.rank,

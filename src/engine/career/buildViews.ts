@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -433,10 +433,28 @@ function groupView(
   }
 }
 
-/** Stars from the player's age-aware ceiling (no growth left past ~25), on the
+/**
+ * Our scouts' read of a player's age-aware CEILING, in overall points. With a
+ * scouting state it's fog-aware: exact for own/fully-scouted players, and a
+ * deterministically-biased estimate (narrowing as knowledge + scout judgment
+ * improve) for the rest — so the profile never leaks a prospect's true potential
+ * before he's been watched. Without a scouting state it returns the true ceiling
+ * (used by engines that model their own scout variance, e.g. the multi-scout panel).
+ */
+export function scoutedCeiling(p: Player, scouting?: ScoutingState): number {
+  const ceiling = agedPotential(p)
+  if (!scouting) return ceiling
+  const pid = p.id as string
+  const k = knowledgeOf(scouting, pid)
+  if (k >= 95) return ceiling
+  const { lo, hi } = maskedCeiling(ceiling, k, pid, accuracyOf(scouting, pid))
+  return Math.round((lo + hi) / 2)
+}
+
+/** Stars from our scouts' (fog-aware) read of the player's ceiling, on the
  *  shared NHL-calibrated scale. */
-export function potentialStars(p: Player): number {
-  return overallToStars(agedPotential(p))
+export function potentialStars(p: Player, scouting?: ScoutingState): number {
+  return overallToStars(scoutedCeiling(p, scouting))
 }
 
 /** FM-style trend arrow from a signed development delta. A move of a full
@@ -457,8 +475,11 @@ function trendOf(delta: number | undefined): 'up' | 'down' | 'steady' {
  * Centred on agedPotential, asymmetric (more downside for high-pedigree youth,
  * more upside for low-pedigree youth) mirrors real draft-outcome distributions.
  */
-function potentialBandOf(p: Player, knowledge: number | undefined): { lo: number; hi: number } {
-  const ceiling = agedPotential(p)
+function potentialBandOf(p: Player, scouting: ScoutingState | undefined): { lo: number; hi: number } {
+  // Centre the band on our scouts' (fog-aware) read, not the hidden truth, so the
+  // displayed range matches the POTENTIAL stars and never reveals the true ceiling.
+  const ceiling = scoutedCeiling(p, scouting)
+  const knowledge = scouting ? knowledgeOf(scouting, p.id as string) : undefined
   // Age-driven base spread in overall points (the dominant signal).
   let down: number
   let up: number
@@ -753,9 +774,12 @@ export function buildPlayerProfile(
         return { label: a.label, blurb: a.blurb }
       })()
     : undefined
-  const potStars = potentialStars(p)
+  // Truth ceiling drives engines that model their OWN scout variance (the multi-
+  // scout panel); the fog-aware read drives everything we DISPLAY as our verdict.
+  const truePotStars = potentialStars(p)
+  const potStars = potentialStars(p, fog?.scouting)
   const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague)
-  const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
+  const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, truePotStars)
   // FM-style Overall Report verdict (own players / reliably scouted opponents).
   const scoutVerdict = archetypeKnown
     ? buildScoutVerdict(
@@ -797,7 +821,7 @@ export function buildPlayerProfile(
     potentialStars: potStars,
     overallTrend: trendOf(p.devTrend),
     potentialTrend: trendOf(p.ceilingTrend),
-    potentialBand: potentialBandOf(p, fog ? knowledgeOf(fog.scouting, pidStr) : undefined),
+    potentialBand: potentialBandOf(p, fog?.scouting),
     personality: PERSONALITY_LABELS.map(([key, label]) => ({
       label,
       value: (p.personality as unknown as Record<string, number>)[key] ?? 0,
@@ -1320,7 +1344,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       teamAbbr: teamAbbrOf.get(r.playerId) ?? 'FA',
       ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
       currentStars: overallToStars(ratedOverall(p)),
-      potentialStars: potentialStars(p),
+      potentialStars: potentialStars(p, scouting),
       knowledge: Math.round(knowledgeOf(scouting, r.playerId)),
       grade: r.grade,
       reason: r.reason,
@@ -1373,7 +1397,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     const p = players.get(pid as PlayerId)
     if (!p) continue
     const cur = overallToStars(ratedOverall(p))
-    const pot = potentialStars(p)
+    const pot = potentialStars(p, scouting)
     const ceiling = Math.max(cur, pot)
     const young = p.age <= 23
     const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =

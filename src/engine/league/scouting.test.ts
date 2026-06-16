@@ -7,6 +7,7 @@ import {
   knowledgeOf,
   maskAttribute,
   maskedOverall,
+  maskedCeiling,
   tickScouting,
   generateScoutCandidates,
   hireScout,
@@ -423,6 +424,19 @@ describe('maskAttribute', () => {
     expect(lo).toBeLessThanOrEqual(hi)
     expect(lo).toBeGreaterThanOrEqual(1)
     expect(hi).toBeLessThanOrEqual(99)
+  })
+
+  it('maskedCeiling fogs the ceiling on a separate channel from maskedOverall', () => {
+    // Exact once fully scouted (no leaked potential after that).
+    const exact = maskedCeiling(80, 95, 'p-ceil')
+    expect(exact).toEqual({ lo: 80, hi: 80 })
+    // Foggy when unscouted: a real band that need not centre on the truth.
+    const foggy = maskedCeiling(80, 25, 'p-ceil')
+    expect(foggy.hi - foggy.lo).toBeGreaterThan(0)
+    // Distinct channel: the ceiling read can diverge from the current-ability read
+    // for the same player+knowledge (so a scout can nail one and miss the other).
+    const overall = maskedOverall(80, 25, 'p-ceil')
+    expect(foggy).not.toEqual(overall)
   })
 })
 

@@ -179,6 +179,23 @@ export function maskedOverall(
   return maskAttribute(ovr, knowledge, playerId, '__overall__', accuracy)
 }
 
+/**
+ * Masked CEILING (potential) — same fog model on a SEPARATE '__potential__'
+ * channel, so a scout's read of a prospect's ceiling can be off in a different
+ * direction (and by a different amount) than his read of current ability. This
+ * is what stops the profile from leaking a prospect's true potential before he's
+ * been scouted: an unseen kid's ceiling shows as a wide, biased band that sharpens
+ * (and de-biases) as your scouts log viewings. Exact at knowledge >= 95.
+ */
+export function maskedCeiling(
+  ceiling: number,
+  knowledge: number,
+  playerId: string,
+  accuracy = 0.5
+): { lo: number; hi: number } {
+  return maskAttribute(ceiling, knowledge, playerId, '__potential__', accuracy)
+}
+
 /* ────────────────────────── initial state ────────────────────────── */
 
 const SCOUT_NAMES = [
