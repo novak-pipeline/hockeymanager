@@ -925,7 +925,7 @@ export class Career {
       // Don't report our own org's players (this is acquisition intel), and don't
       // double-report a prospect the Scouting Centre already surfaced as a find.
       if (orgIds.has(id) || surfaced.has(id)) continue
-      const pot = potentialStars(p)
+      const pot = overallToStars(this.scoutedCeilingOf(p))
       const ovr = ratedOverall(p)
       if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
     }
@@ -5206,31 +5206,33 @@ export class Career {
    *  the recommendation (and fires an inbox note) or null. */
   private evaluateForRecommendation(p: Player, day: number): ScoutRecommendation | null {
     if (p.age > YOUTH_MAX_AGE) return null
-    const current = ratedOverall(p)
     const elig = draftEligibility(p.age, !!p.nhlDrafted)
     const evalRes = this.prospectEval(p, this.leagueAbbrevForPlayer(p), this.analystProjectionNoise())
-    const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium)
-    const potStars = overallToStars(perceived)
-    const gap = perceived - current
+    // Grade the find on OUR scouts' (fog-aware) ceiling read — the same number the
+    // profile/grade and the find card show — so a flagged player is one our staff
+    // actually rates, and the grade can't contradict his displayed potential.
+    const ourCeiling = this.scoutedCeilingOf(p)
+    const potStars = overallToStars(ourCeiling)
+    // The public board's read, to spot genuine sleepers (we see more than the book).
+    const analystPerceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium)
     // Absolute quality floor: only flag prospects who project as a genuine NHL
     // player (≥3★ = bottom-six / 3rd-pair regular). An AHL/fringe ceiling is never
-    // "one to watch", no matter how far it sits above his current ability.
+    // "one to watch", no matter how he's trending.
     if (potStars < 3) return null
-    const highCeiling = potStars >= 3.5      // middle-six / 2nd-pair and up
-    const undervalued = gap >= 8             // his read sits well above his current play
-    if (!highCeiling && !undervalued) return null
+    const highCeiling = potStars >= 3.5                 // middle-six / 2nd-pair and up
+    const sleeper = ourCeiling - analystPerceived >= 5  // our read sits above the book
+    if (!highCeiling && !sleeper) return null
 
     // Respect the covering scout's recruitment-focus bar — he won't bother
     // flagging a prospect below the minimum potential the GM set for him.
     const scout = this.scoutCovering(p)
     if (scout && potStars < scout.minPotentialStars) return null
 
-    const role = ceilingRoleShort(perceived, p.position)
+    const role = ceilingRoleShort(ourCeiling, p.position)
     const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
     const reason =
-      highCeiling ? `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
-      : undervalued ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
-      : `Promising young ${p.position} — ${role} upside.`
+      sleeper ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
+      : `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)
 
@@ -5425,7 +5427,7 @@ export class Career {
           ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
           knowledge: Math.round(k),
           currentStars: overallToStars(ratedOverall(p)),
-          potentialStars: overallToStars(agedPotential(p)),
+          potentialStars: overallToStars(this.scoutedCeilingOf(p)),
           ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         }
       })
@@ -5650,7 +5652,7 @@ export class Career {
         position: p.position,
         age: p.age,
         currentStars: overallToStars(ratedOverall(p)),
-        potentialStars: overallToStars(agedPotential(p)),
+        potentialStars: overallToStars(this.scoutedCeilingOf(p)),
       })
       const notables = [...pool]
         .sort((a, b) => ratedOverall(b) - ratedOverall(a))
@@ -5720,7 +5722,7 @@ export class Career {
         position: p.position,
         age: p.age,
         currentStars: overallToStars(ratedOverall(p)),
-        potentialStars: overallToStars(agedPotential(p)),
+        potentialStars: overallToStars(this.scoutedCeilingOf(p)),
       }
     }
 
@@ -5991,7 +5993,9 @@ export class Career {
           const consensusRank = consensusRankOf.get(id) ?? yourRank
           const movement = consensusRank - yourRank
           const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
-          return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
+          // The Potential column on OUR board shows OUR fog-aware read (c.row's is
+          // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
+          return { rank: yourRank, ...c.row, potentialStars: overallToStars(this.scoutedCeilingOf(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
         })
 
     // Staff consensus board: grounded value + department signal, knowledge-scaled.

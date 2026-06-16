@@ -13,9 +13,9 @@
 
 import type { Player, PlayerId } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf } from '@engine/league/scouting'
 import { ratedOverall, agedPotential, overallToStars } from '@engine/ratings/composites'
-import { maskedOverall } from '@engine/league/scouting'
+import { maskedOverall, maskedCeiling } from '@engine/league/scouting'
 
 export interface OpinionSnapshot {
   day: number
@@ -103,12 +103,17 @@ export function recordOpinions(args: RecordOpinionsArgs): OpinionShift[] {
     if (!own && k < TRACK_FLOOR) continue
 
     const perceived = perceivedOverall(p, k)
+    // Potential is the FOG-AWARE read too, so "raised/lowered his ceiling" tracks
+    // our scouts learning the player — not just his hidden true development.
+    const potCeiling = own || k >= 95
+      ? agedPotential(p)
+      : (() => { const { lo, hi } = maskedCeiling(agedPotential(p), k, id, accuracyOf(args.scouting, id)); return Math.round((lo + hi) / 2) })()
     const snap: OpinionSnapshot = {
       day: args.day,
       year: args.year,
       overall: perceived,
       currentStars: overallToStars(perceived),
-      potentialStars: potentialStarsOf(p),
+      potentialStars: overallToStars(potCeiling),
       knowledge: Math.round(k),
     }
 
