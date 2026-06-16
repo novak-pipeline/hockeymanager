@@ -1406,17 +1406,26 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const scoutedPlayers: import('./views').ScoutedPlayerRow[] = []
   for (const [pid, k] of scouting.knowledge) {
     if (k < 15) continue
+    if (ownRoster.has(pid as string)) continue // your own players aren't acquisition targets
     const p = players.get(pid as PlayerId)
     if (!p) continue
     const cur = overallToStars(ratedOverall(p))
     const pot = potentialStars(p, scouting)
-    const ceiling = Math.max(cur, pot)
-    const young = p.age <= 23
+    const headroom = Math.max(0, pot - cur)
+    // TARGET value (FM-style): a recommendation is about who's worth PURSUING, not
+    // raw quality. Youth + remaining upside drive it; value fades hard with age
+    // (you don't "target" a 30-year-old — for established NHLers scouting just keeps
+    // your knowledge current), and elite CURRENT players are near-impossible to
+    // acquire so they're discounted too. A 19-year-old with a high ceiling and room
+    // to grow is the prize; a world-class veteran on another roster is not.
+    const ageFactor = p.age <= 20 ? 1 : p.age <= 23 ? 0.9 : p.age <= 26 ? 0.6 : p.age <= 29 ? 0.4 : 0.25
+    const acquirability = cur >= 4.5 ? 0.5 : cur >= 4 ? 0.7 : cur >= 3 ? 0.9 : 1
+    const targetScore = (pot * 0.55 + headroom * 1.2) * ageFactor * acquirability
     const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =
-      ceiling >= 4.5 ? 'A+'
-      : ceiling >= 4 ? (young ? 'A+' : 'A')
-      : ceiling >= 3 ? (young ? 'A' : 'B')
-      : ceiling >= 2 ? 'C'
+      targetScore >= 3.2 ? 'A+'
+      : targetScore >= 2.4 ? 'A'
+      : targetScore >= 1.6 ? 'B'
+      : targetScore >= 0.9 ? 'C'
       : 'D'
     scoutedPlayers.push({
       playerId: pid as string,
@@ -1429,13 +1438,14 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       potentialStars: pot,
       knowledge: Math.round(k),
       rec,
+      targetScore: Math.round(targetScore * 100) / 100,
       salary: p.contract.salary,
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
     })
   }
-  const recOrder = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
+  // Best targets first — young, high-upside, acquirable.
   scoutedPlayers.sort((a, b) =>
-    recOrder[a.rec] - recOrder[b.rec] ||
+    b.targetScore - a.targetScore ||
     b.potentialStars - a.potentialStars ||
     b.currentStars - a.currentStars,
   )

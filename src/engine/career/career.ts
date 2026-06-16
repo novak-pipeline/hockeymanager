@@ -5966,15 +5966,16 @@ export class Career {
     // him. Each scout then layers their own specialty bias + judgment-scaled noise
     // on top → distinct boards, but always anchored to what our staff has seen.
     const cands = [...board.values()]
-    const groundedValueOf = (c: Cand): number => {
-      const kw = Math.max(0, Math.min(1, (meta.get(c.row.playerId)?.knowledge ?? 0) / 100))
-      // Fog blend: true ceiling once we've watched him, public ceiling when we haven't.
-      const groundedCeiling = agedPotential(c.player) * kw + c.input.ceiling * (1 - kw)
-      // Apply the SAME positional fade + re-entry dock the analyst board uses, so
-      // hard-to-project positions (a tandem-ceiling goalie) and passed-over re-
-      // entries don't crack the top of our board either — goalies almost never go
-      // top-10 in reality, and our scouts know it.
-      const base = groundedCeiling * 0.74 + c.input.current * 0.26
+    // VALUE is a culmination of current ability AND projected ceiling, built from
+    // the SAME numbers we display (current = ratedOverall, potential = our fog-
+    // aware ceiling read), faded for goalies + docked for re-entries the way real
+    // boards treat them. This is the PRIMARY sort key, so the rule the user wants
+    // is guaranteed: a skater with both higher current and higher potential always
+    // outranks a lesser one — the scout signal can only break near-ties, never
+    // invert a clear value gap.
+    const valueOf = (c: Cand): number => {
+      const ceil = this.scoutedCeilingOf(c.player)
+      const base = ceil * 0.74 + c.input.current * 0.26
       return base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility)
     }
     const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
@@ -5992,10 +5993,11 @@ export class Career {
     const consensusRankOf = new Map<string, number>()
     ordered.forEach((id, i) => consensusRankOf.set(id, i + 1))
 
-    // Build a board (top 64) from a per-candidate value function.
-    const buildBoard = (valueOf: (c: Cand) => number): ScoutBoardRowView[] =>
+    // Build a board (top 64): VALUE first (guarantees the monotonicity rule), then
+    // the scout signal as a tie-breaker for near-equal prospects only.
+    const buildBoard = (signalOf: (c: Cand) => number): ScoutBoardRowView[] =>
       [...cands]
-        .sort((a, b) => valueOf(b) - valueOf(a))
+        .sort((a, b) => valueOf(b) - valueOf(a) || signalOf(b) - signalOf(a))
         .slice(0, 64)
         .map((c, i) => {
           const id = c.row.playerId
@@ -6008,13 +6010,14 @@ export class Career {
           return { rank: yourRank, ...c.row, potentialStars: overallToStars(this.scoutedCeilingOf(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
         })
 
-    // Staff consensus board: grounded value + department signal, knowledge-scaled.
+    // Staff consensus board: department signal breaks ties between equal-value
+    // prospects (intangibles + underlying game), knowledge-scaled.
     const scoutBoard = buildBoard((c) => {
       const m = meta.get(c.row.playerId)!
-      return groundedValueOf(c) + m.deptRaw * (m.knowledge / 100)
+      return m.deptRaw * (m.knowledge / 100)
     })
 
-    // Per-scout boards: each scout adds their own bias + judgment-scaled noise.
+    // Per-scout boards: each scout's own bias + judgment-scaled noise as the tie-break.
     const scouts = this.getTeamStaff(this.userTeamId as string).scouts
     const scoutBoards = scouts.map((s) => ({
       scoutId: s.id as string,
@@ -6022,7 +6025,7 @@ export class Career {
       rows: buildBoard((c) => {
         const m = meta.get(c.row.playerId)!
         const bias = scoutDraftBias(s, c.player, m.composites)
-        return groundedValueOf(c) + (m.deptRaw + bias) * (m.knowledge / 100)
+        return (m.deptRaw + bias) * (m.knowledge / 100)
       }),
     }))
 

@@ -1587,8 +1587,11 @@ export interface ScoutedPlayerRow {
   potentialStars: number
   /** 0–100 scouting knowledge. */
   knowledge: number
-  /** Recommendation grade. */
+  /** Recommendation grade — a TARGET grade (youth + upside + acquirability),
+   *  not raw quality. An ageing star you can't pry loose grades low. */
   rec: 'A+' | 'A' | 'B' | 'C' | 'D'
+  /** Acquisition-target score backing the grade; sorts the list. */
+  targetScore: number
   /** Current salary (≈ transfer/asset value proxy). */
   salary: number
   faceId?: string
