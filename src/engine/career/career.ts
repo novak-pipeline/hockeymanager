@@ -5817,11 +5817,16 @@ export class Career {
    *  the ceiling role and draft verdict never reveal the hidden true potential. */
   private scoutedCeilingOf(p: Player): number {
     const pid = p.id as string
+    if (this.userTeam.roster.includes(asPlayerId(pid))) return agedPotential(p)
+    return this.scoutedCeilingWith(p, knowledgeOf(this.scouting, pid), accuracyOf(this.scouting, pid))
+  }
+
+  /** scoutedCeilingOf when knowledge + accuracy are already in hand — avoids the
+   *  O(n) knowledgeOf/accuracyOf linear scans in hot loops (e.g. the draft board). */
+  private scoutedCeilingWith(p: Player, knowledge: number, accuracy: number): number {
     const ceiling = agedPotential(p)
-    if (this.userTeam.roster.includes(asPlayerId(pid))) return ceiling
-    const k = knowledgeOf(this.scouting, pid)
-    if (k >= 95) return ceiling
-    const { lo, hi } = maskedCeiling(ceiling, k, pid, accuracyOf(this.scouting, pid))
+    if (knowledge >= 95) return ceiling
+    const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
     return Math.round((lo + hi) / 2)
   }
 
@@ -5967,26 +5972,32 @@ export class Career {
     // him. Each scout then layers their own specialty bias + judgment-scaled noise
     // on top → distinct boards, but always anchored to what our staff has seen.
     const cands = [...board.values()]
-    // VALUE is a culmination of current ability AND projected ceiling, built from
-    // the SAME numbers we display (current = ratedOverall, potential = our fog-
-    // aware ceiling read), faded for goalies + docked for re-entries the way real
-    // boards treat them. This is the PRIMARY sort key, so the rule the user wants
-    // is guaranteed: a skater with both higher current and higher potential always
-    // outranks a lesser one — the scout signal can only break near-ties, never
-    // invert a clear value gap.
-    const valueOf = (c: Cand): number => {
-      const ceil = this.scoutedCeilingOf(c.player)
-      const base = ceil * 0.74 + c.input.current * 0.26
-      return base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility)
-    }
+    // PERF: precompute knowledge + ceiling + VALUE once per candidate (the O(n)
+    // knowledgeOf/accuracyOf scans run n times here, never inside the sort). The
+    // sort + every board then read O(1) map lookups — without this, the comparator
+    // recomputed scoutedCeilingOf (→ knowledgeOf linear scan) ~n·log n × boards,
+    // which is what made the rankings + every player profile crawl.
+    const ownIds = new Set(this.userTeam.roster.map((x) => x as string))
     const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
+    const ceilingById = new Map<string, number>()
+    const valueById = new Map<string, number>()
     for (const c of cands) {
       const id = c.row.playerId
-      const isOwn = this.userTeam.roster.includes(asPlayerId(id))
+      const isOwn = ownIds.has(id)
       const knowledge = isOwn ? 100 : knowledgeOf(this.scouting, id)
+      const accuracy = isOwn ? 1 : accuracyOf(this.scouting, id)
+      // VALUE = current ability + our fog-aware ceiling read (the SAME numbers we
+      // display), faded for goalies + docked for re-entries like a real board. This
+      // is the PRIMARY sort key, so a skater higher in BOTH current and potential
+      // always outranks a lesser one — the scout signal only breaks near-ties.
+      const ceil = isOwn || knowledge >= 95 ? agedPotential(c.player) : this.scoutedCeilingWith(c.player, knowledge, accuracy)
+      ceilingById.set(id, ceil)
+      const base = ceil * 0.74 + c.input.current * 0.26
+      valueById.set(id, base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility))
       const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
       meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
     }
+    const valueOf = (c: Cand): number => valueById.get(c.row.playerId) ?? 0
     // The "Cons." column = the ACTUAL analyst board order (same `ordered` the
     // published rankings use), so the movement arrows compare our board against
     // the exact consensus the user sees on the Analyst tab — not a parallel
@@ -6008,7 +6019,7 @@ export class Career {
           const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
           // The Potential column on OUR board shows OUR fog-aware read (c.row's is
           // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
-          return { rank: yourRank, ...c.row, potentialStars: overallToStars(this.scoutedCeilingOf(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
+          return { rank: yourRank, ...c.row, potentialStars: overallToStars(ceilingById.get(id) ?? agedPotential(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
         })
 
     // Staff consensus board: department signal breaks ties between equal-value

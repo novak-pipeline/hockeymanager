@@ -457,6 +457,15 @@ export function potentialStars(p: Player, scouting?: ScoutingState): number {
   return overallToStars(scoutedCeiling(p, scouting))
 }
 
+/** scoutedCeiling when knowledge + accuracy are already in hand — skips the O(n)
+ *  knowledgeOf/accuracyOf scans, for row-heavy builders (scouting tables). */
+export function scoutedCeilingK(p: Player, knowledge: number, accuracy: number): number {
+  const ceiling = agedPotential(p)
+  if (knowledge >= 95) return ceiling
+  const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
+  return Math.round((lo + hi) / 2)
+}
+
 /** FM-style trend arrow from a signed development delta. A move of a full
  *  overall point (or more) since the last pass counts as a real trend; smaller
  *  jitter reads as steady. */
@@ -1179,6 +1188,16 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
 
   const { competitions, competitionMeta, nextOpponentId, scoutMarket } = ctx
 
+  // PERF: precompute scout-read accuracy once (judgmentOf/accuracyOf are O(n)
+  // linear scans; the scouted-players table iterates every known player, so
+  // calling them per row was O(n²)). Look up O(1) from this map instead.
+  const judgmentByPid = new Map<string, number>()
+  for (const [pid, j] of scouting.judgment ?? []) judgmentByPid.set(pid, j)
+  const accFor = (pid: string): number => {
+    const j = judgmentByPid.get(pid) ?? 0
+    return j <= 0 ? 0.5 : Math.max(0, Math.min(1, j / 100))
+  }
+
   // Resolve a scope (+focus) to the set of player ids it covers — mirrors the
   // engine's resolveTarget so the cards/coverage match what actually ticks.
   const isYouth = (pid: string): boolean => {
@@ -1349,6 +1368,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   for (const r of scouting.recommendations ?? []) {
     const p = players.get(r.playerId as PlayerId)
     if (!p) continue
+    const recK = knowledgeOf(scouting, r.playerId)
     recommendations.push({
       ...badge(p),
       age: p.age,
@@ -1356,8 +1376,8 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       teamAbbr: teamAbbrOf.get(r.playerId) ?? 'FA',
       ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
       currentStars: overallToStars(ratedOverall(p)),
-      potentialStars: potentialStars(p, scouting),
-      knowledge: Math.round(knowledgeOf(scouting, r.playerId)),
+      potentialStars: overallToStars(scoutedCeilingK(p, recK, accFor(r.playerId))),
+      knowledge: Math.round(recK),
       grade: r.grade,
       reason: r.reason,
       scoutName: r.scoutName,
@@ -1410,7 +1430,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     const p = players.get(pid as PlayerId)
     if (!p) continue
     const cur = overallToStars(ratedOverall(p))
-    const pot = potentialStars(p, scouting)
+    const pot = overallToStars(scoutedCeilingK(p, k, accFor(pid as string)))
     const headroom = Math.max(0, pot - cur)
     // TARGET value (FM-style): a recommendation is about who's worth PURSUING, not
     // raw quality. Youth + remaining upside drive it; value fades hard with age
