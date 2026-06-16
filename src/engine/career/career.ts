@@ -5934,14 +5934,24 @@ export class Career {
       : 'Final pre-draft ranking'
 
     // ── Your scouts' own board ──────────────────────────────────────────────
-    // Consensus value (noise-free, ceiling-weighted) gives the baseline rank;
-    // your staff's signal (intangibles + underlying game, knowledge-scaled)
-    // re-ranks it. Because elite prospects sit on big value gaps, the same
-    // signal barely moves them but swings the bunched mid/late board — so your
-    // edge naturally grows the deeper you go. Each individual scout then layers
-    // their own specialty bias + judgment-scaled noise on top → distinct boards.
+    // The public CONSENSUS value (analyst perceived ceiling) is only the baseline
+    // we measure AGAINST — the movement arrows show how far our staff moves a
+    // prospect off the public board. Our own board ranks on the GROUNDED value:
+    // the hidden TRUE ceiling where we've put eyes on him, deferring to the public
+    // read only where we haven't scouted. This is the same grounded ceiling that
+    // drives his prospect grade and the per-player "Your scouts" verdict, so the
+    // board can never contradict them — a prospect we grade a depth player can't
+    // sit above one we grade a franchise talent just because the book is high on
+    // him. Each scout then layers their own specialty bias + judgment-scaled noise
+    // on top → distinct boards, but always anchored to what our staff has seen.
     const cands = [...board.values()]
     const consensusValueOf = (c: Cand): number => c.input.ceiling * 0.74 + c.input.current * 0.26
+    const groundedValueOf = (c: Cand): number => {
+      const kw = Math.max(0, Math.min(1, (meta.get(c.row.playerId)?.knowledge ?? 0) / 100))
+      // Fog blend: true ceiling once we've watched him, public ceiling when we haven't.
+      const groundedCeiling = agedPotential(c.player) * kw + c.input.ceiling * (1 - kw)
+      return groundedCeiling * 0.74 + c.input.current * 0.26
+    }
     const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
     for (const c of cands) {
       const id = c.row.playerId
@@ -5968,10 +5978,10 @@ export class Career {
           return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
         })
 
-    // Staff consensus board: department signal, knowledge-scaled.
+    // Staff consensus board: grounded value + department signal, knowledge-scaled.
     const scoutBoard = buildBoard((c) => {
       const m = meta.get(c.row.playerId)!
-      return consensusValueOf(c) + m.deptRaw * (m.knowledge / 100)
+      return groundedValueOf(c) + m.deptRaw * (m.knowledge / 100)
     })
 
     // Per-scout boards: each scout adds their own bias + judgment-scaled noise.
@@ -5982,7 +5992,7 @@ export class Career {
       rows: buildBoard((c) => {
         const m = meta.get(c.row.playerId)!
         const bias = scoutDraftBias(s, c.player, m.composites)
-        return consensusValueOf(c) + (m.deptRaw + bias) * (m.knowledge / 100)
+        return groundedValueOf(c) + (m.deptRaw + bias) * (m.knowledge / 100)
       }),
     }))
 

@@ -170,11 +170,24 @@ function StarRating({
 }
 
 function PotentialStars({ count }: { count: number }): JSX.Element {
+  // Render halves like StarRating so the POTENTIAL tile and the "Our ceiling"
+  // row (which both bind the same number) never disagree visually.
+  const filled = Math.floor(count)
+  const half = count - filled >= 0.5
   return (
     <span title={`${count}/5 potential`} style={{ letterSpacing: 2 }}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <span key={i} style={{ color: i < count ? 'var(--accent2)' : 'var(--line)', fontSize: 13 }}>★</span>
-      ))}
+      {Array.from({ length: 5 }, (_, i) => {
+        if (i < filled) return <span key={i} style={{ color: 'var(--accent2)', fontSize: 13 }}>★</span>
+        if (i === filled && half) {
+          return (
+            <span key={i} style={{ fontSize: 13, position: 'relative', display: 'inline-block', lineHeight: 1, color: 'var(--line)' }}>
+              ★
+              <span style={{ position: 'absolute', left: 0, top: 0, width: '50%', overflow: 'hidden', color: 'var(--accent2)', display: 'inline-block' }}>★</span>
+            </span>
+          )
+        }
+        return <span key={i} style={{ color: 'var(--line)', fontSize: 13 }}>★</span>
+      })}
     </span>
   )
 }
@@ -1678,6 +1691,17 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
     sr.tier === 'Prospect' ? 'var(--violet-h)' :
     'var(--muted)'
 
+  // PROJECTION tile: for a draft prospect, this is the MATURITY projection — the
+  // ceiling role our scouts believe he tops out at (e.g. "Top-pair D") — not the
+  // roster-value tier his current ability slots into. For an established player
+  // there's no separate ceiling to show, so we keep the value tier.
+  const isDraftProspect = !!d.analystProjection || sr.tier === 'Prospect'
+  const projectionLabel = isDraftProspect && d.scoutsCeilingRole ? d.scoutsCeilingRole : sr.tierLabel
+  const projectionColor = isDraftProspect ? 'var(--violet-h)' : tierColor
+  const projectionBlurb = isDraftProspect && d.scoutsCeilingRole
+    ? 'Our scouts’ projected ceiling — the role he tops out in if he develops as expected.'
+    : sr.tierBlurb
+
   const v = d.scoutVerdict
 
   return (
@@ -1797,15 +1821,15 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <VerdictTile label="POTENTIAL">
               <PotentialStars count={d.potentialStars} />
             </VerdictTile>
-            <VerdictTile label="PROJECTION" accent={tierColor}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: tierColor }}>
-                {sr.tier === 'Prospect' && d.scoutsCeilingRole ? d.scoutsCeilingRole : sr.tierLabel}
+            <VerdictTile label="PROJECTION" accent={projectionColor}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: projectionColor }}>
+                {projectionLabel}
               </span>
             </VerdictTile>
           </div>
 
           {/* What the projection means, in hockey terms */}
-          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{sr.tierBlurb}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{projectionBlurb}</div>
 
           {/* Report card — EP-style graded strip */}
           <div>
