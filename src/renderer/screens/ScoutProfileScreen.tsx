@@ -33,6 +33,10 @@ export function ScoutProfileScreen({ scoutId }: { scoutId: string }): JSX.Elemen
   const client = useClient()
   const nav = useNav()
   const [tab, setTab] = useState<Tab>('attributes')
+  const [posFilter, setPosFilter] = useState<'ALL' | 'F' | 'D' | 'G'>('ALL')
+  const [minPot, setMinPot] = useState(0)
+  const [sortKey, setSortKey] = useState<'potential' | 'current' | 'age' | 'knowledge'>('potential')
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
   const { data, loading, error } = useScreenData<ScoutProfileView | null>(
     () => client.getScoutProfile(scoutId),
     (r) => (r.type === 'scoutProfile' ? r.scoutProfile : null)
@@ -114,32 +118,71 @@ export function ScoutProfileScreen({ scoutId }: { scoutId: string }): JSX.Elemen
             </Panel>
           )}
 
-          {tab === 'scouted' && (
-            <Panel title={`Players Scouted (${data.scouted.length})`}>
-              {data.scouted.length === 0 ? (
-                <p className="muted small">No meaningful intel yet — give him time on assignment.</p>
-              ) : (
-                <div className="table-wrap" style={{ maxHeight: 540, overflowY: 'auto' }}>
-                  <table className="table">
-                    <thead><tr><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th><th>Current</th><th>Potential</th><th className="num">Know.</th></tr></thead>
-                    <tbody>
-                      {data.scouted.map((p) => (
-                        <tr key={p.playerId}>
-                          <td><span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>{p.nationality && <FlagIcon nationality={p.nationality} size={14} />}<PlayerLink playerId={p.playerId} name={p.name} /></span></td>
-                          <td className="num muted">{p.position}</td>
-                          <td className="num muted">{p.age}</td>
-                          <td className="muted small">{p.teamAbbr}</td>
-                          <td style={{ color: 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>{stars5(p.currentStars) || '–'}</td>
-                          <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(p.potentialStars) || '–'}</td>
-                          <td className="num muted small">{p.knowledge}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-          )}
+          {tab === 'scouted' && (() => {
+            const isPos = (pos: string, f: 'F' | 'D' | 'G'): boolean => {
+              const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+              return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
+            }
+            const sortVal = (p: typeof data.scouted[number]): number =>
+              sortKey === 'potential' ? p.potentialStars
+              : sortKey === 'current' ? p.currentStars
+              : sortKey === 'age' ? p.age
+              : p.knowledge
+            const rows = data.scouted
+              .filter((p) => posFilter === 'ALL' || isPos(p.position, posFilter))
+              .filter((p) => p.potentialStars >= minPot)
+              .sort((a, b) => (sortDir === 'desc' ? sortVal(b) - sortVal(a) : sortVal(a) - sortVal(b)))
+            const setSort = (k: typeof sortKey): void => {
+              if (k === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))
+              else { setSortKey(k); setSortDir('desc') }
+            }
+            const arrow = (k: typeof sortKey): string => (k === sortKey ? (sortDir === 'desc' ? ' ▾' : ' ▴') : '')
+            const Th = ({ k, label }: { k: typeof sortKey; label: string }): JSX.Element => (
+              <th className="num" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSort(k)}>{label}{arrow(k)}</th>
+            )
+            return (
+              <Panel title={`Players Scouted (${data.scouted.length})`}>
+                {data.scouted.length === 0 ? (
+                  <p className="muted small">No meaningful intel yet — give him time on assignment. Every player he watches is logged here.</p>
+                ) : (
+                  <>
+                    <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                      <div className="row" style={{ gap: 4 }}>
+                        {(['ALL', 'F', 'D', 'G'] as const).map((f) => (
+                          <button key={f} className={`chip ${posFilter === f ? 'chip-accent' : ''}`} onClick={() => setPosFilter(f)}>{f}</button>
+                        ))}
+                      </div>
+                      <div className="row" style={{ gap: 4, alignItems: 'center' }}>
+                        <span className="muted small">Min potential</span>
+                        {[0, 3, 4, 4.5].map((m) => (
+                          <button key={m} className={`chip ${minPot === m ? 'chip-accent' : ''}`} onClick={() => setMinPot(m)}>{m === 0 ? 'Any' : `${m}★`}</button>
+                        ))}
+                      </div>
+                      <span className="muted small" style={{ marginLeft: 'auto' }}>{rows.length} shown</span>
+                    </div>
+                    <div className="table-wrap" style={{ maxHeight: 540, overflowY: 'auto' }}>
+                      <table className="table">
+                        <thead><tr><th>Player</th><th className="num">Pos</th><Th k="age" label="Age" /><th>Club</th><Th k="current" label="Current" /><Th k="potential" label="Potential" /><Th k="knowledge" label="Know." /></tr></thead>
+                        <tbody>
+                          {rows.map((p) => (
+                            <tr key={p.playerId}>
+                              <td><span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>{p.nationality && <FlagIcon nationality={p.nationality} size={14} />}<PlayerLink playerId={p.playerId} name={p.name} /></span></td>
+                              <td className="num muted">{p.position}</td>
+                              <td className="num muted">{p.age}</td>
+                              <td className="muted small">{p.teamAbbr}</td>
+                              <td style={{ color: 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>{stars5(p.currentStars) || '–'}</td>
+                              <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(p.potentialStars) || '–'}</td>
+                              <td className="num muted small">{p.knowledge}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </Panel>
+            )
+          })()}
         </>
       )}
     </section>

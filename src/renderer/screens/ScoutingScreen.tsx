@@ -320,12 +320,16 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
       case 'current': return b.currentStars - a.currentStars
       case 'age': return a.age - b.age
       case 'knowledge': return b.knowledge - a.knowledge
-      default: return recOrder[a.rec]! - recOrder[b.rec]! || b.potentialStars - a.potentialStars
+      default: return b.targetScore - a.targetScore || recOrder[a.rec]! - recOrder[b.rec]!
     }
   })
 
   return (
-    <Panel title={`Scouting Recommendations (${view.length})`}>
+    <Panel title={`Acquisition Targets (${view.length})`}>
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+        Ranked by target value — youth and upside you could realistically acquire. Established
+        stars are deprioritised (scouting just keeps your read on them current).
+      </p>
       <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-2)', alignItems: 'center' }}>
         {positions.map((p) => (
           <button key={p} className={`chip${pos === p ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setPos(p)}>{p}</button>
@@ -334,7 +338,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
         <button className={`chip${topOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setTopOnly((t) => !t)}>Top targets only</button>
         <label className="small muted" style={{ marginLeft: 'auto' }}>Sort:&nbsp;
           <select className="select" value={sort} onChange={(e) => setSort(e.target.value as ScoutSort)} style={{ fontSize: 12 }}>
-            <option value="rec">Recommendation</option>
+            <option value="rec">Target value</option>
             <option value="potential">Potential</option>
             <option value="current">Current</option>
             <option value="knowledge">Knowledge</option>
@@ -528,13 +532,26 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
 }
 
 function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; rosterNeeds: string[] }): JSX.Element {
+  const [posFilter, setPosFilter] = useState<'ALL' | 'F' | 'D' | 'G'>('ALL')
+  const [gradeFilter, setGradeFilter] = useState<'ALL' | 'A+' | 'A' | 'B'>('ALL')
+  const [needsOnly, setNeedsOnly] = useState(false)
+
+  const isPos = (pos: string, f: 'F' | 'D' | 'G'): boolean => {
+    const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+    return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
+  }
+  const shown = finds
+    .filter((f) => posFilter === 'ALL' || isPos(f.position, posFilter))
+    .filter((f) => gradeFilter === 'ALL' || f.grade === gradeFilter)
+    .filter((f) => !needsOnly || f.fitsNeed)
+
+  // Summary: how many finds, how many fill a need, and the grade breakdown — a
+  // scannable headline so the Centre reads as a board's shortlist, not a wall of cards.
+  const gradeCount = (g: string): number => finds.filter((f) => f.grade === g).length
+  const needCount = finds.filter((f) => f.fitsNeed).length
+
   return (
-    <Panel title={`Scout Recommendations (${finds.length})`}>
-      {rosterNeeds.length > 0 && (
-        <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
-          Your roster is thin at <b style={{ color: 'var(--success)' }}>{rosterNeeds.join(', ')}</b> — need-fillers are flagged and floated to the top.
-        </p>
-      )}
+    <Panel title={`Scouting Centre`}>
       {finds.length === 0 ? (
         <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
           <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
@@ -543,9 +560,45 @@ function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; ros
           their finds will appear here (and land in your inbox).
         </div>
       ) : (
-        <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-          {finds.map((f) => <FindCard key={f.playerId} find={f} />)}
-        </div>
+        <>
+          {/* Headline summary */}
+          <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+            <div><div style={{ fontSize: 20, fontWeight: 800 }}>{finds.length}</div><div className="muted small">prospects flagged</div></div>
+            <div><div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)' }}>{needCount}</div><div className="muted small">fill a roster need</div></div>
+            <div className="row" style={{ gap: 6 }}>
+              {(['A+', 'A', 'B'] as const).map((g) => gradeCount(g) > 0 && (
+                <span key={g} className="chip" style={{ fontSize: 11, color: REC_COLOR[g], border: `1px solid ${REC_COLOR[g]}` }}>{gradeCount(g)} {g}</span>
+              ))}
+            </div>
+          </div>
+          {rosterNeeds.length > 0 && (
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+              Your roster is thin at <b style={{ color: 'var(--success)' }}>{rosterNeeds.join(', ')}</b> — need-fillers are flagged and floated to the top.
+            </p>
+          )}
+          {/* Filters */}
+          <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+            <div className="row" style={{ gap: 4 }}>
+              {(['ALL', 'F', 'D', 'G'] as const).map((f) => (
+                <button key={f} className={`chip${posFilter === f ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setPosFilter(f)}>{f}</button>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 4 }}>
+              {(['ALL', 'A+', 'A', 'B'] as const).map((g) => (
+                <button key={g} className={`chip${gradeFilter === g ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setGradeFilter(g)}>{g === 'ALL' ? 'All grades' : g}</button>
+              ))}
+            </div>
+            <button className={`chip${needsOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setNeedsOnly((v) => !v)}>Fills a need</button>
+            <span className="muted small" style={{ marginLeft: 'auto' }}>{shown.length} shown</span>
+          </div>
+          {shown.length === 0 ? (
+            <p className="muted small" style={{ padding: '12px 0' }}>No finds match these filters.</p>
+          ) : (
+            <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+              {shown.map((f) => <FindCard key={f.playerId} find={f} />)}
+            </div>
+          )}
+        </>
       )}
     </Panel>
   )
