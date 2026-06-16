@@ -1008,7 +1008,11 @@ export interface TradesView {
 export interface ProspectRowView extends PlayerBadge {
   /** Scouting consensus, 1 = best. */
   rank: number
+  /** Fog-aware potential (your scouts' read) — uncertain for prospects you
+   *  haven't scouted, sharp for ones you have. */
   potentialStars: number
+  /** 0–100 how well YOUR scouts know him (gates how trustworthy potentialStars is). */
+  knowledge: number
   drafted: boolean
 }
 
@@ -1470,6 +1474,8 @@ export interface ScoutCardView {
   focus: 'youth' | 'senior' | 'all'
   /** How many players currently fall under his assignment (post-focus). */
   coverage: number
+  /** Read speed given the scope size — Fast (focused) / Steady / Thin (spread). */
+  readSpeed: 'Fast' | 'Steady' | 'Thin'
   /** Nation his scope maps to (for the map + flag), or null if global/unassigned. */
   focusNation: string | null
 }

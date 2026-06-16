@@ -77,7 +77,7 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, YOUTH_MAX_AGE, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -1216,6 +1216,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       target: s.target,
       focus,
       coverage: coverageOf(s.target as { kind: string }, focus),
+      readSpeed: scoutReadSpeed(coverageOf(s.target as { kind: string }, focus)),
       focusNation: scopeNation(s.target as { kind: string }),
     }
   })

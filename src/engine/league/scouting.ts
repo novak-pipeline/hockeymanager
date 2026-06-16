@@ -391,6 +391,19 @@ export interface TickScoutingArgs {
 /** 'youth' focus = U23 (≤23). A scout's focus narrows his target set. The single
  *  source of truth for the youth age boundary across scouting code. */
 export const YOUTH_MAX_AGE = 23
+
+/** How many players a scout can watch closely before he's spread thin. Inside
+ *  this many, reads run at full speed; beyond it, per-player progress dilutes. */
+export const SCOUT_CAPACITY = 60
+/** Floor on the dilution factor, so even a continent-wide brief makes slow headway. */
+export const SCOUT_DILUTION_FLOOR = 0.25
+
+/** Qualitative read speed for a scope of the given size — for the UI. */
+export function scoutReadSpeed(scopeSize: number): 'Fast' | 'Steady' | 'Thin' {
+  if (scopeSize <= SCOUT_CAPACITY) return 'Fast'
+  if (scopeSize <= SCOUT_CAPACITY * 3) return 'Steady'
+  return 'Thin'
+}
 function passesFocus(player: Player, focus: ScoutFocus | undefined): boolean {
   if (!focus || focus === 'all') return true
   const youth = player.age <= YOUTH_MAX_AGE
@@ -418,17 +431,24 @@ export function tickScouting(args: TickScoutingArgs): void {
     const targetIds = resolveTarget(
       scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
     )
+    // Bandwidth: a scout has finite attention. A narrow brief (one player, a team,
+    // the next opponent) gets watched closely; cover a whole nation/league and he's
+    // spread thin — per-player progress dilutes. This is what makes a tight
+    // assignment a real choice vs "just scout the biggest region".
+    const inScope = targetIds.filter((pid) => {
+      const pl = players.get(pid as PlayerId)
+      return !!pl && passesFocus(pl, scout.focus)
+    })
+    const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, inScope.length)))
 
-    for (const pid of targetIds) {
-      const player = players.get(pid as PlayerId)
-      if (!player) continue
-      if (!passesFocus(player, scout.focus)) continue
+    for (const pid of inScope) {
+      const player = players.get(pid as PlayerId)!
       const current = knowledgeOf(state, pid)
       if (current >= 100) continue
 
       const baseGain = scout.rating / 25
       const noise = (rng.range(0, 40) - 20) / 10  // -2.0 .. +2.0
-      let gain = baseGain + noise
+      let gain = (baseGain + noise) * dilution
       // Knows his home market: faster reads on players from his specialty nation.
       if (scout.specialtyNation && player.nationality === scout.specialtyNation) gain *= 1.2
 

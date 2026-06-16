@@ -151,6 +151,7 @@ function BestAvailable(props: {
               <th>Age</th>
               <th className="num">OVR</th>
               <th>Potential</th>
+              <th className="num">Know.</th>
               {props.userIsOnClock && <th />}
             </tr>
           </thead>
@@ -172,6 +173,10 @@ function BestAvailable(props: {
                 </td>
                 <td>
                   <PotentialStars stars={p.potentialStars} />
+                </td>
+                <td className="num small" style={{ color: p.knowledge >= 60 ? 'var(--success)' : p.knowledge >= 30 ? 'var(--accent)' : 'var(--muted)' }}
+                  title={p.knowledge < 30 ? 'Barely scouted — this read is a guess' : 'How well your scouts know him'}>
+                  {p.knowledge}%
                 </td>
                 {props.userIsOnClock && (
                   <td>

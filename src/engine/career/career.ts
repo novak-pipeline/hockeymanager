@@ -201,6 +201,8 @@ import {
   assignScout,
   createInitialScouting,
   knowledgeOf,
+  accuracyOf,
+  maskedOverall,
   tickScouting,
   generateScoutCandidates,
   syncAssignmentsToScouts,
@@ -6260,11 +6262,17 @@ export class Career {
         onClockIndex >= 0 && d.order[onClockIndex].ownerTeamId === this.userTeamId,
       prospects: (cls?.prospects ?? []).map((pr) => {
         const p = this.resolve(pr.playerId)
+        const pid = pr.playerId as string
+        // Fog-gate potential by YOUR scouting: a prospect you watched all year
+        // reads sharply; one you ignored is a guess. Makes scouting matter at the draft.
+        const know = knowledgeOf(this.scouting, pid)
+        const band = maskedOverall(agedPotential(p), know, pid, accuracyOf(this.scouting, pid))
         return {
           ...badge(p),
           rank: pr.rank,
-          potentialStars: potentialStars(p),
-          drafted: taken.has(pr.playerId as string),
+          potentialStars: overallToStars(Math.round((band.lo + band.hi) / 2)),
+          knowledge: Math.round(know),
+          drafted: taken.has(pid),
         }
       }),
       complete: d.selections.length >= d.order.length,

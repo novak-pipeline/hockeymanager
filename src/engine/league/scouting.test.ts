@@ -526,6 +526,23 @@ describe('scout scopes, focus and market', () => {
     }
   })
 
+  it('a narrow brief reads a player faster than a sprawling one (bandwidth)', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(80)
+    const pid = [...draftProspectIds][0]!
+    const gainFor = (target: import('@domain/scouting').ScoutTarget): number => {
+      const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(80), draftProspectIds })
+      const s = state.assignments[0]!
+      s.target = target; s.focus = 'all'; s.rating = 70
+      state.assignments = [s]
+      const before = knowledgeOf(state, pid)
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(900) })
+      return knowledgeOf(state, pid) - before
+    }
+    const narrow = gainFor({ kind: 'player', playerId: pid })       // 1 player → full speed
+    const broad = gainFor({ kind: 'draftClass' })                    // whole class → spread thin
+    expect(narrow).toBeGreaterThan(broad)
+  })
+
   it('market generates distinct candidates; hire adds and fire removes', () => {
     const { data, userTeamId } = makeArgs(65)
     const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(65) })

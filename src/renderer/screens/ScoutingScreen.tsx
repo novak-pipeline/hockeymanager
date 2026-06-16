@@ -178,7 +178,13 @@ function ScoutCard(props: {
       </div>
 
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
-        <span className="muted">Covering <b style={{ color: 'var(--text)' }}>{scout.coverage}</b> players</span>
+        <span className="muted">
+          Covering <b style={{ color: 'var(--text)' }}>{scout.coverage}</b> ·{' '}
+          <span style={{ color: scout.readSpeed === 'Fast' ? 'var(--success)' : scout.readSpeed === 'Steady' ? 'var(--accent)' : 'var(--danger, #d8584f)' }}
+            title={scout.readSpeed === 'Thin' ? 'Spread thin — narrow his brief for faster, sharper reads' : 'Read speed at this scope size'}>
+            {scout.readSpeed} reads
+          </span>
+        </span>
         <span className="row" style={{ gap: 8, alignItems: 'center' }}>
           {scout.salary !== undefined && <span className="muted">{fmtMoney(scout.salary)}/yr</span>}
           <button
