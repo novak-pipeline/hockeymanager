@@ -5210,8 +5210,12 @@ export class Career {
     const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium)
     const potStars = overallToStars(perceived)
     const gap = perceived - current
-    const highCeiling = potStars >= 3.5
-    const undervalued = gap >= 8
+    // Absolute quality floor: only flag prospects who project as a genuine NHL
+    // player (≥3★ = bottom-six / 3rd-pair regular). An AHL/fringe ceiling is never
+    // "one to watch", no matter how far it sits above his current ability.
+    if (potStars < 3) return null
+    const highCeiling = potStars >= 3.5      // middle-six / 2nd-pair and up
+    const undervalued = gap >= 8             // his read sits well above his current play
     if (!highCeiling && !undervalued) return null
 
     // Respect the covering scout's recruitment-focus bar — he won't bother
@@ -5222,8 +5226,8 @@ export class Career {
     const role = ceilingRoleShort(perceived, p.position)
     const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
     const reason =
-      elig ? `High-upside draft prospect — projects as a ${role}.`
-      : undervalued && !highCeiling ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
+      highCeiling ? `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
+      : undervalued ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
       : `Promising young ${p.position} — ${role} upside.`
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)
