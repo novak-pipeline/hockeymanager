@@ -5891,9 +5891,10 @@ export class Career {
           const injuryDing = p.injuryStatus ? 4 : 0
           const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
           // Consensus scouting error: even the aggregate board misreads talent —
-          // a persistent per-player miss (±~16 ceiling pts) that, with development
-          // variance, brings draft-rank↔outcome down to the real ~0.45 range.
-          const consensusError = hashSigned(id + ':consensus') * 16
+          // a persistent per-player miss that, with development variance, keeps
+          // draft-rank↔outcome near the real ~0.45 range. Kept modest so PRODUCTION
+          // and tools drive the board (logic), not coin-flip noise.
+          const consensusError = hashSigned(id + ':consensus') * 14
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
           // when one is on staff, and noisier the weaker the analyst.

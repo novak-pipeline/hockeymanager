@@ -67,8 +67,8 @@ describe('analystRank', () => {
     expect(productionPremium(0.6, false, 0.50)).toBeGreaterThan(productionPremium(0.6, false, 0.25))
     // No sample → neutral.
     expect(productionPremium(0, false, 0.30)).toBe(0)
-    // Bounded — can't override pedigree.
-    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(14)
+    // Bounded — production is a strong driver but still can't fully override pedigree.
+    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(22)
   })
 
   it('production feeds the perceived ceiling', () => {

@@ -111,7 +111,11 @@ export function productionPremium(ppg: number, isD: boolean, leagueStrength: num
   const nhlePpg = ppg * Math.max(0.05, leagueStrength)
   const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
   const ratio = nhlePpg / par
-  return Math.max(-6, Math.min(14, Math.round((ratio - 1) * 12)))
+  // Production is the DOMINANT visible driver of a real draft board, and it's
+  // NHLe-translated — so a point-per-game in a strong league (NCAA, 0.40) beats a
+  // point-per-game in a weaker one (OHL, 0.30). Bounds wide enough that a dominant
+  // producer genuinely climbs and a no-show genuinely slides.
+  return Math.max(-10, Math.min(22, Math.round((ratio - 1) * 16)))
 }
 
 /** Goalies are notoriously hard to project — boards fade them (an elite goalie
