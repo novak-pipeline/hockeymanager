@@ -131,7 +131,7 @@ function scoutTierEstimate(
   scout: StaffMember,
   player: Player,
   trueTier: ProjectionTier,
-  _potStars: number,
+  potStars: number,
   composites: Record<string, number>
 ): ProjectionTier {
   // Error magnitude: [0, 2] tiers, shrinking with judgment.
@@ -143,12 +143,17 @@ function scoutTierEstimate(
   if (scout.demeanor === 'motivator') demeanorDelta = 0.3
   else if (scout.demeanor === 'fiery') demeanorDelta = -0.2
 
-  // A genuine young prospect: scouts debate the ceiling (Core..Star) and some
-  // still file him under "Prospect" — but he never reads as a fringe NHLer.
+  // A genuine young prospect: anchor each read on the tier he actually projects to
+  // (from his ceiling), NOT a hard-coded "Key". Most of the staff file him at that
+  // tier; the rest debate a tier either way — with a tighter spread than established
+  // players so the CONSENSUS tracks the headline projection instead of drifting a
+  // full tier high on a couple of bullish reads (which made the consensus chip read
+  // "Franchise Player" while the projection said "Top-six F").
   if (trueTier === 'Prospect') {
-    const idx = Math.round(3 + rawError + specDelta + demeanorDelta) // anchor at Key
-    if (hash01(scout.id + ':' + (player.id as string) + ':prosp') > 0.45) return 'Prospect'
-    return QUALITY_ORDER[Math.max(2, Math.min(4, idx))]!
+    const projected = prospectQuality(potStars)
+    if (hash01(scout.id + ':' + (player.id as string) + ':prosp') > 0.5) return projected
+    const idx = Math.round(qIndex(projected) + rawError * 0.7 + specDelta + demeanorDelta)
+    return QUALITY_ORDER[Math.max(1, Math.min(4, idx))]!
   }
 
   // Established players drift only within the quality ladder — never to Prospect.

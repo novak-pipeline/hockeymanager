@@ -126,7 +126,20 @@ export interface SeasonProjection {
   line: string
 }
 
-function skaterPointProjection(ovr: number, role: string, leagueFactor = 1, leagueName?: string): SeasonProjection {
+function skaterPointProjection(ovr: number, role: string, leagueFactor = 1, leagueName?: string, observed?: number): SeasonProjection {
+  const lf0 = Math.max(0.1, Math.min(1, leagueFactor))
+  // If we already have a real scoring sample this season, project off his ACTUAL
+  // pace. A junior's NHL-readiness rating badly under-counts what he produces in
+  // his own league, so the ovr model can read "6–8 points" for a player on pace
+  // for 50 — a glaring contradiction with the box score right above it.
+  if (observed !== undefined && observed > 0) {
+    const seasonGames = lf0 >= 0.95 ? 82 : 68
+    const proj = Math.round(observed * seasonGames)
+    const lo = Math.max(2, Math.round(proj * 0.9))
+    const hi = Math.round(proj * 1.1)
+    const where = leagueName && lf0 < 0.95 ? `in the ${leagueName} this season` : 'this season'
+    return { line: `On pace for around ${lo}–${hi} points ${where}` }
+  }
   // EHM-calibrated NHL-equivalent: an 80-overall top-liner ~80 pts, 50-overall depth ~12 pts.
   const base = Math.round(Math.pow(Math.max(0, (ovr - 40) / 60), 1.6) * 90)
   const roleBonus =
@@ -441,7 +454,11 @@ export function buildScoutReport(
   player: Player,
   scouting: ScoutingState | undefined,
   potStars: number,
-  league?: { factor: number; name: string }
+  league?: { factor: number; name: string },
+  /** Current-season scoring pace (points/game) in the league he actually plays in.
+   *  When present, the season point projection extrapolates from this real pace
+   *  instead of the (junior-underrating) NHL-readiness model. */
+  observedPace?: number,
 ): ScoutReportView {
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
@@ -457,7 +474,7 @@ export function buildScoutReport(
   const seasonProjection: SeasonProjection =
     player.position === 'G'
       ? goalieProjection(ovr)
-      : skaterPointProjection(ovr, player.role, league?.factor ?? 1, league?.name)
+      : skaterPointProjection(ovr, player.role, league?.factor ?? 1, league?.name, observedPace)
 
   // Build prose
   const prose = buildProse(player, knowledge, pid)

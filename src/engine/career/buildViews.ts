@@ -796,7 +796,7 @@ export function buildPlayerProfile(
   // scout panel); the fog-aware read drives everything we DISPLAY as our verdict.
   const truePotStars = potentialStars(p)
   const potStars = potentialStars(p, fog?.scouting)
-  const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague)
+  const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague, observedPace)
   // Scout Opinions: only scouts who have ACTUALLY watched this player file an
   // opinion (FM-style — a scout can't grade someone he's never seen). Own-org
   // players are known to the whole staff. When no scout has seen an opponent, the
@@ -1466,11 +1466,15 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     const ageFactor = p.age <= 20 ? 1 : p.age <= 23 ? 0.9 : p.age <= 26 ? 0.6 : p.age <= 29 ? 0.4 : 0.25
     const acquirability = cur >= 4.5 ? 0.5 : cur >= 4 ? 0.7 : cur >= 3 ? 0.9 : 1
     const targetScore = (pot * 0.55 + headroom * 1.2) * ageFactor * acquirability
+    // Thresholds calibrated against the formula's real range so the column actually
+    // DISCRIMINATES. A pool filtered to young prospects (all high ageFactor + low
+    // current → big headroom) previously landed everyone at A+; only the genuinely
+    // elite (≥4★ ceiling with room to grow) should earn the top grade.
     const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =
-      targetScore >= 3.2 ? 'A+'
-      : targetScore >= 2.4 ? 'A'
-      : targetScore >= 1.6 ? 'B'
-      : targetScore >= 0.9 ? 'C'
+      targetScore >= 5.5 ? 'A+'
+      : targetScore >= 4.2 ? 'A'
+      : targetScore >= 3.2 ? 'B'
+      : targetScore >= 2.2 ? 'C'
       : 'D'
     scoutedPlayers.push({
       playerId: pid as string,

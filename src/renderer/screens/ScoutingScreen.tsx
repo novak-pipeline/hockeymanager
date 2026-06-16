@@ -359,7 +359,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
             <thead>
               <tr>
                 <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
-                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Value</th>
+                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Salary</th>
                 {scouts && onScoutPlayer && <th></th>}
               </tr>
             </thead>
