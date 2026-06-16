@@ -452,6 +452,10 @@ export const YOUTH_MAX_AGE = 23
 export const SCOUT_CAPACITY = 60
 /** Floor on the dilution factor, so even a continent-wide brief makes slow headway. */
 export const SCOUT_DILUTION_FLOOR = 0.25
+/** How many independent scout opinions a single prospect is worth chasing. Once
+ *  this many of your scouts have filed a read, extra looks add little — spread the
+ *  bandwidth to less-seen players instead. */
+export const SCOUT_MAX_OPINIONS = 3
 
 /** Qualitative read speed for a scope of the given size — for the UI. */
 export function scoutReadSpeed(scopeSize: number): 'Fast' | 'Steady' | 'Thin' {
@@ -522,6 +526,18 @@ export function tickScouting(args: TickScoutingArgs): void {
     set.add(pid)
   }
 
+  // O(1) lookups for the working-set ordering (avoids O(n) scans per player):
+  //  - knowAt: a snapshot of current knowledge (staleness within a day is fine).
+  //  - opinions: how many scouts have ALREADY watched a player — so a scout who's
+  //    finished his own slice gravitates to the players the FEWEST scouts have
+  //    seen, building diverse second/third opinions instead of idling.
+  const kIndex = new Map<string, number>()
+  for (const [pid, k] of state.knowledge) kIndex.set(pid, k)
+  const knowAt = (pid: string): number => kIndex.get(pid) ?? 0
+  const seenCount = new Map<string, number>()
+  for (const set of history.values()) for (const pid of set) seenCount.set(pid, (seenCount.get(pid) ?? 0) + 1)
+  const opinions = (pid: string): number => seenCount.get(pid) ?? 0
+
   for (const scout of state.assignments) {
     const targetIds = resolveTarget(
       scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
@@ -534,18 +550,56 @@ export function tickScouting(args: TickScoutingArgs): void {
       const pl = players.get(pid as PlayerId)
       return !!pl && passesFocus(pl, scout.focus) && passesPosition(pl, scout.positionFilter)
     })
-    // Partition the matched pool across scouts sharing this exact brief.
+    // Working set = his STRIDE first (his slice of a shared brief), then — once his
+    // slice is saturated — SPILL OVER to other in-scope players to add a SECOND
+    // OPINION, preferring the ones the fewest scouts have seen. So scouts divide the
+    // pool while it's fresh, then converge so a prospect ends up assessed by several
+    // independent scouts instead of each scout idling on a maxed slice.
+    //  - A stride player is dropped only once team knowledge is maxed AND this scout
+    //    has already filed his own read on him (nothing left for HIM to add).
+    //  - An out-of-slice player is eligible for a second look if THIS scout hasn't
+    //    seen him and he's under the opinion cap (a 4th scout on the same kid adds
+    //    little — spread the looks around instead).
     const group = briefGroups.get(briefKey(scout))!
     const gSize = group.length
     const gIdx = gSize > 1 ? group.indexOf(scout) : 0
-    const inScope = gSize > 1 ? matched.filter((_, i) => i % gSize === gIdx) : matched
+    const isMine = (i: number): boolean => gSize <= 1 || i % gSize === gIdx
+    const myHistory = history.get(scout.scoutId)
+    const iHaveSeen = (pid: string): boolean => myHistory?.has(pid) ?? false
+    const mine: string[] = []
+    const overflow: string[] = []
+    matched.forEach((pid, i) => {
+      const learnable = knowAt(pid) < 100
+      if (isMine(i)) {
+        if (learnable || !iHaveSeen(pid)) mine.push(pid)
+      } else if (!iHaveSeen(pid) && opinions(pid) < SCOUT_MAX_OPINIONS) {
+        overflow.push(pid)
+      }
+    })
+    overflow.sort((a, b) => opinions(a) - opinions(b) || knowAt(a) - knowAt(b))
+    const inScope = [...mine, ...overflow].slice(0, SCOUT_CAPACITY)
     for (const pid of inScope) watchedToday.add(pid)
-    const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, inScope.length)))
+    // Bandwidth dilutes per-player gain by his RESPONSIBILITY LOAD (the size of his
+    // slice of the brief), not the capped daily working set — so a tight brief (one
+    // player, a team) reads fast, while a scout responsible for a whole nation /
+    // draft class is spread thin and reads each player slower.
+    const strideCount = gSize <= 1 ? matched.length : Math.ceil(matched.length / gSize)
+    const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, strideCount)))
 
     for (const pid of inScope) {
       const player = players.get(pid as PlayerId)!
       const current = knowledgeOf(state, pid)
-      if (current >= 100) continue
+
+      if (current >= 100) {
+        // Team knowledge is maxed, but if THIS scout hasn't filed a read yet, his
+        // look is a genuine second opinion — record it (and let a sharper scout's
+        // judgment tighten the read) without further raising knowledge.
+        if (!iHaveSeen(pid)) {
+          recordJudgment(state, pid, scout.judgment ?? scout.rating)
+          recordSeen(scout.scoutId, pid)
+        }
+        continue
+      }
 
       const baseGain = scout.rating / 25
       const noise = (rng.range(0, 40) - 20) / 10  // -2.0 .. +2.0

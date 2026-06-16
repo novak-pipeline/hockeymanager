@@ -314,6 +314,31 @@ describe('tickScouting', () => {
     expect(scoutsWhoSaw(state, p)).not.toContain(s1)
   })
 
+  it('once a scout saturates his slice he spills over to build SECOND opinions', () => {
+    const { data, userTeamId } = makeArgs(51)
+    const teams = data.teams as Map<import('@domain').TeamId, { roster: import('@domain').PlayerId[]; divisionId?: string }>
+    // A small shared pool so strides saturate quickly, then must overlap.
+    const pool = [...data.players.keys()].slice(0, 12).map((id) => id as string)
+    const draftProspectIds = new Set(pool)
+    const state = createInitialScouting({ userTeamId, teams, players: data.players, rng: new Rng(51), draftProspectIds })
+    // Two scouts share the (tiny) draft class; the rest parked on own roster.
+    state.assignments.forEach((s, i) => {
+      if (i < 2) { s.target = { kind: 'draftClass' }; s.focus = 'all'; s.positionFilter = 'any' }
+      else s.target = { kind: 'team', teamId: userTeamId }
+    })
+    for (let i = 0; i < 200; i++) {
+      tickScouting({ state, userTeamId, teams, players: data.players, draftProspectIds, freeAgentIds: new Set(), rng: new Rng(i + 800) })
+    }
+    // After saturating their disjoint slices, the two scouts converge — at least one
+    // pool player ends up watched by BOTH (a genuine second opinion, not idling).
+    const s0 = state.assignments[0]!.scoutId, s1 = state.assignments[1]!.scoutId
+    const bothSaw = pool.filter((pid) => {
+      const who = scoutsWhoSaw(state, pid)
+      return who.includes(s0) && who.includes(s1)
+    })
+    expect(bothSaw.length).toBeGreaterThan(0)
+  })
+
   it('scouts on an identical brief divide the work (broader coverage, not redundant)', () => {
     const { data, userTeamId, draftProspectIds } = makeArgs(31)
     const teams = data.teams as Map<import('@domain').TeamId, { roster: import('@domain').PlayerId[]; divisionId?: string }>
