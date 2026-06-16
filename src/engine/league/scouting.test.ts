@@ -486,7 +486,7 @@ describe('scout scopes, focus and market', () => {
       tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 760) })
     }
     expect(knowledgeOf(state, youth!)).toBeGreaterThan(yBefore)
-    expect(knowledgeOf(state, senior!)).toBe(sBefore) // senior untouched under youth focus
+    expect(knowledgeOf(state, senior!)).toBeLessThanOrEqual(sBefore) // senior not built under youth focus (may gently decay)
   })
 
   it('specialty nation gives a knowledge bonus over a generalist', () => {
@@ -557,8 +557,29 @@ describe('scout scopes, focus and market', () => {
     for (let i = 0; i < 10; i++) {
       tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds: new Set(), freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 950) })
     }
-    expect(knowledgeOf(state, aD)).toBeGreaterThan(dBefore) // D watched
-    expect(knowledgeOf(state, aF)).toBe(fBefore)            // forward ignored
+    expect(knowledgeOf(state, aD)).toBeGreaterThan(dBefore)       // D watched
+    expect(knowledgeOf(state, aF)).toBeLessThanOrEqual(fBefore)   // forward ignored (not built; may gently decay)
+  })
+
+  it('a read goes stale: unwatched knowledge decays toward the renown floor', () => {
+    const { data, userTeamId, draftProspectIds } = makeArgs(82)
+    const pid = [...draftProspectIds][0]!
+    const state = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(82), draftProspectIds })
+    state.assignments = [] // nobody scouting
+    // Seed a high read on a prospect, then let it idle.
+    const existing = state.knowledge.find(([id]) => id === pid)
+    if (existing) existing[1] = 85; else state.knowledge.push([pid, 85])
+    const before = knowledgeOf(state, pid)
+    for (let i = 0; i < 30; i++) {
+      tickScouting({ state, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, rng: new Rng(i + 1000) })
+    }
+    expect(knowledgeOf(state, pid)).toBeLessThan(before) // faded
+    // Protected players (your own org) never decay.
+    const state2 = createInitialScouting({ userTeamId, teams: teamsMap(data), players: data.players, rng: new Rng(82), draftProspectIds })
+    state2.assignments = []
+    const e2 = state2.knowledge.find(([id]) => id === pid); if (e2) e2[1] = 85
+    tickScouting({ state: state2, userTeamId, teams: teamsMap(data), players: data.players, draftProspectIds, freeAgentIds: new Set(), competitions: [], nextOpponentId: null, protectedIds: new Set([pid]), rng: new Rng(1) })
+    expect(knowledgeOf(state2, pid)).toBe(85)
   })
 
   it('market generates distinct candidates; hire adds and fire removes', () => {

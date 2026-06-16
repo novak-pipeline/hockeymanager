@@ -2473,6 +2473,7 @@ export class Career {
       freeAgentIds: this.currentFaIds(),
       competitions: this.scoutingCompetitions(),
       nextOpponentId: this.nextOpponentTeamId(),
+      protectedIds: this.ownOrgIds(),
       rng: this.rngFor(7008, day),
     })
     // Games reveal players: anyone who suits up becomes better known, so the

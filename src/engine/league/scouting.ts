@@ -287,6 +287,25 @@ function renownKnowledge(renown: number, rng: Rng): number {
   return Math.max(20, Math.min(95, base + rng.range(-4, 4)))
 }
 
+/** The knowledge floor a player's REPUTATION alone sustains — you never forget a
+ *  star entirely, but a prospect you stop watching fades toward obscurity.
+ *  Deterministic (no rng); knowledge decays toward this, never below it. */
+export function renownFloor(player: Player): number {
+  const renown = renownOf(player)
+  let base: number
+  if (renown >= 174) base = 90
+  else if (renown >= 160) base = 80
+  else if (renown >= 148) base = 70
+  else if (renown >= 136) base = 58
+  else if (renown >= 124) base = 46
+  else if (renown >= 110) base = 34
+  else base = 22
+  return base
+}
+
+/** How fast an unwatched player's knowledge fades toward his renown floor (per day). */
+export const KNOWLEDGE_DECAY_PER_DAY = 0.07
+
 /**
  * Build the initial ScoutingState for a new career.
  *
@@ -385,6 +404,8 @@ export interface TickScoutingArgs {
   competitions?: ScoutingCompetition[]
   /** The user's next-opponent team id, for the `nextOpponent` scope. */
   nextOpponentId?: string | null
+  /** Players never subject to knowledge decay (your own org — you always know them). */
+  protectedIds?: Set<string>
   rng: Rng
 }
 
@@ -431,6 +452,8 @@ export function tickScouting(args: TickScoutingArgs): void {
   const { state, teams, players, draftProspectIds, freeAgentIds, rng } = args
   const competitions = args.competitions ?? []
   const nextOpponentId = args.nextOpponentId ?? null
+  const protectedIds = args.protectedIds ?? new Set<string>()
+  const watchedToday = new Set<string>()
 
   // Rostered player set (for freeAgents target)
   const rosteredIds = new Set<string>()
@@ -450,6 +473,7 @@ export function tickScouting(args: TickScoutingArgs): void {
       const pl = players.get(pid as PlayerId)
       return !!pl && passesFocus(pl, scout.focus) && passesPosition(pl, scout.positionFilter)
     })
+    for (const pid of inScope) watchedToday.add(pid)
     const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, inScope.length)))
 
     for (const pid of inScope) {
@@ -474,6 +498,20 @@ export function tickScouting(args: TickScoutingArgs): void {
         recordJudgment(state, pid, scout.judgment ?? scout.rating)
       }
     }
+  }
+
+  // ── Knowledge decay ──────────────────────────────────────────────────────
+  // A read goes stale when no scout is watching: players not watched today (and
+  // not on your own org) drift back toward what their reputation alone sustains.
+  // This makes scouting an ongoing job, not one-and-done. Mutate entries in place
+  // (the array IS the store) to avoid O(n) setKnowledge scans per player.
+  for (const entry of state.knowledge) {
+    const pid = entry[0]
+    if (watchedToday.has(pid) || protectedIds.has(pid)) continue
+    const player = players.get(pid as PlayerId)
+    if (!player) continue
+    const floor = renownFloor(player)
+    if (entry[1] > floor) entry[1] = Math.max(floor, entry[1] - KNOWLEDGE_DECAY_PER_DAY)
   }
 }
 
