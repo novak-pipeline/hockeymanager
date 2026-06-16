@@ -110,7 +110,7 @@ export function buildScoutSummary(a: ScoutSummaryArgs): ScoutSummary {
       : ''
     const verb = a.preDraft ? 'finished the season with' : 'has put up'
     paras.push(
-      `${first} ${verb} ${pts} points (${a.goals}G, ${a.assists}A) in ${a.gamesPlayed} games in the ${a.leagueName}${rankClause} — ${paceWord}. ${productionColour(ppg, a.draftLabel, pid)}`,
+      `${first} ${verb} ${pts} points (${a.goals}G, ${a.assists}A) in ${a.gamesPlayed} games in the ${a.leagueName}${rankClause} — ${paceWord}. ${productionColour(ppg, a.draftLabel, pid, a.leagueScoringRank)}`,
     )
   } else if (a.gamesPlayed > 0 && isGoalie) {
     paras.push(`${first} has carried a real workload in the ${a.leagueName} this season, and our staff has built a read off those starts.`)
@@ -166,7 +166,11 @@ function projectionParagraph(a: ScoutSummaryArgs, confidence: ScoutSummary['conf
   return `Our scouts project him as ${role}. ${conf}.${risk}${comp}${draft}`
 }
 
-function productionColour(ppg: number, draftLabel: string | undefined, pid: string): string {
+function productionColour(ppg: number, draftLabel: string | undefined, pid: string, scoringRank?: number): string {
+  // Finishing near the top of his league trumps the raw rate — a scoring leader is
+  // never "unspectacular", even at a modest points-per-game.
+  if (scoringRank !== undefined && scoringRank <= 3) return pick(['Leading his league in scoring is a real feather in his cap.', 'You can\'t ignore production at the very top of the league.'], pid + ':prod')
+  if (scoringRank !== undefined && scoringRank <= 10) return pick(['Finishing among the league\'s top scorers is a strong marker.', 'That\'s top-of-the-league production for his level.'], pid + ':prod')
   if (ppg >= 1.1) return pick(['That kind of production turns heads.', 'Scoring at that clip at his age is a genuine draft-mover.'], pid + ':prod')
   if (ppg >= 0.6) return pick(['Useful output, even if it does not jump off the page.', 'Solid if unspectacular numbers.'], pid + ':prod')
   return pick(['The scoresheet has not always reflected his minutes.', 'The points have been harder to come by than the talent suggests.'], pid + ':prod')

@@ -163,36 +163,122 @@ function scoutTierEstimate(
  * Player" chip reads like a key player, never "a depth piece"). The optimist /
  * pessimist colour is a SEPARATE clause about where he sits vs the room.
  */
-const TAKE_BY_TIER: Record<ProjectionTier, string[]> = {
-  Star: [
-    'Elite — as good as I\'ve seen at this level.',
-    'A franchise cornerstone; you build the team around him.',
-    'A difference-maker every shift — best player on most ice he skates on.',
-  ],
-  Key: [
-    'A high-end player you lean on every night.',
-    'Top-of-the-lineup quality who drives results.',
-    'Plays big minutes in all situations and delivers.',
-  ],
-  Core: [
-    'A dependable everyday player through the middle of the lineup.',
-    'An honest, reliable regular — rarely a liability.',
-    'A solid middle-of-the-lineup contributor.',
-  ],
-  Depth: [
-    'A useful depth piece in a defined role.',
-    'Bottom-of-the-lineup energy — does the little things well.',
-    'A role player; won\'t move the needle, but does a job.',
-  ],
-  Fringe: [
-    'Replacement-level — a tweener fighting to hold down a job.',
-    'An AHL/NHL bubble body; depth insurance at best.',
-  ],
-  // Kept only as a safety net — the panel remaps Prospect → a value tier first.
-  Prospect: [
-    'Raw, but the ceiling is real — needs development time.',
-    'You\'re betting on projection, not what he is today.',
-  ],
+type PosGroup = 'F' | 'D' | 'G'
+function posGroup(pos: string): PosGroup {
+  if (pos === 'G') return 'G'
+  if (pos === 'D' || pos === 'LD' || pos === 'RD') return 'D'
+  return 'F'
+}
+
+/**
+ * Tier-anchored takes, POSITION-AWARE and deep enough that a room of ~25 scouts
+ * doesn't read as a wall of the same sentence. The verbal read always MATCHES the
+ * chip the scout files (a "Key Player" chip never reads like a depth piece), and
+ * the language fits the position (a winger isn't described as "plays big minutes
+ * in all situations" — that's a defenceman's line).
+ */
+const TAKES: Record<PosGroup, Record<ProjectionTier, string[]>> = {
+  F: {
+    Star: [
+      'Elite — a game-breaker every time he\'s on the ice.',
+      'A franchise forward; you build the top six around him.',
+      'The best forward on most sheets he skates on.',
+      'Drives play and finishes — a true number-one forward.',
+      'A dynamic, dangerous scorer at the top of any lineup.',
+      'Elite skill — he tilts the ice every shift.',
+    ],
+    Key: [
+      'A high-end top-six forward who drives results.',
+      'A real scoring threat you lean on every night.',
+      'Top-of-the-lineup forward — produces and creates.',
+      'A reliable point producer in a featured role.',
+      'A difference-maker on a scoring line.',
+      'Plays up the lineup and delivers offence.',
+    ],
+    Core: [
+      'A dependable middle-six forward.',
+      'An honest two-way forward — rarely a liability.',
+      'A solid everyday contributor through the middle.',
+      'A useful complementary scorer.',
+      'A reliable regular who chips in offence.',
+    ],
+    Depth: [
+      'A useful bottom-six forward in a defined role.',
+      'A fourth-line energy forward who does the little things.',
+      'A checking-line piece — won\'t move the needle offensively.',
+      'A role forward who forechecks hard and eats minutes.',
+    ],
+    Fringe: [
+      'A tweener forward fighting to hold an NHL job.',
+      'An AHL/NHL bubble forward; depth insurance at best.',
+    ],
+  },
+  D: {
+    Star: [
+      'Elite — a true number-one defenceman.',
+      'A franchise blueliner who logs every situation.',
+      'A game-changing defenceman you build around.',
+      'Drives play from the back end — a special talent.',
+      'The best defenceman on most sheets he plays.',
+    ],
+    Key: [
+      'A top-pairing defenceman you lean on every night.',
+      'Plays big minutes in all situations and delivers.',
+      'A real top-four blueliner who moves the puck and defends.',
+      'A trusted two-way defenceman up the lineup.',
+      'A high-end blueliner who eats tough minutes.',
+    ],
+    Core: [
+      'A dependable everyday defenceman.',
+      'An honest middle-pairing blueliner — rarely a liability.',
+      'A solid second/third-pair contributor.',
+      'A steady, reliable defender.',
+    ],
+    Depth: [
+      'A useful depth defenceman in a sheltered role.',
+      'A bottom-pair blueliner who keeps it simple.',
+      'A seventh-defenceman type — depth insurance.',
+    ],
+    Fringe: [
+      'A tweener blueliner fighting to hold a job.',
+      'An AHL/NHL bubble defenceman at best.',
+    ],
+  },
+  G: {
+    Star: [
+      'Elite — a franchise starting goaltender.',
+      'A true number-one who steals games.',
+      'A game-changing goaltender you build around.',
+    ],
+    Key: [
+      'A reliable starting goaltender.',
+      'A high-end netminder who gives you a chance every night.',
+      'A clear starter you can lean on.',
+    ],
+    Core: [
+      'A dependable goaltender — a solid tandem or 1B option.',
+      'An honest netminder who keeps you in games.',
+      'A steady tandem goaltender.',
+    ],
+    Depth: [
+      'A useful backup goaltender.',
+      'A depth netminder — spot-start insurance.',
+    ],
+    Fringe: [
+      'An AHL/NHL bubble goaltender at best.',
+    ],
+  },
+}
+
+// Safety net — the panel remaps Prospect → a value tier first, so this is rarely hit.
+const PROSPECT_TAKES = [
+  'Raw, but the ceiling is real — needs development time.',
+  'You\'re betting on projection, not what he is today.',
+]
+
+function takesFor(tier: ProjectionTier, pos: string): string[] {
+  if (tier === 'Prospect') return PROSPECT_TAKES
+  return TAKES[posGroup(pos)][tier] ?? TAKES[posGroup(pos)].Core
 }
 
 function leanSuffix(estIdx: number, trueIdx: number): string {
@@ -216,7 +302,7 @@ function scoutOneLiner(
   trueDisplayTier: ProjectionTier
 ): string {
   const key = scout.id + ':' + (player.id as string) + ':take'
-  const base = stablePick(TAKE_BY_TIER[displayTier] ?? TAKE_BY_TIER.Core, key)
+  const base = stablePick(takesFor(displayTier, player.position), key)
   return base + leanSuffix(tierIndex(displayTier), tierIndex(trueDisplayTier))
 }
 
@@ -341,12 +427,16 @@ export function computeRisk(
   else if (riskScore >= 2) band = 'Medium'
   else band = 'Low'
 
-  // Upside note
+  // Upside note — position-aware ("top-four" is a defenceman's term; a forward
+  // tops out "top-six", a goalie as a "starter").
+  const highCeil = player.position === 'G' ? 'starting-goaltender upside'
+    : player.position === 'D' || player.position === 'LD' || player.position === 'RD' ? 'top-pairing upside'
+    : 'top-six upside'
   let upsideNote: string
   if (trueTier === 'Star' || potStars >= 5) {
     upsideNote = 'Star-level upside if development goes well.'
   } else if (trueTier === 'Prospect' || potStars >= 4) {
-    upsideNote = 'Top-six or top-four upside — high-ceiling projection.'
+    upsideNote = `${highCeil.charAt(0).toUpperCase()}${highCeil.slice(1)} — high-ceiling projection.`
   } else if (potStars >= 3) {
     upsideNote = 'Core/key player upside with the right development path.'
   } else {
@@ -392,7 +482,8 @@ function computeConsensus(reads: ScoutRead[]): {
     const dissIdx = tierIndex(dissenterTier)
     const direction = dissIdx > estIdx ? 'higher' : 'lower'
     const dissenterWord = dissenterCount === 1 ? 'one scout' : `${dissenterCount} scouts`
-    dissentNote = `${topCount} of ${reads.length} scouts see ${TIER_LABELS[consensusTier]} upside; ${dissenterWord} ${direction === 'higher' ? 'is more bullish' : 'is more cautious'}.`
+    const verb = dissenterCount === 1 ? 'is' : 'are'
+    dissentNote = `${topCount} of ${reads.length} scouts see ${TIER_LABELS[consensusTier]} upside; ${dissenterWord} ${verb} more ${direction === 'higher' ? 'bullish' : 'cautious'}.`
   }
 
   return { consensusTier, dissentNote }
@@ -494,7 +585,9 @@ function watchedGameLine(scout: StaffMember, player: Player, ppg: number, estIdx
   const box = `${toi} TOI · ${goals}G ${assists}A ${pts}P`
   const qual = isD
     ? (pts >= 2 ? 'quarterbacked the play' : pts === 1 ? 'chipped in and defended well' : 'a steady two-way night, heavy minutes')
-    : (pts >= 3 ? 'drove the game' : pts === 2 ? 'dangerous all night' : pts === 1 ? 'a quieter offensive night' : 'kept off the scoresheet')
+    : (pts >= 3 ? 'drove the game' : pts === 2 ? 'dangerous all night'
+      : pts === 1 ? (goals >= 1 ? 'took his one chance, quiet otherwise' : 'a quieter night, one helper')
+      : 'kept off the scoresheet')
   return `${date} · ${box} — ${qual}`
 }
 
