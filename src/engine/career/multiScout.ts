@@ -158,66 +158,66 @@ function scoutTierEstimate(
 
 /* ─────────────────────── per-scout one-liner ─────────────────────── */
 
-const OPTIMIST_TAKES = [
-  'Shows real upside — could be a difference-maker.',
-  'Like what I see — has the tools to be a contributor.',
-  'High-end skill set; ceiling is worth the investment.',
-  'Underrated by most — I have him higher than the consensus.',
-  'A player who makes those around him better.',
-  'Good instincts, works hard — project him up.',
-]
+/**
+ * Tier-anchored takes: the verbal read MATCHES the chip the scout files (a "Key
+ * Player" chip reads like a key player, never "a depth piece"). The optimist /
+ * pessimist colour is a SEPARATE clause about where he sits vs the room.
+ */
+const TAKE_BY_TIER: Record<ProjectionTier, string[]> = {
+  Star: [
+    'Elite — as good as I\'ve seen at this level.',
+    'A franchise cornerstone; you build the team around him.',
+    'A difference-maker every shift — best player on most ice he skates on.',
+  ],
+  Key: [
+    'A high-end player you lean on every night.',
+    'Top-of-the-lineup quality who drives results.',
+    'Plays big minutes in all situations and delivers.',
+  ],
+  Core: [
+    'A dependable everyday player through the middle of the lineup.',
+    'An honest, reliable regular — rarely a liability.',
+    'A solid middle-of-the-lineup contributor.',
+  ],
+  Depth: [
+    'A useful depth piece in a defined role.',
+    'Bottom-of-the-lineup energy — does the little things well.',
+    'A role player; won\'t move the needle, but does a job.',
+  ],
+  Fringe: [
+    'Replacement-level — a tweener fighting to hold down a job.',
+    'An AHL/NHL bubble body; depth insurance at best.',
+  ],
+  // Kept only as a safety net — the panel remaps Prospect → a value tier first.
+  Prospect: [
+    'Raw, but the ceiling is real — needs development time.',
+    'You\'re betting on projection, not what he is today.',
+  ],
+}
 
-const PESSIMIST_TAKES = [
-  'Concerns about his compete level at this stage.',
-  'Not sold — the numbers flatter him.',
-  'Has limitations that are hard to coach around.',
-  'Too many question marks; would need to see more.',
-  'Risk of over-paying for what is essentially a depth piece.',
-  'Scouts around the league may be inflating his stock.',
-]
+function leanSuffix(estIdx: number, trueIdx: number): string {
+  if (estIdx > trueIdx + 0.5) return ' I\'m higher on him than the room.'
+  if (estIdx < trueIdx - 0.5) return ' Though I\'m more cautious than most.'
+  return ''
+}
 
-const NEUTRAL_TAKES = [
-  'Solid pro, does what is asked of him — no more.',
-  'Fits the profile — predictable, dependable output.',
-  'Won\'t hurt you, won\'t wow you.',
-  'A serviceable piece in the right system.',
-  'Steady contributor — consistent if unspectacular.',
-  'Fills a role well; not a game-changer.',
-]
-
-const STAR_TAKES = [
-  'Elite player — as good as I\'ve seen at this level.',
-  'Generational talent in the making.',
-  'Don\'t let him get away — he changes your team.',
-  'Best player on any ice he skates on.',
-]
-
-const PROSPECT_TAKES = [
-  'Raw but the ceiling is immense — patience required.',
-  'Long-term play — needs development time but the tools are there.',
-  'High-variance prospect; either a star or a bust.',
-  'You\'re betting on projection, not what he is today.',
-]
+/** A young "Prospect" read isn't a projection — express it as the value tier he
+ *  projects to, from his potential, so the chip reads "Key Player" not "Prospect". */
+function prospectQuality(potStars: number): ProjectionTier {
+  if (potStars >= 4.5) return 'Star'
+  if (potStars >= 3.5) return 'Key'
+  return 'Core'
+}
 
 function scoutOneLiner(
   scout: StaffMember,
   player: Player,
-  estimatedTier: ProjectionTier,
-  trueTier: ProjectionTier
+  displayTier: ProjectionTier,
+  trueDisplayTier: ProjectionTier
 ): string {
-  const estIdx = tierIndex(estimatedTier)
-  const trueIdx = tierIndex(trueTier)
   const key = scout.id + ':' + (player.id as string) + ':take'
-
-  if (estimatedTier === 'Star') return stablePick(STAR_TAKES, key)
-  if (estimatedTier === 'Prospect') return stablePick(PROSPECT_TAKES, key)
-
-  // Scout is bullish (rates higher than truth)
-  if (estIdx > trueIdx + 0.5) return stablePick(OPTIMIST_TAKES, key)
-  // Scout is bearish
-  if (estIdx < trueIdx - 0.5) return stablePick(PESSIMIST_TAKES, key)
-  // Neutral / on-target
-  return stablePick(NEUTRAL_TAKES, key)
+  const base = stablePick(TAKE_BY_TIER[displayTier] ?? TAKE_BY_TIER.Core, key)
+  return base + leanSuffix(tierIndex(displayTier), tierIndex(trueDisplayTier))
 }
 
 /* ─────────────────────── NHL comp ─────────────────────── */
@@ -506,18 +506,23 @@ export function buildScoutPanel(
     },
   ]
 
+  // "Prospect" is a status, not a projection — express both the true tier and each
+  // scout's read as the value tier they project to, so every chip is a real
+  // projection (Core/Key/Star…), never "Prospect".
+  const trueDisplay: ProjectionTier = trueTier === 'Prospect' ? prospectQuality(potStars) : trueTier
   const reads: ScoutRead[] = effectiveScouts.map((scout) => {
     const tier = scoutTierEstimate(scout, player, trueTier, potStars, composites)
-    const take = scoutOneLiner(scout, player, tier, trueTier)
+    const displayTier: ProjectionTier = tier === 'Prospect' ? prospectQuality(potStars) : tier
+    const take = scoutOneLiner(scout, player, displayTier, trueDisplay)
     const read: ScoutRead = {
       scoutId: scout.id,
       scoutName: scout.name,
-      tier,
-      tierLabel: TIER_LABELS[tier],
+      tier: displayTier,
+      tierLabel: TIER_LABELS[displayTier],
       take,
     }
     // What this scout saw the player do in a recent game he attended.
-    if (observed) read.watched = watchedGameLine(scout, player, observed.ppg, tierIndex(tier), tierIndex(trueTier))
+    if (observed) read.watched = watchedGameLine(scout, player, observed.ppg, tierIndex(displayTier), tierIndex(trueDisplay))
     if (scout.faceId !== undefined) {
       return { ...read, faceId: scout.faceId }
     }

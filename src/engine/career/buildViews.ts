@@ -636,7 +636,12 @@ export function buildPlayerProfile(
   /** The user team's scouts — used to build the multi-scout panel. */
   userScouts?: StaffMember[],
   /** The league the player plays in — used to frame his point projection. */
-  playerLeague?: { factor: number; name: string }
+  playerLeague?: { factor: number; name: string },
+  /** The player's current-season scoring pace (points/game) in the league he
+   *  actually plays in — for the scouts' "what I saw in a recent viewing" line.
+   *  Pass this for prospects whose stats live in the world/AHL sim (ctx only has
+   *  the user-league totals). Omit when there's no game sample. */
+  observedPace?: number,
 ): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
@@ -803,12 +808,16 @@ export function buildPlayerProfile(
     ? allScouts
     : allScouts.filter((s) => sawIds.has(s.id as string))
   // The player's real current-season scoring pace, so each scout's report can
-  // describe what he saw the prospect do in a recent viewing.
-  const obsGp = ctx.gp.get(p.id as PlayerId) ?? 0
-  const obsTot = ctx.totals.get(p.id as PlayerId)
-  const observed = obsGp > 0
-    ? { ppg: ((obsTot?.goals ?? 0) + (obsTot?.assists ?? 0)) / obsGp }
-    : undefined
+  // describe what he saw the prospect do in a recent viewing. Prefer the pace the
+  // caller passed (it knows the player's actual league — world/AHL/NHL); fall back
+  // to the user-league totals in ctx.
+  let obsPpg = observedPace
+  if (obsPpg === undefined) {
+    const obsGp = ctx.gp.get(p.id as PlayerId) ?? 0
+    const obsTot = ctx.totals.get(p.id as PlayerId)
+    if (obsGp > 0) obsPpg = ((obsTot?.goals ?? 0) + (obsTot?.assists ?? 0)) / obsGp
+  }
+  const observed = obsPpg !== undefined ? { ppg: obsPpg } : undefined
   const scoutPanel = (isOwnPlayer || !fog || opinionScouts.length > 0)
     ? buildScoutPanel(opinionScouts, p, fog?.scouting, truePotStars, observed)
     : undefined

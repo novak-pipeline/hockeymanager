@@ -4612,10 +4612,19 @@ export class Career {
     const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
     const playerForLeague = this.data.players.get(pid)
     const leagueAbbrev = playerForLeague ? this.leagueAbbrevForPlayer(playerForLeague) : 'NHL'
+    // Scoring pace from the league he ACTUALLY plays in (world/AHL prospects keep
+    // their stats in the world/AHL sim, not the user-league totals) — feeds the
+    // scouts' "what I saw in a recent viewing" line on the profile.
+    const paceTier = (playerTeamId ? this.data.teams.get(playerTeamId) : undefined)?.tier
+    const paceTotals = paceTier === 'ahl' ? this.ahlTotals : paceTier === 'world' ? this.worldSim.totals : this.totals
+    const paceGpMap = paceTier === 'ahl' ? this.ahlGp : paceTier === 'world' ? this.worldSim.gp : this.gp
+    const paceGp = paceGpMap.get(pid) ?? 0
+    const paceTot = paceTotals.get(pid)
+    const observedPace = paceGp > 0 ? ((paceTot?.goals ?? 0) + (paceTot?.assists ?? 0)) / paceGp : undefined
     const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts, {
       factor: nhleFactorByAbbrev(leagueAbbrev),
       name: leagueAbbrev,
-    })
+    }, observedPace)
 
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
