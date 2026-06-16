@@ -412,6 +412,12 @@ export interface PlayerProfileView extends PlayerBadge {
    * draft-eligible / on-the-radar young players; omitted for everyone else.
    */
   analystProjection?: string
+  /** Analyst FULL-ordering draft rank (1-based, past the published board too).
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystRank?: number
+  /** Compact draft-standing label, e.g. "R1 · #11" or "R3 · #96" / "Undrafted proj.".
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystDraftLabel?: string
   /**
    * The NHL draft analysts' PERCEIVED potential (1–5 stars) — the hype-inflated
    * consensus ceiling that drives the public draft board, kept separate from
@@ -840,6 +846,10 @@ export interface DraftRankingsView {
   scoutBoard: ScoutBoardRowView[]
   /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
   scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[] }[]
+  /** Analyst FULL-ordering rank (1-based) for every eligible prospect — past the
+   *  published top board too, so off-board prospects get a concrete "Nth-round"
+   *  projection. playerId → rank. */
+  fullRankById: Record<string, number>
 }
 
 export interface StatsView {
@@ -1503,6 +1513,10 @@ export interface ScoutFindView {
   foundDate: string
   /** True if he plays a position your roster is currently thin at. */
   fitsNeed: boolean
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
 }
 
 /** A scope option for the assignment dropdowns. */
@@ -1595,6 +1609,10 @@ export interface ScoutedPlayerRow {
   /** Current salary (≈ transfer/asset value proxy). */
   salary: number
   faceId?: string
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
 }
 
 export interface ScoutingView {

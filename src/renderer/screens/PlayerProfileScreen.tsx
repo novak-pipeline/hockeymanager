@@ -42,6 +42,52 @@ import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
 import { ThemeScope } from '../components/ThemeScope'
 
+/* ── Scout this player: send a scout straight from the profile ───────────────── */
+function ScoutPlayerButton({ playerId, client }: { playerId: string; client: ReturnType<typeof useClient> }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [scouts, setScouts] = useState<Array<{ scoutId: string; name: string; rating: number }>>([])
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function toggle(): Promise<void> {
+    if (!open && !loaded) {
+      const res = await client.getScouting()
+      if (res.type === 'scouting') {
+        setScouts(res.scouting.scouts.map((s) => ({ scoutId: s.scoutId, name: s.name, rating: s.rating })))
+      }
+      setLoaded(true)
+    }
+    setOpen((o) => !o)
+  }
+  async function pick(scoutId: string, name: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.assignScout(scoutId, { kind: 'player', playerId }, 'all')
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast(`${name} assigned to watch this player.`, 'success'); bumpRefresh() }
+    } finally { setBusy(false); setOpen(false) }
+  }
+  return (
+    <span style={{ position: 'relative' }}>
+      <button className="btn btn-primary small" onClick={() => void toggle()}>🔍 Scout Player</button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 60, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, minWidth: 200, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>Send a scout to watch him</div>
+          {scouts.length === 0 ? (
+            <div className="muted small" style={{ padding: '4px 12px 8px' }}>No scouts on staff — hire one in Staff › Job Market.</div>
+          ) : scouts.map((s) => (
+            <button key={s.scoutId} className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 12 }}
+              onClick={() => void pick(s.scoutId, s.name)}>
+              {s.name} <span className="muted">({s.rating})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
 type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout' | 'opinion'
@@ -1706,6 +1752,10 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
 
   return (
     <div className="stack">
+      {/* Scout-this-player action */}
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <ScoutPlayerButton playerId={d.playerId} client={client} />
+      </div>
       {/* ── FM-style Overall Report ── */}
       {v && (
         <Panel title="Overall Report">
@@ -1891,9 +1941,14 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         <Panel title="Draft Projection">
           <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
             <div style={{ width: 4, borderRadius: 2, background: 'var(--accent2, #e0b341)', flex: '0 0 auto' }} />
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
-                NHL DRAFT ANALYSTS
+            <div style={{ flex: 1 }}>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)' }}>
+                  NHL DRAFT ANALYSTS
+                </div>
+                {d.analystDraftLabel && (
+                  <span className="chip chip-accent" style={{ fontSize: 11, fontWeight: 700 }}>{d.analystDraftLabel}</span>
+                )}
               </div>
               {d.analystPotentialStars !== undefined && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>

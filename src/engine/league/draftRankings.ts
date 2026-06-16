@@ -202,10 +202,36 @@ export interface AnalystProjectionInput {
   eligibility: DraftEligibility
   /** Board rank, if the player made the published top board (omit if off-board). */
   rank?: number
+  /** The analyst's FULL-ordering rank (1-based), even past the published board — so
+   *  an off-board prospect reads as a concrete "projected Nth-round pick" rather
+   *  than a vague "off the board". */
+  fullRank?: number
   /** Display label for the current phase, e.g. "Mid-season ranking". */
   phaseLabel: string
   /** Upcoming entry-draft year. */
   draftYear: number
+}
+
+/** Picks per round and rounds in an entry draft (NHL: 7 × 32 = 224). */
+const PICKS_PER_ROUND = 32
+const DRAFT_ROUNDS = 7
+const ROUND_ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh']
+
+/** The round a full-ordering rank projects into (1-based), or 0 if beyond the draft. */
+export function projectedRound(fullRank: number): number {
+  const r = Math.ceil(fullRank / PICKS_PER_ROUND)
+  return r >= 1 && r <= DRAFT_ROUNDS ? r : 0
+}
+
+/** Compact draft-projection label for tables / info rows. */
+export function draftRoundLabel(rank: number | undefined, eligibility?: DraftEligibility): string {
+  if (eligibility === 'radar') return 'Future class'
+  if (rank === undefined) return 'Unranked'
+  if (rank <= PICKS_PER_ROUND * DRAFT_ROUNDS) {
+    const round = projectedRound(rank)
+    return `R${round} · #${rank}`
+  }
+  return 'Undrafted proj.'
 }
 
 /**
@@ -219,14 +245,17 @@ export function analystProjection(p: AnalystProjectionInput): string | null {
     return `Not yet draft-eligible, but already on analysts' radar for a future class. Early ceiling read: projects as ${role}.`
   }
   const reentry = p.eligibility === 'reentry'
+  const round = p.fullRank !== undefined ? projectedRound(p.fullRank) : 0
   const where =
     p.rank !== undefined
       ? `have ${p.name} ranked #${p.rank} in the ${p.draftYear} class`
-      : `have ${p.name} outside their published board for the ${p.draftYear} class`
+      : round >= 1
+        ? `peg ${p.name} as roughly a ${ROUND_ORDINALS[round - 1]}-round pick (~#${p.fullRank}) in the ${p.draftYear} class`
+        : `don't see ${p.name} as a draftable prospect this year`
   const lead = reentry
     ? `Passed over once and re-entry eligible; analysts ${where}`
     : `Analyst consensus (${p.phaseLabel.toLowerCase()}) ${where}`
-  return `${lead}. Their projection: tops out as ${role}.${projectionHedge(p.rank)}`
+  return `${lead}. Their projection: tops out as ${role}.${projectionHedge(p.rank ?? p.fullRank)}`
 }
 
 /**
@@ -236,9 +265,10 @@ export function analystProjection(p: AnalystProjectionInput): string | null {
  * confidence caveat appended to the analyst projection.
  */
 export function projectionHedge(rank?: number): string {
-  if (rank === undefined) return ' Off the board, the range of outcomes is enormous.'
+  if (rank === undefined) return ' Off the board entirely — the range of outcomes is enormous.'
   if (rank <= 10) return ' A high-confidence projection at the top of the class.'
   if (rank <= 31) return ' A first-round projection, though some spread remains.'
   if (rank <= 64) return ' Projections this deep carry a wide range of outcomes.'
-  return ' This late, the projection is little more than a best guess.'
+  if (rank <= PICKS_PER_ROUND * DRAFT_ROUNDS) return ' This late, the projection is little more than a best guess.'
+  return ' More of a free-agent flier than a draft pick at this stage.'
 }

@@ -78,6 +78,7 @@ import type {
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
 import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { draftRoundLabel } from '@engine/league/draftRankings'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -1136,6 +1137,9 @@ export interface ScoutingViewCtx extends ViewCtx {
   scouting: ScoutingState
   /** All draft class prospect ids across all years. */
   draftProspectIds: Set<string>
+  /** Analyst full-ordering draft rank by playerId (for showing/filtering draft
+   *  standing in the scouting lists). Optional. */
+  draftRankById?: Record<string, number>
   /** Leagues for `competition`/`nation` scopes (synthetic NHL/AHL included). */
   competitions: ScoutingCompetition[]
   /** Display metadata for feeder/international competitions. */
@@ -1383,6 +1387,8 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       scoutName: r.scoutName,
       foundDate: r.foundDate,
       fitsNeed: needGroups.has(groupOf(p.position)),
+      draftEligible: draftProspectIds.has(r.playerId),
+      ...(ctx.draftRankById?.[r.playerId] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[r.playerId]) } : {}),
     })
   }
   const recRank = { 'A+': 0, A: 1, B: 2, C: 3 }
@@ -1461,6 +1467,8 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       targetScore: Math.round(targetScore * 100) / 100,
       salary: p.contract.salary,
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      draftEligible: draftProspectIds.has(pid as string),
+      ...(ctx.draftRankById?.[pid as string] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid as string]) } : {}),
     })
   }
   // Best targets first — young, high-upside, acquirable.

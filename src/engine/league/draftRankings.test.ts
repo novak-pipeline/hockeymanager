@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, draftRoundLabel, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
+
+describe('draftRoundLabel', () => {
+  it('maps a full-ordering rank to a round/standing', () => {
+    expect(draftRoundLabel(1)).toBe('R1 · #1')
+    expect(draftRoundLabel(33)).toBe('R2 · #33')
+    expect(draftRoundLabel(96)).toBe('R3 · #96')
+    expect(draftRoundLabel(300)).toBe('Undrafted proj.')
+    expect(draftRoundLabel(undefined)).toBe('Unranked')
+    expect(draftRoundLabel(20, 'radar')).toBe('Future class')
+  })
+})
 
 describe('draftEligibility', () => {
   it('buckets by age and excludes drafted / out-of-range', () => {
@@ -122,9 +133,15 @@ describe('analystProjection', () => {
     const s = analystProjection({ ...base, eligibility: 'reentry', rank: 40 })
     expect(s).toMatch(/[Pp]assed over/)
   })
-  it('handles an eligible prospect who missed the published board', () => {
+  it('reads an off-published-board prospect as a concrete projected round', () => {
+    // Ranked ~#96 overall → a third-round projection, not a vague "off the board".
+    const s = analystProjection({ ...base, eligibility: 'eligible', fullRank: 96 })
+    expect(s).toMatch(/third-round pick/)
+    expect(s).toMatch(/#96/)
+  })
+  it('handles an eligible prospect with no draftable projection at all', () => {
     const s = analystProjection({ ...base, eligibility: 'eligible' })
-    expect(s).toMatch(/outside their published board/)
+    expect(s).toMatch(/draftable prospect/)
   })
 
   it('hedges harder the deeper the projection', () => {

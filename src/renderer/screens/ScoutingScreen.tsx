@@ -309,11 +309,15 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
 }): JSX.Element {
   const [pos, setPos] = useState<string>('ALL')
   const [topOnly, setTopOnly] = useState(false)
+  const [draftOnly, setDraftOnly] = useState(false)
   const [sort, setSort] = useState<ScoutSort>('rec')
 
   const positions = ['ALL', 'C', 'LW', 'RW', 'D', 'G']
   const recOrder: Record<string, number> = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
-  let view = rows.filter((r) => (pos === 'ALL' || r.position === pos) && (!topOnly || r.rec === 'A+' || r.rec === 'A'))
+  let view = rows.filter((r) =>
+    (pos === 'ALL' || r.position === pos) &&
+    (!topOnly || r.rec === 'A+' || r.rec === 'A') &&
+    (!draftOnly || r.draftEligible))
   view = [...view].sort((a, b) => {
     switch (sort) {
       case 'potential': return b.potentialStars - a.potentialStars
@@ -336,6 +340,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
         ))}
         <span style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 4px' }} />
         <button className={`chip${topOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setTopOnly((t) => !t)}>Top targets only</button>
+        <button className={`chip${draftOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setDraftOnly((d) => !d)}>Draft eligibles</button>
         <label className="small muted" style={{ marginLeft: 'auto' }}>Sort:&nbsp;
           <select className="select" value={sort} onChange={(e) => setSort(e.target.value as ScoutSort)} style={{ fontSize: 12 }}>
             <option value="rec">Target value</option>
@@ -354,7 +359,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
             <thead>
               <tr>
                 <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
-                <th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Value</th>
+                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Value</th>
                 {scouts && onScoutPlayer && <th></th>}
               </tr>
             </thead>
@@ -371,6 +376,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
                   <td className="num muted">{r.position}</td>
                   <td className="num muted">{r.age}</td>
                   <td className="muted small">{r.teamAbbr}</td>
+                  <td className="small" style={{ color: r.draftEligible ? 'var(--accent2, #e0b341)' : 'var(--muted)' }}>{r.draftLabel ?? (r.draftEligible ? 'Eligible' : '—')}</td>
                   <td style={{ color: 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.currentStars) || '–'}</td>
                   <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.potentialStars) || '–'}</td>
                   <td className="num muted small">{r.knowledge}%</td>
@@ -508,7 +514,10 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
             {find.nationality && <FlagIcon nationality={find.nationality} size={15} />}
             <PlayerLink playerId={find.playerId} name={find.name} />
           </div>
-          <div className="muted small">{find.age} · {find.position} · {find.teamAbbr}</div>
+          <div className="muted small">
+            {find.age} · {find.position} · {find.teamAbbr}
+            {find.draftLabel && <> · <span style={{ color: 'var(--accent2, #e0b341)' }}>{find.draftLabel}</span></>}
+          </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontWeight: 800, fontSize: 22, color }}>{find.grade}</div>
@@ -535,6 +544,7 @@ function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; ros
   const [posFilter, setPosFilter] = useState<'ALL' | 'F' | 'D' | 'G'>('ALL')
   const [gradeFilter, setGradeFilter] = useState<'ALL' | 'A+' | 'A' | 'B'>('ALL')
   const [needsOnly, setNeedsOnly] = useState(false)
+  const [draftOnly, setDraftOnly] = useState(false)
 
   const isPos = (pos: string, f: 'F' | 'D' | 'G'): boolean => {
     const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
@@ -544,6 +554,7 @@ function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; ros
     .filter((f) => posFilter === 'ALL' || isPos(f.position, posFilter))
     .filter((f) => gradeFilter === 'ALL' || f.grade === gradeFilter)
     .filter((f) => !needsOnly || f.fitsNeed)
+    .filter((f) => !draftOnly || f.draftEligible)
 
   // Summary: how many finds, how many fill a need, and the grade breakdown — a
   // scannable headline so the Centre reads as a board's shortlist, not a wall of cards.
@@ -589,6 +600,7 @@ function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; ros
               ))}
             </div>
             <button className={`chip${needsOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setNeedsOnly((v) => !v)}>Fills a need</button>
+            <button className={`chip${draftOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setDraftOnly((v) => !v)}>Draft eligibles</button>
             <span className="muted small" style={{ marginLeft: 'auto' }}>{shown.length} shown</span>
           </div>
           {shown.length === 0 ? (

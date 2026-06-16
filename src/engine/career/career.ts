@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
@@ -4722,6 +4722,14 @@ export class Career {
         const analystRow = board.rankings.find((r) => r.playerId === playerId)
           ?? board.radar.find((r) => r.playerId === playerId)
         const rank = analystRow?.eligibility === 'radar' ? undefined : analystRow?.rank
+        // The analyst's FULL-ordering rank (past the published top-64) — lets an
+        // off-board prospect read as a concrete "projected Nth-round pick" and shows
+        // his draft standing in the profile/info + list views.
+        const fullRank = board.fullRankById[playerId]
+        if (elig !== 'radar' && fullRank !== undefined) {
+          profile.analystRank = fullRank
+          profile.analystDraftLabel = draftRoundLabel(fullRank, elig)
+        }
         if (analystRow) profile.analystPotentialStars = analystRow.potentialStars
         // Off the published board, the analysts rate him as an unranked longshot —
         // a LOW ceiling, not his true upside. So a prospect your scouts like reads
@@ -4734,6 +4742,7 @@ export class Career {
           ceiling: theirCeiling,
           eligibility: elig,
           ...(rank !== undefined ? { rank } : {}),
+          ...(fullRank !== undefined ? { fullRank } : {}),
           phaseLabel: board.phaseLabel,
           draftYear: board.draftYear,
         })
@@ -5324,6 +5333,7 @@ export class Career {
       ...this.ctx(),
       scouting: this.scouting,
       draftProspectIds: this.allDraftProspectIds(),
+      draftRankById: this.getDraftRankings().fullRankById,
       competitions: this.scoutingCompetitions(),
       competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
       nextOpponentId: this.nextOpponentTeamId(),
@@ -6041,7 +6051,9 @@ export class Career {
       }),
     }))
 
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards }
+    const fullRankById: Record<string, number> = {}
+    ordered.forEach((id, i) => { fullRankById[id] = i + 1 })
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards, fullRankById }
   }
 
   getStats(): StatsView {
