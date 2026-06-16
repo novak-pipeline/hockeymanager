@@ -72,7 +72,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, perceivedCeiling, productionPremium, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystProjection, analystRank, ceilingRoleShort, draftEligibility, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
@@ -5963,12 +5963,16 @@ export class Career {
     // him. Each scout then layers their own specialty bias + judgment-scaled noise
     // on top → distinct boards, but always anchored to what our staff has seen.
     const cands = [...board.values()]
-    const consensusValueOf = (c: Cand): number => c.input.ceiling * 0.74 + c.input.current * 0.26
     const groundedValueOf = (c: Cand): number => {
       const kw = Math.max(0, Math.min(1, (meta.get(c.row.playerId)?.knowledge ?? 0) / 100))
       // Fog blend: true ceiling once we've watched him, public ceiling when we haven't.
       const groundedCeiling = agedPotential(c.player) * kw + c.input.ceiling * (1 - kw)
-      return groundedCeiling * 0.74 + c.input.current * 0.26
+      // Apply the SAME positional fade + re-entry dock the analyst board uses, so
+      // hard-to-project positions (a tandem-ceiling goalie) and passed-over re-
+      // entries don't crack the top of our board either — goalies almost never go
+      // top-10 in reality, and our scouts know it.
+      const base = groundedCeiling * 0.74 + c.input.current * 0.26
+      return base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility)
     }
     const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
     for (const c of cands) {
@@ -5978,9 +5982,12 @@ export class Career {
       const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
       meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
     }
+    // The "Cons." column = the ACTUAL analyst board order (same `ordered` the
+    // published rankings use), so the movement arrows compare our board against
+    // the exact consensus the user sees on the Analyst tab — not a parallel
+    // re-derivation that could disagree.
     const consensusRankOf = new Map<string, number>()
-    ;[...cands].sort((a, b) => consensusValueOf(b) - consensusValueOf(a))
-      .forEach((c, i) => consensusRankOf.set(c.row.playerId, i + 1))
+    ordered.forEach((id, i) => consensusRankOf.set(id, i + 1))
 
     // Build a board (top 64) from a per-candidate value function.
     const buildBoard = (valueOf: (c: Cand) => number): ScoutBoardRowView[] =>

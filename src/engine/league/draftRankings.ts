@@ -114,15 +114,17 @@ export function productionPremium(ppg: number, isD: boolean, leagueStrength: num
   return Math.max(-6, Math.min(14, Math.round((ratio - 1) * 12)))
 }
 
-/** Goalies are notoriously hard to project — analysts fade them on draft boards
- *  (an elite goalie ceiling rarely cracks the top 10). Skaters are unaffected. */
-function positionFactor(position?: string): number {
+/** Goalies are notoriously hard to project — boards fade them (an elite goalie
+ *  ceiling rarely cracks the top 10). Skaters are unaffected. Exported so YOUR
+ *  scouts' board applies the same fade as the analyst board (a tandem-ceiling
+ *  goalie shouldn't rank top-10 on either). */
+export function positionFactor(position?: string): number {
   return position === 'G' ? 0.86 : 1
 }
 
 /** Re-entry prospects (19–20, passed over once already) are docked — they're
- *  older and the league has seen them before. */
-function reentryPenalty(eligibility?: DraftEligibility): number {
+ *  older and the league has seen them before. Exported for the scout board too. */
+export function reentryPenalty(eligibility?: DraftEligibility): number {
   return eligibility === 'reentry' ? 9 : 0
 }
 
