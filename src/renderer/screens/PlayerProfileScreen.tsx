@@ -1712,20 +1712,9 @@ function ScoutPanelBlock({ panel }: { panel: ScoutPanel }): JSX.Element {
                 Scouts are in full agreement.
               </p>
             )}
-            {/* NHL comp */}
-            {panel.comp && (
-              <div style={{
-                marginTop: 4,
-                padding: '6px 10px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--panel2)',
-                border: '1px solid var(--line)',
-              }}>
-                <span className="muted small">Plays like </span>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{panel.comp.name}</span>
-                <span className="muted small"> — {panel.comp.blurb}</span>
-              </div>
-            )}
+            {/* Player comparable lives in the "Shades of …" line above (real-DB
+                comp). We intentionally don't also show the archetype "Plays like"
+                comp here — one comparable, not two competing ones. */}
           </div>
         </Panel>
 
@@ -1788,70 +1777,15 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
     ? 'Our scouts’ projected ceiling — the role he tops out in if he develops as expected.'
     : sr.tierBlurb
 
-  const v = d.scoutVerdict
-
   return (
     <div className="stack">
       {/* Scout-this-player action */}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <ScoutPlayerButton playerId={d.playerId} client={client} />
       </div>
-      {/* ── FM-style Overall Report ── */}
-      {v && (
-        <Panel title="Overall Report">
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {/* Verdict banner */}
-            <div
-              style={{
-                background: 'rgba(34,197,94,0.12)',
-                border: '1px solid rgba(34,197,94,0.4)',
-                borderRadius: 'var(--radius-sm)',
-                padding: 'var(--sp-3) var(--sp-4)',
-                fontWeight: 700,
-                color: 'var(--success)',
-              }}
-            >
-              {v.recommendation}
-            </div>
-
-            {/* Ability + best role */}
-            <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap', alignItems: 'center' }}>
-              <div>
-                <div className="muted small">Current ability</div>
-                <StarRating stars={v.currentStars} size={18} />
-              </div>
-              <div>
-                <div className="muted small">Potential</div>
-                <StarRating stars={v.potentialStars} fogged size={18} />
-              </div>
-              <div>
-                <div className="muted small">Best role</div>
-                <div style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{v.bestRole}</div>
-              </div>
-            </div>
-
-            {/* Pros / Cons */}
-            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-              <div>
-                <div className="field-label" style={{ color: 'var(--success)' }}>Pros</div>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  {v.pros.length > 0 ? v.pros.map((s, i) => (
-                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
-                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No standout strengths.</li>}
-                </ul>
-              </div>
-              <div>
-                <div className="field-label" style={{ color: 'var(--danger)' }}>Cons</div>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  {v.cons.length > 0 ? v.cons.map((s, i) => (
-                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
-                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No notable weaknesses.</li>}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </Panel>
-      )}
+      {/* The FM-style "Overall Report" (recommendation + Pros/Cons) lives on the
+          Profile tab's Coach Summary — the Scout tab leads straight into the
+          richer Scouting Report below, so the two no longer duplicate each other. */}
 
       {/* Coach reports request — projection itself lives in the verdict tiles
           (our scouts) and the Draft Projection panel (analysts vs your scouts).
