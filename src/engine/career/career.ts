@@ -534,7 +534,7 @@ export class Career {
   private readonly ahlTotals = new Map<PlayerId, GamePlayerStat>()
   /** Wider-world quick-sim state (other leagues' standings + player stats).
    *  Empty for the generated league / mods without competitions. */
-  private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map() }
+  private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map(), leagueAvg: new Map() }
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()

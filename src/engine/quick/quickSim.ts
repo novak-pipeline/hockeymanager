@@ -148,6 +148,12 @@ interface Ctx {
   rng: Rng
   stream: GameEvent[]
   stats: Map<PlayerId, GamePlayerStat>
+  /** Baseline rating this game's scoring is judged against. Defaults to the global
+   *  LEAGUE_AVG (NHL). A weaker league passes its OWN lower average so its best
+   *  players read as stars RELATIVE to their competition and produce realistic
+   *  point totals — otherwise a junior loop of sub-50 skaters scores almost
+   *  nothing and its leader tops out around 0.4 PPG. */
+  leagueAvg: number
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -226,8 +232,9 @@ function simShift(
   const offense = avg(atk.skaters, (c) => c.scoring * 0.6 + c.playmaking * 0.4)
   const defense = avg(def.skaters, (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
 
+  const lgAvg = ctx.leagueAvg
   const rate =
-    BASE_SHOTS_PER_SHIFT * (offense / LEAGUE_AVG) * (LEAGUE_AVG / Math.max(20, defense)) * strengthMult
+    BASE_SHOTS_PER_SHIFT * (offense / lgAvg) * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -260,8 +267,8 @@ function simShift(
     goalieStat.shotsAgainst++
     goalieStat.xgAgainst = (goalieStat.xgAgainst ?? 0) + shotXgApprox
 
-    const finish = shooter.composites.scoring / LEAGUE_AVG
-    const goaliePull = (goalie.composites.goaltending - LEAGUE_AVG) / 220
+    const finish = shooter.composites.scoring / lgAvg
+    const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
     const pGoal = Math.max(
       0.01,
       Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull))
@@ -382,11 +389,11 @@ function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
   const rng = ctx.rng
   const shooterSkill = (t: TeamSim): number => {
     const shooters = t.team.lines.forwards.flat().map(t.resolve)
-    return avg(shooters, (c) => c.scoring) / LEAGUE_AVG
+    return avg(shooters, (c) => c.scoring) / ctx.leagueAvg
   }
   const goalieSkill = (t: TeamSim): number => {
     const g = t.resolve(t.team.lines.goalies[0])
-    return g.composites.goaltending / LEAGUE_AVG
+    return g.composites.goaltending / ctx.leagueAvg
   }
   let h = 0
   let a = 0
@@ -416,6 +423,13 @@ export interface QuickSimOptions {
    * shootout with repeated 20-minute 5v5 sudden-death periods until a goal.
    */
   rules?: GameRules
+  /**
+   * Average skater rating of THIS game's league, used as the baseline scoring is
+   * judged against. Defaults to the global NHL average (50) — pass a weaker
+   * league's own average so its stars produce realistic totals relative to their
+   * competition (juniors/Europe). NHL and AHL keep the default.
+   */
+  leagueAvg?: number
 }
 
 /**
@@ -488,7 +502,7 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map() }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
 
