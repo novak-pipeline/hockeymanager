@@ -84,7 +84,7 @@ import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
 import { nhleFactorByAbbrev, isProLeagueAbbrev } from '@engine/league/leagueStrength'
 import { scoutDraftBias } from '@engine/career/multiScout'
-import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
+import { selectNationalTeam, nationInfo, runWorldChampionship } from '@engine/league/nationalTeam'
 import {
   createArc,
   createInitialArcsState,
@@ -3220,6 +3220,33 @@ export class Career {
               value: 'Champion',
             })
           }
+        }
+
+        // International honours: an annual World Championship hands Gold/Silver/
+        // Bronze to the three strongest nations; every player on a medal roster
+        // earns a medal (→ medal badge on his profile). No-ops on single-nation DBs.
+        const worlds = runWorldChampionship({ players: this.data.players.values(), rng: this.rngFor(8013) })
+        for (const m of worlds.medals) {
+          for (const id of m.playerIds) {
+            const pl = this.data.players.get(id)
+            if (!pl) continue
+            this.recordsState.awards.push({
+              year: this.year,
+              award: `World Championship ${m.medal}`,
+              playerId: id as string,
+              playerName: pl.name,
+              teamAbbr: m.nation,
+              value: `${m.medal} medal`,
+            })
+          }
+        }
+        const goldNation = worlds.medals.find((m) => m.medal === 'Gold')
+        if (goldNation) {
+          this.pushNews(
+            'league',
+            `${goldNation.nation} win World Championship gold`,
+            `${goldNation.nation} top the podium, with ${worlds.medals.find((m) => m.medal === 'Silver')?.nation ?? '—'} taking silver and ${worlds.medals.find((m) => m.medal === 'Bronze')?.nation ?? '—'} bronze.`,
+          )
         }
 
         /* ── world tournament for everyone whose season is over ── */

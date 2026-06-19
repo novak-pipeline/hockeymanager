@@ -1364,6 +1364,7 @@ function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['award
     <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
       {[...byName.entries()].map(([name, years]) => {
         const sorted = [...years].sort((a, b) => b - a)
+        const icon = name.includes('Gold') ? '🥇' : name.includes('Silver') ? '🥈' : name.includes('Bronze') ? '🥉' : '🏆'
         return (
           <div
             key={name}
@@ -1374,7 +1375,7 @@ function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['award
               cursor: 'help',
             }}
           >
-            <span style={{ fontSize: 16, lineHeight: 1 }}>🏆</span>
+            <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
             <span style={{ fontSize: 12, fontWeight: 700 }}>{name}</span>
             {sorted.length > 1 && (
               <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{sorted.length}</span>
