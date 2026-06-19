@@ -3204,6 +3204,24 @@ export class Career {
           }).newsSeeds
         )
 
+        // Stanley Cup honours: every player on the champion's roster gets a Cup
+        // award for this season, so it shows as a trophy badge on his profile and
+        // counts toward his career haul.
+        if (champTeam) {
+          for (const id of champTeam.roster) {
+            const pl = this.data.players.get(id)
+            if (!pl) continue
+            this.recordsState.awards.push({
+              year: this.year,
+              award: 'Stanley Cup',
+              playerId: id as string,
+              playerName: pl.name,
+              teamAbbr: champTeam.abbreviation,
+              value: 'Champion',
+            })
+          }
+        }
+
         /* ── world tournament for everyone whose season is over ── */
         const eligible: Array<{ player: Player; teamId: TeamId }> = []
         for (const team of this.data.teams.values()) {
