@@ -5273,11 +5273,55 @@ export class Career {
       overallToStars(ratedOverall(p)),
       potentialStars(p),
     ]
+
+    // Coach's "set the roster" recommendation: ability-sort the combined NHL+AHL
+    // pool and surface the call-ups/send-downs that would optimise the NHL roster.
+    const split = ahlTeam
+      ? farmSplit({
+          nhlRoster: team?.roster ?? [],
+          ahlRoster: ahlTeam.roster,
+          resolve: (id) => this.data.players.get(id),
+          score: (p) => ratedOverall(p),
+        })
+      : { promoted: [], demoted: [] }
+    const adviceMove = (id: PlayerId, kind: 'callup' | 'senddown'): import('./developmentCenter').RosterAdviceMove | null => {
+      const p = this.data.players.get(id)
+      if (!p) return null
+      return {
+        playerId: id as string,
+        name: p.name,
+        position: p.position,
+        currentStars: overallToStars(ratedOverall(p)),
+        kind,
+        reason: kind === 'callup'
+          ? 'Outrates current NHL depth at his position.'
+          : 'Bettered by NHL options — more value developing in the AHL.',
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      }
+    }
+    const callUps = split.promoted.map((id) => adviceMove(id, 'callup')).filter((m): m is import('./developmentCenter').RosterAdviceMove => m !== null)
+    const sendDowns = split.demoted.map((id) => adviceMove(id, 'senddown')).filter((m): m is import('./developmentCenter').RosterAdviceMove => m !== null)
+
+    // Rights-held prospects playing outside the NHL/AHL (e.g. juniors we drafted).
+    const onFarm = new Set<string>([...(team?.roster ?? []), ...(ahlTeam?.roster ?? [])].map((id) => id as string))
+    const systemElsewhere: Array<{ player: Player; clubAbbrev: string }> = []
+    for (const p of this.data.players.values()) {
+      if (p.rightsTeamId !== this.userTeamId) continue
+      if (onFarm.has(p.id as string)) continue
+      let clubAbbrev = '—'
+      for (const t of this.data.teams.values()) {
+        if (t.roster.includes(p.id)) { clubAbbrev = t.abbreviation; break }
+      }
+      systemElsewhere.push({ player: p, clubAbbrev })
+    }
+
     return buildDevelopmentCenter({
       teamName: team?.name ?? 'Team',
       roster,
       affiliate,
       stars,
+      rosterAdvice: { callUps, sendDowns },
+      systemElsewhere,
     })
   }
 
