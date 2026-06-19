@@ -1894,7 +1894,7 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
       </Panel>
 
       {/* ── Scouting Report prose — the living, evolving write-up ── */}
-      <Panel title="Scouting Report">
+      <Panel title="Scout's Write-Up">
         {d.scoutSummary ? (
           <>
             <div className="muted small" style={{ marginBottom: 8 }}>

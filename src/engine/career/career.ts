@@ -3573,16 +3573,28 @@ export class Career {
     const team = this.data.teams.get(pick.ownerTeamId)!
     const player = this.resolve(playerId)
     d.selections.push({ overallPick: idx + 1, teamId: pick.ownerTeamId, playerId })
+    const elc = {
+      salary: 900000,
+      yearsRemaining: 3,
+      expiryYear: this.year + 1 + 3,
+      noTradeClause: false,
+      twoWay: true,
+    }
     if (team.roster.length < ROSTER_HARD_CAP) {
       team.roster.push(playerId)
-      player.contract = {
-        salary: 900000,
-        yearsRemaining: 3,
-        expiryYear: this.year + 1 + 3,
-        noTradeClause: false,
-        twoWay: true,
-      }
+      player.contract = elc
       this.lockerArrival(pick.ownerTeamId, playerId)
+    } else {
+      // NHL roster is full — a drafted teenager belongs in the system, not in
+      // limbo. Assign him to the club's AHL affiliate (where the offseason farm
+      // sort will place him correctly). Without this he was drafted with no team
+      // and no contract — an orphaned record.
+      const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+      if (affiliate) {
+        affiliate.roster.push(playerId)
+        player.contract = elc
+        repairLines(affiliate, this.data.players)
+      }
     }
     if (pick.ownerTeamId === this.userTeamId) {
       this.pushNews(
