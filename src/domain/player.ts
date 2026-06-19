@@ -52,6 +52,9 @@ export interface SeasonStats {
   shotsAgainst: number
   goalsAgainst: number
   shutouts: number
+  /** Season average match rating (EHM "Avr", 0–10), accumulated from game one.
+   *  Absent on imported pre-career seasons (no in-game ratings exist for them). */
+  avgRating?: number
 }
 
 export interface Player {

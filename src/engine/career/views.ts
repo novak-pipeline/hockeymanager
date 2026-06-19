@@ -141,6 +141,8 @@ export interface SkaterSeasonLine {
   toiPerGame: number
   ppGoals: number
   ppAssists: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 export interface GoalieSeasonLine {
@@ -152,6 +154,8 @@ export interface GoalieSeasonLine {
   shutouts: number
   saves: number
   shotsAgainst: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 /** ISO date string for a given season year + match day (Oct 1 + (day-1) days),
@@ -1442,6 +1446,8 @@ export interface CareerSnapshot {
    * [playerId, number[]][] — JSON-safe entry array.
    */
   playerRatings?: Array<[string, number[]]>
+  /** Cumulative season match-rating accumulator (true season Avr). JSON-safe. */
+  seasonRatingTotals?: Array<[string, { sum: number; n: number }]>
   /**
    * Team practice state for the user's team.
    * Optional for backward compat; defaults to balanced on load.

@@ -332,6 +332,7 @@ function SkaterHistoryRow({ s }: { s: SkaterSeasonLine }): JSX.Element {
       <td className="num">{s.penaltyMinutes}</td>
       <td className="num">{fmtToi(s.toiPerGame)}</td>
       <td className="num">{s.ppGoals}+{s.ppAssists}</td>
+      <td className="num">{s.avgRating !== undefined ? s.avgRating.toFixed(2) : ''}</td>
     </>
   )
 }
@@ -347,6 +348,7 @@ function GoalieHistoryRow({ g }: { g: GoalieSeasonLine }): JSX.Element {
       <td className="num">{g.shutouts}</td>
       <td className="num"></td>
       <td className="num"></td>
+      <td className="num">{g.avgRating !== undefined ? g.avgRating.toFixed(2) : ''}</td>
     </>
   )
 }
@@ -1620,6 +1622,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   <th className="num">SO</th>
                   <th className="num"></th>
                   <th className="num"></th>
+                  <th className="num">AVR</th>
                 </>
               ) : (
                 <>
@@ -1631,6 +1634,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   <th className="num">PIM</th>
                   <th className="num">TOI/g</th>
                   <th className="num">PP</th>
+                  <th className="num">AVR</th>
                 </>
               )}
             </tr>
@@ -1644,7 +1648,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   ? <GoalieHistoryRow g={season.goalie} />
                   : season.skater
                     ? <SkaterHistoryRow s={season.skater} />
-                    : <td colSpan={8} className="muted">—</td>}
+                    : <td colSpan={9} className="muted">—</td>}
               </tr>
             ))}
           </tbody>

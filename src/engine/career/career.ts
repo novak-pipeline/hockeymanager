@@ -631,6 +631,13 @@ export class Career {
    * (newest at end, capped at RATINGS_WINDOW).
    */
   private readonly playerRatings = new Map<string, number[]>()
+  /**
+   * Cumulative season match-rating accumulator (sum + games), from game one of the
+   * current season — the true season "Avr". Unlike playerRatings (a rolling 10-game
+   * form window), this never drops games. Cleared each season rollover, so a player
+   * has NO Avr before the season's first game (and imported pre-career seasons none).
+   */
+  private readonly seasonRatingTotals = new Map<string, { sum: number; n: number }>()
   /** Practice / scratch state for the user's team. */
   private practiceState: TeamPracticeState = createInitialPracticeState()
   /**
@@ -2316,6 +2323,11 @@ export class Career {
       existing.push(rating)
       if (existing.length > RATINGS_WINDOW) existing.shift()
       this.playerRatings.set(pid_str, existing)
+      // Cumulative season Avr (never windowed).
+      const acc = this.seasonRatingTotals.get(pid_str) ?? { sum: 0, n: 0 }
+      acc.sum += rating
+      acc.n += 1
+      this.seasonRatingTotals.set(pid_str, acc)
     }
   }
 
@@ -3673,6 +3685,7 @@ export class Career {
       const teamId = this.teamOf(pid)
       const ppG = this.ppGoals.get(pid) ?? 0
       const ppA = this.ppAssists.get(pid) ?? 0
+      const ratingAcc = this.seasonRatingTotals.get(pid as string)
       p.stats.push({
         season: this.year,
         teamId: (teamId as string) ?? 'FA',
@@ -3691,6 +3704,7 @@ export class Career {
         shotsAgainst: t.shotsAgainst,
         goalsAgainst: t.goalsAgainst,
         shutouts: 0,
+        ...(ratingAcc && ratingAcc.n > 0 ? { avgRating: Math.round((ratingAcc.sum / ratingAcc.n) * 100) / 100 } : {}),
       })
     }
   }
@@ -3796,6 +3810,7 @@ export class Career {
     this.prevRanks.clear()
     /* ── plumbing module rollover ── */
     this.playerRatings.clear()
+    this.seasonRatingTotals.clear()
     this.hireableStaff = []
     // Keep practiceState team focus across seasons (intentional persistence)
     // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
@@ -4710,10 +4725,11 @@ export class Career {
       .map((a) => ({ award: a.award, year: a.year }))
     if (playerAwards.length > 0) profile.awards = playerAwards
 
-    // This season's average match rating (EHM "Avr").
-    const ratingArr = this.playerRatings.get(pid)
-    if (ratingArr && ratingArr.length > 0) {
-      profile.avgRating = Math.round((ratingArr.reduce((s, v) => s + v, 0) / ratingArr.length) * 100) / 100
+    // This season's average match rating (EHM "Avr") — cumulative from game one,
+    // so there's no Avr before the season's first game.
+    const seasonRating = this.seasonRatingTotals.get(pid as string)
+    if (seasonRating && seasonRating.n > 0) {
+      profile.avgRating = Math.round((seasonRating.sum / seasonRating.n) * 100) / 100
     }
 
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
@@ -7461,6 +7477,7 @@ export class Career {
         ? [...this.teamStaffMap.entries()].map(([k, v]) => [k, structuredClone(v)] as [string, TeamStaff])
         : undefined,
       playerRatings: [...this.playerRatings.entries()].map(([k, v]) => [k, [...v]] as [string, number[]]),
+      seasonRatingTotals: [...this.seasonRatingTotals.entries()].map(([k, v]) => [k, { ...v }] as [string, { sum: number; n: number }]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
       boardState: structuredClone(this.boardState),
@@ -7613,6 +7630,11 @@ export class Career {
     if (snapshot.playerRatings) {
       for (const [k, v] of snapshot.playerRatings) {
         career.playerRatings.set(k, [...v])
+      }
+    }
+    if (snapshot.seasonRatingTotals) {
+      for (const [k, v] of snapshot.seasonRatingTotals) {
+        career.seasonRatingTotals.set(k, { ...v })
       }
     }
     if (snapshot.practiceState) {

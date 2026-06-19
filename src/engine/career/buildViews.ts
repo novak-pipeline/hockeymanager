@@ -708,6 +708,7 @@ export function buildPlayerProfile(
                   : 0,
               ppGoals: s.pp.goals,
               ppAssists: s.pp.assists,
+              ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             },
       goalie:
         p.position === 'G'
@@ -721,6 +722,7 @@ export function buildPlayerProfile(
               shutouts: s.shutouts,
               saves: s.saves,
               shotsAgainst: s.shotsAgainst,
+              ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             }
           : null,
     }))
