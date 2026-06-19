@@ -280,6 +280,11 @@ function simShift(
       const assists = pickAssists(rng, atk.skaters, shooter)
       stat(ctx, shooter.id).goals++
       for (const a of assists) stat(ctx, a.id).assists++
+      // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
+      if (goalStrength !== 'pp') {
+        for (const sk of atk.skaters) stat(ctx, sk.id).plusMinus += 1
+        for (const sk of def.skaters) stat(ctx, sk.id).plusMinus -= 1
+      }
       // Credit the primary assister xA = shooter's xG for this shot.
       if (assists.length > 0) {
         const primaryA = stat(ctx, assists[0].id)
@@ -463,6 +468,8 @@ function simEmptyNetPhase(
     leading.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
+    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus += 1
+    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
     stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
     ctx.stream.push({
       t: tEN,
@@ -480,6 +487,8 @@ function simEmptyNetPhase(
     trailing.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
+    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus += 1
+    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
     stat(ctx, leadingOn.goalie.id).shotsAgainst++
     stat(ctx, leadingOn.goalie.id).goalsAgainst++
     ctx.stream.push({

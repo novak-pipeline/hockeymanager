@@ -885,6 +885,11 @@ function simPeriod(
         if (gStat) gStat.goalsAgainst++
         stat(ctx, shooterSk.player.id).goals++
         for (const as of assists) stat(ctx, as).assists++
+        // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
+        if (gs !== 'pp') {
+          for (const r of atk.unit.skaters) stat(ctx, r.player.id).plusMinus += 1
+          for (const r of def.unit.skaters) stat(ctx, r.player.id).plusMinus -= 1
+        }
         // Credit the primary assister (first in list) xA = shooter's xG value.
         if (assists.length > 0) {
           const primaryA = stat(ctx, assists[0])

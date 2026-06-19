@@ -2307,7 +2307,7 @@ export class Career {
           blockedShots: s.blockedShots,
           takeaways: s.takeaways,
           giveaways: s.giveaways,
-          plusMinus: 0, // plus/minus is a placeholder per CLAUDE.md
+          plusMinus: s.plusMinus,
           toi: s.toi,
         })
       }
@@ -3685,7 +3685,7 @@ export class Career {
         },
         pp: { goals: ppG, assists: ppA, shots: 0, timeOnIce: 0 },
         pk: { goals: 0, assists: 0, shots: 0, timeOnIce: 0 },
-        plusMinus: 0,
+        plusMinus: t.plusMinus,
         penaltyMinutes: t.penaltyMinutes,
         saves: t.saves,
         shotsAgainst: t.shotsAgainst,
