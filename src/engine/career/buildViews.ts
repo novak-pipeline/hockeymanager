@@ -27,6 +27,7 @@ import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
+import { contractStatus } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -580,6 +581,10 @@ function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView 
     twoWay: c.twoWay,
     capHit: c.salary,
     freeAgentStatus,
+    // The rights status he'll carry when this deal ends (ELC/RFA → club retains
+    // rights; UFA → free to leave). Drives both the engine's re-sign logic and the
+    // profile label so they agree.
+    rightsStatus: contractStatus(p),
   }
   // Two-way contracts: buried cap hit is the minor-league minimum (approximation).
   // EHM uses actual minor-league salary; we approximate as half the NHL salary,

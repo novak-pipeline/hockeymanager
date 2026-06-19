@@ -1529,6 +1529,9 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
         <InfoRow label="Years remaining" value={yearsRem} />
         <InfoRow label="Expiry year" value={expiryYear} />
         <InfoRow label="FA status" value={pc?.freeAgentStatus ?? (c ? 'Under contract' : null)} />
+        {pc?.rightsStatus && pc.freeAgentStatus === null && (
+          <InfoRow label="Rights status" value={pc.rightsStatus === 'UFA' ? 'UFA at expiry' : `${pc.rightsStatus} (rights held)`} />
+        )}
         <InfoRow label="No-trade clause" value={(pc?.noTradeClause ?? c?.noTradeClause) ? 'Yes' : null} />
         <InfoRow label="Two-way contract" value={(pc?.twoWay ?? c?.twoWay) ? 'Yes' : null} />
       </Panel>

@@ -353,6 +353,9 @@ export interface ProfileContractView extends ContractView {
   buriedCapHit?: number
   /** 'RFA' | 'UFA' | null if under contract with years remaining. */
   freeAgentStatus: 'RFA' | 'UFA' | null
+  /** Rights status he'll carry at contract's end: ELC/RFA (club retains rights) or
+   *  UFA (free to leave). Present whenever he's on a club. */
+  rightsStatus?: 'ELC' | 'RFA' | 'UFA'
 }
 
 /** EHM-style position proficiency for one position. */

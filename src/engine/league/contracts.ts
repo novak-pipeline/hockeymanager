@@ -72,6 +72,26 @@ function hashId(id: string): number {
 
 const roundTo25k = (salary: number): number => Math.round(salary / 25_000) * 25_000
 
+/**
+ * Contract status by age + pro service (approximates NHL rules):
+ *   ELC — entry-level: young (≤23) with a short pro record (≤3 seasons).
+ *   RFA — restricted: under 27 and fewer than 7 pro seasons. His club holds his
+ *         rights and can qualify him, so he can't simply walk to the open market.
+ *   UFA — unrestricted: 27+, or 7+ pro seasons — free to sign anywhere.
+ * Matches the age-27 RFA/UFA boundary the profile view already displays, so the
+ * label a GM sees and the way the engine treats the player agree.
+ */
+export function contractStatus(player: Player): 'ELC' | 'RFA' | 'UFA' {
+  if (player.age >= 27 || player.stats.length >= 7) return 'UFA'
+  if (player.age <= 23 && player.stats.length <= 3) return 'ELC'
+  return 'RFA'
+}
+
+/** A club walks away from (declines to qualify) a restricted FA below this overall
+ *  when the position group is already at its minimum — i.e. a fringe RFA can still
+ *  reach free agency, but quality young players are retained. */
+const RFA_WALKAWAY_OVERALL = 45
+
 /** Sum of rostered salaries; the live truth `finances.capUsed` caches. */
 export function capUsedFor(team: Team, players: Map<PlayerId, Player>): number {
   let sum = 0
@@ -283,9 +303,25 @@ export function aiResignDay(args: {
       .sort(byOverallDesc)
 
     for (const player of expiring) {
-      if (!isKeeper(team, player, players)) continue
+      const restricted = contractStatus(player) !== 'UFA'
+      if (restricted) {
+        // A restricted FA has no leverage — his club qualifies him and he can't
+        // walk, so we skip the acceptance check. The club only declines a fringe
+        // RFA when the position is already stocked (he then reaches the open pool).
+        const group = groupOf(player)
+        if (
+          playerOverall(player) < RFA_WALKAWAY_OVERALL &&
+          secureCount(team, players, group) >= ROSTER_MINIMUMS[group]
+        ) {
+          continue
+        }
+      } else {
+        // Unrestricted: the club must both want him and win the negotiation.
+        if (!isKeeper(team, player, players)) continue
+        const ask = askTerms(player, year)
+        if (!offerAcceptable(player, ask, ask, rng)) continue
+      }
       const ask = askTerms(player, year)
-      if (!offerAcceptable(player, ask, ask, rng)) continue
       const prospective = capUsedFor(team, players) - player.contract.salary + ask.salary
       if (prospective > team.finances.salaryCap) continue
       signPlayer({ team, player, salary: ask.salary, years: ask.years, year, players })

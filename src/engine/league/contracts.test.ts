@@ -18,6 +18,7 @@ import {
   askTerms,
   capSpace,
   capUsedFor,
+  contractStatus,
   initialPicks,
   offerAcceptable,
   processExpiries,
@@ -386,6 +387,57 @@ describe('aiResignDay', () => {
 
     expect(signings.find((s) => s.playerId === top.id)).toBeUndefined()
     expect(top.contract.yearsRemaining).toBe(0)
+  })
+})
+
+describe('contractStatus', () => {
+  it('classifies by age and pro service (ELC / RFA / UFA)', () => {
+    expect(contractStatus(mkSkater('a', 60, 21))).toBe('ELC') // young, no pro record
+    expect(contractStatus(mkSkater('b', 60, 25))).toBe('RFA') // under 27
+    expect(contractStatus(mkSkater('c', 60, 28))).toBe('UFA') // 27+
+    // 7+ pro seasons makes a sub-27 player a UFA on service.
+    const veteranYoung = mkSkater('d', 60, 25)
+    ;(veteranYoung as unknown as { stats: unknown[] }).stats = new Array(8).fill({})
+    expect(contractStatus(veteranYoung)).toBe('UFA')
+  })
+})
+
+describe('aiResignDay — restricted free agents', () => {
+  it('retains an expiring RFA the club would otherwise let walk as a UFA', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000 // headroom
+
+    // ovr ~52: below the UFA keeper bar (55) and not in the young-keeper branch
+    // (age > 23), so as a UFA he'd walk — but as a 25-year-old he's an RFA.
+    const rfa = mkSkater('rfa-keep', 52, 25)
+    rfa.contract.yearsRemaining = 0
+    expect(contractStatus(rfa)).toBe('RFA')
+    team.roster.push(rfa.id)
+    data.players.set(rfa.id, rfa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(rfa.contract.yearsRemaining).toBeGreaterThan(0)
+    expect(team.roster).toContain(rfa.id)
+  })
+
+  it('still lets a comparable UFA walk', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000
+
+    const ufa = mkSkater('ufa-walk', 52, 30) // same ovr, but 30 → UFA, not a keeper
+    ufa.contract.yearsRemaining = 0
+    expect(contractStatus(ufa)).toBe('UFA')
+    team.roster.push(ufa.id)
+    data.players.set(ufa.id, ufa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(ufa.contract.yearsRemaining).toBe(0)
   })
 })
 
