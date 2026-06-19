@@ -573,10 +573,14 @@ function findOwnedPicks(allPicks: DraftPick[], wanted: DraftPick[], owner: TeamI
   })
 }
 
-function movePlayers(from: Team, to: Team, ids: PlayerId[]): void {
+function movePlayers(from: Team, to: Team, ids: PlayerId[], players: Map<PlayerId, Player>): void {
   for (const id of ids) {
     from.roster.splice(from.roster.indexOf(id), 1)
     to.roster.push(id)
+    // Rights follow the player to the acquiring club. Only update an existing
+    // holder so we don't fabricate rights for players who never had any tracked.
+    const p = players.get(id)
+    if (p && p.rightsTeamId !== undefined) p.rightsTeamId = to.id
   }
 }
 
@@ -612,8 +616,8 @@ export function executeTrade(args: {
   const aPicks = findOwnedPicks(args.allPicks, args.aGivesPicks, args.teamA)
   const bPicks = findOwnedPicks(args.allPicks, args.bGivesPicks, args.teamB)
 
-  movePlayers(a, b, args.aGivesPlayerIds)
-  movePlayers(b, a, args.bGivesPlayerIds)
+  movePlayers(a, b, args.aGivesPlayerIds, args.players)
+  movePlayers(b, a, args.bGivesPlayerIds, args.players)
   for (const p of aPicks) p.ownerTeamId = args.teamB
   for (const p of bPicks) p.ownerTeamId = args.teamA
 

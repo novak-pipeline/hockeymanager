@@ -219,6 +219,28 @@ describe('Career — full year cycle', () => {
     const done = career.getDraft()
     expect(done === null || done.complete).toBe(true)
   })
+
+  it('records rights + draft pedigree on every player selected in-game', () => {
+    const data = generateLeague({ seed: 21 })
+    const career = new Career(data, 21, data.league.teams[0])
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft (builds the board)
+    career.advanceOffseason() // draft → resign (force-sims every pick)
+
+    // rightsTeamId is set ONLY by an in-game selection, so it cleanly identifies
+    // players drafted this career (vs. generated/imported pedigree).
+    const drafted = [...data.players.values()].filter((p) => p.rightsTeamId !== undefined)
+    expect(drafted.length).toBeGreaterThan(0)
+    for (const p of drafted) {
+      expect(p.nhlDrafted).toBe(true)
+      expect(p.nhlDraftEligible).toBe(false)
+      expect(p.draftRound).toBeGreaterThanOrEqual(1)
+      expect(p.draftOverall).toBeGreaterThanOrEqual(1)
+      expect(p.draftClub).toBeTruthy()
+      expect(data.teams.has(p.rightsTeamId!)).toBe(true)
+    }
+  })
 })
 
 describe('Career — scouting', () => {

@@ -3573,6 +3573,16 @@ export class Career {
     const team = this.data.teams.get(pick.ownerTeamId)!
     const player = this.resolve(playerId)
     d.selections.push({ overallPick: idx + 1, teamId: pick.ownerTeamId, playerId })
+    // Record the rights + draft pedigree on the player so his profile reflects how
+    // he entered the league (previously only imported players carried this) and so
+    // the org that drafted him holds his rights wherever he plays.
+    player.rightsTeamId = pick.ownerTeamId
+    player.nhlDrafted = true
+    player.nhlDraftEligible = false
+    player.draftYear = d.year
+    player.draftRound = pick.round
+    player.draftOverall = idx + 1
+    player.draftClub = team.name
     const elc = {
       salary: 900000,
       yearsRemaining: 3,
