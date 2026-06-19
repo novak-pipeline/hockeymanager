@@ -1354,21 +1354,27 @@ function CareerTotals({ seasons, isGoalie, avgRating }: { seasons: PlayerProfile
 
 /** Career honours as trophy badges (grouped by award, with a count + years tooltip). */
 function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['awards']> }): JSX.Element {
-  const byName = new Map<string, number[]>()
+  const byName = new Map<string, { dated: number[]; undated: number }>()
   for (const a of awards) {
-    const arr = byName.get(a.award) ?? []
-    arr.push(a.year)
-    byName.set(a.award, arr)
+    const e = byName.get(a.award) ?? { dated: [], undated: 0 }
+    if (a.year !== undefined) e.dated.push(a.year)
+    else e.undated += 1
+    byName.set(a.award, e)
   }
   return (
     <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
-      {[...byName.entries()].map(([name, years]) => {
-        const sorted = [...years].sort((a, b) => b - a)
+      {[...byName.entries()].map(([name, e]) => {
+        const total = e.dated.length + e.undated
+        const dated = [...e.dated].sort((a, b) => b - a)
+        // Tooltip: in-career years, plus a note for imported (undated) honours.
+        const tip = dated.length && e.undated ? `${name} — ${dated.join(', ')} (+${e.undated} before your tenure)`
+          : dated.length ? `${name} — ${dated.join(', ')}`
+          : `${name} — ${e.undated} before your tenure`
         const icon = name.includes('Gold') ? '🥇' : name.includes('Silver') ? '🥈' : name.includes('Bronze') ? '🥉' : '🏆'
         return (
           <div
             key={name}
-            title={`${name} — ${sorted.join(', ')}`}
+            title={tip}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px',
               borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--accent2, #e0b341)',
@@ -1377,8 +1383,8 @@ function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['award
           >
             <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
             <span style={{ fontSize: 12, fontWeight: 700 }}>{name}</span>
-            {sorted.length > 1 && (
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{sorted.length}</span>
+            {total > 1 && (
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{total}</span>
             )}
           </div>
         )

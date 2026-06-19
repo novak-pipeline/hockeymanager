@@ -4762,12 +4762,15 @@ export class Career {
       name: leagueAbbrev,
     }, observedPace)
 
-    // Career honours — trophies won during this career (Hart, Cup, etc.), shown as
-    // badges on the History tab. Newest first.
-    const playerAwards = this.recordsState.awards
+    // Career honours — trophies won during this career (Hart, Cup, medals, etc.),
+    // shown as badges on the History tab, plus pre-career honours imported from the
+    // source DB. In-career awards carry their year; imported ones are a count only.
+    const playerAwards: Array<{ award: string; year?: number }> = this.recordsState.awards
       .filter((a) => a.playerId === (pid as string))
       .sort((a, b) => b.year - a.year)
       .map((a) => ({ award: a.award, year: a.year }))
+    const priorCups = this.data.players.get(pid)?.stanleyCups ?? 0
+    for (let i = 0; i < priorCups; i++) playerAwards.push({ award: 'Stanley Cup' })
     if (playerAwards.length > 0) profile.awards = playerAwards
 
     // This season's average match rating (EHM "Avr") — cumulative from game one,
