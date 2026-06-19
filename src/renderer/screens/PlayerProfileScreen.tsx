@@ -1319,13 +1319,15 @@ function SeasonStatsTable({ seasons, isGoalie }: { seasons: PlayerProfileView['s
 }
 
 /** Career totals summed from the season lines. */
-function CareerTotals({ seasons, isGoalie }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean }): JSX.Element {
+function CareerTotals({ seasons, isGoalie, avgRating }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean; avgRating?: number }): JSX.Element {
+  const ratingCell: Array<readonly [string, number | string]> =
+    avgRating !== undefined ? [['AVR', avgRating.toFixed(2)]] : []
   if (isGoalie) {
     const t = seasons.reduce((a, s) => {
       if (s.goalie) { a.gp += s.goalie.gamesPlayed; a.w += s.goalie.wins; a.l += s.goalie.losses; a.so += s.goalie.shutouts }
       return a
     }, { gp: 0, w: 0, l: 0, so: 0 })
-    const cells = [['GP', t.gp], ['W', t.w], ['L', t.l], ['SO', t.so]] as const
+    const cells: Array<readonly [string, number | string]> = [['GP', t.gp], ['W', t.w], ['L', t.l], ['SO', t.so], ...ratingCell]
     return (
       <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
         {cells.map(([label, value]) => (
@@ -1338,12 +1340,46 @@ function CareerTotals({ seasons, isGoalie }: { seasons: PlayerProfileView['seaso
     if (s.skater) { a.gp += s.skater.gamesPlayed; a.g += s.skater.goals; a.a += s.skater.assists; a.p += s.skater.points }
     return a
   }, { gp: 0, g: 0, a: 0, p: 0 })
-  const cells = [['GP', t.gp], ['G', t.g], ['A', t.a], ['P', t.p]] as const
+  const cells: Array<readonly [string, number | string]> = [['GP', t.gp], ['G', t.g], ['A', t.a], ['P', t.p], ...ratingCell]
   return (
     <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
       {cells.map(([label, value]) => (
         <div key={label} className="stat"><div className="stat-value" style={{ fontSize: 20 }}>{value}</div><div className="stat-label">{label}</div></div>
       ))}
+    </div>
+  )
+}
+
+/** Career honours as trophy badges (grouped by award, with a count + years tooltip). */
+function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['awards']> }): JSX.Element {
+  const byName = new Map<string, number[]>()
+  for (const a of awards) {
+    const arr = byName.get(a.award) ?? []
+    arr.push(a.year)
+    byName.set(a.award, arr)
+  }
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+      {[...byName.entries()].map(([name, years]) => {
+        const sorted = [...years].sort((a, b) => b - a)
+        return (
+          <div
+            key={name}
+            title={`${name} — ${sorted.join(', ')}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+              borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--accent2, #e0b341)',
+              cursor: 'help',
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>🏆</span>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>{name}</span>
+            {sorted.length > 1 && (
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{sorted.length}</span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1562,7 +1598,10 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
       <Panel title="Career Totals">
-        <CareerTotals seasons={d.seasons} isGoalie={isGoalie} />
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+          <CareerTotals seasons={d.seasons} isGoalie={isGoalie} {...(d.avgRating !== undefined ? { avgRating: d.avgRating } : {})} />
+          {d.awards && d.awards.length > 0 && <TrophyBadges awards={d.awards} />}
+        </div>
       </Panel>
     <Panel title="Career Stats">
       <div className="table-wrap">

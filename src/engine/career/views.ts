@@ -395,6 +395,14 @@ export interface PlayerProfileView extends PlayerBadge {
     goalie: GoalieSeasonLine | null
   }>
 
+  /** Career honours won during this career (individual trophies). Newest first.
+   *  Absent when none. Shown as trophy badges on the History tab. */
+  awards?: Array<{ award: string; year: number }>
+
+  /** This season's average match rating (EHM "Avr", 0–10). Absent before he's
+   *  played a game this season. */
+  avgRating?: number
+
   /* ── Phase B additions (view-layer only, additive) ── */
 
   /** Six-axis radar model derived from composites. */

@@ -4702,6 +4702,20 @@ export class Career {
       name: leagueAbbrev,
     }, observedPace)
 
+    // Career honours — trophies won during this career (Hart, Cup, etc.), shown as
+    // badges on the History tab. Newest first.
+    const playerAwards = this.recordsState.awards
+      .filter((a) => a.playerId === (pid as string))
+      .sort((a, b) => b.year - a.year)
+      .map((a) => ({ award: a.award, year: a.year }))
+    if (playerAwards.length > 0) profile.awards = playerAwards
+
+    // This season's average match rating (EHM "Avr").
+    const ratingArr = this.playerRatings.get(pid)
+    if (ratingArr && ratingArr.length > 0) {
+      profile.avgRating = Math.round((ratingArr.reduce((s, v) => s + v, 0) / ratingArr.length) * 100) / 100
+    }
+
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
     // Re-point the current season at the totals for the league he actually plays
