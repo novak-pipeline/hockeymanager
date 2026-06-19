@@ -4979,6 +4979,16 @@ export class Career {
       }
     }
 
+    // Show the running Avr on the in-progress season's row too (completed seasons
+    // already carry it from SeasonStats; the current season isn't archived yet).
+    if (profile.avgRating !== undefined) {
+      const cur = profile.seasons[0]
+      if (cur && cur.year === this.year) {
+        if (cur.skater) cur.skater.avgRating = profile.avgRating
+        if (cur.goalie) cur.goalie.avgRating = profile.avgRating
+      }
+    }
+
     return profile
   }
 
