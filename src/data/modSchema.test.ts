@@ -742,4 +742,41 @@ describe('loadModDatabase — wider-world competitions (#95)', () => {
     const data = loadModDatabase(validateModDatabase(makeFixtureMod(4)), { seed: 7 })
     expect(data.league.competitions).toBeUndefined()
   })
+
+  it('routes under-age affiliate players to a junior league, never the AHL', () => {
+    const db = modWithCompetition() // includes an OHL (junior) competition
+    // First NHL team's affiliate list includes a 16-year-old prospect.
+    const young = makeSkater(900, 'C')
+    young.age = 16
+    young.externalId = 'young-prospect'
+    const affiliatePlayers: ModPlayer[] = [young]
+    for (let i = 0; i < 3; i++) affiliatePlayers.push(makeSkater(910 + i, 'C'))
+    for (let i = 0; i < 9; i++) affiliatePlayers.push(makeSkater(920 + i, 'W'))
+    for (let i = 0; i < 6; i++) affiliatePlayers.push(makeSkater(930 + i, 'D'))
+    affiliatePlayers.push(makeGoalie(940))
+    affiliatePlayers.push(makeGoalie(941))
+    db.conferences[0].divisions[0].teams[0].affiliate = {
+      city: 'Springfield', nickname: 'Ice Cats', abbreviation: 'SIC',
+      primary: '#AA0000', secondary: '#FFFFFF', players: affiliatePlayers,
+    }
+
+    const data = loadModDatabase(validateModDatabase(db), { seed: 5 })
+
+    const young16 = [...data.players.values()].find((p) => p.externalId === 'young-prospect')!
+    expect(young16).toBeDefined()
+    expect(young16.age).toBe(16)
+
+    // He's rostered on a junior (world-tier) team, not the AHL affiliate.
+    const homeTeam = [...data.teams.values()].find((t) => t.roster.includes(young16.id))!
+    expect(homeTeam).toBeDefined()
+    expect(homeTeam.tier).toBe('world')
+
+    // And NO AHL roster contains anyone below the AHL minimum age.
+    for (const t of data.teams.values()) {
+      if (t.tier !== 'ahl') continue
+      for (const pid of t.roster) {
+        expect(data.players.get(pid)!.age).toBeGreaterThanOrEqual(18)
+      }
+    }
+  })
 })

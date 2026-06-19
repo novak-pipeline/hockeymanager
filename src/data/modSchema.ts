@@ -1439,6 +1439,18 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     return player
   }
 
+  // A player below this age can't realistically be in the AHL — he belongs in a
+  // junior league. Some mod affiliate lists lump junior-age prospects in with the
+  // farm club; we hold those and place them on a junior-league team below (only
+  // when the mod actually ships junior competitions to route them into, so no
+  // player is ever orphaned and NHL-only mods keep their current behaviour).
+  const AHL_MIN_AGE = 18
+  const JUNIOR_TARGET_ABBREVS = new Set(['OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL'])
+  const hasJuniorComps = (mod.competitions ?? []).some(
+    (c) => JUNIOR_TARGET_ABBREVS.has(c.abbrev.toUpperCase()) && c.teams.length > 0
+  )
+  const underageProspects: Player[] = []
+
   for (const { teamId: nhlTeamId, modTeam, roster: nhlRoster } of nhlTeamSpecs) {
     const nhlTeam = teams.get(nhlTeamId)!
     const ahlTeamId = asTeamId(`ahl-mt${ahlTeamNum++}`)
@@ -1508,6 +1520,12 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           externalId: modPlayer.externalId,
           ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
           ...bioFields(modPlayer)
+        }
+        if (hasJuniorComps && player.age < AHL_MIN_AGE) {
+          // Too young for the AHL — hold him for junior-league placement below.
+          players.set(playerId, player)
+          underageProspects.push(player)
+          continue
         }
         const goaliesBefore = ahlRoster.filter((p) => p.position === 'G').length
         if (modPlayer.position === 'G' && goaliesBefore > 0) player.role = 'backup'
@@ -1643,7 +1661,9 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   if (mod.competitions && mod.competitions.length > 0) {
     const rawComps: RawCompetition[] = []
     const membership: Array<{ teamId: TeamId; competitionId: string }> = []
+    const juniorTeamIds: TeamId[] = []
     for (const mc of mod.competitions) {
+      const isJuniorComp = JUNIOR_TARGET_ABBREVS.has(mc.abbrev.toUpperCase())
       rawComps.push({
         id: mc.id,
         name: mc.name,
@@ -1688,8 +1708,27 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         }
         teams.set(teamId, team)
         membership.push({ teamId, competitionId: mc.id })
+        if (isJuniorComp) juniorTeamIds.push(teamId)
       }
     }
+
+    // Place the held under-age prospects onto junior-league teams (round-robin),
+    // then rebuild those teams' lines so the new bodies are slotted. This is what
+    // keeps junior-age players out of the AHL — they now live in a junior loop
+    // where they play, develop, and remain draft-eligible.
+    if (underageProspects.length > 0 && juniorTeamIds.length > 0) {
+      const touched = new Set<TeamId>()
+      underageProspects.forEach((prospect, i) => {
+        const tid = juniorTeamIds[i % juniorTeamIds.length]!
+        teams.get(tid)!.roster.push(prospect.id)
+        touched.add(tid)
+      })
+      for (const tid of touched) {
+        const t = teams.get(tid)!
+        t.lines = buildLinesFromRoster(t.roster.map((id) => players.get(id)!))
+      }
+    }
+
     competitions = buildCompetitions({ comps: rawComps, membership, season: startYear })
   }
 
