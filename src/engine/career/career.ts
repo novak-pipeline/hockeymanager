@@ -78,6 +78,7 @@ import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { farmSplit } from '@engine/career/farmReassign'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
@@ -3536,6 +3537,11 @@ export class Career {
         return true
       }
       case 'preseason': {
+        // Development gate: sort each club's NHL roster vs its AHL affiliate by
+        // ability so the best players are up and the rest develop down. AI clubs
+        // apply it automatically; the user's club gets a SUGGESTION (he keeps
+        // manual control of his own call-ups/send-downs).
+        this.reassignFarmSystems()
         // Fire season review report before rolling over (once per season).
         for (const kind of checkPreseasonStage(this.pressScheduleState)) {
           this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
@@ -3929,6 +3935,52 @@ export class Career {
       else f++
     }
     return { f, d, g }
+  }
+
+  /**
+   * Offseason development gate: for every NHL club with an AHL affiliate, sort the
+   * combined NHL+AHL pool by current ability so the best players are on the NHL
+   * roster and the rest develop in the AHL. AI clubs apply it; the user's club
+   * gets a SUGGESTION in the inbox instead (he keeps manual roster control).
+   */
+  private reassignFarmSystems(): void {
+    const scorer = (p: Player): number => overall(p.composites, p.position)
+    for (const team of this.data.teams.values()) {
+      if (team.tier === 'ahl' || team.tier === 'world') continue
+      const ahlId = team.affiliateId
+      const ahl = ahlId ? this.data.teams.get(ahlId) : undefined
+      if (!ahl) continue
+
+      const split = farmSplit({
+        nhlRoster: team.roster,
+        ahlRoster: ahl.roster,
+        resolve: (id) => this.data.players.get(id),
+        score: scorer,
+      })
+      if (split.promoted.length === 0 && split.demoted.length === 0) continue
+
+      if (team.id === this.userTeamId) {
+        // Suggest, don't apply — surface the staff's recommendation to the GM.
+        const name = (id: PlayerId): string => this.data.players.get(id)?.name ?? 'a player'
+        const ups = split.promoted.slice(0, 4).map(name)
+        const downs = split.demoted.slice(0, 4).map(name)
+        const parts: string[] = []
+        if (ups.length) parts.push(`Call up: ${ups.join(', ')}`)
+        if (downs.length) parts.push(`Send down: ${downs.join(', ')}`)
+        this.pushNews(
+          'contract',
+          'Staff roster recommendation',
+          `Your hockey staff suggest some farm moves based on how the roster developed. ${parts.join('. ')}. (Manage them yourself on the squad and farm screens.)`
+        )
+        continue
+      }
+
+      // AI club: apply the split and rebuild both rosters' lines.
+      team.roster = split.nhl
+      ahl.roster = split.ahl
+      repairLines(team, this.data.players)
+      repairLines(ahl, this.data.players)
+    }
   }
 
   /**
