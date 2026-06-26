@@ -269,7 +269,16 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   return (
     <section className="stack">
       <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Roster') : (ahlData?.teamName ?? 'AHL Affiliate')}>
-        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {screenTab === 'nhl' && data && (
+            <span className="muted small" style={{ whiteSpace: 'nowrap' }} title="Roster size · cap used vs ceiling">
+              {data.rosterCount} players ·{' '}
+              <span style={{ color: data.capUsed > data.salaryCap ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
+                {fmtMoney(data.capUsed)}
+              </span>
+              {' / '}{fmtMoney(data.salaryCap)}
+            </span>
+          )}
           {screenTab === 'nhl' && (
             <input
               className="input"

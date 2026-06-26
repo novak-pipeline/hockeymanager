@@ -298,6 +298,9 @@ export interface SquadView {
   /** Total roster size / currently dressed players. */
   rosterCount: number
   dressedCount: number
+  /** Summed roster salary and the club's cap ceiling (for the header cap chip). */
+  capUsed: number
+  salaryCap: number
 }
 
 export interface AttributeGroupView {

@@ -345,7 +345,8 @@ export function buildSquadView(
     )
 
   const dressedCount = rows.filter((r) => !r.scratched && r.injury === null).length
-  return { teamName: team.name, rows, rosterCount: rows.length, dressedCount }
+  const capUsed = team.roster.reduce((s, id) => s + (ctx.players.get(id)?.contract.salary ?? 0), 0)
+  return { teamName: team.name, rows, rosterCount: rows.length, dressedCount, capUsed, salaryCap: team.finances.salaryCap }
 }
 
 
