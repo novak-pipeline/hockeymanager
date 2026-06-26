@@ -287,6 +287,8 @@ export type WorkerRequestBody =
   | { type: 'callUp'; playerId: string }
   /** Assign an NHL player to the user's AHL affiliate. */
   | { type: 'sendDown'; playerId: string }
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  | { type: 'setCoachRoster' }
   /* ── Phase B: player profile view layer ── */
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   | { type: 'compareRadar'; playerIdA: string; playerIdB: string }
@@ -350,6 +352,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok' }
+  /** Result of an auto-applied coach roster: how many moved each way. */
+  | { type: 'coachRosterSet'; promoted: number; demoted: number }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }

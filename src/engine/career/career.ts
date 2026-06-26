@@ -4066,6 +4066,61 @@ export class Career {
   }
 
   /**
+   * "Ask the coach to set the roster" — auto-applies the coach's recommended NHL
+   * roster for the USER's club: the best players by ability fill a standard
+   * 14F/7D/2G NHL roster, the rest develop in the AHL. One-way NHL contracts are
+   * LOCKED to the NHL (you can't freely demote them — same rule as the manual
+   * Send-down button, which only offers two-way players); only two-way players get
+   * sent down, and any AHL player who outranks them is called up. Returns the names
+   * moved each way for a confirmation toast.
+   */
+  applyCoachRoster(): { promoted: string[]; demoted: string[] } {
+    const nhl = this.data.teams.get(this.userTeamId)
+    const ahlId = this.userTeam.affiliateId
+    const ahl = ahlId ? this.data.teams.get(ahlId as TeamId) : undefined
+    if (!nhl || !ahl) return { promoted: [], demoted: [] }
+
+    const grp = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+    const resolveAll = (ids: PlayerId[]): Player[] =>
+      ids.map((id) => this.data.players.get(id)).filter((p): p is Player => p !== undefined)
+
+    const nhlPlayers = resolveAll(nhl.roster)
+    const ahlPlayers = resolveAll(ahl.roster)
+    const wasNhl = new Set(nhl.roster.map((id) => id as string))
+
+    // One-way NHL players stay up; everyone else (two-way NHL + all AHL) competes.
+    const locked = nhlPlayers.filter((p) => !p.contract.twoWay)
+    const movable = [...nhlPlayers.filter((p) => p.contract.twoWay), ...ahlPlayers]
+
+    const targets: Record<'F' | 'D' | 'G', number> = { F: 14, D: 7, G: 2 }
+    const lockedCount: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
+    for (const p of locked) lockedCount[grp(p)]++
+
+    const byGroup: Record<'F' | 'D' | 'G', Player[]> = { F: [], D: [], G: [] }
+    for (const p of movable) byGroup[grp(p)].push(p)
+    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+
+    const newNhl: PlayerId[] = locked.map((p) => p.id)
+    const newAhl: PlayerId[] = []
+    for (const key of ['F', 'D', 'G'] as const) {
+      const slots = Math.max(0, targets[key] - lockedCount[key])
+      byGroup[key].forEach((p, i) => (i < slots ? newNhl : newAhl).push(p.id))
+    }
+
+    nhl.roster = newNhl
+    ahl.roster = newAhl
+    repairLines(nhl, this.data.players)
+    repairLines(ahl, this.data.players)
+
+    const nameOf = (id: PlayerId): string => this.data.players.get(id)?.name ?? ''
+    return {
+      promoted: newNhl.filter((id) => !wasNhl.has(id as string)).map(nameOf).filter(Boolean),
+      demoted: newAhl.filter((id) => wasNhl.has(id as string)).map(nameOf).filter(Boolean),
+    }
+  }
+
+  /**
    * Call up a player from the AHL to their parent NHL team.
    *
    * The player must be on an AHL team whose parentTeamId points to an NHL team.

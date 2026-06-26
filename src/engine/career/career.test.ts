@@ -1726,3 +1726,29 @@ describe('Career — wider-world quick-sim', () => {
     expect(gpAfter).toBeGreaterThanOrEqual(gpBefore)
   })
 })
+
+describe('Career — applyCoachRoster', () => {
+  it('keeps every player and never demotes a one-way contract', () => {
+    const data = generateLeague({ seed: 9 })
+    const career = new Career(data, 9, data.league.teams[0]!)
+    const userTeam = data.teams.get(data.league.teams[0]!)!
+    const ahlId = userTeam.affiliateId
+    expect(ahlId).toBeDefined()
+    const ahl = data.teams.get(ahlId!)!
+
+    const before = new Set([...userTeam.roster, ...ahl.roster].map((id) => id as string))
+    const oneWayNhl = userTeam.roster.filter((id) => !data.players.get(id)!.contract.twoWay)
+
+    const res = career.applyCoachRoster()
+
+    // Union preserved — no player lost or duplicated across the two rosters.
+    const after = new Set([...userTeam.roster, ...ahl.roster].map((id) => id as string))
+    expect(after).toEqual(before)
+    expect(userTeam.roster.length + ahl.roster.length).toBe(before.size)
+    // One-way contracts can't be sent down.
+    for (const id of oneWayNhl) expect(userTeam.roster).toContain(id)
+    // Reported moves are consistent with the result.
+    expect(Array.isArray(res.promoted)).toBe(true)
+    expect(Array.isArray(res.demoted)).toBe(true)
+  })
+})

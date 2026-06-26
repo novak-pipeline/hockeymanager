@@ -488,6 +488,11 @@ export class SimClient {
     return this.send({ type: 'sendDown', playerId })
   }
 
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  setCoachRoster(): Promise<WorkerResponse> {
+    return this.send({ type: 'setCoachRoster' })
+  }
+
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   compareRadar(playerIdA: string, playerIdB: string): Promise<WorkerResponse> {
     return this.send({ type: 'compareRadar', playerIdA, playerIdB })

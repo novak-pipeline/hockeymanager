@@ -6,7 +6,7 @@ import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
-import { useUiStore } from '../components/store'
+import { useUiStore, toast } from '../components/store'
 
 type ScreenTab = 'nhl' | 'ahl'
 type PosFilter = 'ALL' | 'F' | 'D' | 'G'
@@ -243,9 +243,32 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
     }
   }
 
+  const [settingRoster, setSettingRoster] = useState(false)
+  async function handleSetCoachRoster(): Promise<void> {
+    if (settingRoster) return
+    setSettingRoster(true)
+    try {
+      const res = await client.setCoachRoster()
+      if (res.type === 'error') { toast(res.message, 'error'); return }
+      if (res.type === 'coachRosterSet') {
+        const { promoted, demoted } = res
+        toast(
+          promoted + demoted === 0
+            ? 'Coach is happy with the roster as set — no moves.'
+            : `Coach set the roster: ${promoted} called up, ${demoted} sent down.`,
+          'success'
+        )
+      }
+      bump()
+      refetchAhl()
+    } finally {
+      setSettingRoster(false)
+    }
+  }
+
   return (
     <section className="stack">
-      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Squad') : (ahlData?.teamName ?? 'AHL Affiliate')}>
+      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Roster') : (ahlData?.teamName ?? 'AHL Affiliate')}>
         <div className="row" style={{ gap: 'var(--sp-2)' }}>
           {screenTab === 'nhl' && (
             <input
@@ -255,6 +278,16 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+          )}
+          {!isReadOnly && (
+            <button
+              className="btn btn-sm"
+              disabled={settingRoster}
+              onClick={() => void handleSetCoachRoster()}
+              title="Let the coach auto-set the NHL roster by ability — calls up the best AHL options, sends down two-way players who've been bettered"
+            >
+              {settingRoster ? 'Setting…' : 'Ask coach to set roster'}
+            </button>
           )}
           {!isReadOnly && (
             <button

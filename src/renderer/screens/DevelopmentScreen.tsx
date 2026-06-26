@@ -40,18 +40,6 @@ function tierColor(tier: DevelopmentRow['tier']): string {
   }
 }
 
-function RosterAdviceLine({ m }: { m: DevelopmentCenterView['rosterAdvice']['callUps'][number] }): JSX.Element {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderTop: '1px solid var(--line)' }}>
-      <PlayerFace faceId={m.faceId} name={m.name} size={20} />
-      <PlayerLink playerId={m.playerId} name={m.name} />
-      <span className="muted small">{m.position}</span>
-      <Stars value={m.currentStars} muted />
-      <span className="muted small" style={{ marginLeft: 'auto', fontStyle: 'italic' }}>{m.reason}</span>
-    </div>
-  )
-}
-
 export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
   // User-club scoped; teamId accepted for future per-team use.
@@ -62,61 +50,19 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
   )
 
   const [tab, setTab] = useState<'prospects' | 'system' | 'progress'>('prospects')
-  const [adviceOpen, setAdviceOpen] = useState(false)
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
   if (!data) return <Notice kind="info">No development data.</Notice>
   const d = data
-  const adviceCount = d.rosterAdvice.callUps.length + d.rosterAdvice.sendDowns.length
 
   return (
     <section className="stack">
       <ScreenHeader title="Development Center">
         <span className="muted small">
-          {d.count} prospects tracked · {d.highCeiling} high-ceiling
+          {d.count} prospects tracked · {d.highCeiling} high-ceiling · set the NHL roster on the Roster screen
         </span>
       </ScreenHeader>
-
-      {/* Ask the coach to set the NHL roster — reveals his recommended moves. */}
-      <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'center' }}>
-        <button type="button" className="btn btn-sm" onClick={() => setAdviceOpen((v) => !v)}>
-          {adviceOpen ? 'Hide roster advice' : 'Ask coach to set roster'}
-        </button>
-        <span className="muted small">
-          {adviceCount === 0 ? 'Your coach is happy with the NHL roster as set.' : `Coach suggests ${adviceCount} move${adviceCount === 1 ? '' : 's'}.`}
-        </span>
-      </div>
-
-      {adviceOpen && (
-        <Panel title="Coach's Roster Recommendation">
-          {adviceCount === 0 ? (
-            <div className="muted small">The best 23 are already up — no call-ups or send-downs recommended.</div>
-          ) : (
-            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-              <div>
-                <div className="field-label" style={{ color: 'var(--success)' }}>Call up to NHL</div>
-                {d.rosterAdvice.callUps.length === 0 ? (
-                  <div className="muted small" style={{ marginTop: 4 }}>None.</div>
-                ) : d.rosterAdvice.callUps.map((m) => (
-                  <RosterAdviceLine key={m.playerId} m={m} />
-                ))}
-              </div>
-              <div>
-                <div className="field-label" style={{ color: 'var(--accent2, #e0b341)' }}>Send down to AHL</div>
-                {d.rosterAdvice.sendDowns.length === 0 ? (
-                  <div className="muted small" style={{ marginTop: 4 }}>None.</div>
-                ) : d.rosterAdvice.sendDowns.map((m) => (
-                  <RosterAdviceLine key={m.playerId} m={m} />
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="muted" style={{ fontSize: 10.5, marginTop: 8, fontStyle: 'italic' }}>
-            Advice only — make the moves yourself on the Squad screen (call-up / send-down).
-          </div>
-        </Panel>
-      )}
 
       <div className="row" style={{ gap: 'var(--sp-2)' }}>
         <button type="button" className={`btn btn-sm${tab === 'prospects' ? ' btn-primary' : ''}`} onClick={() => setTab('prospects')}>Prospects</button>
