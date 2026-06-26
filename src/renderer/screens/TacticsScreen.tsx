@@ -347,16 +347,17 @@ function RinkBackdrop(): JSX.Element {
       </defs>
       {/* ice sheet */}
       <rect x="6" y="6" width="988" height="588" rx="96" fill="url(#ice)" stroke="rgba(150,170,200,0.28)" strokeWidth="2" />
-      {/* zone lines (soft) */}
-      <rect x="333" y="6" width="4" height="588" fill="rgba(60,120,230,0.35)" />
-      <rect x="663" y="6" width="4" height="588" fill="rgba(60,120,230,0.35)" />
-      <rect x="498" y="6" width="4" height="588" fill="rgba(220,60,60,0.32)" />
-      <circle cx="500" cy="300" r="70" fill="none" stroke="rgba(60,120,230,0.3)" strokeWidth="2" />
+      {/* zone lines run horizontally across the sheet (blue lines + centre red) */}
+      <rect x="6" y="208" width="988" height="4" fill="rgba(60,120,230,0.32)" />
+      <rect x="6" y="388" width="988" height="4" fill="rgba(60,120,230,0.32)" />
+      <rect x="6" y="298" width="988" height="4" fill="rgba(220,60,60,0.3)" />
+      {/* centre faceoff circle + dot */}
+      <circle cx="500" cy="300" r="64" fill="none" stroke="rgba(60,120,230,0.28)" strokeWidth="2" />
       <circle cx="500" cy="300" r="5" fill="rgba(220,60,60,0.4)" />
-      {/* end-zone faceoff dots (texture only) */}
-      {[150, 850].map((x) =>
-        [185, 415].map((y) => (
-          <circle key={`${x}-${y}`} cx={x} cy={y} r="30" fill="none" stroke="rgba(220,60,60,0.22)" strokeWidth="2" />
+      {/* zone faceoff circles (texture only) */}
+      {[300, 700].map((x) =>
+        [110, 490].map((y) => (
+          <circle key={`${x}-${y}`} cx={x} cy={y} r="34" fill="none" stroke="rgba(220,60,60,0.2)" strokeWidth="2" />
         ))
       )}
     </svg>
@@ -492,11 +493,13 @@ interface TokenRowProps {
   onDragLeave: () => void
   onDrop: (dst: SlotAddr) => void
   onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
+  /** Centre the tokens (defence pairs / goalies) instead of spanning the full width. */
+  centered?: boolean
 }
 
 function TokenRow({
   slots, section, lineIdx, label, roster, synergy, dragOverAddr,
-  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
+  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect, centered,
 }: TokenRowProps): JSX.Element {
   function isOver(si: number): boolean {
     const a = dragOverAddr
@@ -509,7 +512,7 @@ function TokenRow({
         {label}
       </span>
       {/* tokens spread across the rink width, joined by colour-coded chemistry lines */}
-      <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0, padding: '0 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0, padding: '0 8px', ...(centered ? { maxWidth: 560, margin: '0 auto' } : {}) }}>
         {slots.map((slot, si) => {
           const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx, slotIdx: si }
           return (
@@ -623,6 +626,80 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
         </table>
       </div>
     </Panel>
+  )
+}
+
+/* ── Coach system bar with hover info ── */
+
+function SystemInfoBar({ summary }: { summary: StaffMeetingSummaryView }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const fitC = summary.rosterFit >= 66 ? 'var(--success)' : summary.rosterFit >= 55 ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+  const phases: Array<[string, string]> = [
+    ['Forecheck', summary.forecheckName],
+    ['Breakout', summary.breakoutName],
+    ['Neutral zone', summary.nzName],
+    ['D-zone', summary.dZoneName],
+    ['Power play', summary.ppName],
+    ['Penalty kill', summary.pkName],
+    ['Pace', summary.paceName],
+  ]
+  return (
+    <div
+      style={{ position: 'relative' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <div
+        className="row"
+        style={{
+          gap: 12, alignItems: 'center', flexWrap: 'wrap', cursor: 'help',
+          padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-sm)',
+        }}
+      >
+        <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {summary.coachName}’s system
+        </span>
+        <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{summary.systemLabel}</span>
+        <span style={{ color: 'var(--accent)', fontSize: 11, opacity: 0.8 }}>ⓘ</span>
+        <span className="muted small">
+          {summary.forecheckName} · {summary.dZoneName} D-zone · {summary.paceName}
+        </span>
+        <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
+          roster fit <strong style={{ color: fitC }}>{summary.rosterFit}/100</strong>
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
+            width: 'min(460px, 90vw)', background: 'var(--bg1)', border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius)', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', padding: 'var(--sp-4)',
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent)', marginBottom: 4 }}>
+            {summary.systemLabel}
+          </div>
+          <div className="small" style={{ lineHeight: 1.5, marginBottom: 6 }}>{summary.systemBlurb}</div>
+          <div className="small" style={{ lineHeight: 1.5, marginBottom: 'var(--sp-3)' }}>
+            <span style={{ color: 'var(--success)', fontWeight: 600 }}>Favours: </span>
+            <span className="muted">{summary.systemFavors}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 10px', fontSize: 12 }}>
+            {phases.map(([k, v]) => (
+              <Fragment key={k}>
+                <span className="muted">{k}</span>
+                <span style={{ fontWeight: 600 }}>{v}</span>
+              </Fragment>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 'var(--sp-3)', opacity: 0.7 }}>
+            Your coach owns the system — influence it in Front Office → Staff Meeting, or change coaches in Staff → Job Market.
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -874,27 +951,7 @@ export function TacticsScreen(): JSX.Element {
       {error && <Notice kind="warn">{error}</Notice>}
       {loading && !data && <Notice kind="info">Loading…</Notice>}
 
-      {coachSummary && (
-        <div
-          className="row"
-          style={{
-            gap: 12, alignItems: 'center', flexWrap: 'wrap',
-            padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--line)',
-            borderRadius: 'var(--radius-sm)',
-          }}
-        >
-          <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            {coachSummary.coachName}’s system
-          </span>
-          <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{coachSummary.systemLabel}</span>
-          <span className="muted small">
-            {coachSummary.forecheckName} · {coachSummary.dZoneName} D-zone · {coachSummary.paceName}
-          </span>
-          <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
-            roster fit <strong style={{ color: coachSummary.rosterFit >= 66 ? 'var(--success)' : coachSummary.rosterFit >= 55 ? 'var(--amber, #f59e0b)' : 'var(--danger)' }}>{coachSummary.rosterFit}/100</strong>
-          </span>
-        </div>
-      )}
+      {coachSummary && <SystemInfoBar summary={coachSummary} />}
 
       {data && lines && (
         <>
@@ -966,6 +1023,7 @@ export function TacticsScreen(): JSX.Element {
                         roster={roster}
                         synergy={data.pairSynergies?.[li] ?? null}
                         onOpenPicker={(l2, s2) => openPicker('defense', l2, s2)}
+                        centered
                         {...dnd}
                       />
                     ))}
@@ -980,6 +1038,7 @@ export function TacticsScreen(): JSX.Element {
                       roster={roster}
                       synergy={null}
                       onOpenPicker={(_l2, s2) => openPicker('goalies', s2, 0)}
+                      centered
                       {...dnd}
                       onDrop={(dst) => handleDrop(dst)}
                     />

@@ -200,7 +200,7 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
-import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection } from '@engine/league/coachProfile'
+import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection, SYSTEM_FAVORS } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
@@ -5472,6 +5472,8 @@ export class Career {
       coachName: coach.name,
       ...(coach.faceId !== undefined ? { coachFaceId: coach.faceId } : {}),
       systemLabel: m.label,
+      systemBlurb: m.blurb,
+      systemFavors: SYSTEM_FAVORS[profile.system],
       philosophy: profile.philosophy,
       forecheckName: m.forecheckName,
       breakoutName: m.breakoutName,

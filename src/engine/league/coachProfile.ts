@@ -175,6 +175,17 @@ export const SYSTEM_META: Record<CoachSystemId, CoachSystem> = {
   },
 }
 
+/** What roster composition each system is built to exploit (for scouting/UI). */
+export const SYSTEM_FAVORS: Record<CoachSystemId, string> = {
+  lowEventTrap: 'Favours mobile, hockey-smart defencemen and disciplined two-way forwards. Masks thin scoring depth by keeping games low-event.',
+  aggressiveForecheck: 'Favours fast, relentless forwards and puck-hounding wingers who win battles down low. Demands conditioning and depth.',
+  speedTransition: 'Favours elite skating and skilled puck-movers who attack off the rush. Rewards offensive defencemen who join the play.',
+  cyclePossession: 'Favours big, strong forwards and puck-moving D who hold the o-zone and grind shifts in the corners.',
+  structuredTwoWay: 'Favours balanced, versatile two-way players. Low-risk and adaptable — fits almost any roster.',
+  runAndGun: 'Favours high-end scorers and offensive defencemen. Trades chances all night, so you need the firepower to win them.',
+  defensiveShell: 'Favours shot-blocking, stay-at-home defenders and a strong goalie. Built to protect leads, not chase games.',
+}
+
 /** Bridge each system to the existing 4-kind fit machinery in archetypes.ts. */
 export const SYSTEM_TO_STYLE_KIND: Record<CoachSystemId, TeamStyleKind> = {
   lowEventTrap: 'trap',

@@ -1827,6 +1827,10 @@ export interface StaffMeetingSummaryView {
   coachFaceId?: string
   /** Named system, e.g. "Low-Event Trap". */
   systemLabel: string
+  /** One-line description of how the system plays. */
+  systemBlurb: string
+  /** What roster composition the system favours. */
+  systemFavors: string
   philosophy: string
   forecheckName: string
   breakoutName: string
