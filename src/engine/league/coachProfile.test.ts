@@ -9,6 +9,7 @@ import {
   deriveSyntheticProfile,
   deriveSystem,
   profileToTactics,
+  nudgeProfileForDirection,
   SYSTEM_META,
   SYSTEM_TO_STYLE_KIND,
   type CoachProfile,
@@ -182,6 +183,31 @@ describe('coachProfile — profileToTactics', () => {
     const paceFast = profileToTactics(p, fast, BASE_TACTICS).tempo.pace
     const paceSlow = profileToTactics(p, slow, BASE_TACTICS).tempo.pace
     expect(paceFast).toBeGreaterThan(paceSlow)
+  })
+})
+
+describe('coachProfile — nudgeProfileForDirection', () => {
+  const p = buildCoachProfile(coach())
+
+  it('"faster" raises tempo; "defensive" lowers it', () => {
+    expect(nudgeProfileForDirection(p, 'faster').tempo).toBeGreaterThan(p.tempo)
+    expect(nudgeProfileForDirection(p, 'defensive').tempo).toBeLessThan(p.tempo)
+  })
+
+  it('"physical" raises aggression and re-derives a valid system', () => {
+    const after = nudgeProfileForDirection(p, 'physical')
+    expect(after.aggression).toBeGreaterThan(p.aggression)
+    expect(SYSTEM_META[after.system].id).toBe(after.system)
+  })
+
+  it('keeps axes within [0,1] and an unknown direction is a no-op clone', () => {
+    const after = nudgeProfileForDirection(p, 'unknown')
+    expect(after.system).toBe(p.system)
+    for (const k of ALL_AXES) {
+      const v = after[k] as number
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
   })
 })
 

@@ -154,7 +154,7 @@ import {
   INTERACTION_COOLDOWN_DAYS,
   type PlayerInteraction,
 } from '@engine/league/interactions'
-import { lineSynergy, pairSynergy, playerStyleFit } from '@engine/league/archetypes'
+import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
   discussPlayerTopic,
@@ -200,7 +200,7 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
-import { buildCoachProfile, profileToTactics, coachFit } from '@engine/league/coachProfile'
+import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
@@ -344,6 +344,7 @@ import {
   type LeagueLeadersView,
   type LeagueComparisonView,
   type LeagueComparisonCard,
+  type StaffMeetingSummaryView,
   type LeagueStatsView,
   type LeagueTeamsView,
   type LinesUpdate,
@@ -538,6 +539,8 @@ const FA_WINDOW_DAYS = 8
 const ROSTER_HARD_CAP = 26
 /** Rolling per-game ratings window (last N games stored). */
 const RATINGS_WINDOW = 10
+/** Calendar days between recurring staff-meeting prompts. */
+const STAFF_MEETING_INTERVAL = 14
 
 type ResignStatus = 'pending' | 'signed' | 'walked'
 
@@ -2777,6 +2780,15 @@ export class Career {
     }
     // ── wider world: sim other leagues' games on this match day ──────────
     this.tickWorld(nextDay)
+    // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
+    if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
+      this.pushNews(
+        'league',
+        'Staff meeting: time to review how we play',
+        'Two weeks on, your coaching staff are ready to sit down. Review the head coach’s system and roster fit, push for tactical changes, and flag any players whose form or morale needs addressing.',
+        { teamId: this.userTeamId as string }
+      )
+    }
     // ────────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return true
@@ -5338,8 +5350,71 @@ export class Career {
     })
     if (evalResult.accepted && evalResult.newTactics) {
       team.tactics = evalResult.newTactics
+      // The coach's beliefs shift gradually toward what he agreed to, so the
+      // influence persists into future seasons — and his roster-fit edge updates.
+      const ts = this.getTeamStaff(this.userTeamId as string)
+      if (ts.headCoach.profile) {
+        ts.headCoach.profile = nudgeProfileForDirection(ts.headCoach.profile, direction)
+      }
+      team.coachFit = styleMatch(roster, team.tactics).fit
     }
     return { accepted: evalResult.accepted, response: evalResult.response }
+  }
+
+  /**
+   * Staff-meeting summary: the head coach's tactical identity, how well his system
+   * fits the roster, and the players whose form/morale the coach (and GM) should
+   * address. Drives the Staff Meeting screen's overview.
+   */
+  getStaffMeetingSummary(): StaffMeetingSummaryView {
+    const team = this.data.teams.get(this.userTeamId)!
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const coach = ts.headCoach
+    const profile = coach.profile ?? buildCoachProfile(coach)
+    const roster = team.roster.map((id) => this.resolve(id))
+    const sm = styleMatch(roster, team.tactics)
+    const fit = Math.round(sm.fit)
+    const fitLabel = fit >= 78 ? 'Strong' : fit >= 66 ? 'Good' : fit >= 55 ? 'Adequate' : 'Poor'
+    const m = profile.meta
+
+    const flagged: StaffMeetingSummaryView['flagged'] = []
+    for (const p of roster) {
+      if (p.injuryStatus !== null) continue
+      const condition = Math.round(100 - p.fatigue)
+      let issue: 'slumping' | 'unhappy' | 'tired' | null = null
+      let detail = ''
+      if (condition < 40) { issue = 'tired'; detail = `Worn down — condition ${condition}` }
+      else if (p.morale < 30) { issue = 'unhappy'; detail = 'Unhappy with his role or situation' }
+      else if (p.form <= -3) { issue = 'slumping'; detail = 'Cold stretch — production has dried up' }
+      if (issue) {
+        flagged.push({
+          playerId: p.id as unknown as string,
+          name: p.name,
+          issue,
+          detail,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        })
+      }
+    }
+    flagged.sort((a, b) => (a.issue === 'tired' ? -1 : 0) - (b.issue === 'tired' ? -1 : 0))
+
+    return {
+      coachName: coach.name,
+      ...(coach.faceId !== undefined ? { coachFaceId: coach.faceId } : {}),
+      systemLabel: m.label,
+      philosophy: profile.philosophy,
+      forecheckName: m.forecheckName,
+      breakoutName: m.breakoutName,
+      nzName: m.nzName,
+      dZoneName: m.dZoneName,
+      ppName: m.ppName,
+      pkName: m.pkName,
+      paceName: m.paceName,
+      rosterFit: fit,
+      fitLabel,
+      fitAdvice: sm.advice,
+      flagged: flagged.slice(0, 8),
+    }
   }
 
   /* ────────────────────── staff-meeting agenda ────────────────────── */

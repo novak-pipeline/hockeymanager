@@ -141,6 +141,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'squadPlanner', squadPlanner: must().getSquadPlanner() }
     case 'getLeagueComparison':
       return { id: req.id, type: 'leagueComparison', comparison: must().getLeagueComparison() }
+    case 'getStaffMeetingSummary':
+      return { id: req.id, type: 'staffMeetingSummary', summary: must().getStaffMeetingSummary() }
     case 'getLeagueStatTable':
       return { id: req.id, type: 'leagueStatTable', table: must().getLeagueStatTable(req.teamId) }
     case 'suggestToCoach': {

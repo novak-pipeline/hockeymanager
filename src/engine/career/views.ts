@@ -1807,6 +1807,36 @@ export interface LeagueComparisonView {
   cards: LeagueComparisonCard[]
 }
 
+/** A player the coach is likely to act on (form/morale/condition) — staff meeting. */
+export interface StaffMeetingFlaggedPlayer {
+  playerId: string
+  name: string
+  faceId?: string
+  issue: 'slumping' | 'unhappy' | 'tired'
+  detail: string
+}
+
+/** Head-coach tactical identity + roster fit + flagged players. Response to 'getStaffMeetingSummary'. */
+export interface StaffMeetingSummaryView {
+  coachName: string
+  coachFaceId?: string
+  /** Named system, e.g. "Low-Event Trap". */
+  systemLabel: string
+  philosophy: string
+  forecheckName: string
+  breakoutName: string
+  nzName: string
+  dZoneName: string
+  ppName: string
+  pkName: string
+  paceName: string
+  /** 0–100 roster fit (styleMatch). */
+  rosterFit: number
+  fitLabel: string
+  fitAdvice: string[]
+  flagged: StaffMeetingFlaggedPlayer[]
+}
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

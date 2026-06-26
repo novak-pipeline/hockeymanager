@@ -6,6 +6,7 @@ import type { Player, Position, RawAttributes, TeamTactics } from '@domain'
 import { computeComposites } from '@engine/ratings/composites'
 import type { StaffMember } from './staff'
 import { COACH_SUGGESTIONS, evaluateCoachSuggestion } from './coachTactics'
+import { buildCoachProfile } from './coachProfile'
 
 function raw(v: number): RawAttributes {
   return {
@@ -53,8 +54,8 @@ const tactics: TeamTactics = {
 describe('evaluateCoachSuggestion', () => {
   const r = roster(60)
 
-  it('an open (Analytical) coach adopts a play-to-strengths suggestion', () => {
-    const res = evaluateCoachSuggestion({ coach: coach('Analytical'), roster: r, tactics, direction: 'fitRoster' })
+  it('an open (analytical) coach adopts a play-to-strengths suggestion', () => {
+    const res = evaluateCoachSuggestion({ coach: coach('analytical'), roster: r, tactics, direction: 'fitRoster' })
     expect(res.accepted).toBe(true)
     expect(res.newTactics).toBeDefined()
     expect(res.response.length).toBeGreaterThan(0)
@@ -62,7 +63,7 @@ describe('evaluateCoachSuggestion', () => {
 
   it('accepted ⇒ newTactics present; declined ⇒ absent (all directions)', () => {
     for (const s of COACH_SUGGESTIONS) {
-      const res = evaluateCoachSuggestion({ coach: coach('Fiery'), roster: r, tactics, direction: s.id })
+      const res = evaluateCoachSuggestion({ coach: coach('fiery'), roster: r, tactics, direction: s.id })
       if (res.accepted) expect(res.newTactics).toBeDefined()
       else expect(res.newTactics).toBeUndefined()
     }
@@ -70,16 +71,29 @@ describe('evaluateCoachSuggestion', () => {
 
   it('an open coach is never less receptive than a stubborn one', () => {
     for (const s of COACH_SUGGESTIONS) {
-      const open = evaluateCoachSuggestion({ coach: coach('Analytical'), roster: r, tactics, direction: s.id })
-      const stubborn = evaluateCoachSuggestion({ coach: coach('Fiery'), roster: r, tactics, direction: s.id })
+      const open = evaluateCoachSuggestion({ coach: coach('analytical'), roster: r, tactics, direction: s.id })
+      const stubborn = evaluateCoachSuggestion({ coach: coach('fiery'), roster: r, tactics, direction: s.id })
       // Not allowed: stubborn accepts while open rejects.
       expect(!(stubborn.accepted && !open.accepted)).toBe(true)
     }
   })
 
+  it('a high-knowledge coach is never more accepting than a low-knowledge one', () => {
+    // Same demeanor/rating; only tactical knowledge differs (via profile).
+    const base = coach('analytical')
+    const high = { ...base, profile: buildCoachProfile({ ...base, attributes: { tactics: 20 } }) }
+    const low = { ...base, profile: buildCoachProfile({ ...base, attributes: { tactics: 1 } }) }
+    for (const s of COACH_SUGGESTIONS) {
+      const h = evaluateCoachSuggestion({ coach: high, roster: r, tactics, direction: s.id })
+      const l = evaluateCoachSuggestion({ coach: low, roster: r, tactics, direction: s.id })
+      // A skilled tactician trusting his read must never accept where a novice declines.
+      expect(!(h.accepted && !l.accepted)).toBe(true)
+    }
+  })
+
   it('is deterministic', () => {
-    const a = evaluateCoachSuggestion({ coach: coach('Calm'), roster: r, tactics, direction: 'faster' })
-    const b = evaluateCoachSuggestion({ coach: coach('Calm'), roster: r, tactics, direction: 'faster' })
+    const a = evaluateCoachSuggestion({ coach: coach('calm'), roster: r, tactics, direction: 'faster' })
+    const b = evaluateCoachSuggestion({ coach: coach('calm'), roster: r, tactics, direction: 'faster' })
     expect(a).toEqual(b)
   })
 })

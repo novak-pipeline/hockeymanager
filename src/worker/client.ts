@@ -245,6 +245,10 @@ export class SimClient {
     return this.send({ type: 'getLeagueComparison' })
   }
 
+  getStaffMeetingSummary(): Promise<WorkerResponse> {
+    return this.send({ type: 'getStaffMeetingSummary' })
+  }
+
   getClubInfo(): Promise<WorkerResponse> {
     return this.send({ type: 'getClubInfo' })
   }

@@ -492,3 +492,38 @@ export function coachFitMultiplier(fit: number): number {
   const v = Math.max(-1, Math.min(1, (fit - 70) / 30))
   return 1 + v * 0.015
 }
+
+/* ─────────────────────────── GM influence (gradual nudges) ─────────────────────────── */
+
+/** Axis shifts a coach makes when he accepts a GM's tactical request. */
+const DIRECTION_NUDGE: Record<string, Partial<CoachAxes>> = {
+  faster: { tempo: 0.1, offence: 0.06, riskTolerance: 0.05, forecheckDepth: 0.04 },
+  defensive: { tempo: -0.1, offence: -0.07, structure: 0.06, riskTolerance: -0.05 },
+  physical: { aggression: 0.1, forecheckDepth: 0.06 },
+  aggressiveForecheck: { forecheckDepth: 0.1, aggression: 0.06 },
+  fitRoster: {}, // adopts roster-optimal tactics this season; philosophy unchanged
+}
+
+/**
+ * Shift a coach's beliefs gradually toward a GM request he has accepted, then
+ * re-derive his named system. Small (≤0.1/axis) so influence accumulates over
+ * meetings rather than flipping the coach in one conversation.
+ */
+export function nudgeProfileForDirection(profile: CoachProfile, direction: string): CoachProfile {
+  const axes: CoachAxes = {
+    aggression: profile.aggression,
+    tempo: profile.tempo,
+    offence: profile.offence,
+    structure: profile.structure,
+    forecheckDepth: profile.forecheckDepth,
+    riskTolerance: profile.riskTolerance,
+    ppCompetence: profile.ppCompetence,
+    pkCompetence: profile.pkCompetence,
+    tacticsKnowledge: profile.tacticsKnowledge,
+  }
+  const nudge = DIRECTION_NUDGE[direction] ?? {}
+  for (const k of Object.keys(nudge) as (keyof CoachAxes)[]) {
+    axes[k] = clampAxis(axes[k] + (nudge[k] ?? 0))
+  }
+  return assemble(axes)
+}
