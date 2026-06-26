@@ -317,6 +317,10 @@ export class SimClient {
     return this.send({ type: 'draftPlayer', playerId })
   }
 
+  simNextPick(): Promise<WorkerResponse> {
+    return this.send({ type: 'simNextPick' })
+  }
+
   advanceDraft(): Promise<WorkerResponse> {
     return this.send({ type: 'advanceDraft' })
   }

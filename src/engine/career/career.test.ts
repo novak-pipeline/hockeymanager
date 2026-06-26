@@ -1787,6 +1787,45 @@ describe('Career — wider-world quick-sim', () => {
     }
   })
 
+  it('draft: pick-by-pick stepping, staff war-room advice, and enriched prospect info', () => {
+    const { data } = withJuniorProspects(207)
+    const career = new Career(data, 207, data.league.teams[0]!)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+
+    // simNextPick advances EXACTLY one selection when an AI team is on the clock…
+    const d0 = career.getDraft()!
+    const made = (): number => career.getDraft()!.board.filter((b) => b.selection).length
+    if (!d0.userIsOnClock) {
+      const before = made()
+      career.simNextPick()
+      expect(made()).toBe(before + 1)
+    }
+
+    // …and sim-to-my-pick stops with the GM on the clock, advice in hand.
+    career.advanceDraft()
+    const d = career.getDraft()!
+    expect(d.userIsOnClock).toBe(true)
+    expect(d.advice && d.advice.length).toBeGreaterThan(0)
+    // Advisors argue from more than one angle (not a forced consensus).
+    expect(new Set(d.advice!.map((a) => a.kind)).size).toBeGreaterThan(1)
+    for (const a of d.advice!) {
+      expect(a.reason.length).toBeGreaterThan(10)
+      expect(a.playerName).toBeTruthy()
+      expect(a.confidence).toBeGreaterThanOrEqual(0)
+    }
+    // simNextPick is a no-op while the GM is on the clock (he must pick himself).
+    const heldAt = made()
+    career.simNextPick()
+    expect(made()).toBe(heldAt)
+
+    // Enriched board: real prospects carry league + a season scoring line.
+    const real = d.prospects.filter((p) => p.leagueAbbr)
+    expect(real.length).toBeGreaterThan(0)
+    expect(d.prospects.some((p) => p.seasonGp && p.seasonGp > 0)).toBe(true)
+  })
+
   it('graduates drafted prospects into the org once they age out of junior', () => {
     // Mint at 18 → drafted at 19 (offseason ages +1), then a second season ages
     // them to 20 ⇒ they sign their ELC and graduate to the org's farm.

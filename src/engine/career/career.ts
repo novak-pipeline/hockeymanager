@@ -330,6 +330,8 @@ import {
   type ScoutBoardRowView,
   type DashboardView,
   type DraftView,
+  type DraftAdviceView,
+  type ProspectRowView,
   type FinanceView,
   type HistoryView,
   type InboxView,
@@ -941,6 +943,123 @@ export class Career {
       }
     }
     return false
+  }
+
+  /** Map every wider-world player to his league abbrev + club (for the draft board). */
+  private worldClubInfoByPid(): Map<string, { leagueAbbr: string; club: string }> {
+    const out = new Map<string, { leagueAbbr: string; club: string }>()
+    for (const c of this.data.league.competitions ?? []) {
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid as TeamId)
+        if (!t) continue
+        for (const pid of t.roster) out.set(pid as string, { leagueAbbr: c.abbrev, club: t.name })
+      }
+    }
+    return out
+  }
+
+  /** A prospect's scoring line: live this-season world production if he's played,
+   *  otherwise his most recent imported season. Undefined if neither exists. */
+  private prospectSeasonLine(
+    p: Player
+  ): { gp: number; g: number; a: number; pts: number; isHistory: boolean } | undefined {
+    const gp = this.worldSim.gp.get(p.id) ?? 0
+    if (gp > 0) {
+      const t = this.worldSim.totals.get(p.id)
+      const g = t?.goals ?? 0
+      const a = t?.assists ?? 0
+      return { gp, g, a, pts: g + a, isHistory: false }
+    }
+    const h = p.careerHistory?.[0]
+    if (h && h.gamesPlayed > 0) {
+      return { gp: h.gamesPlayed, g: h.goals, a: h.assists, pts: h.goals + h.assists, isHistory: true }
+    }
+    return undefined
+  }
+
+  /**
+   * Your key staff's draft recommendations while you're on the clock. Each
+   * advisor argues from a different lens — best-available, team need, system
+   * fit, highest ceiling — so they often disagree, exactly as a real war room
+   * does. Reasons are data-driven (rank, position, the hole they'd fill).
+   */
+  private draftAdvice(): DraftAdviceView[] {
+    const remaining = this.remainingProspects() // rank-sorted DraftProspect[]
+    if (remaining.length === 0) return []
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const P = (dp: DraftProspect): Player => this.resolve(dp.playerId)
+    const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
+      pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+
+    // Org depth by position group (NHL + AHL) → the thinnest is our biggest need.
+    const team = this.userTeam
+    const ids = [...team.roster]
+    if (team.affiliateId) ids.push(...(this.data.teams.get(team.affiliateId)?.roster ?? []))
+    const count: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
+    for (const id of ids) {
+      const pl = this.data.players.get(id)
+      if (pl) count[grpOf(pl.position)]++
+    }
+    const target: Record<'F' | 'D' | 'G', number> = { F: 16, D: 9, G: 4 }
+    const needGroup = (['F', 'D', 'G'] as const).slice().sort(
+      (a, b) => target[b] - count[b] - (target[a] - count[a])
+    )[0]
+    const grpWord = (g: 'F' | 'D' | 'G'): string =>
+      g === 'G' ? 'in goal' : g === 'D' ? 'on the blue line' : 'up front'
+    const posWord = (pos: Position): string =>
+      grpOf(pos) === 'G' ? 'goaltender' : grpOf(pos) === 'D' ? 'defenceman' : 'forward'
+
+    const advice: DraftAdviceView[] = []
+    const add = (
+      m: StaffMember | undefined,
+      role: string,
+      kind: DraftAdviceView['kind'],
+      angle: string,
+      dp: DraftProspect | undefined,
+      reason: string
+    ): void => {
+      if (!m || !dp) return
+      const p = P(dp)
+      const v: DraftAdviceView = {
+        staffId: m.id, staffName: m.name, role, kind, angle,
+        playerId: dp.playerId as string, playerName: p.name, position: p.position,
+        rank: dp.rank, reason, confidence: Math.round(m.judgment),
+      }
+      if (m.faceId) v.faceId = m.faceId
+      advice.push(v)
+    }
+
+    // 1) Head scout → best player available (top of the board).
+    const headScout = staff.scouts[0]
+    const bpa = remaining[0]
+    add(headScout, 'Head Scout', 'bpa', 'Best available', bpa,
+      `${P(bpa).name} is the top name left on our board at #${bpa.rank}. Best player available — don't overthink it.`)
+
+    // 2) Assistant GM → best value at our position of need.
+    const needPick = remaining.find((dp) => grpOf(P(dp).position) === needGroup) ?? remaining[0]
+    add(staff.assistantGM, 'Assistant GM', 'need', 'Team need', needPick,
+      `We're thin ${grpWord(needGroup)}. ${P(needPick).name} is the best ${posWord(P(needPick).position)} on the board (#${needPick.rank}) — he fills a real hole.`)
+
+    // 3) Head coach → the prospect who fits his system.
+    const profile = staff.headCoach.profile
+    const wantD = profile ? profile.structure > profile.offence : false
+    const fitGroup: 'F' | 'D' = wantD ? 'D' : 'F'
+    const fitPick = remaining.find((dp) => grpOf(P(dp).position) === fitGroup) ?? remaining[0]
+    add(staff.headCoach, 'Head Coach', 'fit', 'System fit', fitPick,
+      wantD
+        ? `${P(fitPick).name} is the mobile, two-way defender my system is built on. He fits how we want to play.`
+        : `${P(fitPick).name} has the speed and skill to thrive in our attack. He fits how I want to play.`)
+
+    // 4) A second scout → the highest-ceiling swing in this range.
+    const scout2 = staff.scouts[1]
+    if (scout2) {
+      const pool = remaining.slice(0, 15)
+      const ceil = pool.slice().sort((a, b) => ratedPotential(P(b)) - ratedPotential(P(a)))[0]
+      add(scout2, 'Scout', 'ceiling', 'Highest ceiling', ceil,
+        `${P(ceil).name} has the highest upside in this range. If we want a home run, he's the swing.`)
+    }
+
+    return advice
   }
 
   /** Current free agent id set (players not on any roster). */
@@ -3936,12 +4055,13 @@ export class Career {
     }
   }
 
-  /** Sim AI picks until `stop()` says hold (e.g. user on the clock) or draft ends. */
+  /** Sim AI picks until `stop()` says hold (e.g. user on the clock) or draft ends.
+   *  Each pick is seeded by its own slot index so the AI's choice is identical
+   *  no matter how the GM steps the draft (pick-by-pick, to-my-pick, or all). */
   private simDraftUntil(stop: () => boolean): void {
     const os = this.offseason
     if (!os?.draft) return
     const d = os.draft
-    const rng = this.rngFor(8005)
     while (d.selections.length < d.order.length) {
       const pick = d.order[d.selections.length]
       if (pick.ownerTeamId === this.userTeamId && stop()) return
@@ -3950,9 +4070,32 @@ export class Career {
       const choice =
         pick.ownerTeamId === this.userTeamId
           ? remaining[0]
-          : aiSelectProspect({ remaining, rng, needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p) })
+          : aiSelectProspect({
+              remaining,
+              rng: this.rngFor(8005, d.selections.length),
+              needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p),
+            })
       this.makeSelection(choice.playerId)
     }
+  }
+
+  /** UI: sim exactly ONE pick. No-op if YOU are on the clock (you pick yourself)
+   *  or the draft is done — so it steps through AI selections one at a time. */
+  simNextPick(): void {
+    const os = this.offseason
+    if (!os?.draft) return
+    const d = os.draft
+    if (d.selections.length >= d.order.length) return
+    const pick = d.order[d.selections.length]
+    if (pick.ownerTeamId === this.userTeamId) return
+    const remaining = this.remainingProspects()
+    if (remaining.length === 0) return
+    const choice = aiSelectProspect({
+      remaining,
+      rng: this.rngFor(8005, d.selections.length),
+      needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p),
+    })
+    this.makeSelection(choice.playerId)
   }
 
   /**
@@ -7511,6 +7654,7 @@ export class Career {
     const cls = this.data.league.draftClasses.find((c) => c.year === d.year)
     const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
     const taken = new Set(d.selections.map((s) => s.playerId as string))
+    const clubInfo = this.worldClubInfoByPid()
     const onClockIndex = d.selections.length < d.order.length ? d.selections.length : -1
     return {
       year: d.year,
@@ -7535,6 +7679,10 @@ export class Career {
       onClockIndex,
       userIsOnClock:
         onClockIndex >= 0 && d.order[onClockIndex].ownerTeamId === this.userTeamId,
+      onClockTeamAbbr:
+        onClockIndex >= 0
+          ? this.data.teams.get(d.order[onClockIndex].ownerTeamId)?.abbreviation
+          : undefined,
       prospects: (cls?.prospects ?? []).map((pr) => {
         const p = this.resolve(pr.playerId)
         const pid = pr.playerId as string
@@ -7542,15 +7690,30 @@ export class Career {
         // reads sharply; one you ignored is a guess. Makes scouting matter at the draft.
         const know = knowledgeOf(this.scouting, pid)
         const band = maskedCeiling(agedPotential(p), know, pid, accuracyOf(this.scouting, pid))
-        return {
+        const where = clubInfo.get(pid)
+        const line = this.prospectSeasonLine(p)
+        const row: ProspectRowView = {
           ...badge(p),
           rank: pr.rank,
           potentialStars: overallToStars(Math.round((band.lo + band.hi) / 2)),
           knowledge: Math.round(know),
           drafted: taken.has(pid),
+          shoots: p.handedness,
         }
+        if (p.heightCm !== undefined) row.heightCm = p.heightCm
+        if (p.weightKg !== undefined) row.weightKg = p.weightKg
+        if (p.nationality !== undefined) row.nationality = p.nationality
+        if (where) { row.leagueAbbr = where.leagueAbbr; row.club = where.club }
+        if (line) {
+          row.seasonGp = line.gp; row.seasonG = line.g; row.seasonA = line.a
+          row.seasonPts = line.pts; row.seasonIsHistory = line.isHistory
+        }
+        return row
       }),
       complete: d.selections.length >= d.order.length,
+      ...(onClockIndex >= 0 && d.order[onClockIndex].ownerTeamId === this.userTeamId
+        ? { advice: this.draftAdvice() }
+        : {}),
     }
   }
 

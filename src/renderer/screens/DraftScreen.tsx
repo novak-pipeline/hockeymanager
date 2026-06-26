@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
-import type { CombineRowView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
+import type { CombineRowView, DraftAdviceView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -140,6 +141,9 @@ function BestAvailable(props: {
     )
   }
 
+  const cm = (v?: number) => (v ? `${Math.floor(v / 30.48)}'${Math.round((v % 30.48) / 2.54)}"` : '—')
+  const lb = (v?: number) => (v ? `${Math.round(v * 2.205)}` : '—')
+
   return (
     <Panel title="Best available">
       <div className="table-wrap">
@@ -149,7 +153,12 @@ function BestAvailable(props: {
               <th>Rank</th>
               <th>Name</th>
               <th>Pos</th>
+              <th title="Shoots/catches">S</th>
               <th>Age</th>
+              <th>League</th>
+              <th title="Height">Ht</th>
+              <th title="Weight (lb)">Wt</th>
+              <th className="num" title="Season scoring (GP · G–A–PTS)">Season</th>
               <th className="num">OVR</th>
               <th>Potential</th>
               <th className="num">Know.</th>
@@ -157,16 +166,27 @@ function BestAvailable(props: {
             </tr>
           </thead>
           <tbody>
-            {available.slice(0, 50).map((p) => (
+            {available.slice(0, 60).map((p) => (
               <tr key={p.playerId}>
-                <td className="num" style={{ color: 'var(--muted)', width: 44 }}>
+                <td className="num" style={{ color: 'var(--muted)', width: 40 }}>
                   {p.rank}
                 </td>
                 <td>
                   <PlayerLink playerId={p.playerId} name={p.name} />
+                  {p.club && <div className="muted" style={{ fontSize: 10 }}>{p.club}</div>}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{p.position}</td>
+                <td style={{ color: 'var(--muted)' }}>{p.shoots ?? '—'}</td>
                 <td style={{ color: 'var(--muted)' }}>{p.age}</td>
+                <td className="small" style={{ color: 'var(--muted)' }}>{p.leagueAbbr ?? '—'}</td>
+                <td className="small" style={{ color: 'var(--muted)' }}>{cm(p.heightCm)}</td>
+                <td className="small" style={{ color: 'var(--muted)' }}>{lb(p.weightKg)}</td>
+                <td className="num small" style={{ color: 'var(--muted)' }}
+                  title={p.seasonIsHistory ? 'Last season' : 'This season'}>
+                  {p.seasonGp
+                    ? <>{p.seasonGp}gp · {p.seasonG}-{p.seasonA}-{p.seasonPts}{p.seasonIsHistory ? '' : ''}</>
+                    : '—'}
+                </td>
                 <td className="num">
                   {p.scouted && !p.scouted.exact
                     ? <span style={{ opacity: 0.6 }} title="Fog-of-war estimate"><OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} /></span>
@@ -487,6 +507,85 @@ function CombineTab(props: { combine: CombineRowView[] }): JSX.Element {
   )
 }
 
+// ─── staff war room: advice while on the clock ──────────────────────────────────
+
+const ANGLE_STYLE: Record<DraftAdviceView['kind'], { chip: string; tint: string }> = {
+  bpa: { chip: 'chip chip-hero', tint: 'rgba(var(--accent-rgb),0.10)' },
+  need: { chip: 'chip chip-warn', tint: 'rgba(255,210,74,0.08)' },
+  fit: { chip: 'chip chip-violet', tint: 'rgba(139,92,246,0.10)' },
+  ceiling: { chip: 'chip chip-success', tint: 'rgba(95,208,104,0.08)' },
+  safe: { chip: 'chip', tint: 'var(--bg1)' },
+}
+
+function AdviceCard(props: {
+  a: DraftAdviceView
+  busy: boolean
+  onDraft: (playerId: string) => void
+}): JSX.Element {
+  const { a, busy, onDraft } = props
+  const style = ANGLE_STYLE[a.kind]
+  return (
+    <div
+      style={{
+        background: style.tint,
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        minWidth: 240,
+        flex: '1 1 240px',
+      }}
+    >
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <PlayerFace faceId={a.faceId} name={a.staffName} size={34} />
+        <div style={{ lineHeight: 1.2 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{a.staffName}</div>
+          <div className="muted" style={{ fontSize: 11 }}>{a.role}</div>
+        </div>
+        <span className={style.chip} style={{ marginLeft: 'auto', fontSize: 10 }}>{a.angle}</span>
+      </div>
+      <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
+        <PlayerLink playerId={a.playerId} name={a.playerName} />
+        <span className="muted" style={{ fontSize: 12 }}>{a.position} · #{a.rank}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text)', opacity: 0.9, fontStyle: 'italic' }}>
+        “{a.reason}”
+      </div>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 'auto' }}>
+        <span className="muted small" title="This advisor's evaluation accuracy">
+          Confidence {a.confidence}%
+        </span>
+        <button
+          className="btn btn-primary"
+          style={{ marginLeft: 'auto', padding: '3px 12px', fontSize: 12 }}
+          disabled={busy}
+          onClick={() => onDraft(a.playerId)}
+        >
+          Draft him
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function StaffAdvicePanel(props: {
+  advice: DraftAdviceView[]
+  busy: boolean
+  onDraft: (playerId: string) => void
+}): JSX.Element {
+  return (
+    <Panel title="War room — your staff's recommendations">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        {props.advice.map((a) => (
+          <AdviceCard key={a.staffId + a.playerId} a={a} busy={props.busy} onDraft={props.onDraft} />
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
 // ─── main screen ──────────────────────────────────────────────────────────────
 
 type DraftTab = 'board' | 'available' | 'combine'
@@ -525,6 +624,18 @@ export function DraftScreen(): JSX.Element {
     setBusy(true)
     setMutErr(null)
     const r = await client.advanceDraft()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      refetch()
+    }
+  }
+
+  async function handleSimNextPick() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.simNextPick()
     setBusy(false)
     if (r.type === 'error') {
       setMutErr(r.message)
@@ -592,6 +703,16 @@ export function DraftScreen(): JSX.Element {
             </div>
             {!data.complete && !data.userIsOnClock && (
               <button
+                className="btn"
+                disabled={busy}
+                onClick={handleSimNextPick}
+                title="Advance one pick"
+              >
+                {busy ? '…' : 'Sim next pick'}
+              </button>
+            )}
+            {!data.complete && !data.userIsOnClock && (
+              <button
                 className="btn btn-primary"
                 disabled={busy}
                 onClick={handleSimToMyPick}
@@ -619,6 +740,11 @@ export function DraftScreen(): JSX.Element {
               </button>
             )}
           </div>
+
+          {/* war room — staff recommendations while you're on the clock */}
+          {data.userIsOnClock && data.advice && data.advice.length > 0 && (
+            <StaffAdvicePanel advice={data.advice} busy={busy} onDraft={handleDraft} />
+          )}
 
           {/* tab strip */}
           <div className="tabs" style={{ marginBottom: 0 }}>

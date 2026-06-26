@@ -212,6 +212,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'draftPlayer':
       must().draftPlayer(req.playerId)
       return { id: req.id, type: 'ok' }
+    case 'simNextPick':
+      must().simNextPick()
+      return { id: req.id, type: 'ok' }
     case 'advanceDraft':
       must().advanceDraft()
       return { id: req.id, type: 'ok' }

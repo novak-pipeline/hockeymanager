@@ -1075,6 +1075,47 @@ export interface ProspectRowView extends PlayerBadge {
   /** 0–100 how well YOUR scouts know him (gates how trustworthy potentialStars is). */
   knowledge: number
   drafted: boolean
+  /* ── EHM-style scouting depth (additive; present for real imported prospects) ── */
+  /** Shooting/catching hand. */
+  shoots?: 'L' | 'R'
+  heightCm?: number
+  weightKg?: number
+  nationality?: string
+  /** The league he's playing in now (OHL, USHL, NTDP, MHL, …). */
+  leagueAbbr?: string
+  /** His current club. */
+  club?: string
+  /** This-season scoring line in his league (or most recent imported season). */
+  seasonGp?: number
+  seasonG?: number
+  seasonA?: number
+  seasonPts?: number
+  /** Whether the season line is live (this sim season) or imported history. */
+  seasonIsHistory?: boolean
+}
+
+/** One key staff member's draft recommendation while the GM is on the clock.
+ *  Advisors weigh the board differently (best-available vs need vs fit vs
+ *  ceiling), so they don't always agree — that's the point. */
+export interface DraftAdviceView {
+  staffId: string
+  staffName: string
+  /** "Head Scout", "Head Coach", "Assistant GM", "Scout". */
+  role: string
+  faceId?: string
+  /** The angle this advisor argues from. */
+  kind: 'bpa' | 'need' | 'fit' | 'ceiling' | 'safe'
+  /** Short tag for the chip, e.g. "Best available", "Team need", "System fit". */
+  angle: string
+  /** The prospect he's pushing for. */
+  playerId: string
+  playerName: string
+  position: Position
+  rank: number
+  /** One- or two-sentence rationale in the advisor's voice. */
+  reason: string
+  /** 0–100 the advisor's evaluation accuracy (how much to trust him). */
+  confidence: number
 }
 
 export interface DraftPickRowView {
@@ -1097,6 +1138,10 @@ export interface DraftView {
   userIsOnClock: boolean
   prospects: ProspectRowView[]
   complete: boolean
+  /** Abbreviation of the team currently on the clock (for the controls strip). */
+  onClockTeamAbbr?: string
+  /** Your key staff's recommendations — populated only while YOU are on the clock. */
+  advice?: DraftAdviceView[]
 }
 
 export interface ResignRowView extends PlayerBadge {

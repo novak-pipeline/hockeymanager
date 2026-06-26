@@ -703,7 +703,10 @@ export function aiSelectProspect(args: {
   const { remaining, rng, needBonus } = args
   const eff = (p: DraftProspect): number => p.rank - (needBonus ? needBonus(p) : 0)
   const board = [...remaining].sort((a, b) => eff(a) - eff(b) || a.rank - b.rank)
+  // Mostly take the best available (need-adjusted); occasionally reach a spot or
+  // two, rarely further. Real GMs don't routinely pass on the clear top of their
+  // board — keep reaches shallow so AI picks read as sane.
   let i = 0
-  while (i < board.length - 1 && i < 7 && rng.chance(0.42)) i++
+  while (i < board.length - 1 && i < 4 && rng.chance(0.22)) i++
   return board[i]
 }

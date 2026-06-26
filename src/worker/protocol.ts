@@ -224,6 +224,8 @@ export type WorkerRequestBody =
   | { type: 'signFreeAgent'; playerId: string; salary: number; years: number }
   /** User makes their selection while on the clock. */
   | { type: 'draftPlayer'; playerId: string }
+  /** Sim exactly one AI pick (pick-by-pick stepping). */
+  | { type: 'simNextPick' }
   /** Sim AI picks until the user is on the clock or the draft ends. */
   | { type: 'advanceDraft' }
   /** Sim the ENTIRE remaining draft, auto-picking best-available for the user. */
