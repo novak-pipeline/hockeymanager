@@ -76,6 +76,12 @@ export interface Team {
    * Drives call-up/send-down routing and UI grouping.
    */
   affiliateId?: TeamId
+  /**
+   * Head-coach roster-fit (0–100), computed by the career layer when the coach's
+   * system is applied. The sim turns it into a small (~±1.5%) shot-conversion
+   * multiplier. Absent = neutral (no effect). Never set by the sim engine itself.
+   */
+  coachFit?: number
   /** Home arena name from the source DB (display-only). */
   arena?: string
   /** Home arena capacity from the source DB (display-only). */

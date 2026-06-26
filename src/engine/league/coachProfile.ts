@@ -19,7 +19,7 @@
 
 import type { StaffMember, StaffAttributes } from './staff'
 import type { TeamStyleKind } from './archetypes'
-import { teamStyleFit } from './archetypes'
+import { teamStyleFit, styleMatch } from './archetypes'
 import type { Rng } from '@engine/shared/rng'
 import type {
   Player,
@@ -461,4 +461,34 @@ export function profileToTactics(profile: CoachProfile, roster: Player[], base: 
     dumping: knob(1 - profile.riskTolerance),
     mentality: knob(profile.offence),
   }
+}
+
+/* ─────────────────────────── coach ↔ roster fit ─────────────────────────── */
+
+const NEUTRAL_TACTICS: TeamTactics = {
+  forecheck: '1-2-2',
+  dZoneCoverage: 'zone',
+  tempo: { pace: 0.5, passRisk: 0.5, shotEagerness: 0.5, defensivePinch: 0.4 },
+  specialTeams: { powerPlay: 'umbrella', penaltyKill: 'box' },
+  lineMatching: false,
+}
+
+/**
+ * How well a coach's system suits the roster (0–100; ~70 = serviceable baseline).
+ * Reuses the calibrated styleMatch machinery against the tactics the coach would
+ * actually run with this roster.
+ */
+export function coachFit(profile: CoachProfile, roster: Player[]): number {
+  return styleMatch(roster, profileToTactics(profile, roster, NEUTRAL_TACTICS)).fit
+}
+
+/**
+ * Convert a coach-fit score (0–100) into a small on-ice execution multiplier.
+ * Neutral (1.0) at the styleMatch baseline of 70; a perfect fit nudges shot
+ * conversion +1.5%, a poor fit −1.5%. Deliberately subtle — coaching is real but
+ * modest, and the cap keeps calibration intact.
+ */
+export function coachFitMultiplier(fit: number): number {
+  const v = Math.max(-1, Math.min(1, (fit - 70) / 30))
+  return 1 + v * 0.015
 }

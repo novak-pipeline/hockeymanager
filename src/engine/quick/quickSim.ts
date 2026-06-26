@@ -25,6 +25,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -269,9 +270,11 @@ function simShift(
 
     const finish = shooter.composites.scoring / lgAvg
     const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = attacking.team.coachFit === undefined ? 1 : coachFitMultiplier(attacking.team.coachFit)
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull))
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf)
     )
 
     if (rng.chance(pGoal)) {

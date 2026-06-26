@@ -94,6 +94,7 @@ import { steer, type MoveOrder } from './movement'
 import { defenderOrders, faceoffOrders, faceoffSpot } from './formations'
 import { attackPlayOrders, phaseForPlay, type PlayId } from './playbook'
 import { Director } from './director'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
@@ -870,9 +871,11 @@ function simPeriod(
 
     const finish = shooterSk.player.composites.scoring / LEAGUE_AVG
     const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge), 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf, 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
     const gs = goalStrengthNow(atk, def)

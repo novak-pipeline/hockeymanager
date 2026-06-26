@@ -200,7 +200,7 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
-import { buildCoachProfile, profileToTactics } from '@engine/league/coachProfile'
+import { buildCoachProfile, profileToTactics, coachFit } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
@@ -1192,6 +1192,8 @@ export class Career {
       if (!profile) continue
       const roster = team.roster.map((id) => this.resolve(id))
       team.tactics = profileToTactics(profile, roster, team.tactics)
+      // How well the coach's system suits this roster → small on-ice edge in the sim.
+      team.coachFit = coachFit(profile, roster)
     }
   }
 
