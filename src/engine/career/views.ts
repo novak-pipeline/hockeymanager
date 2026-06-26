@@ -1121,6 +1121,9 @@ export interface DraftAdviceView {
   reason: string
   /** 0–100 the advisor's evaluation accuracy (how much to trust him). */
   confidence: number
+  /** True when this advisor's pick is ALSO the best player available — i.e. his
+   *  lens and pure value agree (a clear-cut, consensus pick). */
+  isConsensus?: boolean
 }
 
 export interface DraftPickRowView {

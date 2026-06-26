@@ -84,7 +84,7 @@ import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
 import { nhleFactorByAbbrev, isProLeagueAbbrev } from '@engine/league/leagueStrength'
-import { scoutDraftBias } from '@engine/career/multiScout'
+import { scoutDraftBias, buildNhlComp } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo, runWorldChampionship } from '@engine/league/nationalTeam'
 import {
   createArc,
@@ -990,114 +990,160 @@ export class Career {
     const P = (dp: DraftProspect): Player => this.resolve(dp.playerId)
     const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
       pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+    const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
-    // CRITICAL: advice is driven by YOUR SCOUTS' board, not the public consensus.
-    // Your staff's grounded read (fog-aware, knowledge-gated) routinely disagrees
-    // with the media board — so a consensus stud our scouts are cool on must NOT be
-    // pitched as "best available". We reuse the exact same scout board the Scout
-    // Report / rankings screen show, so the war room can never contradict them.
+    // Advice is driven by YOUR SCOUTS' read, not the public consensus, so it can
+    // never contradict the Scout Report. Each advisor scores the SAME grounded
+    // value and then tilts it through his own lens (need / fit / ceiling) + his
+    // personal bias. Because value is the dominant term, a prospect who is clearly
+    // best wins across every lens (a true consensus); only when it's close does
+    // the lens decide — exactly how a real war room behaves.
     const sbRow = new Map<string, ScoutBoardRowView>()
     for (const r of ranks.scoutBoard) sbRow.set(r.playerId, r)
     const BIG = 100000
     const scoutRankOf = (pid: string): number => sbRow.get(pid)?.rank ?? BIG
-    // Remaining prospects in OUR scouts' preferred order (board rank, then consensus).
-    const byScouts = [...remaining].sort(
-      (a, b) => scoutRankOf(a.playerId as string) - scoutRankOf(b.playerId as string) || a.rank - b.rank
-    )
-    const ord = (n: number): string => {
-      const v = n % 100
-      const s = ['th', 'st', 'nd', 'rd']
-      return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
-    }
-    // How our scouts see him vs the media board → woven into the reason.
-    const verdictNote = (pid: string): string => {
-      const r = sbRow.get(pid)
-      if (!r) return ''
-      if (!r.seen) return ' (limited viewings so far — treat it as an early read).'
-      if (r.verdict === 'lower') return ' The media have him higher; our reads are more measured.'
-      if (r.verdict === 'higher') return ` We're higher on him than the board (consensus #${r.consensusRank}).`
-      return ''
-    }
-    const roleOf = (p: Player): string => ceilingRoleShort(this.scoutedCeilingOf(p), p.position)
+    const isOwn = (pid: string): boolean => this.userTeam.roster.includes(asPlayerId(pid))
+    const knowOf = (pid: string): number => (isOwn(pid) ? 100 : knowledgeOf(this.scouting, pid))
+    const clubInfo = this.worldClubInfoByPid()
 
-    // Org depth by position group (NHL + AHL) → the thinnest is our biggest need.
+    // Candidate pool: the top of our scouts' board (a war room debates a shortlist).
+    const pool = [...remaining]
+      .sort((a, b) => scoutRankOf(a.playerId as string) - scoutRankOf(b.playerId as string) || a.rank - b.rank)
+      .slice(0, 24)
+    if (pool.length === 0) return []
+
+    // Grounded value (value-points) — our fog-aware ceiling, weighted with current.
+    const ceilOf = (p: Player): number => this.scoutedCeilingOf(p)
+    const valueById = new Map<string, number>()
+    for (const dp of pool) valueById.set(dp.playerId as string, ceilOf(P(dp)) * 0.74 + ratedOverall(P(dp)) * 0.26)
+    const valueOf = (pid: string): number => valueById.get(pid) ?? 0
+    const ceils = pool.map((dp) => ceilOf(P(dp))).sort((a, b) => a - b)
+    const medianCeil = ceils[Math.floor(ceils.length / 2)] ?? 50
+    // The pure best-player-available (value leader) — used to flag consensus picks.
+    const bpaId = pool.reduce((b, dp) => (valueOf(dp.playerId as string) > valueOf(b.playerId as string) ? dp : b), pool[0]).playerId as string
+
+    // Team need: thinnest position group (NHL + AHL) → a value-point bonus.
     const team = this.userTeam
     const ids = [...team.roster]
     if (team.affiliateId) ids.push(...(this.data.teams.get(team.affiliateId)?.roster ?? []))
     const count: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
-    for (const id of ids) {
-      const pl = this.data.players.get(id)
-      if (pl) count[grpOf(pl.position)]++
-    }
+    for (const id of ids) { const pl = this.data.players.get(id); if (pl) count[grpOf(pl.position)]++ }
     const target: Record<'F' | 'D' | 'G', number> = { F: 16, D: 9, G: 4 }
-    const needGroup = (['F', 'D', 'G'] as const).slice().sort(
-      (a, b) => target[b] - count[b] - (target[a] - count[a])
-    )[0]
-    const grpWord = (g: 'F' | 'D' | 'G'): string =>
-      g === 'G' ? 'in goal' : g === 'D' ? 'on the blue line' : 'up front'
-    const posWord = (pos: Position): string =>
-      grpOf(pos) === 'G' ? 'goaltender' : grpOf(pos) === 'D' ? 'defenceman' : 'forward'
+    const needGroup = (['F', 'D', 'G'] as const).slice().sort((a, b) => target[b] - count[b] - (target[a] - count[a]))[0]
+    const needPts = clamp(Math.max(0, target[needGroup] - count[needGroup]) * 1.4, 0, 8)
+    const profile = staff.headCoach.profile
+    const wantD = profile ? profile.structure > profile.offence : false
+
+    // Lens tilts (value-points). Small vs the value spread, so they only decide
+    // close calls — never override a prospect who is genuinely a tier above.
+    const needBonus = (p: Player): number =>
+      grpOf(p.position) === needGroup ? needPts : grpOf(p.position) === 'G' && needGroup !== 'G' ? -1.5 : 0
+    const fitBonus = (p: Player): number => {
+      const g = grpOf(p.position)
+      // The coach leans his roster toward his system: a structured/defensive coach
+      // covets mobile D, an attacking coach covets skill up front.
+      return wantD ? (g === 'D' ? 5 : g === 'G' ? 0 : -1) : g === 'F' ? 4 : g === 'G' ? -1 : 0
+    }
+    const ceilingBonus = (p: Player): number => clamp((ceilOf(p) - medianCeil) * 0.55, 0, 8)
+
+    // ── reason-builder helpers (all data-driven, never generic) ─────────────
+    const grpWord = (g: 'F' | 'D' | 'G'): string => (g === 'G' ? 'in goal' : g === 'D' ? 'on the blue line' : 'up front')
+    const posWord = (pos: Position): string => (grpOf(pos) === 'G' ? 'goaltender' : grpOf(pos) === 'D' ? 'defenceman' : 'forward')
+    const roleOf = (p: Player): string => ceilingRoleShort(ceilOf(p), p.position)
+    const seasonStr = (p: Player): string => {
+      const l = this.prospectSeasonLine(p)
+      if (!l || l.gp <= 0) return ''
+      const lg = clubInfo.get(p.id as string)?.leagueAbbr
+      return p.position === 'G'
+        ? `${l.gp} games in the ${lg ?? 'his league'}${l.seasonIsHistory ? ' last year' : ''}`
+        : `${l.g}-${l.a}-${l.pts} in ${l.gp} ${lg ? lg + ' ' : ''}games${l.seasonIsHistory ? ' last year' : ''}`
+    }
+    const compStr = (p: Player): string => {
+      const c = buildNhlComp(p, knowOf(p.id as string))
+      return c ? `shades of ${c.name} — ${c.blurb}` : ''
+    }
+    const verdictNote = (pid: string): string => {
+      const r = sbRow.get(pid)
+      if (!r) return ''
+      if (!r.seen) return ' Mind you, light viewings so far — call it an early read.'
+      if (r.verdict === 'lower') return ` The media are higher on him (consensus #${r.consensusRank}); our read is more measured.`
+      if (r.verdict === 'higher') return ` We're higher on him than the board has him (#${r.consensusRank}) — a value pick.`
+      return ''
+    }
+    const lead = (lens: Lens, p: Player): string => {
+      const nm = p.name
+      switch (lens) {
+        case 'value': return `${nm} is, flat out, the best player left on our board.`
+        case 'need': return `We're thin ${grpWord(needGroup)} — and ${nm} is the best ${posWord(p.position)} on the board.`
+        case 'fit': return wantD
+          ? `${nm} is the mobile, two-way defenceman my system is built around.`
+          : `${nm} has the pace and skill to drive our attack.`
+        case 'ceiling': return `Nobody left here has ${nm}'s upside.`
+      }
+    }
+
+    type Lens = 'value' | 'need' | 'fit' | 'ceiling'
+    const angleFor: Record<Lens, { kind: DraftAdviceView['kind']; angle: string }> = {
+      value: { kind: 'bpa', angle: 'Best available' },
+      need: { kind: 'need', angle: 'Team need' },
+      fit: { kind: 'fit', angle: 'System fit' },
+      ceiling: { kind: 'ceiling', angle: 'Highest ceiling' },
+    }
+
+    interface Advisor { m: StaffMember | undefined; role: string; lens: Lens; isScout: boolean }
+    const advisors: Advisor[] = [
+      { m: staff.scouts[0], role: 'Head Scout', lens: 'value', isScout: true },
+      { m: staff.assistantGM, role: 'Assistant GM', lens: 'need', isScout: false },
+      { m: staff.headCoach, role: 'Head Coach', lens: 'fit', isScout: false },
+    ]
+    // Extra scouts each take a lens (alternating ceiling/value) and carry their own
+    // specialty bias — so a scout who's high on a specific player breaks from the room.
+    staff.scouts.slice(1).forEach((s, i) => {
+      advisors.push({ m: s, role: s.specialty ? `${s.specialty} Scout` : 'Scout', lens: i % 2 === 0 ? 'ceiling' : 'value', isScout: true })
+    })
 
     const advice: DraftAdviceView[] = []
-    const add = (
-      m: StaffMember | undefined,
-      role: string,
-      kind: DraftAdviceView['kind'],
-      angle: string,
-      dp: DraftProspect | undefined,
-      reason: string
-    ): void => {
-      if (!m || !dp) return
-      const p = P(dp)
+    for (const adv of advisors) {
+      const m = adv.m
+      if (!m) continue
+      // Score the shortlist from this advisor's perspective and take his favourite.
+      let bestDp = pool[0]
+      let bestScore = -Infinity
+      for (const dp of pool) {
+        const p = P(dp)
+        const pid = dp.playerId as string
+        let s = valueOf(pid)
+        if (adv.lens === 'need') s += needBonus(p)
+        else if (adv.lens === 'fit') s += fitBonus(p)
+        else if (adv.lens === 'ceiling') s += ceilingBonus(p)
+        if (adv.isScout) s += scoutDraftBias(m, p, p.composites as unknown as Record<string, number>) * (knowOf(pid) / 100)
+        if (s > bestScore) { bestScore = s; bestDp = dp }
+      }
+      const p = P(bestDp)
+      const pid = bestDp.playerId as string
+      const isConsensus = pid === bpaId
+      const meta = angleFor[adv.lens]
+
+      // Build a specific, non-generic reason: lens lead + evidence + conviction.
+      const evidenceBits: string[] = []
+      const prod = seasonStr(p)
+      if (prod) evidenceBits.push(`He's put up ${prod}`)
+      evidenceBits.push(`projects as ${roleOf(p)}`)
+      const comp = compStr(p)
+      if (comp) evidenceBits.push(comp)
+      let reason = `${lead(adv.lens, p)} ${evidenceBits.join(', ')}.`
+      reason += verdictNote(pid)
+      if (isConsensus && adv.lens !== 'value') reason += ' He also grades out as the best player available, so this is an easy one.'
+      else if (!isConsensus && adv.lens === 'need') reason += ` Not the very top of the board, but the fit at ${posWord(p.position)} is too clean to pass up.`
+
       const v: DraftAdviceView = {
-        staffId: m.id, staffName: m.name, role, kind, angle,
-        playerId: dp.playerId as string, playerName: p.name, position: p.position,
-        rank: dp.rank, reason, confidence: Math.round(m.judgment),
+        staffId: m.id, staffName: m.name, role: adv.role, kind: meta.kind, angle: meta.angle,
+        playerId: pid, playerName: p.name, position: p.position, rank: bestDp.rank, reason,
+        confidence: Math.round(m.judgment * (0.55 + 0.45 * (knowOf(pid) / 100))),
+        isConsensus,
       }
       if (m.faceId) v.faceId = m.faceId
       advice.push(v)
-    }
-    // The first remaining prospect in a given scout's personal board order.
-    const topOfBoard = (rows: ScoutBoardRowView[] | undefined): DraftProspect | undefined => {
-      if (!rows) return undefined
-      for (const r of rows) {
-        const m = remaining.find((dp) => (dp.playerId as string) === r.playerId)
-        if (m) return m
-      }
-      return undefined
-    }
-
-    // 1) Head scout → the top name on HIS OWN board (not the media's).
-    const headScout = staff.scouts[0]
-    const bpa = topOfBoard(ranks.scoutBoards[0]?.rows) ?? byScouts[0]
-    const bpaRow = sbRow.get(bpa.playerId as string)
-    add(headScout, 'Head Scout', 'bpa', 'Best available', bpa,
-      `${P(bpa).name} is the top name left on our board${bpaRow ? ` — we have him ${ord(bpaRow.rank)}` : ''}. Best player available.${verdictNote(bpa.playerId as string)}`)
-
-    // 2) Assistant GM → best value at our position of need (by OUR board).
-    const needPick = byScouts.find((dp) => grpOf(P(dp).position) === needGroup) ?? byScouts[0]
-    add(staff.assistantGM, 'Assistant GM', 'need', 'Team need', needPick,
-      `We're thin ${grpWord(needGroup)}. ${P(needPick).name} is the best ${posWord(P(needPick).position)} our scouts have left — projects as ${roleOf(P(needPick))}, and he fills a real hole.${verdictNote(needPick.playerId as string)}`)
-
-    // 3) Head coach → the prospect who fits his system (best at that group by OUR board).
-    const profile = staff.headCoach.profile
-    const wantD = profile ? profile.structure > profile.offence : false
-    const fitGroup: 'F' | 'D' = wantD ? 'D' : 'F'
-    const fitPick = byScouts.find((dp) => grpOf(P(dp).position) === fitGroup) ?? byScouts[0]
-    add(staff.headCoach, 'Head Coach', 'fit', 'System fit', fitPick,
-      wantD
-        ? `${P(fitPick).name} is the mobile, two-way defender my system is built on — our staff see ${roleOf(P(fitPick))}. He fits how we want to play.`
-        : `${P(fitPick).name} has the speed and skill to thrive in our attack — our staff project ${roleOf(P(fitPick))}. He fits how I want to play.`)
-
-    // 4) A second scout → the highest-ceiling swing OUR scouts see in this range.
-    const scout2 = staff.scouts[1]
-    if (scout2) {
-      const pool = byScouts.slice(0, 18)
-      const ceil = pool.slice().sort((a, b) => this.scoutedCeilingOf(P(b)) - this.scoutedCeilingOf(P(a)))[0]
-      if (ceil) {
-        add(scout2, 'Scout', 'ceiling', 'Highest ceiling', ceil,
-          `${P(ceil).name} has the highest upside our scouts see here — a possible ${roleOf(P(ceil))}. If we want a home run, he's the swing.${verdictNote(ceil.playerId as string)}`)
-      }
     }
 
     return advice

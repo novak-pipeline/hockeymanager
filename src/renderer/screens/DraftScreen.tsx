@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
 import type { CombineRowView, DraftAdviceView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -559,7 +559,14 @@ function AdviceCard(props: {
           <div style={{ fontWeight: 600, fontSize: 13 }}>{a.staffName}</div>
           <div className="muted" style={{ fontSize: 11 }}>{a.role}</div>
         </div>
-        <span className={style.chip} style={{ marginLeft: 'auto', fontSize: 10 }}>{a.angle}</span>
+        <div className="row" style={{ marginLeft: 'auto', gap: 4 }}>
+          {a.isConsensus && (
+            <span className="chip chip-hero" style={{ fontSize: 9 }} title="His pick is also the best player available — a clear-cut call">
+              ★ Consensus
+            </span>
+          )}
+          <span className={style.chip} style={{ fontSize: 10 }}>{a.angle}</span>
+        </div>
       </div>
       <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
         <PlayerLink playerId={a.playerId} name={a.playerName} />
@@ -590,10 +597,44 @@ function StaffAdvicePanel(props: {
   busy: boolean
   onDraft: (playerId: string) => void
 }): JSX.Element {
+  // Which advisors are giving you their take — toggle any in/out.
+  const advisors = useMemo(() => {
+    const seen = new Set<string>()
+    const list: { id: string; name: string; role: string }[] = []
+    for (const a of props.advice) {
+      if (!seen.has(a.staffId)) { seen.add(a.staffId); list.push({ id: a.staffId, name: a.staffName, role: a.role }) }
+    }
+    return list
+  }, [props.advice])
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const toggle = (id: string): void =>
+    setHidden((h) => { const n = new Set(h); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const shown = props.advice.filter((a) => !hidden.has(a.staffId))
+
   return (
     <Panel title="War room — your staff's recommendations">
+      {advisors.length > 1 && (
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+          <span className="muted small" style={{ marginRight: 2 }}>Ask:</span>
+          {advisors.map((adv) => {
+            const on = !hidden.has(adv.id)
+            return (
+              <button
+                key={adv.id}
+                type="button"
+                className={`chip${on ? ' chip-violet' : ''}`}
+                style={{ cursor: 'pointer', opacity: on ? 1 : 0.45, fontSize: 11 }}
+                title={`${adv.role} — click to ${on ? 'hide' : 'show'}`}
+                onClick={() => toggle(adv.id)}
+              >
+                {adv.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        {props.advice.map((a) => (
+        {shown.map((a) => (
           <AdviceCard key={a.staffId + a.playerId} a={a} busy={props.busy} onDraft={props.onDraft} />
         ))}
       </div>

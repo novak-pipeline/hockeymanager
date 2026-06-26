@@ -1814,7 +1814,13 @@ describe('Career — wider-world quick-sim', () => {
       expect(a.reason.length).toBeGreaterThan(10)
       expect(a.playerName).toBeTruthy()
       expect(a.confidence).toBeGreaterThanOrEqual(0)
+      // Reasons are specific to the player, not a fixed template — his name appears
+      // and the rationale carries real evidence (role projection / production).
+      expect(a.reason).toContain(a.playerName)
+      expect(typeof a.isConsensus).toBe('boolean')
     }
+    // Different advisors give materially different write-ups (not one template).
+    expect(new Set(d.advice!.map((a) => a.reason)).size).toBeGreaterThan(1)
     // simNextPick is a no-op while the GM is on the clock (he must pick himself).
     const heldAt = made()
     career.simNextPick()
