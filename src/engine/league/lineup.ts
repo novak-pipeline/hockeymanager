@@ -196,23 +196,32 @@ export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean
     else holes.push(s)
   }
 
-  // Pass 2: fill holes — best healthy unused first (position-preferred), then
-  // double-shift the best healthy skater outside the slot's own line, then
-  // (only when zero healthy skaters exist) a goalie.
+  // Pass 2: fill holes. A position-correct body ALWAYS beats a miscast one — we
+  // would sooner double-shift a forward onto a wing than drop a defenceman there
+  // (and vice versa), so a D never ends up at LW while any forward is available.
+  // Tiers per hole: (1) unused, right position; (2) double-shift, right position;
+  // (3) unused, wrong position; (4) double-shift, anyone; (5) emergency goalie.
+  const isFwd = (p: Player): boolean =>
+    p.position !== 'G' && p.position !== 'D' && p.position !== 'LD' && p.position !== 'RD'
+  const isDef = (p: Player): boolean =>
+    p.position === 'D' || p.position === 'LD' || p.position === 'RD'
+
   let unused = healthySkaters.filter((p) => !used.has(p.id))
   for (const s of holes) {
     const current = s.row[s.col]
     const lineMates = new Set(s.row.filter((id, i) => i !== s.col && id))
-    let replacement: Player | undefined
-    const fresh = unused.filter((p) => !lineMates.has(p.id)).sort(bySlotPreference(s.prefer))
-    if (fresh.length > 0) {
-      replacement = fresh[0]
-    } else {
-      const doubleShift = healthySkaters
-        .filter((p) => !lineMates.has(p.id))
-        .sort(bySlotPreference(s.prefer))
-      replacement = doubleShift[0] ?? healthyGoalies[0]
-    }
+    const wantFwd = s.prefer === 'C' || s.prefer === 'W'
+    const rightPos = (p: Player): boolean => (wantFwd ? isFwd(p) : isDef(p))
+    const pref = bySlotPreference(s.prefer)
+    const free = (pool: Player[]): Player[] => pool.filter((p) => !lineMates.has(p.id))
+
+    const replacement: Player | undefined =
+      free(unused.filter(rightPos)).sort(pref)[0] ??
+      free(healthySkaters.filter(rightPos)).sort(pref)[0] ??
+      free(unused.filter((p) => !rightPos(p))).sort(pref)[0] ??
+      free(healthySkaters).sort(pref)[0] ??
+      healthyGoalies[0]
+
     if (!replacement) continue // nobody healthy at all; leave the hole
     if (replacement.id !== current) {
       s.row[s.col] = replacement.id

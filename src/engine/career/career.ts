@@ -2602,7 +2602,46 @@ export class Career {
   }
 
   private prepareTeamsForDay(): void {
+    this.emergencyRecalls()
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+  }
+
+  /**
+   * Emergency call-ups: when injuries drop a club below the HEALTHY bodies needed
+   * to dress full lines (12F + 6D + 2G), pull up the best healthy AHL players of
+   * the short position so the coach never has to ice a defenceman at wing. Bounded
+   * by a roster ceiling so it can't balloon; healthy depth is restored at the
+   * season rollover via assignRosters. Silent (no inbox spam) and deterministic.
+   */
+  private emergencyRecalls(): void {
+    const NEED: Record<'F' | 'D' | 'G', number> = { F: 12, D: 6, G: 2 }
+    const CEILING = 28
+    const grpOf = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+
+    for (const nhlId of this.data.league.teams) {
+      const nhl = this.data.teams.get(nhlId)
+      const ahl = nhl?.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+      if (!nhl || !ahl) continue
+
+      const healthyCount = (roster: PlayerId[], grp: 'F' | 'D' | 'G'): number =>
+        roster.reduce((n, id) => {
+          const p = this.data.players.get(id)
+          return p && p.injuryStatus === null && grpOf(p) === grp ? n + 1 : n
+        }, 0)
+
+      for (const grp of ['G', 'D', 'F'] as const) {
+        while (healthyCount(nhl.roster, grp) < NEED[grp] && nhl.roster.length < CEILING) {
+          const cand = ahl.roster
+            .map((id) => this.data.players.get(id))
+            .filter((p): p is Player => !!p && p.injuryStatus === null && grpOf(p) === grp)
+            .sort((a, b) => ratedOverall(b) - ratedOverall(a) || (a.id < b.id ? -1 : 1))[0]
+          if (!cand) break // no healthy AHL body at this position — repairLines copes
+          ahl.roster = ahl.roster.filter((id) => id !== cand.id)
+          nhl.roster.push(cand.id)
+        }
+      }
+    }
   }
 
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
