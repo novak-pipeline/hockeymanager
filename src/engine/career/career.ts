@@ -466,18 +466,40 @@ export interface ManagerView {
 }
 
 /** Team list for the club picker, built without starting a career. */
+/**
+ * Team strength rating (~0–100) for the club picker and preseason odds.
+ *
+ * A flat average of the top-15 skaters (the old formula) ignored goaltending
+ * entirely and treated a fourth-liner the same as a franchise centre, so a
+ * top-heavy-but-thin, weakly-goaltended club could float up the table. This
+ * weights the best players more heavily and folds goaltending in at ~a quarter,
+ * which is roughly its real influence on results.
+ */
+export function teamStrengthRating(roster: Player[]): number {
+  const skaters = roster
+    .filter((p) => p.position !== 'G')
+    .map((p) => overall(p.composites, p.position))
+    .sort((a, b) => b - a)
+  const goalies = roster
+    .filter((p) => p.position === 'G')
+    .map((p) => overall(p.composites, p.position))
+    .sort((a, b) => b - a)
+  const mean = (xs: number[], fallback: number): number =>
+    xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : fallback
+  const core = mean(skaters.slice(0, 9), 50) // top ~3 lines + top pair
+  const depth = mean(skaters.slice(9, 18), core) // bottom six + depth D
+  const starter = goalies[0] ?? 50
+  const backup = goalies[1] ?? starter
+  const goalie = starter * 0.7 + backup * 0.3
+  return Math.round(0.55 * core + 0.2 * depth + 0.25 * goalie)
+}
+
 export function buildTeamList(data: LeagueData): TeamInfo[] {
   const divName = new Map(data.league.divisions.map((d) => [d.id, d.name]))
   const confName = new Map(data.league.conferences.map((c) => [c.id, c.name]))
   return data.league.teams.map((teamId) => {
     const team = data.teams.get(teamId)!
-    const skaters = team.roster
-      .map((id) => data.players.get(id)!)
-      .filter((p) => p.position !== 'G')
-      .map((p) => overall(p.composites, p.position))
-      .sort((a, b) => b - a)
-      .slice(0, 15)
-    const strength = Math.round(skaters.reduce((s, v) => s + v, 0) / skaters.length)
+    const strength = teamStrengthRating(team.roster.map((id) => data.players.get(id)!))
     return {
       teamId,
       name: team.name,
@@ -1065,16 +1087,7 @@ export class Career {
   private teamDescriptors(lastRanks?: Map<string, number>): TeamDescriptor[] {
     return [...this.data.league.teams].map((teamId) => {
       const team = this.data.teams.get(teamId)!
-      const skaters = team.roster
-        .map((id) => this.resolve(id))
-        .filter((p) => p.position !== 'G')
-        .map((p) => overall(p.composites, p.position))
-        .sort((a, b) => b - a)
-        .slice(0, 15)
-      const strength =
-        skaters.length > 0
-          ? Math.round(skaters.reduce((s, v) => s + v, 0) / skaters.length)
-          : 50
+      const strength = teamStrengthRating(team.roster.map((id) => this.resolve(id)))
       const last = lastRanks?.get(teamId as string)
       return {
         teamId: teamId as string,
