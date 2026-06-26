@@ -42,22 +42,31 @@ const KIND_WEIGHTS: Array<{ kind: InjuryKind; weight: number }> = [
 
 const INJURY_DESCRIPTIONS: Record<InjuryKind, readonly string[]> = {
   lowerBody: [
-    'strained MCL',
-    'sprained ankle',
-    'groin strain',
-    'hip pointer',
-    'charley horse',
+    'blocked a shot — bruised foot',
+    'knee-on-knee collision — sprained MCL',
+    'caught a rut — sprained ankle',
+    'groin strain on a stretch save',
+    'hip pointer after a hit',
+    'tweaked a knee on an awkward fall',
+    'charley horse from a slash',
     'lower-body injury'
   ],
   upperBody: [
-    'shoulder sprain',
-    'wrist sprain',
-    'bruised ribs',
-    'sore back',
+    'separated shoulder on a hit',
+    'broken finger blocking a shot',
+    'wrist injury after a slash',
+    'hand injury in a fight',
+    'bruised ribs from a hit',
+    'tweaked his back',
     'upper-body injury'
   ],
-  illness: ['flu', 'illness'],
-  concussion: ['concussion', 'concussion protocol']
+  illness: ['flu', 'a virus', 'food poisoning', 'illness'],
+  concussion: [
+    'concussion after a blindside hit',
+    'concussion protocol following a fight',
+    'concussion from a hit to the head',
+    'concussion'
+  ]
 }
 
 function rollKind(rng: Rng): InjuryKind {
