@@ -89,6 +89,8 @@ export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views
 import type { DevelopmentCenterView } from '@engine/career/views'
 export type { SquadPlannerView, PlannerPlayer, PositionDepth, CareerStage, PosGroup } from '@engine/career/views'
 import type { SquadPlannerView } from '@engine/career/views'
+export type { LeagueComparisonView, LeagueComparisonCard } from '@engine/career/views'
+import type { LeagueComparisonView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -186,6 +188,7 @@ export type WorkerRequestBody =
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
+  | { type: 'getLeagueComparison' }
   | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
@@ -341,6 +344,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'medical'; medical: MedicalView }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
+  | { type: 'leagueComparison'; comparison: LeagueComparisonView }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'agenda'; items: AgendaItem[] }

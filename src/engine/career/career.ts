@@ -37,7 +37,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall, ratedOverall, overallToStars, agedPotential } from '@engine/ratings/composites'
+import { overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -341,6 +341,8 @@ import {
   type LeagueSkaterStatRow,
   type LeagueGoalieStatRow,
   type LeagueLeadersView,
+  type LeagueComparisonView,
+  type LeagueComparisonCard,
   type LeagueStatsView,
   type LeagueTeamsView,
   type LinesUpdate,
@@ -5464,6 +5466,112 @@ export class Career {
       (this.data.teams.get(tid)?.roster ?? []).map((id) => this.resolve(id))
     )
     return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster, leagueRosters })
+  }
+
+  /**
+   * "How your club stacks up" — ranks the user's NHL team against every other
+   * NHL club across a spread of dimensions (on-ice quality, pipeline, staff,
+   * money, arena, physical traits). Powers the dashboard comparison card.
+   */
+  getLeagueComparison(): LeagueComparisonView {
+    const teamIds = [...this.data.league.teams]
+    const outOf = teamIds.length
+
+    const nhlRoster = (tid: TeamId): Player[] =>
+      (this.data.teams.get(tid)?.roster ?? []).map((id) => this.resolve(id))
+
+    // Prospects = under-24 players across the NHL roster + AHL affiliate.
+    const prospectsOf = (tid: TeamId): Player[] => {
+      const team = this.data.teams.get(tid)
+      const ids = [...(team?.roster ?? [])]
+      const aff = team?.affiliateId
+      if (aff) ids.push(...(this.data.teams.get(aff)?.roster ?? []))
+      return ids.map((id) => this.resolve(id)).filter((p) => p.age <= 23)
+    }
+
+    const skatersOf = (tid: TeamId): Player[] => nhlRoster(tid).filter((p) => p.position !== 'G')
+    const mean = (xs: number[]): number => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0)
+    const heightCm = (p: Player): number => p.heightCm ?? 165 + p.ratings.physical.height * 0.35
+    const weightKg = (p: Player): number => p.weightKg ?? 75 + p.ratings.physical.strength * 0.25
+    const speedOf = (p: Player): number => (p.ratings.physical.speed + p.ratings.physical.acceleration) / 2
+
+    const staffQuality = (ts: TeamStaff): number => {
+      const avg = (xs: StaffMember[]): number => (xs.length ? mean(xs.map((s) => s.rating)) : 0)
+      const ac = avg(ts.assistantCoaches)
+      const sc = avg(ts.scouts)
+      const ph = avg(ts.physios)
+      return (
+        ts.headCoach.rating * 0.34 +
+        (ac || ts.headCoach.rating) * 0.18 +
+        (sc || 50) * 0.2 +
+        ts.assistantGM.rating * 0.16 +
+        (ph || 50) * 0.12
+      )
+    }
+
+    const money = (v: number): string =>
+      v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${Math.round(v / 1000)}K`
+    const ftIn = (cm: number): string => {
+      const totalIn = Math.round(cm / 2.54)
+      return `${Math.floor(totalIn / 12)}'${totalIn % 12}"`
+    }
+
+    interface Metric {
+      key: string
+      label: string
+      blurb: string
+      better: 'high' | 'low'
+      value: (tid: TeamId) => number
+      fmt: (v: number) => string
+    }
+
+    const metrics: Metric[] = [
+      { key: 'squad', label: 'Squad rating', blurb: 'Overall on-ice quality, star-weighted and including goaltending.', better: 'high',
+        value: (tid) => teamStrengthRating(nhlRoster(tid)), fmt: (v) => String(Math.round(v)) },
+      { key: 'prospects', label: 'Prospect pipeline', blurb: 'Ceiling of your best under-24 talent (NHL roster + AHL affiliate).', better: 'high',
+        value: (tid) => mean(prospectsOf(tid).map((p) => ratedPotential(p)).sort((a, b) => b - a).slice(0, 8)), fmt: (v) => String(Math.round(v)) },
+      { key: 'staff', label: 'Coaching & scouting', blurb: 'Combined quality of your coaches, scouts, AGM and medical staff.', better: 'high',
+        value: (tid) => staffQuality(this.getTeamStaff(tid as string)), fmt: (v) => String(Math.round(v)) },
+      { key: 'capspace', label: 'Cap space', blurb: 'Room left under the salary cap to add or extend players.', better: 'high',
+        value: (tid) => { const f = this.data.teams.get(tid)!.finances; return f.salaryCap - f.capUsed }, fmt: money },
+      { key: 'revenue', label: 'Revenue', blurb: 'Annual club revenue — your financial muscle in the market.', better: 'high',
+        value: (tid) => this.data.teams.get(tid)?.finances.revenue ?? 0, fmt: money },
+      { key: 'arena', label: 'Arena capacity', blurb: 'Home-rink seats — a proxy for the size of your fanbase.', better: 'high',
+        value: (tid) => this.data.teams.get(tid)?.arenaCapacity ?? 0, fmt: (v) => v > 0 ? Math.round(v).toLocaleString() : '—' },
+      { key: 'tallest', label: 'Biggest team', blurb: 'Average height of your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(heightCm)), fmt: ftIn },
+      { key: 'fastest', label: 'Fastest skaters', blurb: 'Average skating speed + acceleration across your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(speedOf)), fmt: (v) => String(Math.round(v)) },
+      { key: 'heaviest', label: 'Heaviest team', blurb: 'Average weight of your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(weightKg)), fmt: (v) => v > 0 ? `${Math.round(v)} kg` : '—' },
+      { key: 'youngest', label: 'Youngest roster', blurb: 'Average age — rank 1 is the youngest, most up-and-coming roster.', better: 'low',
+        value: (tid) => mean(nhlRoster(tid).map((p) => p.age)), fmt: (v) => `${v.toFixed(1)}y` },
+    ]
+
+    const cards: LeagueComparisonCard[] = metrics.map((m) => {
+      const all = teamIds.map((tid) => ({ tid, v: m.value(tid) }))
+      const sorted = [...all].sort((a, b) => (m.better === 'high' ? b.v - a.v : a.v - b.v))
+      const rank = sorted.findIndex((x) => x.tid === this.userTeamId) + 1
+      const leader = sorted[0]!
+      const leaderTeam = this.data.teams.get(leader.tid)!
+      const mine = all.find((x) => x.tid === this.userTeamId)!.v
+      const percentile = outOf > 1 ? (outOf - rank) / (outOf - 1) : 1
+      return {
+        key: m.key,
+        label: m.label,
+        blurb: m.blurb,
+        rank: rank > 0 ? rank : outOf,
+        outOf,
+        percentile,
+        display: m.fmt(mine),
+        leaderTeamId: leader.tid as string,
+        leaderAbbr: leaderTeam.abbreviation,
+        leaderDisplay: m.fmt(leader.v),
+        isUserLeader: leader.tid === this.userTeamId,
+      }
+    })
+
+    return { teamName: this.userTeam.name, cards }
   }
 
   /** Legends registry for a club, most recent first. */

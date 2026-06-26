@@ -1779,6 +1779,34 @@ export type {
   PosGroup,
 } from './squadPlanner'
 
+/** One league-wide leaderboard the user's club is ranked within. */
+export interface LeagueComparisonCard {
+  key: string
+  label: string
+  /** Plain-English explanation of what the metric measures. */
+  blurb: string
+  /** User club's rank, 1 = best. */
+  rank: number
+  /** League size ranked against. */
+  outOf: number
+  /** 0–1 fraction of the league the user outranks (1 = top). */
+  percentile: number
+  /** User club's value, preformatted for display. */
+  display: string
+  /** League leader for this metric. */
+  leaderTeamId: string
+  leaderAbbr: string
+  leaderDisplay: string
+  /** True when the user's club is itself the leader. */
+  isUserLeader: boolean
+}
+
+/** "How your club stacks up" — dashboard comparison card. Response to 'getLeagueComparison'. */
+export interface LeagueComparisonView {
+  teamName: string
+  cards: LeagueComparisonCard[]
+}
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

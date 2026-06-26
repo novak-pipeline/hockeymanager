@@ -17,6 +17,28 @@ describe('buildTeamList', () => {
   })
 })
 
+describe('Career — league comparison', () => {
+  it('ranks the user club across every dimension, in-bounds, with a leader', () => {
+    const data = generateLeague({ seed: 42 })
+    const userId = data.league.teams[3]!
+    const career = new Career(data, 42, userId)
+    const view = career.getLeagueComparison()
+    const n = data.league.teams.length
+    expect(view.cards.length).toBeGreaterThan(5)
+    for (const c of view.cards) {
+      expect(c.outOf).toBe(n)
+      expect(c.rank).toBeGreaterThanOrEqual(1)
+      expect(c.rank).toBeLessThanOrEqual(n)
+      expect(c.percentile).toBeGreaterThanOrEqual(0)
+      expect(c.percentile).toBeLessThanOrEqual(1)
+      expect(c.display).toBeTruthy()
+      expect(c.leaderAbbr).toBeTruthy()
+      // The rank-1 club is flagged as the user only when it IS the user.
+      expect(c.isUserLeader).toBe(c.rank === 1 && c.leaderTeamId === (userId as unknown as string))
+    }
+  })
+})
+
 describe('Career — regular season', () => {
   it('starts empty: day 0, no last result, a scheduled next game', () => {
     const data = generateLeague({ seed: 3 })
