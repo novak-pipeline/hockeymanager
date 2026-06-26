@@ -1,16 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import { Rng } from '@engine/shared/rng'
+import { generateLeague } from '@data/generate'
+import type { Player, TeamTactics } from '@domain'
 import type { StaffMember } from './staff'
 import {
   buildCoachProfile,
   deriveProfileFromAttributes,
   deriveSyntheticProfile,
   deriveSystem,
+  profileToTactics,
   SYSTEM_META,
   SYSTEM_TO_STYLE_KIND,
   type CoachProfile,
   type CoachSystemId,
 } from './coachProfile'
+
+const BASE_TACTICS: TeamTactics = {
+  forecheck: '1-2-2',
+  dZoneCoverage: 'zone',
+  tempo: { pace: 0.5, passRisk: 0.5, shotEagerness: 0.5, defensivePinch: 0.4 },
+  specialTeams: { powerPlay: 'umbrella', penaltyKill: 'box' },
+  lineMatching: false,
+}
+
+function leagueRoster(seed = 1): Player[] {
+  const { players, teams, league } = generateLeague({ seed })
+  const team = teams.get(league.teams[0]!)!
+  return team.roster.map((id) => players.get(id)!).filter(Boolean)
+}
 
 function coach(over: Partial<StaffMember> = {}): StaffMember {
   return {
@@ -115,6 +132,56 @@ describe('coachProfile — deriveSystem', () => {
       expect(SYSTEM_TO_STYLE_KIND[id]).toBeTruthy()
       expect(SYSTEM_META[id].label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('coachProfile — profileToTactics', () => {
+  const roster = leagueRoster(1)
+
+  function profileWith(over: Partial<CoachProfile>): CoachProfile {
+    const p = buildCoachProfile(coach())
+    return { ...p, ...over }
+  }
+
+  it('produces a valid TeamTactics with knobs in [0,1]', () => {
+    const t = profileToTactics(buildCoachProfile(coach({ attributes: { attacking: 14, tactics: 12 } })), roster, BASE_TACTICS)
+    for (const v of [t.tempo.pace, t.tempo.passRisk, t.tempo.shotEagerness, t.tempo.defensivePinch,
+      t.aggressiveness!, t.hitting!, t.puckPressure!, t.gapControl!, t.shooting!, t.passing!, t.dumping!, t.mentality!]) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+    expect(['1-2-2', '2-1-2', 'trap']).toContain(t.forecheck)
+    expect(['man', 'zone', 'hybrid']).toContain(t.dZoneCoverage)
+  })
+
+  it('an attack-minded coach plays more aggressively than a defensive one', () => {
+    const attack = profileWith({ offence: 0.9, aggression: 0.85, tempo: 0.85, riskTolerance: 0.8, forecheckDepth: 0.8, structure: 0.3 })
+    const defend = profileWith({ offence: 0.2, aggression: 0.25, tempo: 0.2, riskTolerance: 0.2, forecheckDepth: 0.3, structure: 0.8 })
+    const ta = profileToTactics(attack, roster, BASE_TACTICS)
+    const td = profileToTactics(defend, roster, BASE_TACTICS)
+    expect(ta.shooting!).toBeGreaterThan(td.shooting!)
+    expect(ta.tempo.shotEagerness).toBeGreaterThan(td.tempo.shotEagerness)
+    expect(ta.aggressiveness!).toBeGreaterThan(td.aggressiveness!)
+  })
+
+  it('a neutral profile keeps continuous knobs at the neutral 0.5', () => {
+    const neutral = profileWith({
+      aggression: 0.5, tempo: 0.5, offence: 0.5, structure: 0.5,
+      forecheckDepth: 0.5, riskTolerance: 0.5,
+    })
+    const t = profileToTactics(neutral, roster, BASE_TACTICS)
+    expect(t.aggressiveness).toBeCloseTo(0.5, 5)
+    expect(t.shooting).toBeCloseTo(0.5, 5)
+    expect(t.gapControl).toBeCloseTo(0.5, 5)
+  })
+
+  it('the same coach adapts pace to a faster vs slower roster', () => {
+    const p = profileWith({ tempo: 0.55, offence: 0.6 })
+    const fast = leagueRoster(2).map((q) => ({ ...q, ratings: { ...q.ratings, physical: { ...q.ratings.physical, speed: 90 } } }) as Player)
+    const slow = leagueRoster(2).map((q) => ({ ...q, ratings: { ...q.ratings, physical: { ...q.ratings.physical, speed: 30 } } }) as Player)
+    const paceFast = profileToTactics(p, fast, BASE_TACTICS).tempo.pace
+    const paceSlow = profileToTactics(p, slow, BASE_TACTICS).tempo.pace
+    expect(paceFast).toBeGreaterThan(paceSlow)
   })
 })
 

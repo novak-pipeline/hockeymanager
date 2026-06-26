@@ -19,7 +19,16 @@
 
 import type { StaffMember, StaffAttributes } from './staff'
 import type { TeamStyleKind } from './archetypes'
+import { teamStyleFit } from './archetypes'
 import type { Rng } from '@engine/shared/rng'
+import type {
+  Player,
+  TeamTactics,
+  ForecheckSystem,
+  DefensiveZoneCoverage,
+  PowerPlayFormation,
+  PenaltyKillFormation,
+} from '@domain'
 
 /* ─────────────────────────── system taxonomy ─────────────────────────── */
 
@@ -363,4 +372,93 @@ export function deriveSyntheticProfile(coach: StaffMember, rng?: Rng): CoachProf
 export function buildCoachProfile(coach: StaffMember, rng?: Rng): CoachProfile {
   if (hasTacticalAttributes(coach.attributes)) return deriveProfileFromAttributes(coach)
   return deriveSyntheticProfile(coach, rng)
+}
+
+/* ─────────────────────────── profile → engine tactics ─────────────────────────── */
+
+const SYSTEM_FORECHECK: Record<CoachSystemId, ForecheckSystem> = {
+  lowEventTrap: 'trap',
+  defensiveShell: 'trap',
+  aggressiveForecheck: '2-1-2',
+  cyclePossession: '2-1-2',
+  runAndGun: '2-1-2',
+  speedTransition: '1-2-2',
+  structuredTwoWay: '1-2-2',
+}
+const SYSTEM_PP: Record<CoachSystemId, PowerPlayFormation> = {
+  lowEventTrap: 'umbrella',
+  defensiveShell: 'umbrella',
+  structuredTwoWay: 'umbrella',
+  aggressiveForecheck: 'overload',
+  cyclePossession: 'overload',
+  speedTransition: '1-3-1',
+  runAndGun: '1-3-1',
+}
+const SYSTEM_PK: Record<CoachSystemId, PenaltyKillFormation> = {
+  lowEventTrap: 'box',
+  defensiveShell: 'box',
+  structuredTwoWay: 'box',
+  cyclePossession: 'box',
+  speedTransition: 'diamond',
+  aggressiveForecheck: 'aggressive',
+  runAndGun: 'aggressive',
+}
+
+/** Continuous knob from a 0–1 axis: exactly 0.5 at a neutral 0.5 axis. */
+function knob(axis: number, gain = 1.2): number {
+  return clamp01(0.5 + (axis - 0.5) * gain)
+}
+
+function avgSkaterSpeed(roster: Player[]): number {
+  const skaters = roster.filter((p) => p.position !== 'G')
+  if (skaters.length === 0) return 55
+  return skaters.reduce((s, p) => s + p.ratings.physical.speed, 0) / skaters.length
+}
+
+function dZoneFromStructure(structure: number): DefensiveZoneCoverage {
+  if (structure >= 0.6) return 'zone'
+  if (structure <= 0.4) return 'man'
+  return 'hybrid'
+}
+
+/**
+ * Map a coach's beliefs onto the engine-wired TeamTactics knobs, adapting to the
+ * roster. Continuous knobs are neutral-preserving; the pace knob blends 65/35
+ * toward the roster's natural style (teamStyleFit) so a possession coach pushes
+ * pace with a fast roster but leans on the cycle with a slow one. A 1-2-2
+ * forecheck is downgraded to 2-1-2 when the roster lacks the speed to trap high.
+ */
+export function profileToTactics(profile: CoachProfile, roster: Player[], base: TeamTactics): TeamTactics {
+  const fit = teamStyleFit({ roster })
+  const fitPace = fit.suggestedTactics.tempo?.pace
+  const profilePace = knob(profile.tempo)
+  const pace = clamp01(fitPace === undefined ? profilePace : profilePace * 0.65 + fitPace * 0.35)
+
+  let forecheck = SYSTEM_FORECHECK[profile.system]
+  if (forecheck === '1-2-2' && avgSkaterSpeed(roster) < 58) forecheck = '2-1-2'
+
+  return {
+    ...base,
+    forecheck,
+    dZoneCoverage: dZoneFromStructure(profile.structure),
+    tempo: {
+      pace,
+      passRisk: knob(profile.riskTolerance),
+      shotEagerness: knob(profile.offence),
+      defensivePinch: knob(profile.riskTolerance),
+    },
+    specialTeams: {
+      powerPlay: SYSTEM_PP[profile.system],
+      penaltyKill: SYSTEM_PK[profile.system],
+    },
+    // EHM-style sliders (engine-wired; neutral-preserving)
+    aggressiveness: knob(profile.aggression),
+    hitting: knob(profile.aggression),
+    puckPressure: knob(profile.forecheckDepth),
+    gapControl: knob(profile.structure),
+    shooting: knob(profile.offence),
+    passing: knob((profile.offence + profile.riskTolerance) / 2),
+    dumping: knob(1 - profile.riskTolerance),
+    mentality: knob(profile.offence),
+  }
 }

@@ -200,6 +200,7 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
+import { buildCoachProfile, profileToTactics } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
@@ -724,6 +725,9 @@ export class Career {
       this.generateAllTeamStaff()
       // Make every staff scout deployable (replaces the placeholder scout roster).
       this.syncScoutRoster()
+      // The coach owns the system: derive each NHL team's tactics from its head
+      // coach's tactical profile, adapted to that roster.
+      this.applyCoachSystems()
 
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
@@ -1110,6 +1114,9 @@ export class Career {
    */
   private static readonly TEAM_STAFF_NS = 9260
 
+  /** Rng namespace for lazy head-coach tactical-profile synthesis. Unused elsewhere. */
+  private static readonly COACH_PROFILE_NS = 9261
+
   /**
    * Generate a full TeamStaff for every NHL-tier team.
    * Called once at career construction; NOT called on restore (loaded from snapshot).
@@ -1148,12 +1155,44 @@ export class Career {
    */
   getTeamStaff(teamId: string): TeamStaff {
     const existing = this.teamStaffMap.get(teamId)
-    if (existing) return existing
+    if (existing) {
+      this.ensureCoachProfile(teamId, existing)
+      return existing
+    }
     const idx = this.data.league.teams.indexOf(teamId as unknown as typeof this.data.league.teams[number])
     const teamRng = new Rng(deriveSeed(this.seed, Career.TEAM_STAFF_NS, Math.max(0, idx)))
     const ts = generateTeamStaff(teamRng)
+    this.ensureCoachProfile(teamId, ts)
     this.teamStaffMap.set(teamId, ts)
     return ts
+  }
+
+  /**
+   * Guarantee a head coach carries a tactical profile, regenerating it
+   * deterministically when absent (old saves, mod-imported staff). Idempotent.
+   */
+  private ensureCoachProfile(teamId: string, ts: TeamStaff): void {
+    if (ts.headCoach.profile) return
+    const idx = Math.max(0, this.data.league.teams.indexOf(teamId as unknown as typeof this.data.league.teams[number]))
+    const rng = new Rng(deriveSeed(this.seed, Career.COACH_PROFILE_NS, idx))
+    ts.headCoach.profile = buildCoachProfile(ts.headCoach, rng)
+  }
+
+  /**
+   * The coach owns the system: set every NHL team's tactics from its head coach's
+   * tactical profile, adapted to that roster. Run at career start and each season
+   * rollover (NOT on restore — saved/influenced tactics are preserved there).
+   */
+  private applyCoachSystems(): void {
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const ts = this.getTeamStaff(teamId as string)
+      const profile = ts.headCoach.profile
+      if (!profile) continue
+      const roster = team.roster.map((id) => this.resolve(id))
+      team.tactics = profileToTactics(profile, roster, team.tactics)
+    }
   }
 
   private initLockerRooms(): void {
@@ -3859,6 +3898,8 @@ export class Career {
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Re-balance rosters across NHL/AHL pairs for the new season.
     this.assignRosters()
+    // Re-derive each team's system from its head coach for the new roster.
+    this.applyCoachSystems()
 
     /* ── story layer rollover ── */
     this.tentpoles = createInitialTentpolesState()
