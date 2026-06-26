@@ -199,7 +199,7 @@ import {
   rollInjuries,
   tickRecovery,
 } from '@engine/league/condition'
-import { repairLines, coachSetLineup } from '@engine/league/lineup'
+import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
 import {
   addKnowledge,
   assignScout,
@@ -4099,10 +4099,13 @@ export class Career {
 
     const wasNhl = new Set(nhl.roster.map((id) => id as string))
 
+    // The user's head coach weighs form/morale/condition alongside skill, so a
+    // hot AHL player can earn a call-up over a cold NHL regular within a band.
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
     const targets: Record<'F' | 'D' | 'G', number> = { F: 14, D: 7, G: 2 }
     const byGroup: Record<'F' | 'D' | 'G', Player[]> = { F: [], D: [], G: [] }
     for (const p of [...resolveAll(nhl.roster), ...resolveAll(ahl.roster)]) byGroup[grp(p)].push(p)
-    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => coachAdjustedScore(b, coach) - coachAdjustedScore(a, coach))
 
     const newNhl: PlayerId[] = []
     const newAhl: PlayerId[] = []

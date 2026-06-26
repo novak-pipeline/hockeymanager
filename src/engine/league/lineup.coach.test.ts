@@ -14,7 +14,8 @@ import { generateLeague } from '@data/generate'
 import { Rng } from '@engine/shared/rng'
 import { overall } from '@engine/ratings/composites'
 import type { StaffMember } from '@engine/league/staff'
-import { coachSetLineup } from './lineup'
+import { coachSetLineup, coachAdjustedScore, coachFormMoraleConditionAdj } from './lineup'
+import type { Player } from '@domain'
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -185,5 +186,80 @@ describe('coachSetLineup', () => {
       if (diffFound) break
     }
     expect(diffFound).toBe(true)
+  })
+})
+
+describe('coachSetLineup — form / morale / condition', () => {
+  function topForward(roster: Player[]): Player {
+    return roster
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))[0]!
+  }
+
+  it('contributes exactly zero at neutral form/morale/condition (backward compatible)', () => {
+    const roster = makeRoster(10)
+    const coach = makeCoach()
+    for (const p of roster.slice(0, 8)) {
+      const neutral = { ...p, form: 0, morale: 50, fatigue: 0 } as Player
+      expect(coachFormMoraleConditionAdj(neutral, coach)).toBe(0)
+    }
+  })
+
+  it('a hot player outscores an identical cold one', () => {
+    const p = makeRoster(3).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 75 })
+    const hot = { ...p, form: 5 } as Player
+    const cold = { ...p, form: -5 } as Player
+    expect(coachAdjustedScore(hot, coach)).toBeGreaterThan(coachAdjustedScore(cold, coach))
+  })
+
+  it('a tired player takes a penalty big enough to flip a small skill gap', () => {
+    const p = makeRoster(4).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 80 })
+    const fresh = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 0 } as Player, coach)
+    const tired = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 80 } as Player, coach) // condition 20
+    expect(fresh).toBe(0)
+    expect(tired).toBeLessThan(-5) // ≈ -6.7, enough to overcome a sub-5 OVR edge
+  })
+
+  it('does not bury a star who is cold, unhappy and tired', () => {
+    const roster = makeRoster(8)
+    const star = topForward(roster)
+    const modified = roster.map((p) =>
+      p.id === star.id ? ({ ...p, form: -5, fatigue: 80, morale: 20 } as Player) : p
+    )
+    const result = coachSetLineup({ roster: modified, coach: makeCoach({ rating: 85, judgment: 85 }), rng: new Rng(1) })
+    const dressed = new Set(
+      [...result.lines.forwards.flat(), ...result.lines.defensePairs.flat()].map(String)
+    )
+    expect(dressed.has(star.id as string)).toBe(true)
+  })
+
+  it('a better coach reacts more strongly to a slump', () => {
+    const p = makeRoster(9).find((q) => q.position !== 'G')!
+    const slumping = { ...p, form: -5 } as Player
+    const strong = coachFormMoraleConditionAdj(slumping, makeCoach({ rating: 90 }))
+    const weak = coachFormMoraleConditionAdj(slumping, makeCoach({ rating: 45 }))
+    expect(strong).toBeLessThan(weak) // both negative; the better coach benches harder
+  })
+
+  it('labels a scratched tired player with a reason', () => {
+    const roster = makeRoster(12)
+    const weakest = roster
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => overall(a.composites, a.position) - overall(b.composites, b.position))[0]!
+    const modified = roster.map((p) => (p.id === weakest.id ? ({ ...p, fatigue: 85 } as Player) : p))
+    const result = coachSetLineup({ roster: modified, coach: makeCoach(), rng: new Rng(1) })
+    if (result.scratchIds.map(String).includes(weakest.id as string)) {
+      expect(result.scratchReasons?.[weakest.id as string]).toBe('tired')
+    }
+  })
+
+  it('is deterministic with form/morale/condition in play', () => {
+    const roster = makeRoster(17).map((p, i) => ({ ...p, form: (i % 11) - 5, fatigue: (i * 7) % 100 }) as Player)
+    const coach = makeCoach({ judgment: 60, rating: 65 })
+    const a = coachSetLineup({ roster, coach, rng: new Rng(42) })
+    const b = coachSetLineup({ roster, coach, rng: new Rng(42) })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })

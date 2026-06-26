@@ -318,6 +318,62 @@ export interface CoachLineupResult {
   lines: Lines
   /** Player ids who were left out (healthy but not dressed). */
   scratchIds: PlayerId[]
+  /**
+   * Why a healthy player was scratched, when it was for cause (not just depth).
+   * Surfaced to the UI so the GM understands the coach's call.
+   */
+  scratchReasons?: Record<string, 'slumping' | 'unhappy' | 'tired'>
+}
+
+/** Stable per-id float (same hash as staff.ts) for reproducible coach noise. */
+function lineupStableFloat(id: string, salt: number): number {
+  let h = 5381
+  for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) >>> 0
+  h = (Math.imul(h ^ (salt >>> 0), 0x9e3779b1) + 0x85ebca77) >>> 0
+  return (h >>> 0) / 4294967296
+}
+
+/**
+ * How much a coach moves a player up/down the depth chart for current form,
+ * morale and condition — on top of raw skill. Exactly 0 at neutral inputs
+ * (form 0, morale 50, full condition) so a roster of neutral players reproduces
+ * the old skill-only ordering. Form is the loudest lever (the drama lever);
+ * morale next; tiredness is a one-sided penalty. Form/morale scale by coach
+ * rating — a poor coach under-reacts and leaves a slumping player in too long.
+ */
+export function coachFormMoraleConditionAdj(p: Player, coach: StaffMember): number {
+  const react = Math.max(0, Math.min(1, coach.rating / 90))
+  const formAdj = Math.max(-6, Math.min(6, (p.form / 5) * 6)) * react // form is -5..5
+  const moraleAdj = Math.max(-4, Math.min(4, ((p.morale - 50) / 50) * 4)) * react
+  const condition = 100 - p.fatigue
+  const conditionAdj = condition >= 60 ? 0 : -((60 - condition) / 60) * 10
+  return formAdj + moraleAdj + conditionAdj
+}
+
+/**
+ * The coach's full evaluation of a player for lineup/roster purposes: true
+ * overall + specialty lean + form/morale/condition + a stable judgment-scaled
+ * noise. Shared by coachSetLineup and the career NHL/AHL split so both reflect
+ * the same realistic read. Deterministic.
+ */
+export function coachAdjustedScore(p: Player, coach: StaffMember): number {
+  const trueOvr = ratedOverall(p)
+  let specialtyBonus = 0
+  const spec = coach.specialty ?? ''
+  if (p.position !== 'G') {
+    if (spec === 'Offense' || spec === 'Power Play') {
+      specialtyBonus = (p.composites.scoring + p.composites.playmaking) / 2 - trueOvr
+    } else if (spec === 'Defense' || spec === 'Penalty Kill') {
+      specialtyBonus = (p.composites.defensiveZone + p.composites.takeaway) / 2 - trueOvr
+    } else if (spec === 'Player Development') {
+      specialtyBonus = p.age < 26 ? 3 : 0
+    }
+    specialtyBonus *= (90 - coach.rating) / 50
+    specialtyBonus = Math.max(-4, Math.min(4, specialtyBonus))
+  }
+  const noiseBudget = 6 * (1 - coach.judgment / 100)
+  const noise = (lineupStableFloat(p.id as string, 42) * 2 - 1) * noiseBudget
+  return trueOvr + specialtyBonus + noise + coachFormMoraleConditionAdj(p, coach)
 }
 
 /**
@@ -347,50 +403,11 @@ export function coachSetLineup(args: {
 }): CoachLineupResult {
   const { roster, coach, rng } = args
 
-  /* ── 1. Stable per-player noise from judgment ── */
-
-  // Noise budget: judgment 100 → 0, judgment 0 → 6. Kept small on purpose — a
-  // coach reshuffles borderline calls, but no coach buries a clear star two
-  // lines down. With a typical judgment (~50) this is ±3, so a 9-point overall
-  // gap (e.g. an 83 vs a 74) is never flipped.
-  const noiseBudget = 6 * (1 - coach.judgment / 100)
-
-  // Stable hash identical to staff.ts stableFloat
-  function stableFloat(playerId: string, salt: number): number {
-    let h = 5381
-    for (let i = 0; i < playerId.length; i++) {
-      h = ((h << 5) + h + playerId.charCodeAt(i)) >>> 0
-    }
-    h = (Math.imul(h ^ (salt >>> 0), 0x9e3779b1) + 0x85ebca77) >>> 0
-    return (h >>> 0) / 4294967296
-  }
-
-  function coachScore(p: Player): number {
-    const trueOvr = ratedOverall(p)
-    // Base composite weighting — specialty shifts this
-    let specialtyBonus = 0
-    const spec = coach.specialty ?? ''
-    if (p.position !== 'G') {
-      if (spec === 'Offense' || spec === 'Power Play') {
-        specialtyBonus = (p.composites.scoring + p.composites.playmaking) / 2 - trueOvr
-      } else if (spec === 'Defense' || spec === 'Penalty Kill') {
-        specialtyBonus = (p.composites.defensiveZone + p.composites.takeaway) / 2 - trueOvr
-      } else if (spec === 'Player Development') {
-        // Slightly prefer younger players with upside (potential proxy: age < 26)
-        specialtyBonus = p.age < 26 ? 3 : 0
-      }
-      // Scale specialty bonus by coach rating (weaker coaches have larger bias),
-      // then clamp so a stylistic lean nudges the order rather than upending it.
-      specialtyBonus *= (90 - coach.rating) / 50
-      specialtyBonus = Math.max(-4, Math.min(4, specialtyBonus))
-    }
-
-    // Perturb with stable noise
-    const bias = stableFloat(p.id as string, 42) * 2 - 1
-    const noise = bias * noiseBudget
-
-    return trueOvr + specialtyBonus + noise
-  }
+  /* ── 1. The coach's read of each player ── */
+  // True overall + specialty lean + form/morale/condition + judgment noise.
+  // Form/morale slide borderline players up or down and can scratch a slumping
+  // or unhappy depth player; a clear star is never buried (the swing is capped).
+  const coachScore = (p: Player): number => coachAdjustedScore(p, coach)
 
   /* ── 2. Split by position and filter healthy ── */
   const healthy = roster.filter((p) => p.injuryStatus === null)
@@ -421,6 +438,16 @@ export function coachSetLineup(args: {
   const scratchIds: PlayerId[] = roster
     .filter((p) => !dressed.has(p.id as string))
     .map((p) => p.id)
+
+  // Label healthy scratches that sat for cause (not just depth), so the GM sees
+  // the coach's reasoning. Tiredness > unhappiness > slump in priority.
+  const scratchReasons: Record<string, 'slumping' | 'unhappy' | 'tired'> = {}
+  for (const p of roster) {
+    if (p.injuryStatus !== null || dressed.has(p.id as string)) continue
+    if (100 - p.fatigue < 35) scratchReasons[p.id as string] = 'tired'
+    else if (p.morale < 25) scratchReasons[p.id as string] = 'unhappy'
+    else if (p.form <= -3) scratchReasons[p.id as string] = 'slumping'
+  }
 
   /* ── 5. Build lines from dressed players ── */
   // Divide 12 forwards into 4 lines of 3, alternating C/W/W.
@@ -507,5 +534,9 @@ export function coachSetLineup(args: {
   // future tie-breaking extensions; it's seeded so callers can rely on stability)
   void rng
 
-  return { lines: tempTeam.lines, scratchIds }
+  return {
+    lines: tempTeam.lines,
+    scratchIds,
+    ...(Object.keys(scratchReasons).length > 0 ? { scratchReasons } : {}),
+  }
 }
