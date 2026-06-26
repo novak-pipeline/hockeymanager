@@ -1092,6 +1092,11 @@ export interface ProspectRowView extends PlayerBadge {
   seasonPts?: number
   /** Whether the season line is live (this sim season) or imported history. */
   seasonIsHistory?: boolean
+  /** Where YOUR scouts rank him on their own board (differs from the public
+   *  `rank` when your staff is higher/lower than the media consensus). */
+  scoutRank?: number
+  /** Your scouts' read vs the public board: 'higher' = they like him more. */
+  scoutVerdict?: 'higher' | 'inline' | 'lower'
 }
 
 /** One key staff member's draft recommendation while the GM is on the clock.

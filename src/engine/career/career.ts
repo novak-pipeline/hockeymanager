@@ -983,13 +983,42 @@ export class Career {
    * fit, highest ceiling — so they often disagree, exactly as a real war room
    * does. Reasons are data-driven (rank, position, the hole they'd fill).
    */
-  private draftAdvice(): DraftAdviceView[] {
-    const remaining = this.remainingProspects() // rank-sorted DraftProspect[]
+  private draftAdvice(ranks: ReturnType<Career['getDraftRankings']>): DraftAdviceView[] {
+    const remaining = this.remainingProspects() // consensus-rank-sorted DraftProspect[]
     if (remaining.length === 0) return []
     const staff = this.getTeamStaff(this.userTeamId as string)
     const P = (dp: DraftProspect): Player => this.resolve(dp.playerId)
     const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
       pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+
+    // CRITICAL: advice is driven by YOUR SCOUTS' board, not the public consensus.
+    // Your staff's grounded read (fog-aware, knowledge-gated) routinely disagrees
+    // with the media board — so a consensus stud our scouts are cool on must NOT be
+    // pitched as "best available". We reuse the exact same scout board the Scout
+    // Report / rankings screen show, so the war room can never contradict them.
+    const sbRow = new Map<string, ScoutBoardRowView>()
+    for (const r of ranks.scoutBoard) sbRow.set(r.playerId, r)
+    const BIG = 100000
+    const scoutRankOf = (pid: string): number => sbRow.get(pid)?.rank ?? BIG
+    // Remaining prospects in OUR scouts' preferred order (board rank, then consensus).
+    const byScouts = [...remaining].sort(
+      (a, b) => scoutRankOf(a.playerId as string) - scoutRankOf(b.playerId as string) || a.rank - b.rank
+    )
+    const ord = (n: number): string => {
+      const v = n % 100
+      const s = ['th', 'st', 'nd', 'rd']
+      return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+    }
+    // How our scouts see him vs the media board → woven into the reason.
+    const verdictNote = (pid: string): string => {
+      const r = sbRow.get(pid)
+      if (!r) return ''
+      if (!r.seen) return ' (limited viewings so far — treat it as an early read).'
+      if (r.verdict === 'lower') return ' The media have him higher; our reads are more measured.'
+      if (r.verdict === 'higher') return ` We're higher on him than the board (consensus #${r.consensusRank}).`
+      return ''
+    }
+    const roleOf = (p: Player): string => ceilingRoleShort(this.scoutedCeilingOf(p), p.position)
 
     // Org depth by position group (NHL + AHL) → the thinnest is our biggest need.
     const team = this.userTeam
@@ -1028,35 +1057,47 @@ export class Career {
       if (m.faceId) v.faceId = m.faceId
       advice.push(v)
     }
+    // The first remaining prospect in a given scout's personal board order.
+    const topOfBoard = (rows: ScoutBoardRowView[] | undefined): DraftProspect | undefined => {
+      if (!rows) return undefined
+      for (const r of rows) {
+        const m = remaining.find((dp) => (dp.playerId as string) === r.playerId)
+        if (m) return m
+      }
+      return undefined
+    }
 
-    // 1) Head scout → best player available (top of the board).
+    // 1) Head scout → the top name on HIS OWN board (not the media's).
     const headScout = staff.scouts[0]
-    const bpa = remaining[0]
+    const bpa = topOfBoard(ranks.scoutBoards[0]?.rows) ?? byScouts[0]
+    const bpaRow = sbRow.get(bpa.playerId as string)
     add(headScout, 'Head Scout', 'bpa', 'Best available', bpa,
-      `${P(bpa).name} is the top name left on our board at #${bpa.rank}. Best player available — don't overthink it.`)
+      `${P(bpa).name} is the top name left on our board${bpaRow ? ` — we have him ${ord(bpaRow.rank)}` : ''}. Best player available.${verdictNote(bpa.playerId as string)}`)
 
-    // 2) Assistant GM → best value at our position of need.
-    const needPick = remaining.find((dp) => grpOf(P(dp).position) === needGroup) ?? remaining[0]
+    // 2) Assistant GM → best value at our position of need (by OUR board).
+    const needPick = byScouts.find((dp) => grpOf(P(dp).position) === needGroup) ?? byScouts[0]
     add(staff.assistantGM, 'Assistant GM', 'need', 'Team need', needPick,
-      `We're thin ${grpWord(needGroup)}. ${P(needPick).name} is the best ${posWord(P(needPick).position)} on the board (#${needPick.rank}) — he fills a real hole.`)
+      `We're thin ${grpWord(needGroup)}. ${P(needPick).name} is the best ${posWord(P(needPick).position)} our scouts have left — projects as ${roleOf(P(needPick))}, and he fills a real hole.${verdictNote(needPick.playerId as string)}`)
 
-    // 3) Head coach → the prospect who fits his system.
+    // 3) Head coach → the prospect who fits his system (best at that group by OUR board).
     const profile = staff.headCoach.profile
     const wantD = profile ? profile.structure > profile.offence : false
     const fitGroup: 'F' | 'D' = wantD ? 'D' : 'F'
-    const fitPick = remaining.find((dp) => grpOf(P(dp).position) === fitGroup) ?? remaining[0]
+    const fitPick = byScouts.find((dp) => grpOf(P(dp).position) === fitGroup) ?? byScouts[0]
     add(staff.headCoach, 'Head Coach', 'fit', 'System fit', fitPick,
       wantD
-        ? `${P(fitPick).name} is the mobile, two-way defender my system is built on. He fits how we want to play.`
-        : `${P(fitPick).name} has the speed and skill to thrive in our attack. He fits how I want to play.`)
+        ? `${P(fitPick).name} is the mobile, two-way defender my system is built on — our staff see ${roleOf(P(fitPick))}. He fits how we want to play.`
+        : `${P(fitPick).name} has the speed and skill to thrive in our attack — our staff project ${roleOf(P(fitPick))}. He fits how I want to play.`)
 
-    // 4) A second scout → the highest-ceiling swing in this range.
+    // 4) A second scout → the highest-ceiling swing OUR scouts see in this range.
     const scout2 = staff.scouts[1]
     if (scout2) {
-      const pool = remaining.slice(0, 15)
-      const ceil = pool.slice().sort((a, b) => ratedPotential(P(b)) - ratedPotential(P(a)))[0]
-      add(scout2, 'Scout', 'ceiling', 'Highest ceiling', ceil,
-        `${P(ceil).name} has the highest upside in this range. If we want a home run, he's the swing.`)
+      const pool = byScouts.slice(0, 18)
+      const ceil = pool.slice().sort((a, b) => this.scoutedCeilingOf(P(b)) - this.scoutedCeilingOf(P(a)))[0]
+      if (ceil) {
+        add(scout2, 'Scout', 'ceiling', 'Highest ceiling', ceil,
+          `${P(ceil).name} has the highest upside our scouts see here — a possible ${roleOf(P(ceil))}. If we want a home run, he's the swing.${verdictNote(ceil.playerId as string)}`)
+      }
     }
 
     return advice
@@ -7655,6 +7696,12 @@ export class Career {
     const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
     const taken = new Set(d.selections.map((s) => s.playerId as string))
     const clubInfo = this.worldClubInfoByPid()
+    // Your scouts' own board (fog-aware) — so the board can show where your staff
+    // diverge from the public consensus, and the war room agrees with the Scout
+    // Report. Computed once here and shared with draftAdvice().
+    const ranks = this.getDraftRankings()
+    const sbByPid = new Map<string, ScoutBoardRowView>()
+    for (const r of ranks.scoutBoard) sbByPid.set(r.playerId, r)
     const onClockIndex = d.selections.length < d.order.length ? d.selections.length : -1
     return {
       year: d.year,
@@ -7708,11 +7755,13 @@ export class Career {
           row.seasonGp = line.gp; row.seasonG = line.g; row.seasonA = line.a
           row.seasonPts = line.pts; row.seasonIsHistory = line.isHistory
         }
+        const sb = sbByPid.get(pid)
+        if (sb) { row.scoutRank = sb.rank; row.scoutVerdict = sb.verdict }
         return row
       }),
       complete: d.selections.length >= d.order.length,
       ...(onClockIndex >= 0 && d.order[onClockIndex].ownerTeamId === this.userTeamId
-        ? { advice: this.draftAdvice() }
+        ? { advice: this.draftAdvice(ranks) }
         : {}),
     }
   }

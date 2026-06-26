@@ -161,6 +161,7 @@ function BestAvailable(props: {
               <th className="num" title="Season scoring (GP · G–A–PTS)">Season</th>
               <th className="num">OVR</th>
               <th>Potential</th>
+              <th title="Your scouts' own board rank vs the public consensus">Scouts</th>
               <th className="num">Know.</th>
               {props.userIsOnClock && <th />}
             </tr>
@@ -194,6 +195,20 @@ function BestAvailable(props: {
                 </td>
                 <td>
                   <PotentialStars stars={p.potentialStars} />
+                </td>
+                <td className="small">
+                  {p.scoutRank
+                    ? <span
+                        title={
+                          p.scoutVerdict === 'higher' ? 'Your scouts are HIGHER on him than the board'
+                          : p.scoutVerdict === 'lower' ? 'Your scouts are LOWER on him than the board'
+                          : 'Your scouts agree with the board'
+                        }
+                        style={{ color: p.scoutVerdict === 'higher' ? 'var(--success)' : p.scoutVerdict === 'lower' ? 'var(--danger)' : 'var(--muted)' }}
+                      >
+                        #{p.scoutRank}{p.scoutVerdict === 'higher' ? ' ▲' : p.scoutVerdict === 'lower' ? ' ▼' : ''}
+                      </span>
+                    : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
                 <td className="num small" style={{ color: p.knowledge >= 60 ? 'var(--success)' : p.knowledge >= 30 ? 'var(--accent)' : 'var(--muted)' }}
                   title={p.knowledge < 30 ? 'Barely scouted — this read is a guess' : 'How well your scouts know him'}>
