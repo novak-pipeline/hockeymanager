@@ -536,7 +536,9 @@ function freshStanding(teamId: TeamId): Standing {
 
 const NEWS_LIMIT = 200
 const ROUND_ROBINS = 4
-const DRAFT_ROUNDS = 2
+const DRAFT_ROUNDS = 7
+/** Floor for the prospect board; the actual class scales to cover all 7 rounds
+ *  of every team (+ a margin of undrafted prospects). See draft-class generation. */
 const DRAFT_CLASS_SIZE = 64
 const PICK_YEARS_AHEAD = 3
 const FA_WINDOW_DAYS = 8
@@ -3591,7 +3593,9 @@ export class Career {
         const draftYear = this.year + 1
         const cls = generateDraftClass({
           year: draftYear,
-          count: DRAFT_CLASS_SIZE,
+          // Enough prospects for all 7 rounds of every team, plus a margin who go
+          // undrafted (realistic — not every eligible is picked).
+          count: Math.max(DRAFT_CLASS_SIZE, this.data.league.teams.length * DRAFT_ROUNDS + 30),
           rng: this.rngFor(8002),
           nextPlayerNumber: () => this.playerCounter++,
         })

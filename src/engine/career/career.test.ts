@@ -310,7 +310,7 @@ describe('Career — full year cycle', () => {
     career.advanceOffseason()
     const draft = career.getDraft()
     expect(draft).not.toBeNull()
-    expect(draft!.board).toHaveLength(32) // 16 teams × 2 rounds
+    expect(draft!.board).toHaveLength(16 * 7) // 16 teams × 7 rounds
     career.advanceDraft() // sim to user pick (or end)
     const mid = career.getDraft()!
     if (mid.userIsOnClock) {
