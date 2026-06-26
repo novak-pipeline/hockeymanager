@@ -1,33 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { overallToStars } from '../../engine/ratings/composites'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
+import type { SquadView } from '../../worker/protocol'
 import type {
   LinesView,
   LineSlotView,
   LineSynergyView,
-  CoachSuggestionView,
-  StyleFitView,
   PlayerBadge,
+  SquadRowView,
 } from '../../engine/career/views'
-import type {
-  TeamTactics,
-  ForecheckSystem,
-  DefensiveZoneCoverage,
-  PowerPlayFormation,
-  PenaltyKillFormation,
-  BreakoutSystem,
-  NzOffensiveSystem,
-  NzDefensiveSystem,
-  OzEntry,
-  DZoneStructure,
-  FaceoffPlay,
-  ShotTargeting,
-  PersonalTactics,
-} from '@domain'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { bumpRefresh, toast } from '../components/store'
+import { moraleColor, moraleWord } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
+import { PlayerLink } from '../components/NavContext'
 
 /* ── helpers ── */
 
@@ -119,20 +106,18 @@ function addToScratches(l: LinesView, player: PlayerBadge): void {
  * - slot → occupied slot: swap
  * - slot → scratches: bench (player goes to scratches, slot becomes empty)
  * - scratch → slot: place (if slot occupied, displaced player goes to scratches)
- * - scratch → scratch: no-op (same player, or reorder — we keep scratches unordered)
+ * - scratch → scratch: no-op
  */
 function applyDrop(l: LinesView, src: SlotAddr, dst: SlotAddr, draggedPlayer: PlayerBadge): void {
   if (src.kind === 'scratch' && dst.kind === 'scratch') return // no-op
 
   if (src.kind === 'slot' && dst.kind === 'scratch') {
-    // Bench the dragged player
     setAtAddr(l, src, null)
     addToScratches(l, draggedPlayer)
     return
   }
 
   if (src.kind === 'scratch' && dst.kind === 'slot') {
-    // Place from scratches into a slot
     const displaced = getAtAddr(l, dst)
     removeFromScratches(l, draggedPlayer.playerId)
     setAtAddr(l, dst, draggedPlayer)
@@ -141,210 +126,23 @@ function applyDrop(l: LinesView, src: SlotAddr, dst: SlotAddr, draggedPlayer: Pl
   }
 
   if (src.kind === 'slot' && dst.kind === 'slot') {
-    // Move or swap
     const dstPlayer = getAtAddr(l, dst)
     setAtAddr(l, src, dstPlayer) // may be null (move) or another player (swap)
     setAtAddr(l, dst, draggedPlayer)
   }
 }
 
-/* ── Synergy badge ── */
+/* ── Synergy → colour/word (green / yellow / red) ── */
 
 function synergyColor(score: number): string {
   if (score >= 70) return 'var(--success)'
-  if (score >= 50) return 'var(--accent2)'
+  if (score >= 50) return 'var(--amber, #f59e0b)'
   return 'var(--danger)'
 }
-
-interface SynergyBadgeProps {
-  synergy: LineSynergyView
-  lineLabel: string
-}
-
-function SynergyBadge({ synergy, lineLabel }: SynergyBadgeProps): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const color = synergyColor(synergy.score)
-
-  return (
-    <div style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        className="btn btn-ghost btn-sm"
-        style={{
-          gap: 4,
-          padding: '2px 8px',
-          borderColor: color,
-          color,
-          fontSize: 11,
-          fontVariantNumeric: 'tabular-nums',
-          fontWeight: 700,
-        }}
-        title={`${lineLabel} synergy — click to expand`}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span style={{ fontSize: 9, opacity: 0.8 }}>SYN</span>
-        {synergy.score}
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '110%',
-            left: 0,
-            zIndex: 50,
-            minWidth: 260,
-            background: 'var(--bg2)',
-            border: `1px solid ${color}`,
-            borderRadius: 'var(--radius-sm)',
-            padding: 'var(--sp-3)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-          }}
-        >
-          <div
-            className="row-between"
-            style={{ marginBottom: 'var(--sp-2)' }}
-          >
-            <span style={{ fontWeight: 700, fontSize: 12, color }}>
-              Line synergy: {synergy.score}/100
-            </span>
-            <button
-              className="btn btn-ghost"
-              style={{ padding: '0 4px', fontSize: 11 }}
-              onClick={() => setOpen(false)}
-            >
-              ✕
-            </button>
-          </div>
-          <div
-            style={{
-              height: 4,
-              borderRadius: 2,
-              background: 'var(--bg0)',
-              marginBottom: 'var(--sp-2)',
-            }}
-          >
-            <div
-              style={{
-                width: `${synergy.score}%`,
-                height: '100%',
-                borderRadius: 2,
-                background: color,
-              }}
-            />
-          </div>
-          <ul style={{ margin: 0, paddingLeft: 16 }}>
-            {synergy.notes.map((note, i) => (
-              <li key={i} className="muted small" style={{ marginBottom: 2 }}>
-                {note}
-              </li>
-            ))}
-          </ul>
-          <div className="muted small" style={{ marginTop: 'var(--sp-2)', opacity: 0.6 }}>
-            Multiplier: ×{synergy.multiplier.toFixed(3)}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Coach's recommendation panel ── */
-
-interface CoachPanelProps {
-  suggestion: CoachSuggestionView
-  styleFit: StyleFitView
-  onApply: () => Promise<void>
-  applying: boolean
-}
-
-function CoachPanel({ suggestion, styleFit, onApply, applying }: CoachPanelProps): JSX.Element {
-  const fitColor = synergyColor(styleFit.fit)
-
-  return (
-    <Panel title="Coach's Recommendation">
-      <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-        {/* Style fit meter */}
-        <div>
-          <div
-            className="row-between"
-            style={{ marginBottom: 'var(--sp-1)' }}
-          >
-            <span className="muted small">Current style fit</span>
-            <span style={{ fontWeight: 700, fontSize: 12, color: fitColor }}>
-              {styleFit.fit}/100
-            </span>
-          </div>
-          <div
-            style={{
-              height: 6,
-              borderRadius: 3,
-              background: 'var(--bg0)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: `${styleFit.fit}%`,
-                height: '100%',
-                background: fitColor,
-                borderRadius: 3,
-                transition: 'width 0.3s ease',
-              }}
-            />
-          </div>
-          {styleFit.advice.length > 0 && (
-            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-              {styleFit.advice.map((tip, i) => (
-                <li key={i} className="muted small" style={{ marginBottom: 2 }}>
-                  {tip}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Suggested style */}
-        <div
-          style={{
-            background: 'var(--bg0)',
-            border: '1px solid var(--line)',
-            borderRadius: 'var(--radius-sm)',
-            padding: 'var(--sp-3)',
-          }}
-        >
-          <div className="row-between" style={{ marginBottom: 'var(--sp-2)' }}>
-            <span
-              style={{
-                fontWeight: 700,
-                fontSize: 13,
-                color: 'var(--accent)',
-              }}
-            >
-              {suggestion.styleLabel}
-            </span>
-            <span className="chip chip-accent" style={{ fontSize: 10 }}>
-              Suggested
-            </span>
-          </div>
-          <ul style={{ margin: '0 0 var(--sp-3)', paddingLeft: 18 }}>
-            {suggestion.rationale.map((r, i) => (
-              <li key={i} className="muted small" style={{ marginBottom: 3 }}>
-                {r}
-              </li>
-            ))}
-          </ul>
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%' }}
-            onClick={onApply}
-            disabled={applying}
-          >
-            {applying ? 'Applying…' : 'Apply suggestion'}
-          </button>
-        </div>
-      </div>
-    </Panel>
-  )
+function synergyWord(score: number): string {
+  if (score >= 70) return 'Strong chemistry'
+  if (score >= 50) return 'Workable chemistry'
+  return 'Poor chemistry'
 }
 
 /* ── Star rating (0–5, half-steps) on the canonical NHL-calibrated scale ── */
@@ -359,7 +157,7 @@ function StarRating({ value }: { value: number }): JSX.Element {
   const half = stars - full >= 0.5
   const empty = 5 - full - (half ? 1 : 0)
   return (
-    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1 }} title={`${stars}/5`}>
+    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1, whiteSpace: 'nowrap' }} title={`${stars}/5`}>
       {'★'.repeat(full)}
       {half ? '½' : ''}
       {'☆'.repeat(empty)}
@@ -367,7 +165,21 @@ function StarRating({ value }: { value: number }): JSX.Element {
   )
 }
 
-/* ── Player picker modal ── */
+/**
+ * Off-hand check (EHM handedness rules): a LW shoots best R-handed, RW best L;
+ * LD best L-handed, RD best R. Returns a short reason when the player is on his
+ * off-hand for that slot (a soft warning, not a block).
+ */
+function offHandReason(slot: string, handedness: 'L' | 'R'): string | null {
+  const s = slot.toUpperCase()
+  if (s === 'LW' && handedness === 'L') return 'Off-hand wing (R preferred)'
+  if (s === 'RW' && handedness === 'R') return 'Off-hand wing (L preferred)'
+  if (s === 'LD' && handedness === 'R') return 'Off-side D (L preferred)'
+  if (s === 'RD' && handedness === 'L') return 'Off-side D (R preferred)'
+  return null
+}
+
+/* ── Player picker modal (for assigning into an empty slot / search) ── */
 interface PickerProps {
   slot: string
   current: PlayerBadge | null
@@ -444,12 +256,10 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
   )
 }
 
-/* ── Depth-chart dropdown ── */
+/* ── Depth-chart dropdown (per-position quick swap) ── */
 
 interface DepthDropdownProps {
-  /** Currently slotted player (may be null). */
   current: PlayerBadge | null
-  /** Full roster sorted by overall desc. */
   roster: PlayerBadge[]
   onSelect: (p: PlayerBadge) => void
 }
@@ -458,13 +268,10 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent): void {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
@@ -475,12 +282,8 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
       <button
         className="btn btn-ghost btn-sm"
         style={{
-          padding: '1px 4px',
-          fontSize: 10,
-          lineHeight: 1,
-          color: 'var(--muted)',
-          borderColor: 'transparent',
-          minWidth: 0,
+          padding: '1px 4px', fontSize: 10, lineHeight: 1,
+          color: 'var(--muted)', borderColor: 'transparent', minWidth: 0,
         }}
         title="Quick depth swap"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
@@ -490,17 +293,10 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
       {open && (
         <div
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            zIndex: 60,
-            minWidth: 220,
-            maxHeight: 260,
-            overflowY: 'auto',
-            background: 'var(--bg2)',
-            border: '1px solid var(--accent)',
-            borderRadius: 'var(--radius-sm)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+            position: 'absolute', top: '100%', left: 0, zIndex: 60,
+            minWidth: 220, maxHeight: 260, overflowY: 'auto',
+            background: 'var(--bg2)', border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
             padding: '4px 0',
           }}
           onClick={(e) => e.stopPropagation()}
@@ -510,13 +306,8 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
               key={p.playerId}
               className="btn btn-ghost"
               style={{
-                width: '100%',
-                justifyContent: 'flex-start',
-                gap: 6,
-                padding: '4px 10px',
-                fontSize: 12,
-                borderRadius: 0,
-                borderColor: 'transparent',
+                width: '100%', justifyContent: 'flex-start', gap: 6, padding: '4px 10px',
+                fontSize: 12, borderRadius: 0, borderColor: 'transparent',
                 background: current?.playerId === p.playerId ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
                 fontWeight: current?.playerId === p.playerId ? 600 : 400,
               }}
@@ -537,28 +328,72 @@ function DepthDropdown({ current, roster, onSelect }: DepthDropdownProps): JSX.E
   )
 }
 
-/**
- * Off-hand check (EHM handedness rules): a LW shoots best R-handed, RW best L;
- * LD best L-handed, RD best R. Returns a short reason when the player is on his
- * off-hand for that slot (a soft warning, not a block — versatile players cope).
- */
-function offHandReason(slot: string, handedness: 'L' | 'R'): string | null {
-  const s = slot.toUpperCase()
-  if (s === 'LW' && handedness === 'L') return 'Off-hand wing (R preferred)'
-  if (s === 'RW' && handedness === 'R') return 'Off-hand wing (L preferred)'
-  if (s === 'LD' && handedness === 'R') return 'Off-side D (L preferred)'
-  if (s === 'RD' && handedness === 'L') return 'Off-side D (R preferred)'
-  return null
+/* ── Rink backdrop (decorative SVG, stretches to fill its container) ── */
+
+function RinkBackdrop(): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 1000 600"
+      preserveAspectRatio="none"
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.5 }}
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id="ice" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgba(120,170,220,0.10)" />
+          <stop offset="100%" stopColor="rgba(120,170,220,0.04)" />
+        </linearGradient>
+      </defs>
+      {/* boards */}
+      <rect x="8" y="8" width="984" height="584" rx="90" fill="url(#ice)" stroke="rgba(150,170,200,0.35)" strokeWidth="3" />
+      {/* blue lines */}
+      <rect x="332" y="8" width="5" height="584" fill="rgba(60,120,230,0.55)" />
+      <rect x="663" y="8" width="5" height="584" fill="rgba(60,120,230,0.55)" />
+      {/* centre red line */}
+      <rect x="497" y="8" width="6" height="584" fill="rgba(220,60,60,0.55)" />
+      {/* centre circle */}
+      <circle cx="500" cy="300" r="66" fill="none" stroke="rgba(60,120,230,0.5)" strokeWidth="3" />
+      <circle cx="500" cy="300" r="6" fill="rgba(220,60,60,0.6)" />
+      {/* end-zone faceoff dots */}
+      {[160, 840].map((x) =>
+        [180, 420].map((y) => (
+          <circle key={`${x}-${y}`} cx={x} cy={y} r="34" fill="none" stroke="rgba(220,60,60,0.45)" strokeWidth="3" />
+        ))
+      )}
+      {/* creases */}
+      <path d="M 8 250 A 60 60 0 0 1 8 350" fill="rgba(60,120,230,0.12)" stroke="rgba(60,120,230,0.5)" strokeWidth="2" />
+      <path d="M 992 250 A 60 60 0 0 0 992 350" fill="rgba(60,120,230,0.12)" stroke="rgba(60,120,230,0.5)" strokeWidth="2" />
+    </svg>
+  )
 }
 
-/* ── Slot button (DnD-aware, with face + depth dropdown) ── */
+/* ── Synergy connector between two adjacent linemates ── */
 
-interface SlotButtonProps {
+function Connector({ synergy }: { synergy: LineSynergyView | null }): JSX.Element {
+  const color = synergy ? synergyColor(synergy.score) : 'rgba(139,149,166,0.35)'
+  const title = synergy
+    ? `${synergyWord(synergy.score)} — ${synergy.score}/100\n${synergy.notes.join('\n')}`
+    : undefined
+  return (
+    <div
+      title={title}
+      style={{
+        flex: '0 0 22px', alignSelf: 'center', height: 4, borderRadius: 2,
+        background: color,
+        boxShadow: synergy ? `0 0 6px ${color}` : 'none',
+      }}
+    />
+  )
+}
+
+/* ── Rink token (DnD-aware): face + name(link→profile) + stars + depth dropdown ── */
+
+interface RinkTokenProps {
   slotDef: LineSlotView
   addr: SlotAddr & { kind: 'slot' }
   roster: PlayerBadge[]
   dragOver: boolean
-  onClickSlot: () => void
+  onOpenPicker: () => void
   onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
   onDragOver: (addr: SlotAddr & { kind: 'slot' }) => void
   onDragLeave: () => void
@@ -566,18 +401,10 @@ interface SlotButtonProps {
   onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
 }
 
-function SlotButton({
-  slotDef,
-  addr,
-  roster,
-  dragOver,
-  onClickSlot,
-  onDragStart,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-  onDepthSelect,
-}: SlotButtonProps): JSX.Element {
+function RinkToken({
+  slotDef, addr, roster, dragOver,
+  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
+}: RinkTokenProps): JSX.Element {
   const p = slotDef.player
 
   return (
@@ -590,64 +417,41 @@ function SlotButton({
         e.dataTransfer.effectAllowed = 'move'
         onDragStart(addr)
       }}
-      onDragOver={(e) => {
-        e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
-        onDragOver(addr)
-      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOver(addr) }}
       onDragLeave={onDragLeave}
-      onDrop={(e) => {
-        e.preventDefault()
-        onDrop(addr)
-      }}
+      onDrop={(e) => { e.preventDefault(); onDrop(addr) }}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        minWidth: 128,
-        padding: '6px 8px',
-        gap: 2,
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+        minWidth: 130, padding: '6px 8px', gap: 2,
         background: dragOver
-          ? 'rgba(var(--accent-rgb),0.18)'
-          : p
-            ? 'var(--bg2)'
-            : 'var(--bg0)',
+          ? 'rgba(var(--accent-rgb),0.22)'
+          : p ? 'rgba(20,26,38,0.82)' : 'rgba(20,26,38,0.45)',
         border: dragOver
           ? '1px solid var(--accent)'
-          : p
-            ? '1px solid var(--line)'
-            : '1px dashed rgba(139,149,166,0.4)',
+          : p ? '1px solid var(--line)' : '1px dashed rgba(139,149,166,0.4)',
         borderRadius: 'var(--radius-sm)',
         cursor: p ? 'grab' : 'default',
+        backdropFilter: 'blur(1px)',
         transition: 'background 0.1s, border-color 0.1s',
-        position: 'relative',
         userSelect: 'none',
       }}
     >
-      {/* slot label row */}
+      {/* slot label + depth caret */}
       <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 4 }}>
         <span className="muted" style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, flex: 1 }}>
           {slotDef.slot}
         </span>
-        {/* Depth dropdown caret */}
-        <DepthDropdown
-          current={p ?? null}
-          roster={roster}
-          onSelect={(chosen) => onDepthSelect(addr, chosen)}
-        />
+        <DepthDropdown current={p ?? null} roster={roster} onSelect={(chosen) => onDepthSelect(addr, chosen)} />
       </div>
 
-      {/* player row */}
       {p ? (
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', cursor: 'pointer' }}
-          onClick={onClickSlot}
-          title={`${slotDef.slot} — click to search/change`}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
           <PlayerFace faceId={p.faceId} name={p.name} size={24} />
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+            <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, maxWidth: 96 }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <PlayerLink playerId={p.playerId} name={p.name} />
+              </span>
               {(() => {
                 const off = offHandReason(slotDef.slot, p.handedness)
                 return off ? <span title={off} style={{ color: 'var(--amber, #f59e0b)', fontSize: 11, flexShrink: 0 }}>↔</span> : null
@@ -657,105 +461,36 @@ function SlotButton({
           </div>
         </div>
       ) : (
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', paddingTop: 2 }}
-          onClick={onClickSlot}
-          title={`${slotDef.slot} — click to assign player`}
+        <button
+          className="btn btn-ghost btn-sm"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', borderColor: 'transparent' }}
+          onClick={onOpenPicker}
+          title={`${slotDef.slot} — click to assign a player`}
         >
-          <div style={{
-            width: 24, height: 24, borderRadius: '50%',
-            border: '1px dashed rgba(139,149,166,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
+          <span style={{
+            width: 24, height: 24, borderRadius: '50%', border: '1px dashed rgba(139,149,166,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}>
             <span className="muted" style={{ fontSize: 10 }}>+</span>
-          </div>
+          </span>
           <span className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>Empty</span>
-        </div>
+        </button>
       )}
     </div>
   )
 }
 
-/* ── Lines sub-section (DnD-aware) ── */
+/* ── A line / pair row: tokens joined by colour-coded synergy connectors ── */
 
-interface LinesSectionProps {
-  title: string
-  lines: LineSlotView[][]
+interface TokenRowProps {
+  slots: LineSlotView[]
   section: Section
+  lineIdx: number
+  label: string
   roster: PlayerBadge[]
+  synergy: LineSynergyView | null
   dragOverAddr: SlotAddr | null
-  onClickSlot: (lineIdx: number, slotIdx: number) => void
-  onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
-  onDragOver: (addr: SlotAddr) => void
-  onDragLeave: () => void
-  onDrop: (dst: SlotAddr) => void
-  onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
-  synergies?: LineSynergyView[]
-}
-
-function LinesSection({
-  title, lines, section, roster, dragOverAddr,
-  onClickSlot, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
-  synergies,
-}: LinesSectionProps): JSX.Element {
-  function addrMatches(a: SlotAddr | null, b: SlotAddr): boolean {
-    if (!a || a.kind !== b.kind) return false
-    if (a.kind === 'slot' && b.kind === 'slot') {
-      return a.section === b.section && a.lineIdx === b.lineIdx && a.slotIdx === b.slotIdx
-    }
-    return false
-  }
-
-  return (
-    <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-      <div className="panel-title">{title}</div>
-      {lines.map((line, li) => (
-        <div key={li} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'stretch' }}>
-            <span className="muted small" style={{ width: 24, textAlign: 'right', alignSelf: 'center' }}>
-              {li + 1}
-            </span>
-            {line.map((slot, si) => {
-              const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx: li, slotIdx: si }
-              return (
-                <SlotButton
-                  key={`${li}-${si}`}
-                  slotDef={slot}
-                  addr={addr}
-                  roster={roster}
-                  dragOver={addrMatches(dragOverAddr, addr)}
-                  onClickSlot={() => onClickSlot(li, si)}
-                  onDragStart={onDragStart}
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                  onDrop={() => onDrop(addr)}
-                  onDepthSelect={onDepthSelect}
-                />
-              )
-            })}
-            {synergies?.[li] && (
-              <div style={{ alignSelf: 'center', marginLeft: 'var(--sp-1)' }}>
-                <SynergyBadge
-                  synergy={synergies[li]!}
-                  lineLabel={`Line ${li + 1}`}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/* ── Goalies row (separate — goalies are a flat array, not lines[][]) ── */
-
-interface GoaliesRowProps {
-  goalies: LineSlotView[]
-  roster: PlayerBadge[]
-  dragOverAddr: SlotAddr | null
-  onClickSlot: (idx: number) => void
+  onOpenPicker: (lineIdx: number, slotIdx: number) => void
   onDragStart: (addr: SlotAddr & { kind: 'slot' }) => void
   onDragOver: (addr: SlotAddr) => void
   onDragLeave: () => void
@@ -763,203 +498,132 @@ interface GoaliesRowProps {
   onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
 }
 
-function GoaliesRow({
-  goalies, roster, dragOverAddr,
-  onClickSlot, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
-}: GoaliesRowProps): JSX.Element {
-  function addrMatches(a: SlotAddr | null, si: number): boolean {
+function TokenRow({
+  slots, section, lineIdx, label, roster, synergy, dragOverAddr,
+  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect,
+}: TokenRowProps): JSX.Element {
+  function isOver(si: number): boolean {
+    const a = dragOverAddr
     if (!a || a.kind !== 'slot') return false
-    return a.section === 'goalies' && a.lineIdx === si
+    return a.section === section && a.lineIdx === lineIdx && a.slotIdx === si
   }
-
   return (
-    <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-      <div className="panel-title">Goalies</div>
-      <div className="row" style={{ gap: 'var(--sp-2)' }}>
-        {goalies.map((slot, si) => {
-          const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section: 'goalies', lineIdx: si, slotIdx: 0 }
-          return (
-            <SlotButton
-              key={si}
+    <div className="row" style={{ gap: 0, alignItems: 'stretch' }}>
+      <span className="muted small" style={{ width: 26, textAlign: 'right', alignSelf: 'center', flexShrink: 0 }}>
+        {label}
+      </span>
+      {slots.map((slot, si) => {
+        const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx, slotIdx: si }
+        return (
+          <div key={si} style={{ display: 'flex', alignItems: 'stretch', marginLeft: si === 0 ? 8 : 0 }}>
+            {si > 0 && <Connector synergy={synergy} />}
+            <RinkToken
               slotDef={slot}
               addr={addr}
               roster={roster}
-              dragOver={addrMatches(dragOverAddr, si)}
-              onClickSlot={() => onClickSlot(si)}
+              dragOver={isOver(si)}
+              onOpenPicker={() => onOpenPicker(lineIdx, si)}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={() => onDrop(addr)}
               onDepthSelect={onDepthSelect}
             />
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-/* ── tactics slider ── */
-function TacticSlider({
-  label, value, onChange,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-}): JSX.Element {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr 30px', alignItems: 'center', gap: 8 }}>
-      <span className="muted small" style={{ textAlign: 'right' }}>{label}</span>
-      <input
-        type="range" min={0} max={1} step={0.05}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: '100%', accentColor: 'var(--accent)' }}
-      />
-      <span className="small mono" style={{ textAlign: 'right' }}>{Math.round(value * 100)}</span>
-    </div>
-  )
-}
-
-/* ── EHM-depth slider (same layout as TacticSlider but with end labels) ── */
-function EhmSlider({
-  label, value, onChange, leftLabel, rightLabel,
-}: {
-  label: string
-  value: number
-  onChange: (v: number) => void
-  leftLabel?: string
-  rightLabel?: string
-}): JSX.Element {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 28px', alignItems: 'center', gap: 6 }}>
-      <span className="muted small" style={{ textAlign: 'right', fontSize: 11 }}>{label}</span>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <input
-          type="range" min={0} max={1} step={0.05}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          style={{ width: '100%', accentColor: 'var(--accent)' }}
-        />
-        {(leftLabel || rightLabel) && (
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.7 }}>{leftLabel}</span>
-            <span style={{ fontSize: 9, color: 'var(--muted)', opacity: 0.7 }}>{rightLabel}</span>
           </div>
-        )}
-      </div>
-      <span className="small mono" style={{ textAlign: 'right', fontSize: 11 }}>{Math.round(value * 100)}</span>
+        )
+      })}
+      {synergy && (
+        <span
+          className="small"
+          style={{ alignSelf: 'center', marginLeft: 10, color: synergyColor(synergy.score), fontWeight: 600, fontSize: 11 }}
+          title={synergy.notes.join('\n')}
+        >
+          {synergyWord(synergy.score)}
+        </span>
+      )}
     </div>
   )
 }
 
-/* ── Personal Tactics panel ── */
-interface PersonalTacticsProps {
-  player: PlayerBadge
-  pt: PersonalTactics
-  onChange: (pt: PersonalTactics) => void
-  onClose: () => void
+/* ── Right-side depth chart (live morale / condition / form) ── */
+
+function CondPip({ value }: { value: number }): JSX.Element {
+  const color = value >= 85 ? 'var(--success)' : value >= 65 ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ width: 36, height: 5, borderRadius: 3, background: 'var(--bg0)', overflow: 'hidden', display: 'inline-block' }}>
+        <span style={{ display: 'block', width: `${Math.max(0, Math.min(100, value))}%`, height: '100%', background: color }} />
+      </span>
+    </span>
+  )
 }
 
-function PersonalTacticsPanel({ player, pt, onChange, onClose }: PersonalTacticsProps): JSX.Element {
-  function set<K extends keyof PersonalTactics>(key: K, val: PersonalTactics[K]): void {
-    onChange({ ...pt, [key]: val })
+function FormArrow({ value }: { value: number }): JSX.Element {
+  if (value > 1.5) return <span style={{ color: 'var(--success)' }} title="In form">▲</span>
+  if (value < -1.5) return <span style={{ color: 'var(--danger)' }} title="Out of form">▼</span>
+  return <span className="muted" title="Steady">▬</span>
+}
+
+function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
+  if (!squad) {
+    return <Panel title="Depth Chart"><div className="muted small">Loading roster…</div></Panel>
   }
+  const groups: Array<{ label: string; rows: SquadRowView[] }> = [
+    { label: 'Forwards', rows: squad.rows.filter((r) => r.position !== 'D' && r.position !== 'G') },
+    { label: 'Defence', rows: squad.rows.filter((r) => r.position === 'D') },
+    { label: 'Goalies', rows: squad.rows.filter((r) => r.position === 'G') },
+  ]
+  for (const g of groups) g.rows.sort((a, b) => b.overall - a.overall)
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 50,
-        background: 'rgba(0,0,0,0.65)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-      onClick={onClose}
-    >
-      <div
-        className="panel"
-        style={{ width: 360, display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="row-between">
-          <span style={{ fontWeight: 700, fontSize: 13 }}>Personal Tactics — {player.name}</span>
-          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={onClose}>✕</button>
-        </div>
-
-        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-          {/* Shoot vs Pass */}
-          <div>
-            <div className="field-label" style={{ marginBottom: 4 }}>Shoot vs Pass</div>
-            <div className="row" style={{ gap: 'var(--sp-2)' }}>
-              {([-1, 0, 1] as const).map((v) => (
-                <button
-                  key={v}
-                  className={`btn btn-sm ${(pt.shootVsPass ?? 0) === v ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: 11 }}
-                  onClick={() => set('shootVsPass', v)}
-                >
-                  {v === -1 ? 'Pass more' : v === 0 ? 'Default' : 'Shoot more'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Entry style (engine-wired) */}
-          <div>
-            <div className="field-label" style={{ marginBottom: 4 }}>Zone entry style <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Engine</span></div>
-            <div className="row" style={{ gap: 'var(--sp-2)' }}>
-              {(['default', 'carry', 'dump'] as const).map((v) => (
-                <button
-                  key={v}
-                  className={`btn btn-sm ${(pt.entryStyle ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: 11, textTransform: 'capitalize' }}
-                  onClick={() => set('entryStyle', v)}
-                >
-                  {v === 'default' ? 'Default' : v === 'carry' ? 'Always carry' : 'Dump & chase'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Rush join (engine-wired) */}
-          <div>
-            <div className="field-label" style={{ marginBottom: 4 }}>Rush join <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Engine</span></div>
-            <div className="row" style={{ gap: 'var(--sp-2)' }}>
-              {(['default', 'join', 'sit-back'] as const).map((v) => (
-                <button
-                  key={v}
-                  className={`btn btn-sm ${(pt.rushJoin ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: 11 }}
-                  onClick={() => set('rushJoin', v)}
-                >
-                  {v === 'default' ? 'Default' : v === 'join' ? 'Join rush' : 'Sit back'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Fighting */}
-          <div>
-            <div className="field-label" style={{ marginBottom: 4 }}>Fighting</div>
-            <div className="row" style={{ gap: 'var(--sp-2)' }}>
-              {(['default', 'will-fight', 'avoid'] as const).map((v) => (
-                <button
-                  key={v}
-                  className={`btn btn-sm ${(pt.fighting ?? 'default') === v ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: 11 }}
-                  onClick={() => set('fighting', v)}
-                >
-                  {v === 'default' ? 'Default' : v === 'will-fight' ? 'Will fight' : 'Avoid'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="muted small" style={{ opacity: 0.7, fontSize: 10, marginTop: -4 }}>
-            Engine-wired instructions affect simulation. Others are set-able intent for future depth.
-          </div>
-        </div>
+    <Panel title="Depth Chart">
+      <div className="muted small" style={{ marginBottom: 'var(--sp-2)', opacity: 0.75 }}>
+        Form, condition and morale at a glance — click a name for the full profile.
       </div>
-    </div>
+      <div className="table-wrap">
+        <table className="table" style={{ fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Line</th>
+              <th>Ability</th>
+              <th>Cond</th>
+              <th>Form</th>
+              <th>Morale</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) =>
+              g.rows.length === 0 ? null : (
+                <>
+                  <tr key={`hdr-${g.label}`} style={{ background: 'var(--surface-raised)' }}>
+                    <td colSpan={6} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', padding: '5px 8px' }}>
+                      {g.label}
+                    </td>
+                  </tr>
+                  {g.rows.map((r) => (
+                    <tr key={r.playerId} style={r.injury ? { opacity: 0.65 } : undefined}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <PlayerFace faceId={r.faceId} name={r.name} size={20} />
+                          <PlayerLink playerId={r.playerId} name={r.name} />
+                          {r.injury && <span title="Injured" style={{ color: 'var(--danger)', fontSize: 11 }}>＋</span>}
+                        </div>
+                      </td>
+                      <td><span className="chip" style={{ fontSize: 10 }}>{r.lineLabel}</span></td>
+                      <td><StarRating value={r.overall} /></td>
+                      <td><CondPip value={r.condition} /></td>
+                      <td style={{ textAlign: 'center' }}><FormArrow value={r.form} /></td>
+                      <td style={{ color: moraleColor(r.morale), fontWeight: 600 }}>{moraleWord(r.morale)}</td>
+                    </tr>
+                  ))}
+                </>
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   )
 }
 
@@ -971,39 +635,29 @@ export function TacticsScreen(): JSX.Element {
     () => client.getTactics(),
     (r) => (r.type === 'tactics' ? r.tactics : null)
   )
+  const { data: squad } = useScreenData<SquadView>(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
 
-  // Local draft state for lines + tactics
+  // Local draft state for lines
   const [draftLines, setDraftLines] = useState<LinesView | null>(null)
-  const [draftTactics, setDraftTactics] = useState<TeamTactics | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [applying, setApplying] = useState(false)
   const [coachBuilding, setCoachBuilding] = useState(false)
 
   // Picker state
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [pickerContext, setPickerContext] = useState<{
-    section: 'forwards' | 'defense' | 'goalies' | 'pp' | 'pk'
-    lineIdx: number
-    slotIdx: number
-  } | null>(null)
-
-  // Personal tactics modal
-  const [ptPlayer, setPtPlayer] = useState<PlayerBadge | null>(null)
+  const [pickerContext, setPickerContext] = useState<{ section: Section; lineIdx: number; slotIdx: number } | null>(null)
 
   // DnD state
-  const [dragSrc, setDragSrc] = useState<SlotAddr | null>(null)
+  const [, setDragSrc] = useState<SlotAddr | null>(null)
   const [dragOverAddr, setDragOverAddr] = useState<SlotAddr | null>(null)
-  // Payload carried during drag (set on dragstart, consumed on drop)
   const dragPayloadRef = useRef<DragPayload | null>(null)
 
-  // When fresh data arrives and no local draft, sync from server
   const lines = draftLines ?? data?.lines ?? null
-  const tactics = draftTactics ?? data?.tactics ?? null
 
   function markDirty(): void { setDirty(true) }
-
-  // ── lines mutation helpers ──
 
   function setLines(updater: (l: LinesView) => LinesView): void {
     const base = lines ?? data?.lines
@@ -1012,11 +666,7 @@ export function TacticsScreen(): JSX.Element {
     markDirty()
   }
 
-  function openPicker(
-    section: 'forwards' | 'defense' | 'goalies' | 'pp' | 'pk',
-    lineIdx: number,
-    slotIdx: number,
-  ): void {
+  function openPicker(section: Section, lineIdx: number, slotIdx: number): void {
     setPickerContext({ section, lineIdx, slotIdx })
     setPickerOpen(true)
   }
@@ -1048,18 +698,17 @@ export function TacticsScreen(): JSX.Element {
     })
   }
 
-  // Build a healthy roster for the picker/dropdown sorted by overall desc.
+  // Healthy roster for picker/dropdown sorted by overall desc.
   function buildRoster(): PlayerBadge[] {
     if (!data) return []
     const fromSlots = [
       ...data.lines.forwards.flat(),
       ...data.lines.defensePairs.flat(),
-      ...data.lines.goalies
+      ...data.lines.goalies,
     ]
       .map((s) => s.player)
       .filter((p): p is PlayerBadge => p != null)
     const healthy = fromSlots.concat(data.lines.scratches)
-    // deduplicate
     const seen = new Set<string>()
     const deduped = healthy.filter((p) => {
       if (seen.has(p.playerId)) return false
@@ -1070,39 +719,26 @@ export function TacticsScreen(): JSX.Element {
   }
 
   // ── DnD handlers ──
-
   const handleDragStart = useCallback((addr: SlotAddr & { kind: 'slot' }) => {
-    // Record the drag source so handleDrop can resolve it. The dragged player is
-    // looked up from the slot at drop time (getAtAddr), so playerId is a
-    // placeholder here. (Scratch chips set their own full payload on drag start.)
     dragPayloadRef.current = { src: addr, playerId: '' }
     setDragSrc(addr)
   }, [])
 
-  const handleDragOver = useCallback((addr: SlotAddr) => {
-    setDragOverAddr(addr)
-  }, [])
-
-  const handleDragLeave = useCallback(() => {
-    setDragOverAddr(null)
-  }, [])
+  const handleDragOver = useCallback((addr: SlotAddr) => { setDragOverAddr(addr) }, [])
+  const handleDragLeave = useCallback(() => { setDragOverAddr(null) }, [])
 
   function handleDrop(dst: SlotAddr): void {
-    // Try to read from ref first (set in onDragStart handler), then from state
     const payload = dragPayloadRef.current
     dragPayloadRef.current = null
     setDragSrc(null)
     setDragOverAddr(null)
-
     if (!payload || !lines) return
 
     const src = payload.src
-    // Same address — no-op
     if (
       src.kind === 'slot' && dst.kind === 'slot' &&
       src.section === dst.section && src.lineIdx === dst.lineIdx && src.slotIdx === dst.slotIdx
     ) return
-    if (src.kind === 'scratch' && dst.kind === 'scratch' && src.playerId === dst.kind) return
 
     setLines((l) => {
       const draggedPlayer = getAtAddr(l, src)
@@ -1122,8 +758,6 @@ export function TacticsScreen(): JSX.Element {
 
   function handleScratchDrop(e: React.DragEvent<HTMLDivElement>): void {
     e.preventDefault()
-    // Parse payload from dataTransfer (the ref approach works within same component tree,
-    // but dataTransfer is the reliable cross-element channel)
     const raw = e.dataTransfer.getData('application/x-lineup-slot')
     if (!raw) return
     try {
@@ -1137,16 +771,9 @@ export function TacticsScreen(): JSX.Element {
   }
 
   // ── Depth dropdown handler ──
-  // Selecting a player from the depth dropdown should:
-  // - If the selected player is already in a slot elsewhere, swap them.
-  // - If the selected player is in scratches, place them (old slot occupant goes to scratches).
-  // - Then set the target slot to the selected player.
   function handleDepthSelect(targetAddr: SlotAddr & { kind: 'slot' }, chosen: PlayerBadge): void {
     setLines((l) => {
-      // Find where the chosen player currently lives
       let chosenSrc: SlotAddr | null = null
-
-      // Search slots
       const sections: Section[] = ['forwards', 'defense', 'goalies', 'pp', 'pk']
       outer: for (const sec of sections) {
         if (sec === 'goalies') {
@@ -1170,40 +797,18 @@ export function TacticsScreen(): JSX.Element {
           }
         }
       }
-
-      // Check scratches
       if (!chosenSrc && l.scratches.some((p) => p.playerId === chosen.playerId)) {
         chosenSrc = { kind: 'scratch', playerId: chosen.playerId }
       }
-
-      if (!chosenSrc) return l // player not found (stale roster)
-
+      if (!chosenSrc) return l
       applyDrop(l, chosenSrc, targetAddr, chosen)
       return l
     })
   }
 
-  // ── tactics mutation helpers ──
-
-  function setPersonalTactics(playerId: string, pt: PersonalTactics): void {
-    setTacticsFn((t) => {
-      const existing = t.personalTactics ?? {}
-      return { ...t, personalTactics: { ...existing, [playerId]: pt } }
-    })
-  }
-
-  // Tactics are owned by the head coach (set via staff-meeting suggestions),
-  // so the GM can no longer edit the system directly. This is intentionally a
-  // no-op; the System panel renders read-only and changes flow through
-  // suggestToCoach instead. `updater` is accepted to keep call sites unchanged.
-  function setTacticsFn(_updater: (t: TeamTactics) => TeamTactics): void {
-    /* coach-owned: no direct GM edits */
-  }
-
   // ── save / revert ──
-
   async function handleSave(): Promise<void> {
-    if (!lines || !tactics || !dirty) return
+    if (!lines || !dirty) return
     setSaving(true)
     try {
       const linesRes = await client.setLines(linesViewToUpdate(lines))
@@ -1212,15 +817,8 @@ export function TacticsScreen(): JSX.Element {
         setSaving(false)
         return
       }
-      const tacRes = await client.setTactics(tactics)
-      if (tacRes.type === 'error') {
-        toast(tacRes.message, 'error')
-        setSaving(false)
-        return
-      }
-      toast('Tactics saved.', 'success')
+      toast('Lines saved.', 'success')
       setDraftLines(null)
-      setDraftTactics(null)
       setDirty(false)
       bumpRefresh()
     } catch {
@@ -1232,30 +830,8 @@ export function TacticsScreen(): JSX.Element {
 
   function handleRevert(): void {
     setDraftLines(null)
-    setDraftTactics(null)
     setDirty(false)
     refetch()
-  }
-
-  async function handleApplyCoachSuggestion(): Promise<void> {
-    if (!data) return
-    setApplying(true)
-    try {
-      const res = await client.applyCoachSuggestion(data.coachSuggestion.suggestedTactics)
-      if (res.type === 'error') {
-        toast(res.message, 'error')
-      } else {
-        toast('Coach suggestion applied.', 'success')
-        setDraftLines(null)
-        setDraftTactics(null)
-        setDirty(false)
-        bumpRefresh()
-      }
-    } catch {
-      toast('Failed to apply suggestion.', 'error')
-    } finally {
-      setApplying(false)
-    }
   }
 
   async function handleCoachSetLines(): Promise<void> {
@@ -1276,49 +852,30 @@ export function TacticsScreen(): JSX.Element {
     }
   }
 
-  // ── picker data ──
   const pickerSlot = getPickerSlot()
   const roster = buildRoster()
-
-  // Is the scratches area currently a drop target?
   const scratchDragOver = dragOverAddr?.kind === 'scratch'
 
-  // Common DnD slot props builder for LinesSection/GoaliesRow
-  // We pass the raw handlers since each slot needs to set up its own DnD via div props.
-  // The sections pass through the addr-based callbacks; slot divs wire up native events.
-
-  // Shared DnD callbacks passed to sub-components
-  const dndHandlers = {
+  const dnd = {
     dragOverAddr,
     onDragStart: handleDragStart,
     onDragOver: handleDragOver,
     onDragLeave: handleDragLeave,
     onDepthSelect: handleDepthSelect,
+    onDrop: (dst: SlotAddr) => handleDrop(dst),
   }
-
-  // Section slots call this with their address on drop. It must INVOKE the drop
-  // (not return a handler) — sections wire it as onDrop(addr) directly.
-  function makeSectionDropHandler(dst: SlotAddr & { kind: 'slot' }): void {
-    handleDrop(dst)
-  }
-
-  // Override SlotButton to wire native drag events via wrapper div approach.
-  // The sub-components (LinesSection, GoaliesRow) pass onDrop as a simple callback,
-  // but we need access to the DragEvent for dataTransfer. We handle this by using
-  // dragPayloadRef which is set in onDragStart — for same-window drags this always works.
-
-  void dragSrc // referenced to avoid lint warning (used in dragPayloadRef logic)
 
   return (
     <section className="stack" style={{ paddingBottom: dirty ? 72 : 0 }}>
-      <ScreenHeader title="Tactics &amp; Lines" />
+      <ScreenHeader title="Tactics &amp; Lines">
+        <span className="muted small">Your coach owns the system — you set the lineup.</span>
+      </ScreenHeader>
 
       {error && <Notice kind="warn">{error}</Notice>}
       {loading && !data && <Notice kind="info">Loading…</Notice>}
 
-      {data && lines && tactics && (
+      {data && lines && (
         <>
-          {/* ── Issues ── */}
           {lines.issues.length > 0 && (
             <Notice kind="warn">
               <strong>Line issues:</strong>
@@ -1328,11 +885,22 @@ export function TacticsScreen(): JSX.Element {
             </Notice>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(500px,2fr) minmax(300px,1fr)', gap: 'var(--sp-4)', alignItems: 'start' }}>
-            {/* ── LEFT: lines editor ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(520px,2fr) minmax(320px,1fr)', gap: 'var(--sp-4)', alignItems: 'start' }}>
+            {/* ── LEFT: rink line board ── */}
             <div className="stack">
               <div className="row-between" style={{ marginBottom: -4 }}>
-                <span className="panel-title" style={{ fontSize: 13, fontWeight: 700 }}>Lines</span>
+                <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                  <span className="panel-title" style={{ fontSize: 13, fontWeight: 700 }}>Line Board</span>
+                  {/* synergy legend */}
+                  <span className="row small" style={{ gap: 10, alignItems: 'center', opacity: 0.85 }}>
+                    {([['var(--success)', 'Strong'], ['var(--amber, #f59e0b)', 'OK'], ['var(--danger)', 'Poor']] as const).map(([c, label]) => (
+                      <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                        <span style={{ width: 14, height: 4, borderRadius: 2, background: c, display: 'inline-block' }} />
+                        <span className="muted">{label}</span>
+                      </span>
+                    ))}
+                  </span>
+                </div>
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ fontSize: 12, gap: 4, whiteSpace: 'nowrap', minWidth: 0 }}
@@ -1343,73 +911,106 @@ export function TacticsScreen(): JSX.Element {
                   {coachBuilding ? 'Asking coach…' : 'Ask the coach to set lines'}
                 </button>
               </div>
-              <Panel title="Lines">
-                <div className="stack" style={{ gap: 'var(--sp-5)' }}>
-                  <LinesSection
-                    title="Forwards"
-                    lines={lines.forwards}
-                    section="forwards"
-                    roster={roster}
-                    {...dndHandlers}
-                    onClickSlot={(li, si) => openPicker('forwards', li, si)}
-                    onDrop={makeSectionDropHandler}
-                    synergies={data.lineSynergies}
-                  />
-                  <LinesSection
-                    title="Defence Pairs"
-                    lines={lines.defensePairs}
-                    section="defense"
-                    roster={roster}
-                    {...dndHandlers}
-                    onClickSlot={(li, si) => openPicker('defense', li, si)}
-                    onDrop={makeSectionDropHandler}
-                    synergies={data.pairSynergies}
-                  />
 
-                  {/* Goalies */}
-                  <GoaliesRow
-                    goalies={lines.goalies}
-                    roster={roster}
-                    {...dndHandlers}
-                    onClickSlot={(si) => openPicker('goalies', si, 0)}
-                    onDrop={makeSectionDropHandler}
-                  />
+              {/* Even-strength rink */}
+              <div style={{ position: 'relative', borderRadius: 'var(--radius)', overflow: 'hidden', border: '1px solid var(--line)', background: 'var(--bg1)', padding: 'var(--sp-4)' }}>
+                <RinkBackdrop />
+                <div className="stack" style={{ position: 'relative', zIndex: 1, gap: 'var(--sp-4)' }}>
+                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                    <div className="panel-title">Forward Lines</div>
+                    {lines.forwards.map((line, li) => (
+                      <TokenRow
+                        key={li}
+                        slots={line}
+                        section="forwards"
+                        lineIdx={li}
+                        label={`${li + 1}`}
+                        roster={roster}
+                        synergy={data.lineSynergies?.[li] ?? null}
+                        onOpenPicker={(l2, s2) => openPicker('forwards', l2, s2)}
+                        {...dnd}
+                      />
+                    ))}
+                  </div>
+                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                    <div className="panel-title">Defence Pairs</div>
+                    {lines.defensePairs.map((pair, li) => (
+                      <TokenRow
+                        key={li}
+                        slots={pair}
+                        section="defense"
+                        lineIdx={li}
+                        label={`${li + 1}`}
+                        roster={roster}
+                        synergy={data.pairSynergies?.[li] ?? null}
+                        onOpenPicker={(l2, s2) => openPicker('defense', l2, s2)}
+                        {...dnd}
+                      />
+                    ))}
+                  </div>
+                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                    <div className="panel-title">Goaltenders</div>
+                    <TokenRow
+                      slots={lines.goalies}
+                      section="goalies"
+                      lineIdx={0}
+                      label="G"
+                      roster={roster}
+                      synergy={null}
+                      onOpenPicker={(_l2, s2) => openPicker('goalies', s2, 0)}
+                      {...dnd}
+                      onDrop={(dst) => handleDrop(dst)}
+                    />
+                  </div>
                 </div>
-              </Panel>
+              </div>
 
+              {/* Special teams (units only — formation is coach-owned) */}
               <Panel title="Special Teams">
-                <div className="stack" style={{ gap: 'var(--sp-5)' }}>
-                  <LinesSection
-                    title="Power Play"
-                    lines={lines.powerPlayUnits}
-                    section="pp"
-                    roster={roster}
-                    {...dndHandlers}
-                    onClickSlot={(li, si) => openPicker('pp', li, si)}
-                    onDrop={makeSectionDropHandler}
-                  />
-                  <LinesSection
-                    title="Penalty Kill"
-                    lines={lines.penaltyKillUnits}
-                    section="pk"
-                    roster={roster}
-                    {...dndHandlers}
-                    onClickSlot={(li, si) => openPicker('pk', li, si)}
-                    onDrop={makeSectionDropHandler}
-                  />
+                <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                    <div className="panel-title">Power Play</div>
+                    {lines.powerPlayUnits.map((unit, li) => (
+                      <TokenRow
+                        key={li}
+                        slots={unit}
+                        section="pp"
+                        lineIdx={li}
+                        label={`${li + 1}`}
+                        roster={roster}
+                        synergy={null}
+                        onOpenPicker={(l2, s2) => openPicker('pp', l2, s2)}
+                        {...dnd}
+                      />
+                    ))}
+                  </div>
+                  <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+                    <div className="panel-title">Penalty Kill</div>
+                    {lines.penaltyKillUnits.map((unit, li) => (
+                      <TokenRow
+                        key={li}
+                        slots={unit}
+                        section="pk"
+                        lineIdx={li}
+                        label={`${li + 1}`}
+                        roster={roster}
+                        synergy={null}
+                        onOpenPicker={(l2, s2) => openPicker('pk', l2, s2)}
+                        {...dnd}
+                      />
+                    ))}
+                  </div>
                 </div>
               </Panel>
 
-              {/* Depth pool / Scratches — drop target, grouped by position */}
+              {/* Depth pool / scratches — drop target */}
               <div
                 onDragOver={handleScratchDragOver}
                 onDragLeave={() => setDragOverAddr(null)}
                 onDrop={handleScratchDrop}
                 style={{
                   borderRadius: 'var(--radius)',
-                  border: scratchDragOver
-                    ? '1px solid var(--accent)'
-                    : '1px solid var(--line)',
+                  border: scratchDragOver ? '1px solid var(--accent)' : '1px solid var(--line)',
                   background: scratchDragOver ? 'rgba(var(--accent-rgb),0.08)' : 'var(--bg1)',
                   padding: 'var(--sp-4)',
                   transition: 'border-color 0.12s, background 0.12s',
@@ -1420,7 +1021,6 @@ export function TacticsScreen(): JSX.Element {
                   {scratchDragOver && <span style={{ color: 'var(--accent)', marginLeft: 6 }}>Drop to bench</span>}
                 </div>
                 {lines.scratches.length > 0 ? (() => {
-                  // Group by position category
                   const fwds = lines.scratches.filter((p) => p.position !== 'D' && p.position !== 'G')
                   const defs = lines.scratches.filter((p) => p.position === 'D')
                   const gols = lines.scratches.filter((p) => p.position === 'G')
@@ -1454,7 +1054,7 @@ export function TacticsScreen(): JSX.Element {
                               >
                                 <PlayerFace faceId={p.faceId} name={p.name} size={20} />
                                 <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
-                                <span style={{ fontSize: 12 }}>{p.name}</span>
+                                <PlayerLink playerId={p.playerId} name={p.name} />
                                 <StarRating value={p.overall} />
                               </div>
                             ))}
@@ -1471,356 +1071,20 @@ export function TacticsScreen(): JSX.Element {
               </div>
             </div>
 
-            {/* ── RIGHT: Coach's System (read-only info feed) ── */}
+            {/* ── RIGHT: depth chart ── */}
             <div className="stack">
-              <div className="muted small" style={{ fontStyle: 'italic', lineHeight: 1.5 }}>
-                Your head coach owns the system — below is a read-only view of what he’s running.
-                To change it, make a suggestion in Front Office → Staff Meeting.
-              </div>
-              <div className="stack" style={{ pointerEvents: 'none', opacity: 0.85 }}>
-              <Panel title="System">
-                <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-
-                  {/* Forecheck */}
-                  <div>
-                    <label className="field-label">Forecheck</label>
-                    <select
-                      className="select"
-                      value={tactics.forecheck}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, forecheck: e.target.value as ForecheckSystem }))}
-                    >
-                      <option value="1-2-2">1-2-2 (passive)</option>
-                      <option value="2-1-2">2-1-2 (aggressive)</option>
-                      <option value="trap">Trap</option>
-                    </select>
-                  </div>
-
-                  {/* D-zone coverage */}
-                  <div>
-                    <label className="field-label">D-zone coverage</label>
-                    <select
-                      className="select"
-                      value={tactics.dZoneCoverage}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, dZoneCoverage: e.target.value as DefensiveZoneCoverage }))}
-                    >
-                      <option value="man">Man-to-man</option>
-                      <option value="zone">Zone</option>
-                      <option value="hybrid">Hybrid</option>
-                    </select>
-                  </div>
-                </div>
-              </Panel>
-
-              <Panel title="Tempo">
-                <div className="stack" style={{ gap: 10 }}>
-                  <TacticSlider
-                    label="Pace"
-                    value={tactics.tempo.pace}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, tempo: { ...t.tempo, pace: v } }))}
-                  />
-                  <TacticSlider
-                    label="Pass risk"
-                    value={tactics.tempo.passRisk}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, tempo: { ...t.tempo, passRisk: v } }))}
-                  />
-                  <TacticSlider
-                    label="Shot eagerness"
-                    value={tactics.tempo.shotEagerness}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, tempo: { ...t.tempo, shotEagerness: v } }))}
-                  />
-                  <TacticSlider
-                    label="Defensive pinch"
-                    value={tactics.tempo.defensivePinch}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, tempo: { ...t.tempo, defensivePinch: v } }))}
-                  />
-                </div>
-              </Panel>
-
-              <Panel title="Special Teams Formations">
-                <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-                  <div>
-                    <label className="field-label">Power play formation</label>
-                    <select
-                      className="select"
-                      value={tactics.specialTeams.powerPlay}
-                      onChange={(e) => setTacticsFn((t) => ({
-                        ...t, specialTeams: { ...t.specialTeams, powerPlay: e.target.value as PowerPlayFormation }
-                      }))}
-                    >
-                      <option value="umbrella">Umbrella</option>
-                      <option value="1-3-1">1-3-1</option>
-                      <option value="overload">Overload</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">Penalty kill formation</label>
-                    <select
-                      className="select"
-                      value={tactics.specialTeams.penaltyKill}
-                      onChange={(e) => setTacticsFn((t) => ({
-                        ...t, specialTeams: { ...t.specialTeams, penaltyKill: e.target.value as PenaltyKillFormation }
-                      }))}
-                    >
-                      <option value="box">Box</option>
-                      <option value="diamond">Diamond</option>
-                      <option value="aggressive">Aggressive</option>
-                    </select>
-                  </div>
-                </div>
-              </Panel>
-
-              <Panel title="Matching">
-                <label
-                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', cursor: 'pointer' }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={tactics.lineMatching}
-                    onChange={(e) => setTacticsFn((t) => ({ ...t, lineMatching: e.target.checked }))}
-                    style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
-                  />
-                  <span>Line matching (shadow opponent's top line)</span>
-                </label>
-              </Panel>
-
-              {/* ── EHM Style sliders ── */}
-              <Panel title="Style">
-                <div className="stack" style={{ gap: 10 }}>
-                  <EhmSlider
-                    label="Aggressiveness"
-                    value={tactics.aggressiveness ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, aggressiveness: v }))}
-                    leftLabel="Disciplined"
-                    rightLabel="Physical"
-                  />
-                  <EhmSlider
-                    label="Hitting"
-                    value={tactics.hitting ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, hitting: v }))}
-                    leftLabel="Avoid"
-                    rightLabel="Punishing"
-                  />
-                  <EhmSlider
-                    label="Puck pressure"
-                    value={tactics.puckPressure ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, puckPressure: v }))}
-                    leftLabel="Passive"
-                    rightLabel="Swarming"
-                  />
-                  <EhmSlider
-                    label="Gap control"
-                    value={tactics.gapControl ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, gapControl: v }))}
-                    leftLabel="Loose"
-                    rightLabel="Tight"
-                  />
-                  <EhmSlider
-                    label="Shooting"
-                    value={tactics.shooting ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, shooting: v }))}
-                    leftLabel="Patient"
-                    rightLabel="Shoot on sight"
-                  />
-                  <EhmSlider
-                    label="Passing"
-                    value={tactics.passing ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, passing: v }))}
-                    leftLabel="Individual"
-                    rightLabel="High movement"
-                  />
-                  <EhmSlider
-                    label="Dumping"
-                    value={tactics.dumping ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, dumping: v }))}
-                    leftLabel="Always carry"
-                    rightLabel="Always dump"
-                  />
-                  <EhmSlider
-                    label="Backchecking"
-                    value={tactics.backchecking ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, backchecking: v }))}
-                    leftLabel="Float"
-                    rightLabel="Hard back"
-                  />
-                  <EhmSlider
-                    label="Mentality"
-                    value={tactics.mentality ?? 0.5}
-                    onChange={(v) => setTacticsFn((t) => ({ ...t, mentality: v }))}
-                    leftLabel="Defensive"
-                    rightLabel="All-out attack"
-                  />
-                </div>
-                <div className="muted small" style={{ marginTop: 8, opacity: 0.65, fontSize: 10 }}>
-                  Bold items affect the sim; others are intent for future depth.
-                </div>
-              </Panel>
-
-              {/* ── Positional systems ── */}
-              <Panel title="Positional Systems">
-                <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-                  <div>
-                    <label className="field-label">Breakout</label>
-                    <select
-                      className="select"
-                      value={tactics.breakout ?? 'wheel'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, breakout: e.target.value as BreakoutSystem }))}
-                    >
-                      <option value="wheel">Wheel</option>
-                      <option value="rim">Rim</option>
-                      <option value="reverse">Reverse</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">NZ Offensive</label>
-                    <select
-                      className="select"
-                      value={tactics.nzOffensive ?? 'controlled'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, nzOffensive: e.target.value as NzOffensiveSystem }))}
-                    >
-                      <option value="controlled">Controlled</option>
-                      <option value="stretch">Stretch passes</option>
-                      <option value="overload">Overload</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">NZ Defensive</label>
-                    <select
-                      className="select"
-                      value={tactics.nzDefensive ?? 'standard'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, nzDefensive: e.target.value as NzDefensiveSystem }))}
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="trap">Trap</option>
-                      <option value="aggressive">Aggressive</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">Zone entry preference</label>
-                    <select
-                      className="select"
-                      value={tactics.ozEntry ?? 'mixed'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, ozEntry: e.target.value as OzEntry }))}
-                    >
-                      <option value="mixed">Mixed</option>
-                      <option value="carry">Carry in</option>
-                      <option value="dump">Dump &amp; chase</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">DZone structure</label>
-                    <select
-                      className="select"
-                      value={tactics.dZoneStructure ?? 'contain'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, dZoneStructure: e.target.value as DZoneStructure }))}
-                    >
-                      <option value="contain">Contain</option>
-                      <option value="collapse">Collapse</option>
-                      <option value="aggressive">Aggressive</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">Shot targeting</label>
-                    <select
-                      className="select"
-                      value={tactics.shotTargeting ?? 'mixed'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, shotTargeting: e.target.value as ShotTargeting }))}
-                    >
-                      <option value="mixed">Mixed</option>
-                      <option value="corners">Corners</option>
-                      <option value="high-glove">High glove</option>
-                      <option value="blocker">Blocker side</option>
-                      <option value="five-hole">Five-hole</option>
-                    </select>
-                  </div>
-                </div>
-              </Panel>
-
-              {/* ── Faceoff plays ── */}
-              <Panel title="Faceoff Plays">
-                <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-                  <div>
-                    <label className="field-label">Offensive zone</label>
-                    <select
-                      className="select"
-                      value={tactics.offensiveFaceoff ?? 'standard'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, offensiveFaceoff: e.target.value as FaceoffPlay }))}
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="wheel">Wheel</option>
-                      <option value="quick-strike">Quick strike</option>
-                      <option value="tie-up">Tie-up</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label">Defensive zone</label>
-                    <select
-                      className="select"
-                      value={tactics.defensiveFaceoff ?? 'standard'}
-                      onChange={(e) => setTacticsFn((t) => ({ ...t, defensiveFaceoff: e.target.value as FaceoffPlay }))}
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="tie-up">Tie-up</option>
-                      <option value="wheel">Wheel</option>
-                      <option value="quick-strike">Quick clear</option>
-                    </select>
-                  </div>
-                </div>
-              </Panel>
-
-              {/* ── Personal Tactics (roster list) ── */}
-              <Panel title="Personal Tactics">
-                <div className="stack" style={{ gap: 6 }}>
-                  <div className="muted small" style={{ opacity: 0.75, fontSize: 10, marginBottom: 2 }}>
-                    Click a player to set individual instructions. Engine-wired instructions affect the sim.
-                  </div>
-                  {roster.slice(0, 20).map((p) => {
-                    const pt = tactics.personalTactics?.[p.playerId]
-                    const hasInstructions = pt && Object.values(pt).some((v) => v !== undefined && v !== 'default' && v !== 0)
-                    return (
-                      <button
-                        key={p.playerId}
-                        className="btn btn-ghost btn-sm"
-                        style={{
-                          justifyContent: 'flex-start',
-                          gap: 6,
-                          padding: '4px 8px',
-                          borderColor: hasInstructions ? 'var(--accent)' : 'transparent',
-                          background: hasInstructions ? 'rgba(var(--accent-rgb),0.08)' : undefined,
-                          width: '100%',
-                        }}
-                        onClick={() => setPtPlayer(p)}
-                      >
-                        <PlayerFace faceId={p.faceId} name={p.name} size={18} />
-                        <span className="muted" style={{ fontSize: 10, width: 22 }}>{p.position}</span>
-                        <span style={{ flex: 1, fontSize: 12, textAlign: 'left' }}>{p.name}</span>
-                        {hasInstructions && <span className="chip chip-accent" style={{ fontSize: 9, padding: '1px 5px' }}>Custom</span>}
-                      </button>
-                    )
-                  })}
-                </div>
-              </Panel>
-
-              </div>
-
-              <CoachPanel
-                suggestion={data.coachSuggestion}
-                styleFit={data.styleFit}
-                onApply={handleApplyCoachSuggestion}
-                applying={applying}
-              />
+              <DepthChart squad={squad} />
             </div>
           </div>
 
-          {/* ── Sticky save bar ── */}
+          {/* sticky save bar */}
           {dirty && (
             <div
               style={{
                 position: 'fixed', bottom: 0, left: 210, right: 0, zIndex: 30,
-                background: 'var(--bg1)',
-                borderTop: '1px solid var(--line)',
+                background: 'var(--bg1)', borderTop: '1px solid var(--line)',
                 padding: 'var(--sp-3) var(--sp-5)',
-                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                gap: 'var(--sp-3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--sp-3)',
               }}
             >
               <span className="muted small">You have unsaved changes.</span>
@@ -1831,7 +1095,7 @@ export function TacticsScreen(): JSX.Element {
             </div>
           )}
 
-          {/* ── Picker modal ── */}
+          {/* picker modal */}
           {pickerOpen && pickerContext && (
             <PlayerPicker
               slot={pickerSlot?.slot ?? pickerContext.section}
@@ -1839,18 +1103,6 @@ export function TacticsScreen(): JSX.Element {
               roster={roster}
               onSelect={handlePickerSelect}
               onClose={() => setPickerOpen(false)}
-            />
-          )}
-
-          {/* ── Personal Tactics modal ── */}
-          {ptPlayer && tactics && (
-            <PersonalTacticsPanel
-              player={ptPlayer}
-              pt={tactics.personalTactics?.[ptPlayer.playerId] ?? {}}
-              onChange={(pt) => {
-                setPersonalTactics(ptPlayer.playerId, pt)
-              }}
-              onClose={() => setPtPlayer(null)}
             />
           )}
         </>
