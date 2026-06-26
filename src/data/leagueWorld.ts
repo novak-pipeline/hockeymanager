@@ -29,6 +29,8 @@ export interface RawCompetition {
 const SIMULATED_ABBREVS = new Set([
   'AHL', 'ECHL', 'OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL', 'NTDP', 'USNTDP', 'NCAA',
   'KHL', 'SHL', 'LIIGA', 'NL', 'DEL', 'EXTRALIGA', 'MESTIS', 'VHL',
+  // Top junior/prospect leagues by nation (NHL-draft feeders).
+  'BCHL', 'NAHL', 'MHL', 'J20', 'U20SM', 'CZEJR', 'SVKJR', 'DNL',
 ])
 
 /**

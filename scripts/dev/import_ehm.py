@@ -683,6 +683,23 @@ COMP_LEAGUES = {
     # NCAA Division I — clubs file under this umbrella name (where US college
     # draft prospects like Gavin McKenna play).
     "National Collegiate Athletic Association": "NCAA",
+    # ── Top junior/prospect leagues by nation (NHL-draft feeders) ──────────
+    # Russia's premier junior league (MHL) — Demidov-tier prospects. The lower
+    # "Natsyonalnaya" tier (NMHL) is deliberately NOT whitelisted (exact match).
+    "Russian Molodyozhnaya Hokkeinaya Liga": "MHL",
+    # Nordic top junior tiers (where SHL/Liiga clubs' teenagers play).
+    "Swedish U20 Nationell": "J20",
+    "Finnish U20 SM-sarja": "U20SM",
+    # British Columbia Hockey League — now an elite Tier-1 junior drawing
+    # NHL first-rounders and NCAA commits.
+    "British Columbia Hockey League": "BCHL",
+    # North American Hockey League — US Tier-II junior.
+    "North American Hockey League": "NAHL",
+    # Czech / Slovak / German top junior leagues (Slafkovský, Stützle paths).
+    # Exact match keeps the "… 2/3/4/5" German sub-tiers out.
+    "Czech DHL Extraliga junioru": "CZEJR",
+    "Slovenská Extraliga juniorov": "SVKJR",
+    "Deutsche Nachwuchs Liga": "DNL",
 }
 COMP_BY_LOWER = {k.lower(): k for k in COMP_LEAGUES}
 
