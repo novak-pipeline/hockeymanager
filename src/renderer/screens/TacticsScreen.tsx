@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import { overallToStars } from '../../engine/ratings/composites'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type { SquadView } from '../../worker/protocol'
@@ -10,7 +10,7 @@ import type {
   SquadRowView,
 } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
-import { bumpRefresh, toast } from '../components/store'
+import { toast } from '../components/store'
 import { moraleColor, moraleWord } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
@@ -335,34 +335,30 @@ function RinkBackdrop(): JSX.Element {
     <svg
       viewBox="0 0 1000 600"
       preserveAspectRatio="none"
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.5 }}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', opacity: 0.4 }}
       aria-hidden
     >
       <defs>
         <linearGradient id="ice" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(120,170,220,0.10)" />
-          <stop offset="100%" stopColor="rgba(120,170,220,0.04)" />
+          <stop offset="0%" stopColor="rgba(120,170,225,0.12)" />
+          <stop offset="55%" stopColor="rgba(120,170,225,0.05)" />
+          <stop offset="100%" stopColor="rgba(120,170,225,0.10)" />
         </linearGradient>
       </defs>
-      {/* boards */}
-      <rect x="8" y="8" width="984" height="584" rx="90" fill="url(#ice)" stroke="rgba(150,170,200,0.35)" strokeWidth="3" />
-      {/* blue lines */}
-      <rect x="332" y="8" width="5" height="584" fill="rgba(60,120,230,0.55)" />
-      <rect x="663" y="8" width="5" height="584" fill="rgba(60,120,230,0.55)" />
-      {/* centre red line */}
-      <rect x="497" y="8" width="6" height="584" fill="rgba(220,60,60,0.55)" />
-      {/* centre circle */}
-      <circle cx="500" cy="300" r="66" fill="none" stroke="rgba(60,120,230,0.5)" strokeWidth="3" />
-      <circle cx="500" cy="300" r="6" fill="rgba(220,60,60,0.6)" />
-      {/* end-zone faceoff dots */}
-      {[160, 840].map((x) =>
-        [180, 420].map((y) => (
-          <circle key={`${x}-${y}`} cx={x} cy={y} r="34" fill="none" stroke="rgba(220,60,60,0.45)" strokeWidth="3" />
+      {/* ice sheet */}
+      <rect x="6" y="6" width="988" height="588" rx="96" fill="url(#ice)" stroke="rgba(150,170,200,0.28)" strokeWidth="2" />
+      {/* zone lines (soft) */}
+      <rect x="333" y="6" width="4" height="588" fill="rgba(60,120,230,0.35)" />
+      <rect x="663" y="6" width="4" height="588" fill="rgba(60,120,230,0.35)" />
+      <rect x="498" y="6" width="4" height="588" fill="rgba(220,60,60,0.32)" />
+      <circle cx="500" cy="300" r="70" fill="none" stroke="rgba(60,120,230,0.3)" strokeWidth="2" />
+      <circle cx="500" cy="300" r="5" fill="rgba(220,60,60,0.4)" />
+      {/* end-zone faceoff dots (texture only) */}
+      {[150, 850].map((x) =>
+        [185, 415].map((y) => (
+          <circle key={`${x}-${y}`} cx={x} cy={y} r="30" fill="none" stroke="rgba(220,60,60,0.22)" strokeWidth="2" />
         ))
       )}
-      {/* creases */}
-      <path d="M 8 250 A 60 60 0 0 1 8 350" fill="rgba(60,120,230,0.12)" stroke="rgba(60,120,230,0.5)" strokeWidth="2" />
-      <path d="M 992 250 A 60 60 0 0 0 992 350" fill="rgba(60,120,230,0.12)" stroke="rgba(60,120,230,0.5)" strokeWidth="2" />
     </svg>
   )
 }
@@ -378,7 +374,7 @@ function Connector({ synergy }: { synergy: LineSynergyView | null }): JSX.Elemen
     <div
       title={title}
       style={{
-        flex: '0 0 22px', alignSelf: 'center', height: 4, borderRadius: 2,
+        flex: '1 1 auto', minWidth: 18, alignSelf: 'center', height: 4, borderRadius: 2,
         background: color,
         boxShadow: synergy ? `0 0 6px ${color}` : 'none',
       }}
@@ -508,34 +504,37 @@ function TokenRow({
     return a.section === section && a.lineIdx === lineIdx && a.slotIdx === si
   }
   return (
-    <div className="row" style={{ gap: 0, alignItems: 'stretch' }}>
-      <span className="muted small" style={{ width: 26, textAlign: 'right', alignSelf: 'center', flexShrink: 0 }}>
+    <div className="row" style={{ gap: 0, alignItems: 'stretch', width: '100%' }}>
+      <span className="muted small" style={{ width: 22, textAlign: 'right', alignSelf: 'center', flexShrink: 0 }}>
         {label}
       </span>
-      {slots.map((slot, si) => {
-        const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx, slotIdx: si }
-        return (
-          <div key={si} style={{ display: 'flex', alignItems: 'stretch', marginLeft: si === 0 ? 8 : 0 }}>
-            {si > 0 && <Connector synergy={synergy} />}
-            <RinkToken
-              slotDef={slot}
-              addr={addr}
-              roster={roster}
-              dragOver={isOver(si)}
-              onOpenPicker={() => onOpenPicker(lineIdx, si)}
-              onDragStart={onDragStart}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={() => onDrop(addr)}
-              onDepthSelect={onDepthSelect}
-            />
-          </div>
-        )
-      })}
+      {/* tokens spread across the rink width, joined by colour-coded chemistry lines */}
+      <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0, padding: '0 8px' }}>
+        {slots.map((slot, si) => {
+          const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx, slotIdx: si }
+          return (
+            <Fragment key={si}>
+              {si > 0 && <Connector synergy={synergy} />}
+              <RinkToken
+                slotDef={slot}
+                addr={addr}
+                roster={roster}
+                dragOver={isOver(si)}
+                onOpenPicker={() => onOpenPicker(lineIdx, si)}
+                onDragStart={onDragStart}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={() => onDrop(addr)}
+                onDepthSelect={onDepthSelect}
+              />
+            </Fragment>
+          )
+        })}
+      </div>
       {synergy && (
         <span
           className="small"
-          style={{ alignSelf: 'center', marginLeft: 10, color: synergyColor(synergy.score), fontWeight: 600, fontSize: 11 }}
+          style={{ alignSelf: 'center', width: 116, flexShrink: 0, color: synergyColor(synergy.score), fontWeight: 600, fontSize: 11 }}
           title={synergy.notes.join('\n')}
         >
           {synergyWord(synergy.score)}
@@ -640,9 +639,10 @@ export function TacticsScreen(): JSX.Element {
     (r) => (r.type === 'squad' ? r.squad : null)
   )
 
-  // Local draft state for lines
+  // Optimistic local copy of the lines while a save round-trips. The board is
+  // auto-saved on every change — there is no Save button. Cleared whenever fresh
+  // server data arrives (which also carries recomputed, legalised lines).
   const [draftLines, setDraftLines] = useState<LinesView | null>(null)
-  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [coachBuilding, setCoachBuilding] = useState(false)
 
@@ -655,15 +655,33 @@ export function TacticsScreen(): JSX.Element {
   const [dragOverAddr, setDragOverAddr] = useState<SlotAddr | null>(null)
   const dragPayloadRef = useRef<DragPayload | null>(null)
 
+  // When new server data lands, the optimistic copy is no longer needed —
+  // synergies and any legalisation now come from the server.
+  useEffect(() => { setDraftLines(null) }, [data])
+
   const lines = draftLines ?? data?.lines ?? null
 
-  function markDirty(): void { setDirty(true) }
+  // Persist the lineup immediately (auto-save), then refresh to pull recomputed
+  // line chemistry so the connectors recolour without any manual save.
+  const persistLines = useCallback(async (next: LinesView): Promise<void> => {
+    setSaving(true)
+    try {
+      const res = await client.setLines(linesViewToUpdate(next))
+      if (res.type === 'error') { toast(res.message, 'error'); return }
+      refetch()
+    } catch {
+      toast('Could not save the lineup.', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }, [client, refetch])
 
   function setLines(updater: (l: LinesView) => LinesView): void {
     const base = lines ?? data?.lines
     if (!base) return
-    setDraftLines(updater(deepCloneLines(base)))
-    markDirty()
+    const next = updater(deepCloneLines(base))
+    setDraftLines(next) // optimistic — board updates instantly
+    void persistLines(next) // auto-save + chemistry refresh
   }
 
   function openPicker(section: Section, lineIdx: number, slotIdx: number): void {
@@ -806,34 +824,6 @@ export function TacticsScreen(): JSX.Element {
     })
   }
 
-  // ── save / revert ──
-  async function handleSave(): Promise<void> {
-    if (!lines || !dirty) return
-    setSaving(true)
-    try {
-      const linesRes = await client.setLines(linesViewToUpdate(lines))
-      if (linesRes.type === 'error') {
-        toast(linesRes.message, 'error')
-        setSaving(false)
-        return
-      }
-      toast('Lines saved.', 'success')
-      setDraftLines(null)
-      setDirty(false)
-      bumpRefresh()
-    } catch {
-      toast('Save failed.', 'error')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  function handleRevert(): void {
-    setDraftLines(null)
-    setDirty(false)
-    refetch()
-  }
-
   async function handleCoachSetLines(): Promise<void> {
     setCoachBuilding(true)
     try {
@@ -841,8 +831,9 @@ export function TacticsScreen(): JSX.Element {
       if (res.type === 'error') {
         toast(res.message, 'error')
       } else if (res.type === 'coachLines') {
-        setDraftLines(deepCloneLines(res.lines))
-        setDirty(true)
+        const next = deepCloneLines(res.lines)
+        setDraftLines(next)
+        await persistLines(next) // auto-save the coach's lineup
         toast('Coach set the lines.', 'success')
       }
     } catch {
@@ -866,9 +857,14 @@ export function TacticsScreen(): JSX.Element {
   }
 
   return (
-    <section className="stack" style={{ paddingBottom: dirty ? 72 : 0 }}>
+    <section className="stack">
       <ScreenHeader title="Tactics &amp; Lines">
-        <span className="muted small">Your coach owns the system — you set the lineup.</span>
+        <span className="muted small">
+          Your coach owns the system — you set the lineup.{' '}
+          <span style={{ color: saving ? 'var(--amber, #f59e0b)' : 'var(--success)' }}>
+            {saving ? 'Saving…' : '✓ Auto-saved'}
+          </span>
+        </span>
       </ScreenHeader>
 
       {error && <Notice kind="warn">{error}</Notice>}
@@ -1076,24 +1072,6 @@ export function TacticsScreen(): JSX.Element {
               <DepthChart squad={squad} />
             </div>
           </div>
-
-          {/* sticky save bar */}
-          {dirty && (
-            <div
-              style={{
-                position: 'fixed', bottom: 0, left: 210, right: 0, zIndex: 30,
-                background: 'var(--bg1)', borderTop: '1px solid var(--line)',
-                padding: 'var(--sp-3) var(--sp-5)',
-                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--sp-3)',
-              }}
-            >
-              <span className="muted small">You have unsaved changes.</span>
-              <button className="btn" onClick={handleRevert} disabled={saving}>Revert</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-            </div>
-          )}
 
           {/* picker modal */}
           {pickerOpen && pickerContext && (
