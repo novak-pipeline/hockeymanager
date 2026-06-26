@@ -3856,9 +3856,35 @@ export class Career {
       const choice =
         pick.ownerTeamId === this.userTeamId
           ? remaining[0]
-          : aiSelectProspect({ remaining, rng })
+          : aiSelectProspect({ remaining, rng, needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p) })
       this.makeSelection(choice.playerId)
     }
+  }
+
+  /**
+   * How much an AI club wants a prospect for positional need (0+). Counts org
+   * depth (NHL + AHL) at the prospect's position group against a target; the
+   * thinner the group, the bigger the nudge, capped so it never trumps a clearly
+   * better player. Deterministic.
+   */
+  private draftNeedBonus(teamId: TeamId, prospect: DraftProspect): number {
+    const p = this.data.players.get(asPlayerId(prospect.playerId as string))
+    if (!p) return 0
+    const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
+      pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+    const team = this.data.teams.get(teamId)
+    if (!team) return 0
+    const ids = [...team.roster]
+    if (team.affiliateId) ids.push(...(this.data.teams.get(team.affiliateId)?.roster ?? []))
+    const count: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
+    for (const id of ids) {
+      const pl = this.data.players.get(id)
+      if (pl) count[grpOf(pl.position)]++
+    }
+    const target: Record<'F' | 'D' | 'G', number> = { F: 16, D: 9, G: 4 }
+    const grp = grpOf(p.position)
+    const scarcity = Math.max(0, target[grp] - count[grp])
+    return Math.min(6, scarcity * 1.5)
   }
 
   /** UI: the user makes their selection while on the clock. */

@@ -661,12 +661,20 @@ export function buildDraftOrder(args: {
 }
 
 /**
- * AI pick: heavily biased toward the best remaining consensus rank, with the
- * occasional reach a few spots down the board (never past ~8 spots).
+ * AI pick: best-player-available, biased by team need and with the occasional
+ * reach a few spots down the board. `needBonus` (0+, optional) nudges a prospect
+ * UP the board when his position is thin in the drafting org — it shifts the
+ * effective rank by a few spots so a club fills holes without passing on a
+ * clearly superior talent. Omitted → pure BPA-with-reach (unchanged).
  */
-export function aiSelectProspect(args: { remaining: DraftProspect[]; rng: Rng }): DraftProspect {
-  const { remaining, rng } = args
-  const board = [...remaining].sort((a, b) => a.rank - b.rank)
+export function aiSelectProspect(args: {
+  remaining: DraftProspect[]
+  rng: Rng
+  needBonus?: (p: DraftProspect) => number
+}): DraftProspect {
+  const { remaining, rng, needBonus } = args
+  const eff = (p: DraftProspect): number => p.rank - (needBonus ? needBonus(p) : 0)
+  const board = [...remaining].sort((a, b) => eff(a) - eff(b) || a.rank - b.rank)
   let i = 0
   while (i < board.length - 1 && i < 7 && rng.chance(0.42)) i++
   return board[i]
