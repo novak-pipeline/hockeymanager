@@ -60,7 +60,7 @@ AHL->NHL parent map (32 affiliates):
 Usage:
     py scripts/dev/import_ehm.py <export.xlsx> <out_dir> [facepack_dir ...]
 """
-import sys, os, io, json, unicodedata, glob, shutil, zlib
+import sys, os, io, json, re, unicodedata, glob, shutil, zlib
 
 # Column indices (0-based) for the full "Players and non-players" EHM export
 # (two header rows: section markers on row 0, field names on row 1; data row 2+).
@@ -1219,15 +1219,29 @@ def main():
             g = [p for p in roster if p["position"] == "G"][:3]
             d = [p for p in roster if p["position"] == "D"][:8]
             fwd = [p for p in roster if p["position"] in ("C", "W")][:14]
-            if len(g) < 2 or len(d) < 5 or len(fwd) < 9:
+            # Quick-sim only ices a starter (goalies[0]), so 1 goalie is enough.
+            # National development squads (NTDP U17/U18) legitimately carry a
+            # single goalie; a stricter 2-goalie floor wrongly drops the famous
+            # U18 team (Hughes brothers et al.) and then the whole programme.
+            if len(g) < 1 or len(d) < 5 or len(fwd) < 9:
                 continue
             chosen = g[:max(2, len(g))] + d + fwd
             clean = resolve_faces(chosen, faces_out, comp_total, comp_matched)
             prim, sec = COMP_PALETTE[zlib.crc32(club_name.encode("utf-8")) % len(COMP_PALETTE)]
+            team_city, team_nick = info["city"] or club_name, info["nickname"]
+            # Some programmes (notably the NTDP) ice an under-17 and an under-18
+            # squad that share a generic nickname ("Team USA") and city, which
+            # collapses to one indistinguishable name. Disambiguate by the age
+            # tier embedded in the club name ("… U18 Team" -> "USA" / "U18").
+            age_tier = re.search(r"\bU(1[0-9]|2[0-9])\b", club_name)
+            if age_tier:
+                team_nick = age_tier.group(0)
+                if abbrev == "NTDP":
+                    team_city = "USA"
             teams_out.append({
                 "externalId": f"ehm-{abbrev.lower()}-{norm(club_name)}",
-                "city": info["city"] or club_name,
-                "nickname": info["nickname"],
+                "city": team_city,
+                "nickname": team_nick,
                 "abbreviation": info["abbr"],
                 "primary": prim,
                 "secondary": sec,
