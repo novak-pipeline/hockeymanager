@@ -2103,7 +2103,6 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
             <thead>
               <tr>
                 <th>When</th>
-                <th className="num">Overall</th>
                 <th>Current</th>
                 <th>Ceiling</th>
                 <th>Read</th>
@@ -2117,7 +2116,6 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
                 return (
                   <tr key={`${s.year}-${s.day}`}>
                     <td className="muted small">{s.year} · GD{s.day}</td>
-                    <td className="num" style={{ fontWeight: 700 }}>{s.overall}</td>
                     <td><StarRating stars={s.currentStars} size={13} /></td>
                     <td><StarRating stars={s.potentialStars} size={13} /></td>
                     <td className="muted small">{knowledgeProse(s.knowledge)}</td>

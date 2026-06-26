@@ -352,8 +352,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok' }
-  /** Result of an auto-applied coach roster: how many moved each way. */
-  | { type: 'coachRosterSet'; promoted: number; demoted: number }
+  /** Result of an auto-applied coach roster: the player names moved each way. */
+  | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }

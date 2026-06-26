@@ -4,6 +4,7 @@ import type { FreeAgentRowView, ResignRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
+import { OverallStars } from '../components/Stars'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
@@ -211,7 +212,7 @@ function ResignRow(props: {
           <PlayerLink playerId={row.playerId} name={row.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
         <td className="num">{fmtMoney(row.currentSalary)}</td>
         <td colSpan={3}>
           <span className="chip chip-success">Signed</span>
@@ -227,7 +228,7 @@ function ResignRow(props: {
           <PlayerLink playerId={row.playerId} name={row.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
         <td className="num">{fmtMoney(row.currentSalary)}</td>
         <td colSpan={3}>
           <span className="chip chip-danger">Left in FA</span>
@@ -266,7 +267,7 @@ function ResignRow(props: {
           <PlayerLink playerId={row.playerId} name={row.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
         <td className="num">{fmtMoney(row.currentSalary)}</td>
         <td>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -382,7 +383,7 @@ function FARow(props: {
           <PlayerLink playerId={fa.playerId} name={fa.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num">{fa.overall}</td>
+        <td className="num"><OverallStars value={fa.overall} /></td>
         <td colSpan={4}>
           <span className="chip chip-success">Signed</span>
         </td>
@@ -425,7 +426,7 @@ function FARow(props: {
           <PlayerLink playerId={fa.playerId} name={fa.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num">{fa.overall}</td>
+        <td className="num"><OverallStars value={fa.overall} /></td>
         <td>{daysChip}</td>
         <td>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

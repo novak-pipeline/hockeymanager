@@ -322,7 +322,7 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'setCoachRoster': {
       const res = must().applyCoachRoster()
-      return { id: req.id, type: 'coachRosterSet', promoted: res.promoted.length, demoted: res.demoted.length }
+      return { id: req.id, type: 'coachRosterSet', promoted: res.promoted, demoted: res.demoted }
     }
 
     /* ── Phase B: player profile view layer ── */

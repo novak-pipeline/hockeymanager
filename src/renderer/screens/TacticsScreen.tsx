@@ -359,7 +359,7 @@ function StarRating({ value }: { value: number }): JSX.Element {
   const half = stars - full >= 0.5
   const empty = 5 - full - (half ? 1 : 0)
   return (
-    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1 }} title={`OVR: ${value}`}>
+    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1 }} title={`${stars}/5`}>
       {'★'.repeat(full)}
       {half ? '½' : ''}
       {'☆'.repeat(empty)}

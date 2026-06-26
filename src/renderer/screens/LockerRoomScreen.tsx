@@ -1,6 +1,7 @@
 import type { LockerRoomView } from '../../worker/protocol'
 import type { RelationshipView } from '../../engine/career/views'
 import { PlayerLink } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -50,7 +51,7 @@ function LeadershipPanel({ view }: { view: LockerRoomView }): JSX.Element {
                 C
               </span>
               <PlayerLink playerId={view.captain.playerId} name={view.captain.name} />
-              <span className="muted small">{view.captain.position} · {view.captain.age} yrs · OVR {view.captain.overall}</span>
+              <span className="muted small" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{view.captain.position} · {view.captain.age} yrs · <OverallStars value={view.captain.overall} /></span>
             </div>
           ) : (
             <span className="muted small">No captain assigned</span>

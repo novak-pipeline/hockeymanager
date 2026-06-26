@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
 import type { CombineRowView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -166,10 +167,10 @@ function BestAvailable(props: {
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{p.position}</td>
                 <td style={{ color: 'var(--muted)' }}>{p.age}</td>
-                <td className="num" style={{ fontWeight: 600, color: p.scouted && !p.scouted.exact ? 'var(--muted)' : undefined }}>
+                <td className="num">
                   {p.scouted && !p.scouted.exact
-                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
-                    : p.overall}
+                    ? <span style={{ opacity: 0.6 }} title="Fog-of-war estimate"><OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} /></span>
+                    : <OverallStars value={p.overall} />}
                 </td>
                 <td>
                   <PotentialStars stars={p.potentialStars} />
