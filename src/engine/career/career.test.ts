@@ -1707,13 +1707,16 @@ describe('Career — wider-world quick-sim', () => {
    * an imported world has. Used to prove the entry draft draws from the real
    * prospect pool, not synthetic prospects.
    */
-  function withJuniorProspects(seed: number): { data: ReturnType<typeof generateLeague>; amateurIds: Set<string> } {
+  function withJuniorProspects(seed: number, age?: number): { data: ReturnType<typeof generateLeague>; amateurIds: Set<string> } {
     const data = generateLeague({ seed })
     // Mint a deep pool of real amateurs (age 17–18 ⇒ draft-eligible).
     let n = 90000
     const { players: amateurs } = generateDraftClass({
       year: 2026, count: 300, rng: new Rng(seed + 7), nextPlayerNumber: () => n++,
     })
+    // Optionally override age (the offseason ages everyone +1 before the draft,
+    // so age 19 here ⇒ 20 at the draft ⇒ graduates pro that same offseason).
+    if (age !== undefined) for (const p of amateurs) p.age = age
     for (const p of amateurs) { data.players.set(p.id, p); data.league.players.push(p.id) }
     const get = (id: PlayerId) => data.players.get(id)!
     const goaliesPool = amateurs.filter((p) => p.position === 'G').map((p) => p.id)
@@ -1782,6 +1785,37 @@ describe('Career — wider-world quick-sim', () => {
       )
       expect(stillJunior).toBe(true)
     }
+  })
+
+  it('graduates drafted prospects into the org once they age out of junior', () => {
+    // Mint at 19 → the offseason dev pass ages them to 20 before the draft, so
+    // they're drafted as 20yos and graduate pro that same offseason.
+    const { data, amateurIds } = withJuniorProspects(205, 19)
+    const career = new Career(data, 205, data.league.teams[0]!)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+    career.autoDraft()
+    // Finish the offseason (resign → FA → preseason graduation → new season).
+    let guard = 0
+    while (career.getDashboard().phase === 'offseason' && guard++ < 60) {
+      if (career.draftPending()) { career.autoDraft(); continue }
+      career.advanceOffseason()
+    }
+    // Drafted juniors have signed ELCs and joined a pro (NHL/AHL) roster…
+    const onPro = [...data.teams.values()]
+      .filter((t) => t.tier !== 'world')
+      .flatMap((t) => t.roster)
+      .filter((id) => amateurIds.has(id as string))
+    expect(onPro.length).toBeGreaterThan(0)
+    for (const id of onPro) {
+      expect(data.players.get(id)!.contract.yearsRemaining).toBeGreaterThan(0)
+    }
+    // …and are no longer double-rostered in their junior league.
+    const stillJunior = [...data.teams.values()]
+      .filter((t) => t.tier === 'world')
+      .flatMap((t) => t.roster)
+    for (const id of onPro) expect(stillJunior.includes(id)).toBe(false)
   })
 
   it('sims other leagues during the season — standings + player stats accrue', () => {

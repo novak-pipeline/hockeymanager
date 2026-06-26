@@ -3822,6 +3822,11 @@ export class Career {
         return true
       }
       case 'preseason': {
+        // Graduate rights-held junior/college prospects who have turned pro
+        // (aged out of junior) into their org's farm BEFORE the farm sort runs,
+        // so a club actually reaps its draft picks instead of leaving them to
+        // age out in junior forever.
+        this.graduateProspects()
         // Development gate: sort each club's NHL roster vs its AHL affiliate by
         // ability so the best players are up and the rest develop down. AI clubs
         // apply it automatically; the user's club gets a SUGGESTION (he keeps
@@ -4309,6 +4314,62 @@ export class Career {
    * roster and the rest develop in the AHL. AI clubs apply it; the user's club
    * gets a SUGGESTION in the inbox instead (he keeps manual roster control).
    */
+  /**
+   * Sign and promote rights-held amateurs who have turned pro. A drafted junior
+   * keeps developing in his league with the club holding his rights; once he
+   * ages out of junior (20+) he signs his entry-level deal and joins the org's
+   * AHL affiliate (the subsequent farm sort then elevates the NHL-ready ones).
+   * Without this a club would draft prospects who never actually arrive.
+   * No-op for the generated league / mods without wider-world competitions.
+   */
+  private graduateProspects(): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    const touchedAhl = new Set<TeamId>()
+    for (const c of comps) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      for (const tid of c.teamIds) {
+        const wt = this.data.teams.get(tid as TeamId)
+        if (!wt) continue
+        const stay: PlayerId[] = []
+        for (const pid of wt.roster) {
+          const p = this.data.players.get(pid)
+          // Eligible to turn pro: drafted, rights held, aged out of junior.
+          if (!p || !p.nhlDrafted || !p.rightsTeamId || p.age < 20) { stay.push(pid); continue }
+          const org = this.data.teams.get(p.rightsTeamId)
+          const ahl = org?.affiliateId ? this.data.teams.get(org.affiliateId) : undefined
+          if (!org || !ahl) { stay.push(pid); continue }
+          // Sign a standard 2-way ELC and report to the org's farm.
+          p.contract = {
+            salary: 900000,
+            yearsRemaining: 3,
+            expiryYear: this.year + 1 + 3,
+            noTradeClause: false,
+            twoWay: true,
+          }
+          ahl.roster.push(pid)
+          touchedAhl.add(ahl.id)
+          if (p.rightsTeamId === this.userTeamId) {
+            this.pushNews(
+              'contract',
+              `${p.name} turns pro`,
+              `${p.name} (${p.position}, ${p.age}) has signed his entry-level contract and reports to ${ahl.name}.`,
+              { playerId: pid as string }
+            )
+          }
+        }
+        if (stay.length !== wt.roster.length) {
+          wt.roster = stay
+          repairLines(wt, this.data.players)
+        }
+      }
+    }
+    for (const aid of touchedAhl) {
+      const ahl = this.data.teams.get(aid)
+      if (ahl) repairLines(ahl, this.data.players)
+    }
+  }
+
   private reassignFarmSystems(): void {
     // Waiver-required veterans aren't dumped to the farm over a small ability dip.
     const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
