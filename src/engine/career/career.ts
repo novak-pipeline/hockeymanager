@@ -2625,6 +2625,24 @@ export class Career {
   }
 
   /**
+   * Re-optimise every AI club's lines from its head coach's read (skill + form +
+   * morale + condition), so combinations evolve through the season. Runs weekly;
+   * never touches the user's lineup (the GM owns that). Deterministic per (seed, day).
+   */
+  private reoptimizeAiLines(day: number): void {
+    this.data.league.teams.forEach((teamId, idx) => {
+      if ((teamId as string) === (this.userTeamId as string)) return
+      const team = this.data.teams.get(teamId)
+      if (!team) return
+      const coach = this.getTeamStaff(teamId as string).headCoach
+      const roster = team.roster.map((id) => this.resolve(id))
+      if (roster.length < 18) return // too thin to bother; repairLines will cope
+      const res = coachSetLineup({ roster, coach, rng: new Rng(deriveSeed(this.seed, 9271, day * 100 + idx)) })
+      team.lines = res.lines
+    })
+  }
+
+  /**
    * Emergency call-ups: when injuries drop a club below the HEALTHY bodies needed
    * to dress full lines (12F + 6D + 2G), pull up the best healthy AHL players of
    * the short position so the coach never has to ice a defenceman at wing. Bounded
@@ -2849,6 +2867,11 @@ export class Career {
     }
     // ── wider world: sim other leagues' games on this match day ──────────
     this.tickWorld(nextDay)
+    // ── AI coaches re-jig their lines weekly so combinations evolve with form,
+    //    morale and health (the user's own lines are never touched). ───────────
+    if (Math.floor(nextDay / 7) > Math.floor(this.currentDay / 7)) {
+      this.reoptimizeAiLines(nextDay)
+    }
     // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
     if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
       this.pushNews(
