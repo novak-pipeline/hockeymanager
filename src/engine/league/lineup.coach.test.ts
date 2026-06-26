@@ -292,4 +292,42 @@ describe('coachSetLineup — form / morale / condition', () => {
     // The lone versatile winger is the one promoted to fill the 4th centre slot.
     expect(centreIds).toContain(swing.id as string)
   })
+
+  it('plays a centre-deep club\'s weakest pivot on the wing', () => {
+    // Five natural centres. One is a strong playmaker but a poor pivot (low
+    // faceoffs + low defence) — he should be the one bumped to the wing, since
+    // the four better two-way pivots take the dot.
+    const base = makeRoster(7)
+    const fwds = base
+      .filter((p) => p.position === 'C' || p.position === 'W')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))
+      .slice(0, 12)
+    const defs = base.filter((p) => p.position === 'D').slice(0, 6)
+    const gols = base.filter((p) => p.position === 'G').slice(0, 2)
+    const playmaker = fwds[1]! // a strong forward, but make him a poor-pivot centre
+    const forwards = fwds.map((p, i) => {
+      if (i <= 4) {
+        const isPM = p.id === playmaker.id
+        return {
+          ...p,
+          position: 'C' as const,
+          composites: {
+            ...p.composites,
+            // Weak pivot for the playmaker; solid pivots for the other four centres.
+            faceoffWin: isPM ? 20 : 70,
+            defensiveZone: isPM ? 30 : 65,
+          },
+        }
+      }
+      return { ...p, position: 'W' as const }
+    }) as Player[]
+    const roster = [...forwards, ...defs, ...gols]
+
+    const result = coachSetLineup({ roster, coach: makeCoach({ judgment: 99, rating: 85 }), rng: new Rng(2) })
+    const centreIds = result.lines.forwards.map((line) => String(line[1]))
+    const wingIds = result.lines.forwards.flatMap((line) => [String(line[0]), String(line[2])])
+    // The poor-pivot playmaker plays the wing, not centre.
+    expect(wingIds).toContain(playmaker.id as string)
+    expect(centreIds).not.toContain(playmaker.id as string)
+  })
 })

@@ -466,8 +466,18 @@ export function coachSetLineup(args: {
   const naturalW = dressedForwards.filter((p) => p.position === 'W')
   const canPlayCentre = (p: Player): boolean => (p.versatility ?? 50) >= 50
 
-  const centres: Player[] = naturalC.slice(0, 4)
-  let wingPool: Player[] = [...naturalW, ...naturalC.slice(4)]
+  // Centre-role fitness: skill PLUS a pivot bonus for the things that make a
+  // centre rather than a winger (faceoffs, defensive responsibility). So when a
+  // club is centre-deep, its best two-way pivots take the dot and a pure
+  // playmaking centre slides to the wing where his offence plays up.
+  const pivotBonus = (p: Player): number =>
+    Math.max(-4, Math.min(4, (p.composites.faceoffWin - 50) * 0.05 + (p.composites.defensiveZone - 50) * 0.04))
+  const centreFitness = (p: Player): number => coachScore(p) + pivotBonus(p)
+
+  // Pick the four best CENTRES by pivot fitness; surplus centres join the wings.
+  const centresByFitness = [...naturalC].sort((a, b) => centreFitness(b) - centreFitness(a) || (a.id < b.id ? -1 : 1))
+  const centres: Player[] = centresByFitness.slice(0, 4)
+  let wingPool: Player[] = [...naturalW, ...centresByFitness.slice(4)]
   if (centres.length < 4) {
     const need = 4 - centres.length
     const capable = wingPool.filter(canPlayCentre)

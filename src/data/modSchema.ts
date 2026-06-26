@@ -1445,7 +1445,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   // when the mod actually ships junior competitions to route them into, so no
   // player is ever orphaned and NHL-only mods keep their current behaviour).
   const AHL_MIN_AGE = 18
-  const JUNIOR_TARGET_ABBREVS = new Set(['OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL'])
+  const JUNIOR_TARGET_ABBREVS = new Set(['OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL', 'NTDP', 'USNTDP'])
   const hasJuniorComps = (mod.competitions ?? []).some(
     (c) => JUNIOR_TARGET_ABBREVS.has(c.abbrev.toUpperCase()) && c.teams.length > 0
   )
