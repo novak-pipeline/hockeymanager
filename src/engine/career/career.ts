@@ -894,11 +894,25 @@ export class Career {
   }
 
   /**
-   * The real draft-eligible amateurs for this year's class: undrafted players
-   * aged into eligibility (first-year 17–18 'eligible' or 19–20 'reentry') who
-   * live on a wider-world amateur team (junior / college / European feeder),
-   * never the NHL or its AHL farm. Empty for the generated league / mods without
-   * competitions — callers then fall back to a synthetic class.
+   * Is this amateur in THIS year's entry-draft class? Undrafted and in the
+   * first/second-year window (18–19). The offseason ages everyone +1 before the
+   * draft is built, so 18 = the cohort that just turned 18 (first-year eligible)
+   * and 19 = a re-entry passed over last year. We deliberately exclude 20+: in an
+   * imported world those are career junior/European pros (the EHM `nhlDraftEligible`
+   * flag is true for every undrafted player up to age 40, so it can't gate a draft
+   * class) — including them put established men in the draft. 17-and-under wait for
+   * next season, when they age into the window.
+   */
+  private isEntryDraftEligible(p: Player): boolean {
+    return !p.nhlDrafted && p.age >= 18 && p.age <= 19
+  }
+
+  /**
+   * The real draft-eligible amateurs for this year's class: undrafted 18–19yos
+   * (see isEntryDraftEligible) who live on a wider-world amateur team (junior /
+   * college / European feeder), never the NHL or its AHL farm. Empty for the
+   * generated league / mods without competitions — callers then fall back to a
+   * synthetic class.
    */
   private realDraftEligibles(): Player[] {
     const out: Player[] = []
@@ -909,9 +923,7 @@ export class Career {
         if (!t) continue
         for (const pid of t.roster) {
           const p = this.data.players.get(pid)
-          if (!p) continue
-          const elig = draftEligibility(p.age, !!p.nhlDrafted)
-          if (elig === 'eligible' || elig === 'reentry') out.push(p)
+          if (p && this.isEntryDraftEligible(p)) out.push(p)
         }
       }
     }

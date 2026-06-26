@@ -1788,25 +1788,31 @@ describe('Career — wider-world quick-sim', () => {
   })
 
   it('graduates drafted prospects into the org once they age out of junior', () => {
-    // Mint at 19 → the offseason dev pass ages them to 20 before the draft, so
-    // they're drafted as 20yos and graduate pro that same offseason.
-    const { data, amateurIds } = withJuniorProspects(205, 19)
+    // Mint at 18 → drafted at 19 (offseason ages +1), then a second season ages
+    // them to 20 ⇒ they sign their ELC and graduate to the org's farm.
+    const { data, amateurIds } = withJuniorProspects(205, 18)
     const career = new Career(data, 205, data.league.teams[0]!)
-    while (career.getDashboard().phase === 'regularSeason') career.step()
-    while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
-    career.autoDraft()
-    // Finish the offseason (resign → FA → preseason graduation → new season).
-    let guard = 0
-    while (career.getDashboard().phase === 'offseason' && guard++ < 60) {
-      if (career.draftPending()) { career.autoDraft(); continue }
-      career.advanceOffseason()
+    const onProNow = (): PlayerId[] =>
+      [...data.teams.values()]
+        .filter((t) => t.tier !== 'world')
+        .flatMap((t) => t.roster)
+        .filter((id) => amateurIds.has(id as string))
+    let onPro: PlayerId[] = []
+    // Roll up to three full years, conducting each (user-gated) draft, until a
+    // drafted junior has turned pro.
+    for (let yr = 0; yr < 3 && onPro.length === 0; yr++) {
+      let guard = 0
+      while (career.getDashboard().phase !== 'offseason' && guard++ < 400) {
+        if (!career.step()) break
+      }
+      let g2 = 0
+      while (career.getDashboard().phase === 'offseason' && g2++ < 80) {
+        if (career.draftPending()) { career.autoDraft(); continue }
+        if (!career.advanceOffseason()) break
+      }
+      onPro = onProNow()
     }
     // Drafted juniors have signed ELCs and joined a pro (NHL/AHL) roster…
-    const onPro = [...data.teams.values()]
-      .filter((t) => t.tier !== 'world')
-      .flatMap((t) => t.roster)
-      .filter((id) => amateurIds.has(id as string))
     expect(onPro.length).toBeGreaterThan(0)
     for (const id of onPro) {
       expect(data.players.get(id)!.contract.yearsRemaining).toBeGreaterThan(0)
