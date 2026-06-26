@@ -56,6 +56,7 @@ import {
 } from '@engine/league/playoffs'
 import {
   aiSelectProspect,
+  buildDraftClassFromPlayers,
   buildDraftOrder,
   developPlayers,
   expectedPointsFor,
@@ -890,6 +891,44 @@ export class Career {
       for (const p of cls.prospects) ids.add(p.playerId as string)
     }
     return ids
+  }
+
+  /**
+   * The real draft-eligible amateurs for this year's class: undrafted players
+   * aged into eligibility (first-year 17–18 'eligible' or 19–20 'reentry') who
+   * live on a wider-world amateur team (junior / college / European feeder),
+   * never the NHL or its AHL farm. Empty for the generated league / mods without
+   * competitions — callers then fall back to a synthetic class.
+   */
+  private realDraftEligibles(): Player[] {
+    const out: Player[] = []
+    for (const c of this.data.league.competitions ?? []) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid as TeamId)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (!p) continue
+          const elig = draftEligibility(p.age, !!p.nhlDrafted)
+          if (elig === 'eligible' || elig === 'reentry') out.push(p)
+        }
+      }
+    }
+    return out
+  }
+
+  /** True when `playerId` sits on a wider-world amateur (non-pro) team — i.e. a
+   *  junior/college/European prospect, not a signed pro on an NHL/AHL roster. */
+  private isAmateurWorldPlayer(playerId: PlayerId): boolean {
+    for (const c of this.data.league.competitions ?? []) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid as TeamId)
+        if (t && t.roster.includes(playerId)) return true
+      }
+    }
+    return false
   }
 
   /** Current free agent id set (players not on any roster). */
@@ -3591,19 +3630,40 @@ export class Career {
 
         /* ── draft class ── */
         const draftYear = this.year + 1
-        const cls = generateDraftClass({
-          year: draftYear,
-          // Enough prospects for all 7 rounds of every team, plus a margin who go
-          // undrafted (realistic — not every eligible is picked).
-          count: Math.max(DRAFT_CLASS_SIZE, this.data.league.teams.length * DRAFT_ROUNDS + 30),
-          rng: this.rngFor(8002),
-          nextPlayerNumber: () => this.playerCounter++,
-        })
-        for (const p of cls.players) {
-          this.data.players.set(p.id, p)
-          this.data.league.players.push(p.id)
+        const classCount = Math.max(
+          DRAFT_CLASS_SIZE,
+          this.data.league.teams.length * DRAFT_ROUNDS + 30
+        )
+        // Prefer REAL eligibles from the imported junior/college/European world.
+        // Only when the world can't field a deep enough class (the generated
+        // league, or a thin mod) do we synthesize fictional prospects — keeping
+        // the generated-league path byte-identical.
+        const realEligibles = this.realDraftEligibles()
+        const neededPicks = this.data.league.teams.length * DRAFT_ROUNDS
+        let draftClass: DraftClass
+        if (realEligibles.length >= neededPicks) {
+          draftClass = buildDraftClassFromPlayers({
+            year: draftYear,
+            eligible: realEligibles,
+            count: classCount,
+            rng: this.rngFor(8002),
+          })
+        } else {
+          const cls = generateDraftClass({
+            year: draftYear,
+            // Enough prospects for all 7 rounds of every team, plus a margin who go
+            // undrafted (realistic — not every eligible is picked).
+            count: classCount,
+            rng: this.rngFor(8002),
+            nextPlayerNumber: () => this.playerCounter++,
+          })
+          for (const p of cls.players) {
+            this.data.players.set(p.id, p)
+            this.data.league.players.push(p.id)
+          }
+          draftClass = cls.draftClass
         }
-        this.data.league.draftClasses.push(cls.draftClass)
+        this.data.league.draftClasses.push(draftClass)
 
         /* ── draft lottery (non-playoff teams) BEFORE the order is built ── */
         const qualified = new Set<string>()
@@ -3649,7 +3709,7 @@ export class Career {
 
         /* ── scouting combine on the new class ── */
         const combine = runCombine({
-          prospects: cls.draftClass.prospects.map((pr) => {
+          prospects: draftClass.prospects.map((pr) => {
             const p = this.resolve(pr.playerId)
             return { playerId: pr.playerId as string, name: p.name, position: p.position, rank: pr.rank }
           }),
@@ -3669,7 +3729,7 @@ export class Career {
         this.pushNews(
           'draft',
           `The ${draftYear} entry draft is open`,
-          `${cls.draftClass.prospects.length} prospects are on the board across ${DRAFT_ROUNDS} rounds.`
+          `${draftClass.prospects.length} prospects are on the board across ${DRAFT_ROUNDS} rounds.`
         )
         // Fire draft preview report (once per season).
         for (const kind of checkDraftStage(this.pressScheduleState)) {
@@ -3808,27 +3868,36 @@ export class Career {
     player.draftRound = pick.round
     player.draftOverall = idx + 1
     player.draftClub = team.name
-    const elc = {
-      salary: 900000,
-      yearsRemaining: 3,
-      expiryYear: this.year + 1 + 3,
-      noTradeClause: false,
-      twoWay: true,
-    }
-    if (team.roster.length < ROSTER_HARD_CAP) {
-      team.roster.push(playerId)
-      player.contract = elc
-      this.lockerArrival(pick.ownerTeamId, playerId)
+    // A REAL prospect drafted out of a junior/college/European league keeps
+    // developing there — the club just holds his rights (no ELC, no roster move,
+    // no double-rostering). He graduates into the org later, via the dev gates /
+    // farm reassignment, once he turns pro. A GENERATED prospect has no club, so
+    // he must join the org now (NHL roster if there's room, else the AHL farm).
+    if (this.isAmateurWorldPlayer(playerId)) {
+      // rights-only: leave him on his amateur team, untouched contract.
     } else {
-      // NHL roster is full — a drafted teenager belongs in the system, not in
-      // limbo. Assign him to the club's AHL affiliate (where the offseason farm
-      // sort will place him correctly). Without this he was drafted with no team
-      // and no contract — an orphaned record.
-      const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
-      if (affiliate) {
-        affiliate.roster.push(playerId)
+      const elc = {
+        salary: 900000,
+        yearsRemaining: 3,
+        expiryYear: this.year + 1 + 3,
+        noTradeClause: false,
+        twoWay: true,
+      }
+      if (team.roster.length < ROSTER_HARD_CAP) {
+        team.roster.push(playerId)
         player.contract = elc
-        repairLines(affiliate, this.data.players)
+        this.lockerArrival(pick.ownerTeamId, playerId)
+      } else {
+        // NHL roster is full — a drafted teenager belongs in the system, not in
+        // limbo. Assign him to the club's AHL affiliate (where the offseason farm
+        // sort will place him correctly). Without this he was drafted with no team
+        // and no contract — an orphaned record.
+        const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+        if (affiliate) {
+          affiliate.roster.push(playerId)
+          player.contract = elc
+          repairLines(affiliate, this.data.players)
+        }
       }
     }
     if (pick.ownerTeamId === this.userTeamId) {

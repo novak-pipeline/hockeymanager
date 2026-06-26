@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { asPlayerId, asTeamId, type Lines, type PlayerId } from '@domain'
 import { generateLeague } from '@data/generate'
 import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
+import { generateDraftClass } from '@engine/league/offseason'
+import { Rng } from '@engine/shared/rng'
 import { Career, buildTeamList } from './career'
 
 describe('buildTeamList', () => {
@@ -1697,6 +1700,89 @@ describe('Career — wider-world quick-sim', () => {
     })
     return data
   }
+
+  /**
+   * Build a generated NHL league plus a real junior competition (the OHL) whose
+   * teams are stocked with genuine 17–18yo draft-eligible amateurs — the shape
+   * an imported world has. Used to prove the entry draft draws from the real
+   * prospect pool, not synthetic prospects.
+   */
+  function withJuniorProspects(seed: number): { data: ReturnType<typeof generateLeague>; amateurIds: Set<string> } {
+    const data = generateLeague({ seed })
+    // Mint a deep pool of real amateurs (age 17–18 ⇒ draft-eligible).
+    let n = 90000
+    const { players: amateurs } = generateDraftClass({
+      year: 2026, count: 300, rng: new Rng(seed + 7), nextPlayerNumber: () => n++,
+    })
+    for (const p of amateurs) { data.players.set(p.id, p); data.league.players.push(p.id) }
+    const get = (id: PlayerId) => data.players.get(id)!
+    const goaliesPool = amateurs.filter((p) => p.position === 'G').map((p) => p.id)
+    const dPool = amateurs.filter((p) => p.position === 'D').map((p) => p.id)
+    const fPool = amateurs.filter((p) => p.position === 'C' || p.position === 'W').map((p) => p.id)
+    const take = (pool: PlayerId[], k: number) => pool.splice(0, k)
+    const linesFrom = (roster: PlayerId[]): Lines => {
+      const g = roster.filter((id) => get(id).position === 'G')
+      const d = roster.filter((id) => get(id).position === 'D')
+      const f = roster.filter((id) => get(id).position === 'C' || get(id).position === 'W')
+      return {
+        forwards: [[f[0], f[1], f[2]], [f[3], f[4], f[5]], [f[6], f[7], f[8]], [f[9], f[10], f[11]]],
+        defensePairs: [[d[0], d[1]], [d[2], d[3]], [d[4], d[5]]],
+        goalies: [g[0], g[1]],
+        powerPlayUnits: [[f[0], f[1], f[2], d[0], d[1]]],
+        penaltyKillUnits: [[f[0], f[1], d[0], d[1]]],
+      }
+    }
+    const template = data.teams.get(data.league.teams[0]!)!
+    const TEAMS = 8
+    const juniorIds: ReturnType<typeof asTeamId>[] = []
+    const amateurIds = new Set<string>()
+    for (let t = 0; t < TEAMS; t++) {
+      const tid = asTeamId(`ohl-jt${t}`)
+      const roster = [...take(goaliesPool, 2), ...take(dPool, 6), ...take(fPool, 14)]
+      for (const id of roster) amateurIds.add(id as string)
+      const clone = JSON.parse(JSON.stringify(template)) as typeof template
+      data.teams.set(tid, {
+        ...clone, id: tid, externalId: undefined, name: `Junior ${t}`,
+        abbreviation: `J${t}`, tier: 'world', roster, lines: linesFrom(roster),
+      })
+      juniorIds.push(tid)
+    }
+    data.league.competitions = buildCompetitions({
+      comps: [{ id: 'ohl', name: 'Ontario Hockey League', abbrev: 'OHL', nation: 'Canada', level: 1, reputation: 13 }],
+      membership: juniorIds.map((teamId) => ({ teamId, competitionId: 'ohl' })),
+      season: 2025,
+    })
+    return { data, amateurIds }
+  }
+
+  it('drafts REAL junior prospects — board is built from them; picks hold rights, stay in junior', () => {
+    const { data, amateurIds } = withJuniorProspects(202)
+    const career = new Career(data, 202, data.league.teams[0]!)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft (class built from real eligibles)
+
+    const draft = career.getDraft()!
+    // The board references real junior amateurs, not freshly-minted prospects.
+    const onBoard = draft.prospects.filter((p) => amateurIds.has(p.playerId))
+    expect(onBoard.length).toBeGreaterThan(0)
+    expect(onBoard.length).toBe(draft.prospects.length) // ENTIRE class is real
+
+    career.autoDraft()
+    const drafted = [...data.players.values()].filter((p) => p.rightsTeamId !== undefined && amateurIds.has(p.id as string))
+    expect(drafted.length).toBeGreaterThan(0)
+    for (const p of drafted) {
+      expect(p.nhlDrafted).toBe(true)
+      // A drafted junior keeps developing in his league — not pulled onto any
+      // NHL/AHL roster, and not signed to an ELC yet.
+      const onNhl = data.league.teams.some((tid) => data.teams.get(tid)!.roster.includes(p.id))
+      expect(onNhl).toBe(false)
+      const stillJunior = [...data.teams.values()].some(
+        (t) => t.tier === 'world' && t.roster.includes(p.id)
+      )
+      expect(stillJunior).toBe(true)
+    }
+  })
 
   it('sims other leagues during the season — standings + player stats accrue', () => {
     const data = withCompetitions(31)

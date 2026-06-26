@@ -634,6 +634,34 @@ export function generateDraftClass(args: {
   return { players, draftClass: { year, prospects } }
 }
 
+/**
+ * Build a draft class from REAL, already-existing draft-eligible players (the
+ * imported junior/college/European prospects living in the wider-world
+ * competitions) rather than generating fictional ones. Ranks them by the same
+ * scouting-consensus formula `generateDraftClass` uses — true potential plus
+ * rng noise, so the top board slot isn't always the genuine best — and keeps
+ * the top `count` to match the generated class size (the rest stay in junior,
+ * undrafted / re-entry eligible next year). Creates no new players.
+ */
+export function buildDraftClassFromPlayers(args: {
+  year: number
+  eligible: Player[]
+  count: number
+  rng: Rng
+}): DraftClass {
+  const { year, eligible, count, rng } = args
+  const consensus = eligible.map((p, i) => ({
+    playerId: p.id,
+    index: i,
+    score: overall(computeComposites(p.potential, p.role, p.position), p.position) + rng.normal(0, 4),
+  }))
+  consensus.sort((a, b) => b.score - a.score || a.index - b.index)
+  const prospects: DraftProspect[] = consensus
+    .slice(0, Math.max(0, count))
+    .map((c, i) => ({ playerId: c.playerId, rank: i + 1 }))
+  return { year, prospects }
+}
+
 /* ────────────────────────── draft order & AI picks ────────────────────────── */
 
 /**

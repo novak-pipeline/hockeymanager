@@ -16,6 +16,7 @@ import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import {
   aiSelectProspect,
+  buildDraftClassFromPlayers,
   buildDraftOrder,
   developPlayers,
   expectedPointsFor,
@@ -743,6 +744,50 @@ describe('generateDraftClass', () => {
       if (draftClass.prospects[0].playerId !== trueBest.id) mismatch = true
     }
     expect(mismatch).toBe(true)
+  })
+})
+
+describe('buildDraftClassFromPlayers', () => {
+  it('ranks real eligibles, caps to count, and mints no new players', () => {
+    const { players } = makeClass(11, 200) // reuse generated players as "real eligibles"
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(3) })
+    expect(cls.year).toBe(2027)
+    // capped to the class size
+    expect(cls.prospects).toHaveLength(64)
+    // contiguous ranks 1..64
+    expect(cls.prospects.map((p) => p.rank)).toEqual(Array.from({ length: 64 }, (_, i) => i + 1))
+    // every prospect references an EXISTING player id (no new players created)
+    const ids = new Set(players.map((p) => p.id))
+    for (const pr of cls.prospects) expect(ids.has(pr.playerId)).toBe(true)
+  })
+
+  it('takes all eligibles when fewer than the cap', () => {
+    const { players } = makeClass(12, 20)
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(3) })
+    expect(cls.prospects).toHaveLength(20)
+  })
+
+  it('is deterministic for the same eligibles + seed', () => {
+    const { players } = makeClass(13, 80)
+    const a = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(5) })
+    const b = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(5) })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+
+  it('ranks by scouting consensus (top board slot is a high-potential player)', () => {
+    const { players } = makeClass(14, 120)
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(7) })
+    const byId = new Map(players.map((p) => [p.id as string, p]))
+    const topPot = overall(
+      computeComposites(byId.get(cls.prospects[0].playerId as string)!.potential,
+        byId.get(cls.prospects[0].playerId as string)!.role,
+        byId.get(cls.prospects[0].playerId as string)!.position),
+      byId.get(cls.prospects[0].playerId as string)!.position
+    )
+    // #1 overall sits comfortably in the upper tier of the eligible pool.
+    const allPot = players.map((p) => overall(computeComposites(p.potential, p.role, p.position), p.position))
+    const median = [...allPot].sort((a, b) => a - b)[Math.floor(allPot.length / 2)]
+    expect(topPot).toBeGreaterThan(median)
   })
 })
 
