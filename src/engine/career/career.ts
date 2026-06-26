@@ -347,6 +347,8 @@ import {
   type StaffMeetingSummaryView,
   type CoachMarketView,
   type CoachMarketEntry,
+  type PlayoffOddsView,
+  type PlayoffOddsRow,
   type LeagueStatsView,
   type LeagueTeamsView,
   type LinesUpdate,
@@ -5764,6 +5766,97 @@ export class Career {
       rosterAdvice: { callUps, sendDowns },
       systemElsewhere,
     })
+  }
+
+  /**
+   * Monte-Carlo playoff odds: simulate the remaining schedule many times from a
+   * lightweight strength-based win model and report each club's chance of making
+   * the playoffs (top 4 per conference, matching the bracket) plus its projected
+   * final points. Deterministic per (seed, day) so the number is stable until the
+   * next game is played.
+   */
+  getPlayoffOdds(): PlayoffOddsView {
+    const userId = this.userTeamId as string
+    if (this.phase !== 'regularSeason') {
+      return { available: false, simulations: 0, userTeamId: userId, rows: [] }
+    }
+    const N = 600
+    const QUAL = 4 // matches QUALIFIERS_PER_CONFERENCE in seedBracket
+    const teamIds = [...this.data.league.teams]
+
+    const strength = new Map<TeamId, number>()
+    const basePts = new Map<TeamId, number>()
+    const gamesPlayed = new Map<TeamId, number>()
+    const gamesRemaining = new Map<TeamId, number>()
+    const confOf = new Map<TeamId, string>()
+    for (const t of teamIds) {
+      const team = this.data.teams.get(t)
+      strength.set(t, teamStrengthRating((team?.roster ?? []).map((id) => this.resolve(id))))
+      const st = this.standings.get(t)
+      basePts.set(t, st?.points ?? 0)
+      gamesPlayed.set(t, st?.gamesPlayed ?? 0)
+      gamesRemaining.set(t, 0)
+      confOf.set(t, team?.conferenceId ?? '')
+    }
+
+    const remaining = this.data.league.schedule.filter((g) => g.day > this.currentDay)
+    for (const g of remaining) {
+      gamesRemaining.set(g.homeTeamId, (gamesRemaining.get(g.homeTeamId) ?? 0) + 1)
+      gamesRemaining.set(g.awayTeamId, (gamesRemaining.get(g.awayTeamId) ?? 0) + 1)
+    }
+
+    const confs = [...new Set(teamIds.map((t) => confOf.get(t)!))]
+    const sig = (x: number): number => 1 / (1 + Math.exp(-x))
+    const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
+
+    const playoffCount = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
+    const ptsTotal = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
+
+    for (let s = 0; s < N; s++) {
+      const pts = new Map<TeamId, number>(basePts)
+      for (const g of remaining) {
+        const sh = strength.get(g.homeTeamId) ?? 55
+        const sa = strength.get(g.awayTeamId) ?? 55
+        const pHome = sig((sh - sa) / 8 + 0.18) // home-ice edge
+        const otGame = rng.chance(0.23) // ~NHL share of games past regulation
+        if (rng.chance(pHome)) {
+          pts.set(g.homeTeamId, (pts.get(g.homeTeamId) ?? 0) + 2)
+          if (otGame) pts.set(g.awayTeamId, (pts.get(g.awayTeamId) ?? 0) + 1)
+        } else {
+          pts.set(g.awayTeamId, (pts.get(g.awayTeamId) ?? 0) + 2)
+          if (otGame) pts.set(g.homeTeamId, (pts.get(g.homeTeamId) ?? 0) + 1)
+        }
+      }
+      for (const t of teamIds) ptsTotal.set(t, (ptsTotal.get(t) ?? 0) + (pts.get(t) ?? 0))
+      for (const c of confs) {
+        const members = teamIds.filter((t) => confOf.get(t) === c)
+        members.sort((a, b) =>
+          (pts.get(b)! - pts.get(a)!) || (strength.get(b)! - strength.get(a)!) || (a < b ? -1 : 1)
+        )
+        for (let i = 0; i < QUAL && i < members.length; i++) {
+          playoffCount.set(members[i]!, playoffCount.get(members[i]!)! + 1)
+        }
+      }
+    }
+
+    const rows: PlayoffOddsRow[] = teamIds.map((t) => {
+      const team = this.data.teams.get(t)!
+      const confName = this.data.league.conferences.find((c) => c.id === confOf.get(t))?.name ?? ''
+      return {
+        teamId: t as string,
+        name: team.name,
+        abbreviation: team.abbreviation,
+        conference: confName,
+        points: basePts.get(t) ?? 0,
+        gamesPlayed: gamesPlayed.get(t) ?? 0,
+        gamesRemaining: gamesRemaining.get(t) ?? 0,
+        projectedPoints: Math.round((ptsTotal.get(t) ?? 0) / N),
+        playoffPct: Math.round(((playoffCount.get(t) ?? 0) / N) * 100),
+        isUser: (t as string) === userId,
+      }
+    })
+    rows.sort((a, b) => b.projectedPoints - a.projectedPoints || b.playoffPct - a.playoffPct)
+    return { available: true, simulations: N, userTeamId: userId, rows }
   }
 
   /** Squad Planner: experience matrix + depth/age/contract report for the user club. */

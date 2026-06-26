@@ -1873,6 +1873,34 @@ export interface CoachMarketView {
   entries: CoachMarketCandidateView[]
 }
 
+/** One team's Monte-Carlo playoff projection. */
+export interface PlayoffOddsRow {
+  teamId: string
+  name: string
+  abbreviation: string
+  conference: string
+  /** Current standings points. */
+  points: number
+  gamesPlayed: number
+  gamesRemaining: number
+  /** Mean simulated final points. */
+  projectedPoints: number
+  /** 0–100 chance of making the playoffs. */
+  playoffPct: number
+  isUser: boolean
+}
+
+/** Monte-Carlo playoff odds for the league. Response to 'getPlayoffOdds'. */
+export interface PlayoffOddsView {
+  /** False outside the regular season (no projection to make). */
+  available: boolean
+  /** Number of season simulations run. */
+  simulations: number
+  userTeamId: string
+  /** All teams, best projected points first. */
+  rows: PlayoffOddsRow[]
+}
+
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
   /** Captain badge, null during a leadership vacancy. */

@@ -95,6 +95,8 @@ export type { StaffMeetingSummaryView, StaffMeetingFlaggedPlayer } from '@engine
 import type { StaffMeetingSummaryView } from '@engine/career/views'
 export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
 import type { CoachMarketView } from '@engine/career/views'
+export type { PlayoffOddsView, PlayoffOddsRow } from '@engine/career/views'
+import type { PlayoffOddsView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -193,6 +195,7 @@ export type WorkerRequestBody =
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
   | { type: 'getLeagueComparison' }
+  | { type: 'getPlayoffOdds' }
   | { type: 'getStaffMeetingSummary' }
   | { type: 'getCoachMarket' }
   | { type: 'fireCoach' }
@@ -353,6 +356,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
   | { type: 'leagueComparison'; comparison: LeagueComparisonView }
+  | { type: 'playoffOdds'; odds: PlayoffOddsView }
   | { type: 'staffMeetingSummary'; summary: StaffMeetingSummaryView }
   | { type: 'coachMarket'; market: CoachMarketView }
   | { type: 'coachHireResult'; ok: boolean; message: string }

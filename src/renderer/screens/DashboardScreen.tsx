@@ -6,6 +6,7 @@ import type {
   InboxView,
   LeagueComparisonView,
   LeagueComparisonCard,
+  PlayoffOddsView,
   ScheduleEntryView,
   ScheduleView,
   StandingRowView,
@@ -100,6 +101,11 @@ export function DashboardScreen(): JSX.Element {
   const { data: comparison } = useScreenData<LeagueComparisonView>(
     () => client.getLeagueComparison(),
     (r) => (r.type === 'leagueComparison' ? r.comparison : null)
+  )
+
+  const { data: playoffOdds } = useScreenData<PlayoffOddsView>(
+    () => client.getPlayoffOdds(),
+    (r) => (r.type === 'playoffOdds' ? r.odds : null)
   )
 
   if (error) {
@@ -349,6 +355,13 @@ export function DashboardScreen(): JSX.Element {
             )}
           </Panel>
 
+          {/* Playoff picture */}
+          {playoffOdds?.available && (
+            <Panel title="Playoff picture">
+              <PlayoffOddsCard view={playoffOdds} />
+            </Panel>
+          )}
+
           {/* How your club stacks up */}
           {comparison && comparison.cards.length > 0 && (
             <Panel title="How you stack up">
@@ -359,6 +372,54 @@ export function DashboardScreen(): JSX.Element {
         </div>
       </div>
     </section>
+  )
+}
+
+/* ── Playoff odds card ── */
+
+function oddsColor(pct: number): string {
+  if (pct >= 85) return 'var(--success)'
+  if (pct >= 45) return 'var(--accent, #f5b301)'
+  if (pct >= 15) return 'var(--amber, #f59e0b)'
+  return 'var(--danger)'
+}
+
+function PlayoffOddsCard({ view }: { view: PlayoffOddsView }): JSX.Element {
+  const user = view.rows.find((r) => r.isUser)
+  // The user's conference, by projected points, with the top-4 playoff cut line.
+  const conf = user ? view.rows.filter((r) => r.conference === user.conference) : []
+
+  return (
+    <div className="list">
+      {user && (
+        <div className="row-between" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+          <span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: oddsColor(user.playoffPct) }}>{user.playoffPct}%</span>
+            <span className="muted small"> to make the playoffs</span>
+          </span>
+          <span className="muted small">proj. {user.projectedPoints} pts</span>
+        </div>
+      )}
+      <div className="muted small" style={{ marginBottom: 4, opacity: 0.7 }}>
+        {user?.conference} — top 4 make it ({view.simulations} sims)
+      </div>
+      {conf.map((r, i) => (
+        <div key={r.teamId}>
+          {i === 4 && <div style={{ borderTop: '1px dashed var(--danger)', opacity: 0.5, margin: '3px 0' }} />}
+          <div
+            className="row-between small"
+            style={{ alignItems: 'center', gap: 8, fontWeight: r.isUser ? 700 : 400, color: r.isUser ? 'var(--violet-h)' : undefined }}
+          >
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {i + 1}. <TeamLink teamId={r.teamId} name={r.abbreviation} /> <span className="muted">{r.points}p · {r.gamesRemaining} left</span>
+            </span>
+            <span className="mono" style={{ color: oddsColor(r.playoffPct), fontWeight: 700, minWidth: 38, textAlign: 'right' }}>
+              {r.playoffPct}%
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 

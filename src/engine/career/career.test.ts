@@ -17,6 +17,30 @@ describe('buildTeamList', () => {
   })
 })
 
+describe('Career — playoff odds', () => {
+  it('projects sane, deterministic playoff odds during the regular season', () => {
+    const data = generateLeague({ seed: 61 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 61, userId)
+    const a = career.getPlayoffOdds()
+    const b = new Career(generateLeague({ seed: 61 }), 61, userId).getPlayoffOdds()
+
+    expect(a.available).toBe(true)
+    expect(a.rows.length).toBe(data.league.teams.length)
+    expect(a).toEqual(b) // deterministic per (seed, day)
+    for (const r of a.rows) {
+      expect(r.playoffPct).toBeGreaterThanOrEqual(0)
+      expect(r.playoffPct).toBeLessThanOrEqual(100)
+      expect(r.projectedPoints).toBeGreaterThanOrEqual(r.points) // can only gain points
+      expect(r.gamesRemaining).toBeGreaterThan(0) // day 0: full slate ahead
+    }
+    // Two conferences, top 4 each = 8 playoff spots; total odds ≈ 800%.
+    const totalPct = a.rows.reduce((s, r) => s + r.playoffPct, 0)
+    expect(totalPct).toBeGreaterThan(650)
+    expect(totalPct).toBeLessThan(950)
+  })
+})
+
 describe('Career — coach job market', () => {
   it('offers a deterministic market with roster-fit previews', () => {
     const data = generateLeague({ seed: 71 })

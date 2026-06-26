@@ -245,6 +245,10 @@ export class SimClient {
     return this.send({ type: 'getLeagueComparison' })
   }
 
+  getPlayoffOdds(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPlayoffOdds' })
+  }
+
   getStaffMeetingSummary(): Promise<WorkerResponse> {
     return this.send({ type: 'getStaffMeetingSummary' })
   }
