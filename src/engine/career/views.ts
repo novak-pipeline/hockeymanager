@@ -194,6 +194,10 @@ export interface NextGameView {
   home: boolean
   /** Opponent's league rank for the pre-match blurb. */
   opponentRank: number
+  /** Opponent record, e.g. "24-12-4". */
+  opponentRecord: string
+  /** Opponent head coach's named system, e.g. "Heavy Forecheck". */
+  opponentSystem: string
   /** Non-null when this is a rivalry game (intensity >= 60). */
   rivalryLabel: string | null
 }

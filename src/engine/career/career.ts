@@ -4740,6 +4740,8 @@ export class Career {
       const home = nextSched.homeTeamId === this.userTeamId
       const opp = this.data.teams.get(home ? nextSched.awayTeamId : nextSched.homeTeamId)!
       const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+      const os = this.standings.get(opp.id)
+      const oppCoach = this.getTeamStaff(opp.id as string).headCoach
       nextGame = {
         day: nextSched.day,
         date: dayToDateISO(this.year, nextSched.day),
@@ -4748,6 +4750,8 @@ export class Career {
         opponentAbbr: opp.abbreviation,
         home,
         opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+        opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
+        opponentSystem: oppCoach.profile?.meta.label ?? '—',
         rivalryLabel: gi.label,
       }
     } else if (this.phase === 'playoffs' && this.playoffs) {
@@ -4758,6 +4762,8 @@ export class Career {
         const home = pending.homeTeamId === this.userTeamId
         const opp = this.data.teams.get(home ? pending.awayTeamId : pending.homeTeamId)!
         const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+        const os = this.standings.get(opp.id)
+        const oppCoach = this.getTeamStaff(opp.id as string).headCoach
         nextGame = {
           day: this.currentDay + 1,
           date: dayToDateISO(this.year, this.currentDay + 1),
@@ -4766,6 +4772,8 @@ export class Career {
           opponentAbbr: opp.abbreviation,
           home,
           opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+          opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
+          opponentSystem: oppCoach.profile?.meta.label ?? '—',
           rivalryLabel: gi.label,
         }
       }

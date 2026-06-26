@@ -294,6 +294,12 @@ export function DashboardScreen(): JSX.Element {
                   {fmtDate(d.nextGame.date)} · #{d.nextGame.opponentRank} in league ·{' '}
                   {d.nextGame.home ? 'Home' : 'Away'}
                 </div>
+                <div className="muted small">
+                  Opponent: {d.nextGame.opponentRecord}
+                  {d.nextGame.opponentSystem && d.nextGame.opponentSystem !== '—' && (
+                    <> · plays <span style={{ color: 'var(--accent)' }}>{d.nextGame.opponentSystem}</span></>
+                  )}
+                </div>
                 <div className="row">
                   <button
                     className="btn btn-primary"
