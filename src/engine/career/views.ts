@@ -277,6 +277,8 @@ export interface DashboardView {
 export interface SquadRowView extends PlayerBadge {
   role: string
   handedness: 'L' | 'R'
+  /** Positions the player can fill, natural first, e.g. "C, LW, RW" or "LD, RD". */
+  positions: string
   /** 0–100; 100 = fully fresh. */
   condition: number
   morale: number

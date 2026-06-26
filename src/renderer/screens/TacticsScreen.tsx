@@ -587,6 +587,7 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
           <thead>
             <tr>
               <th>Player</th>
+              <th>Pos</th>
               <th>Line</th>
               <th>Ability</th>
               <th>Cond</th>
@@ -599,18 +600,32 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
               g.rows.length === 0 ? null : (
                 <>
                   <tr key={`hdr-${g.label}`} style={{ background: 'var(--surface-raised)' }}>
-                    <td colSpan={6} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', padding: '5px 8px' }}>
+                    <td colSpan={7} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--muted)', padding: '5px 8px' }}>
                       {g.label}
                     </td>
                   </tr>
-                  {g.rows.map((r) => (
+                  {g.rows.map((r) => {
+                    const natural = r.positions.split(',')[0]?.trim() ?? ''
+                    const extras = r.positions.split(',').slice(1).map((s) => s.trim()).filter(Boolean)
+                    return (
                     <tr key={r.playerId} style={r.injury ? { opacity: 0.65 } : undefined}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <PlayerFace faceId={r.faceId} name={r.name} size={20} />
-                          <PlayerLink playerId={r.playerId} name={r.name} />
+                          <div style={{ minWidth: 0 }}>
+                            <PlayerLink playerId={r.playerId} name={r.name} />
+                            {r.archetype && (
+                              <div className="muted" style={{ fontSize: 10, lineHeight: 1.1 }}>{r.archetype.label}</div>
+                            )}
+                          </div>
                           {r.injury && <span title="Injured" style={{ color: 'var(--danger)', fontSize: 11 }}>＋</span>}
                         </div>
+                      </td>
+                      <td title={`Can play: ${r.positions}`} style={{ whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 600 }}>{natural}</span>
+                        {extras.length > 0 && (
+                          <span className="muted" style={{ fontSize: 10 }}> /{extras.join('/')}</span>
+                        )}
                       </td>
                       <td><span className="chip" style={{ fontSize: 10 }}>{r.lineLabel}</span></td>
                       <td><StarRating value={r.overall} /></td>
@@ -618,7 +633,8 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
                       <td style={{ textAlign: 'center' }}><FormArrow value={r.form} /></td>
                       <td style={{ color: moraleColor(r.morale), fontWeight: 600 }}>{moraleWord(r.morale)}</td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </>
               )
             )}

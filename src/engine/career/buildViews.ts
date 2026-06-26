@@ -304,6 +304,30 @@ function lineLabel(team: Team, id: PlayerId): string {
   return parts.length > 0 ? parts.join('/') : '—'
 }
 
+/**
+ * Positions a player can fill (natural first). Derived from position + handedness
+ * + the versatility attribute, so only genuinely versatile players show extra
+ * slots. Forwards slide between C and the wings; D can cover their off side.
+ */
+function eligiblePositions(p: Player): string {
+  const v = p.versatility ?? 50
+  if (p.position === 'G') return 'G'
+  if (p.position === 'D') {
+    const nat = p.handedness === 'L' ? 'LD' : 'RD'
+    const off = p.handedness === 'L' ? 'RD' : 'LD'
+    return v >= 55 ? `${nat}, ${off}` : nat
+  }
+  if (p.position === 'C') {
+    return v >= 50 ? 'C, LW, RW' : 'C'
+  }
+  // Winger: the off-hand wing is the natural side (a right shot plays LW).
+  const natWing = p.handedness === 'R' ? 'LW' : 'RW'
+  const offWing = p.handedness === 'R' ? 'RW' : 'LW'
+  if (v >= 65) return `C, ${natWing}, ${offWing}`
+  if (v >= 50) return `${natWing}, ${offWing}`
+  return natWing
+}
+
 export function buildSquadView(
   ctx: ViewCtx,
   opts?: {
@@ -327,6 +351,7 @@ export function buildSquadView(
         ...badge(p),
         role: p.role,
         handedness: p.handedness,
+        positions: eligiblePositions(p),
         condition: conditionOf(p),
         morale: Math.round(p.morale),
         form: Math.round(p.form),
