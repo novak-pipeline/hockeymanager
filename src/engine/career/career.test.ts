@@ -3,6 +3,7 @@ import { asPlayerId, asTeamId, type Lines, type PlayerId } from '@domain'
 import { generateLeague } from '@data/generate'
 import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
 import { generateDraftClass } from '@engine/league/offseason'
+import { computeComposites } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import { Career, buildTeamList } from './career'
 
@@ -1830,6 +1831,36 @@ describe('Career — wider-world quick-sim', () => {
     const real = d.prospects.filter((p) => p.leagueAbbr)
     expect(real.length).toBeGreaterThan(0)
     expect(d.prospects.some((p) => p.seasonGp && p.seasonGp > 0)).toBe(true)
+  })
+
+  it('an elite teenager jumps straight to the NHL out of camp', () => {
+    const { data } = withJuniorProspects(208, 18)
+    const userId = data.league.teams[0]!
+    // Craft a generational 18yo on a junior team with the user holding his rights.
+    const jt = [...data.teams.values()].find((t) => t.tier === 'world')!
+    const pid = jt.roster.find((id) => data.players.get(id)!.position !== 'G')!
+    const p = data.players.get(pid)!
+    p.age = 18
+    p.nhlDrafted = true
+    p.nhlDraftEligible = false
+    p.rightsTeamId = userId
+    for (const grp of [p.ratings.technical, p.ratings.physical, p.ratings.mental, p.ratings.goalie]) {
+      if (grp) for (const k of Object.keys(grp)) (grp as Record<string, number>)[k] = 95
+    }
+    p.composites = computeComposites(p.ratings, p.role, p.position)
+
+    const career = new Career(data, 208, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    let g = 0
+    while (career.getDashboard().phase === 'offseason' && g++ < 80) {
+      if (career.draftPending()) { career.autoDraft(); continue }
+      career.advanceOffseason()
+    }
+    // He made the NHL roster directly — not the AHL, not still in junior.
+    expect(data.teams.get(userId)!.roster.includes(pid)).toBe(true)
+    expect([...data.teams.values()].some((t) => t.tier === 'world' && t.roster.includes(pid))).toBe(false)
+    expect(data.players.get(pid)!.contract.yearsRemaining).toBeGreaterThan(0)
   })
 
   it('graduates drafted prospects into the org once they age out of junior', () => {
