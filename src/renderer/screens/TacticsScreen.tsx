@@ -45,6 +45,8 @@ type Section = 'forwards' | 'defense' | 'goalies' | 'pp' | 'pk'
 interface DragPayload {
   src: SlotAddr
   playerId: string
+  /** Set when dragged from the depth-chart list: locate the player wherever he is. */
+  fromRoster?: boolean
 }
 
 /* ── Mutation helpers (pure) ── */
@@ -495,29 +497,35 @@ interface TokenRowProps {
   onDepthSelect: (addr: SlotAddr & { kind: 'slot' }, player: PlayerBadge) => void
   /** Centre the tokens (defence pairs / goalies) instead of spanning the full width. */
   centered?: boolean
+  /** Pack tokens together with no stretched chemistry connector (goalies, special teams). */
+  packed?: boolean
 }
 
 function TokenRow({
   slots, section, lineIdx, label, roster, synergy, dragOverAddr,
-  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect, centered,
+  onOpenPicker, onDragStart, onDragOver, onDragLeave, onDrop, onDepthSelect, centered, packed,
 }: TokenRowProps): JSX.Element {
   function isOver(si: number): boolean {
     const a = dragOverAddr
     if (!a || a.kind !== 'slot') return false
     return a.section === section && a.lineIdx === lineIdx && a.slotIdx === si
   }
+  // Packed rows (goalies, special-teams units) are NOT chemistry lines, so the
+  // tokens simply sit together with a small gap — no stretched connector.
+  const inner: React.CSSProperties = packed
+    ? { display: 'flex', gap: 10, flexWrap: 'wrap', flex: 1, minWidth: 0, padding: '0 8px', justifyContent: centered ? 'center' : 'flex-start' }
+    : { display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0, padding: '0 8px', ...(centered ? { maxWidth: 560, margin: '0 auto' } : {}) }
   return (
     <div className="row" style={{ gap: 0, alignItems: 'stretch', width: '100%' }}>
       <span className="muted small" style={{ width: 22, textAlign: 'right', alignSelf: 'center', flexShrink: 0 }}>
         {label}
       </span>
-      {/* tokens spread across the rink width, joined by colour-coded chemistry lines */}
-      <div style={{ display: 'flex', alignItems: 'stretch', flex: 1, minWidth: 0, padding: '0 8px', ...(centered ? { maxWidth: 560, margin: '0 auto' } : {}) }}>
+      <div style={inner}>
         {slots.map((slot, si) => {
           const addr: SlotAddr & { kind: 'slot' } = { kind: 'slot', section, lineIdx, slotIdx: si }
           return (
             <Fragment key={si}>
-              {si > 0 && <Connector synergy={synergy} />}
+              {!packed && si > 0 && <Connector synergy={synergy} />}
               <RinkToken
                 slotDef={slot}
                 addr={addr}
@@ -534,7 +542,7 @@ function TokenRow({
           )
         })}
       </div>
-      {synergy && (
+      {synergy && !packed && (
         <span
           className="small"
           style={{ alignSelf: 'center', width: 116, flexShrink: 0, color: synergyColor(synergy.score), fontWeight: 600, fontSize: 11 }}
@@ -566,7 +574,26 @@ function FormArrow({ value }: { value: number }): JSX.Element {
   return <span className="muted" title="Steady">▬</span>
 }
 
-function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
+type DepthSortKey = 'name' | 'positions' | 'lineLabel' | 'overall' | 'condition' | 'form' | 'morale'
+
+function depthVal(r: SquadRowView, key: DepthSortKey): number | string {
+  switch (key) {
+    case 'name': return r.name
+    case 'positions': return r.positions
+    case 'lineLabel': return r.lineLabel
+    case 'overall': return r.overall
+    case 'condition': return r.condition
+    case 'form': return r.form
+    case 'morale': return r.morale
+  }
+}
+
+function DepthChart({ squad, onRosterDragStart }: {
+  squad: SquadView | null
+  onRosterDragStart: (playerId: string) => void
+}): JSX.Element {
+  const [sort, setSort] = useState<{ key: DepthSortKey; dir: 1 | -1 }>({ key: 'overall', dir: -1 })
+
   if (!squad) {
     return <Panel title="Depth Chart"><div className="muted small">Loading roster…</div></Panel>
   }
@@ -575,24 +602,43 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
     { label: 'Defence', rows: squad.rows.filter((r) => r.position === 'D') },
     { label: 'Goalies', rows: squad.rows.filter((r) => r.position === 'G') },
   ]
-  for (const g of groups) g.rows.sort((a, b) => b.overall - a.overall)
+  const cmp = (a: SquadRowView, b: SquadRowView): number => {
+    const av = depthVal(a, sort.key)
+    const bv = depthVal(b, sort.key)
+    const d = typeof av === 'string' ? av.localeCompare(bv as string) : av - (bv as number)
+    return d * sort.dir || b.overall - a.overall
+  }
+  for (const g of groups) g.rows.sort(cmp)
+
+  // Numeric columns default to descending (best first); text columns to ascending.
+  function clickHeader(key: DepthSortKey): void {
+    setSort((s) => (s.key === key ? { key, dir: (s.dir === 1 ? -1 : 1) } : { key, dir: key === 'name' || key === 'positions' || key === 'lineLabel' ? 1 : -1 }))
+  }
+  const arrow = (key: DepthSortKey): string => (sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : '')
+  const HEADERS: Array<[DepthSortKey, string]> = [
+    ['name', 'Player'], ['positions', 'Pos'], ['lineLabel', 'Line'],
+    ['overall', 'Ability'], ['condition', 'Cond'], ['form', 'Form'], ['morale', 'Morale'],
+  ]
 
   return (
     <Panel title="Depth Chart">
       <div className="muted small" style={{ marginBottom: 'var(--sp-2)', opacity: 0.75 }}>
-        Form, condition and morale at a glance — click a name for the full profile.
+        Click a column to sort · drag a name onto the board to slot him in · click a name for the profile.
       </div>
       <div className="table-wrap">
         <table className="table" style={{ fontSize: 12 }}>
           <thead>
             <tr>
-              <th>Player</th>
-              <th>Pos</th>
-              <th>Line</th>
-              <th>Ability</th>
-              <th>Cond</th>
-              <th>Form</th>
-              <th>Morale</th>
+              {HEADERS.map(([key, label]) => (
+                <th
+                  key={key}
+                  onClick={() => clickHeader(key)}
+                  style={{ cursor: 'pointer', userSelect: 'none', color: sort.key === key ? 'var(--accent)' : undefined }}
+                  title={`Sort by ${label}`}
+                >
+                  {label}{arrow(key)}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -608,7 +654,17 @@ function DepthChart({ squad }: { squad: SquadView | null }): JSX.Element {
                     const natural = r.positions.split(',')[0]?.trim() ?? ''
                     const extras = r.positions.split(',').slice(1).map((s) => s.trim()).filter(Boolean)
                     return (
-                    <tr key={r.playerId} style={r.injury ? { opacity: 0.65 } : undefined}>
+                    <tr
+                      key={r.playerId}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('application/x-lineup-slot', JSON.stringify({ fromRoster: true, playerId: r.playerId }))
+                        e.dataTransfer.effectAllowed = 'move'
+                        onRosterDragStart(r.playerId)
+                      }}
+                      style={{ cursor: 'grab', ...(r.injury ? { opacity: 0.65 } : {}) }}
+                      title={`${r.name} — drag onto the board to slot him in`}
+                    >
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <PlayerFace faceId={r.faceId} name={r.name} size={20} />
@@ -842,12 +898,26 @@ export function TacticsScreen(): JSX.Element {
   const handleDragOver = useCallback((addr: SlotAddr) => { setDragOverAddr(addr) }, [])
   const handleDragLeave = useCallback(() => { setDragOverAddr(null) }, [])
 
+  // A name dragged from the depth chart: locate-and-place on drop (see handleDrop).
+  const handleRosterDragStart = useCallback((playerId: string) => {
+    dragPayloadRef.current = { src: { kind: 'scratch', playerId: '' }, playerId, fromRoster: true }
+  }, [])
+
   function handleDrop(dst: SlotAddr): void {
     const payload = dragPayloadRef.current
     dragPayloadRef.current = null
     setDragSrc(null)
     setDragOverAddr(null)
     if (!payload || !lines) return
+
+    // Dragged from the depth-chart list → place that player into the target slot
+    // (locating and vacating wherever he currently sits). Only valid onto a slot.
+    if (payload.fromRoster) {
+      if (dst.kind !== 'slot') return
+      const chosen = buildRoster().find((p) => p.playerId === payload.playerId)
+      if (chosen) handleDepthSelect(dst, chosen)
+      return
+    }
 
     const src = payload.src
     if (
@@ -1055,6 +1125,7 @@ export function TacticsScreen(): JSX.Element {
                       synergy={null}
                       onOpenPicker={(_l2, s2) => openPicker('goalies', s2, 0)}
                       centered
+                      packed
                       {...dnd}
                       onDrop={(dst) => handleDrop(dst)}
                     />
@@ -1077,6 +1148,7 @@ export function TacticsScreen(): JSX.Element {
                         roster={roster}
                         synergy={null}
                         onOpenPicker={(l2, s2) => openPicker('pp', l2, s2)}
+                        packed
                         {...dnd}
                       />
                     ))}
@@ -1093,6 +1165,7 @@ export function TacticsScreen(): JSX.Element {
                         roster={roster}
                         synergy={null}
                         onOpenPicker={(l2, s2) => openPicker('pk', l2, s2)}
+                        packed
                         {...dnd}
                       />
                     ))}
@@ -1170,7 +1243,7 @@ export function TacticsScreen(): JSX.Element {
 
             {/* ── RIGHT: depth chart ── */}
             <div className="stack">
-              <DepthChart squad={squad} />
+              <DepthChart squad={squad} onRosterDragStart={handleRosterDragStart} />
             </div>
           </div>
 
