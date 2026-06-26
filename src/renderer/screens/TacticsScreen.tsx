@@ -1,7 +1,7 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import { overallToStars } from '../../engine/ratings/composites'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
-import type { SquadView } from '../../worker/protocol'
+import type { SquadView, StaffMeetingSummaryView } from '../../worker/protocol'
 import type {
   LinesView,
   LineSlotView,
@@ -638,6 +638,10 @@ export function TacticsScreen(): JSX.Element {
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
   )
+  const { data: coachSummary } = useScreenData<StaffMeetingSummaryView>(
+    () => client.getStaffMeetingSummary(),
+    (r) => (r.type === 'staffMeetingSummary' ? r.summary : null)
+  )
 
   // Optimistic local copy of the lines while a save round-trips. The board is
   // auto-saved on every change — there is no Save button. Cleared whenever fresh
@@ -869,6 +873,28 @@ export function TacticsScreen(): JSX.Element {
 
       {error && <Notice kind="warn">{error}</Notice>}
       {loading && !data && <Notice kind="info">Loading…</Notice>}
+
+      {coachSummary && (
+        <div
+          className="row"
+          style={{
+            gap: 12, alignItems: 'center', flexWrap: 'wrap',
+            padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            {coachSummary.coachName}’s system
+          </span>
+          <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{coachSummary.systemLabel}</span>
+          <span className="muted small">
+            {coachSummary.forecheckName} · {coachSummary.dZoneName} D-zone · {coachSummary.paceName}
+          </span>
+          <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
+            roster fit <strong style={{ color: coachSummary.rosterFit >= 66 ? 'var(--success)' : coachSummary.rosterFit >= 55 ? 'var(--amber, #f59e0b)' : 'var(--danger)' }}>{coachSummary.rosterFit}/100</strong>
+          </span>
+        </div>
+      )}
 
       {data && lines && (
         <>

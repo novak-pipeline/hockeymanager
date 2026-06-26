@@ -2606,6 +2606,22 @@ export class Career {
   private prepareTeamsForDay(): void {
     this.emergencyRecalls()
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+    this.refreshCoachFit()
+  }
+
+  /**
+   * Keep every NHL team's coach roster-fit current as rosters evolve (trades,
+   * call-ups, injuries) so the small on-ice coach-fit edge tracks reality rather
+   * than the season-opening snapshot. Measures the tactics actually in use.
+   */
+  private refreshCoachFit(): void {
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const roster = team.roster.map((id) => this.resolve(id))
+      if (roster.length === 0) continue
+      team.coachFit = styleMatch(roster, team.tactics).fit
+    }
   }
 
   /**
