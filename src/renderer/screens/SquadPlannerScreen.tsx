@@ -101,13 +101,14 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Position</th><th className="num">No.</th><th>Verdict</th><th>Note</th></tr>
+                <tr><th>Position</th><th className="num">No.</th><th className="num">League rank</th><th>Verdict</th><th>Note</th></tr>
               </thead>
               <tbody>
                 {d.depth.map((dp) => (
                   <tr key={dp.group}>
                     <td>{dp.label}</td>
                     <td className="num muted">{dp.count}</td>
+                    <td className="num muted">{dp.rank != null && dp.outOf != null ? `${dp.rank} / ${dp.outOf}` : '—'}</td>
                     <td style={{ color: verdictColor(dp.verdict), fontWeight: 700, fontSize: 12 }}>{dp.verdict}</td>
                     <td className="small muted">{dp.note}</td>
                   </tr>

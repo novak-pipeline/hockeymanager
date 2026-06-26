@@ -5445,7 +5445,12 @@ export class Career {
   getSquadPlanner(): SquadPlannerView {
     const team = this.data.teams.get(this.userTeamId)
     const roster = (team?.roster ?? []).map((id) => this.resolve(id))
-    return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster })
+    // Every NHL team's roster, so the depth report can judge each position group
+    // RELATIVE to the rest of the league rather than by absolute headcount.
+    const leagueRosters = this.data.league.teams.map((tid) =>
+      (this.data.teams.get(tid)?.roster ?? []).map((id) => this.resolve(id))
+    )
+    return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster, leagueRosters })
   }
 
   /** Legends registry for a club, most recent first. */

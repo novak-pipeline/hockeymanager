@@ -38,6 +38,10 @@ export interface PositionDepth {
   /** 'Strong' | 'Adequate' | 'Thin' | 'Critical'. */
   verdict: 'Strong' | 'Adequate' | 'Thin' | 'Critical'
   note: string
+  /** League rank for this position group (1 = strongest), when league context is supplied. */
+  rank?: number
+  /** Number of teams ranked against (league size). */
+  outOf?: number
 }
 
 export interface SquadPlannerView {
@@ -91,9 +95,43 @@ function stars(p: Player): number {
   return overallToStars(ratedOverall(p))
 }
 
+/** 1 -> "1st", 2 -> "2nd", 23 -> "23rd". */
+function ordinal(n: number): string {
+  const rem100 = n % 100
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`
+  switch (n % 10) {
+    case 1: return `${n}st`
+    case 2: return `${n}nd`
+    case 3: return `${n}rd`
+    default: return `${n}th`
+  }
+}
+
 export interface BuildSquadPlannerArgs {
   teamName: string
   roster: Player[]
+  /**
+   * Every league team's roster (including this one), used to judge each position
+   * group's strength RELATIVE to the rest of the league rather than by absolute
+   * headcount. When omitted, depth falls back to fixed headcount targets.
+   */
+  leagueRosters?: Player[][]
+}
+
+/**
+ * Position-group strength for one roster: the sum of the top `TARGET_DEPTH`
+ * players' ratings in that group (missing bodies count as zero), so the metric
+ * rewards both quality and depth the way a GM weighs a position.
+ */
+function groupStrength(roster: Player[], group: PosGroup): number {
+  const target = TARGET_DEPTH[group]
+  const rated = roster
+    .filter((p) => groupOf(p) === group)
+    .map((p) => ratedOverall(p))
+    .sort((a, b) => b - a)
+  let s = 0
+  for (let i = 0; i < target; i++) s += rated[i] ?? 0
+  return s
 }
 
 export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView {
@@ -131,9 +169,30 @@ export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView
   ]
   const ageProfile = bands.map((b) => ({ band: b.band, count: players.filter((p) => b.test(p.age)).length }))
 
-  // Depth verdicts.
+  // Depth verdicts — relative to the rest of the league when league context is
+  // supplied (a position is "Strong" because you're better stocked than rival
+  // clubs, not because you cleared an arbitrary headcount), else by headcount.
+  const league = args.leagueRosters && args.leagueRosters.length > 1 ? args.leagueRosters : null
   const depth: PositionDepth[] = groups.map((group) => {
     const count = players.filter((p) => p.group === group).length
+
+    if (league) {
+      const mine = groupStrength(args.roster, group)
+      const all = league.map((r) => groupStrength(r, group))
+      // Rank: 1 = strongest. Ties share the better (lower) rank.
+      const rank = 1 + all.filter((s) => s > mine).length
+      const outOf = all.length
+      // Fraction of the league you outrank (1 = top, 0 = bottom).
+      const pct = outOf > 1 ? (outOf - rank) / (outOf - 1) : 1
+      let verdict: PositionDepth['verdict']
+      let note: string
+      if (pct >= 0.66) { verdict = 'Strong'; note = `Among the league's best here (${ordinal(rank)} of ${outOf}).` }
+      else if (pct >= 0.4) { verdict = 'Adequate'; note = `Around league average (${ordinal(rank)} of ${outOf}).` }
+      else if (pct >= 0.15) { verdict = 'Thin'; note = `Below the league standard (${ordinal(rank)} of ${outOf}).` }
+      else { verdict = 'Critical'; note = `One of the weakest in the league (${ordinal(rank)} of ${outOf}).` }
+      return { group, label: GROUP_LABEL[group], count, verdict, note, rank, outOf }
+    }
+
     const target = TARGET_DEPTH[group]
     let verdict: PositionDepth['verdict']
     let note: string
