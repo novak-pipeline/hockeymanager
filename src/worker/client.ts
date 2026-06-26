@@ -249,6 +249,18 @@ export class SimClient {
     return this.send({ type: 'getStaffMeetingSummary' })
   }
 
+  getCoachMarket(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCoachMarket' })
+  }
+
+  fireCoach(): Promise<WorkerResponse> {
+    return this.send({ type: 'fireCoach' })
+  }
+
+  hireCoach(coachId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireCoach', coachId })
+  }
+
   getClubInfo(): Promise<WorkerResponse> {
     return this.send({ type: 'getClubInfo' })
   }

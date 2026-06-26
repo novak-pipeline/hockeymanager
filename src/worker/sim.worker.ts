@@ -143,6 +143,16 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'leagueComparison', comparison: must().getLeagueComparison() }
     case 'getStaffMeetingSummary':
       return { id: req.id, type: 'staffMeetingSummary', summary: must().getStaffMeetingSummary() }
+    case 'getCoachMarket':
+      return { id: req.id, type: 'coachMarket', market: must().getCoachMarket() }
+    case 'fireCoach': {
+      const r = must().fireCoach()
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
+    case 'hireCoach': {
+      const r = must().hireCoach(req.coachId)
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
     case 'getLeagueStatTable':
       return { id: req.id, type: 'leagueStatTable', table: must().getLeagueStatTable(req.teamId) }
     case 'suggestToCoach': {

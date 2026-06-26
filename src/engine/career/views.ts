@@ -1463,6 +1463,11 @@ export interface CareerSnapshot {
    */
   hireableStaff?: string[]
   /**
+   * Coach hiring market — available head coaches with profiles. Optional for
+   * backward compat; regenerated deterministically when absent.
+   */
+  coachMarket?: CoachMarketEntry[]
+  /**
    * Owner/board expectations state (franchise drama). Optional for backward compat.
    */
   boardState?: BoardState
@@ -1835,6 +1840,37 @@ export interface StaffMeetingSummaryView {
   fitLabel: string
   fitAdvice: string[]
   flagged: StaffMeetingFlaggedPlayer[]
+}
+
+/** A stored available coach in the hiring market (snapshot-serialised). */
+export interface CoachMarketEntry {
+  coach: StaffMember
+  /** Quality the coach is asking to be measured by (~rating). */
+  askingRating: number
+}
+
+/** One candidate row in the coach hiring market. */
+export interface CoachMarketCandidateView {
+  coachId: string
+  name: string
+  faceId?: string
+  rating: number
+  /** Demeanour label, e.g. "analytical". */
+  demeanor: string
+  systemLabel: string
+  philosophy: string
+  /** Roster fit vs the USER's current roster (0–100). */
+  rosterFit: number
+  fitLabel: string
+  fitBlurb: string
+}
+
+/** Coach hiring market. Response to 'getCoachMarket'. */
+export interface CoachMarketView {
+  currentCoachName: string
+  currentSystemLabel: string
+  currentRosterFit: number
+  entries: CoachMarketCandidateView[]
 }
 
 /** The user club's locker room. Response to 'getLockerRoom'. */

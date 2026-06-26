@@ -345,6 +345,8 @@ import {
   type LeagueComparisonView,
   type LeagueComparisonCard,
   type StaffMeetingSummaryView,
+  type CoachMarketView,
+  type CoachMarketEntry,
   type LeagueStatsView,
   type LeagueTeamsView,
   type LinesUpdate,
@@ -678,6 +680,11 @@ export class Career {
    * Keyed by TeamId string; built at career construction, persisted in snapshots.
    */
   private readonly teamStaffMap = new Map<string, TeamStaff>()
+  /**
+   * Available head coaches the GM can hire. Lazily generated per (seed, year),
+   * persisted so a hire removes the entry across saves. Null = regenerate.
+   */
+  private coachMarket: CoachMarketEntry[] | null = null
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -1119,6 +1126,11 @@ export class Career {
 
   /** Rng namespace for lazy head-coach tactical-profile synthesis. Unused elsewhere. */
   private static readonly COACH_PROFILE_NS = 9261
+
+  /** Rng namespace for the coach hiring market. Unused elsewhere. */
+  private static readonly COACH_MARKET_NS = 9262
+  /** How many available coaches to surface in the hiring market. */
+  private static readonly COACH_MARKET_SIZE = 8
 
   /**
    * Generate a full TeamStaff for every NHL-tier team.
@@ -3927,6 +3939,7 @@ export class Career {
     this.playerRatings.clear()
     this.seasonRatingTotals.clear()
     this.hireableStaff = []
+    this.coachMarket = null // fresh slate of available coaches each offseason
     // Keep practiceState team focus across seasons (intentional persistence)
     // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
     for (const arc of this.arcsState.arcs) {
@@ -5415,6 +5428,143 @@ export class Career {
       fitAdvice: sm.advice,
       flagged: flagged.slice(0, 8),
     }
+  }
+
+  /* ────────────────────── coach hiring market ────────────────────── */
+
+  /** Lazily build the available-coach pool for the current season. Deterministic. */
+  private ensureCoachMarket(): CoachMarketEntry[] {
+    if (this.coachMarket) return this.coachMarket
+    const taken = new Set<string>()
+    // Avoid duplicating the user's current head coach's name.
+    taken.add(this.getTeamStaff(this.userTeamId as string).headCoach.name)
+    const list: CoachMarketEntry[] = []
+    for (let i = 0; i < Career.COACH_MARKET_SIZE; i++) {
+      const rng = new Rng(deriveSeed(this.seed, Career.COACH_MARKET_NS, this.year * 100 + i))
+      const coach = generateTeamStaff(rng, { existingNames: taken }).headCoach
+      coach.id = `mktcoach-${this.year}-${i}`
+      coach.profile = buildCoachProfile(coach, new Rng(deriveSeed(this.seed, Career.COACH_PROFILE_NS, 5000 + i)))
+      list.push({ coach, askingRating: coach.rating })
+    }
+    this.coachMarket = list
+    return list
+  }
+
+  /** The coach hiring market, with each candidate's fit against the user roster. */
+  getCoachMarket(): CoachMarketView {
+    const team = this.data.teams.get(this.userTeamId)!
+    const roster = team.roster.map((id) => this.resolve(id))
+    const current = this.getTeamStaff(this.userTeamId as string).headCoach
+    const currentProfile = current.profile ?? buildCoachProfile(current)
+    const fitLabelOf = (f: number): string => (f >= 78 ? 'Strong' : f >= 66 ? 'Good' : f >= 55 ? 'Adequate' : 'Poor')
+    const fitBlurbOf = (f: number, label: string): string =>
+      f >= 78 ? `${label} fit — his system suits this roster`
+        : f >= 66 ? `${label} fit — workable with this group`
+        : f >= 55 ? `${label} fit — some friction with the personnel`
+        : `${label} fit — his style clashes with this roster`
+
+    const entries = this.ensureCoachMarket().map((e) => {
+      const profile = e.coach.profile ?? buildCoachProfile(e.coach)
+      const fit = Math.round(coachFit(profile, roster))
+      const label = fitLabelOf(fit)
+      return {
+        coachId: e.coach.id,
+        name: e.coach.name,
+        ...(e.coach.faceId !== undefined ? { faceId: e.coach.faceId } : {}),
+        rating: e.coach.rating,
+        demeanor: e.coach.demeanor ?? 'calm',
+        systemLabel: profile.meta.label,
+        philosophy: profile.philosophy,
+        rosterFit: fit,
+        fitLabel: label,
+        fitBlurb: fitBlurbOf(fit, label),
+      }
+    }).sort((a, b) => b.rosterFit - a.rosterFit)
+
+    return {
+      currentCoachName: current.name,
+      currentSystemLabel: currentProfile.meta.label,
+      currentRosterFit: Math.round(coachFit(currentProfile, roster)),
+      entries,
+    }
+  }
+
+  /**
+   * Hire a coach from the market. Installs him as the user's head coach, re-derives
+   * the team's system + roster fit, removes him from the market, and logs it.
+   */
+  hireCoach(coachId: string): { ok: boolean; message: string } {
+    const market = this.ensureCoachMarket()
+    const idx = market.findIndex((e) => e.coach.id === coachId)
+    if (idx < 0) return { ok: false, message: 'That coach is no longer available.' }
+    const entry = market[idx]!
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return { ok: false, message: 'No team.' }
+
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const outgoing = ts.headCoach.name
+    ts.headCoach = entry.coach
+    if (!ts.headCoach.profile) ts.headCoach.profile = buildCoachProfile(ts.headCoach)
+    market.splice(idx, 1)
+
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(ts.headCoach.profile, roster, team.tactics)
+    team.coachFit = styleMatch(roster, team.tactics).fit
+
+    this.pushNews(
+      'contract',
+      `${team.name} hire ${entry.coach.name} as head coach`,
+      `${entry.coach.name} takes over from ${outgoing}, bringing a ${ts.headCoach.profile.meta.label.toLowerCase()} approach.`,
+      { teamId: this.userTeamId as string }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${team.abbreviation} hire ${entry.coach.name} as head coach.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, message: `${entry.coach.name} hired as head coach.` }
+  }
+
+  /**
+   * Fire the user's head coach. A caretaker takes over until the GM hires a
+   * replacement from the market. The team's system re-derives to the caretaker's.
+   */
+  fireCoach(): { ok: boolean; message: string } {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return { ok: false, message: 'No team.' }
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const outgoing = ts.headCoach.name
+
+    // Caretaker: a modest interim coach, deterministically generated.
+    const rng = new Rng(deriveSeed(this.seed, Career.COACH_MARKET_NS, this.year * 100 + 9000 + this.currentDay))
+    const caretaker = generateTeamStaff(rng).headCoach
+    caretaker.id = `caretaker-${this.year}-${this.currentDay}`
+    caretaker.rating = Math.max(40, caretaker.rating - 8) // interim discount
+    caretaker.profile = buildCoachProfile(caretaker, rng)
+    ts.headCoach = caretaker
+
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(caretaker.profile, roster, team.tactics)
+    team.coachFit = styleMatch(roster, team.tactics).fit
+
+    this.pushNews(
+      'contract',
+      `${team.name} part ways with head coach ${outgoing}`,
+      `${outgoing} has been relieved of his duties. ${caretaker.name} steps in as interim bench boss while the club searches for a permanent hire.`,
+      { teamId: this.userTeamId as string }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
   /* ────────────────────── staff-meeting agenda ────────────────────── */
@@ -7827,6 +7977,7 @@ export class Career {
       seasonRatingTotals: [...this.seasonRatingTotals.entries()].map(([k, v]) => [k, { ...v }] as [string, { sum: number; n: number }]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
+      ...(this.coachMarket ? { coachMarket: structuredClone(this.coachMarket) } : {}),
       boardState: structuredClone(this.boardState),
       rivalriesState: structuredClone(this.rivalriesState),
       specialTeams: structuredClone(this.specialTeams),
@@ -7989,6 +8140,9 @@ export class Career {
     }
     if (snapshot.hireableStaff) {
       career.hireableStaff = [...snapshot.hireableStaff]
+    }
+    if (snapshot.coachMarket) {
+      career.coachMarket = structuredClone(snapshot.coachMarket)
     }
 
     // Restore Wave 4 franchise drama + league hub state (all optional for backward compat).

@@ -17,6 +17,62 @@ describe('buildTeamList', () => {
   })
 })
 
+describe('Career — coach job market', () => {
+  it('offers a deterministic market with roster-fit previews', () => {
+    const data = generateLeague({ seed: 71 })
+    const userId = data.league.teams[2]!
+    const a = new Career(data, 71, userId).getCoachMarket()
+    const b = new Career(generateLeague({ seed: 71 }), 71, userId).getCoachMarket()
+    expect(a.entries.length).toBeGreaterThan(3)
+    expect(a).toEqual(b) // deterministic per (seed, year)
+    for (const c of a.entries) {
+      expect(c.rosterFit).toBeGreaterThanOrEqual(0)
+      expect(c.rosterFit).toBeLessThanOrEqual(100)
+      expect(c.systemLabel.length).toBeGreaterThan(0)
+    }
+    expect(a.currentCoachName.length).toBeGreaterThan(0)
+  })
+
+  it('hiring a coach swaps the head coach, applies his system, and clears the entry', () => {
+    const data = generateLeague({ seed: 72 })
+    const userId = data.league.teams[1]!
+    const career = new Career(data, 72, userId)
+    const before = career.getCoachMarket()
+    const pick = before.entries[0]!
+    const res = career.hireCoach(pick.coachId)
+    expect(res.ok).toBe(true)
+    const after = career.getCoachMarket()
+    expect(after.currentCoachName).toBe(pick.name)
+    expect(after.entries.some((e) => e.coachId === pick.coachId)).toBe(false)
+    // Team tactics + coachFit are set after a hire.
+    const team = data.teams.get(userId)!
+    expect(team.coachFit).toBeGreaterThan(0)
+  })
+
+  it('firing installs an interim coach and a re-hire is possible', () => {
+    const data = generateLeague({ seed: 73 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 73, userId)
+    const original = career.getCoachMarket().currentCoachName
+    const fired = career.fireCoach()
+    expect(fired.ok).toBe(true)
+    expect(career.getCoachMarket().currentCoachName).not.toBe(original)
+  })
+
+  it('survives a snapshot round-trip after a hire (entry stays removed)', () => {
+    const data = generateLeague({ seed: 74 })
+    const userId = data.league.teams[3]!
+    const career = new Career(data, 74, userId)
+    const pick = career.getCoachMarket().entries[0]!
+    career.hireCoach(pick.coachId)
+    const snap = career.exportSnapshot('t', '2026-01-01')
+    const restored = Career.fromSnapshot(snap)
+    const market = restored.getCoachMarket()
+    expect(market.currentCoachName).toBe(pick.name)
+    expect(market.entries.some((e) => e.coachId === pick.coachId)).toBe(false)
+  })
+})
+
 describe('Career — league comparison', () => {
   it('ranks the user club across every dimension, in-bounds, with a leader', () => {
     const data = generateLeague({ seed: 42 })

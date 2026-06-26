@@ -93,6 +93,8 @@ export type { LeagueComparisonView, LeagueComparisonCard } from '@engine/career/
 import type { LeagueComparisonView } from '@engine/career/views'
 export type { StaffMeetingSummaryView, StaffMeetingFlaggedPlayer } from '@engine/career/views'
 import type { StaffMeetingSummaryView } from '@engine/career/views'
+export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
+import type { CoachMarketView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -192,6 +194,9 @@ export type WorkerRequestBody =
   | { type: 'getSquadPlanner' }
   | { type: 'getLeagueComparison' }
   | { type: 'getStaffMeetingSummary' }
+  | { type: 'getCoachMarket' }
+  | { type: 'fireCoach' }
+  | { type: 'hireCoach'; coachId: string }
   | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
@@ -349,6 +354,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
   | { type: 'leagueComparison'; comparison: LeagueComparisonView }
   | { type: 'staffMeetingSummary'; summary: StaffMeetingSummaryView }
+  | { type: 'coachMarket'; market: CoachMarketView }
+  | { type: 'coachHireResult'; ok: boolean; message: string }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'agenda'; items: AgendaItem[] }
