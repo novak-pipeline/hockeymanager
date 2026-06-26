@@ -4215,7 +4215,8 @@ export class Career {
    * gets a SUGGESTION in the inbox instead (he keeps manual roster control).
    */
   private reassignFarmSystems(): void {
-    const scorer = (p: Player): number => overall(p.composites, p.position)
+    // Waiver-required veterans aren't dumped to the farm over a small ability dip.
+    const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
     for (const team of this.data.teams.values()) {
       if (team.tier === 'ahl' || team.tier === 'world') continue
       const ahlId = team.affiliateId
@@ -4260,6 +4261,22 @@ export class Career {
    * type) fill a standard 14F/7D/2G NHL roster, the rest develop in the AHL. Returns
    * the player NAMES moved each way so the screen can report exactly what he did.
    */
+  /**
+   * Roster-keep protection for waiver-required players. A one-way veteran can't be
+   * sent to the AHL without clearing waivers (risking losing him for nothing), so
+   * the auto-roster must have a VERY good reason — a big ability gap — before it
+   * demotes him. Two-way contracts and young (often waiver-exempt) players carry
+   * no protection. Bigger contracts and older vets are protected more.
+   */
+  private waiverProtection(p: Player): number {
+    if (p.contract.twoWay !== false) return 0 // two-way → free to move
+    if (p.age < 23) return 0 // young one-way deals are usually still waiver-exempt
+    let bonus = 10
+    if (p.contract.salary >= 4_000_000) bonus += 4
+    if (p.age >= 32) bonus += 3
+    return bonus
+  }
+
   applyCoachRoster(): { promoted: string[]; demoted: string[] } {
     const nhl = this.data.teams.get(this.userTeamId)
     const ahlId = this.userTeam.affiliateId
@@ -4279,7 +4296,8 @@ export class Career {
     const targets: Record<'F' | 'D' | 'G', number> = { F: 14, D: 7, G: 2 }
     const byGroup: Record<'F' | 'D' | 'G', Player[]> = { F: [], D: [], G: [] }
     for (const p of [...resolveAll(nhl.roster), ...resolveAll(ahl.roster)]) byGroup[grp(p)].push(p)
-    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => coachAdjustedScore(b, coach) - coachAdjustedScore(a, coach))
+    const keep = (p: Player): number => coachAdjustedScore(p, coach) + this.waiverProtection(p)
+    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => keep(b) - keep(a))
 
     const newNhl: PlayerId[] = []
     const newAhl: PlayerId[] = []
@@ -5799,7 +5817,8 @@ export class Career {
           nhlRoster: team?.roster ?? [],
           ahlRoster: ahlTeam.roster,
           resolve: (id) => this.data.players.get(id),
-          score: (p) => ratedOverall(p),
+          // Match applyCoachRoster: protect waiver-required veterans from demotion.
+          score: (p) => ratedOverall(p) + this.waiverProtection(p),
         })
       : { promoted: [], demoted: [] }
     const adviceMove = (id: PlayerId, kind: 'callup' | 'senddown'): import('./developmentCenter').RosterAdviceMove | null => {

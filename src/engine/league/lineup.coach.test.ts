@@ -262,4 +262,34 @@ describe('coachSetLineup — form / morale / condition', () => {
     const b = coachSetLineup({ roster, coach, rng: new Rng(42) })
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
+
+  it('does not bury a top winger at centre — promotes a versatile depth winger instead', () => {
+    // Build forwards: 3 natural centres, and wingers where the BEST winger is a
+    // non-versatile star and a weaker winger is versatile enough to play centre.
+    const base = makeRoster(3)
+    const fwds = base
+      .filter((p) => p.position === 'C' || p.position === 'W')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))
+      .slice(0, 12)
+    const defs = base.filter((p) => p.position === 'D').slice(0, 6)
+    const gols = base.filter((p) => p.position === 'G').slice(0, 2)
+    const star = fwds[0]! // highest-overall forward — make him a low-versatility WINGER
+    const swing = fwds[4]! // a weaker forward — the versatile one who SHOULD take 4C
+    const forwards = fwds.map((p, i) => {
+      if (i >= 1 && i <= 3) return { ...p, position: 'C' as const } // three natural centres
+      if (p.id === swing.id) return { ...p, position: 'W' as const, versatility: 95 }
+      return { ...p, position: 'W' as const, versatility: 10 } // wingers who can't pivot
+    }) as Player[]
+    const roster = [...forwards, ...defs, ...gols]
+
+    const result = coachSetLineup({ roster, coach: makeCoach({ judgment: 99, rating: 85 }), rng: new Rng(1) })
+    const centreIds = result.lines.forwards.map((line) => String(line[1]))
+    const wingIds = result.lines.forwards.flatMap((line) => [String(line[0]), String(line[2])])
+
+    // The star winger must stay on the wing — never shoved to centre.
+    expect(wingIds).toContain(star.id as string)
+    expect(centreIds).not.toContain(star.id as string)
+    // The lone versatile winger is the one promoted to fill the 4th centre slot.
+    expect(centreIds).toContain(swing.id as string)
+  })
 })

@@ -458,22 +458,36 @@ export function coachSetLineup(args: {
     else if (p.form <= -3) scratchReasons[p.id as string] = 'slumping'
   }
 
-  /* ── 5. Build lines from dressed players ── */
-  // Divide 12 forwards into 4 lines of 3, alternating C/W/W.
-  // Centres first (sort centres to C slots), then fill remaining with W.
-  const centres = dressedForwards.filter((p) => p.position === 'C')
-  const wings = dressedForwards.filter((p) => p.position === 'W')
+  /* ── 5. Build lines from dressed players (position-aware) ── */
+  // Use natural centres first. If short of four, promote the most CENTRE-CAPABLE
+  // depth winger (high versatility, lowest score) — never a top scoring winger,
+  // who stays on the wing. Surplus natural centres slide out to the wing.
+  const naturalC = dressedForwards.filter((p) => p.position === 'C')
+  const naturalW = dressedForwards.filter((p) => p.position === 'W')
+  const canPlayCentre = (p: Player): boolean => (p.versatility ?? 50) >= 50
 
-  // We need 4 centres (one per line); if insufficient, promote best wing
-  while (centres.length < 4 && wings.length > 0) {
-    centres.push(wings.shift()!)
+  const centres: Player[] = naturalC.slice(0, 4)
+  let wingPool: Player[] = [...naturalW, ...naturalC.slice(4)]
+  if (centres.length < 4) {
+    const need = 4 - centres.length
+    const capable = wingPool.filter(canPlayCentre)
+    const promote = (capable.length >= need ? capable : wingPool)
+      .slice()
+      .sort((a, b) => coachScore(a) - coachScore(b)) // worst-first → a depth (4th-line) centre
+      .slice(0, need)
+    const promoted = new Set(promote.map((p) => p.id))
+    centres.push(...promote)
+    wingPool = wingPool.filter((p) => !promoted.has(p.id))
   }
+  // Best centre anchors line 1; a promoted depth winger lands on line 4.
+  centres.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
+  wingPool.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
 
   const fwdLines: PlayerId[][] = []
   for (let i = 0; i < 4; i++) {
     const c = centres[i]
-    const lw = wings[i * 2]
-    const rw = wings[i * 2 + 1]
+    const lw = wingPool[i * 2]
+    const rw = wingPool[i * 2 + 1]
     fwdLines.push([
       lw?.id ?? asPlayerId(''),
       c?.id ?? asPlayerId(''),
