@@ -609,8 +609,9 @@ export function OffseasonScreen(): JSX.Element {
             </Panel>
           )}
 
-          {/* advance button */}
-          {data.stage !== 'preseason' && (
+          {/* advance button — hidden during the draft: Continue can't sim past
+              it, so the only path forward is conducting it via "Go to Draft". */}
+          {data.stage !== 'preseason' && data.stage !== 'draft' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 className="btn"

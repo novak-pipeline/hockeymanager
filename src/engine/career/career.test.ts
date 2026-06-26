@@ -272,6 +272,8 @@ describe('Career — full year cycle', () => {
     // Guard well above 60 match days + ~21 playoff days + offseason stages.
     let guard = 0
     while (career.year === firstYear && guard++ < 200) {
+      // step() intentionally halts on the user-gated entry draft; conduct it.
+      if (career.draftPending()) { career.autoDraft(); continue }
       expect(career.step()).toBe(true)
     }
     expect(career.year).toBe(firstYear + 1)
@@ -311,15 +313,20 @@ describe('Career — full year cycle', () => {
     const draft = career.getDraft()
     expect(draft).not.toBeNull()
     expect(draft!.board).toHaveLength(16 * 7) // 16 teams × 7 rounds
+    expect(career.getDashboard().draftPending).toBe(true) // Continue is gated here
     career.advanceDraft() // sim to user pick (or end)
     const mid = career.getDraft()!
     if (mid.userIsOnClock) {
       const best = mid.prospects.find((p) => !p.drafted)!
       career.draftPlayer(best.playerId)
     }
-    career.advanceOffseason() // finishes draft, moves to resign
+    // Continue can no longer sim past an unfinished draft — advanceOffseason
+    // refuses while picks remain; the GM finishes via autoDraft (or pick-by-pick).
+    expect(career.advanceOffseason()).toBe(false)
+    career.autoDraft() // finish the remaining picks
     const done = career.getDraft()
     expect(done === null || done.complete).toBe(true)
+    expect(career.advanceOffseason()).toBe(true) // now it advances to resign
   })
 
   it('records rights + draft pedigree on every player selected in-game', () => {
@@ -328,7 +335,8 @@ describe('Career — full year cycle', () => {
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
     career.advanceOffseason() // awards → draft (builds the board)
-    career.advanceOffseason() // draft → resign (force-sims every pick)
+    career.autoDraft() // conduct the (user-gated) draft, auto-picking for the user
+    career.advanceOffseason() // draft → resign
 
     // rightsTeamId is set ONLY by an in-game selection, so it cleanly identifies
     // players drafted this career (vs. generated/imported pedigree).
@@ -542,7 +550,9 @@ describe('Career — story layer', () => {
     expect(hist.awards.length).toBeGreaterThan(0)
     expect(hist.singleSeason.points.length).toBeGreaterThan(0)
 
-    // Finish the year; records survive into season 2.
+    // Finish the year; records survive into season 2. The entry draft is now
+    // user-gated (step() halts on it), so conduct it before rolling the season.
+    career.autoDraft()
     let guard = 0
     while (career.year === firstYear && guard++ < 60) career.step()
     expect(career.year).toBe(firstYear + 1)

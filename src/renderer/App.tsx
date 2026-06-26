@@ -234,6 +234,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     () => ({
       busy,
       continueGame: () => {
+        // On draft day the offseason is parked on the entry draft — Continue
+        // cannot sim past it. Route the GM into the Draft screen to conduct it.
+        if (dashboard?.draftPending) {
+          navigate('draft')
+          return
+        }
         void run(() => client.continueGame())
       },
       advanceDays: (days: number) => {
@@ -252,7 +258,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run]
+    [busy, client, run, dashboard?.draftPending, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is

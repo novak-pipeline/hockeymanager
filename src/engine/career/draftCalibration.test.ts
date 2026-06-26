@@ -119,7 +119,11 @@ describe('draft calibration simulation', () => {
     // already close to his ceiling gains little.)
     const startYear = career.year
     let guard = 0
-    while (career.year < startYear + 3 && guard++ < 12000) career.step()
+    while (career.year < startYear + 3 && guard++ < 12000) {
+      // step() halts on the user-gated entry draft; auto-conduct it each year.
+      if (career.draftPending()) { career.autoDraft(); continue }
+      career.step()
+    }
     const trueArr: number[] = []
     const finalArr: number[] = []
     const gains: number[] = []

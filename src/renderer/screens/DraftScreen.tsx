@@ -493,6 +493,7 @@ type DraftTab = 'board' | 'available' | 'combine'
 
 export function DraftScreen(): JSX.Element {
   const client = useClient()
+  const nav = useNav()
   const { data, loading, error, refetch } = useScreenData<DraftView>(
     () => client.getDraft(),
     (r) => (r.type === 'draft' ? r.draft : null)
@@ -529,6 +530,32 @@ export function DraftScreen(): JSX.Element {
       setMutErr(r.message)
     } else {
       refetch()
+    }
+  }
+
+  async function handleAutoDraft() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.autoDraft()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      toast('Draft completed — best available auto-picked for your club.', 'success')
+      refetch()
+    }
+  }
+
+  /** Draft done → resume the offseason (move to re-signings) and return. */
+  async function handleProceed() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.advanceOffseason()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      nav.navigate('offseason')
     }
   }
 
@@ -570,6 +597,25 @@ export function DraftScreen(): JSX.Element {
                 onClick={handleSimToMyPick}
               >
                 {busy ? 'Simming…' : 'Sim to my pick'}
+              </button>
+            )}
+            {!data.complete && (
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={handleAutoDraft}
+                title="Auto-pick best available for your remaining picks and finish the draft"
+              >
+                {busy ? 'Simming…' : 'Sim entire draft'}
+              </button>
+            )}
+            {data.complete && (
+              <button
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={handleProceed}
+              >
+                {busy ? '…' : 'Proceed to re-signings →'}
               </button>
             )}
           </div>

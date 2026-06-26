@@ -3678,7 +3678,11 @@ export class Career {
         return true
       }
       case 'draft': {
-        this.simDraftUntil(() => false)
+        // The entry draft must be conducted from the Draft screen — Continue
+        // cannot sim past it. The user sims to their picks, drafts a prospect,
+        // or auto-drafts the rest there; only once every pick is in does the
+        // offseason resume. Returning false halts advance() / step() cleanly.
+        if (os.draft && os.draft.selections.length < os.draft.order.length) return false
         const rng = this.rngFor(8003)
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         this.resignStatus.clear()
@@ -3907,6 +3911,24 @@ export class Career {
   /** UI: sim AI picks until the user is on the clock or the draft completes. */
   advanceDraft(): void {
     this.simDraftUntil(() => true)
+  }
+
+  /** UI: sim the ENTIRE remaining draft, auto-picking best-available for the
+   *  user's own picks. Used by the "Sim entire draft" button. */
+  autoDraft(): void {
+    this.simDraftUntil(() => false)
+  }
+
+  /** True once every pick in the current draft has been made (or no draft). */
+  private draftComplete(): boolean {
+    const d = this.offseason?.draft
+    return !d || d.selections.length >= d.order.length
+  }
+
+  /** True when the offseason is sitting on an unfinished draft — Continue is
+   *  blocked and the UI should route the GM into the Draft screen. */
+  draftPending(): boolean {
+    return this.offseason?.stage === 'draft' && !this.draftComplete()
   }
 
   /* ────────────────────────── season rollover ────────────────────────── */
@@ -4854,7 +4876,7 @@ export class Career {
       const stage = this.offseason?.stage ?? 'awards'
       const labels: Record<string, string> = {
         awards: 'Continue — season awards & development',
-        draft: 'Continue — finish the draft',
+        draft: this.draftPending() ? 'Go to the entry draft' : 'Continue — open free agency',
         resign: 'Continue — open free agency',
         freeAgency: `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
         preseason: 'Continue — start the new season',
@@ -4941,6 +4963,7 @@ export class Career {
       totalDays: this.matchDays[this.matchDays.length - 1] ?? 0,
       date: dayToDateISO(this.year, Math.max(1, this.currentDay)),
       continueLabel,
+      draftPending: this.draftPending(),
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,

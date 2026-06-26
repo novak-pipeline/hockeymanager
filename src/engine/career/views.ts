@@ -222,6 +222,9 @@ export interface DashboardView {
   date: string
   /** Label for the Continue button, e.g. "Continue to 12 Oct" or "Start draft". */
   continueLabel: string
+  /** True on draft day: the offseason is parked on an unfinished entry draft.
+   *  The UI must route the GM into the Draft screen — Continue can't sim past it. */
+  draftPending?: boolean
   userTeam: {
     teamId: string
     name: string

@@ -215,6 +215,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'advanceDraft':
       must().advanceDraft()
       return { id: req.id, type: 'ok' }
+    case 'autoDraft':
+      must().autoDraft()
+      return { id: req.id, type: 'ok' }
     case 'advanceOffseason':
       must().advanceOffseason()
       return { id: req.id, type: 'ok' }

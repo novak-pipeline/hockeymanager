@@ -226,6 +226,8 @@ export type WorkerRequestBody =
   | { type: 'draftPlayer'; playerId: string }
   /** Sim AI picks until the user is on the clock or the draft ends. */
   | { type: 'advanceDraft' }
+  /** Sim the ENTIRE remaining draft, auto-picking best-available for the user. */
+  | { type: 'autoDraft' }
   /** Move the offseason to its next stage (awards → draft → resign → FA → preseason). */
   | { type: 'advanceOffseason' }
   /* ── persistence ── */

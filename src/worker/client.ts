@@ -321,6 +321,10 @@ export class SimClient {
     return this.send({ type: 'advanceDraft' })
   }
 
+  autoDraft(): Promise<WorkerResponse> {
+    return this.send({ type: 'autoDraft' })
+  }
+
   advanceOffseason(): Promise<WorkerResponse> {
     return this.send({ type: 'advanceOffseason' })
   }

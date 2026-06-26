@@ -148,6 +148,7 @@ describe('SimClient', () => {
       ],
       [() => client.draftPlayer('p4'), { type: 'draftPlayer', playerId: 'p4' }],
       [() => client.advanceDraft(), { type: 'advanceDraft' }],
+      [() => client.autoDraft(), { type: 'autoDraft' }],
       [() => client.advanceOffseason(), { type: 'advanceOffseason' }],
       [() => client.exportSave('My save'), { type: 'exportSave', saveName: 'My save' }],
       [() => client.importSave({} as CareerSnapshot), { type: 'importSave' }],
