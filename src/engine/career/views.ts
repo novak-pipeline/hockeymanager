@@ -1209,6 +1209,16 @@ export interface OwnerRequestView {
   declineHint: string
 }
 
+/** The GM's competitive stance + whether a rebuild can be sanctioned. Response to 'getClubDirection'. */
+export interface ClubDirectionView {
+  direction: 'compete' | 'retool' | 'rebuild'
+  /** True when ownership has signed off on a rebuild this season. */
+  rebuildSanctioned: boolean
+  /** False when the board expects a contender and won't sanction a teardown. */
+  canRebuild: boolean
+  mandateText: string
+}
+
 /** Veteran→rookie mentorships + eligible players. Response to 'getMentorships'. */
 export interface MentorshipView {
   pairs: Array<{ mentee: MentorBadge; mentor: MentorBadge }>
@@ -1544,6 +1554,8 @@ export interface CareerSnapshot {
   gmRelationships?: Array<[string, number]>
   /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */
   mentorships?: Array<[string, string]>
+  /** GM's declared competitive stance. Additive; absent → 'compete'. */
+  clubDirection?: 'compete' | 'retool' | 'rebuild'
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

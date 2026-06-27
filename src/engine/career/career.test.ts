@@ -2345,6 +2345,27 @@ describe('Career — GM career', () => {
     expect(career.getMentorships().pairs.length).toBe(0)
   })
 
+  it('a rebuild is sanctioned only when the board is not expecting a contender', () => {
+    const data = generateLeague({ seed: 68 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 68, userId)
+    const internals = career as unknown as { boardState: { mandate: string; rebuildSanctioned?: boolean } }
+
+    // Win-now mandate → rebuild refused (you can't quietly tank a contender).
+    internals.boardState.mandate = 'cupOrBust'
+    const refused = career.setClubDirection('rebuild')
+    expect(refused.ok).toBe(false)
+    expect(career.getClubDirection().direction).not.toBe('rebuild')
+
+    // Non-contender mandate → rebuild sanctioned.
+    internals.boardState.mandate = 'makePlayoffs'
+    const ok = career.setClubDirection('rebuild')
+    expect(ok.ok).toBe(true)
+    const view = career.getClubDirection()
+    expect(view.direction).toBe('rebuild')
+    expect(view.rebuildSanctioned).toBe(true)
+  })
+
   it('reports a relationship row per rival club, neutral by default', () => {
     const data = generateLeague({ seed: 65 })
     const userId = data.league.teams[0]!

@@ -378,6 +378,7 @@ import {
   type GMJobMarketView,
   type GMRelationshipsView,
   type MentorshipView,
+  type ClubDirectionView,
   type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
@@ -737,6 +738,12 @@ export class Career {
   /** Veteran→rookie mentorships on the user's club (menteeId → mentorId). A valid
    *  pairing gives the mentee a development-rate boost. Serialized additively. */
   private mentorships = new Map<string, string>()
+
+  /** The GM's declared competitive stance. A board-sanctioned 'rebuild' shields a
+   *  losing season from getting you fired (you sell veterans for futures and chase
+   *  draft position) — but ownership only sanctions it if they aren't expecting a
+   *  contender. Serialized additively; defaults to 'compete'. */
+  private clubDirection: 'compete' | 'retool' | 'rebuild' = 'compete'
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -3235,8 +3242,9 @@ export class Career {
       this.reoptimizeAiLines(nextDay)
       this.generateWaiverPlacements(nextDay)
     }
-    // ── owner meddling: roughly monthly, the owner may lean on the GM ──────
-    if (Math.floor(nextDay / 30) > Math.floor(this.currentDay / 30)) {
+    // ── owner meddling: occasionally (~every 6 weeks, and not always), the owner
+    //    leans on the GM — kept infrequent so it's flavour, not a nag. ──────
+    if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
     // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
@@ -6944,6 +6952,62 @@ export class Career {
     return { ok: true, message: 'Mentorship dissolved.' }
   }
 
+  /* ────────────────────── club direction / rebuild ────────────────────── */
+
+  /** Win-now mandates the board won't let you tear down without consequence. */
+  private static readonly WIN_NOW_MANDATES = new Set(['cupOrBust', 'contend'])
+
+  /** The GM's current declared stance + whether a rebuild can be sanctioned. */
+  getClubDirection(): ClubDirectionView {
+    const winNow = Career.WIN_NOW_MANDATES.has(this.boardState.mandate)
+    return {
+      direction: this.clubDirection,
+      rebuildSanctioned: this.boardState.rebuildSanctioned === true,
+      // Ownership only signs off on a rebuild when they aren't expecting a contender.
+      canRebuild: !winNow,
+      mandateText: this.boardState.mandateText,
+    }
+  }
+
+  /**
+   * Set the GM's competitive stance. 'rebuild' is the sanctioned-tank path: sell
+   * veterans for picks and youth and chase draft position, shielded from a firing
+   * for the losing that follows — but ONLY if ownership isn't expecting a contender
+   * (you can't quietly throw a season the owner sold to the fans as a Cup run).
+   * 'retool' and 'compete' are always available.
+   */
+  setClubDirection(direction: 'compete' | 'retool' | 'rebuild'): { ok: boolean; message: string } {
+    if (direction === 'rebuild') {
+      if (Career.WIN_NOW_MANDATES.has(this.boardState.mandate)) {
+        return {
+          ok: false,
+          message: 'Ownership expects this team to compete — they will not sanction a teardown. Lower their expectations first, or win them over.',
+        }
+      }
+      this.clubDirection = 'rebuild'
+      this.boardState.rebuildSanctioned = true
+      this.boardState.patience = Math.min(100, this.boardState.patience + 15)
+      this.pushNews(
+        'league',
+        'Ownership signs off on a rebuild',
+        'The board has blessed a reset: move veterans for picks and prospects, lean on youth, and build through the draft. A losing season is the price of the plan — they will not hold it against you this year.',
+        { teamId: this.userTeamId as string }
+      )
+      return { ok: true, message: 'Rebuild sanctioned — sell veterans for futures and chase draft position.' }
+    }
+    this.clubDirection = direction
+    if (direction === 'compete') this.boardState.rebuildSanctioned = false
+    this.pushNews(
+      'league',
+      direction === 'retool' ? 'Club sets a retool course' : 'Club commits to competing',
+      direction === 'retool'
+        ? 'The plan: stay competitive while refreshing the roster on the fly — no full teardown.'
+        : 'The directive is clear: this team is here to win now.',
+      { teamId: this.userTeamId as string }
+    )
+    return { ok: true, message: `Club direction set to ${direction}.` }
+  }
+
   /* ────────────────────── staff-meeting agenda ────────────────────── */
 
   /** Mark a player topic for discussion at the next staff meeting. */
@@ -9461,6 +9525,7 @@ export class Career {
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       gmRelationships: [...this.gmRelationships.entries()],
       mentorships: [...this.mentorships.entries()],
+      clubDirection: this.clubDirection,
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9560,6 +9625,7 @@ export class Career {
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.mentorships = new Map(snapshot.mentorships ?? [])
+    career.clubDirection = snapshot.clubDirection ?? 'compete'
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

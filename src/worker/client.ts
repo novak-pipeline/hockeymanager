@@ -357,6 +357,14 @@ export class SimClient {
     return this.send({ type: 'clearMentor', menteeId })
   }
 
+  getClubDirection(): Promise<WorkerResponse> {
+    return this.send({ type: 'getClubDirection' })
+  }
+
+  setClubDirection(direction: 'compete' | 'retool' | 'rebuild'): Promise<WorkerResponse> {
+    return this.send({ type: 'setClubDirection', direction })
+  }
+
   acceptGMJob(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptGMJob', teamId })
   }

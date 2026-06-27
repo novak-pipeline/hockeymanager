@@ -46,6 +46,10 @@ export interface BoardState {
   firedAtYear: number | null
   /** Number of formal ultimatums issued to the GM this tenure. */
   warnings: number
+  /** Set when ownership has signed off on a rebuild this season: a losing finish
+   *  can't get the GM fired (they knew the plan). Consumed at the season review,
+   *  so the GM re-declares each year. Absent/false = normal expectations. */
+  rebuildSanctioned?: boolean
 }
 
 export interface NewsSeed {
@@ -522,6 +526,14 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
       break
     }
   }
+
+  // A board-sanctioned rebuild can't get the GM fired for losing — ownership knew
+  // and approved the plan. Soften a failing/missed verdict, then consume the
+  // sanction (it must be re-declared each season).
+  if (state.rebuildSanctioned && (verdict === 'failed' || verdict === 'missed')) {
+    verdict = 'met'
+  }
+  state.rebuildSanctioned = false
 
   // Firing logic: 'failed' verdict triggers firing when patience is exhausted OR
   // there was already an ultimatum in place.

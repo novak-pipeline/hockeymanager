@@ -239,6 +239,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!r.ok) throw new Error(r.message)
       return { id: req.id, type: 'ok', note: r.message }
     }
+    case 'getClubDirection':
+      return { id: req.id, type: 'clubDirection', clubDirection: must().getClubDirection() }
+    case 'setClubDirection': {
+      const r = must().setClubDirection(req.direction)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
     case 'acceptGMJob': {
       const r = must().acceptGMJob(req.teamId)
       if (!r.ok) throw new Error(r.message)

@@ -50,6 +50,7 @@ export type {
   GMJobMarketView,
   GMRelationshipsView,
   MentorshipView,
+  ClubDirectionView,
   OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
@@ -249,6 +250,10 @@ export type WorkerRequestBody =
   | { type: 'assignMentor'; menteeId: string; mentorId: string }
   /** Dissolve a mentorship. */
   | { type: 'clearMentor'; menteeId: string }
+  /** Read the GM's competitive stance + whether a rebuild can be sanctioned. */
+  | { type: 'getClubDirection' }
+  /** Set the GM's competitive stance (compete / retool / rebuild). */
+  | { type: 'setClubDirection'; direction: 'compete' | 'retool' | 'rebuild' }
   /** Accept a GM vacancy and move clubs. */
   | { type: 'acceptGMJob'; teamId: string }
   /** Read the pending owner directive, if any. */
@@ -394,6 +399,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
   | { type: 'gmRelationships'; gmRelationships: GMRelationshipsView }
   | { type: 'mentorships'; mentorships: MentorshipView }
+  | { type: 'clubDirection'; clubDirection: ClubDirectionView }
   | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }

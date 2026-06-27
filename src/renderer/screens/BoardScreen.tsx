@@ -6,7 +6,7 @@
  * has been fired it renders a somber "Relieved of duties" state.
  */
 import { useState } from 'react'
-import type { BoardView, OwnerRequestView } from '../../worker/protocol'
+import type { BoardView, OwnerRequestView, ClubDirectionView } from '../../worker/protocol'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -103,6 +103,10 @@ export function BoardScreen(): JSX.Element {
     () => client.getOwnerRequest(),
     (r) => (r.type === 'ownerRequest' ? r.ownerRequest : null)
   )
+  const dir = useScreenData<ClubDirectionView>(
+    () => client.getClubDirection(),
+    (r) => (r.type === 'clubDirection' ? r.clubDirection : null)
+  )
 
   return (
     <section className="stack">
@@ -116,8 +120,58 @@ export function BoardScreen(): JSX.Element {
       />
 
       {owner.data && <OwnerDeskPanel request={owner.data} onDone={owner.refetch} />}
+      {dir.data && <ClubDirectionPanel dir={dir.data} onDone={dir.refetch} />}
       {data && <BoardBody board={data} />}
     </section>
+  )
+}
+
+function ClubDirectionPanel(props: { dir: ClubDirectionView; onDone: () => void }): JSX.Element {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const { dir } = props
+  const set = async (direction: 'compete' | 'retool' | 'rebuild'): Promise<void> => {
+    setBusy(true)
+    const r = await client.setClubDirection(direction)
+    setBusy(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else {
+      if (r.type === 'ok' && r.note) toast(r.note, direction === 'rebuild' ? 'success' : 'info')
+      props.onDone()
+    }
+  }
+  const opts: Array<{ key: 'compete' | 'retool' | 'rebuild'; label: string; blurb: string }> = [
+    { key: 'compete', label: 'Compete', blurb: 'Win now — the team is built to contend.' },
+    { key: 'retool', label: 'Retool', blurb: 'Stay competitive while refreshing on the fly.' },
+    { key: 'rebuild', label: 'Rebuild', blurb: 'Sell veterans for futures, lean on youth, chase the draft.' },
+  ]
+  return (
+    <Panel title="Club direction">
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        {dir.rebuildSanctioned
+          ? 'Ownership has sanctioned a rebuild this season — a losing record won\'t cost you your job.'
+          : dir.canRebuild
+            ? `Set the club's strategy. ${dir.mandateText}`
+            : `The board expects you to compete — a rebuild won't be sanctioned right now. ${dir.mandateText}`}
+      </div>
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        {opts.map((o) => {
+          const active = dir.direction === o.key
+          const disabled = busy || (o.key === 'rebuild' && !dir.canRebuild && !active)
+          return (
+            <button
+              key={o.key}
+              className={`btn ${active ? 'btn-primary' : ''}`}
+              disabled={disabled}
+              title={o.blurb}
+              onClick={() => set(o.key)}
+            >
+              {o.label}{active ? ' ✓' : ''}
+            </button>
+          )
+        })}
+      </div>
+    </Panel>
   )
 }
 

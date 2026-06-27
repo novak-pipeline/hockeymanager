@@ -101,7 +101,10 @@ export function generateOwnerRequest(args: {
   const pool = poolFor(mandate)
   const kind = pool[rng.int(pool.length)]!
   const t = TEMPLATES[kind]
-  // Win-now / marketing asks carry more weight (bigger swings) than housekeeping.
+  // Deliberately low-stakes so a directive is flavour + a nudge, never a tax you
+  // must pay: accepting curries a little favour, declining costs a little — small
+  // enough that backing your own plan is always a legitimate choice. Win-now asks
+  // carry marginally more weight than housekeeping.
   const heavy = kind === 'pushForPlayoffs' || kind === 'signMarketableStar'
   return {
     id: `owner-${year}-${day}`,
@@ -110,9 +113,9 @@ export function generateOwnerRequest(args: {
     day,
     title: t.title,
     body: t.body,
-    acceptConfidence: heavy ? 7 : 5,
-    declineConfidence: heavy ? -9 : -6,
-    acceptPatience: 4,
-    declinePatience: -4,
+    acceptConfidence: heavy ? 5 : 4,
+    declineConfidence: heavy ? -4 : -3,
+    acceptPatience: 2,
+    declinePatience: -1,
   }
 }
