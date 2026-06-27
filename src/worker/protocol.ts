@@ -44,6 +44,7 @@ export type {
   LinesView,
   LockerRoomView,
   OffseasonView,
+  WaiverWireRowView,
   PersonalityReadView,
   PersonalityTraitRead,
   PlayerAnalyticsRow,
@@ -226,6 +227,10 @@ export type WorkerRequestBody =
   | { type: 'matchOfferSheet'; playerId: string }
   /** Let an offer-sheeted RFA walk and take the draft-pick compensation. */
   | { type: 'declineOfferSheet'; playerId: string }
+  /** Read the live in-season waiver wire (AI castoffs claimable by the user). */
+  | { type: 'getWaiverWire' }
+  /** Claim a player off the in-season waiver wire onto the user's roster. */
+  | { type: 'claimWaiver'; playerId: string }
   /** User makes their selection while on the clock. */
   | { type: 'draftPlayer'; playerId: string }
   /** Sim exactly one AI pick (pick-by-pick stepping). */
@@ -357,6 +362,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'trades'; trades: TradesView }
   | { type: 'draft'; draft: DraftView }
   | { type: 'finances'; finances: FinanceView }
+  | { type: 'waiverWire'; waiverWire: WaiverWireRowView[] }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }

@@ -273,6 +273,8 @@ export interface DashboardView {
   board?: BoardSummaryView
   /** True when the GM has been fired (board.firedAtYear is non-null). */
   gmFired?: boolean
+  /** Players currently claimable on the in-season waiver wire (badge for a nudge). */
+  waiverClaimsAvailable?: number
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -1178,6 +1180,23 @@ export interface OfferSheetRowView extends PlayerBadge {
   compRounds: number[]
 }
 
+/** A player an AI club has exposed on the in-season waiver wire, claimable by the
+ *  user until the window closes (after which AI clubs get a worst-first crack). */
+export interface WaiverWireRowView extends PlayerBadge {
+  /** Club that placed him on waivers. */
+  fromTeamAbbr: string
+  fromTeamName: string
+  salary: number
+  yearsRemaining: number
+  twoWay: boolean
+  /** Match days left before the claim window closes. 0 = closes on the next sim. */
+  claimDeadlineInDays: number
+  /** False when claiming him would breach the cap or the 26-man roster. */
+  canClaim: boolean
+  /** Why the claim is blocked (when canClaim is false). */
+  blockReason?: string
+}
+
 export interface OffseasonView {
   year: number
   stage: 'awards' | 'draft' | 'resign' | 'freeAgency' | 'preseason'
@@ -1439,6 +1458,8 @@ export interface CareerSnapshot {
   /** Rival offer sheets pending on the user's RFAs (re-sign window). Additive;
    *  absent on pre-offer-sheet saves → restored as empty. */
   offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }>
+  /** Live in-season waiver-wire entries. Additive; absent on old saves → empty. */
+  waiverWire?: Array<{ playerId: string; fromTeamId: string; placedDay: number }>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

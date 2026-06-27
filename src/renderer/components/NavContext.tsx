@@ -62,6 +62,7 @@ export type ScreenId =
   | 'player'
   | 'matchcenter'
   | 'trades'
+  | 'waivers'
   | 'lockerRoom'
   | 'calendar'
   | 'settings'

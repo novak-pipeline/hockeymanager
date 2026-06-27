@@ -2112,6 +2112,123 @@ describe('Career — waiver wire', () => {
   })
 })
 
+describe('Career — in-season waiver wire (claim direction)', () => {
+  // Turn an AI club's depth D into a clearly-surplus one-way veteran — exactly the
+  // kind of body a club exposes on the wire mid-season.
+  function makeSurplusVet(
+    data: ReturnType<typeof generateLeague>,
+    teamId: (typeof data.league.teams)[number]
+  ) {
+    const team = data.teams.get(teamId)!
+    const vet = data.players.get(team.roster.find((id) => data.players.get(id)!.position === 'D')!)!
+    vet.age = 31
+    vet.contract = { ...vet.contract, twoWay: false, salary: 1_000_000 }
+    for (const grp of [vet.ratings.technical, vet.ratings.physical, vet.ratings.mental]) {
+      if (grp) for (const k of Object.keys(grp)) (grp as Record<string, number>)[k] = 20
+    }
+    vet.composites = computeComposites(vet.ratings, vet.role, vet.position)
+    return vet
+  }
+
+  it('AI clubs expose surplus one-way veterans on the wire over a season', () => {
+    const data = generateLeague({ seed: 51 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 51, userId)
+    const vet = makeSurplusVet(data, aiId)
+
+    // Drive the weekly placement pass directly across many weeks (deterministic per seed).
+    let fired = false
+    for (let week = 1; week <= 12 && !fired; week++) {
+      ;(career as unknown as { generateWaiverPlacements(d: number): void }).generateWaiverPlacements(week * 7)
+      fired = (career as unknown as { waiverWire: Array<{ playerId: string }> }).waiverWire.some(
+        (w) => w.playerId === (vet.id as string)
+      )
+    }
+    expect(fired).toBe(true)
+    expect(career.getWaiverWire().some((w) => w.playerId === (vet.id as string))).toBe(true)
+  })
+
+  it('the user can claim a player off the wire (his contract comes with him)', () => {
+    const data = generateLeague({ seed: 52 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 52, userId)
+    const ai = data.teams.get(aiId)!
+    const user = data.teams.get(userId)!
+    const target = data.players.get(ai.roster.find((id) => data.players.get(id)!.position === 'D')!)!
+    target.contract = { ...target.contract, salary: 1_000_000 }
+    // Guarantee cap + roster room for the claim.
+    user.finances.salaryCap = 300_000_000
+    user.roster = user.roster.slice(0, 20)
+    ;(career as unknown as { waiverWire: Array<{ playerId: string; fromTeamId: string; placedDay: number }> }).waiverWire = [
+      { playerId: target.id as string, fromTeamId: aiId as string, placedDay: 0 },
+    ]
+
+    expect(career.getWaiverWire().some((w) => w.playerId === (target.id as string) && w.canClaim)).toBe(true)
+    const r = career.claimWaiver(target.id as string)
+    expect(r.ok).toBe(true)
+    expect(user.roster.includes(target.id)).toBe(true)
+    expect(ai.roster.includes(target.id)).toBe(false)
+    // Off the wire once claimed.
+    expect(career.getWaiverWire().length).toBe(0)
+  })
+
+  it('a claim is blocked when it would breach the salary cap', () => {
+    const data = generateLeague({ seed: 53 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 53, userId)
+    const ai = data.teams.get(aiId)!
+    const user = data.teams.get(userId)!
+    const target = data.players.get(ai.roster.find((id) => data.players.get(id)!.position === 'D')!)!
+    target.contract = { ...target.contract, salary: 9_000_000 }
+    // Pin the cap at exactly current usage so any add busts it.
+    const used = user.roster.reduce((s, id) => s + data.players.get(id)!.contract.salary, 0)
+    user.finances.salaryCap = used
+    ;(career as unknown as { waiverWire: Array<{ playerId: string; fromTeamId: string; placedDay: number }> }).waiverWire = [
+      { playerId: target.id as string, fromTeamId: aiId as string, placedDay: 0 },
+    ]
+
+    expect(career.getWaiverWire().find((w) => w.playerId === (target.id as string))!.canClaim).toBe(false)
+    const r = career.claimWaiver(target.id as string)
+    expect(r.ok).toBe(false)
+    expect(ai.roster.includes(target.id)).toBe(true) // untouched
+  })
+
+  it('entries resolve once the window elapses (AI claim or AHL)', () => {
+    const data = generateLeague({ seed: 54 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 54, userId)
+    const ai = data.teams.get(aiId)!
+    const vet = makeSurplusVet(data, aiId)
+    ;(career as unknown as { waiverWire: Array<{ playerId: string; fromTeamId: string; placedDay: number }> }).waiverWire = [
+      { playerId: vet.id as string, fromTeamId: aiId as string, placedDay: 0 },
+    ]
+    // Advance a few match days; the window (2 days) elapses and the entry resolves.
+    for (let i = 0; i < 4; i++) career.advanceDay()
+    expect(career.getWaiverWire().length).toBe(0)
+    // He's no longer on the AI club's NHL roster — claimed elsewhere or sent to its AHL.
+    expect(ai.roster.includes(vet.id)).toBe(false)
+  })
+
+  it('persists the waiver wire across save/load', () => {
+    const data = generateLeague({ seed: 55 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 55, userId)
+    const target = data.players.get(data.teams.get(aiId)!.roster[0]!)!
+    ;(career as unknown as { waiverWire: Array<{ playerId: string; fromTeamId: string; placedDay: number }> }).waiverWire = [
+      { playerId: target.id as string, fromTeamId: aiId as string, placedDay: 3 },
+    ]
+    const snap = career.exportSnapshot('t', '2026-06-26')
+    expect(snap.waiverWire!.length).toBe(1)
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    expect(restored.getWaiverWire().some((w) => w.playerId === (target.id as string))).toBe(true)
+  })
+})
+
 describe('Career — offer sheets', () => {
   it('rivals tender for your RFAs; match keeps him, declining nets pick compensation', () => {
     const data = generateLeague({ seed: 41 })

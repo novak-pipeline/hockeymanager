@@ -358,6 +358,7 @@ import {
   type LinesUpdate,
   type LockerRoomView,
   type OffseasonView,
+  type WaiverWireRowView,
   type PickAssetView,
   type PlayerProfileView,
   type PlayoffBracketView,
@@ -3073,6 +3074,8 @@ export class Career {
     if (this.phase !== 'regularSeason') return false
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     if (nextDay === undefined) return false
+    // Resolve any waiver-wire claims whose window has elapsed before today's games.
+    this.resolveExpiredWaivers(nextDay)
     this.prepareTeamsForDay()
     const played = new Set<PlayerId>()
     const outcomes: GameOutcome[] = []
@@ -3133,6 +3136,7 @@ export class Career {
     //    morale and health (the user's own lines are never touched). ───────────
     if (Math.floor(nextDay / 7) > Math.floor(this.currentDay / 7)) {
       this.reoptimizeAiLines(nextDay)
+      this.generateWaiverPlacements(nextDay)
     }
     // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
     if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
@@ -4763,12 +4767,13 @@ export class Career {
    * goes with him. Returns the claiming team, or null if he clears. On a claim the
    * player is moved onto the claimant's roster (caller removes him from the source).
    */
-  private processWaivers(p: Player, fromTeamId: TeamId): Team | null {
+  private processWaivers(p: Player, fromTeamId: TeamId, skipTeamId?: TeamId): Team | null {
     const grp = this.posGroup(p.position)
     const ovr = ratedOverall(p)
     const order = sortStandings([...this.standings.values()]).map((s) => s.teamId).reverse()
     for (const tid of order) {
       if (tid === fromTeamId) continue
+      if (skipTeamId && tid === skipTeamId) continue
       const team = this.data.teams.get(tid)
       if (!team || team.tier === 'ahl' || team.tier === 'world') continue
       if (team.roster.length >= ROSTER_HARD_CAP) continue
@@ -4972,6 +4977,153 @@ export class Career {
     }
 
     return cleared ? { ok: true, note: `${p.name} cleared waivers.` } : { ok: true }
+  }
+
+  // ──────────────────────── in-season waiver wire ────────────────────────
+  /** Calendar-day window a player sits on the wire before claims resolve. With
+   *  NHL match days ~2–3 days apart this gives the GM one "Continue" to decide. */
+  private static readonly WAIVER_WINDOW_DAYS = 2
+
+  /** Players AI clubs have exposed on the in-season waiver wire. While an entry is
+   *  live the USER may claim the player (cap + roster permitting); when it expires
+   *  AI clubs get a worst-first crack, else he reports to the placing club's AHL.
+   *  The player STAYS on his club's roster while exposed — he only moves on a claim
+   *  or at resolution, so no roster minimum is ever breached mid-window. */
+  private waiverWire: Array<{ playerId: string; fromTeamId: string; placedDay: number }> = []
+
+  /** Weekly: AI clubs put a clearly-surplus one-way veteran (sitting below their
+   *  NHL bar, blocking nobody useful) on waivers. Bounded to ~2 leaguewide per pass
+   *  so the wire never floods, and never more than one body per club at a time. */
+  private generateWaiverPlacements(day: number): void {
+    const rng = new Rng(deriveSeed(this.seed, 9281, day))
+    let placed = 0
+    for (const tid of this.data.league.teams) {
+      if (placed >= 2) break
+      if ((tid as string) === (this.userTeamId as string)) continue
+      if (this.waiverWire.some((w) => w.fromTeamId === (tid as string))) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      if (!team.affiliateId) continue // need an AHL to send the clearer to
+      const cand = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.injuryStatus === null && this.requiresWaivers(p))
+        .filter((p) => ratedOverall(p) < this.orgNhlBar(team, this.posGroup(p.position)) - 3)
+        .sort((a, b) => ratedOverall(a) - ratedOverall(b))[0]
+      if (!cand) continue
+      if (!rng.chance(0.5)) continue // not every eligible club, every week
+      this.waiverWire.push({ playerId: cand.id as string, fromTeamId: tid as string, placedDay: day })
+      placed++
+      this.pushNews(
+        'contract',
+        `${cand.name} placed on waivers by ${team.abbreviation}`,
+        `${team.name} have placed ${cand.name} (${cand.position}, ${cand.age}, $${(cand.contract.salary / 1_000_000).toFixed(2)}M) on waivers. ` +
+          `You have until the wire clears to claim him and his contract — head to the Waiver Wire to put in a claim.`,
+        { playerId: cand.id as string, teamId: tid as string }
+      )
+    }
+  }
+
+  /** Resolve any wire entries whose window has elapsed. The user already had their
+   *  claim window, so only AI clubs (worst-first) are offered the player here; if
+   *  none bite he reports to the placing club's AHL affiliate. */
+  private resolveExpiredWaivers(nextDay: number): void {
+    if (this.waiverWire.length === 0) return
+    const remaining: typeof this.waiverWire = []
+    for (const w of this.waiverWire) {
+      if (nextDay - w.placedDay < Career.WAIVER_WINDOW_DAYS) {
+        remaining.push(w)
+        continue
+      }
+      const fromId = asTeamId(w.fromTeamId)
+      const from = this.data.teams.get(fromId)
+      const p = this.data.players.get(asPlayerId(w.playerId))
+      if (!from || !p || !from.roster.includes(p.id)) continue // traded/gone — drop it
+      const claimant = this.processWaivers(p, fromId, this.userTeamId)
+      if (claimant) {
+        from.roster = from.roster.filter((id) => id !== p.id)
+        repairLines(from, this.data.players)
+        const tx = recordTransaction(this.transactionLedger, {
+          day: nextDay, year: this.year, kind: 'release', teamIds: [fromId as string, claimant.id as string],
+          summary: `${claimant.abbreviation} claims ${p.name} off waivers from ${from.abbreviation}.`,
+        })
+        this.transactionLedger = tx.ledger
+      } else {
+        const ahl = from.affiliateId ? this.data.teams.get(from.affiliateId) : undefined
+        if (ahl) {
+          from.roster = from.roster.filter((id) => id !== p.id)
+          ahl.roster.push(p.id)
+          repairLines(from, this.data.players)
+          repairLines(ahl, this.data.players)
+        }
+      }
+    }
+    this.waiverWire = remaining
+  }
+
+  /** Players currently claimable on the in-season waiver wire (user-facing view). */
+  getWaiverWire(): WaiverWireRowView[] {
+    const user = this.data.teams.get(this.userTeamId)
+    if (!user) return []
+    const capUsed = user.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    const capSpace = user.finances.salaryCap - capUsed
+    return this.waiverWire.map((w) => {
+      const p = this.resolve(asPlayerId(w.playerId))
+      const from = this.data.teams.get(asTeamId(w.fromTeamId))
+      const rosterFull = user.roster.length >= ROSTER_HARD_CAP
+      const overCap = p.contract.salary > capSpace
+      const canClaim = !rosterFull && !overCap
+      return {
+        ...badge(p),
+        fromTeamAbbr: from?.abbreviation ?? '???',
+        fromTeamName: from?.name ?? 'Unknown',
+        salary: p.contract.salary,
+        yearsRemaining: p.contract.yearsRemaining,
+        twoWay: p.contract.twoWay !== false,
+        claimDeadlineInDays: Math.max(0, w.placedDay + Career.WAIVER_WINDOW_DAYS - this.currentDay),
+        canClaim,
+        ...(canClaim ? {} : { blockReason: rosterFull ? 'Roster full (26)' : 'No cap space' }),
+      }
+    })
+  }
+
+  /** Claim a player off the in-season waiver wire onto the user's NHL roster. His
+   *  contract comes with him. Fails (without throwing) on cap/roster constraints. */
+  claimWaiver(playerId: string): { ok: true; note: string } | { ok: false; reason: string } {
+    const w = this.waiverWire.find((x) => x.playerId === playerId)
+    if (!w) return { ok: false, reason: 'That player is no longer on the waiver wire.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    const from = this.data.teams.get(asTeamId(w.fromTeamId))
+    const user = this.data.teams.get(this.userTeamId)
+    if (!p || !from || !user) return { ok: false, reason: 'Player not found.' }
+    if (!from.roster.includes(p.id)) {
+      this.waiverWire = this.waiverWire.filter((x) => x.playerId !== playerId)
+      return { ok: false, reason: 'That player is no longer available.' }
+    }
+    if (user.roster.length >= ROSTER_HARD_CAP) {
+      return { ok: false, reason: 'Your roster is full (26 players). Make room before claiming.' }
+    }
+    const capUsed = user.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    if (capUsed + p.contract.salary > user.finances.salaryCap) {
+      return { ok: false, reason: 'Claiming him would put you over the salary cap.' }
+    }
+    from.roster = from.roster.filter((id) => id !== p.id)
+    user.roster.push(p.id)
+    repairLines(from, this.data.players)
+    repairLines(user, this.data.players)
+    this.waiverWire = this.waiverWire.filter((x) => x.playerId !== playerId)
+    this.pushNews(
+      'contract',
+      `Claimed ${p.name} off waivers`,
+      `You claimed ${p.name} (${p.position}, ${p.age}) off waivers from ${from.name}. His contract ` +
+        `($${(p.contract.salary / 1_000_000).toFixed(2)}M, ${p.contract.yearsRemaining}yr) is now on your books.`,
+      { playerId, teamId: this.userTeamId as string }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay, year: this.year, kind: 'signing', teamIds: [this.userTeamId as string, from.id as string],
+      summary: `${user.abbreviation} claims ${p.name} off waivers from ${from.abbreviation}.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, note: `${p.name} claimed off waivers.` }
   }
 
   /**
@@ -5614,6 +5766,7 @@ export class Career {
       financesSummary,
       board: boardSummary(this.boardState),
       gmFired: this.boardState.firedAtYear !== null,
+      ...(this.waiverWire.length > 0 ? { waiverClaimsAvailable: this.waiverWire.length } : {}),
     }
   }
 
@@ -8827,6 +8980,7 @@ export class Career {
       offseason: this.offseason,
       picks: [...this.picks],
       offerSheets: [...this.offerSheets],
+      waiverWire: this.waiverWire.map((w) => ({ ...w })),
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -8919,6 +9073,7 @@ export class Career {
       ownerTeamId: asTeamId(p.ownerTeamId as unknown as string),
     }))
     career.offerSheets = snapshot.offerSheets ? snapshot.offerSheets.map((s) => ({ ...s })) : []
+    career.waiverWire = snapshot.waiverWire ? snapshot.waiverWire.map((w) => ({ ...w })) : []
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

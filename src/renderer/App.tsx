@@ -8,6 +8,7 @@ import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
+import { LeagueTicker } from './components/LeagueTicker'
 import { SideNav } from './components/SideNav'
 import { TeamColorsProvider } from './components/Crest'
 import { SubTabBar } from './components/SubTabBar'
@@ -24,6 +25,7 @@ import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
+import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
@@ -376,6 +378,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                     <ScreenRouter screen={nav.screen} params={nav.params} />
                   </ScreenBoundary>
                 </div>
+                <LeagueTicker />
               </div>
             </div>
           </div>
@@ -507,6 +510,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <CalendarScreen />
     case 'trades':
       return <TradesScreen />
+    case 'waivers':
+      return <WaiverWireScreen />
     case 'lockerRoom':
       return <Notice kind="info">Locker room — navigate via Team &gt; Roster.</Notice>
     case 'settings':

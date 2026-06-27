@@ -217,6 +217,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().declineOfferSheet(req.playerId)
       return { id: req.id, type: 'ok', note: r.message }
     }
+    case 'getWaiverWire':
+      return { id: req.id, type: 'waiverWire', waiverWire: must().getWaiverWire() }
+    case 'claimWaiver': {
+      const r = must().claimWaiver(req.playerId)
+      if (!r.ok) throw new Error(r.reason)
+      return { id: req.id, type: 'ok', note: r.note }
+    }
     case 'draftPlayer':
       must().draftPlayer(req.playerId)
       return { id: req.id, type: 'ok' }

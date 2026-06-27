@@ -1368,3 +1368,110 @@ a:hover { text-decoration: underline; }
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.45; }
 }
+
+/* ── league ticker (ESPN BottomLine-style crawl, bottom of shell) ── */
+
+.ticker {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  background: var(--bg0);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  z-index: 15;
+}
+.ticker--collapsed { height: 22px; }
+.ticker-handle {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.ticker-handle:hover { color: var(--text); }
+
+.ticker-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-right: 1px solid var(--line);
+  background: var(--bg1);
+}
+.ticker-brand {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgb(var(--accent-rgb));
+  margin-right: 2px;
+}
+.ticker-mode {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ticker-mode:hover { color: var(--text); background: var(--bg3); }
+.ticker-mode.is-active { color: var(--accent-ink); background: rgb(var(--accent-rgb)); }
+.ticker-hide {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.ticker-hide:hover { color: var(--text); }
+
+.ticker-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ticker-empty { color: var(--muted); padding: 0 12px; font-style: italic; }
+
+.ticker-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation-name: ticker-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+.ticker-viewport:hover .ticker-track { animation-play-state: paused; }
+.ticker-run { display: inline-flex; }
+.ticker-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ticker-item:hover { color: var(--violet-h); }
+.ticker-item.is-accent { color: rgb(var(--accent-rgb)); font-weight: 600; }
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Respect reduced-motion: no crawl — show a static, horizontally scrollable strip. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; transform: none; }
+  .ticker-run:nth-child(2) { display: none; }
+  .ticker-viewport { overflow-x: auto; scrollbar-width: thin; }
+}
