@@ -699,9 +699,14 @@ export function aiSelectProspect(args: {
   remaining: DraftProspect[]
   rng: Rng
   needBonus?: (p: DraftProspect) => number
+  /** Per-club board variance (rank nudge, + = this club is higher on him). Lets
+   *  each org keep its own slightly different board instead of all AI sharing the
+   *  public consensus. Deterministic per (team, prospect). Omitted → consensus. */
+  boardBias?: (p: DraftProspect) => number
 }): DraftProspect {
-  const { remaining, rng, needBonus } = args
-  const eff = (p: DraftProspect): number => p.rank - (needBonus ? needBonus(p) : 0)
+  const { remaining, rng, needBonus, boardBias } = args
+  const eff = (p: DraftProspect): number =>
+    p.rank - (needBonus ? needBonus(p) : 0) - (boardBias ? boardBias(p) : 0)
   const board = [...remaining].sort((a, b) => eff(a) - eff(b) || a.rank - b.rank)
   // Mostly take the best available (need-adjusted); occasionally reach a spot or
   // two, rarely further. Real GMs don't routinely pass on the clear top of their

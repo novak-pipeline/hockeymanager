@@ -878,4 +878,22 @@ describe('aiSelectProspect', () => {
     // The need bias lifts the thin-position prospect up the board far more often.
     expect(countNeed(true)).toBeGreaterThan(countNeed(false))
   })
+
+  it('boardBias lets a club move a prospect up its own board', () => {
+    // Two near-equal prospects; the bias makes the lower-ranked one this club's guy.
+    const remaining: DraftProspect[] = [
+      { playerId: asPlayerId('a'), rank: 1 },
+      { playerId: asPlayerId('b'), rank: 2 },
+    ]
+    const bias = (p: DraftProspect): number => ((p.playerId as string) === 'b' ? 4 : 0)
+    const countB = (withBias: boolean): number => {
+      let n = 0
+      for (let s = 0; s < 200; s++) {
+        const pick = aiSelectProspect({ remaining, rng: new Rng(s), ...(withBias ? { boardBias: bias } : {}) })
+        if ((pick.playerId as string) === 'b') n++
+      }
+      return n
+    }
+    expect(countB(true)).toBeGreaterThan(countB(false))
+  })
 })

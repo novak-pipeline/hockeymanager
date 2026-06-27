@@ -4161,6 +4161,7 @@ export class Career {
               remaining,
               rng: this.rngFor(8005, d.selections.length),
               needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p),
+              boardBias: (p) => this.teamDraftBias(pick.ownerTeamId, p),
             })
       this.makeSelection(choice.playerId)
     }
@@ -4181,8 +4182,19 @@ export class Career {
       remaining,
       rng: this.rngFor(8005, d.selections.length),
       needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p),
+      boardBias: (p) => this.teamDraftBias(pick.ownerTeamId, p),
     })
     this.makeSelection(choice.playerId)
+  }
+
+  /** A club's private board variance on a prospect: a small, deterministic rank
+   *  nudge (±~2.5) per (team, prospect) so different AI orgs value the same kid
+   *  slightly differently instead of all sharing the public consensus board. */
+  private teamDraftBias(teamId: TeamId, p: DraftProspect): number {
+    let h = 2166136261
+    const s = `${teamId as string}:${p.playerId as string}`
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) }
+    return (((h >>> 0) % 100000) / 100000 - 0.5) * 5
   }
 
   /**
