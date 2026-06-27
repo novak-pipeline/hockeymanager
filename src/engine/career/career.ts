@@ -3961,6 +3961,7 @@ export class Career {
         // or auto-drafts the rest there; only once every pick is in does the
         // offseason resume. Returning false halts advance() / step() cleanly.
         if (os.draft && os.draft.selections.length < os.draft.order.length) return false
+        this.pushDraftRecap()
         const rng = this.rngFor(8003)
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         this.resignStatus.clear()
@@ -4257,6 +4258,36 @@ export class Career {
    *  blocked and the UI should route the GM into the Draft screen. */
   draftPending(): boolean {
     return this.offseason?.stage === 'draft' && !this.draftComplete()
+  }
+
+  /** Drop a post-draft recap into the inbox: your haul, with the best value
+   *  (slid furthest past the consensus board) and any notable reach called out. */
+  private pushDraftRecap(): void {
+    const os = this.offseason
+    if (!os?.draft) return
+    const d = os.draft
+    const cls = this.data.league.draftClasses.find((c) => c.year === d.year)
+    const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
+    const mine = d.selections.filter((s) => s.teamId === this.userTeamId)
+    if (mine.length === 0) return
+    const picks = mine.map((s) => {
+      const p = this.resolve(s.playerId)
+      const cons = rankOf.get(s.playerId as string) ?? s.overallPick
+      return { name: p.name, pos: p.position, overall: s.overallPick, cons, delta: s.overallPick - cons }
+    })
+    const haul = picks.map((p) => `#${p.overall} ${p.name} (${p.pos})`).join(', ')
+    const lines = [`Your haul: ${haul}.`]
+    const steal = [...picks].sort((a, b) => b.delta - a.delta)[0]
+    if (steal && steal.delta >= 6) {
+      lines.push(`Best value: ${steal.name} slid to #${steal.overall} with the consensus board on him at #${steal.cons}.`)
+    }
+    const reach = [...picks].sort((a, b) => a.delta - b.delta)[0]
+    if (reach && reach.delta <= -10 && reach !== steal) {
+      lines.push(`A swing: we went early on ${reach.name} (#${reach.overall}; board #${reach.cons}) — our scouts liked him more than the room.`)
+    }
+    this.pushNews('draft', `${d.year} Draft recap — ${this.userTeam.abbreviation}`, lines.join(' '), {
+      playerId: mine[0].playerId as string,
+    })
   }
 
   /* ────────────────────────── season rollover ────────────────────────── */

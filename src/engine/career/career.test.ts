@@ -331,6 +331,8 @@ describe('Career — full year cycle', () => {
     const done = career.getDraft()
     expect(done === null || done.complete).toBe(true)
     expect(career.advanceOffseason()).toBe(true) // now it advances to resign
+    // A post-draft recap lands in the inbox summarising the user's haul.
+    expect(career.getInbox().items.some((n) => n.headline.includes('Draft recap'))).toBe(true)
   })
 
   it('records rights + draft pedigree on every player selected in-game', () => {
