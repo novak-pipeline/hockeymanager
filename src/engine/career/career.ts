@@ -73,6 +73,7 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { applyConsistency } from '@engine/league/consistency'
+import { streakMilestone } from '@engine/league/ambientNews'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
@@ -609,6 +610,9 @@ export class Career {
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
   private readonly resignStatus = new Map<PlayerId, ResignStatus>()
+  /** Per-team signed current streak (+wins / −winless), for ambient league news.
+   *  NHL games only; reset each season. Serialized additively. */
+  private teamStreaks = new Map<string, number>()
   /** Rival offer sheets tendered to the user's RFAs in the re-sign window. */
   private offerSheets: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }> = []
   private faPool: PlayerId[] = []
@@ -1763,6 +1767,22 @@ export class Career {
     }
     return new Rng(deriveSeed(this.seed, Career.CONSISTENCY_NS, this.year, this.currentDay, (h >>> 0) % 2147483647)).next()
   }
+
+  /** Update a team's hot/cold streak after an NHL result and emit ambient league
+   *  news when it hits a notable threshold (6, 8, 10, …). Story flavour only. */
+  private updateStreak(teamId: string, won: boolean): void {
+    const prev = this.teamStreaks.get(teamId) ?? 0
+    const next = won ? (prev > 0 ? prev + 1 : 1) : prev < 0 ? prev - 1 : -1
+    this.teamStreaks.set(teamId, next)
+    // Surface only the USER's club streak to the inbox (club voice) — pushing every
+    // team's run would flood the capped news feed. All streaks are still tracked,
+    // ready for a future leaguewide ticker feed.
+    if (teamId !== (this.userTeamId as string)) return
+    const team = this.data.teams.get(asTeamId(teamId))
+    if (!team) return
+    const m = streakMilestone(team.name, next)
+    if (m) this.pushNews('league', m.headline, m.body, { teamId })
+  }
   /** Keep at most this many open concerns at once, and this many total stored. */
   private static readonly MAX_OPEN_INTERACTIONS = 3
   private static readonly INTERACTION_HISTORY_LIMIT = 40
@@ -2722,6 +2742,9 @@ export class Career {
     // before merging into totals (so totals pick up the physical counts too).
     this.creditPhysicalStats(res)
     applyStandingsResult(this.standings, res)
+    // Hot/cold streak tracking → ambient league news (a tie is impossible in hockey).
+    this.updateStreak(res.homeTeamId as string, res.homeGoals > res.awayGoals)
+    this.updateStreak(res.awayTeamId as string, res.awayGoals > res.homeGoals)
     mergePlayerStats(this.totals, res.playerStats)
     for (const [pid, s] of res.playerStats) {
       if (s.toi > 0) this.gp.set(pid, (this.gp.get(pid) ?? 0) + 1)
@@ -4493,6 +4516,8 @@ export class Career {
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
     this.specialTeams = []
+    // Reset hot/cold streak tracking for the new season.
+    this.teamStreaks.clear()
 
     this.pushNews(
       'league',
@@ -8999,6 +9024,7 @@ export class Career {
       picks: [...this.picks],
       offerSheets: [...this.offerSheets],
       waiverWire: this.waiverWire.map((w) => ({ ...w })),
+      teamStreaks: [...this.teamStreaks.entries()],
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9092,6 +9118,7 @@ export class Career {
     }))
     career.offerSheets = snapshot.offerSheets ? snapshot.offerSheets.map((s) => ({ ...s })) : []
     career.waiverWire = snapshot.waiverWire ? snapshot.waiverWire.map((w) => ({ ...w })) : []
+    career.teamStreaks = new Map(snapshot.teamStreaks ?? [])
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

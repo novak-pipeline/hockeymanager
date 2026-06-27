@@ -1460,6 +1460,8 @@ export interface CareerSnapshot {
   offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }>
   /** Live in-season waiver-wire entries. Additive; absent on old saves → empty. */
   waiverWire?: Array<{ playerId: string; fromTeamId: string; placedDay: number }>
+  /** Per-team hot/cold streak counters for ambient news. Additive; absent → empty. */
+  teamStreaks?: Array<[string, number]>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;
