@@ -234,8 +234,12 @@ function simShift(
   const defense = avg(def.skaters, (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
 
   const lgAvg = ctx.leagueAvg
+  // Cap the team-strength shot multiplier: a stacked line in a weak league must
+  // not generate runaway shot volume. NHL top lines sit ~1.25, so a 1.4 ceiling
+  // is invisible there but tames weak-league outliers.
+  const offMult = Math.min(1.4, offense / lgAvg)
   const rate =
-    BASE_SHOTS_PER_SHIFT * (offense / lgAvg) * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult
+    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -268,7 +272,11 @@ function simShift(
     goalieStat.shotsAgainst++
     goalieStat.xgAgainst = (goalieStat.xgAgainst ?? 0) + shotXgApprox
 
-    const finish = shooter.composites.scoring / lgAvg
+    // Cap the per-shooter finishing multiplier. Relative-to-league finishing lets
+    // a weak league's best players score realistically, but uncapped it let a
+    // genuine star in a very weak loop convert at a supernatural rate (200-pt
+    // junior seasons). NHL stars top out ~1.6, so this ceiling is NHL-neutral.
+    const finish = Math.min(1.6, shooter.composites.scoring / lgAvg)
     const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
     // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
     const cf = attacking.team.coachFit === undefined ? 1 : coachFitMultiplier(attacking.team.coachFit)

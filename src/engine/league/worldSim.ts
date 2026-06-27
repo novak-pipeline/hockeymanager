@@ -75,7 +75,9 @@ function competitionLeagueAvg(
   // realistic totals without destabilising the calibrated draft model.
   const raw = sum / n
   const blended = 50 + (raw - 50) * 0.6
-  return Math.max(40, Math.min(52, blended))
+  // Floor at 44 (not 40): too low a baseline over-credits a weak league's best
+  // players (their scoring/leagueAvg finishing ratio blew up into 200-pt seasons).
+  return Math.max(44, Math.min(52, blended))
 }
 
 /** Zero a Standing row in place (season rollover). */

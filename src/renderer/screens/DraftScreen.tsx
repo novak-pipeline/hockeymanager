@@ -606,7 +606,12 @@ function StaffAdvicePanel(props: {
     }
     return list
   }, [props.advice])
-  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  // Default: only the 4 most important advisors are on (the engine emits them
+  // first — Head Scout, Assistant GM, Head Coach, lead pro scout). The rest are
+  // available but toggled off so the room isn't a wall of cards.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(advisors.slice(4).map((a) => a.id))
+  )
   const toggle = (id: string): void =>
     setHidden((h) => { const n = new Set(h); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const shown = props.advice.filter((a) => !hidden.has(a.staffId))
