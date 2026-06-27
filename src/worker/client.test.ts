@@ -161,6 +161,7 @@ describe('SimClient', () => {
       [() => client.clearMentor('m1'), { type: 'clearMentor', menteeId: 'm1' }],
       [() => client.getClubDirection(), { type: 'getClubDirection' }],
       [() => client.setClubDirection('rebuild'), { type: 'setClubDirection', direction: 'rebuild' }],
+      [() => client.getFanbase(), { type: 'getFanbase' }],
       [() => client.getOwnerRequest(), { type: 'getOwnerRequest' }],
       [() => client.respondOwnerRequest(true), { type: 'respondOwnerRequest', accept: true }],
       [() => client.advanceOffseason(), { type: 'advanceOffseason' }],

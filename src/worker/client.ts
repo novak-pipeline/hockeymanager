@@ -365,6 +365,10 @@ export class SimClient {
     return this.send({ type: 'setClubDirection', direction })
   }
 
+  getFanbase(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFanbase' })
+  }
+
   acceptGMJob(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptGMJob', teamId })
   }

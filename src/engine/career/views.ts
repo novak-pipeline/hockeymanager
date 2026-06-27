@@ -1209,6 +1209,14 @@ export interface OwnerRequestView {
   declineHint: string
 }
 
+/** Fan engagement + its effect on the owner budget. Response to 'getFanbase'. */
+export interface FanbaseView {
+  interest: number
+  label: string
+  /** Owner-budget multiplier from fan interest, as a percentage (e.g. 105 = 1.05×). */
+  budgetFactorPct: number
+}
+
 /** The GM's competitive stance + whether a rebuild can be sanctioned. Response to 'getClubDirection'. */
 export interface ClubDirectionView {
   direction: 'compete' | 'retool' | 'rebuild'
@@ -1556,6 +1564,10 @@ export interface CareerSnapshot {
   mentorships?: Array<[string, string]>
   /** GM's declared competitive stance. Additive; absent → 'compete'. */
   clubDirection?: 'compete' | 'retool' | 'rebuild'
+  /** Fan engagement (0–100). Additive; absent → 60. */
+  fanInterest?: number
+  /** Captured baseline owner budget for fan-scaling. Additive; absent → 0 (recapture). */
+  baseBudget?: number
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

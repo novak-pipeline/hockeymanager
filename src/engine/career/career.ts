@@ -75,6 +75,7 @@ import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
 import { generateOwnerRequest, type OwnerRequest } from '@engine/league/ownerMeddling'
+import { fanInterestDelta, budgetFactor, fanInterestLabel } from '@engine/league/fanbase'
 import {
   createGMState,
   recordSeasonResult,
@@ -379,6 +380,7 @@ import {
   type GMRelationshipsView,
   type MentorshipView,
   type ClubDirectionView,
+  type FanbaseView,
   type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
@@ -744,6 +746,14 @@ export class Career {
    *  draft position) — but ownership only sanctions it if they aren't expecting a
    *  contender. Serialized additively; defaults to 'compete'. */
   private clubDirection: 'compete' | 'retool' | 'rebuild' = 'compete'
+
+  /** Fan engagement for the user's club (0–100). Rises with success, erodes with
+   *  losing — and feeds the owner's budget, so a long tank quietly shrinks your war
+   *  chest. Serialized additively; defaults to 60. */
+  private fanInterest = 60
+  /** The club's baseline owner budget, captured once so fan interest scales it
+   *  each season without compounding drift. 0 = not yet captured. */
+  private baseBudget = 0
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -3738,6 +3748,27 @@ export class Career {
             endStint(gm, this.year, 'fired')
             this.gmJobMarket = this.buildGMOpenings(sorted)
           }
+
+          // ── Fanbase: the season's result moves the needle on fan engagement. ──
+          const fanDelta = fanInterestDelta({
+            finalRank: userFinalRank,
+            n: this.data.league.teams.length,
+            madePlayoffs,
+            wonCup,
+            rebuilding: this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true,
+          })
+          if (fanDelta !== 0) {
+            const before = this.fanInterest
+            this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + fanDelta))
+            if (Math.abs(this.fanInterest - before) >= 6) {
+              this.pushNews(
+                'league',
+                fanDelta > 0 ? 'The fans are buying in' : 'The fans are drifting away',
+                `${fanInterestLabel(this.fanInterest)}. ${fanDelta > 0 ? 'Engagement is up' : 'Engagement is down'} after this season — and that shapes what ownership puts on the table next year.`,
+                { teamId: this.userTeamId as string }
+              )
+            }
+          }
         }
 
         /* ── fold the season into the all-time records ── */
@@ -4479,6 +4510,15 @@ export class Career {
     })
 
     this.archiveSeasonStats()
+
+    // Fanbase → owner budget: an engaged fanbase fills the building and the owner
+    // opens the chequebook; an empty barn tightens it. Scales a captured baseline
+    // so it never compounds. (Capture lazily on the first rollover.)
+    {
+      const fin = this.userTeam.finances
+      if (this.baseBudget === 0) this.baseBudget = fin.budget
+      fin.budget = Math.round(this.baseBudget * budgetFactor(this.fanInterest))
+    }
 
     // Final ranks feed next season's preseason odds (30% of the blend).
     const finalRanks = new Map<string, number>(
@@ -7012,6 +7052,15 @@ export class Career {
     return { ok: true, message: `Club direction set to ${direction}.` }
   }
 
+  /** Fan engagement + its current pull on the owner budget. */
+  getFanbase(): FanbaseView {
+    return {
+      interest: this.fanInterest,
+      label: fanInterestLabel(this.fanInterest),
+      budgetFactorPct: Math.round(budgetFactor(this.fanInterest) * 100),
+    }
+  }
+
   /* ────────────────────── staff-meeting agenda ────────────────────── */
 
   /** Mark a player topic for discussion at the next staff meeting. */
@@ -9530,6 +9579,8 @@ export class Career {
       gmRelationships: [...this.gmRelationships.entries()],
       mentorships: [...this.mentorships.entries()],
       clubDirection: this.clubDirection,
+      fanInterest: this.fanInterest,
+      baseBudget: this.baseBudget,
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9630,6 +9681,8 @@ export class Career {
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.mentorships = new Map(snapshot.mentorships ?? [])
     career.clubDirection = snapshot.clubDirection ?? 'compete'
+    career.fanInterest = snapshot.fanInterest ?? 60
+    career.baseBudget = snapshot.baseBudget ?? 0
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

@@ -1,4 +1,4 @@
-import type { FinanceView, PayrollRowView } from '../../worker/protocol'
+import type { FinanceView, FanbaseView, PayrollRowView } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -11,6 +11,10 @@ export function FinancesScreen(): JSX.Element {
     () => client.getFinances(),
     (r) => (r.type === 'finances' ? r.finances : null)
   )
+  const fans = useScreenData<FanbaseView>(
+    () => client.getFanbase(),
+    (r) => (r.type === 'fanbase' ? r.fanbase : null)
+  )
 
   return (
     <section className="stack">
@@ -21,6 +25,22 @@ export function FinancesScreen(): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="No finance data yet."
       />
+      {fans.data && (
+        <Panel title="Fanbase">
+          <div className="row" style={{ gap: 24, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <div>
+              <div className="muted small">Fan interest</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{fans.data.interest}<span className="muted small"> / 100</span></div>
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 600 }}>{fans.data.label}</div>
+              <div className="muted small">
+                Owner budget is running at <strong>{fans.data.budgetFactorPct}%</strong> of baseline — win and fill the building to grow it; a long rebuild erodes it.
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
       {data && <FinancesBody data={data} />}
     </section>
   )

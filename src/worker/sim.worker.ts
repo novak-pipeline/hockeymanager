@@ -246,6 +246,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!r.ok) throw new Error(r.message)
       return { id: req.id, type: 'ok', note: r.message }
     }
+    case 'getFanbase':
+      return { id: req.id, type: 'fanbase', fanbase: must().getFanbase() }
     case 'acceptGMJob': {
       const r = must().acceptGMJob(req.teamId)
       if (!r.ok) throw new Error(r.message)
