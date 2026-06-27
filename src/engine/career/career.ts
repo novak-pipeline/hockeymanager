@@ -361,6 +361,7 @@ import {
   type LockerRoomView,
   type OffseasonView,
   type WaiverWireRowView,
+  type LeagueWireView,
   type PickAssetView,
   type PlayerProfileView,
   type PlayoffBracketView,
@@ -8891,6 +8892,29 @@ export class Career {
           (tid) => this.data.teams.get(asTeamId(tid))?.name ?? tid
         ),
       }))
+    return { items }
+  }
+
+  /** Leaguewide ticker feed: recent transactions interleaved with current notable
+   *  hot/cold team streaks (|streak| ≥ 5). The league's voice for the bottom ticker
+   *  — read-only, derived from the ledger + streak tracking. */
+  getLeagueWire(): LeagueWireView {
+    const items: LeagueWireView['items'] = []
+    // Recent transactions (most recent first).
+    for (const tx of [...this.transactionLedger.items].reverse().slice(0, 25)) {
+      items.push({ kind: 'transaction', text: tx.summary, accent: tx.kind === 'trade' })
+    }
+    // Current notable streaks across the whole league.
+    for (const [teamId, streak] of this.teamStreaks) {
+      if (Math.abs(streak) < 5) continue
+      const team = this.data.teams.get(asTeamId(teamId))
+      if (!team) continue
+      const text =
+        streak > 0
+          ? `${team.abbreviation} have won ${streak} straight`
+          : `${team.abbreviation} winless in ${Math.abs(streak)}`
+      items.push({ kind: 'streak', text, teamAbbr: team.abbreviation, accent: Math.abs(streak) >= 8 })
+    }
     return { items }
   }
 

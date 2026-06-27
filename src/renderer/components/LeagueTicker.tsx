@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ScoreboardView, TransactionsView } from '../../engine/career/views'
+import type { ScoreboardView, LeagueWireView } from '../../engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 
@@ -36,9 +36,9 @@ export function LeagueTicker(): JSX.Element {
     () => client.getScoreboard(),
     (r) => (r.type === 'scoreboard' ? r.scoreboard : null)
   )
-  const transactions = useScreenData<TransactionsView>(
-    () => client.getTransactions(40),
-    (r) => (r.type === 'transactions' ? r.transactions : null)
+  const wire = useScreenData<LeagueWireView>(
+    () => client.getLeagueWire(),
+    (r) => (r.type === 'leagueWire' ? r.leagueWire : null)
   )
 
   if (!on) {
@@ -62,11 +62,11 @@ export function LeagueTicker(): JSX.Element {
             accent: Math.abs(e.homeGoals - e.awayGoals) >= 4,
             onClick: () => nav.navigate('leagueScoreboard'),
           }))
-      : (transactions.data?.items ?? []).map((t) => ({
-          key: t.id,
-          text: t.summary,
-          accent: t.kind === 'trade',
-          onClick: () => nav.navigate('leagueTransactions'),
+      : (wire.data?.items ?? []).map((it, i) => ({
+          key: `${it.kind}-${i}`,
+          text: it.text,
+          accent: it.accent,
+          onClick: () => nav.navigate(it.kind === 'streak' ? 'standings' : 'leagueTransactions'),
         }))
 
   // Keep the crawl speed roughly constant regardless of how much is in the feed.

@@ -329,6 +329,10 @@ export class SimClient {
     return this.send({ type: 'getWaiverWire' })
   }
 
+  getLeagueWire(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueWire' })
+  }
+
   claimWaiver(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'claimWaiver', playerId })
   }

@@ -219,6 +219,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getWaiverWire':
       return { id: req.id, type: 'waiverWire', waiverWire: must().getWaiverWire() }
+    case 'getLeagueWire':
+      return { id: req.id, type: 'leagueWire', leagueWire: must().getLeagueWire() }
     case 'claimWaiver': {
       const r = must().claimWaiver(req.playerId)
       if (!r.ok) throw new Error(r.reason)

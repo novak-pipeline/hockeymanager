@@ -2287,6 +2287,22 @@ export interface TransactionsView {
 }
 
 /**
+ * Leaguewide "wire" feed for the ticker — recent transactions plus current
+ * notable hot/cold team streaks. The LEAGUE's voice (distinct from the club
+ * inbox). Response to 'getLeagueWire'.
+ */
+export interface LeagueWireView {
+  items: Array<{
+    kind: 'transaction' | 'streak'
+    text: string
+    /** Team this item is about, for deep-linking / accenting. */
+    teamAbbr?: string
+    /** True for marquee items (trades, long streaks) — the ticker can highlight. */
+    accent?: boolean
+  }>
+}
+
+/**
  * Daily scoreboard.
  * Response to 'getScoreboard'.
  */

@@ -45,6 +45,7 @@ export type {
   LockerRoomView,
   OffseasonView,
   WaiverWireRowView,
+  LeagueWireView,
   PersonalityReadView,
   PersonalityTraitRead,
   PlayerAnalyticsRow,
@@ -229,6 +230,8 @@ export type WorkerRequestBody =
   | { type: 'declineOfferSheet'; playerId: string }
   /** Read the live in-season waiver wire (AI castoffs claimable by the user). */
   | { type: 'getWaiverWire' }
+  /** Read the leaguewide ticker feed (recent transactions + notable streaks). */
+  | { type: 'getLeagueWire' }
   /** Claim a player off the in-season waiver wire onto the user's roster. */
   | { type: 'claimWaiver'; playerId: string }
   /** User makes their selection while on the clock. */
@@ -363,6 +366,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'draft'; draft: DraftView }
   | { type: 'finances'; finances: FinanceView }
   | { type: 'waiverWire'; waiverWire: WaiverWireRowView[] }
+  | { type: 'leagueWire'; leagueWire: LeagueWireView }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }

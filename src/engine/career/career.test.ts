@@ -2213,6 +2213,23 @@ describe('Career — in-season waiver wire (claim direction)', () => {
     expect(ai.roster.includes(vet.id)).toBe(false)
   })
 
+  it('league wire surfaces notable team streaks (leaguewide)', () => {
+    const data = generateLeague({ seed: 56 })
+    const userId = data.league.teams[0]!
+    const aiId = data.league.teams[1]!
+    const career = new Career(data, 56, userId)
+    // Seed a hot streak for a rival and a cold one for the user's club.
+    ;(career as unknown as { teamStreaks: Map<string, number> }).teamStreaks = new Map([
+      [aiId as string, 7],
+      [userId as string, -6],
+    ])
+    const wire = career.getLeagueWire()
+    const streaks = wire.items.filter((it) => it.kind === 'streak')
+    expect(streaks.length).toBe(2)
+    expect(streaks.some((s) => s.text.includes('won 7 straight'))).toBe(true)
+    expect(streaks.some((s) => s.text.includes('winless in 6'))).toBe(true)
+  })
+
   it('persists the waiver wire across save/load', () => {
     const data = generateLeague({ seed: 55 })
     const userId = data.league.teams[0]!
