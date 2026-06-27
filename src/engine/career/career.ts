@@ -3775,6 +3775,10 @@ export class Career {
         // International honours: an annual World Championship hands Gold/Silver/
         // Bronze to the three strongest nations; every player on a medal roster
         // earns a medal (→ medal badge on his profile). No-ops on single-nation DBs.
+        // The marquee senior international event: an Olympics every fourth year
+        // (best-on-best, far bigger prize), the World Championship otherwise.
+        const isOlympicYear = this.year % 4 === 0
+        const intlEvent = isOlympicYear ? 'Olympics' : 'World Championship'
         const worlds = runWorldChampionship({ players: this.data.players.values(), rng: this.rngFor(8013) })
         for (const m of worlds.medals) {
           for (const id of m.playerIds) {
@@ -3782,7 +3786,7 @@ export class Career {
             if (!pl) continue
             this.recordsState.awards.push({
               year: this.year,
-              award: `World Championship ${m.medal}`,
+              award: `${isOlympicYear ? 'Olympic' : 'World Championship'} ${m.medal}`,
               playerId: id as string,
               playerName: pl.name,
               teamAbbr: m.nation,
@@ -3794,8 +3798,8 @@ export class Career {
         if (goldNation) {
           this.pushNews(
             'league',
-            `${goldNation.nation} win World Championship gold`,
-            `${goldNation.nation} top the podium, with ${worlds.medals.find((m) => m.medal === 'Silver')?.nation ?? '—'} taking silver and ${worlds.medals.find((m) => m.medal === 'Bronze')?.nation ?? '—'} bronze.`,
+            isOlympicYear ? `${goldNation.nation} win Olympic gold` : `${goldNation.nation} win World Championship gold`,
+            `${isOlympicYear ? 'On the sport\'s biggest stage, ' : ''}${goldNation.nation} top the ${intlEvent} podium, with ${worlds.medals.find((m) => m.medal === 'Silver')?.nation ?? '—'} taking silver and ${worlds.medals.find((m) => m.medal === 'Bronze')?.nation ?? '—'} bronze.`,
           )
         }
 
