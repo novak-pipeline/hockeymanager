@@ -34,6 +34,7 @@ import {
   type TeamId
 } from '@domain'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { deriveConsistency } from '@engine/league/consistency'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { buildSchedule, buildWeightedSchedule, freshStanding, type ScheduleTeam } from './generate'
@@ -1242,7 +1243,7 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
     }
   }
 
-  return {
+  const player: Player = {
     id: playerId,
     name: modPlayer.name,
     age: modPlayer.age,
@@ -1266,6 +1267,17 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
       : modPlayer.potential !== undefined ? { basePotential: modPlayer.potential } : {}),
     ...bioFields(modPlayer)
   }
+  // Imported rosters rarely label a consistency column — derive a stable hidden
+  // value (no RNG draw) so real players get the trait too. Keyed off the EHM
+  // external id when present so it survives re-imports.
+  if (player.consistency === undefined) {
+    player.consistency = deriveConsistency(
+      modPlayer.externalId ?? (playerId as string),
+      raw.mental.composure,
+      player.personality.determination
+    )
+  }
+  return player
 }
 
 export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueData {

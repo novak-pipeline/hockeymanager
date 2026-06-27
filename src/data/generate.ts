@@ -29,6 +29,7 @@ import {
   type TeamTactics
 } from '@domain'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { deriveConsistency } from '@engine/league/consistency'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { CONFERENCE_NAMES, DIVISION_NAMES, FIRST_NAMES, FRANCHISES, LAST_NAMES } from './names'
@@ -196,7 +197,7 @@ function makePlayer(
         : weightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
   const composites = computeComposites(raw, role, position)
   const ovr = overall(composites, position)
-  return {
+  const player: Player = {
     id,
     name: makeName(rng),
     age,
@@ -214,6 +215,10 @@ function makePlayer(
     injuryStatus: null,
     form: 0
   }
+  // Derived AFTER the literal (no RNG draw) so the generation stream — and the
+  // byte-identical sim calibration — is unchanged.
+  player.consistency = deriveConsistency(id as string, raw.mental.composure, player.personality.determination)
+  return player
 }
 
 const DEFAULT_TACTICS: TeamTactics = {
@@ -790,7 +795,7 @@ function makeAhlPlayer(
     ? makePotentialAhl(rng, raw, age, rng.float(55, 82))
     : makePotential(rng, raw, age)
 
-  return {
+  const player: Player = {
     id,
     name: makeName(rng),
     age,
@@ -808,6 +813,8 @@ function makeAhlPlayer(
     injuryStatus: null,
     form: 0,
   }
+  player.consistency = deriveConsistency(id as string, raw.mental.composure, player.personality.determination)
+  return player
 }
 
 /**

@@ -136,6 +136,13 @@ export interface Player {
   pressure?: number
   /** Fair-play and respect-for-opponents trait (1–20). */
   sportsmanship?: number
+  /**
+   * Hidden "Consistency" trait (1–20): how reliably he performs to his ability
+   * night to night. Shapes the spread of his per-game ratings (low = wide swings
+   * + a lower achievable average; high = tight + reliable), never the sim event
+   * stream. Scouts only hint at it. Absent = treated as no-op. See
+   * src/engine/league/consistency.ts. */
+  consistency?: number
 
   /**
    * Career history counts. Populated by mod loaders; absent on fictional players.

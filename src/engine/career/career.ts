@@ -72,6 +72,7 @@ import {
   type WorldSimState,
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
+import { applyConsistency } from '@engine/league/consistency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
@@ -1748,6 +1749,20 @@ export class Career {
   /* ────────────────────── player → GM interactions ────────────────────── */
 
   private static readonly INTERACTION_NS = 7110
+  private static readonly CONSISTENCY_NS = 9311
+
+  /** Deterministic per-(player, game) uniform draw in [0,1) for the hidden
+   *  consistency rating adjustment. Stable across save/load: it depends only on
+   *  the career seed, year, current day and a hash of the player id (no shared
+   *  RNG-stream order), so a replay reproduces the same game ratings. */
+  private consistencyNoise(pid: string): number {
+    let h = 2166136261
+    for (let i = 0; i < pid.length; i++) {
+      h ^= pid.charCodeAt(i)
+      h = Math.imul(h, 16777619)
+    }
+    return new Rng(deriveSeed(this.seed, Career.CONSISTENCY_NS, this.year, this.currentDay, (h >>> 0) % 2147483647)).next()
+  }
   /** Keep at most this many open concerns at once, and this many total stored. */
   private static readonly MAX_OPEN_INTERACTIONS = 3
   private static readonly INTERACTION_HISTORY_LIMIT = 40
@@ -2654,6 +2669,9 @@ export class Career {
           toi: s.toi,
         })
       }
+
+      // Hidden consistency reshapes the spread of his game ratings (no-op when absent).
+      rating = applyConsistency(rating, p.consistency, this.consistencyNoise(pid_str))
 
       const existing = this.playerRatings.get(pid_str) ?? []
       existing.push(rating)

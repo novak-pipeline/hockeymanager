@@ -109,9 +109,12 @@ export function buildScoutVerdict(
   if (p.personality.determination >= 15) pros.push('Relentless work ethic')
   if ((p.leadership ?? 0) >= 80) pros.push('A genuine leader')
   if ((p.pressure ?? 10) >= 15) pros.push('Performs in the big moments')
+  // Hidden consistency read — only a confident scout/own club ever sees this verdict.
+  if (p.consistency !== undefined && p.consistency >= 15) pros.push('Remarkably consistent — brings it every night')
   if ((p.versatility ?? 0) >= 70) pros.push('Natural in multiple positions')
   if (p.age <= 22 && potentialStars >= 4) pros.push('High ceiling with room to grow')
 
+  if (p.consistency !== undefined && p.consistency <= 7) cons.push('Streaky — runs hot and cold from night to night')
   if (p.personality.temperament <= 6) cons.push('Volatile temperament — discipline risk')
   if (p.personality.loyalty <= 5) cons.push('Mercenary streak; loyalty is a question')
   if ((p.injuryProneness ?? 30) >= 60) cons.push('Notable injury history')
