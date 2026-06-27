@@ -2298,6 +2298,32 @@ describe('Career — GM career', () => {
     expect(res.ok).toBe(false)
   })
 
+  it('a big overpay lands an elite free agent (no spurious bidding-war loss)', () => {
+    const data = generateLeague({ seed: 66 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 66, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+    career.autoDraft()
+    career.advanceOffseason() // draft → resign
+    career.advanceOffseason() // resign → free agency
+    expect(career.getOffseason()!.stage).toBe('freeAgency')
+
+    const internals = career as unknown as { faPool: Array<{ toString(): string }> }
+    const faId = internals.faPool[0] as unknown as string
+    const p = data.players.get(asPlayerId(faId))!
+    for (const grp of [p.ratings.technical, p.ratings.physical, p.ratings.mental, p.ratings.goalie]) {
+      if (grp) for (const k of Object.keys(grp)) (grp as Record<string, number>)[k] = 90
+    }
+    p.composites = computeComposites(p.ratings, p.role, p.position)
+    // Cap headroom + a clear overpay → the rival-interest term clamps to zero.
+    data.teams.get(userId)!.finances.salaryCap = 400_000_000
+    const r = career.signFreeAgent(faId, 20_000_000, 8)
+    expect(r.signed).toBe(true)
+    expect(data.teams.get(userId)!.roster.includes(asPlayerId(faId))).toBe(true)
+  })
+
   it('reports a relationship row per rival club, neutral by default', () => {
     const data = generateLeague({ seed: 65 })
     const userId = data.league.teams[0]!

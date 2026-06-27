@@ -5483,6 +5483,30 @@ export class Career {
         message: `He wants more — around $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}.`,
       }
     }
+    // ── Bidding war: a sought-after UFA fields competing offers. A fair-but-not-
+    // generous bid can lose to a cap-capable rival; overpaying suppresses interest. ──
+    const ovr = ratedOverall(player)
+    if (ovr >= 78) {
+      const generosity = salary / Math.max(1, ask.salary)
+      const rivalChance = Math.max(0, Math.min(0.6, (ovr - 76) / 40 - (generosity - 1) * 0.8))
+      if (rng.chance(rivalChance)) {
+        const suitor = this.findOutbiddingRival(ask.salary)
+        if (suitor) {
+          signPlayer({ team: suitor, player, salary: ask.salary, years: Math.max(years, ask.years), year: this.year, players: this.data.players })
+          this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
+          this.lockerArrival(suitor.id, id)
+          repairLines(suitor, this.data.players)
+          this.adjustRelationship(suitor.id as string, -4) // beaten to a target stings a little
+          this.pushNews(
+            'contract',
+            `${player.name} spurns your offer, signs with ${suitor.abbreviation}`,
+            `You were in on ${player.name}, but ${suitor.name} swooped in with a stronger package. He's off the board.`,
+            { playerId, teamId: suitor.id as string }
+          )
+          return { signed: false, message: `${suitor.name} outbid you for ${player.name}. Move fast or pay up next time.` }
+        }
+      }
+    }
     signPlayer({
       team: this.userTeam,
       player,
@@ -6804,6 +6828,22 @@ export class Career {
   private adjustRelationship(teamId: string, delta: number): void {
     const next = Math.max(0, Math.min(100, this.relationshipWith(teamId) + delta))
     this.gmRelationships.set(teamId, next)
+  }
+
+  /** A contending rival with the cap + roster room to outbid the user for a UFA
+   *  asking `askSalary`. Best record first; undefined if none can fit him. */
+  private findOutbiddingRival(askSalary: number): Team | undefined {
+    const order = sortStandings([...this.standings.values()]).map((s) => s.teamId)
+    for (const tid of order) {
+      if ((tid as string) === (this.userTeamId as string)) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      if (team.roster.length >= ROSTER_HARD_CAP) continue
+      const capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      if (capUsed + askSalary > team.finances.salaryCap) continue
+      return team
+    }
+    return undefined
   }
 
   /** Rival-GM standings for the GM Career screen (most → least friendly). */
