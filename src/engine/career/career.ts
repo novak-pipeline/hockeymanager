@@ -376,6 +376,7 @@ import {
   type LeagueWireView,
   type GMProfileView,
   type GMJobMarketView,
+  type GMRelationshipsView,
   type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
@@ -726,6 +727,11 @@ export class Career {
 
   /** Pending owner directive awaiting the GM's response. Null = none. Serialized. */
   private ownerRequest: OwnerRequest | null = null
+
+  /** The user GM's standing with each rival club (teamId → 0–100, 50 = neutral).
+   *  Warms on completed trades, cools when you poach their RFA. Nudges how willing
+   *  that club is to deal with you. Lazily defaulted; serialized additively. */
+  private gmRelationships = new Map<string, number>()
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -5404,6 +5410,8 @@ export class Career {
     }
     this.resignStatus.delete(asPlayerId(playerId))
     this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    // Letting a rival poach your RFA sours the relationship with that front office.
+    this.adjustRelationship(suitor.id as string, -12)
     const compStr = rounds.length ? rounds.map((r) => `R${r}`).join(' + ') + ` (${compYear})` : 'no compensation (below threshold)'
     this.pushNews('contract', `${player.name} leaves on an offer sheet`, `${player.name} signs with ${suitor.name}. Compensation: ${compStr}.`, { playerId, teamId: suitor.id as string })
     return { ok: true, message: `${player.name} walks; you receive ${compStr}.` }
@@ -5550,6 +5558,7 @@ export class Career {
       partnerTeam: partner,
       partnerPlayers: this.data.players,
       rng,
+      relationship: this.relationshipWith(partnerId as string),
     })
     if (evaln.verdict === 'accept') {
       executeTrade({
@@ -5588,6 +5597,8 @@ export class Career {
         summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
       })
       this.transactionLedger = txResult.ledger
+      // A completed deal builds rapport with that front office.
+      this.adjustRelationship(partnerId as string, 6)
     }
     return { verdict: evaln.verdict, message: evaln.message, counter: null }
   }
@@ -6780,6 +6791,35 @@ export class Career {
       teamId: this.userTeamId as string,
     })
     return { ok: true, message: msg }
+  }
+
+  /* ────────────────────── rival-GM relationships ────────────────────── */
+
+  /** The user GM's standing with a rival club (0–100, 50 = neutral by default). */
+  private relationshipWith(teamId: string): number {
+    return this.gmRelationships.get(teamId) ?? 50
+  }
+
+  /** Nudge the relationship with a club, clamped to [0,100]. */
+  private adjustRelationship(teamId: string, delta: number): void {
+    const next = Math.max(0, Math.min(100, this.relationshipWith(teamId) + delta))
+    this.gmRelationships.set(teamId, next)
+  }
+
+  /** Rival-GM standings for the GM Career screen (most → least friendly). */
+  getGMRelationships(): GMRelationshipsView {
+    const label = (v: number): string =>
+      v >= 75 ? 'Friendly' : v >= 60 ? 'Warm' : v >= 40 ? 'Cordial' : v >= 25 ? 'Frosty' : 'Hostile'
+    const rows = this.data.league.teams
+      .filter((t) => (t as string) !== (this.userTeamId as string))
+      .map((t) => {
+        const team = this.data.teams.get(t)
+        const standing = this.relationshipWith(t as string)
+        return { teamAbbr: team?.abbreviation ?? '???', teamName: team?.name ?? '', standing, label: label(standing) }
+      })
+      .filter((r) => r.teamName)
+      .sort((a, b) => b.standing - a.standing)
+    return { rows }
   }
 
   /* ────────────────────── staff-meeting agenda ────────────────────── */
@@ -9297,6 +9337,7 @@ export class Career {
       gmState: this.gmStateInternal ? structuredClone(this.gmStateInternal) : undefined,
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
+      gmRelationships: [...this.gmRelationships.entries()],
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9394,6 +9435,7 @@ export class Career {
     career.gmStateInternal = snapshot.gmState ? structuredClone(snapshot.gmState) : null
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
+    career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

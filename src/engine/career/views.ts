@@ -1209,6 +1209,11 @@ export interface OwnerRequestView {
   declineHint: string
 }
 
+/** The user GM's standing with each rival club. Response to 'getGMRelationships'. */
+export interface GMRelationshipsView {
+  rows: Array<{ teamAbbr: string; teamName: string; standing: number; label: string }>
+}
+
 /** The user's GM identity, reputation, and career record. Response to 'getGMProfile'. */
 export interface GMProfileView {
   name: string
@@ -1522,6 +1527,8 @@ export interface CareerSnapshot {
   gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
   /** Pending owner directive. Additive; absent → none. */
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
+  /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
+  gmRelationships?: Array<[string, number]>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

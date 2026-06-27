@@ -341,6 +341,10 @@ export class SimClient {
     return this.send({ type: 'getGMJobMarket' })
   }
 
+  getGMRelationships(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMRelationships' })
+  }
+
   acceptGMJob(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptGMJob', teamId })
   }

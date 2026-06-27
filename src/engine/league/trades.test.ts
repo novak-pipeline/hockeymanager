@@ -269,6 +269,32 @@ describe('evaluateProposal', () => {
     expect(result.message).toMatch(/cap/i)
   })
 
+  it('relationship eases or hardens the ask (neutral default unchanged)', () => {
+    const rank = (v: string): number => (v === 'accept' ? 2 : v === 'counter' ? 1 : 0)
+    const deal = (relationship?: number) => {
+      const { partnerTeam, partnerPlayers } = partnerFixture()
+      return evaluateProposal({
+        // A near-even one-for-one swap so the relationship nudge can tip the verdict.
+        give: { players: [makePlayer('give-w', 73, { position: 'W' })], picks: [] },
+        receive: { players: [makePlayer('recv-w', 72, { position: 'W' })], picks: [] },
+        partnerTeam,
+        partnerPlayers,
+        rng: new Rng(5),
+        ...(relationship === undefined ? {} : { relationship }),
+      }).verdict
+    }
+    const friendly = deal(100)
+    const neutral = deal(50)
+    const omitted = deal(undefined)
+    const hostile = deal(0)
+    // Neutral (50) is identical to omitting the field — byte-compatible default.
+    expect(neutral).toBe(omitted)
+    // A friendlier club is never harder to deal with than a hostile one.
+    expect(rank(friendly)).toBeGreaterThanOrEqual(rank(hostile))
+    // And on a borderline deal it genuinely helps.
+    expect(rank(friendly)).toBeGreaterThan(rank(hostile))
+  })
+
   it('accepts when the partner clearly gains value', () => {
     const { partnerTeam, partnerPlayers } = partnerFixture()
     for (let seed = 1; seed <= 20; seed++) {

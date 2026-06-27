@@ -155,6 +155,7 @@ describe('SimClient', () => {
       [() => client.getGMProfile(), { type: 'getGMProfile' }],
       [() => client.getGMJobMarket(), { type: 'getGMJobMarket' }],
       [() => client.acceptGMJob('t5'), { type: 'acceptGMJob', teamId: 't5' }],
+      [() => client.getGMRelationships(), { type: 'getGMRelationships' }],
       [() => client.getOwnerRequest(), { type: 'getOwnerRequest' }],
       [() => client.respondOwnerRequest(true), { type: 'respondOwnerRequest', accept: true }],
       [() => client.advanceOffseason(), { type: 'advanceOffseason' }],

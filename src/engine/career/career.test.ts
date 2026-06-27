@@ -2298,6 +2298,16 @@ describe('Career — GM career', () => {
     expect(res.ok).toBe(false)
   })
 
+  it('reports a relationship row per rival club, neutral by default', () => {
+    const data = generateLeague({ seed: 65 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 65, userId)
+    const rel = career.getGMRelationships()
+    expect(rel.rows.length).toBe(data.league.teams.length - 1) // every club but the user's
+    expect(rel.rows.every((r) => r.standing === 50)).toBe(true)
+    expect(rel.rows.every((r) => r.label === 'Cordial')).toBe(true)
+  })
+
   it('responding to an owner request swings board confidence', () => {
     const data = generateLeague({ seed: 64 })
     const userId = data.league.teams[0]!

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { GMProfileView, GMJobMarketView } from '../../worker/protocol'
+import type { GMProfileView, GMJobMarketView, GMRelationshipsView } from '../../worker/protocol'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -94,6 +94,10 @@ export function GMCareerScreen(): JSX.Element {
     () => client.getGMJobMarket(),
     (r) => (r.type === 'gmJobMarket' ? r.gmJobMarket : null)
   )
+  const rel = useScreenData<GMRelationshipsView>(
+    () => client.getGMRelationships(),
+    (r) => (r.type === 'gmRelationships' ? r.gmRelationships : null)
+  )
 
   return (
     <section className="stack">
@@ -128,6 +132,31 @@ export function GMCareerScreen(): JSX.Element {
       )}
 
       {market.data && <JobMarketPanel market={market.data} onRefetch={() => { market.refetch(); profile.refetch() }} />}
+
+      {rel.data && rel.data.rows.length > 0 && (
+        <Panel title="Around the league — GM relationships">
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            Your standing with rival front offices. Friendly clubs deal with you more readily;
+            poaching their players sours things.
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Club</th><th className="num">Standing</th><th>Relationship</th></tr>
+              </thead>
+              <tbody>
+                {rel.data.rows.map((r) => (
+                  <tr key={r.teamAbbr}>
+                    <td><strong>{r.teamAbbr}</strong> <span className="muted small">{r.teamName}</span></td>
+                    <td className="num">{r.standing}</td>
+                    <td>{r.label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
 
       {profile.data && profile.data.stints.length > 0 && (
         <Panel title="Career history">

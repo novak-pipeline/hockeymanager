@@ -454,12 +454,19 @@ export function evaluateProposal(args: {
   partnerTeam: Team
   partnerPlayers: Map<PlayerId, Player>
   rng: Rng
+  /** The proposing GM's standing with this club (0–100, 50 = neutral). A friendly
+   *  GM gets a slightly easier ask; a frosty one a harder one. Omitted/50 → no
+   *  change (keeps existing trade behaviour byte-identical). */
+  relationship?: number
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
 
   // Draw the mood wiggle up front so rng consumption is identical on every
   // path — repeat evaluations with the same seed must match exactly.
-  const threshold = 1.03 + rng.float(-0.04, 0.04)
+  const moodThreshold = 1.03 + rng.float(-0.04, 0.04)
+  // Relationship nudge applied AFTER the draw so RNG order is unchanged.
+  const relAdj = ((50 - (args.relationship ?? 50)) / 50) * 0.1 // ±0.10 at the extremes
+  const threshold = moodThreshold + relAdj
 
   const ntc = [...give.players, ...receive.players].find((p) => p.contract.noTradeClause)
   if (ntc) {

@@ -225,6 +225,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'gmProfile', gmProfile: must().getGMProfile() }
     case 'getGMJobMarket':
       return { id: req.id, type: 'gmJobMarket', gmJobMarket: must().getGMJobMarket() }
+    case 'getGMRelationships':
+      return { id: req.id, type: 'gmRelationships', gmRelationships: must().getGMRelationships() }
     case 'acceptGMJob': {
       const r = must().acceptGMJob(req.teamId)
       if (!r.ok) throw new Error(r.message)

@@ -48,6 +48,7 @@ export type {
   LeagueWireView,
   GMProfileView,
   GMJobMarketView,
+  GMRelationshipsView,
   OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
@@ -239,6 +240,8 @@ export type WorkerRequestBody =
   | { type: 'getGMProfile' }
   /** Read open GM vacancies (populated when the user is fired). */
   | { type: 'getGMJobMarket' }
+  /** Read the user GM's standing with rival clubs. */
+  | { type: 'getGMRelationships' }
   /** Accept a GM vacancy and move clubs. */
   | { type: 'acceptGMJob'; teamId: string }
   /** Read the pending owner directive, if any. */
@@ -382,6 +385,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'leagueWire'; leagueWire: LeagueWireView }
   | { type: 'gmProfile'; gmProfile: GMProfileView }
   | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
+  | { type: 'gmRelationships'; gmRelationships: GMRelationshipsView }
   | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
