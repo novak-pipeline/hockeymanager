@@ -374,7 +374,7 @@ export type WorkerResponse = { id: number } & (
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
-  | { type: 'ok' }
+  | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */
   | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
   | { type: 'save'; snapshot: CareerSnapshot }

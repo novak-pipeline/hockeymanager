@@ -223,6 +223,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
     if (res.type === 'error') {
       alert(res.message)
     } else {
+      if (res.type === 'ok' && res.note) alert(res.note)
       bump()
       refetchAhl()
     }

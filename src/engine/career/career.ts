@@ -4743,6 +4743,41 @@ export class Career {
     return bonus
   }
 
+  /** A one-way veteran must clear waivers to go to the AHL; young/two-way players
+   *  are exempt. (Simplified from the NHL's age+games formula.) */
+  private requiresWaivers(p: Player): boolean {
+    return p.contract.twoWay === false && p.age >= 25
+  }
+
+  /**
+   * Run a waiver-required player through the wire on a send-down. Other clubs get
+   * a shot in worst-record-first priority; the first one for whom he'd be a roster
+   * upgrade (and who has the cap + roster room) claims him for free — his contract
+   * goes with him. Returns the claiming team, or null if he clears. On a claim the
+   * player is moved onto the claimant's roster (caller removes him from the source).
+   */
+  private processWaivers(p: Player, fromTeamId: TeamId): Team | null {
+    const grp = this.posGroup(p.position)
+    const ovr = ratedOverall(p)
+    const order = sortStandings([...this.standings.values()]).map((s) => s.teamId).reverse()
+    for (const tid of order) {
+      if (tid === fromTeamId) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      if (team.roster.length >= ROSTER_HARD_CAP) continue
+      const capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      if (capUsed + p.contract.salary > team.finances.salaryCap) continue
+      // Claim if he'd be a regular (or close) on this club — bad teams, with the
+      // lowest bars and the highest priority, scoop up useful vets first.
+      if (ovr >= this.orgNhlBar(team, grp) - 2) {
+        team.roster.push(p.id)
+        repairLines(team, this.data.players)
+        return team
+      }
+    }
+    return null
+  }
+
   applyCoachRoster(): { promoted: string[]; demoted: string[] } {
     const nhl = this.data.teams.get(this.userTeamId)
     const ahlId = this.userTeam.affiliateId
@@ -4852,7 +4887,7 @@ export class Career {
    * Returns `{ ok: false, reason }` rather than throwing if any pre-condition fails.
    * On success, pushes a news item and transaction ledger entry for the user's org.
    */
-  sendDown(playerId: string): { ok: true } | { ok: false; reason: string } {
+  sendDown(playerId: string): { ok: true; note?: string } | { ok: false; reason: string } {
     const pid = asPlayerId(playerId)
     // Find the NHL team that holds this player (skip AHL teams).
     const nhlTeam = [...this.data.teams.values()].find(
@@ -4879,18 +4914,44 @@ export class Career {
       }
     }
 
-    // Move the player.
+    const isUser = nhlTeam.id === this.userTeamId
+
+    // Waiver wire: a one-way veteran must clear waivers to be assigned. If a club
+    // claims him, he's gone — his contract goes with him.
+    if (this.requiresWaivers(p)) {
+      const claimant = this.processWaivers(p, nhlTeam.id)
+      if (claimant) {
+        nhlTeam.roster = nhlTeam.roster.filter((id) => id !== pid)
+        repairLines(nhlTeam, this.data.players)
+        if (isUser) {
+          this.pushNews(
+            'contract',
+            `${p.name} CLAIMED off waivers by ${claimant.abbreviation}`,
+            `You tried to send ${p.name} (${p.position}, ${p.age}) to the AHL, but he required waivers — ${claimant.name} claimed him and his contract. He's gone for nothing.`,
+            { playerId, teamId: claimant.id as string }
+          )
+          const tx = recordTransaction(this.transactionLedger, {
+            day: this.currentDay, year: this.year, kind: 'release', teamIds: [nhlTeam.id as string, claimant.id as string],
+            summary: `${claimant.abbreviation} claims ${p.name} off waivers from ${nhlTeam.abbreviation}.`,
+          })
+          this.transactionLedger = tx.ledger
+        }
+        return { ok: true, note: `${p.name} was claimed off waivers by ${claimant.name}.` }
+      }
+    }
+
+    // Cleared (or exempt) → assign to the AHL affiliate.
     nhlTeam.roster = nhlTeam.roster.filter((id) => id !== pid)
     ahlTeam.roster.push(pid)
     repairLines(nhlTeam, this.data.players)
     repairLines(ahlTeam, this.data.players)
 
-    // News + transaction for the user's org only.
-    if (nhlTeam.id === this.userTeamId) {
+    const cleared = this.requiresWaivers(p)
+    if (isUser) {
       this.pushNews(
         'contract',
         `${p.name} assigned to ${ahlTeam.abbreviation}`,
-        `${p.name} (${p.position}, ${p.age}) has been assigned to the AHL affiliate.`,
+        `${p.name} (${p.position}, ${p.age})${cleared ? ' cleared waivers and' : ' has been'} assigned to the AHL affiliate.`,
         { playerId: playerId, teamId: ahlTeam.id as string }
       )
       const txResult = recordTransaction(this.transactionLedger, {
@@ -4903,7 +4964,7 @@ export class Career {
       this.transactionLedger = txResult.ledger
     }
 
-    return { ok: true }
+    return cleared ? { ok: true, note: `${p.name} cleared waivers.` } : { ok: true }
   }
 
   /**

@@ -2066,3 +2066,48 @@ describe('Career — applyCoachRoster', () => {
     expect(Array.isArray(res.demoted)).toBe(true)
   })
 })
+
+describe('Career — waiver wire', () => {
+  function depthD(data: ReturnType<typeof generateLeague>, userId: (typeof data.league.teams)[number]) {
+    const ds = data.teams.get(userId)!.roster
+      .map((id) => data.players.get(id)!)
+      .filter((p) => p.position === 'D')
+    return ds[ds.length - 1] // the last (most expendable) D — removal keeps the minimum
+  }
+
+  it('a one-way veteran sent down can be claimed off waivers by a rival', () => {
+    const data = generateLeague({ seed: 33 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 33, userId)
+    const vet = depthD(data, userId)
+    vet.age = 30
+    vet.contract = { ...vet.contract, twoWay: false, salary: 1_000_000 }
+    for (const grp of [vet.ratings.technical, vet.ratings.physical, vet.ratings.mental]) {
+      if (grp) for (const k of Object.keys(grp)) (grp as Record<string, number>)[k] = 95
+    }
+    vet.composites = computeComposites(vet.ratings, vet.role, vet.position)
+
+    const res = career.sendDown(vet.id as string)
+    expect(res.ok).toBe(true)
+    expect(res.ok && (res as { note?: string }).note).toContain('claimed off waivers')
+    // Gone from the user's NHL roster, picked up by another NHL club.
+    expect(data.teams.get(userId)!.roster.includes(vet.id)).toBe(false)
+    const claimed = data.league.teams.filter((t) => t !== userId).some((t) => data.teams.get(t)!.roster.includes(vet.id))
+    expect(claimed).toBe(true)
+  })
+
+  it('a waiver-exempt player (young / two-way) clears straight to the AHL', () => {
+    const data = generateLeague({ seed: 33 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 33, userId)
+    const ahlId = data.teams.get(userId)!.affiliateId!
+    const kid = depthD(data, userId)
+    kid.age = 20
+    kid.contract = { ...kid.contract, twoWay: true }
+
+    const res = career.sendDown(kid.id as string)
+    expect(res.ok).toBe(true)
+    expect(data.teams.get(ahlId)!.roster.includes(kid.id)).toBe(true)
+    expect(data.teams.get(userId)!.roster.includes(kid.id)).toBe(false)
+  })
+})

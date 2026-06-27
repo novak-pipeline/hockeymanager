@@ -340,7 +340,7 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'sendDown': {
       const res = must().sendDown(req.playerId)
       if (!res.ok) throw new Error(res.reason)
-      return { id: req.id, type: 'ok' }
+      return res.note ? { id: req.id, type: 'ok', note: res.note } : { id: req.id, type: 'ok' }
     }
     case 'setCoachRoster': {
       const res = must().applyCoachRoster()
