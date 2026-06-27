@@ -275,6 +275,8 @@ export interface DashboardView {
   gmFired?: boolean
   /** Players currently claimable on the in-season waiver wire (badge for a nudge). */
   waiverClaimsAvailable?: number
+  /** True when the owner has a pending directive awaiting the GM's response. */
+  ownerRequestPending?: boolean
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -1197,6 +1199,16 @@ export interface WaiverWireRowView extends PlayerBadge {
   blockReason?: string
 }
 
+/** A pending owner directive awaiting the GM's response. Response to 'getOwnerRequest'. */
+export interface OwnerRequestView {
+  kind: string
+  title: string
+  body: string
+  /** Human hint for the accept choice incl. the board-confidence consequence. */
+  acceptHint: string
+  declineHint: string
+}
+
 /** The user's GM identity, reputation, and career record. Response to 'getGMProfile'. */
 export interface GMProfileView {
   name: string
@@ -1508,6 +1520,8 @@ export interface CareerSnapshot {
   gmState?: import('@engine/league/gmCareer').GMState
   /** Open GM vacancies when the user is between jobs. Additive; absent → none. */
   gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
+  /** Pending owner directive. Additive; absent → none. */
+  ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

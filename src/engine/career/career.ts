@@ -74,6 +74,7 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
+import { generateOwnerRequest, type OwnerRequest } from '@engine/league/ownerMeddling'
 import {
   createGMState,
   recordSeasonResult,
@@ -375,6 +376,7 @@ import {
   type LeagueWireView,
   type GMProfileView,
   type GMJobMarketView,
+  type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
   type PlayoffBracketView,
@@ -721,6 +723,9 @@ export class Career {
   private gmStateInternal: GMState | null = null
   /** Open GM vacancies the user can take (set when fired / courted). Null = none. */
   private gmJobMarket: GMJobOpening[] | null = null
+
+  /** Pending owner directive awaiting the GM's response. Null = none. Serialized. */
+  private ownerRequest: OwnerRequest | null = null
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -3217,6 +3222,10 @@ export class Career {
     if (Math.floor(nextDay / 7) > Math.floor(this.currentDay / 7)) {
       this.reoptimizeAiLines(nextDay)
       this.generateWaiverPlacements(nextDay)
+    }
+    // ── owner meddling: roughly monthly, the owner may lean on the GM ──────
+    if (Math.floor(nextDay / 30) > Math.floor(this.currentDay / 30)) {
+      this.maybeGenerateOwnerRequest(nextDay)
     }
     // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
     if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
@@ -5864,6 +5873,7 @@ export class Career {
       board: boardSummary(this.boardState),
       gmFired: this.boardState.firedAtYear !== null,
       ...(this.waiverWire.length > 0 ? { waiverClaimsAvailable: this.waiverWire.length } : {}),
+      ...(this.ownerRequest ? { ownerRequestPending: true } : {}),
     }
   }
 
@@ -6719,6 +6729,57 @@ export class Career {
     })
     this.transactionLedger = tx.ledger
     return { ok: true, message: `Hired as GM of ${newTeam.name}.` }
+  }
+
+  /* ────────────────────────── owner meddling ────────────────────────── */
+
+  /** Possibly raise a new owner directive (skips when one is already pending). */
+  private maybeGenerateOwnerRequest(day: number): void {
+    if (this.ownerRequest) return
+    if (this.boardState.firedAtYear !== null) return // no owner to please between jobs
+    const req = generateOwnerRequest({
+      mandate: this.boardState.mandate,
+      year: this.year,
+      day,
+      rng: new Rng(deriveSeed(this.seed, 9340, this.year, day)),
+    })
+    if (!req) return
+    this.ownerRequest = req
+    this.pushNews('league', req.title, `${req.body}\n\nHead to Club Vision to respond to the owner.`, {
+      teamId: this.userTeamId as string,
+    })
+  }
+
+  /** The pending owner directive, if any. */
+  getOwnerRequest(): OwnerRequestView | null {
+    const r = this.ownerRequest
+    if (!r) return null
+    const sign = (n: number): string => (n >= 0 ? `+${n}` : `${n}`)
+    return {
+      kind: r.kind,
+      title: r.title,
+      body: r.body,
+      acceptHint: `Go along with it (board confidence ${sign(r.acceptConfidence)})`,
+      declineHint: `Push back (board confidence ${sign(r.declineConfidence)})`,
+    }
+  }
+
+  /** Respond to the pending owner directive; swings board confidence + patience. */
+  respondToOwnerRequest(accept: boolean): { ok: boolean; message: string } {
+    const r = this.ownerRequest
+    if (!r) return { ok: false, message: 'There is no owner request right now.' }
+    const dC = accept ? r.acceptConfidence : r.declineConfidence
+    const dP = accept ? r.acceptPatience : r.declinePatience
+    this.boardState.confidence = Math.max(0, Math.min(100, this.boardState.confidence + dC))
+    this.boardState.patience = Math.max(0, Math.min(100, this.boardState.patience + dP))
+    this.ownerRequest = null
+    const msg = accept
+      ? 'You assured the owner you would deliver. He is pleased.'
+      : 'You pushed back and backed your own plan. The owner is not thrilled.'
+    this.pushNews('league', accept ? 'GM backs the owner' : 'GM pushes back on ownership', msg, {
+      teamId: this.userTeamId as string,
+    })
+    return { ok: true, message: msg }
   }
 
   /* ────────────────────── staff-meeting agenda ────────────────────── */
@@ -9235,6 +9296,7 @@ export class Career {
       teamStreaks: [...this.teamStreaks.entries()],
       gmState: this.gmStateInternal ? structuredClone(this.gmStateInternal) : undefined,
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
+      ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9331,6 +9393,7 @@ export class Career {
     career.teamStreaks = new Map(snapshot.teamStreaks ?? [])
     career.gmStateInternal = snapshot.gmState ? structuredClone(snapshot.gmState) : null
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
+    career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

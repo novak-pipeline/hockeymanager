@@ -345,6 +345,14 @@ export class SimClient {
     return this.send({ type: 'acceptGMJob', teamId })
   }
 
+  getOwnerRequest(): Promise<WorkerResponse> {
+    return this.send({ type: 'getOwnerRequest' })
+  }
+
+  respondOwnerRequest(accept: boolean): Promise<WorkerResponse> {
+    return this.send({ type: 'respondOwnerRequest', accept })
+  }
+
   claimWaiver(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'claimWaiver', playerId })
   }

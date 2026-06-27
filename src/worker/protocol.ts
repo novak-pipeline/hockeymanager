@@ -48,6 +48,7 @@ export type {
   LeagueWireView,
   GMProfileView,
   GMJobMarketView,
+  OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
   PlayerAnalyticsRow,
@@ -240,6 +241,10 @@ export type WorkerRequestBody =
   | { type: 'getGMJobMarket' }
   /** Accept a GM vacancy and move clubs. */
   | { type: 'acceptGMJob'; teamId: string }
+  /** Read the pending owner directive, if any. */
+  | { type: 'getOwnerRequest' }
+  /** Respond to the pending owner directive. */
+  | { type: 'respondOwnerRequest'; accept: boolean }
   /** Claim a player off the in-season waiver wire onto the user's roster. */
   | { type: 'claimWaiver'; playerId: string }
   /** User makes their selection while on the clock. */
@@ -377,6 +382,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'leagueWire'; leagueWire: LeagueWireView }
   | { type: 'gmProfile'; gmProfile: GMProfileView }
   | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
+  | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }

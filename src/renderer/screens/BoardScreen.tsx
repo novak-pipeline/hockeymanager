@@ -5,9 +5,11 @@
  * warnings, target vs current rank, and the board message feed. When the GM
  * has been fired it renders a somber "Relieved of duties" state.
  */
-import type { BoardView } from '../../worker/protocol'
+import { useState } from 'react'
+import type { BoardView, OwnerRequestView } from '../../worker/protocol'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { toast } from '../components/store'
 
 /* ── helpers ── */
 
@@ -97,6 +99,10 @@ export function BoardScreen(): JSX.Element {
     () => client.getBoard(),
     (r) => (r.type === 'board' ? r.board : null)
   )
+  const owner = useScreenData<OwnerRequestView | null>(
+    () => client.getOwnerRequest(),
+    (r) => (r.type === 'ownerRequest' ? r.ownerRequest : null)
+  )
 
   return (
     <section className="stack">
@@ -109,8 +115,34 @@ export function BoardScreen(): JSX.Element {
         emptyText="Board data not yet available — start a season first."
       />
 
+      {owner.data && <OwnerDeskPanel request={owner.data} onDone={owner.refetch} />}
       {data && <BoardBody board={data} />}
     </section>
+  )
+}
+
+function OwnerDeskPanel(props: { request: OwnerRequestView; onDone: () => void }): JSX.Element {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const { request } = props
+  const respond = async (accept: boolean): Promise<void> => {
+    setBusy(true)
+    const r = await client.respondOwnerRequest(accept)
+    setBusy(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else {
+      if (r.type === 'ok' && r.note) toast(r.note, accept ? 'success' : 'info')
+      props.onDone()
+    }
+  }
+  return (
+    <Panel title={`📞 Owner's Desk — ${request.title}`}>
+      <div style={{ marginBottom: 10 }}>{request.body}</div>
+      <div className="row" style={{ gap: 10 }}>
+        <button className="btn btn-primary" disabled={busy} onClick={() => respond(true)}>{request.acceptHint}</button>
+        <button className="btn" disabled={busy} onClick={() => respond(false)}>{request.declineHint}</button>
+      </div>
+    </Panel>
   )
 }
 

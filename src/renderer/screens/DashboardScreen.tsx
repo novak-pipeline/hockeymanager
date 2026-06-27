@@ -153,6 +153,16 @@ export function DashboardScreen(): JSX.Element {
         </button>
       )}
 
+      {d.ownerRequestPending && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
+          onClick={() => nav.navigate('board')}
+        >
+          📞 The owner wants a word — respond on the Club Vision page.
+        </button>
+      )}
+
       {(d.waiverClaimsAvailable ?? 0) > 0 && (
         <button
           className="dash-banner"

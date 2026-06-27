@@ -230,6 +230,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!r.ok) throw new Error(r.message)
       return { id: req.id, type: 'ok', note: r.message }
     }
+    case 'getOwnerRequest':
+      return { id: req.id, type: 'ownerRequest', ownerRequest: must().getOwnerRequest() }
+    case 'respondOwnerRequest': {
+      const r = must().respondToOwnerRequest(req.accept)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
     case 'claimWaiver': {
       const r = must().claimWaiver(req.playerId)
       if (!r.ok) throw new Error(r.reason)

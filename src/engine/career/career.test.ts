@@ -2297,6 +2297,26 @@ describe('Career — GM career', () => {
     const res = career.acceptGMJob(data.league.teams[1]! as string)
     expect(res.ok).toBe(false)
   })
+
+  it('responding to an owner request swings board confidence', () => {
+    const data = generateLeague({ seed: 64 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 64, userId)
+    const internals = career as unknown as {
+      ownerRequest: { id: string; kind: string; year: number; day: number; title: string; body: string; acceptConfidence: number; declineConfidence: number; acceptPatience: number; declinePatience: number } | null
+      boardState: { confidence: number }
+    }
+    internals.ownerRequest = {
+      id: 'o1', kind: 'pushForPlayoffs', year: career.getDashboard().year, day: 30,
+      title: 'T', body: 'B', acceptConfidence: 7, declineConfidence: -9, acceptPatience: 4, declinePatience: -4,
+    }
+    expect(career.getOwnerRequest()).not.toBeNull()
+    const before = internals.boardState.confidence
+    const r = career.respondToOwnerRequest(true)
+    expect(r.ok).toBe(true)
+    expect(internals.boardState.confidence).toBe(Math.min(100, before + 7))
+    expect(career.getOwnerRequest()).toBeNull()
+  })
 })
 
 describe('Career — offer sheets', () => {
