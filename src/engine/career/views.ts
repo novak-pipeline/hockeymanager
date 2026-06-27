@@ -1196,6 +1196,10 @@ export interface FinanceView {
   salaryCap: number
   capUsed: number
   capSpace: number
+  /** League salary floor (minimum payroll). */
+  salaryFloor?: number
+  /** True when this club's payroll sits below the floor. */
+  underFloor?: boolean
   budget: number
   payroll: PayrollRowView[]
   /** Contracts expiring at season end. */

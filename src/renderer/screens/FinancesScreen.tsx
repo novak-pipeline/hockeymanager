@@ -42,6 +42,12 @@ function FinancesBody(props: { data: FinanceView }): JSX.Element {
           capSpace={d.capSpace}
           leagueAvg={d.leagueAvgPayroll}
         />
+        {d.salaryFloor !== undefined && (
+          <div className="small" style={{ marginTop: 8, color: d.underFloor ? 'var(--danger)' : 'var(--muted)' }}>
+            Salary floor: {fmtMoney(d.salaryFloor)}
+            {d.underFloor ? ' — your payroll is BELOW the floor; you must add salary before the season.' : ' ✓ above the floor.'}
+          </div>
+        )}
       </Panel>
 
       {/* ── salary by position + revenue ── */}

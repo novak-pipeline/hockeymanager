@@ -27,7 +27,7 @@ import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
-import { contractStatus } from '@engine/league/contracts'
+import { contractStatus, CAP_FLOOR } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -1173,6 +1173,8 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     salaryCap: team.finances.salaryCap,
     capUsed,
     capSpace: team.finances.salaryCap - capUsed,
+    salaryFloor: CAP_FLOOR,
+    underFloor: capUsed < CAP_FLOOR,
     budget: team.finances.budget,
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),
