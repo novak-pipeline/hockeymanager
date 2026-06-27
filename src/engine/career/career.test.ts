@@ -2324,6 +2324,27 @@ describe('Career — GM career', () => {
     expect(data.teams.get(userId)!.roster.includes(asPlayerId(faId))).toBe(true)
   })
 
+  it('pairs a veteran mentor with a young player and validates eligibility', () => {
+    const data = generateLeague({ seed: 67 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 67, userId)
+    const roster = data.teams.get(userId)!.roster.map((id) => data.players.get(id)!)
+    const vet = roster.find((p) => p.age >= 29)
+    const kid = roster.find((p) => p.age <= 23)
+    // These ages should exist on a generated roster; guard so the test is meaningful.
+    if (!vet || !kid) return
+    const ok = career.assignMentor(kid.id as string, vet.id as string)
+    expect(ok.ok).toBe(true)
+    const view = career.getMentorships()
+    expect(view.pairs.some((p) => p.mentee.playerId === (kid.id as string))).toBe(true)
+    // A young player cannot mentor a veteran.
+    const bad = career.assignMentor(vet.id as string, kid.id as string)
+    expect(bad.ok).toBe(false)
+    // Clearing works.
+    expect(career.clearMentor(kid.id as string).ok).toBe(true)
+    expect(career.getMentorships().pairs.length).toBe(0)
+  })
+
   it('reports a relationship row per rival club, neutral by default', () => {
     const data = generateLeague({ seed: 65 })
     const userId = data.league.teams[0]!

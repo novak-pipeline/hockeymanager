@@ -49,6 +49,7 @@ export type {
   GMProfileView,
   GMJobMarketView,
   GMRelationshipsView,
+  MentorshipView,
   OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
@@ -242,6 +243,12 @@ export type WorkerRequestBody =
   | { type: 'getGMJobMarket' }
   /** Read the user GM's standing with rival clubs. */
   | { type: 'getGMRelationships' }
+  /** Read veteran/rookie mentorships + eligible players. */
+  | { type: 'getMentorships' }
+  /** Pair a veteran mentor with a young mentee. */
+  | { type: 'assignMentor'; menteeId: string; mentorId: string }
+  /** Dissolve a mentorship. */
+  | { type: 'clearMentor'; menteeId: string }
   /** Accept a GM vacancy and move clubs. */
   | { type: 'acceptGMJob'; teamId: string }
   /** Read the pending owner directive, if any. */
@@ -386,6 +393,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'gmProfile'; gmProfile: GMProfileView }
   | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
   | { type: 'gmRelationships'; gmRelationships: GMRelationshipsView }
+  | { type: 'mentorships'; mentorships: MentorshipView }
   | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }

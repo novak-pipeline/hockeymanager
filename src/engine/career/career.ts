@@ -377,6 +377,7 @@ import {
   type GMProfileView,
   type GMJobMarketView,
   type GMRelationshipsView,
+  type MentorshipView,
   type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
@@ -732,6 +733,10 @@ export class Career {
    *  Warms on completed trades, cools when you poach their RFA. Nudges how willing
    *  that club is to deal with you. Lazily defaulted; serialized additively. */
   private gmRelationships = new Map<string, number>()
+
+  /** Veteran→rookie mentorships on the user's club (menteeId → mentorId). A valid
+   *  pairing gives the mentee a development-rate boost. Serialized additively. */
+  private mentorships = new Map<string, string>()
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -3104,7 +3109,8 @@ export class Career {
         devModifier: (id) => {
           const tid = this.teamOf(id)
           const lr = tid ? this.lockerRooms.get(tid) : undefined
-          return lr ? developmentModifier(lr, id as string) : 1
+          const base = lr ? developmentModifier(lr, id as string) : 1
+          return base * this.mentorshipDevBonus(id as string)
         },
       })
     }
@@ -3843,7 +3849,7 @@ export class Career {
                 // is just the locker-room factor so we don't double-count.
               }
             }
-            return lockerMod
+            return lockerMod * this.mentorshipDevBonus(id as string)
           },
         })
         for (const seed of dev.newsSeeds) {
@@ -6862,6 +6868,82 @@ export class Career {
     return { rows }
   }
 
+  /* ────────────────────────── mentorship ────────────────────────── */
+
+  private static readonly MENTOR_MIN_AGE = 29
+  private static readonly MENTEE_MAX_AGE = 23
+  private static readonly MENTOR_DEV_BONUS = 1.08
+
+  /** A mentee under a valid mentorship develops a little faster. Validity requires
+   *  the mentor still on the same NHL roster as the mentee. */
+  private mentorshipDevBonus(menteeId: string): number {
+    const mentorId = this.mentorships.get(menteeId)
+    if (!mentorId) return 1
+    const menteeTeam = this.teamOf(asPlayerId(menteeId))
+    const mentorTeam = this.teamOf(asPlayerId(mentorId))
+    if (!menteeTeam || menteeTeam !== mentorTeam) return 1
+    return Career.MENTOR_DEV_BONUS
+  }
+
+  /** Eligible as a mentor: a established veteran on the user's NHL roster. */
+  private isMentorEligible(p: Player): boolean {
+    return p.age >= Career.MENTOR_MIN_AGE || (p.leadership ?? 0) >= 75
+  }
+
+  /** Current mentorships + eligible mentors/mentees for the Development Center. */
+  getMentorships(): MentorshipView {
+    const roster = this.userTeam.roster.map((id) => this.resolve(id))
+    const byId = new Map(roster.map((p) => [p.id as string, p]))
+    const badgeOf = (id: string): { playerId: string; name: string; position: Position; age: number } => {
+      const p = byId.get(id)
+      return { playerId: id, name: p?.name ?? '?', position: p?.position ?? 'C', age: p?.age ?? 0 }
+    }
+    // Prune stale pairs (player moved/retired) lazily on read.
+    for (const [menteeId, mentorId] of [...this.mentorships]) {
+      if (!byId.has(menteeId) || !byId.has(mentorId)) this.mentorships.delete(menteeId)
+    }
+    const pairs = [...this.mentorships].map(([menteeId, mentorId]) => ({
+      mentee: badgeOf(menteeId),
+      mentor: badgeOf(mentorId),
+    }))
+    const mentoredIds = new Set(this.mentorships.keys())
+    const mentors = roster.filter((p) => this.isMentorEligible(p)).map((p) => badgeOf(p.id as string))
+    const mentees = roster
+      .filter((p) => p.age <= Career.MENTEE_MAX_AGE && !mentoredIds.has(p.id as string))
+      .map((p) => badgeOf(p.id as string))
+    return { pairs, eligibleMentors: mentors, eligibleMentees: mentees }
+  }
+
+  /** Pair a veteran mentor with a young mentee on the user's roster. */
+  assignMentor(menteeId: string, mentorId: string): { ok: boolean; message: string } {
+    if (menteeId === mentorId) return { ok: false, message: 'A player cannot mentor himself.' }
+    const mentee = this.data.players.get(asPlayerId(menteeId))
+    const mentor = this.data.players.get(asPlayerId(mentorId))
+    if (!mentee || !mentor) return { ok: false, message: 'Player not found.' }
+    const onRoster = (id: string): boolean => this.userTeam.roster.some((r) => (r as string) === id)
+    if (!onRoster(menteeId) || !onRoster(mentorId)) {
+      return { ok: false, message: 'Both players must be on your NHL roster.' }
+    }
+    if (mentee.age > Career.MENTEE_MAX_AGE) {
+      return { ok: false, message: `${mentee.name} is too established to need a mentor.` }
+    }
+    if (!this.isMentorEligible(mentor)) {
+      return { ok: false, message: `${mentor.name} isn't a seasoned enough veteran to mentor.` }
+    }
+    // A mentor can guide at most two mentees.
+    const load = [...this.mentorships.values()].filter((m) => m === mentorId).length
+    if (load >= 2) return { ok: false, message: `${mentor.name} already has his hands full with two mentees.` }
+    this.mentorships.set(menteeId, mentorId)
+    return { ok: true, message: `${mentor.name} will take ${mentee.name} under his wing.` }
+  }
+
+  /** Dissolve a mentorship. */
+  clearMentor(menteeId: string): { ok: boolean; message: string } {
+    if (!this.mentorships.has(menteeId)) return { ok: false, message: 'No mentorship to clear.' }
+    this.mentorships.delete(menteeId)
+    return { ok: true, message: 'Mentorship dissolved.' }
+  }
+
   /* ────────────────────── staff-meeting agenda ────────────────────── */
 
   /** Mark a player topic for discussion at the next staff meeting. */
@@ -9378,6 +9460,7 @@ export class Career {
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       gmRelationships: [...this.gmRelationships.entries()],
+      mentorships: [...this.mentorships.entries()],
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9476,6 +9559,7 @@ export class Career {
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
+    career.mentorships = new Map(snapshot.mentorships ?? [])
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

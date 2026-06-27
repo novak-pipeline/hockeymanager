@@ -345,6 +345,18 @@ export class SimClient {
     return this.send({ type: 'getGMRelationships' })
   }
 
+  getMentorships(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMentorships' })
+  }
+
+  assignMentor(menteeId: string, mentorId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'assignMentor', menteeId, mentorId })
+  }
+
+  clearMentor(menteeId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'clearMentor', menteeId })
+  }
+
   acceptGMJob(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptGMJob', teamId })
   }

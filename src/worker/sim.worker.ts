@@ -227,6 +227,18 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'gmJobMarket', gmJobMarket: must().getGMJobMarket() }
     case 'getGMRelationships':
       return { id: req.id, type: 'gmRelationships', gmRelationships: must().getGMRelationships() }
+    case 'getMentorships':
+      return { id: req.id, type: 'mentorships', mentorships: must().getMentorships() }
+    case 'assignMentor': {
+      const r = must().assignMentor(req.menteeId, req.mentorId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'clearMentor': {
+      const r = must().clearMentor(req.menteeId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
     case 'acceptGMJob': {
       const r = must().acceptGMJob(req.teamId)
       if (!r.ok) throw new Error(r.message)

@@ -34,6 +34,7 @@ export type ScreenId =
   | 'teamDynamics'
   | 'teamMedical'
   | 'teamDevelopment'
+  | 'mentorship'
   | 'teamPlanner'
   // League section
   | 'leagueOverview'

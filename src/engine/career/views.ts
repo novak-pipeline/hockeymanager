@@ -1209,6 +1209,19 @@ export interface OwnerRequestView {
   declineHint: string
 }
 
+/** Veteran→rookie mentorships + eligible players. Response to 'getMentorships'. */
+export interface MentorshipView {
+  pairs: Array<{ mentee: MentorBadge; mentor: MentorBadge }>
+  eligibleMentors: MentorBadge[]
+  eligibleMentees: MentorBadge[]
+}
+export interface MentorBadge {
+  playerId: string
+  name: string
+  position: Position
+  age: number
+}
+
 /** The user GM's standing with each rival club. Response to 'getGMRelationships'. */
 export interface GMRelationshipsView {
   rows: Array<{ teamAbbr: string; teamName: string; standing: number; label: string }>
@@ -1529,6 +1542,8 @@ export interface CareerSnapshot {
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
   /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
   gmRelationships?: Array<[string, number]>
+  /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */
+  mentorships?: Array<[string, string]>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

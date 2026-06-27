@@ -27,6 +27,7 @@ import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
+import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
@@ -515,6 +516,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <WaiverWireScreen />
     case 'gmCareer':
       return <GMCareerScreen />
+    case 'mentorship':
+      return <MentorshipScreen />
     case 'lockerRoom':
       return <Notice kind="info">Locker room — navigate via Team &gt; Roster.</Notice>
     case 'settings':
