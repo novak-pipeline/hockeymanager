@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { OffseasonView } from '../../worker/protocol'
-import type { FreeAgentRowView, ResignRowView } from '../../engine/career/views'
+import type { FreeAgentRowView, OfferSheetRowView, ResignRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
@@ -318,6 +318,41 @@ function ResignRow(props: {
   )
 }
 
+function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => void }): JSX.Element {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const act = async (kind: 'match' | 'decline', s: OfferSheetRowView): Promise<void> => {
+    setBusy(true)
+    const r = kind === 'match' ? await client.matchOfferSheet(s.playerId) : await client.declineOfferSheet(s.playerId)
+    setBusy(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else { if (r.type === 'ok' && r.note) toast(r.note, kind === 'match' ? 'success' : 'info'); props.onRefetch() }
+  }
+  return (
+    <Panel title="⚠ Offer sheets on your RFAs">
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        Rival clubs have tendered offer sheets. Match the price to keep your player, or let him walk for the draft-pick compensation.
+      </div>
+      <div className="stack">
+        {props.sheets.map((s) => (
+          <div key={s.playerId} className="row" style={{ gap: 12, alignItems: 'center', padding: '8px 10px', background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ flex: 1 }}>
+              <PlayerLink playerId={s.playerId} name={s.name} />
+              <span className="muted small" style={{ marginLeft: 8 }}>{s.position} · from {s.fromTeamAbbr}</span>
+              <div className="small" style={{ marginTop: 2 }}>
+                Offer: <strong>{fmtMoney(s.salary)}</strong> × {s.years} · compensation if you pass:{' '}
+                {s.compRounds.length ? s.compRounds.map((r) => `R${r}`).join(' + ') : 'none'}
+              </div>
+            </div>
+            <button className="btn btn-primary" disabled={busy} onClick={() => act('match', s)}>Match</button>
+            <button className="btn" disabled={busy} onClick={() => act('decline', s)}>Let him walk</button>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
 function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX.Element {
   const { view } = props
 
@@ -593,6 +628,9 @@ export function OffseasonScreen(): JSX.Element {
             </Panel>
           )}
 
+          {data.stage === 'resign' && data.offerSheets && data.offerSheets.length > 0 && (
+            <OfferSheetPanel sheets={data.offerSheets} onRefetch={refetch} />
+          )}
           {data.stage === 'resign' && (
             <ResignPanel view={data} onRefetch={refetch} />
           )}

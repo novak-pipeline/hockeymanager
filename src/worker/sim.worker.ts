@@ -209,6 +209,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.signed) throw new Error(res.message)
       return { id: req.id, type: 'ok' }
     }
+    case 'matchOfferSheet': {
+      const r = must().matchOfferSheet(req.playerId)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'declineOfferSheet': {
+      const r = must().declineOfferSheet(req.playerId)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
     case 'draftPlayer':
       must().draftPlayer(req.playerId)
       return { id: req.id, type: 'ok' }

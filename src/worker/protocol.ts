@@ -222,6 +222,10 @@ export type WorkerRequestBody =
   | { type: 'resignPlayer'; playerId: string; salary: number; years: number }
   | { type: 'releasePlayer'; playerId: string }
   | { type: 'signFreeAgent'; playerId: string; salary: number; years: number }
+  /** Match a rival offer sheet on one of your RFAs (re-sign at the offered terms). */
+  | { type: 'matchOfferSheet'; playerId: string }
+  /** Let an offer-sheeted RFA walk and take the draft-pick compensation. */
+  | { type: 'declineOfferSheet'; playerId: string }
   /** User makes their selection while on the clock. */
   | { type: 'draftPlayer'; playerId: string }
   /** Sim exactly one AI pick (pick-by-pick stepping). */

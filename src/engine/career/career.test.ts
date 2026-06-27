@@ -2111,3 +2111,56 @@ describe('Career — waiver wire', () => {
     expect(data.teams.get(userId)!.roster.includes(kid.id)).toBe(false)
   })
 })
+
+describe('Career — offer sheets', () => {
+  it('rivals tender for your RFAs; match keeps him, declining nets pick compensation', () => {
+    const data = generateLeague({ seed: 41 })
+    const userId = data.league.teams[0]!
+    // A rival with plenty of cap + roster room so it can tender.
+    const rival = data.teams.get(data.league.teams[1]!)!
+    rival.roster = rival.roster.slice(0, 10)
+    // Two strong, young, expiring RFAs on the user's club.
+    const fwds = data.teams.get(userId)!.roster
+      .map((id) => data.players.get(id)!)
+      .filter((p) => p.position === 'C' || p.position === 'W')
+    for (const rfa of [fwds[0], fwds[1]]) {
+      rfa.age = 24
+      rfa.contract = { ...rfa.contract, yearsRemaining: 1, twoWay: false }
+      // Crank current AND potential (else the dev pass regresses an over-potential
+      // skater back down before the re-sign stage and he drops below the OS bar).
+      for (const set of [rfa.ratings, rfa.potential]) {
+        for (const grp of [set.technical, set.physical, set.mental]) {
+          if (grp) for (const k of Object.keys(grp)) (grp as Record<string, number>)[k] = 88
+        }
+      }
+      rfa.composites = computeComposites(rfa.ratings, rfa.role, rfa.position)
+    }
+    const career = new Career(data, 41, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+    career.autoDraft()
+    career.advanceOffseason() // draft → resign
+
+    const off = career.getOffseason()!
+    expect(off.offerSheets && off.offerSheets.length).toBeGreaterThan(0)
+    const ids = off.offerSheets!.map((s) => s.playerId)
+
+    // Match the first — he stays on the user's roster.
+    const matchId = ids[0]
+    expect(career.matchOfferSheet(matchId).ok).toBe(true)
+    expect(data.teams.get(userId)!.roster.includes(asPlayerId(matchId))).toBe(true)
+
+    // Decline the second (if any) — he joins the rival; compensation comes back.
+    if (ids.length > 1) {
+      const declineId = ids[1]
+      const r = career.declineOfferSheet(declineId)
+      expect(r.ok).toBe(true)
+      expect(data.teams.get(userId)!.roster.includes(asPlayerId(declineId))).toBe(false)
+      const onARival = data.league.teams
+        .filter((t) => t !== userId)
+        .some((t) => data.teams.get(t)!.roster.includes(asPlayerId(declineId)))
+      expect(onARival).toBe(true)
+    }
+  })
+})

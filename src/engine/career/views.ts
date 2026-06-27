@@ -1169,6 +1169,15 @@ export interface FreeAgentRowView extends PlayerBadge {
   decidesInDays: number
 }
 
+export interface OfferSheetRowView extends PlayerBadge {
+  /** Rival club that tendered the sheet. */
+  fromTeamAbbr: string
+  salary: number
+  years: number
+  /** Compensation rounds you'd receive if you let him walk (e.g. [1,3]). */
+  compRounds: number[]
+}
+
 export interface OffseasonView {
   year: number
   stage: 'awards' | 'draft' | 'resign' | 'freeAgency' | 'preseason'
@@ -1178,6 +1187,8 @@ export interface OffseasonView {
   championTeamName: string | null
   /** Re-sign stage: the user's expiring contracts. */
   expiring: ResignRowView[]
+  /** Re-sign stage: rival offer sheets on your RFAs — match or take compensation. */
+  offerSheets?: OfferSheetRowView[]
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
   capUsed: number
@@ -1425,6 +1436,9 @@ export interface CareerSnapshot {
   playoffs: PlayoffsState | null
   offseason: import('@domain').OffseasonState | null
   picks: DraftPick[]
+  /** Rival offer sheets pending on the user's RFAs (re-sign window). Additive;
+   *  absent on pre-offer-sheet saves → restored as empty. */
+  offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

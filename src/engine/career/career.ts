@@ -179,6 +179,7 @@ import {
   aiFreeAgencyDay,
   aiResignDay,
   askTerms,
+  contractStatus,
   initialPicks,
   offerAcceptable,
   processExpiries,
@@ -606,6 +607,8 @@ export class Career {
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
   private readonly resignStatus = new Map<PlayerId, ResignStatus>()
+  /** Rival offer sheets tendered to the user's RFAs in the re-sign window. */
+  private offerSheets: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }> = []
   private faPool: PlayerId[] = []
   private matchDays: number[] = []
   private playerCounter = 0
@@ -3968,6 +3971,7 @@ export class Career {
         for (const id of this.userTeam.roster) {
           if (this.resolve(id).contract.yearsRemaining === 0) this.resignStatus.set(id, 'pending')
         }
+        this.generateOfferSheets()
         const ai = aiResignDay({
           teams: this.data.teams,
           players: this.data.players,
@@ -3986,6 +3990,9 @@ export class Career {
         return true
       }
       case 'resign': {
+        // Any offer sheet the GM ignored resolves as a walk — the RFA signs with
+        // the suitor and the compensation comes back. (Decline mutates the list.)
+        for (const sheet of [...this.offerSheets]) this.declineOfferSheet(sheet.playerId)
         const { expired } = processExpiries({
           teams: this.data.teams,
           players: this.data.players,
@@ -5038,6 +5045,110 @@ export class Career {
       repairLines(nhlTeam, this.data.players)
       repairLines(ahlTeam, this.data.players)
     }
+  }
+
+  /** Draft-pick compensation owed for letting an offer-sheeted RFA walk, by AAV
+   *  (NHL CBA tiers scaled to the $88M cap). Returns the rounds to surrender. */
+  private offerSheetComp(salary: number): number[] {
+    if (salary <= 1_500_000) return []
+    if (salary <= 2_400_000) return [3]
+    if (salary <= 4_800_000) return [2]
+    if (salary <= 7_200_000) return [1, 3]
+    if (salary <= 9_600_000) return [1, 2, 3]
+    return [1, 1, 2, 3]
+  }
+
+  /** Rival GMs tender offer sheets to the user's best RFAs during the re-sign
+   *  window — you must match the price or let him walk for pick compensation. */
+  private generateOfferSheets(): void {
+    this.offerSheets = []
+    const rng = this.rngFor(8009)
+    const rivals = this.data.league.teams
+      .filter((t) => t !== this.userTeamId)
+      .map((t) => this.data.teams.get(t)!)
+      .filter((t) => t && t.tier !== 'ahl')
+    for (const [id, status] of this.resignStatus) {
+      if (status !== 'pending') continue
+      const p = this.resolve(id)
+      if (contractStatus(p) !== 'RFA') continue
+      const ovr = ratedOverall(p)
+      if (ovr < 68) continue
+      // Better players are likelier to draw a sheet; a 78+ stud always does.
+      const chance = Math.min(0.95, (ovr - 64) / 16)
+      if (ovr < 78 && !rng.chance(chance)) continue
+      const ask = askTerms(p, this.year)
+      const salary = Math.round(ask.salary * 1.1) // rivals overpay to pry him loose
+      // A rival with the cap room to carry the deal (a full roster just clears a
+      // spot for him — handled on decline).
+      const suitor = rivals.find((t) => {
+        const capUsed = t.roster.reduce((s, x) => s + (this.data.players.get(x)?.contract.salary ?? 0), 0)
+        return capUsed + salary <= t.finances.salaryCap
+      })
+      if (!suitor) continue
+      this.offerSheets.push({ playerId: id as string, fromTeamId: suitor.id as string, salary, years: Math.max(ask.years, 4) })
+      this.pushNews(
+        'contract',
+        `${suitor.abbreviation} tenders an offer sheet to ${p.name}`,
+        `${suitor.name} has tabled a ${p.contract ? '' : ''}$${(salary / 1e6).toFixed(2)}M × ${Math.max(ask.years, 4)} offer sheet for your RFA ${p.name}. Match it to keep him, or let him walk for draft-pick compensation.`,
+        { playerId: id as string, teamId: suitor.id as string }
+      )
+    }
+  }
+
+  /** Match a rival offer sheet — re-sign your RFA at the offered terms. */
+  matchOfferSheet(playerId: string): { ok: boolean; message: string } {
+    const os = this.offseason
+    if (!os || os.stage !== 'resign') return { ok: false, message: 'The re-sign window is closed.' }
+    const sheet = this.offerSheets.find((s) => s.playerId === playerId)
+    if (!sheet) return { ok: false, message: 'No offer sheet for this player.' }
+    const player = this.resolve(asPlayerId(playerId))
+    try {
+      signPlayer({ team: this.userTeam, player, salary: sheet.salary, years: sheet.years, year: this.year, players: this.data.players })
+    } catch {
+      return { ok: false, message: `You can't fit the $${(sheet.salary / 1e6).toFixed(2)}M cap hit — he walks unless you clear space.` }
+    }
+    this.resignStatus.set(asPlayerId(playerId), 'signed')
+    this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    this.pushNews('contract', `${player.name} matched & retained`, `You matched the offer sheet — ${player.name} stays at $${(sheet.salary / 1e6).toFixed(2)}M × ${sheet.years}.`, { playerId })
+    return { ok: true, message: `Matched. ${player.name} stays.` }
+  }
+
+  /** Let an offer-sheeted RFA walk — he joins the rival and you collect the
+   *  draft-pick compensation. */
+  declineOfferSheet(playerId: string): { ok: boolean; message: string } {
+    const os = this.offseason
+    if (!os || os.stage !== 'resign') return { ok: false, message: 'The re-sign window is closed.' }
+    const sheet = this.offerSheets.find((s) => s.playerId === playerId)
+    if (!sheet) return { ok: false, message: 'No offer sheet for this player.' }
+    const player = this.resolve(asPlayerId(playerId))
+    const suitor = this.data.teams.get(asTeamId(sheet.fromTeamId))!
+    // Player leaves the user's org for the rival.
+    this.userTeam.roster = this.userTeam.roster.filter((id) => (id as string) !== playerId)
+    repairLines(this.userTeam, this.data.players)
+    // A full suitor clears a spot — its weakest body goes to the farm.
+    if (suitor.roster.length >= ROSTER_HARD_CAP && suitor.affiliateId) {
+      const ahl = this.data.teams.get(suitor.affiliateId)
+      if (ahl) {
+        const weakest = [...suitor.roster].sort((a, b) => ratedOverall(this.resolve(a)) - ratedOverall(this.resolve(b)))[0]
+        if (weakest) {
+          suitor.roster = suitor.roster.filter((id) => id !== weakest)
+          ahl.roster.push(weakest)
+          repairLines(ahl, this.data.players)
+        }
+      }
+    }
+    signPlayer({ team: suitor, player, salary: sheet.salary, years: sheet.years, year: this.year, players: this.data.players })
+    // Compensation: the rival's picks (their slot) for the next draft go to you.
+    const compYear = this.year + 1
+    const rounds = this.offerSheetComp(sheet.salary)
+    for (const round of rounds) {
+      this.picks.push({ year: compYear, round, originalTeamId: suitor.id, ownerTeamId: this.userTeamId })
+    }
+    this.resignStatus.delete(asPlayerId(playerId))
+    this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    const compStr = rounds.length ? rounds.map((r) => `R${r}`).join(' + ') + ` (${compYear})` : 'no compensation (below threshold)'
+    this.pushNews('contract', `${player.name} leaves on an offer sheet`, `${player.name} signs with ${suitor.name}. Compensation: ${compStr}.`, { playerId, teamId: suitor.id as string })
+    return { ok: true, message: `${player.name} walks; you receive ${compStr}.` }
   }
 
   resignPlayer(playerId: string, salary: number, years: number): { signed: boolean; message: string } {
@@ -7990,6 +8101,17 @@ export class Career {
             decidesInDays: Math.max(1, Math.round((90 - rank) / 10)),
           }
         }),
+      offerSheets: this.offerSheets.map((s) => {
+        const p = this.resolve(asPlayerId(s.playerId))
+        const suitor = this.data.teams.get(asTeamId(s.fromTeamId))
+        return {
+          ...badge(p),
+          fromTeamAbbr: suitor?.abbreviation ?? '???',
+          salary: s.salary,
+          years: s.years,
+          compRounds: this.offerSheetComp(s.salary),
+        }
+      }),
       capUsed,
       salaryCap: team.finances.salaryCap,
     }
@@ -8704,6 +8826,7 @@ export class Career {
       playoffs: this.playoffs,
       offseason: this.offseason,
       picks: [...this.picks],
+      offerSheets: [...this.offerSheets],
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -8795,6 +8918,7 @@ export class Career {
       originalTeamId: asTeamId(p.originalTeamId as unknown as string),
       ownerTeamId: asTeamId(p.ownerTeamId as unknown as string),
     }))
+    career.offerSheets = snapshot.offerSheets ? snapshot.offerSheets.map((s) => ({ ...s })) : []
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)
