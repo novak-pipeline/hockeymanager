@@ -88,6 +88,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
     { id: 'clubInfo', label: 'Club Info', icon: 'clubInfo', section: 'club', screen: 'teamInfo', match: ['teamInfo', 'teamHistory'],
       subTabs: [{ id: 'teamInfo', label: 'Profile' }, { id: 'teamHistory', label: 'History' }] },
     { id: 'clubVision', label: 'Club Vision', icon: 'clubVision', section: 'club', screen: 'board', match: ['board'] },
+    { id: 'gmCareer', label: 'GM Career', icon: 'clubInfo', section: 'club', screen: 'gmCareer', match: ['gmCareer'] },
     { id: 'finances', label: 'Finances', icon: 'finances', section: 'club', screen: 'finances', match: ['finances'] },
   ]
 }

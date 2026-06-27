@@ -333,6 +333,18 @@ export class SimClient {
     return this.send({ type: 'getLeagueWire' })
   }
 
+  getGMProfile(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMProfile' })
+  }
+
+  getGMJobMarket(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMJobMarket' })
+  }
+
+  acceptGMJob(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'acceptGMJob', teamId })
+  }
+
   claimWaiver(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'claimWaiver', playerId })
   }

@@ -143,6 +143,16 @@ export function DashboardScreen(): JSX.Element {
         </div>
       )}
 
+      {d.gmFired && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
+          onClick={() => nav.navigate('gmCareer')}
+        >
+          🧳 You've been let go. Review the GM job market to catch on with a new club.
+        </button>
+      )}
+
       {(d.waiverClaimsAvailable ?? 0) > 0 && (
         <button
           className="dash-banner"

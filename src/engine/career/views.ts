@@ -1197,6 +1197,48 @@ export interface WaiverWireRowView extends PlayerBadge {
   blockReason?: string
 }
 
+/** The user's GM identity, reputation, and career record. Response to 'getGMProfile'. */
+export interface GMProfileView {
+  name: string
+  reputation: number
+  tier: string
+  seasons: number
+  wins: number
+  losses: number
+  playoffApps: number
+  cupWins: number
+  presidentsTrophies: number
+  /** Current club name, or null when between jobs (fired). */
+  currentClub: string | null
+  fired: boolean
+  stints: Array<{
+    teamAbbr: string
+    teamName: string
+    fromYear: number
+    toYear: number | null
+    seasons: number
+    record: string
+    cupWins: number
+    endReason: 'fired' | 'moved' | null
+  }>
+}
+
+/** Open GM vacancies the user can take. Response to 'getGMJobMarket'. */
+export interface GMJobMarketView {
+  reputation: number
+  tier: string
+  /** True when the user is between jobs and may accept an opening. */
+  available: boolean
+  openings: Array<{
+    teamId: string
+    teamName: string
+    teamAbbr: string
+    projectedRank: number
+    interest: 'courting' | 'open' | 'longshot'
+    blurb: string
+  }>
+}
+
 export interface OffseasonView {
   year: number
   stage: 'awards' | 'draft' | 'resign' | 'freeAgency' | 'preseason'
@@ -1462,6 +1504,10 @@ export interface CareerSnapshot {
   waiverWire?: Array<{ playerId: string; fromTeamId: string; placedDay: number }>
   /** Per-team hot/cold streak counters for ambient news. Additive; absent → empty. */
   teamStreaks?: Array<[string, number]>
+  /** The user's GM identity + reputation + job history. Additive; absent → lazily created. */
+  gmState?: import('@engine/league/gmCareer').GMState
+  /** Open GM vacancies when the user is between jobs. Additive; absent → none. */
+  gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;

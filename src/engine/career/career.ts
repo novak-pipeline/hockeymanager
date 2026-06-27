@@ -74,6 +74,17 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
+import {
+  createGMState,
+  recordSeasonResult,
+  reputationTier,
+  endStint,
+  startStint,
+  currentStint,
+  buildGMJobMarket,
+  type GMState,
+  type GMJobOpening,
+} from '@engine/league/gmCareer'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
 import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
@@ -362,6 +373,8 @@ import {
   type OffseasonView,
   type WaiverWireRowView,
   type LeagueWireView,
+  type GMProfileView,
+  type GMJobMarketView,
   type PickAssetView,
   type PlayerProfileView,
   type PlayoffBracketView,
@@ -561,7 +574,7 @@ type ResignStatus = 'pending' | 'signed' | 'walked'
 export class Career {
   readonly data: LeagueData
   readonly seed: number
-  readonly userTeamId: TeamId
+  userTeamId: TeamId
 
   private currentDay = 0
   private phase: CareerPhase = 'regularSeason'
@@ -703,6 +716,12 @@ export class Career {
    */
   private coachMarket: CoachMarketEntry[] | null = null
 
+  /** The user's GM identity + reputation + job history. Lazily created (so old
+   *  saves restore cleanly), serialized additively. */
+  private gmStateInternal: GMState | null = null
+  /** Open GM vacancies the user can take (set when fired / courted). Null = none. */
+  private gmJobMarket: GMJobOpening[] | null = null
+
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
     this.seed = seed
@@ -775,6 +794,15 @@ export class Career {
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
+
+      // The user's GM identity (name generated; reputation starts unproven).
+      this.gmStateInternal = createGMState(
+        generateTeamStaff(new Rng(deriveSeed(this.seed, 9330))).headCoach.name,
+        this.year,
+        this.userTeamId as string,
+        this.userTeam.abbreviation,
+        this.userTeam.name
+      )
 
       this.rivalriesState = seedRivalries({
         teams: [...data.league.teams].map((tid) => {
@@ -1783,6 +1811,16 @@ export class Career {
     if (!team) return
     const m = streakMilestone(team.name, next)
     if (m) this.pushNews('league', m.headline, m.body, { teamId })
+  }
+
+  /** The user's GM state, lazily created for old saves that predate the GM career. */
+  private ensureGM(): GMState {
+    if (!this.gmStateInternal) {
+      const name = generateTeamStaff(new Rng(deriveSeed(this.seed, 9330))).headCoach.name
+      const t = this.userTeam
+      this.gmStateInternal = createGMState(name, this.year, this.userTeamId as string, t.abbreviation, t.name)
+    }
+    return this.gmStateInternal
   }
   /** Keep at most this many open concerns at once, and this many total stored. */
   private static readonly MAX_OPEN_INTERACTIONS = 3
@@ -3652,9 +3690,24 @@ export class Career {
             teamName: this.userTeam.name,
           })
           this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+
+          // ── Fold the season into the GM's career + reputation. ──
+          const userStanding = this.standings.get(this.userTeamId)
+          const gm = this.ensureGM()
+          recordSeasonResult(gm, {
+            wins: userStanding?.wins ?? 0,
+            losses: (userStanding?.losses ?? 0) + (userStanding?.overtimeLosses ?? 0),
+            madePlayoffs,
+            wonCup,
+            wonPresidents: userFinalRank === 1,
+            finalRank: userFinalRank,
+            n: this.data.league.teams.length,
+          })
           if (reviewResult.fired) {
-            // Record the firing but don't hard-crash — expose as a UI state.
-            // The user can continue playing; further seasons just note the new GM context.
+            // The board has fired the GM. Close his stint and open the job market so
+            // he can catch on elsewhere (the user keeps playing — see acceptGMJob).
+            endStint(gm, this.year, 'fired')
+            this.gmJobMarket = this.buildGMOpenings(sorted)
           }
         }
 
@@ -6537,6 +6590,137 @@ export class Career {
     return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
+  /* ────────────────────────── GM career ────────────────────────── */
+
+  /** Build the rival GM vacancy list. The weakest non-playoff clubs (plus a little
+   *  deterministic churn) are treated as having an opening; the user's reputation
+   *  decides how keenly each would hire him. `sorted` is worst-last standings. */
+  private buildGMOpenings(sorted: ReturnType<typeof sortStandings>): GMJobOpening[] {
+    const gm = this.ensureGM()
+    const n = this.data.league.teams.length
+    const rankOf = new Map<string, number>()
+    sorted.forEach((s, i) => rankOf.set(s.teamId as string, i + 1))
+    const rng = new Rng(deriveSeed(this.seed, 9331, this.year))
+    const openings: Array<{ teamId: string; teamName: string; teamAbbr: string; marketSize: number; projectedRank: number }> = []
+    for (const tid of this.data.league.teams) {
+      if ((tid as string) === (this.userTeamId as string)) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      const rank = rankOf.get(tid as string) ?? n
+      // Bottom third of the league is most likely to make a change; a little churn
+      // higher up keeps the carousel alive.
+      const bottomThird = rank > Math.ceil(n * 0.66)
+      const fires = bottomThird ? rng.chance(0.5) : rng.chance(0.08)
+      if (!fires) continue
+      openings.push({
+        teamId: tid as string,
+        teamName: team.name,
+        teamAbbr: team.abbreviation,
+        marketSize: 3,
+        projectedRank: rank,
+      })
+    }
+    return buildGMJobMarket({ openings, userTeamId: this.userTeamId as string, reputation: gm.reputation, n })
+  }
+
+  /** The user's GM profile (identity, reputation, career record, job history). */
+  getGMProfile(): GMProfileView {
+    const gm = this.ensureGM()
+    const cur = currentStint(gm)
+    return {
+      name: gm.name,
+      reputation: gm.reputation,
+      tier: reputationTier(gm.reputation),
+      seasons: gm.seasons,
+      wins: gm.wins,
+      losses: gm.losses,
+      playoffApps: gm.playoffApps,
+      cupWins: gm.cupWins,
+      presidentsTrophies: gm.presidentsTrophies,
+      currentClub: cur ? cur.teamName : null,
+      fired: this.boardState.firedAtYear !== null,
+      stints: gm.stints.map((s) => ({
+        teamAbbr: s.teamAbbr,
+        teamName: s.teamName,
+        fromYear: s.fromYear,
+        toYear: s.toYear,
+        seasons: s.seasons,
+        record: `${s.wins}-${s.losses}`,
+        cupWins: s.cupWins,
+        endReason: s.endReason ?? null,
+      })),
+    }
+  }
+
+  /** Open GM vacancies the user can take (populated when he's fired). */
+  getGMJobMarket(): GMJobMarketView {
+    const gm = this.ensureGM()
+    return {
+      reputation: gm.reputation,
+      tier: reputationTier(gm.reputation),
+      available: this.boardState.firedAtYear !== null,
+      openings: (this.gmJobMarket ?? []).map((o) => ({
+        teamId: o.teamId,
+        teamName: o.teamName,
+        teamAbbr: o.teamAbbr,
+        projectedRank: o.projectedRank,
+        interest: o.interest,
+        blurb: o.blurb,
+      })),
+    }
+  }
+
+  /**
+   * Accept a GM vacancy and move clubs. Re-points the user's club, rebuilds the
+   * board mandate for the new team, ensures its locker room exists, records the new
+   * stint, clears the fired flag, and announces the hire. Only permitted while
+   * between jobs (fired). Most club-scoped state is keyed by team or leaguewide, so
+   * it follows the new userTeamId automatically.
+   */
+  acceptGMJob(teamId: string): { ok: boolean; message: string } {
+    if (this.boardState.firedAtYear === null) {
+      return { ok: false, message: 'You can only take a new job while between jobs.' }
+    }
+    const opening = (this.gmJobMarket ?? []).find((o) => o.teamId === teamId)
+    if (!opening) return { ok: false, message: 'That job is no longer on the market.' }
+    if (opening.interest === 'longshot') {
+      return { ok: false, message: `${opening.teamName} need more convincing — build your reputation first.` }
+    }
+    const newTeam = this.data.teams.get(asTeamId(teamId))
+    if (!newTeam) return { ok: false, message: 'Club not found.' }
+
+    const gm = this.ensureGM()
+    // Switch the user's club.
+    this.userTeamId = asTeamId(teamId)
+    startStint(gm, this.year, teamId, newTeam.abbreviation, newTeam.name)
+
+    // Rebuild the board mandate for the new club; clears firedAtYear via fresh state.
+    const boardResult = setSeasonMandate({
+      teamStrengthRank: this.userStrengthRank(),
+      teamsInLeague: this.data.league.teams.length,
+      rng: this.rngFor(9301, this.year),
+      year: this.year,
+      teamId: teamId,
+      teamName: newTeam.name,
+    })
+    this.boardState = boardResult.state
+    // (Every NHL club already has a locker room from initLockerRooms — no rebuild needed.)
+
+    this.gmJobMarket = null
+    this.pushNews(
+      'contract',
+      `You've been hired as GM of ${newTeam.name}`,
+      `${gm.name} is back in the game — ${newTeam.name} have handed you the keys. ${boardResult.state.mandateText}`,
+      { teamId }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay, year: this.year, kind: 'signing', teamIds: [teamId],
+      summary: `${newTeam.abbreviation} hire ${gm.name} as general manager.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, message: `Hired as GM of ${newTeam.name}.` }
+  }
+
   /* ────────────────────── staff-meeting agenda ────────────────────── */
 
   /** Mark a player topic for discussion at the next staff meeting. */
@@ -9049,6 +9233,8 @@ export class Career {
       offerSheets: [...this.offerSheets],
       waiverWire: this.waiverWire.map((w) => ({ ...w })),
       teamStreaks: [...this.teamStreaks.entries()],
+      gmState: this.gmStateInternal ? structuredClone(this.gmStateInternal) : undefined,
+      gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       history: [...this.history],
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
@@ -9143,6 +9329,8 @@ export class Career {
     career.offerSheets = snapshot.offerSheets ? snapshot.offerSheets.map((s) => ({ ...s })) : []
     career.waiverWire = snapshot.waiverWire ? snapshot.waiverWire.map((w) => ({ ...w })) : []
     career.teamStreaks = new Map(snapshot.teamStreaks ?? [])
+    career.gmStateInternal = snapshot.gmState ? structuredClone(snapshot.gmState) : null
+    career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {
       for (const [k, v] of snapshot.extraStats.goalieWins) career.goalieWins.set(asPlayerId(k), v)

@@ -46,6 +46,8 @@ export type {
   OffseasonView,
   WaiverWireRowView,
   LeagueWireView,
+  GMProfileView,
+  GMJobMarketView,
   PersonalityReadView,
   PersonalityTraitRead,
   PlayerAnalyticsRow,
@@ -232,6 +234,12 @@ export type WorkerRequestBody =
   | { type: 'getWaiverWire' }
   /** Read the leaguewide ticker feed (recent transactions + notable streaks). */
   | { type: 'getLeagueWire' }
+  /** Read the user's GM profile (identity, reputation, career record). */
+  | { type: 'getGMProfile' }
+  /** Read open GM vacancies (populated when the user is fired). */
+  | { type: 'getGMJobMarket' }
+  /** Accept a GM vacancy and move clubs. */
+  | { type: 'acceptGMJob'; teamId: string }
   /** Claim a player off the in-season waiver wire onto the user's roster. */
   | { type: 'claimWaiver'; playerId: string }
   /** User makes their selection while on the clock. */
@@ -367,6 +375,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'finances'; finances: FinanceView }
   | { type: 'waiverWire'; waiverWire: WaiverWireRowView[] }
   | { type: 'leagueWire'; leagueWire: LeagueWireView }
+  | { type: 'gmProfile'; gmProfile: GMProfileView }
+  | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }

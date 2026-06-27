@@ -2246,6 +2246,59 @@ describe('Career — in-season waiver wire (claim direction)', () => {
   })
 })
 
+describe('Career — GM career', () => {
+  it('records season results into the GM profile', () => {
+    const data = generateLeague({ seed: 61 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 61, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → folds the season into the GM profile
+    const gm = career.getGMProfile()
+    expect(gm.seasons).toBe(1)
+    expect(gm.wins + gm.losses).toBeGreaterThan(0)
+    expect(gm.name.length).toBeGreaterThan(0)
+    expect(gm.stints.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('a fired GM can accept a vacancy and switch clubs (reputation carries)', () => {
+    const data = generateLeague({ seed: 62 })
+    const userId = data.league.teams[0]!
+    const newId = data.league.teams[5]!
+    const career = new Career(data, 62, userId)
+    const newTeam = data.teams.get(newId)!
+    // Force the fired state + a courting opening for the new club.
+    const internals = career as unknown as {
+      boardState: { firedAtYear: number | null }
+      gmJobMarket: Array<{ teamId: string; teamName: string; teamAbbr: string; projectedRank: number; marketSize: number; interest: string; blurb: string }>
+    }
+    internals.boardState.firedAtYear = career.getDashboard().year
+    internals.gmJobMarket = [
+      { teamId: newId as string, teamName: newTeam.name, teamAbbr: newTeam.abbreviation, projectedRank: 8, marketSize: 3, interest: 'courting', blurb: 'x' },
+    ]
+    const repBefore = career.getGMProfile().reputation
+
+    const res = career.acceptGMJob(newId as string)
+    expect(res.ok).toBe(true)
+    expect(career.userTeamId as string).toBe(newId as string)
+    // Board reset (no longer fired) and reputation carried over.
+    expect(career.getGMProfile().fired).toBe(false)
+    expect(career.getGMProfile().reputation).toBe(repBefore)
+    // A new stint opened at the new club.
+    const cur = career.getGMProfile().stints[career.getGMProfile().stints.length - 1]!
+    expect(cur.teamAbbr).toBe(newTeam.abbreviation)
+    expect(cur.toYear).toBeNull()
+  })
+
+  it('cannot accept a job while still employed', () => {
+    const data = generateLeague({ seed: 63 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 63, userId)
+    const res = career.acceptGMJob(data.league.teams[1]! as string)
+    expect(res.ok).toBe(false)
+  })
+})
+
 describe('Career — offer sheets', () => {
   it('rivals tender for your RFAs; match keeps him, declining nets pick compensation', () => {
     const data = generateLeague({ seed: 41 })
