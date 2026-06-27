@@ -143,6 +143,16 @@ export function DashboardScreen(): JSX.Element {
         </div>
       )}
 
+      {(d.waiverClaimsAvailable ?? 0) > 0 && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
+          onClick={() => nav.navigate('waivers')}
+        >
+          📋 {d.waiverClaimsAvailable} player{d.waiverClaimsAvailable === 1 ? '' : 's'} on the waiver wire — click to review claims
+        </button>
+      )}
+
       {/* ── 3-col card grid ── */}
       <div className="dash-grid">
 
