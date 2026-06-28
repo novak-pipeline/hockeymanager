@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { NewsCategory } from '@domain'
 import type {
   BoardSummaryView,
@@ -68,6 +69,57 @@ function monthOf(iso: string): string {
    ═══════════════════════════════════════════════════════════════ */
 
 /** Club home screen: FM24-style 3-col card grid. */
+/** Optional dashboard panels the user can hide (core panels stay always-on). */
+const OPTIONAL_PANELS: Array<{ key: string; label: string }> = [
+  { key: 'injuries', label: 'Injuries' },
+  { key: 'storylines', label: 'Storylines' },
+  { key: 'fixtures', label: 'Fixtures' },
+  { key: 'topScorers', label: 'Top scorers' },
+  { key: 'playoff', label: 'Playoff picture' },
+  { key: 'stacksUp', label: 'How you stack up' },
+]
+const HIDDEN_PANELS_KEY = 'hg.dash.hiddenPanels'
+
+function loadHiddenPanels(): Set<string> {
+  try {
+    const raw = localStorage.getItem(HIDDEN_PANELS_KEY)
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+function saveHiddenPanels(s: Set<string>): void {
+  try {
+    localStorage.setItem(HIDDEN_PANELS_KEY, JSON.stringify([...s]))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** A small "⚙ Customize" popover listing the optional panels with show/hide checkboxes. */
+function CustomizeMenu(props: { hidden: Set<string>; onToggle: (key: string) => void }): JSX.Element {
+  return (
+    <details className="dash-customize" style={{ position: 'relative' }}>
+      <summary className="btn btn-ghost btn-sm" style={{ listStyle: 'none', cursor: 'pointer' }}>⚙ Customize</summary>
+      <div
+        style={{
+          position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 30,
+          background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)',
+          padding: '8px 10px', minWidth: 180, boxShadow: 'var(--violet-glow)',
+        }}
+      >
+        <div className="muted small" style={{ marginBottom: 6 }}>Show panels</div>
+        {OPTIONAL_PANELS.map((p) => (
+          <label key={p.key} className="row" style={{ gap: 8, padding: '3px 0', cursor: 'pointer' }}>
+            <input type="checkbox" checked={!props.hidden.has(p.key)} onChange={() => props.onToggle(p.key)} />
+            <span className="small">{p.label}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 export function DashboardScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
@@ -108,6 +160,17 @@ export function DashboardScreen(): JSX.Element {
     (r) => (r.type === 'playoffOdds' ? r.odds : null)
   )
 
+  const [hiddenPanels, setHiddenPanels] = useState<Set<string>>(() => loadHiddenPanels())
+  const togglePanel = (key: string): void => {
+    setHiddenPanels((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      saveHiddenPanels(next)
+      return next
+    })
+  }
+
   if (error) {
     return (
       <section>
@@ -127,11 +190,13 @@ export function DashboardScreen(): JSX.Element {
 
   const d = data
   const s = d.userTeam.standing
+  const shown = (key: string): boolean => !hiddenPanels.has(key)
 
   return (
     <section className="stack">
       {/* title row */}
       <ScreenHeader title={d.userTeam.name}>
+        <CustomizeMenu hidden={hiddenPanels} onToggle={togglePanel} />
         <span className="muted small">
           {d.leagueName} · {d.year} · Day {d.day}/{d.totalDays}
         </span>
@@ -229,6 +294,7 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
 
           {/* Injuries */}
+          {shown('injuries') && (
           <Panel title="Injuries">
             {d.injuries.length === 0 ? (
               <span className="muted small">Fully healthy.</span>
@@ -248,6 +314,7 @@ export function DashboardScreen(): JSX.Element {
               </div>
             )}
           </Panel>
+          )}
 
         </div>
 
@@ -288,7 +355,7 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
 
           {/* Storylines ticker strip */}
-          {d.topArcs && d.topArcs.length > 0 && (
+          {shown('storylines') && d.topArcs && d.topArcs.length > 0 && (
             <StorylinesStrip arcs={d.topArcs} />
           )}
 
@@ -360,9 +427,11 @@ export function DashboardScreen(): JSX.Element {
         <div className="stack">
 
           {/* Fixtures card */}
+          {shown('fixtures') && (
           <Panel title="Fixtures">
             <FixturesCard entries={schedule?.entries ?? []} todayDate={d.date} />
           </Panel>
+          )}
 
           {/* Division standings */}
           <Panel title={`${d.divisionName} Division`}>
@@ -370,6 +439,7 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
 
           {/* Top scorers */}
+          {shown('topScorers') && (
           <Panel title="Top scorers">
             {d.topScorers.length === 0 ? (
               <span className="muted small">No points scored yet.</span>
@@ -390,16 +460,17 @@ export function DashboardScreen(): JSX.Element {
               </div>
             )}
           </Panel>
+          )}
 
           {/* Playoff picture */}
-          {playoffOdds?.available && (
+          {shown('playoff') && playoffOdds?.available && (
             <Panel title="Playoff picture">
               <PlayoffOddsCard view={playoffOdds} />
             </Panel>
           )}
 
           {/* How your club stacks up */}
-          {comparison && comparison.cards.length > 0 && (
+          {shown('stacksUp') && comparison && comparison.cards.length > 0 && (
             <Panel title="How you stack up">
               <StacksUpCard view={comparison} />
             </Panel>
