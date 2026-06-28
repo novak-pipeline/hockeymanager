@@ -510,6 +510,10 @@ export class SimClient {
   }
 
   /** Set (or clear) a per-player individual focus override. */
+  recommendPlayerFocuses(): Promise<WorkerResponse> {
+    return this.send({ type: 'recommendPlayerFocuses' })
+  }
+
   setPlayerFocusDrill(playerId: string, focus: PracticeFocus | null): Promise<WorkerResponse> {
     return this.send({ type: 'setPlayerFocusDrill', playerId, focus })
   }

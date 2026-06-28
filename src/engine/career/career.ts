@@ -284,6 +284,7 @@ import {
   practiceDevModifier,
   effectiveFocus,
   suggestFocus,
+  suggestPlayerFocus,
   toggleScratch,
   setPlayerFocus,
   isScratchedFor,
@@ -9066,6 +9067,19 @@ export class Career {
   /** Set (or clear) a per-player individual focus override. */
   setPlayerFocusDrill(playerId: string, focus: PracticeFocus | null): void {
     this.practiceState = setPlayerFocus(this.practiceState, playerId, focus)
+  }
+
+  /** Assign each roster player an individual training focus targeting his weakest
+   *  area (goalies → goaltending). One click to development-optimise the squad. */
+  recommendPlayerFocuses(): { ok: true; count: number } {
+    let count = 0
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      this.practiceState = setPlayerFocus(this.practiceState, id as string, suggestPlayerFocus(p))
+      count++
+    }
+    return { ok: true, count }
   }
 
   /** Whether a given player is scratched. */

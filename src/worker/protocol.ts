@@ -316,6 +316,8 @@ export type WorkerRequestBody =
   | { type: 'toggleScratch'; playerId: string }
   /** Set (or clear) a per-player individual focus override (null = revert to team focus). */
   | { type: 'setPlayerFocusDrill'; playerId: string; focus: PracticeFocus | null }
+  /** Auto-assign each roster player a focus targeting his weakest area. */
+  | { type: 'recommendPlayerFocuses' }
   /** League-wide top-N leaderboards for the League hub. */
   | { type: 'getLeagueLeaders'; topN?: number }
   /** Team leaders panel (goals/assists/points/+-/AvR/GAA/SV%). */

@@ -359,6 +359,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'setPlayerFocusDrill':
       must().setPlayerFocusDrill(req.playerId, req.focus)
       return { id: req.id, type: 'ok' }
+    case 'recommendPlayerFocuses': {
+      const r = must().recommendPlayerFocuses()
+      return { id: req.id, type: 'ok', note: `Set individual focuses for ${r.count} players.` }
+    }
     case 'getLeagueLeaders':
       return { id: req.id, type: 'leagueLeaders', leaders: must().getLeagueLeaders(req.topN) }
     case 'getTeamLeaders': {

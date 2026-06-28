@@ -570,6 +570,18 @@ function PracticeTab(): JSX.Element {
     }
   }
 
+  async function recommendIndividual(): Promise<void> {
+    if (savingFocus || actions.busy) return
+    setSavingFocus(true)
+    const res = await client.recommendPlayerFocuses()
+    setSavingFocus(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else {
+      if (res.type === 'ok' && res.note) toast(res.note, 'success')
+      bumpRefresh()
+    }
+  }
+
   const { data: squad } = useScreenData<SquadView>(
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
@@ -604,6 +616,14 @@ function PracticeTab(): JSX.Element {
             onClick={() => void setFocus(data.suggestion.teamFocus)}
           >
             Apply
+          </button>
+        </div>
+        <div className="row" style={{ marginTop: 'var(--sp-3)', alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <div style={{ flex: 1, color: 'var(--muted)', fontSize: 13 }}>
+            Or target each player individually — assign every skater a drill for his weakest area (goalies → goaltending).
+          </div>
+          <button className="btn btn-sm" disabled={savingFocus} onClick={() => void recommendIndividual()}>
+            Recommend individual focuses
           </button>
         </div>
       </Panel>
