@@ -248,6 +248,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getFanbase':
       return { id: req.id, type: 'fanbase', fanbase: must().getFanbase() }
+    case 'getSponsors':
+      return { id: req.id, type: 'sponsors', sponsors: must().getSponsors() }
     case 'acceptGMJob': {
       const r = must().acceptGMJob(req.teamId)
       if (!r.ok) throw new Error(r.message)

@@ -76,6 +76,7 @@ import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
 import { generateOwnerRequest, type OwnerRequest } from '@engine/league/ownerMeddling'
 import { fanInterestDelta, budgetFactor, fanInterestLabel } from '@engine/league/fanbase'
+import { buildSponsors, sponsorTotal, sponsorKindLabel } from '@engine/league/sponsors'
 import {
   createGMState,
   recordSeasonResult,
@@ -381,6 +382,7 @@ import {
   type MentorshipView,
   type ClubDirectionView,
   type FanbaseView,
+  type SponsorsView,
   type OwnerRequestView,
   type PickAssetView,
   type PlayerProfileView,
@@ -7050,6 +7052,30 @@ export class Career {
       { teamId: this.userTeamId as string }
     )
     return { ok: true, message: `Club direction set to ${direction}.` }
+  }
+
+  /** Club sponsorship deals (title / jersey / arena) + total annual revenue. Deals
+   *  scale with roster stature and fan interest — winning and a full barn are worth
+   *  more to sponsors. Also refreshes the finances revenue line. */
+  getSponsors(): SponsorsView {
+    const team = this.userTeam
+    const roster = team.roster.map((id) => this.resolve(id))
+    const stature = roster.length
+      ? Math.round(roster.reduce((s, p) => s + ratedOverall(p), 0) / roster.length)
+      : 55
+    const deals = buildSponsors({ teamKey: team.abbreviation, stature, fanInterest: this.fanInterest })
+    const total = sponsorTotal(deals)
+    team.finances.revenue = total
+    return {
+      total,
+      deals: deals.map((d) => ({
+        kind: d.kind,
+        kindLabel: sponsorKindLabel(d.kind),
+        sponsor: d.sponsor,
+        value: d.value,
+        yearsLeft: d.yearsLeft,
+      })),
+    }
   }
 
   /** Fan engagement + its current pull on the owner budget. */

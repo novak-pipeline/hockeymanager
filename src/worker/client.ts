@@ -369,6 +369,10 @@ export class SimClient {
     return this.send({ type: 'getFanbase' })
   }
 
+  getSponsors(): Promise<WorkerResponse> {
+    return this.send({ type: 'getSponsors' })
+  }
+
   acceptGMJob(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptGMJob', teamId })
   }

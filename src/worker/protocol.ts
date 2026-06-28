@@ -52,6 +52,7 @@ export type {
   MentorshipView,
   ClubDirectionView,
   FanbaseView,
+  SponsorsView,
   OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
@@ -257,6 +258,8 @@ export type WorkerRequestBody =
   | { type: 'setClubDirection'; direction: 'compete' | 'retool' | 'rebuild' }
   /** Read fan engagement + its effect on the owner budget. */
   | { type: 'getFanbase' }
+  /** Read the club's sponsorship deals + revenue. */
+  | { type: 'getSponsors' }
   /** Accept a GM vacancy and move clubs. */
   | { type: 'acceptGMJob'; teamId: string }
   /** Read the pending owner directive, if any. */
@@ -404,6 +407,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'mentorships'; mentorships: MentorshipView }
   | { type: 'clubDirection'; clubDirection: ClubDirectionView }
   | { type: 'fanbase'; fanbase: FanbaseView }
+  | { type: 'sponsors'; sponsors: SponsorsView }
   | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }

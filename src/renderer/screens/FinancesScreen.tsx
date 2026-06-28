@@ -1,4 +1,4 @@
-import type { FinanceView, FanbaseView, PayrollRowView } from '../../worker/protocol'
+import type { FinanceView, FanbaseView, SponsorsView, PayrollRowView } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -14,6 +14,10 @@ export function FinancesScreen(): JSX.Element {
   const fans = useScreenData<FanbaseView>(
     () => client.getFanbase(),
     (r) => (r.type === 'fanbase' ? r.fanbase : null)
+  )
+  const sponsors = useScreenData<SponsorsView>(
+    () => client.getSponsors(),
+    (r) => (r.type === 'sponsors' ? r.sponsors : null)
   )
 
   return (
@@ -38,6 +42,30 @@ export function FinancesScreen(): JSX.Element {
                 Owner budget is running at <strong>{fans.data.budgetFactorPct}%</strong> of baseline — win and fill the building to grow it; a long rebuild erodes it.
               </div>
             </div>
+          </div>
+        </Panel>
+      )}
+      {sponsors.data && (
+        <Panel title={`Sponsorships — ${fmtMoney(sponsors.data.total)}/yr`}>
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            Commercial deals scale with the club's stature and fan engagement — winning and a full barn are worth more at the negotiating table.
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Type</th><th>Sponsor</th><th className="num">Value/yr</th><th className="num">Years left</th></tr>
+              </thead>
+              <tbody>
+                {sponsors.data.deals.map((d) => (
+                  <tr key={d.kind}>
+                    <td>{d.kindLabel}</td>
+                    <td>{d.sponsor}</td>
+                    <td className="num">{fmtMoney(d.value)}</td>
+                    <td className="num">{d.yearsLeft}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Panel>
       )}

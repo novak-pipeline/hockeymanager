@@ -1209,6 +1209,18 @@ export interface OwnerRequestView {
   declineHint: string
 }
 
+/** Club sponsorship deals + total annual revenue. Response to 'getSponsors'. */
+export interface SponsorsView {
+  total: number
+  deals: Array<{
+    kind: 'title' | 'jersey' | 'arena'
+    kindLabel: string
+    sponsor: string
+    value: number
+    yearsLeft: number
+  }>
+}
+
 /** Fan engagement + its effect on the owner budget. Response to 'getFanbase'. */
 export interface FanbaseView {
   interest: number
