@@ -1377,7 +1377,7 @@ a:hover { text-decoration: underline; }
   align-items: stretch;
   height: 30px;
   background: var(--bg0);
-  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   font-size: 12px;
   z-index: 15;
 }

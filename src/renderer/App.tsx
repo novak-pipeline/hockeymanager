@@ -374,13 +374,13 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   onSave={onSave}
                   onLoad={onLoad}
                 />
+                <LeagueTicker />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <ScreenBoundary screen={nav.screen}>
                     <ScreenRouter screen={nav.screen} params={nav.params} />
                   </ScreenBoundary>
                 </div>
-                <LeagueTicker />
               </div>
             </div>
           </div>
