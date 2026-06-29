@@ -7776,7 +7776,7 @@ export class Career {
       attributes,
       assignmentLabel: card?.assignmentLabel ?? '—',
       focusLabel: card?.focusLabel ?? 'All players',
-      coverage: card?.coverage ?? scopeIds.length,
+      coverage: card?.coverage ?? 0,
       scouted,
       finds,
     }

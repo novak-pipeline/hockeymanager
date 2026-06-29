@@ -152,7 +152,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
     // Own team: full management
     switch (effectiveTab) {
       case 'squad':       return <SquadScreen />
-      case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
+      case 'teamStats':   return <LeagueStatsTableScreen teamId={viewedTeamId} />
       case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
       case 'teamDynamics': return <DynamicsScreen teamId={viewedTeamId} />
       case 'teamMedical': return <MedicalScreen />
@@ -165,6 +165,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       case 'finances':    return <FinancesScreen />
       case 'teamInfo':    return <TeamInfoTab />
       case 'teamHistory': return <HistoryScreen />
+      default:            return <SquadScreen />
     }
   }
 
