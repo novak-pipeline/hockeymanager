@@ -374,7 +374,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   onSave={onSave}
                   onLoad={onLoad}
                 />
-                <LeagueTicker />
+                {nav.screen === 'dashboard' && <LeagueTicker />}
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <ScreenBoundary screen={nav.screen}>

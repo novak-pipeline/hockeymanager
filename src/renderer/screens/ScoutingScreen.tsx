@@ -59,6 +59,10 @@ function ScopeDropdown(props: {
 }): JSX.Element {
   const { scout, view, onAssign } = props
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const match = (label: string): boolean => q === '' || label.toLowerCase().includes(q)
+  const close = (): void => { setOpen(false); setQuery('') }
   const Group = ({ label }: { label: string }): JSX.Element => (
     <div className="muted small" style={{ padding: '7px 10px 2px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
   )
@@ -66,17 +70,26 @@ function ScopeDropdown(props: {
     <button
       className="btn-ghost"
       style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
-      onClick={() => { onAssign(target); setOpen(false) }}
+      onClick={() => { onAssign(target); close() }}
     >
       {label}
     </button>
   )
 
+  const nations = view.nations.filter((n) => match(n.label))
+  const competitions = view.competitions.filter((c) => match(c.label))
+  const priorities: Array<{ label: string; target: ScoutTarget }> = [
+    { label: 'Next opponent', target: { kind: 'nextOpponent' } },
+    ...(view.hasDraftClass ? [{ label: 'Whole draft class', target: { kind: 'draftClass' as const } }] : []),
+    { label: 'Free agents', target: { kind: 'freeAgents' } },
+  ].filter((p) => match(p.label))
+  const nothing = priorities.length + nations.length + competitions.length === 0
+
   return (
     <div style={{ position: 'relative' }}>
       <button
         className="btn btn-ghost small"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
         <span>{scout.assignmentLabel}</span>
@@ -91,20 +104,32 @@ function ScopeDropdown(props: {
             minWidth: 240, maxHeight: 360, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
           }}
         >
-          <Group label="Priorities" />
-          <Item label="Next opponent" target={{ kind: 'nextOpponent' }} />
-          {view.hasDraftClass && <Item label="Whole draft class" target={{ kind: 'draftClass' }} />}
-          <Item label="Free agents" target={{ kind: 'freeAgents' }} />
+          {/* Type-to-filter so the brief isn't a giant scrolling list. */}
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter regions & leagues…"
+            style={{
+              position: 'sticky', top: 0, zIndex: 1, width: '100%', boxSizing: 'border-box',
+              padding: '7px 10px', background: 'var(--bg0)', border: 'none',
+              borderBottom: '1px solid var(--line)', color: 'var(--text)', fontSize: 12,
+            }}
+          />
+          {priorities.length > 0 && <Group label="Priorities" />}
+          {priorities.map((p) => <Item key={`prio-${p.label}`} label={p.label} target={p.target} />)}
 
-          {view.nations.length > 0 && <Group label="Regions" />}
-          {view.nations.map((n) => (
+          {nations.length > 0 && <Group label="Regions" />}
+          {nations.map((n) => (
             <Item key={`nation-${n.id}`} label={n.label} target={{ kind: 'nation', nation: n.id }} />
           ))}
 
-          {view.competitions.length > 0 && <Group label="Leagues" />}
-          {view.competitions.map((c) => (
+          {competitions.length > 0 && <Group label="Leagues" />}
+          {competitions.map((c) => (
             <Item key={`comp-${c.id}`} label={c.label} target={{ kind: 'competition', competitionId: c.id }} />
           ))}
+
+          {nothing && <div className="muted small" style={{ padding: '8px 12px' }}>No match for “{query}”.</div>}
         </div>
       )}
     </div>

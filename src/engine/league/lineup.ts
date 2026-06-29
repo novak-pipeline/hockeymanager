@@ -459,6 +459,28 @@ export function coachSetLineup(args: {
   }
 
   /* ── 5. Build lines from dressed players (position-aware) ── */
+  // WHO PLAYS WHICH LINE is ability-dominant. Fatigue/condition decide who RESTS
+  // (the dress cut above), not where a dressed player slots: a tired star still
+  // anchors line 1 rather than sliding to the 4th line. Form/morale add only a
+  // small flavour, so an ability gap of more than a couple of points is never
+  // overturned — the GM never finds his franchise centre buried on the wing.
+  const depthScore = (p: Player): number => {
+    const formNudge = Math.max(-2, Math.min(2, (p.form / 5) * 2))
+    const moraleNudge = Math.max(-1.5, Math.min(1.5, ((p.morale - 50) / 50) * 1.5))
+    return ratedOverall(p) + formNudge + moraleNudge
+  }
+  const byDepth = (a: Player, b: Player): number =>
+    depthScore(b) - depthScore(a) || (a.id < b.id ? -1 : 1)
+  // Seat the left shot at the left slot and the right shot at the right when a
+  // pair is split-handed; otherwise keep the better player on his natural side.
+  const seatByHand = (pair: Player[]): [Player | undefined, Player | undefined] => {
+    let [left, right] = [pair[0], pair[1]]
+    if (left && right && left.handedness === 'R' && right.handedness === 'L') {
+      const tmp = left; left = right; right = tmp
+    }
+    return [left, right]
+  }
+
   // Use natural centres first. If short of four, promote the most CENTRE-CAPABLE
   // depth winger (high versatility, lowest score) — never a top scoring winger,
   // who stays on the wing. Surplus natural centres slide out to the wing.
@@ -472,7 +494,7 @@ export function coachSetLineup(args: {
   // playmaking centre slides to the wing where his offence plays up.
   const pivotBonus = (p: Player): number =>
     Math.max(-4, Math.min(4, (p.composites.faceoffWin - 50) * 0.05 + (p.composites.defensiveZone - 50) * 0.04))
-  const centreFitness = (p: Player): number => coachScore(p) + pivotBonus(p)
+  const centreFitness = (p: Player): number => depthScore(p) + pivotBonus(p)
 
   // Pick the four best CENTRES by pivot fitness; surplus centres join the wings.
   const centresByFitness = [...naturalC].sort((a, b) => centreFitness(b) - centreFitness(a) || (a.id < b.id ? -1 : 1))
@@ -483,21 +505,22 @@ export function coachSetLineup(args: {
     const capable = wingPool.filter(canPlayCentre)
     const promote = (capable.length >= need ? capable : wingPool)
       .slice()
-      .sort((a, b) => coachScore(a) - coachScore(b)) // worst-first → a depth (4th-line) centre
+      .sort((a, b) => depthScore(a) - depthScore(b)) // worst-first → a depth (4th-line) centre
       .slice(0, need)
     const promoted = new Set(promote.map((p) => p.id))
     centres.push(...promote)
     wingPool = wingPool.filter((p) => !promoted.has(p.id))
   }
   // Best centre anchors line 1; a promoted depth winger lands on line 4.
-  centres.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
-  wingPool.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
+  centres.sort(byDepth)
+  wingPool.sort(byDepth)
 
+  // Slot the two best available wings onto each line in turn (top wingers play
+  // line 1), then seat them by handedness within the line.
   const fwdLines: PlayerId[][] = []
   for (let i = 0; i < 4; i++) {
     const c = centres[i]
-    const lw = wingPool[i * 2]
-    const rw = wingPool[i * 2 + 1]
+    const [lw, rw] = seatByHand([wingPool[i * 2], wingPool[i * 2 + 1]].filter(Boolean) as Player[])
     fwdLines.push([
       lw?.id ?? asPlayerId(''),
       c?.id ?? asPlayerId(''),
@@ -505,11 +528,11 @@ export function coachSetLineup(args: {
     ])
   }
 
-  // Divide 6 defensemen into 3 pairs of 2
+  // Defence: best pair first (by ability), then seat each pair by handedness.
+  const orderedDefense = [...dressedDefense].sort(byDepth)
   const defPairs: PlayerId[][] = []
   for (let i = 0; i < 3; i++) {
-    const ld = dressedDefense[i * 2]
-    const rd = dressedDefense[i * 2 + 1]
+    const [ld, rd] = seatByHand([orderedDefense[i * 2], orderedDefense[i * 2 + 1]].filter(Boolean) as Player[])
     defPairs.push([
       ld?.id ?? asPlayerId(''),
       rd?.id ?? asPlayerId(''),

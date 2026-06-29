@@ -89,8 +89,11 @@ export function LeagueTicker(): JSX.Element {
       }))
   }
 
-  // Keep the crawl speed roughly constant regardless of how much is in the feed.
-  const durationSec = Math.max(18, items.length * 4.5)
+  // Keep a CONSTANT crawl speed (px/sec) across every mode by scaling the
+  // duration to the total text width, not the item count — so long news
+  // headlines crawl at the same pace as short scores instead of racing past.
+  const totalChars = items.reduce((sum, it) => sum + it.text.length + 4, 0)
+  const durationSec = Math.max(18, totalChars * 0.3)
 
   return (
     <div className="ticker">

@@ -15,6 +15,7 @@ import type {
   TransactionsView,
 } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { TeamCrest } from '../components/Crest'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -164,7 +165,13 @@ function LeaderCard(props: {
   entries: LeagueLeadersView[keyof LeagueLeadersView]
   decimals: number
 }): JSX.Element {
-  const { entries, decimals } = props
+  const { decimals } = props
+  type Entry = { playerId: string; name: string; teamAbbr: string; value: number; faceId?: string }
+  const entries = props.entries as Entry[]
+  const fmt = (v: number): string =>
+    decimals > 0 ? v.toFixed(decimals).replace(/^0\./, '.') : String(v)
+  const leader = entries[0]
+  const rest = entries.slice(1)
   return (
     <div
       style={{
@@ -186,66 +193,44 @@ function LeaderCard(props: {
       >
         {props.title}
       </div>
-      {(entries as Array<{ playerId: string; name: string; teamAbbr: string; value: number }>).map(
-        (entry, idx) => (
-          <div
-            key={entry.playerId}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sp-2)',
-              padding: '3px 0',
-              borderBottom: idx < entries.length - 1 ? '1px solid var(--line)' : 'none',
-            }}
-          >
-            {/* Rank + avatar */}
-            <span
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                background: idx === 0 ? 'var(--violet)' : 'var(--bg3)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 9,
-                fontWeight: 700,
-                color: idx === 0 ? '#fff' : 'var(--muted)',
-                flexShrink: 0,
-              }}
-            >
-              {idx + 1}
-            </span>
+
+      {!leader && <span className="muted small">No data yet.</span>}
+
+      {leader && (
+        <>
+          {/* Category leader — big headshot, FM-style */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: rest.length ? 'var(--sp-3)' : 0 }}>
+            <PlayerFace faceId={leader.faceId} name={leader.name} size={52} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 }}>
-                <PlayerLink
-                  playerId={entry.playerId}
-                  name={entry.name}
-                  className="small"
-                />
-                <span className="muted" style={{ fontSize: 10, flexShrink: 0 }}>
-                  {entry.teamAbbr}
-                </span>
-              </div>
+              <PlayerLink playerId={leader.playerId} name={leader.name} />
+              <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{leader.teamAbbr}</div>
             </div>
-            <span
-              className="mono"
-              style={{
-                fontWeight: idx === 0 ? 700 : 500,
-                color: idx === 0 ? 'var(--violet-h)' : 'var(--text)',
-                fontSize: 13,
-                flexShrink: 0,
-              }}
-            >
-              {decimals > 0
-                ? entry.value.toFixed(decimals).replace(/^0\./, '.')
-                : entry.value}
+            <span className="mono" style={{ fontWeight: 800, fontSize: 22, color: 'var(--violet-h)', flexShrink: 0 }}>
+              {fmt(leader.value)}
             </span>
           </div>
-        )
-      )}
-      {entries.length === 0 && (
-        <span className="muted small">No data yet.</span>
+
+          {/* Chasing pack — compact rows */}
+          {rest.map((entry, i) => (
+            <div
+              key={entry.playerId}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--sp-2)',
+                padding: '3px 0',
+                borderTop: '1px solid var(--line)',
+              }}
+            >
+              <span className="muted mono" style={{ width: 14, fontSize: 10, flexShrink: 0, textAlign: 'right' }}>{i + 2}</span>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                <PlayerLink playerId={entry.playerId} name={entry.name} className="small" />
+                <span className="muted" style={{ fontSize: 10, flexShrink: 0 }}>{entry.teamAbbr}</span>
+              </div>
+              <span className="mono" style={{ fontSize: 12, flexShrink: 0 }}>{fmt(entry.value)}</span>
+            </div>
+          ))}
+        </>
       )}
     </div>
   )

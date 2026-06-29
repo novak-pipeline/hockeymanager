@@ -15,6 +15,7 @@ import type {
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, TeamLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate, fmtMoney } from '../components/format'
 import { TeamCrest } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -447,11 +448,12 @@ export function DashboardScreen(): JSX.Element {
               <div className="list">
                 {d.topScorers.map((p) => (
                   <div key={p.playerId} className="row-between small">
-                    <span className="row">
-                      <span className="muted">{p.position}</span>
+                    <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
+                      <PlayerFace faceId={p.faceId} name={p.name} size={26} />
+                      <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
                       <PlayerLink playerId={p.playerId} name={p.name} />
                     </span>
-                    <span className="mono">
+                    <span className="mono" style={{ flexShrink: 0 }}>
                       {p.goals}G {p.assists}A ·{' '}
                       <strong style={{ color: 'var(--violet-h)' }}>{p.points} pts</strong>
                     </span>
