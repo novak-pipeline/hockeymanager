@@ -188,12 +188,17 @@ function ScoutCard(props: {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: ratingColor }}>{scout.rating}</div>
-          <div className="muted small">Ability{scout.judgment !== undefined ? ` · JA ${scout.judgment}` : ''}</div>
+          <div className="muted small">
+            <span title="Overall scouting ability (0–100)">Ability</span>
+            {scout.judgment !== undefined
+              ? <> · <span title="Judgment of Ability — how accurately this scout reads talent (0–100)">JA {scout.judgment}</span></>
+              : ''}
+          </div>
         </div>
       </div>
 
       <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Region / League</div>
+        <div className="muted small" style={{ marginBottom: 4 }} title="Narrow the brief to a region or league for faster, sharper reads">Region / League</div>
         <ScopeDropdown scout={scout} view={view} onAssign={(target) => apply({ target })} />
       </div>
 
@@ -212,7 +217,7 @@ function ScoutCard(props: {
       </div>
 
       <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Only flag potential ≥</div>
+        <div className="muted small" style={{ marginBottom: 4 }} title="Only surface prospects whose potential meets this star rating">Minimum potential to flag</div>
         <SegControl<number>
           options={[{ key: 0, label: 'Any' }, { key: 3, label: '3★' }, { key: 4, label: '4★' }]}
           value={scout.minPotentialStars >= 4 ? 4 : scout.minPotentialStars >= 3 ? 3 : 0}

@@ -472,7 +472,7 @@ function RinkToken({
           }}>
             <span className="muted" style={{ fontSize: 10 }}>+</span>
           </span>
-          <span className="muted" style={{ fontSize: 11, fontStyle: 'italic' }}>Empty</span>
+          <span className="muted" style={{ fontSize: 11 }}>Click to assign</span>
         </button>
       )}
     </div>
@@ -558,12 +558,18 @@ function TokenRow({
 /* ── Right-side depth chart (live morale / condition / form) ── */
 
 function CondPip({ value }: { value: number }): JSX.Element {
+  const v = Math.round(value)
   const color = value >= 85 ? 'var(--success)' : value >= 65 ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+  const label = value >= 85 ? 'peak' : value >= 65 ? 'good' : 'fatigued'
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      title={`Condition ${v}/100 — ${label}`}
+    >
       <span style={{ width: 36, height: 5, borderRadius: 3, background: 'var(--bg0)', overflow: 'hidden', display: 'inline-block' }}>
         <span style={{ display: 'block', width: `${Math.max(0, Math.min(100, value))}%`, height: '100%', background: color }} />
       </span>
+      <span className="muted" style={{ fontSize: 10, minWidth: 16, textAlign: 'right' }}>{v}</span>
     </span>
   )
 }

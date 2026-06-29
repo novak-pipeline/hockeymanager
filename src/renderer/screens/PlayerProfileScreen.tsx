@@ -1100,6 +1100,9 @@ function TabProfile({
 
         {/* ── CENTER: attributes (3 cols) + meta ── */}
         <Panel title="Attributes">
+          <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
+            Rated 1–20 (20 = elite). Values marked <span style={{ opacity: 0.7 }}>*</span> are scout estimates — hover for the range.
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${d.attributeGroups.length}, 1fr)`, gap: 'var(--sp-4)' }}>
             {d.attributeGroups.map((group) => (
               <div key={group.name}>

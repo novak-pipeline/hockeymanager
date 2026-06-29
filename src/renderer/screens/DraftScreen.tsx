@@ -161,8 +161,8 @@ function BestAvailable(props: {
               <th className="num" title="Season scoring (GP · G–A–PTS)">Season</th>
               <th className="num">OVR</th>
               <th>Potential</th>
-              <th title="Your scouts' own board rank vs the public consensus">Scouts</th>
-              <th className="num">Know.</th>
+              <th title="Your scouts' own board rank vs the public consensus — ▲ they rate higher, ▼ lower">Scouts</th>
+              <th className="num" title="How well your scouts know this prospect (0–100%)">Know.</th>
               {props.userIsOnClock && <th />}
             </tr>
           </thead>

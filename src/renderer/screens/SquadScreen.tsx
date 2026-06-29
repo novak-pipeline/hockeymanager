@@ -101,22 +101,27 @@ function CondBar({ value }: { value: number }): JSX.Element {
 }
 
 function FormArrow({ value }: { value: number }): JSX.Element {
-  if (value > 1) return <span style={{ color: 'var(--success)' }}>▲</span>
-  if (value < -1) return <span style={{ color: 'var(--danger)' }}>▼</span>
-  return <span style={{ color: 'var(--muted)' }}>—</span>
+  if (value > 1) return <span style={{ color: 'var(--success)' }} title="Form trending up — playing above their level lately">▲</span>
+  if (value < -1) return <span style={{ color: 'var(--danger)' }} title="Form trending down — in a slump">▼</span>
+  return <span style={{ color: 'var(--muted)' }} title="Steady form">—</span>
 }
 
 function InjuryBadge({ row }: { row: SquadRowView }): JSX.Element | null {
   if (!row.injury) return null
+  const n = row.injury.gamesRemaining
   return (
-    <span className="chip chip-danger" style={{ fontSize: 10 }}>
-      {row.injury.gamesRemaining}gm
+    <span
+      className="chip chip-danger"
+      style={{ fontSize: 10 }}
+      title={`Injured${row.injury.description ? ` (${row.injury.description})` : ''} — out ~${n} game${n === 1 ? '' : 's'}`}
+    >
+      {n}gm
     </span>
   )
 }
 
 function SortTh({
-  label, sortKey, current, asc, onSort, align = 'left',
+  label, sortKey, current, asc, onSort, align = 'left', title,
 }: {
   label: string
   sortKey: SortKey
@@ -124,6 +129,7 @@ function SortTh({
   asc: boolean
   onSort: (k: SortKey) => void
   align?: 'left' | 'right'
+  title?: string
 }): JSX.Element {
   const active = current === sortKey
   return (
@@ -131,6 +137,7 @@ function SortTh({
       className={align === 'right' ? 'num' : undefined}
       style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
       onClick={() => onSort(sortKey)}
+      title={title}
     >
       {label}
       {active && <span style={{ marginLeft: 3, color: 'var(--accent)' }}>{asc ? '↑' : '↓'}</span>}
@@ -388,45 +395,45 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                       <tr>
                         <SortTh label="Name" sortKey="name" {...sharedSortProps} />
                         <SortTh label="Age" sortKey="age" {...sharedSortProps} align="right" />
-                        <SortTh label="Pos" sortKey="pos" {...sharedSortProps} />
-                        <SortTh label="Role" sortKey="line" {...sharedSortProps} />
+                        <SortTh label="Pos" sortKey="pos" {...sharedSortProps} title="Position" />
+                        <SortTh label="Role" sortKey="line" {...sharedSortProps} title="Depth role / assigned line" />
                         {colView === 'general' && (
                           <>
-                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
-                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
-                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
-                            <th title="Form trend">Form</th>
-                            <th>Inj</th>
+                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Overall ability (0–100)" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition / fitness (0–100)" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale (0–100)" />
+                            <th title="Recent form trend">Form</th>
+                            <th title="Injury status">Inj</th>
                           </>
                         )}
                         {colView === 'contract' && (
                           <>
-                            <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" />
-                            <th className="num">Years</th>
-                            <th className="num">Expires</th>
-                            <th>Clauses</th>
+                            <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" title="Annual cap hit" />
+                            <th className="num" title="Years remaining on the contract">Years</th>
+                            <th className="num" title="Season the contract expires">Expires</th>
+                            <th title="No-trade / no-movement clauses">Clauses</th>
                           </>
                         )}
                         {colView === 'stats' && (
                           <>
-                            <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
+                            <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" title="Games played" />
                             {isGoalieView || hasGoalies ? (
                               <>
-                                <th className="num" title="Wins (G) or Goals (S)">W/G</th>
-                                <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
-                                <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
-                                <th className="num" title="Shutouts / +/-">SO/±</th>
-                                <th className="num">PIM</th>
-                                <th className="num">TOI</th>
+                                <th className="num" title="Wins (goalie) or Goals (skater)">W/G</th>
+                                <th className="num" title="Save % (goalie) or Assists (skater)">SV%/A</th>
+                                <th className="num" title="Goals-against average (goalie) or Points (skater)">GAA/P</th>
+                                <th className="num" title="Shutouts (goalie) or plus/minus (skater)">SO/±</th>
+                                <th className="num" title="Penalty minutes">PIM</th>
+                                <th className="num" title="Time on ice">TOI</th>
                               </>
                             ) : (
                               <>
-                                <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
-                                <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
-                                <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
-                                <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
-                                <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
-                                <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
+                                <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" title="Goals" />
+                                <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" title="Assists" />
+                                <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" title="Points (goals + assists)" />
+                                <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" title="Plus/minus" />
+                                <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" title="Penalty minutes" />
+                                <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" title="Time on ice per game" />
                               </>
                             )}
                           </>
