@@ -36,9 +36,9 @@ describe('consistency — applyConsistency', () => {
     }
   })
 
-  it('clamps output to the 4.0–8.0 band', () => {
-    expect(applyConsistency(8.0, 1, 0.999)).toBeLessThanOrEqual(8.0)
-    expect(applyConsistency(4.0, 1, 0.0)).toBeGreaterThanOrEqual(4.0)
+  it('clamps output to the 5.0–9.5 band', () => {
+    expect(applyConsistency(9.5, 1, 0.999)).toBeLessThanOrEqual(9.5)
+    expect(applyConsistency(5.0, 1, 0.0)).toBeGreaterThanOrEqual(5.0)
   })
 
   it('low consistency swings ratings far more than high consistency', () => {

@@ -353,7 +353,6 @@ import {
   type FinanceView,
   type HistoryView,
   type InboxView,
-  type PlayerInteractionView,
   type ClubLegend,
   type TeamLegendsView,
   type TeamDynamicsView,
@@ -1858,12 +1857,18 @@ export class Career {
     }
     return this.gmStateInternal
   }
+  /** Master switch for the player→GM concern system. Off for now (morale/
+   *  dynamics rework pending); flip to true to bring the prompts back. */
+  private static readonly INTERACTIONS_ENABLED: boolean = false
   /** Keep at most this many open concerns at once, and this many total stored. */
   private static readonly MAX_OPEN_INTERACTIONS = 3
   private static readonly INTERACTION_HISTORY_LIMIT = 40
 
-  /** Scan the user roster after a match day and maybe raise new concerns. */
+  /** Scan the user roster after a match day and maybe raise new concerns.
+   *  Temporarily disabled while the morale/dynamics layer is reworked — the GM
+   *  shouldn't be pestered by player complaints until that system returns. */
   private maybeRaiseInteractions(day: number): void {
+    if (Career.INTERACTIONS_ENABLED === false) return
     const open = this.interactions.filter((i) => i.status === 'open')
     if (open.length >= Career.MAX_OPEN_INTERACTIONS) return
 
@@ -8612,27 +8617,9 @@ export class Career {
     // Coach-quote items carry speakerFaceId directly on the item — no extra lookup needed.
     // The InboxScreen reads item.speaker and item.speakerFaceId to render the quote card.
 
-    // Open player→GM concerns, newest first.
-    const interactions: PlayerInteractionView[] = []
-    for (const i of this.interactions) {
-      if (i.status !== 'open') continue
-      const p = this.data.players.get(asPlayerId(i.playerId))
-      const view: PlayerInteractionView = {
-        id: i.id,
-        playerId: i.playerId,
-        playerName: p?.name ?? 'Player',
-        kind: i.kind,
-        severity: i.severity,
-        message: i.message,
-        day: i.day,
-        year: i.year,
-        options: i.options.map((o) => ({ id: o.id, label: o.label })),
-      }
-      if (p?.faceId !== undefined) view.faceId = p.faceId
-      interactions.push(view)
-    }
-
-    return { items, unread, playerInfo, teamInfo, ...(interactions.length > 0 ? { interactions } : {}) }
+    // Player→GM concerns are suppressed for now (the morale/dynamics layer is
+    // being reworked) — the inbox no longer surfaces these prompt cards.
+    return { items, unread, playerInfo, teamInfo }
   }
 
   getLastBoxScore(): BoxScoreView | null {

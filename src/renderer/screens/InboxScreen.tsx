@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { NewsCategory } from '@domain'
-import type { InboxView, NewsItem, PlayerInteractionView } from '../../worker/protocol'
+import type { InboxView, NewsItem } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
@@ -199,30 +199,15 @@ export function InboxScreen(): JSX.Element {
     ? items.filter((it) => it.category === categoryFilter)
     : items
 
-  // Sort: unread first, then newest day first, then id desc
-  const sorted = [...visible].sort((a, b) => {
+  // Unread first, then newest first. Read messages fall to the bottom (greyed
+  // out) — the same order drives Space-to-advance through the feed.
+  const ordered = [...visible].sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1
     if (b.day !== a.day) return b.day - a.day
     return b.id.localeCompare(a.id)
   })
-
-  // FM-style date grouping: newest day first; within a day, unread first then id desc.
-  const dayGroups: Array<{ day: number; year: number; items: NewsItem[] }> = []
-  {
-    const byDay = new Map<number, NewsItem[]>()
-    for (const it of visible) {
-      const arr = byDay.get(it.day)
-      if (arr) arr.push(it)
-      else byDay.set(it.day, [it])
-    }
-    for (const day of [...byDay.keys()].sort((a, b) => b - a)) {
-      const its = byDay.get(day)!.sort((a, b) => {
-        if (a.read !== b.read) return a.read ? 1 : -1
-        return b.id.localeCompare(a.id)
-      })
-      dayGroups.push({ day, year: its[0]!.year, items: its })
-    }
-  }
+  const unreadItems = ordered.filter((i) => !i.read)
+  const readItems = ordered.filter((i) => i.read)
 
   async function handleSelect(item: NewsItem) {
     setSelected(item)
@@ -239,16 +224,110 @@ export function InboxScreen(): JSX.Element {
     refetch()
   }
 
-  async function handleRespond(interactionId: string, optionId: string) {
-    const res = await client.respondToInteraction(interactionId, optionId)
-    if (res.type === 'error') {
-      toast(res.message, 'error')
-    } else {
-      refetch()
-    }
+  // Space (or the "Next unread" button) jumps to the next unread message —
+  // opening one marks it read and drops it from the pool, so the next-unread
+  // walks the feed. Once none are left it steps through the rest in order.
+  function selectNext(): void {
+    const nextUnread = unreadItems.find((i) => i.id !== selected?.id)
+    if (nextUnread) { void handleSelect(nextUnread); return }
+    if (ordered.length === 0) return
+    const idx = selected ? ordered.findIndex((i) => i.id === selected.id) : -1
+    void handleSelect(ordered[(idx + 1) % ordered.length]!)
   }
 
-  const interactions = data.interactions ?? []
+  // Spacebar advances to the next message (ignored while typing in a field).
+  const selectNextRef = useRef(selectNext)
+  selectNextRef.current = selectNext
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      selectNextRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  /** One message row. Read rows are greyed; the selected row is highlighted. */
+  function renderRow(item: NewsItem): JSX.Element {
+    const meta = CATEGORY_META[item.category]
+    const isSelected = selected?.id === item.id
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => handleSelect(item)}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '44px 1fr',
+          gap: 'var(--sp-2)',
+          alignItems: 'center',
+          padding: '10px var(--sp-3)',
+          borderBottom: '1px solid var(--line)',
+          background: isSelected
+            ? 'rgba(var(--accent-rgb),0.13)'
+            : item.read
+            ? 'transparent'
+            : 'rgba(var(--accent-rgb),0.04)',
+          borderLeft: `3px solid ${isSelected ? 'var(--accent)' : item.read ? 'transparent' : meta.color}`,
+          color: 'var(--text)',
+          textAlign: 'left',
+          cursor: 'pointer',
+          font: 'inherit',
+          width: '100%',
+          borderTop: 'none',
+          borderRight: 'none',
+          opacity: item.read && !isSelected ? 0.55 : 1,
+          transition: 'background 0.1s ease',
+        }}
+      >
+        <RowThumbnail item={item} playerInfo={data.playerInfo} teamInfo={data.teamInfo} size={38} />
+        <span style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: item.read ? 400 : 650,
+              lineHeight: 1.35,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: item.read ? 'var(--muted)' : 'var(--text)',
+            }}
+          >
+            {item.headline}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              marginTop: 3,
+              fontSize: 10,
+              color: 'var(--muted)',
+              overflow: 'hidden',
+            }}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: meta.color, flexShrink: 0, display: 'inline-block' }} />
+            <span
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                fontWeight: item.read ? 500 : 700,
+                color: item.read ? 'var(--muted)' : 'var(--text)',
+              }}
+            >
+              {senderOf(item)}
+            </span>
+            <span style={{ opacity: 0.5 }}>·</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemDate(item)}</span>
+          </div>
+        </span>
+      </button>
+    )
+  }
 
   return (
     <section className="stack" style={{ gap: 'var(--sp-3)' }}>
@@ -261,6 +340,14 @@ export function InboxScreen(): JSX.Element {
             </span>
           )}
           <button
+            className="btn btn-sm"
+            onClick={selectNext}
+            disabled={ordered.length === 0}
+            title="Open the next unread message (Space)"
+          >
+            Next unread ▶
+          </button>
+          <button
             className="btn btn-ghost btn-sm"
             onClick={handleMarkAllRead}
             disabled={unread === 0}
@@ -269,15 +356,6 @@ export function InboxScreen(): JSX.Element {
           </button>
         </div>
       </ScreenHeader>
-
-      {/* ── Player → GM concerns awaiting a response ── */}
-      {interactions.length > 0 && (
-        <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-          {interactions.map((ix) => (
-            <InteractionCard key={ix.id} interaction={ix} onRespond={handleRespond} />
-          ))}
-        </div>
-      )}
 
       {/* ── Category filter chips ── */}
       <div
@@ -307,170 +385,46 @@ export function InboxScreen(): JSX.Element {
         })}
       </div>
 
-      {/* ── Two-column layout ── */}
+      {/* ── Two-column layout (fills the viewport so the reading pane is large) ── */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '320px 1fr',
+          gridTemplateColumns: '340px 1fr',
           gap: 'var(--sp-3)',
-          alignItems: 'start',
-          minHeight: 0,
+          alignItems: 'stretch',
+          height: 'calc(100vh - 210px)',
+          minHeight: 360,
         }}
       >
-        {/* Left: message list */}
+        {/* Left: message list — unread on top, read greyed at the bottom */}
         <div
           className="panel"
-          style={{
-            padding: 0,
-            overflow: 'hidden',
-            maxHeight: 'calc(100vh - 260px)',
-            overflowY: 'auto',
-          }}
+          style={{ padding: 0, overflow: 'hidden', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}
         >
-          {sorted.length === 0 ? (
-            <div
-              className="muted small"
-              style={{ padding: 'var(--sp-4)', textAlign: 'center' }}
-            >
+          {ordered.length === 0 ? (
+            <div className="muted small" style={{ padding: 'var(--sp-4)', textAlign: 'center' }}>
               No messages{categoryFilter ? ' in this category' : ''}.
             </div>
           ) : (
             <div style={{ display: 'grid' }}>
-              {dayGroups.map((group) => (
-                <div key={group.day} style={{ display: 'grid' }}>
-                  <div
-                    style={{
-                      position: 'sticky',
-                      top: 0,
-                      zIndex: 1,
-                      padding: '5px var(--sp-3)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: 0.4,
-                      textTransform: 'uppercase',
-                      color: 'var(--muted)',
-                      background: 'var(--panel, #1a1a24)',
-                      borderBottom: '1px solid var(--line)',
-                    }}
-                  >
-                    {fmtDate(dayToDateISO(group.year, group.day))} · {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
-                  </div>
-                  {group.items.map((item, idx) => {
-                    const meta = CATEGORY_META[item.category]
-                    const isSelected = selected?.id === item.id
-                    const isLast = idx === group.items.length - 1
-
-                    return (
-                      <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelect(item)}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '44px 1fr',
-                      gap: 'var(--sp-2)',
-                      alignItems: 'center',
-                      padding: '10px var(--sp-3)',
-                      borderBottom: isLast ? 'none' : '1px solid var(--line)',
-                      background: isSelected
-                        ? 'rgba(var(--accent-rgb),0.13)'
-                        : item.read
-                        ? 'transparent'
-                        : 'rgba(var(--accent-rgb),0.04)',
-                      borderLeft: `3px solid ${
-                        isSelected
-                          ? 'var(--accent)'
-                          : item.read
-                          ? 'transparent'
-                          : meta.color
-                      }`,
-                      color: 'var(--text)',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      font: 'inherit',
-                      width: '100%',
-                      borderTop: 'none',
-                      borderRight: 'none',
-                      transition: 'background 0.1s ease',
-                    }}
-                  >
-                    <RowThumbnail
-                      item={item}
-                      playerInfo={data.playerInfo}
-                      teamInfo={data.teamInfo}
-                      size={38}
-                    />
-                    <span style={{ minWidth: 0 }}>
-                      {/* Headline */}
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: item.read ? 400 : 650,
-                          lineHeight: 1.35,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: item.read ? 'var(--muted)' : 'var(--text)',
-                        }}
-                      >
-                        {item.headline}
-                      </div>
-                      {/* Meta row */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          marginTop: 3,
-                          fontSize: 10,
-                          color: 'var(--muted)',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: 5,
-                            height: 5,
-                            borderRadius: '50%',
-                            background: meta.color,
-                            flexShrink: 0,
-                            display: 'inline-block',
-                          }}
-                        />
-                        <span
-                          style={{
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            fontWeight: item.read ? 500 : 700,
-                            color: item.read ? 'var(--muted)' : 'var(--text)',
-                          }}
-                        >
-                          {senderOf(item)}
-                        </span>
-                        <span style={{ opacity: 0.5 }}>·</span>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {itemDate(item)}
-                        </span>
-                      </div>
-                    </span>
-                  </button>
-                    )
-                  })}
-                </div>
-              ))}
+              {unreadItems.length > 0 && <SectionHeader label={`Unread · ${unreadItems.length}`} />}
+              {unreadItems.map((item) => renderRow(item))}
+              {readItems.length > 0 && <SectionHeader label="Earlier" muted />}
+              {readItems.map((item) => renderRow(item))}
             </div>
           )}
         </div>
 
-        {/* Right: reading pane */}
+        {/* Right: reading pane (fills height) */}
         {selected ? (
-          <ReadingPane
-            item={selected}
-            playerInfo={data.playerInfo}
-            teamInfo={data.teamInfo}
-            navigate={nav.navigate}
-          />
+          <div style={{ overflowY: 'auto', minHeight: 0 }}>
+            <ReadingPane
+              item={selected}
+              playerInfo={data.playerInfo}
+              teamInfo={data.teamInfo}
+              navigate={nav.navigate}
+            />
+          </div>
         ) : (
           <div
             className="panel"
@@ -478,13 +432,12 @@ export function InboxScreen(): JSX.Element {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: 200,
               color: 'var(--muted)',
               fontSize: 13,
               fontStyle: 'italic',
             }}
           >
-            Select a message to read it.
+            Select a message to read it · press Space for the next unread.
           </div>
         )}
       </div>
@@ -492,111 +445,26 @@ export function InboxScreen(): JSX.Element {
   )
 }
 
-const KIND_LABEL: Record<string, string> = {
-  iceTime:      'Wants a bigger role',
-  future:       'Contract / future',
-  unhappy:      'Unsettled',
-  feud:         'Dressing-room friction',
-  tradeRequest: 'Trade request',
-}
-
-/**
- * Player → GM concern card with response options. Compact accent strip on left,
- * small face thumbnail, label + message + buttons on one card row.
- */
-function InteractionCard(props: {
-  interaction: PlayerInteractionView
-  onRespond: (interactionId: string, optionId: string) => void | Promise<void>
-}): JSX.Element {
-  const { interaction: ix, onRespond } = props
-  const [busy, setBusy] = useState(false)
-  const accent = ix.severity === 'serious' ? 'var(--danger, #ef4444)' : 'var(--amber, #f59e0b)'
-
-  async function pick(optionId: string) {
-    if (busy) return
-    setBusy(true)
-    await onRespond(ix.id, optionId)
-    setBusy(false)
-  }
-
+/** A small sticky divider between the Unread and Earlier (read) sections. */
+function SectionHeader({ label, muted }: { label: string; muted?: boolean }): JSX.Element {
   return (
     <div
       style={{
-        display: 'flex',
-        background: 'var(--bg1)',
-        border: `1px solid ${accent}44`,
-        borderLeft: `3px solid ${accent}`,
-        borderRadius: 'var(--radius)',
-        overflow: 'hidden',
-        gap: 'var(--sp-3)',
-        padding: 'var(--sp-3) var(--sp-3)',
-        alignItems: 'flex-start',
+        position: 'sticky',
+        top: 0,
+        zIndex: 1,
+        padding: '5px var(--sp-3)',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        color: muted ? 'var(--muted)' : 'var(--accent)',
+        background: 'var(--panel, #1a1a24)',
+        borderBottom: '1px solid var(--line)',
+        opacity: muted ? 0.8 : 1,
       }}
     >
-      {/* Player face */}
-      <div style={{ flexShrink: 0, paddingTop: 2 }}>
-        <PlayerFace faceId={ix.faceId} name={ix.playerName} size={40} />
-      </div>
-
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {/* Top row: label + player link */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sp-2)',
-            marginBottom: 4,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: 1,
-              color: accent,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {KIND_LABEL[ix.kind] ?? 'Player concern'}
-          </span>
-          <span style={{ color: 'var(--line)', fontSize: 10 }}>·</span>
-          <PlayerLink playerId={ix.playerId} name={ix.playerName} className="small" />
-        </div>
-
-        {/* Message */}
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: 'var(--text)',
-            maxWidth: '72ch',
-          }}
-        >
-          {ix.message}
-        </p>
-
-        {/* Response buttons */}
-        <div
-          className="row"
-          style={{ flexWrap: 'wrap', gap: 'var(--sp-1)', marginTop: 'var(--sp-2)' }}
-        >
-          {ix.options.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              className="btn btn-sm"
-              disabled={busy}
-              onClick={() => void pick(o.id)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {label}
     </div>
   )
 }

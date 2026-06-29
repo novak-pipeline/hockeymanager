@@ -1747,6 +1747,36 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     competitions = buildCompetitions({ comps: rawComps, membership, season: startYear })
   }
 
+  // Link drafted-but-unsigned prospects to the NHL club that holds their rights,
+  // so imported rosters show "in the system" players from game start — not only
+  // after the first in-game draft. `draftClub` is a club name/abbr string from
+  // the import. We only tag players who AREN'T on an NHL or AHL roster (so an
+  // established or traded player is never mis-linked to his original draft club).
+  {
+    const nhlByKey = new Map<string, TeamId>()
+    const proRostered = new Set<string>()
+    for (const [tid, t] of teams) {
+      // NHL teams are the top-tier clubs (tier is left unset for them; only AHL
+      // and world/junior teams carry an explicit tier).
+      const isNhl = t.tier === undefined || t.tier === 'nhl'
+      if (isNhl) {
+        nhlByKey.set(t.name.toLowerCase(), tid)
+        nhlByKey.set(t.abbreviation.toLowerCase(), tid)
+      }
+      if (isNhl || t.tier === 'ahl') {
+        for (const pid of t.roster) proRostered.add(pid as string)
+      }
+    }
+    for (const p of players.values()) {
+      if (p.rightsTeamId !== undefined) continue
+      if (proRostered.has(p.id as string)) continue
+      const club = p.draftClub
+      if (!club) continue
+      const tid = nhlByKey.get(club.toLowerCase())
+      if (tid) p.rightsTeamId = tid
+    }
+  }
+
   const league: League = {
     id: asLeagueId('lg0'),
     name: mod.meta.name,

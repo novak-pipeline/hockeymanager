@@ -129,8 +129,11 @@ export function gameRating(args: SkaterGameRatingArgs): number {
   // TOI factor: rewards players who earn their ice time; penalises no-shows
   const toiFactor = Math.max(0.4, Math.min(1.4, toi / 1200))
 
-  const raw = 5.6 + (production + defense - negatives + pmBonus) * toiFactor
-  return Math.max(4.0, Math.min(8.0, Math.round(raw * 10) / 10))
+  // Scale calibrated so a LEAGUE-AVERAGE regular reads ~7.0 over a season, an
+  // elite NHLer (Makar/McDavid-class) ~8.5–9, and a quiet/depth game ~6.
+  // Anchor 6.5 + a widened performance delta; clamp 5.0–9.5.
+  const raw = 6.5 + (production + defense - negatives + pmBonus) * toiFactor * 1.5
+  return Math.max(5.0, Math.min(9.5, Math.round(raw * 10) / 10))
 }
 
 /* ────────────────────────── goalie game rating ────────────────────────── */
@@ -151,15 +154,17 @@ export interface GoalieGameRatingArgs {
  */
 export function goalieGameRating(args: GoalieGameRatingArgs): number {
   const { saves, shotsAgainst, goalsAgainst, toi } = args
-  if (shotsAgainst === 0 || toi < 600) return 5.0 // insufficient sample
+  if (shotsAgainst === 0 || toi < 600) return 7.0 // insufficient sample → neutral
 
   const savePct = saves / shotsAgainst
-  const svComponent = (savePct - 0.9) * 40
-  const gaPenalty = Math.max(0, goalsAgainst - 2) * 0.2
-  const workload = shotsAgainst >= 30 ? 0.3 : 0
+  // Anchored so a .910 night reads ~7.0 (league average), .925+ pushes 8+, a
+  // .890 night drops toward 6. Matches the skater scale (avg 7, elite ~9).
+  const svComponent = (savePct - 0.91) * 55
+  const gaPenalty = Math.max(0, goalsAgainst - 2) * 0.25
+  const workload = shotsAgainst >= 30 ? 0.35 : 0
 
-  const raw = 5.6 + svComponent - gaPenalty + workload
-  return Math.max(4.0, Math.min(8.0, Math.round(raw * 10) / 10))
+  const raw = 7.0 + svComponent - gaPenalty + workload
+  return Math.max(5.0, Math.min(9.5, Math.round(raw * 10) / 10))
 }
 
 /* ────────────────────────── rolling ratings helpers ────────────────────────── */
@@ -173,10 +178,10 @@ export function goalieGameRating(args: GoalieGameRatingArgs): number {
  */
 export function formString(lastRatings: number[]): string {
   const bucket = (r: number): string => {
-    if (r >= 7.0) return 'A'
-    if (r >= 6.0) return 'B'
-    if (r >= 5.5) return 'C'
-    if (r >= 4.5) return 'D'
+    if (r >= 8.0) return 'A'
+    if (r >= 7.0) return 'B'
+    if (r >= 6.25) return 'C'
+    if (r >= 5.5) return 'D'
     return 'F'
   }
   return lastRatings

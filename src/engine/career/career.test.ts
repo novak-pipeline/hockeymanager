@@ -935,8 +935,8 @@ describe('Career — per-game ratings', () => {
     // gameRatingForm should be a string of A/B/C/D/F characters
     for (const row of withRatings) {
       expect(row.gameRatingForm).toMatch(/^[ABCDF]*$/)
-      expect(row.avgRating).toBeGreaterThanOrEqual(4.0)
-      expect(row.avgRating).toBeLessThanOrEqual(8.0)
+      expect(row.avgRating).toBeGreaterThanOrEqual(5.0)
+      expect(row.avgRating).toBeLessThanOrEqual(9.5)
     }
   })
 

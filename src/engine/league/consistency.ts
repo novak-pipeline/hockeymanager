@@ -43,7 +43,7 @@ const SWING_MAX = 1.2 // rating points of game-to-game swing at consistency = 1
 const BIAS_MAX = 0.6 // reliable bump / erratic drag at the extremes
 
 /**
- * Adjust a raw 4.0–8.0 game rating for the player's hidden consistency, given a
+ * Adjust a raw 5.0–9.5 game rating for the player's hidden consistency, given a
  * deterministic uniform draw `noise01` in [0,1) supplied by the caller (keeps
  * this pure). Absent consistency → returned unchanged (exact no-op), so players
  * without the trait behave exactly as before.
@@ -55,7 +55,7 @@ export function applyConsistency(rating: number, consistency: number | undefined
   const swing = (1 - c) * SWING_MAX // erratic players swing more
   const n = noise01 * 2 - 1 // [-1, 1)
   const adj = rating + bias + n * swing
-  return Math.max(4.0, Math.min(8.0, Math.round(adj * 10) / 10))
+  return Math.max(5.0, Math.min(9.5, Math.round(adj * 10) / 10))
 }
 
 /** A scout's qualitative read of a consistency value (it's never shown raw). */
