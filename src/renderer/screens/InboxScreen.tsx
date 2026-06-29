@@ -4,25 +4,34 @@ import type { InboxView, NewsItem, PlayerInteractionView } from '../../worker/pr
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
+import { dayToDateISO } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 
-/** Category metadata: icon character and accent color class. */
+/** Category metadata: icon, accent color, label, and FM-style "from" sender. */
 const CATEGORY_META: Record<
   NewsCategory,
-  { icon: string; colorClass: string; label: string; color: string }
+  { icon: string; colorClass: string; label: string; color: string; sender: string }
 > = {
-  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)' },
-  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)' },
-  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)' },
-  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)' },
-  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)' },
-  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)' },
-  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)' },
-  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
-  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
-  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)' },
+  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)', sender: 'Match Report' },
+  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)',    sender: 'Medical Staff' },
+  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)',  sender: 'Front Office' },
+  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)',  sender: 'Front Office' },
+  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)',   sender: 'Scouting Dept' },
+  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)',  sender: 'League Office' },
+  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)',  sender: 'League Office' },
+  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)',  sender: 'Club News' },
+  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)', sender: 'League Office' },
+  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)',   sender: 'Scouting Dept' },
+}
+
+/** FM-style "from" line: a press byline source or coach speaker wins over the
+ *  generic department sender for the category. */
+function senderOf(item: NewsItem): string {
+  if (item.speaker) return item.speaker
+  if (item.press?.byline) return item.press.byline.split('—')[0]!.trim()
+  return CATEGORY_META[item.category].sender
 }
 
 const ALL_CATEGORIES: NewsCategory[] = [
@@ -151,7 +160,7 @@ function HeroImage(props: {
 
 /** Format item date: "Day 12 · Oct 2026" style. */
 function itemDate(item: NewsItem): string {
-  return `Day ${item.day} · ${fmtDate(`${item.year}-10-01`)}`
+  return fmtDate(dayToDateISO(item.year, item.day))
 }
 
 export function InboxScreen(): JSX.Element {
@@ -344,7 +353,7 @@ export function InboxScreen(): JSX.Element {
                       borderBottom: '1px solid var(--line)',
                     }}
                   >
-                    Day {group.day} · {fmtDate(`${group.year}-10-01`)}
+                    {fmtDate(dayToDateISO(group.year, group.day))} · {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
                   </div>
                   {group.items.map((item, idx) => {
                     const meta = CATEGORY_META[item.category]
@@ -428,26 +437,21 @@ export function InboxScreen(): JSX.Element {
                             display: 'inline-block',
                           }}
                         />
-                        <span style={{ whiteSpace: 'nowrap' }}>{meta.label}</span>
+                        <span
+                          style={{
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            fontWeight: item.read ? 500 : 700,
+                            color: item.read ? 'var(--muted)' : 'var(--text)',
+                          }}
+                        >
+                          {senderOf(item)}
+                        </span>
                         <span style={{ opacity: 0.5 }}>·</span>
                         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {itemDate(item)}
                         </span>
-                        {item.press && (
-                          <>
-                            <span style={{ opacity: 0.5 }}>·</span>
-                            <span
-                              style={{
-                                fontStyle: 'italic',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {item.press.byline.split('—')[0]?.trim()}
-                            </span>
-                          </>
-                        )}
                       </div>
                     </span>
                   </button>
@@ -673,6 +677,8 @@ function ReadingPane(props: {
                 className="muted small"
                 style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
               >
+                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{senderOf(item)}</span>
+                <span style={{ opacity: 0.5 }}>·</span>
                 <span>{itemDate(item)}</span>
                 {item.playerId && playerInfo?.[item.playerId] && (
                   <PlayerLink
