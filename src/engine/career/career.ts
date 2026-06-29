@@ -564,7 +564,11 @@ function freshStanding(teamId: TeamId): Standing {
   }
 }
 
-const NEWS_LIMIT = 200
+// Keep a full season's worth of history so scheduled digests (monthly reports,
+// power rankings, season review) and ambient news aren't evicted before the
+// year is out. The inbox UI sorts unread-first and greys read items, so a
+// deeper backlog stays readable.
+const NEWS_LIMIT = 600
 const ROUND_ROBINS = 4
 const DRAFT_ROUNDS = 7
 /** Floor for the prospect board; the actual class scales to cover all 7 rounds
