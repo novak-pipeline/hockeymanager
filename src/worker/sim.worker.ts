@@ -126,6 +126,17 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'setTactics':
       must().setTactics(req.tactics)
       return { id: req.id, type: 'ok' }
+    case 'saveLineSetup': {
+      const r = must().saveLineSetup(req.name)
+      return r.ok ? { id: req.id, type: 'tactics', tactics: must().getTactics() } : { id: req.id, type: 'error', message: 'Could not save the setup.' }
+    }
+    case 'applyLineSetup': {
+      const r = must().applyLineSetup(req.name)
+      return r.ok ? { id: req.id, type: 'tactics', tactics: must().getTactics() } : { id: req.id, type: 'error', message: 'That setup is no longer available.' }
+    }
+    case 'deleteLineSetup':
+      must().deleteLineSetup(req.name)
+      return { id: req.id, type: 'tactics', tactics: must().getTactics() }
     case 'markNewsRead':
       must().markNewsRead(req.ids)
       return { id: req.id, type: 'ok' }

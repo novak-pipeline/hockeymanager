@@ -205,6 +205,18 @@ export class SimClient {
     return this.send({ type: 'setTactics', tactics })
   }
 
+  saveLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'saveLineSetup', name })
+  }
+
+  applyLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'applyLineSetup', name })
+  }
+
+  deleteLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'deleteLineSetup', name })
+  }
+
   markNewsRead(ids: string[]): Promise<WorkerResponse> {
     return this.send({ type: 'markNewsRead', ids })
   }

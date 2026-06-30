@@ -835,6 +835,22 @@ export function TacticsScreen(): JSX.Element {
     }
   }, [client, refetch])
 
+  async function handleSaveSetup(): Promise<void> {
+    const name = window.prompt('Save this line board as:')?.trim()
+    if (!name) return
+    const res = await client.saveLineSetup(name)
+    if (res.type === 'error') { toast(res.message, 'error'); return }
+    toast(`Saved line setup “${name}”.`, 'success')
+    refetch()
+  }
+  async function handleApplySetup(name: string): Promise<void> {
+    if (!name) return
+    const res = await client.applyLineSetup(name)
+    if (res.type === 'error') { toast(res.message, 'error'); return }
+    toast(`Loaded “${name}”.`, 'success')
+    refetch()
+  }
+
   function setLines(updater: (l: LinesView) => LinesView): void {
     const base = lines ?? data?.lines
     if (!base) return
@@ -1072,15 +1088,38 @@ export function TacticsScreen(): JSX.Element {
                     ))}
                   </span>
                 </div>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ fontSize: 12, gap: 4, whiteSpace: 'nowrap', minWidth: 0 }}
-                  onClick={() => { void handleCoachSetLines() }}
-                  disabled={coachBuilding}
-                  title="Let the head coach build the full lineup and scratch list"
-                >
-                  {coachBuilding ? 'Asking coach…' : 'Ask the coach to set lines'}
-                </button>
+                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  {/* Saved line setups: load from the dropdown, or save the current board. */}
+                  <select
+                    className="input"
+                    style={{ fontSize: 12, padding: '4px 8px', maxWidth: 170 }}
+                    value=""
+                    onChange={(e) => { if (e.target.value) void handleApplySetup(e.target.value) }}
+                    title="Load a saved line setup"
+                  >
+                    <option value="">
+                      {data.lineSetups && data.lineSetups.length > 0 ? 'Load setup…' : 'No saved setups'}
+                    </option>
+                    {(data.lineSetups ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                    onClick={() => { void handleSaveSetup() }}
+                    title="Save the current line board as a named setup"
+                  >
+                    Save setup
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: 12, gap: 4, whiteSpace: 'nowrap', minWidth: 0 }}
+                    onClick={() => { void handleCoachSetLines() }}
+                    disabled={coachBuilding}
+                    title="Let the head coach build the full lineup and scratch list"
+                  >
+                    {coachBuilding ? 'Asking coach…' : 'Ask the coach to set lines'}
+                  </button>
+                </div>
               </div>
 
               {/* Even-strength rink */}

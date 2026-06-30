@@ -2994,7 +2994,64 @@ export class Career {
   private prepareTeamsForDay(): void {
     this.emergencyRecalls()
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+    // AI teams re-optimise their lines weekly; the user's are GM-owned and only
+    // hole-filled — so a player who filled in for an injury would otherwise keep
+    // the slot after the star returns. Promote clearly-better healthy bench
+    // players back into the user lineup so the best available always dress.
+    this.autoUpgradeUserLines()
     this.refreshCoachFit()
+  }
+
+  /** Ensure the user's NHL lineup dresses the best available healthy skaters:
+   *  swap a dressed player for a benched one who is clearly better (by a margin,
+   *  so it self-heals injury fill-ins without churning near-equal choices).
+   *  Position groups are respected; lines are repaired for legality after. */
+  private autoUpgradeUserLines(): void {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return
+    const THRESH = 3 // ratedOverall points — a meaningful gap, not a coin-flip
+    const ovrOf = (id: PlayerId): number => {
+      const p = this.data.players.get(id)
+      return p ? ratedOverall(p) : -1
+    }
+    const isFwd = (p: Player): boolean => p.position === 'C' || p.position === 'W'
+    const isDef = (p: Player): boolean => p.position === 'D' || p.position === 'LD' || p.position === 'RD'
+
+    const dressed = new Set<string>()
+    for (const line of team.lines.forwards) for (const id of line) if (id) dressed.add(id as string)
+    for (const pair of team.lines.defensePairs) for (const id of pair) if (id) dressed.add(id as string)
+
+    const upgrade = (slots: PlayerId[][], pred: (p: Player) => boolean): void => {
+      // Healthy, on-roster, group-matching players currently NOT dressed.
+      const bench = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.injuryStatus === null && pred(p) && !dressed.has(p.id as string))
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+      if (bench.length === 0) return
+      // Dressed slots of this group, weakest occupant first.
+      const cells: Array<[number, number]> = []
+      slots.forEach((row, r) => row.forEach((id, c) => {
+        const p = id ? this.data.players.get(id) : undefined
+        if (p && p.injuryStatus === null && pred(p)) cells.push([r, c])
+      }))
+      cells.sort((a, b) => ovrOf(slots[a[0]]![a[1]]!) - ovrOf(slots[b[0]]![b[1]]!))
+      let bi = 0
+      for (const [r, c] of cells) {
+        if (bi >= bench.length) break
+        const curId = slots[r]![c]!
+        const best = bench[bi]!
+        if (ratedOverall(best) > ovrOf(curId) + THRESH) {
+          slots[r]![c] = best.id
+          dressed.add(best.id as string)
+          dressed.delete(curId as string)
+          bi++
+        } else break // weakest-first: once the gap is too small, no more upgrades
+      }
+    }
+
+    upgrade(team.lines.forwards, isFwd)
+    upgrade(team.lines.defensePairs, isDef)
+    repairLines(team, this.data.players)
   }
 
   /**
@@ -4707,6 +4764,44 @@ export class Career {
 
   setTactics(tactics: TeamTactics): void {
     this.userTeam.tactics = structuredClone(tactics)
+  }
+
+  /* ── saved line setups (named depth-chart presets) ───────────────────────── */
+  /** Named snapshots of the user's line board, so the GM can keep e.g. an
+   *  "Even strength" and a "Shut-down" setup and swap between them. */
+  private lineSetups: Array<{ name: string; lines: Lines }> = []
+
+  /** Save the current line board under a name (overwrites a same-named preset). */
+  saveLineSetup(name: string): { ok: boolean } {
+    const trimmed = name.trim().slice(0, 40)
+    if (!trimmed) return { ok: false }
+    const lines = structuredClone(this.userTeam.lines)
+    const existing = this.lineSetups.findIndex((s) => s.name.toLowerCase() === trimmed.toLowerCase())
+    if (existing >= 0) this.lineSetups[existing] = { name: trimmed, lines }
+    else this.lineSetups.push({ name: trimmed, lines })
+    return { ok: true }
+  }
+
+  /** Apply a saved preset to the user's line board (repaired for legality, so a
+   *  since-traded or injured player is swapped out rather than breaking it). */
+  applyLineSetup(name: string): { ok: boolean } {
+    const setup = this.lineSetups.find((s) => s.name.toLowerCase() === name.trim().toLowerCase())
+    if (!setup) return { ok: false }
+    this.userTeam.lines = structuredClone(setup.lines)
+    repairLines(this.userTeam, this.data.players)
+    return { ok: true }
+  }
+
+  deleteLineSetup(name: string): { ok: boolean } {
+    const i = this.lineSetups.findIndex((s) => s.name.toLowerCase() === name.trim().toLowerCase())
+    if (i < 0) return { ok: false }
+    this.lineSetups.splice(i, 1)
+    return { ok: true }
+  }
+
+  /** Names of the saved line presets, in save order. */
+  getLineSetupNames(): string[] {
+    return this.lineSetups.map((s) => s.name)
   }
 
   /**
@@ -7844,7 +7939,7 @@ export class Career {
   }
 
   getTactics(): TacticsView {
-    return buildTacticsView(this.ctx())
+    return { ...buildTacticsView(this.ctx()), lineSetups: this.getLineSetupNames() }
   }
 
   /**
@@ -9725,6 +9820,7 @@ export class Career {
       seasonRatingTotals: [...this.seasonRatingTotals.entries()].map(([k, v]) => [k, { ...v }] as [string, { sum: number; n: number }]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
+      ...(this.lineSetups.length > 0 ? { lineSetups: structuredClone(this.lineSetups) } : {}),
       ...(this.coachMarket ? { coachMarket: structuredClone(this.coachMarket) } : {}),
       boardState: structuredClone(this.boardState),
       rivalriesState: structuredClone(this.rivalriesState),
@@ -9899,6 +9995,9 @@ export class Career {
     }
     if (snapshot.hireableStaff) {
       career.hireableStaff = [...snapshot.hireableStaff]
+    }
+    if (snapshot.lineSetups) {
+      career.lineSetups = structuredClone(snapshot.lineSetups) as typeof career.lineSetups
     }
     if (snapshot.coachMarket) {
       career.coachMarket = structuredClone(snapshot.coachMarket)

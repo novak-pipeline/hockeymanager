@@ -221,6 +221,9 @@ export type WorkerRequestBody =
   /* ── mutations ── */
   | { type: 'setLines'; lines: LinesUpdate }
   | { type: 'setTactics'; tactics: TeamTactics }
+  | { type: 'saveLineSetup'; name: string }
+  | { type: 'applyLineSetup'; name: string }
+  | { type: 'deleteLineSetup'; name: string }
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'requestInterview'; playerId: string }

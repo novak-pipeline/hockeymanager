@@ -13,6 +13,7 @@ import type {
   DraftPick,
   GameResult,
   Injury,
+  Lines,
   NewsItem,
   PlayoffsState,
   Position,
@@ -665,6 +666,8 @@ export interface StyleFitView {
 export interface TacticsView {
   tactics: TeamTactics
   lines: LinesView
+  /** Names of the GM's saved line-board presets (for the load dropdown). */
+  lineSetups?: string[]
   /**
    * Per-forward-line synergy (parallel to lines.forwards).
    * Index i corresponds to lines.forwards[i].
@@ -1688,6 +1691,8 @@ export interface CareerSnapshot {
    * Optional for backward compat.
    */
   hireableStaff?: string[]
+  /** Saved named line-board presets for the user club. Optional (back-compat). */
+  lineSetups?: Array<{ name: string; lines: Lines }>
   /**
    * Coach hiring market — available head coaches with profiles. Optional for
    * backward compat; regenerated deterministically when absent.
