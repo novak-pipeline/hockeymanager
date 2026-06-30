@@ -174,6 +174,22 @@ export function InboxScreen(): JSX.Element {
   const [selected, setSelected] = useState<NewsItem | null>(null)
   const [categoryFilter, setCategoryFilter] = useState<NewsCategory | null>(null)
 
+  // Spacebar advances to the next message. These hooks must run on every render
+  // (before any early return) to keep React's hook order stable; the ref is
+  // pointed at the live selectNext once data is available, below.
+  const selectNextRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      selectNextRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   if (error) {
     return (
       <section>
@@ -235,20 +251,9 @@ export function InboxScreen(): JSX.Element {
     void handleSelect(ordered[(idx + 1) % ordered.length]!)
   }
 
-  // Spacebar advances to the next message (ignored while typing in a field).
-  const selectNextRef = useRef(selectNext)
+  // Point the keyboard handler (registered above, before the guards) at the
+  // current selectNext closure.
   selectNextRef.current = selectNext
-  useEffect(() => {
-    function onKey(e: KeyboardEvent): void {
-      if (e.code !== 'Space' && e.key !== ' ') return
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      e.preventDefault()
-      selectNextRef.current()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   /** One message row. Read rows are greyed; the selected row is highlighted. */
   function renderRow(item: NewsItem): JSX.Element {
