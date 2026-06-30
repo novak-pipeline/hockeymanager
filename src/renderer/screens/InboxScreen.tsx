@@ -225,10 +225,15 @@ export function InboxScreen(): JSX.Element {
   const unreadItems = ordered.filter((i) => !i.read)
   const readItems = ordered.filter((i) => i.read)
 
+  // Open a message WITHOUT marking it read — instead mark the one you're
+  // LEAVING as read. The message you're currently reading stays in the Unread
+  // section (highlighted) until you move on, so it's clear where you are in the
+  // list; advancing shrinks the unread pile one at a time.
   async function handleSelect(item: NewsItem) {
+    const leaving = selected
     setSelected(item)
-    if (!item.read) {
-      await client.markNewsRead([item.id])
+    if (leaving && leaving.id !== item.id && !leaving.read) {
+      await client.markNewsRead([leaving.id])
       refetch()
     }
   }
@@ -240,15 +245,19 @@ export function InboxScreen(): JSX.Element {
     refetch()
   }
 
-  // Space (or the "Next unread" button) jumps to the next unread message —
-  // opening one marks it read and drops it from the pool, so the next-unread
-  // walks the feed. Once none are left it steps through the rest in order.
+  // Space (or "Next unread") advances through the feed. From an unread message
+  // it steps to the NEXT unread (marking the one you leave read); when you reach
+  // the last unread it walks the rest of the list in order. Nothing selected →
+  // open the first unread.
   function selectNext(): void {
-    const nextUnread = unreadItems.find((i) => i.id !== selected?.id)
-    if (nextUnread) { void handleSelect(nextUnread); return }
-    if (ordered.length === 0) return
-    const idx = selected ? ordered.findIndex((i) => i.id === selected.id) : -1
-    void handleSelect(ordered[(idx + 1) % ordered.length]!)
+    if (selected) {
+      const ui = unreadItems.findIndex((i) => i.id === selected.id)
+      if (ui >= 0 && ui + 1 < unreadItems.length) { void handleSelect(unreadItems[ui + 1]!); return }
+      const oi = ordered.findIndex((i) => i.id === selected.id)
+      if (oi >= 0 && oi + 1 < ordered.length) { void handleSelect(ordered[oi + 1]!); return }
+    }
+    const first = unreadItems[0] ?? ordered[0]
+    if (first && first.id !== selected?.id) void handleSelect(first)
   }
 
   // Point the keyboard handler (registered above, before the guards) at the
@@ -420,9 +429,9 @@ export function InboxScreen(): JSX.Element {
           )}
         </div>
 
-        {/* Right: reading pane (fills height) */}
+        {/* Right: reading pane (fills the full column height) */}
         {selected ? (
-          <div style={{ overflowY: 'auto', minHeight: 0 }}>
+          <div style={{ overflowY: 'auto', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <ReadingPane
               item={selected}
               playerInfo={data.playerInfo}
@@ -530,7 +539,7 @@ function ReadingPane(props: {
   return (
     <div
       className="panel"
-      style={{ padding: 0, overflow: 'hidden' }}
+      style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}
     >
       <PaneAccentBar gradient={`linear-gradient(90deg, ${meta.color}, ${meta.color}88)`} />
 
@@ -625,7 +634,7 @@ function CoachQuotePane(props: {
   const meta = CATEGORY_META[item.category]
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--amber))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>
@@ -725,7 +734,7 @@ function PressArticlePane(props: {
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--cyan))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>

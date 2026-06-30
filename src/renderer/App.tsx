@@ -271,6 +271,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     function onKey(e: KeyboardEvent): void {
       if (e.code !== 'Space' && e.key !== ' ') return
       if (watched || e.repeat) return
+      // The Inbox owns Space (advance to next message), so don't also sim a day.
+      if (nav.screen === 'inbox') return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
       if (
@@ -283,7 +285,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [watched, actions])
+  }, [watched, actions, nav.screen])
 
   const closeViewer = useCallback(() => {
     setWatched(null)
