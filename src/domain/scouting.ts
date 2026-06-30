@@ -28,6 +28,8 @@ export type ScoutTarget =
   | { kind: 'nextOpponent' }
   | { kind: 'draftClass' }
   | { kind: 'freeAgents' }
+  /** The club's own players + rights-held prospects, for up-to-date internal reads. */
+  | { kind: 'ownProspects' }
 
 /**
  * Who, WITHIN the scope, the scout prioritises. Youth = draft-age prospects

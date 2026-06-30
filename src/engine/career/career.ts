@@ -7607,6 +7607,11 @@ export class Career {
       if (t.kind === 'player') inScope = t.playerId === pid
       else if (t.kind === 'draftClass') inScope = !!draftEligibility(p.age, !!p.nhlDrafted)
       else if (t.kind === 'freeAgents') inScope = faIds.has(pid)
+      else if (t.kind === 'ownProspects') {
+        const u = this.userTeamId as string
+        const ahl = this.userTeam.affiliateId as string | undefined
+        inScope = tid === u || (!!ahl && tid === ahl) || (p.rightsTeamId as unknown as string | undefined) === u
+      }
       else if (t.kind === 'nextOpponent') inScope = !!tid && tid === oppId
       else if (tid && t.kind === 'team') inScope = t.teamId === tid
       else if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); inScope = !!c?.teamIds.includes(tid) }
@@ -7725,6 +7730,15 @@ export class Career {
       case 'nextOpponent': { const opp = this.nextOpponentTeamId(); return opp ? rostersOf([opp]) : [] }
       case 'draftClass': return [...this.allDraftProspectIds()]
       case 'freeAgents': return [...this.currentFaIds()]
+      case 'ownProspects': {
+        const u = this.userTeamId as string
+        const ahl = this.userTeam.affiliateId as string | undefined
+        const ids = new Set<string>(rostersOf(ahl ? [u, ahl] : [u]))
+        for (const p of this.data.players.values()) {
+          if ((p.rightsTeamId as unknown as string | undefined) === u) ids.add(p.id as string)
+        }
+        return [...ids]
+      }
       default: return []
     }
   }

@@ -717,6 +717,10 @@ function resolveTarget(
       return [...draftProspectIds]
     case 'freeAgents':
       return [...freeAgentIds].filter((id) => !rosteredIds.has(id))
+    case 'ownProspects':
+      // Resolved in the career layer (needs the user team + rights-held players);
+      // this league-level util has no user context, so it contributes nothing here.
+      return []
   }
 }
 

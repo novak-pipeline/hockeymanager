@@ -1247,6 +1247,8 @@ function assignmentLabel(
       return 'Scouting draft class'
     case 'freeAgents':
       return 'Watching free agents'
+    case 'ownProspects':
+      return 'Assessing our players & prospects'
     default:
       return 'Unassigned'
   }
@@ -1306,6 +1308,15 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       case 'nextOpponent': return nextOpponentId ? rostersOf([nextOpponentId]) : []
       case 'draftClass': return [...draftProspectIds]
       case 'freeAgents': return [] // FA coverage isn't league-bounded; skip the count
+      case 'ownProspects': {
+        const u = ctx.userTeamId as string
+        const ahl = teams.get(ctx.userTeamId)?.affiliateId as string | undefined
+        const ids = new Set<string>(rostersOf(ahl ? [u, ahl] : [u]))
+        for (const p of ctx.players.values()) {
+          if ((p.rightsTeamId as unknown as string | undefined) === u) ids.add(p.id as string)
+        }
+        return [...ids]
+      }
       default: return []
     }
   }

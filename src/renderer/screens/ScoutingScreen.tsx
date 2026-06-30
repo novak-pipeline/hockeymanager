@@ -79,6 +79,7 @@ function ScopeDropdown(props: {
   const nations = view.nations.filter((n) => match(n.label))
   const competitions = view.competitions.filter((c) => match(c.label))
   const priorities: Array<{ label: string; target: ScoutTarget }> = [
+    { label: 'Our players & prospects', target: { kind: 'ownProspects' } },
     { label: 'Next opponent', target: { kind: 'nextOpponent' } },
     ...(view.hasDraftClass ? [{ label: 'Whole draft class', target: { kind: 'draftClass' as const } }] : []),
     { label: 'Free agents', target: { kind: 'freeAgents' } },
@@ -196,81 +197,84 @@ function ScoutCard(props: {
       patch.positionFilter ?? scout.positionFilter,
       patch.minPotentialStars ?? scout.minPotentialStars,
     )
+  const [editing, setEditing] = useState(false)
   const ratingColor =
     scout.rating >= 80 ? 'var(--success)' :
     scout.rating >= 65 ? 'var(--accent)' :
     'var(--muted)'
+  const focusLabel = scout.focus === 'youth' ? 'U23' : scout.focus === 'senior' ? 'Senior' : 'All ages'
+  const posLabel = scout.positionFilter === 'any' ? 'All pos' : scout.positionFilter
+  const potLabel = scout.minPotentialStars >= 4 ? '4★+' : scout.minPotentialStars >= 3 ? '3★+' : null
+  const speedColor = scout.readSpeed === 'Fast' ? 'var(--success)' : scout.readSpeed === 'Steady' ? 'var(--accent)' : 'var(--danger, #d8584f)'
 
   return (
-    <div className="panel" style={{ background: 'var(--bg2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ fontWeight: 600 }}><ScoutLink scoutId={scout.scoutId} name={scout.name} /></div>
-          <div className="muted small" style={{ marginTop: 2, display: 'flex', alignItems: 'center', gap: 5 }}>
-            {scout.specialtyNation && <FlagIcon nationality={scout.specialtyNation} size={13} />}
+    <div className="panel" style={{ background: 'var(--bg2)', padding: '8px var(--sp-3)' }}>
+      {/* Compact summary row (always visible) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '34px 1.4fr 1.6fr auto', gap: 'var(--sp-3)', alignItems: 'center' }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: ratingColor, textAlign: 'center' }} title={`Ability ${scout.rating}${scout.judgment !== undefined ? ` · JA ${scout.judgment}` : ''}`}>
+          {scout.rating}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <ScoutLink scoutId={scout.scoutId} name={scout.name} />
+          </div>
+          <div className="muted small" style={{ marginTop: 1, display: 'flex', alignItems: 'center', gap: 5 }}>
+            {scout.specialtyNation && <FlagIcon nationality={scout.specialtyNation} size={12} />}
             {scout.specialtyNation ? `${scout.specialtyNation} specialist` : 'Generalist'}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: ratingColor }}>{scout.rating}</div>
-          <div className="muted small">
-            <span title="Overall scouting ability (0–100)">Ability</span>
-            {scout.judgment !== undefined
-              ? <> · <span title="Judgment of Ability — how accurately this scout reads talent (0–100)">JA {scout.judgment}</span></>
-              : ''}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scout.assignmentLabel}</div>
+          <div className="muted small" style={{ marginTop: 1 }}>
+            {focusLabel} · {posLabel}{potLabel ? ` · ${potLabel}` : ''} · {scout.coverage} covered ·{' '}
+            <span style={{ color: speedColor }}>{scout.readSpeed}</span>
           </div>
+        </div>
+        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)} title="Edit this scout's brief">
+            {editing ? 'Done' : 'Edit'}
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled={!canFire}
+            title={canFire ? 'Release this scout' : 'You must keep at least one scout'}
+            style={{ color: canFire ? 'var(--danger, #d8584f)' : 'var(--muted)' }}
+            onClick={() => onFire(scout.scoutId)}
+          >
+            ✕
+          </button>
         </div>
       </div>
 
-      <div>
-        <div className="muted small" style={{ marginBottom: 4 }} title="Narrow the brief to a region or league for faster, sharper reads">Region / League</div>
-        <ScopeDropdown scout={scout} view={view} onAssign={(target) => apply({ target })} />
-      </div>
-
-      <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Age focus</div>
-        <FocusControl focus={scout.focus} onFocus={(f) => apply({ focus: f })} />
-      </div>
-
-      <div>
-        <div className="muted small" style={{ marginBottom: 4 }}>Position</div>
-        <SegControl<PosFilter>
-          options={[{ key: 'any', label: 'Any' }, { key: 'F', label: 'F' }, { key: 'D', label: 'D' }, { key: 'G', label: 'G' }]}
-          value={scout.positionFilter}
-          onPick={(positionFilter) => apply({ positionFilter })}
-        />
-      </div>
-
-      <div>
-        <div className="muted small" style={{ marginBottom: 4 }} title="Only surface prospects whose potential meets this star rating">Minimum potential to flag</div>
-        <SegControl<number>
-          options={[{ key: 0, label: 'Any' }, { key: 3, label: '3★' }, { key: 4, label: '4★' }]}
-          value={scout.minPotentialStars >= 4 ? 4 : scout.minPotentialStars >= 3 ? 3 : 0}
-          onPick={(minPotentialStars) => apply({ minPotentialStars })}
-        />
-      </div>
-
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
-        <span className="muted">
-          Covering <b style={{ color: 'var(--text)' }}>{scout.coverage}</b> ·{' '}
-          <span style={{ color: scout.readSpeed === 'Fast' ? 'var(--success)' : scout.readSpeed === 'Steady' ? 'var(--accent)' : 'var(--danger, #d8584f)' }}
-            title={scout.readSpeed === 'Thin' ? 'Spread thin — narrow his brief for faster, sharper reads' : 'Read speed at this scope size'}>
-            {scout.readSpeed} reads
-          </span>
-        </span>
-        <span className="row" style={{ gap: 8, alignItems: 'center' }}>
-          {scout.salary !== undefined && <span className="muted">{fmtMoney(scout.salary)}/yr</span>}
-          <button
-            className="btn btn-ghost small"
-            disabled={!canFire}
-            title={canFire ? 'Release this scout' : 'You must keep at least one scout'}
-            style={{ color: canFire ? 'var(--danger, #d8584f)' : 'var(--muted)', padding: '2px 8px' }}
-            onClick={() => onFire(scout.scoutId)}
-          >
-            Release
-          </button>
-        </span>
-      </div>
+      {/* Expanded editor (on demand) */}
+      {editing && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)', marginTop: 'var(--sp-3)', paddingTop: 'var(--sp-3)', borderTop: '1px solid var(--line)' }}>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }} title="Narrow the brief to a region or league for faster, sharper reads">Region / League</div>
+            <ScopeDropdown scout={scout} view={view} onAssign={(target) => apply({ target })} />
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>Age focus</div>
+            <FocusControl focus={scout.focus} onFocus={(f) => apply({ focus: f })} />
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>Position</div>
+            <SegControl<PosFilter>
+              options={[{ key: 'any', label: 'Any' }, { key: 'F', label: 'F' }, { key: 'D', label: 'D' }, { key: 'G', label: 'G' }]}
+              value={scout.positionFilter}
+              onPick={(positionFilter) => apply({ positionFilter })}
+            />
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }} title="Only surface prospects whose potential meets this star rating">Minimum potential to flag</div>
+            <SegControl<number>
+              options={[{ key: 0, label: 'Any' }, { key: 3, label: '3★' }, { key: 4, label: '4★' }]}
+              value={scout.minPotentialStars >= 4 ? 4 : scout.minPotentialStars >= 3 ? 3 : 0}
+              onPick={(minPotentialStars) => apply({ minPotentialStars })}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -720,8 +724,8 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
 
       {data && tab === 'focus' && (
         <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
-          <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Aim each scout at a region/league and set who they focus on. Hire more scouts under Staff → Job Market.</p>
-          <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+          <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Each scout shows his current brief at a glance — hit <b>Edit</b> to retarget him (incl. <b>Our players &amp; prospects</b> for in-house reads). Hire more under Staff → Job Market.</p>
+          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
             {data.scouts.map((scout) => (
               <ScoutCard
                 key={scout.scoutId}
