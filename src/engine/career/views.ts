@@ -376,6 +376,9 @@ export interface ProfileContractView extends ContractView {
   /** Rights status he'll carry at contract's end: ELC/RFA (club retains rights) or
    *  UFA (free to leave). Present whenever he's on a club. */
   rightsStatus?: 'ELC' | 'RFA' | 'UFA'
+  /** True when the player skates in a non-pro loop (junior/college/Europe) and so
+   *  carries no NHL contract — the salary/term fields are not a pro deal. */
+  amateur?: boolean
 }
 
 /** EHM-style position proficiency for one position. */

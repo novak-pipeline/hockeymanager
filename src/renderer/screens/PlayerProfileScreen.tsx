@@ -945,20 +945,32 @@ function TabProfile({
         {/* Contract */}
         <div className="pp-band-col">
           <div className="pp-band-label">Contract</div>
-          {d.teamName
-            ? <div className="pp-band-row">Contracted to <strong>{d.teamName}</strong></div>
-            : <div className="pp-band-row"><span className="chip chip-warn">Free agent</span></div>}
-          {d.profileContract && (
-            <>
-              <div className="pp-band-row"><strong>{fmtMoney(d.profileContract.salary)}</strong><span className="muted small"> /yr</span></div>
-              <div className="pp-band-row muted small">until {d.profileContract.expiryYear}</div>
-              <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
-                {d.profileContract.noTradeClause && <span className="chip chip-warn" style={{ fontSize: 9 }}>NTC</span>}
-                {d.profileContract.twoWay && <span className="chip" style={{ fontSize: 9 }}>2-way</span>}
-                {d.profileContract.freeAgentStatus && <span className="chip chip-warn" style={{ fontSize: 9 }}>{d.profileContract.freeAgentStatus}</span>}
-              </div>
-            </>
-          )}
+          {d.profileContract?.amateur
+            ? (
+              <>
+                {d.teamName && <div className="pp-band-row">Plays for <strong>{d.teamName}</strong></div>}
+                <div className="pp-band-row"><span className="chip" style={{ fontSize: 10 }}>Amateur</span></div>
+                <div className="pp-band-row muted small">No pro contract — NHL rights held</div>
+              </>
+            )
+            : (
+              <>
+                {d.teamName
+                  ? <div className="pp-band-row">Contracted to <strong>{d.teamName}</strong></div>
+                  : <div className="pp-band-row"><span className="chip chip-warn">Free agent</span></div>}
+                {d.profileContract && (
+                  <>
+                    <div className="pp-band-row"><strong>{fmtMoney(d.profileContract.salary)}</strong><span className="muted small"> /yr</span></div>
+                    <div className="pp-band-row muted small">until {d.profileContract.expiryYear}</div>
+                    <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                      {d.profileContract.noTradeClause && <span className="chip chip-warn" style={{ fontSize: 9 }}>NTC</span>}
+                      {d.profileContract.twoWay && <span className="chip" style={{ fontSize: 9 }}>2-way</span>}
+                      {d.profileContract.freeAgentStatus && <span className="chip chip-warn" style={{ fontSize: 9 }}>{d.profileContract.freeAgentStatus}</span>}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
         </div>
 
         {/* Coach summary */}
@@ -1552,6 +1564,20 @@ function currentRepTier(rep: number, overall: number): string {
 function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
   const pc = d.profileContract
   const c = d.contract
+
+  if (pc?.amateur) {
+    return (
+      <Panel title="Contract Details">
+        <InfoRow label="Status" value="Amateur — no pro contract" />
+        {d.teamName && <InfoRow label="Plays for" value={d.teamName} />}
+        <InfoRow label="NHL rights" value="Held by your club (draft rights)" />
+        <p className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
+          Junior/college/European players don&apos;t carry an NHL contract. He&apos;ll sign an
+          entry-level deal if and when he turns pro.
+        </p>
+      </Panel>
+    )
+  }
 
   if (!pc && !c) {
     return (

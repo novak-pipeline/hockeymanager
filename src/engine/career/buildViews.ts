@@ -592,9 +592,18 @@ function buildHonours(p: Player): PlayerHonoursView {
  * UFA: yearsRemaining === 0 and age >= 27.
  * Under contract: yearsRemaining > 0 → null status.
  */
-function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView | null {
+function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false): ProfileContractView | null {
   if (!hasTeam) return null
   const c = p.contract
+  // Amateurs (junior/college/Europe) hold no NHL deal — surface a zeroed,
+  // flagged block the renderer shows as "Amateur — NHL rights held" rather than
+  // a bogus pro salary/term.
+  if (isAmateur) {
+    return {
+      salary: 0, yearsRemaining: 0, expiryYear: 0, noTradeClause: false,
+      twoWay: false, capHit: 0, freeAgentStatus: null, amateur: true,
+    }
+  }
   let freeAgentStatus: 'RFA' | 'UFA' | null = null
   if (c.yearsRemaining <= 0) {
     freeAgentStatus = p.age < 27 ? 'RFA' : 'UFA'
@@ -680,15 +689,20 @@ export function buildPlayerProfile(
   let teamName: string | null = null
   let teamAbbr = 'FA'
   let teamColors: { primary: number; secondary: number } | undefined
+  let teamTier: 'nhl' | 'ahl' | 'world' | undefined
   for (const t of ctx.teams.values()) {
     if (t.roster.includes(playerId)) {
       teamId = t.id as string
       teamName = t.name
       teamAbbr = t.abbreviation
       teamColors = t.colors
+      teamTier = t.tier
       break
     }
   }
+  // Amateur = skating in a non-pro loop (junior/college/Europe). These players
+  // hold no NHL contract, so the imported salary/term is not a pro deal.
+  const isAmateur = teamId !== null && teamTier !== undefined && teamTier !== 'nhl' && teamTier !== 'ahl'
 
   const pidStr = playerId as string
   const groups: AttributeGroupView[] = [
@@ -911,7 +925,7 @@ export function buildPlayerProfile(
     personalityReads,
     bio: buildBio(p),
     honours: buildHonours(p),
-    profileContract: buildProfileContract(p, teamId !== null),
+    profileContract: buildProfileContract(p, teamId !== null, isAmateur),
     scoutReport,
     ...(scoutPanel !== undefined ? { scoutPanel } : {}),
     ...(mindset !== undefined ? { mindset } : {}),
