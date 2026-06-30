@@ -8266,6 +8266,7 @@ export class Career {
             name: p.name,
             teamId: t.id as string,
             teamAbbr: t.abbreviation,
+            teamName: t.name,
             leagueAbbr: c.abbrev,
             nation: p.nationality ?? '',
             position: p.position,

@@ -853,6 +853,8 @@ export interface DraftRankRowView {
   name: string
   teamId: string
   teamAbbr: string
+  /** Full club name (e.g. "Penn State Nittany Lions") for a readable label. */
+  teamName?: string
   leagueAbbr: string
   nation: string
   position: string
