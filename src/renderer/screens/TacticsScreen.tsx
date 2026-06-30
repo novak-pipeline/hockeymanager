@@ -1081,10 +1081,10 @@ export function TacticsScreen(): JSX.Element {
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(520px,2fr) minmax(320px,1fr)', gap: 'var(--sp-4)', alignItems: 'start' }}>
             {/* ── LEFT: rink line board ── */}
             <div className="stack">
-              <div className="row-between" style={{ marginBottom: -4 }}>
-                <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+              <div className="stack" style={{ gap: 'var(--sp-2)', marginBottom: -4 }}>
+                {/* Title + synergy legend */}
+                <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="panel-title" style={{ fontSize: 13, fontWeight: 700 }}>Line Board</span>
-                  {/* synergy legend */}
                   <span className="row small" style={{ gap: 10, alignItems: 'center', opacity: 0.85 }}>
                     {([['var(--success)', 'Strong'], ['var(--amber, #f59e0b)', 'OK'], ['var(--danger)', 'Poor']] as const).map(([c, label]) => (
                       <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
@@ -1094,11 +1094,12 @@ export function TacticsScreen(): JSX.Element {
                     ))}
                   </span>
                 </div>
-                <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                {/* Toolbar — wraps instead of smushing */}
+                <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   {/* How injuries/returns are handled each matchday. */}
                   <select
                     className="input"
-                    style={{ fontSize: 12, padding: '4px 8px', maxWidth: 200 }}
+                    style={{ fontSize: 12, padding: '4px 8px' }}
                     value={data.lineManagementMode ?? 'coach'}
                     onChange={(e) => { void handleSetLineMode(e.target.value as 'coach' | 'fillGaps') }}
                     title="How your lineup is managed when you sim: the coach can auto-adjust to dress the best available, or only fill gaps and leave the rest as you set it"
@@ -1109,7 +1110,7 @@ export function TacticsScreen(): JSX.Element {
                   {/* Saved line setups: load from the dropdown, or save the current board. */}
                   <select
                     className="input"
-                    style={{ fontSize: 12, padding: '4px 8px', maxWidth: 170 }}
+                    style={{ fontSize: 12, padding: '4px 8px' }}
                     value=""
                     onChange={(e) => { if (e.target.value) void handleApplySetup(e.target.value) }}
                     title="Load a saved line setup"
@@ -1128,7 +1129,7 @@ export function TacticsScreen(): JSX.Element {
                     Save setup
                   </button>
                   <button
-                    className="btn btn-ghost btn-sm"
+                    className="btn btn-sm"
                     style={{ fontSize: 12, gap: 4, whiteSpace: 'nowrap', minWidth: 0 }}
                     onClick={() => { void handleCoachSetLines() }}
                     disabled={coachBuilding}
