@@ -69,6 +69,61 @@ export interface DevelopmentCenterView {
   systemElsewhere: DevelopmentRow[]
 }
 
+/** Major-junior / development leagues a prospect "ages out" of by ~20. */
+const JUNIOR_LEAGUES = new Set([
+  'OHL', 'WHL', 'QMJHL', 'CHL', 'USHL', 'NTDP', 'MHL', 'U20SM', 'SVKJR', 'J20', 'BCHL', 'AJHL',
+])
+
+type Pathway = 'junior' | 'college' | 'europe'
+function prospectPathway(leagueAbbr: string | undefined, age: number): Pathway {
+  if (leagueAbbr === 'NCAA') return 'college'
+  if (leagueAbbr && JUNIOR_LEAGUES.has(leagueAbbr)) return 'junior'
+  if (age <= 20) return 'junior'
+  return 'europe'
+}
+
+/**
+ * A logical, trackable development plan for a rights-held prospect playing
+ * outside the NHL/AHL: where he is on his pathway (junior/college/Europe) plus
+ * the recommended next pro step based on his current ability and ceiling.
+ * Example: "20, ages out of junior this year — looks AHL-ready; slot him on the
+ * farm once he signs."
+ */
+export function systemDevPlan(
+  p: Player, currentStars: number, potentialStars: number, ovr: number, leagueAbbr?: string
+): string {
+  if (p.injuryStatus) return 'Sidelined — development on hold until healthy.'
+  const age = p.age
+  const ceiling = potentialStars
+  const path = prospectPathway(leagueAbbr, age)
+  const league = leagueAbbr && leagueAbbr !== '—' ? leagueAbbr : path === 'college' ? 'college' : path === 'europe' ? 'Europe' : 'junior'
+
+  // Where he is on his pathway.
+  let where: string
+  if (path === 'junior') {
+    const yrsLeft = Math.max(0, 20 - age)
+    if (age <= 17) where = `${age}yo — years away; let him lead in ${league}`
+    else if (age >= 20) where = `${age}yo — ages out of junior after this season`
+    else where = `${age}yo — ~${yrsLeft} yr${yrsLeft === 1 ? '' : 's'} of ${league} left`
+  } else if (path === 'college') {
+    const yrsLeft = Math.max(0, 22 - age)
+    where = yrsLeft > 0
+      ? `${age}yo — ~${yrsLeft} yr${yrsLeft === 1 ? '' : 's'} of ${league} eligibility left`
+      : `${age}yo — final ${league} season; turns pro after`
+  } else {
+    where = `${age}yo, developing in ${league}`
+  }
+
+  // Recommended next pro step by current ability + ceiling.
+  let step: string
+  if (ovr >= 68) step = 'looks AHL-ready — slot him on the farm once he signs'
+  else if (ovr >= 58) step = ceiling >= 3 ? 'another year to develop, then an AHL look' : 'projects as AHL depth when he turns pro'
+  else step = ceiling >= 3 ? 'still raw — recommend ECHL minutes to season him before an AHL call-up' : 'organisational depth; an ECHL projection for now'
+
+  void currentStars
+  return `${where} — ${step}.`
+}
+
 function devNote(p: Player, location: 'NHL' | 'AHL' | 'Junior', upside: number, tier: ProjectionTier): string {
   if (p.injuryStatus) return 'Sidelined — development on hold until healthy.'
   if (location === 'Junior') {
@@ -107,7 +162,7 @@ export interface BuildDevelopmentArgs {
   rosterAdvice?: { callUps: RosterAdviceMove[]; sendDowns: RosterAdviceMove[] }
   /** Players whose rights the club holds but who play outside the NHL/AHL, with
    *  the club they currently skate for. */
-  systemElsewhere?: Array<{ player: Player; clubAbbrev: string }>
+  systemElsewhere?: Array<{ player: Player; clubAbbrev: string; leagueAbbr?: string }>
 }
 
 export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentCenterView {
@@ -145,7 +200,7 @@ export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentC
 
   // Rights-held prospects playing outside the NHL/AHL (junior, college, Europe).
   const systemElsewhere: DevelopmentRow[] = []
-  for (const { player: p, clubAbbrev } of args.systemElsewhere ?? []) {
+  for (const { player: p, clubAbbrev, leagueAbbr } of args.systemElsewhere ?? []) {
     const [cur, pot] = args.stars(p)
     const ovr = ratedOverall(p)
     const tier = projectionTier(ovr, pot, p.age)
@@ -163,7 +218,9 @@ export function buildDevelopmentCenter(args: BuildDevelopmentArgs): DevelopmentC
       tierLabel: TIER_LABELS[tier],
       projection: ceilingRoleShort(agedPotential(p), p.position),
       upside,
-      note: devNote(p, 'Junior', upside, tier),
+      // Logical, trackable plan (pathway + recommended pro step) rather than a
+      // generic "longer-term project" line.
+      note: systemDevPlan(p, cur, pot, ovr, leagueAbbr),
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
     })
   }

@@ -7237,7 +7237,8 @@ export class Career {
 
     // Rights-held prospects playing outside the NHL/AHL (e.g. juniors we drafted).
     const onFarm = new Set<string>([...(team?.roster ?? []), ...(ahlTeam?.roster ?? [])].map((id) => id as string))
-    const systemElsewhere: Array<{ player: Player; clubAbbrev: string }> = []
+    const worldInfo = this.worldClubInfoByPid()
+    const systemElsewhere: Array<{ player: Player; clubAbbrev: string; leagueAbbr?: string }> = []
     for (const p of this.data.players.values()) {
       if (p.rightsTeamId !== this.userTeamId) continue
       if (onFarm.has(p.id as string)) continue
@@ -7245,7 +7246,8 @@ export class Career {
       for (const t of this.data.teams.values()) {
         if (t.roster.includes(p.id)) { clubAbbrev = t.abbreviation; break }
       }
-      systemElsewhere.push({ player: p, clubAbbrev })
+      const leagueAbbr = worldInfo.get(p.id as string)?.leagueAbbr
+      systemElsewhere.push({ player: p, clubAbbrev, ...(leagueAbbr ? { leagueAbbr } : {}) })
     }
 
     return buildDevelopmentCenter({
@@ -8987,10 +8989,23 @@ export class Career {
     const prospectPool: Array<{ player: Player; location: string }> = []
     const affiliateId = this.userTeam.affiliateId
     const ahlTeam = affiliateId ? this.data.teams.get(affiliateId as TeamId) : undefined
+    const pooled = new Set<string>(this.userTeam.roster.map((id) => id as string))
     if (ahlTeam) {
       for (const id of ahlTeam.roster) {
         const p = this.data.players.get(id)
-        if (p) prospectPool.push({ player: p, location: 'AHL' })
+        if (p) { prospectPool.push({ player: p, location: 'AHL' }); pooled.add(id as string) }
+      }
+    }
+    // Rights-held prospects skating in junior/college/Europe belong in the
+    // prospect report too — ranked by scout value alongside the AHL group, tagged
+    // with the league they're in (OHL/NCAA/SHL…) so "Based" reads usefully.
+    {
+      const worldInfo = this.worldClubInfoByPid()
+      for (const p of this.data.players.values()) {
+        if (p.rightsTeamId !== this.userTeamId) continue
+        if (pooled.has(p.id as string)) continue
+        const league = worldInfo.get(p.id as string)?.leagueAbbr ?? 'JR'
+        prospectPool.push({ player: p, location: league })
       }
     }
     const report = buildAgmReport({
