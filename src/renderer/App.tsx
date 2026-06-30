@@ -271,8 +271,6 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     function onKey(e: KeyboardEvent): void {
       if (e.code !== 'Space' && e.key !== ' ') return
       if (watched || e.repeat) return
-      // The Inbox owns Space (advance to next message), so don't also sim a day.
-      if (nav.screen === 'inbox') return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
       if (
@@ -280,12 +278,22 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         tag === 'BUTTON' || tag === 'A' ||
         t?.isContentEditable || t?.getAttribute('role') === 'button'
       ) return
+      // FM-style: Space can't advance the calendar while the inbox has unread
+      // mail. Instead it takes you to the inbox to clear it; the inbox's own
+      // handler then steps through the unreads. Only once the inbox is empty
+      // does Space sim the next day.
+      const unread = dashboard?.unreadNews ?? 0
+      if (unread > 0) {
+        if (nav.screen !== 'inbox') { e.preventDefault(); nav.navigate('inbox') }
+        // On the inbox screen the inbox handler advances through unreads.
+        return
+      }
       e.preventDefault()
       actions.continueGame()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [watched, actions, nav.screen])
+  }, [watched, actions, nav, dashboard?.unreadNews])
 
   const closeViewer = useCallback(() => {
     setWatched(null)

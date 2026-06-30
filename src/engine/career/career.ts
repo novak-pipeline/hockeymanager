@@ -9124,6 +9124,7 @@ export class Career {
       toi: number
       goalsAgainst: number
       wins: number
+      faceId?: string
     }
     const entries: Entry[] = []
     for (const [pid, t] of this.totals) {
@@ -9148,6 +9149,7 @@ export class Career {
         toi: t.toi,
         goalsAgainst: t.goalsAgainst,
         wins: this.goalieWins.get(pid) ?? 0,
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
       })
     }
 
@@ -9168,6 +9170,7 @@ export class Career {
           position: e.position,
           gamesPlayed: e.gamesPlayed,
           value: Math.round(score(e) * 100) / 100,
+          ...(e.faceId !== undefined ? { faceId: e.faceId } : {}),
         }))
 
     return {
@@ -9190,6 +9193,7 @@ export class Career {
           position: e.position,
           gamesPlayed: e.gamesPlayed,
           value: Math.round((e.goalsAgainst / (e.toi / 3600)) * 100) / 100,
+          ...(e.faceId !== undefined ? { faceId: e.faceId } : {}),
         })),
       wins: topSkaters((e) => e.wins, goalies),
     }

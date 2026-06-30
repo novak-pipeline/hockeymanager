@@ -114,11 +114,26 @@ export function systemDevPlan(
     where = `${age}yo, developing in ${league}`
   }
 
-  // Recommended next pro step by current ability + ceiling.
+  // Recommended next step, driven by CEILING (so quality is reflected) with a
+  // current-ability read for "ready now". ECHL is reserved for genuine depth
+  // ceilings or a raw player who's about to turn pro — not every young prospect.
   let step: string
-  if (ovr >= 68) step = 'looks AHL-ready — slot him on the farm once he signs'
-  else if (ovr >= 58) step = ceiling >= 3 ? 'another year to develop, then an AHL look' : 'projects as AHL depth when he turns pro'
-  else step = ceiling >= 3 ? 'still raw — recommend ECHL minutes to season him before an AHL call-up' : 'organisational depth; an ECHL projection for now'
+  if (ceiling >= 3) {
+    step = ovr >= 64
+      ? 'AHL-ready with real NHL upside — push him onto the farm and up the depth chart'
+      : 'a genuine NHL ceiling — keep developing him, then onto the farm'
+  } else if (ceiling >= 2.5) {
+    step = 'projects as an AHL regular with a shot at the NHL fringe'
+  } else if (ceiling >= 2) {
+    step = 'an AHL depth projection — useful org body'
+  } else {
+    step = 'organisational depth — an ECHL ceiling for now'
+  }
+  // A raw player about to turn pro may need ECHL seasoning first (overrides above).
+  const turningProSoon = (path === 'junior' && age >= 20) || (path === 'college' && age >= 22) || path === 'europe'
+  if (turningProSoon && ovr < 58 && ceiling >= 2) {
+    step = 'raw for the AHL — an ECHL stint to find his feet, then a call-up'
+  }
 
   void currentStars
   return `${where} — ${step}.`

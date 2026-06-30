@@ -2297,6 +2297,8 @@ export interface LeagueLeaderEntry {
   gamesPlayed: number
   /** The ranked stat value. */
   value: number
+  /** Facepack image key (for the headshot on the League Overview leader cards). */
+  faceId?: string
 }
 
 /**

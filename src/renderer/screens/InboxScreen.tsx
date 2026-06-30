@@ -177,14 +177,15 @@ export function InboxScreen(): JSX.Element {
   // Spacebar advances to the next message. These hooks must run on every render
   // (before any early return) to keep React's hook order stable; the ref is
   // pointed at the live selectNext once data is available, below.
-  const selectNextRef = useRef<() => void>(() => {})
+  const selectNextRef = useRef<() => boolean>(() => false)
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.code !== 'Space' && e.key !== ' ') return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      e.preventDefault()
-      selectNextRef.current()
+      // Only consume Space if there's an unread to step to; otherwise let the
+      // global handler advance the day (the inbox is clear).
+      if (selectNextRef.current()) e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -245,19 +246,20 @@ export function InboxScreen(): JSX.Element {
     refetch()
   }
 
-  // Space (or "Next unread") advances through the feed. From an unread message
-  // it steps to the NEXT unread (marking the one you leave read); when you reach
-  // the last unread it walks the rest of the list in order. Nothing selected →
-  // open the first unread.
-  function selectNext(): void {
-    if (selected) {
-      const ui = unreadItems.findIndex((i) => i.id === selected.id)
-      if (ui >= 0 && ui + 1 < unreadItems.length) { void handleSelect(unreadItems[ui + 1]!); return }
-      const oi = ordered.findIndex((i) => i.id === selected.id)
-      if (oi >= 0 && oi + 1 < ordered.length) { void handleSelect(ordered[oi + 1]!); return }
-    }
-    const first = unreadItems[0] ?? ordered[0]
-    if (first && first.id !== selected?.id) void handleSelect(first)
+  // Unread, OLDEST first — Space works the pile from the bottom of the list up
+  // to the newest. (unreadItems is newest-first, so reverse for traversal.)
+  const unreadOldestFirst = [...unreadItems].reverse()
+
+  // Advance to the next unread (oldest remaining, excluding the current one).
+  // Opening it via handleSelect marks the one you LEFT read, so the pile shrinks
+  // bottom-up. When only the open message is left unread, this Space clears it
+  // (so the count hits zero and the NEXT Space can sim). Returns true if it
+  // handled the key (so the global sim hotkey stays out of the way).
+  function selectNext(): boolean {
+    const next = unreadOldestFirst.find((i) => i.id !== selected?.id)
+    if (next) { void handleSelect(next); return true }
+    if (selected && !selected.read) { void client.markNewsRead([selected.id]).then(() => refetch()); return true }
+    return false
   }
 
   // Point the keyboard handler (registered above, before the guards) at the
