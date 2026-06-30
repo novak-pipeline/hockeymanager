@@ -355,6 +355,8 @@ export type WorkerRequestBody =
   | { type: 'sendDown'; playerId: string }
   /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
   | { type: 'setCoachRoster' }
+  /** Revert the most recent coach roster auto-set. */
+  | { type: 'undoCoachRoster' }
   /* ── Phase B: player profile view layer ── */
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   | { type: 'compareRadar'; playerIdA: string; playerIdB: string }

@@ -269,6 +269,14 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
       setSettingRoster(false)
     }
   }
+  async function handleUndoCoachRoster(): Promise<void> {
+    const res = await client.undoCoachRoster()
+    if (res.type === 'error') { toast(res.message, 'error'); return }
+    setCoachMoves(null)
+    toast('Reverted the coach’s roster moves.', 'success')
+    bump()
+    refetchAhl()
+  }
 
   return (
     <section className="stack">
@@ -326,7 +334,16 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
               </div>
             </div>
           )}
-          <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
+          <div className="row" style={{ marginTop: 'var(--sp-2)', gap: 'var(--sp-2)' }}>
+            {coachMoves.promoted.length + coachMoves.demoted.length > 0 && (
+              <button
+                className="btn btn-sm"
+                onClick={() => void handleUndoCoachRoster()}
+                title="Put the roster back exactly as it was before the coach's moves"
+              >
+                ↶ Undo
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={() => setCoachMoves(null)}>Dismiss</button>
           </div>
         </Panel>

@@ -408,6 +408,10 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().applyCoachRoster()
       return { id: req.id, type: 'coachRosterSet', promoted: res.promoted, demoted: res.demoted }
     }
+    case 'undoCoachRoster': {
+      const res = must().undoCoachRoster()
+      return res.ok ? { id: req.id, type: 'ok' } : { id: req.id, type: 'ok', note: 'nothing to undo' }
+    }
 
     /* ── Phase B: player profile view layer ── */
     case 'compareRadar':

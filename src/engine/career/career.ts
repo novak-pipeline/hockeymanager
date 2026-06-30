@@ -5000,6 +5000,9 @@ export class Career {
       byGroup[key].forEach((p, i) => (i < targets[key] ? newNhl : newAhl).push(p.id))
     }
 
+    // Snapshot the pre-set split so the GM can one-click Undo the coach's moves.
+    this.coachRosterUndo = { nhl: [...nhl.roster], ahl: [...ahl.roster] }
+
     nhl.roster = newNhl
     ahl.roster = newAhl
     repairLines(nhl, this.data.players)
@@ -5010,6 +5013,27 @@ export class Career {
       promoted: newNhl.filter((id) => !wasNhl.has(id as string)).map(nameOf).filter(Boolean),
       demoted: newAhl.filter((id) => wasNhl.has(id as string)).map(nameOf).filter(Boolean),
     }
+  }
+
+  /** Snapshot of the NHL/AHL rosters before the last coach auto-set, for Undo.
+   *  In-memory only (no persistence) — a within-session convenience. */
+  private coachRosterUndo: { nhl: PlayerId[]; ahl: PlayerId[] } | null = null
+
+  /** Revert the most recent "ask coach to set roster" — restores the exact
+   *  NHL/AHL split that was in place beforehand. No-op if nothing to undo. */
+  undoCoachRoster(): { ok: boolean } {
+    const snap = this.coachRosterUndo
+    if (!snap) return { ok: false }
+    const nhl = this.data.teams.get(this.userTeamId)
+    const ahlId = this.userTeam.affiliateId
+    const ahl = ahlId ? this.data.teams.get(ahlId as TeamId) : undefined
+    if (!nhl || !ahl) return { ok: false }
+    nhl.roster = [...snap.nhl]
+    ahl.roster = [...snap.ahl]
+    repairLines(nhl, this.data.players)
+    repairLines(ahl, this.data.players)
+    this.coachRosterUndo = null
+    return { ok: true }
   }
 
   /**

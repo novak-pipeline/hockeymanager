@@ -601,6 +601,10 @@ export class SimClient {
     return this.send({ type: 'setCoachRoster' })
   }
 
+  undoCoachRoster(): Promise<WorkerResponse> {
+    return this.send({ type: 'undoCoachRoster' })
+  }
+
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   compareRadar(playerIdA: string, playerIdB: string): Promise<WorkerResponse> {
     return this.send({ type: 'compareRadar', playerIdA, playerIdB })

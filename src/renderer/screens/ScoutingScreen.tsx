@@ -68,6 +68,7 @@ function ScopeDropdown(props: {
   )
   const Item = ({ label, target }: { label: string; target: ScoutTarget }): JSX.Element => (
     <button
+      type="button"
       className="btn-ghost"
       style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
       onClick={() => { onAssign(target); close() }}
@@ -151,6 +152,7 @@ function FocusControl({ focus, onFocus }: { focus: ScoutFocus; onFocus: (f: Scou
       {FOCI.map((f) => (
         <button
           key={f.key}
+          type="button"
           className={`chip${focus === f.key ? ' chip-accent' : ''}`}
           style={{ cursor: 'pointer', border: 'none', fontSize: 11, flex: 1 }}
           onClick={() => onFocus(f.key)}
@@ -172,7 +174,7 @@ function SegControl<T extends string | number>({ options, value, onPick }: {
   return (
     <div className="row" style={{ gap: 4 }}>
       {options.map((o) => (
-        <button key={String(o.key)} className={`chip${value === o.key ? ' chip-accent' : ''}`}
+        <button key={String(o.key)} type="button" className={`chip${value === o.key ? ' chip-accent' : ''}`}
           style={{ cursor: 'pointer', border: 'none', fontSize: 11, flex: 1 }} onClick={() => onPick(o.key)}>
           {o.label}
         </button>
