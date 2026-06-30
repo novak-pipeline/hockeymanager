@@ -2994,21 +2994,32 @@ export class Career {
   private prepareTeamsForDay(): void {
     this.emergencyRecalls()
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
-    // AI teams re-optimise their lines weekly; the user's are GM-owned and only
-    // hole-filled — so a player who filled in for an injury would otherwise keep
-    // the slot after the star returns. Promote clearly-better healthy bench
-    // players back into the user lineup so the best available always dress.
-    this.autoUpgradeUserLines()
+    // Keep every club's lineup logical: a player who filled in for an injury
+    // shouldn't keep the slot once a clearly-better regular is healthy again.
+    // Applies to ALL teams. The user's team honours the line-management setting:
+    // 'coach' (auto-adjust, the default) upgrades; 'fillGaps' leaves the board
+    // as the GM set it (repairLines already filled any holes above).
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const isUser = (teamId as string) === (this.userTeamId as string)
+      if (isUser && this.lineManagementMode === 'fillGaps') continue
+      this.autoUpgradeLines(team)
+    }
     this.refreshCoachFit()
   }
 
-  /** Ensure the user's NHL lineup dresses the best available healthy skaters:
+  /** How the user's lines are managed each matchday: 'coach' auto-adjusts to
+   *  dress the best available; 'fillGaps' only fills holes (GM keeps control). */
+  private lineManagementMode: 'coach' | 'fillGaps' = 'coach'
+  getLineManagementMode(): 'coach' | 'fillGaps' { return this.lineManagementMode }
+  setLineManagementMode(mode: 'coach' | 'fillGaps'): void { this.lineManagementMode = mode }
+
+  /** Ensure a team's NHL lineup dresses the best available healthy skaters:
    *  swap a dressed player for a benched one who is clearly better (by a margin,
    *  so it self-heals injury fill-ins without churning near-equal choices).
    *  Position groups are respected; lines are repaired for legality after. */
-  private autoUpgradeUserLines(): void {
-    const team = this.data.teams.get(this.userTeamId)
-    if (!team) return
+  private autoUpgradeLines(team: Team): void {
     const THRESH = 3 // ratedOverall points — a meaningful gap, not a coin-flip
     const ovrOf = (id: PlayerId): number => {
       const p = this.data.players.get(id)
@@ -7939,7 +7950,7 @@ export class Career {
   }
 
   getTactics(): TacticsView {
-    return { ...buildTacticsView(this.ctx()), lineSetups: this.getLineSetupNames() }
+    return { ...buildTacticsView(this.ctx()), lineSetups: this.getLineSetupNames(), lineManagementMode: this.lineManagementMode }
   }
 
   /**
@@ -9820,6 +9831,7 @@ export class Career {
       seasonRatingTotals: [...this.seasonRatingTotals.entries()].map(([k, v]) => [k, { ...v }] as [string, { sum: number; n: number }]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
+      lineManagementMode: this.lineManagementMode,
       ...(this.lineSetups.length > 0 ? { lineSetups: structuredClone(this.lineSetups) } : {}),
       ...(this.coachMarket ? { coachMarket: structuredClone(this.coachMarket) } : {}),
       boardState: structuredClone(this.boardState),
@@ -9998,6 +10010,9 @@ export class Career {
     }
     if (snapshot.lineSetups) {
       career.lineSetups = structuredClone(snapshot.lineSetups) as typeof career.lineSetups
+    }
+    if (snapshot.lineManagementMode === 'coach' || snapshot.lineManagementMode === 'fillGaps') {
+      career.lineManagementMode = snapshot.lineManagementMode
     }
     if (snapshot.coachMarket) {
       career.coachMarket = structuredClone(snapshot.coachMarket)

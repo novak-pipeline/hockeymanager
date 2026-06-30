@@ -137,6 +137,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'deleteLineSetup':
       must().deleteLineSetup(req.name)
       return { id: req.id, type: 'tactics', tactics: must().getTactics() }
+    case 'setLineManagementMode':
+      must().setLineManagementMode(req.mode)
+      return { id: req.id, type: 'tactics', tactics: must().getTactics() }
     case 'markNewsRead':
       must().markNewsRead(req.ids)
       return { id: req.id, type: 'ok' }

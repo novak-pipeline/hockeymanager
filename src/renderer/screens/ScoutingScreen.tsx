@@ -698,8 +698,12 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
   )
 
   const handleAssign = async (scoutId: string, target: ScoutTarget, focus: ScoutFocus, positionFilter: PosFilter, minPotentialStars: number): Promise<void> => {
-    const res = await client.assignScout(scoutId, target, focus, positionFilter, minPotentialStars)
-    if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
+    try {
+      const res = await client.assignScout(scoutId, target, focus, positionFilter, minPotentialStars)
+      if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
+    } catch (e) {
+      toast(`Scout assignment failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
   }
   const handleFire = async (scoutId: string): Promise<void> => {
     const res = await client.fireScout(scoutId)

@@ -278,16 +278,11 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         tag === 'BUTTON' || tag === 'A' ||
         t?.isContentEditable || t?.getAttribute('role') === 'button'
       ) return
-      // FM-style: Space can't advance the calendar while the inbox has unread
-      // mail. Instead it takes you to the inbox to clear it; the inbox's own
-      // handler then steps through the unreads. Only once the inbox is empty
-      // does Space sim the next day.
+      // Space sims the next day everywhere — EXCEPT on the inbox screen, where
+      // it first steps through the unread mail (the inbox's own handler does
+      // that and consumes the key). Once the inbox is all read, Space sims here.
       const unread = dashboard?.unreadNews ?? 0
-      if (unread > 0) {
-        if (nav.screen !== 'inbox') { e.preventDefault(); nav.navigate('inbox') }
-        // On the inbox screen the inbox handler advances through unreads.
-        return
-      }
+      if (nav.screen === 'inbox' && unread > 0) return // inbox handler advances messages
       e.preventDefault()
       actions.continueGame()
     }

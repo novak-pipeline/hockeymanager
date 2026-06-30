@@ -224,6 +224,7 @@ export type WorkerRequestBody =
   | { type: 'saveLineSetup'; name: string }
   | { type: 'applyLineSetup'; name: string }
   | { type: 'deleteLineSetup'; name: string }
+  | { type: 'setLineManagementMode'; mode: 'coach' | 'fillGaps' }
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'requestInterview'; playerId: string }

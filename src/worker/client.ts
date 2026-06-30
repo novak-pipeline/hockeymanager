@@ -217,6 +217,10 @@ export class SimClient {
     return this.send({ type: 'deleteLineSetup', name })
   }
 
+  setLineManagementMode(mode: 'coach' | 'fillGaps'): Promise<WorkerResponse> {
+    return this.send({ type: 'setLineManagementMode', mode })
+  }
+
   markNewsRead(ids: string[]): Promise<WorkerResponse> {
     return this.send({ type: 'markNewsRead', ids })
   }

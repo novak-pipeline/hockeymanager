@@ -668,6 +668,8 @@ export interface TacticsView {
   lines: LinesView
   /** Names of the GM's saved line-board presets (for the load dropdown). */
   lineSetups?: string[]
+  /** Current line-management mode for the user's club. */
+  lineManagementMode?: 'coach' | 'fillGaps'
   /**
    * Per-forward-line synergy (parallel to lines.forwards).
    * Index i corresponds to lines.forwards[i].
@@ -1693,6 +1695,8 @@ export interface CareerSnapshot {
   hireableStaff?: string[]
   /** Saved named line-board presets for the user club. Optional (back-compat). */
   lineSetups?: Array<{ name: string; lines: Lines }>
+  /** How the user's lines are managed each matchday. Optional (back-compat). */
+  lineManagementMode?: 'coach' | 'fillGaps'
   /**
    * Coach hiring market — available head coaches with profiles. Optional for
    * backward compat; regenerated deterministically when absent.

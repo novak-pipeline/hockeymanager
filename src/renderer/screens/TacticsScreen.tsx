@@ -850,6 +850,12 @@ export function TacticsScreen(): JSX.Element {
     toast(`Loaded “${name}”.`, 'success')
     refetch()
   }
+  async function handleSetLineMode(mode: 'coach' | 'fillGaps'): Promise<void> {
+    const res = await client.setLineManagementMode(mode)
+    if (res.type === 'error') { toast(res.message, 'error'); return }
+    toast(mode === 'coach' ? 'Coach will keep the best players dressed.' : 'Coach will only fill gaps — you control the lines.', 'success')
+    refetch()
+  }
 
   function setLines(updater: (l: LinesView) => LinesView): void {
     const base = lines ?? data?.lines
@@ -1089,6 +1095,17 @@ export function TacticsScreen(): JSX.Element {
                   </span>
                 </div>
                 <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  {/* How injuries/returns are handled each matchday. */}
+                  <select
+                    className="input"
+                    style={{ fontSize: 12, padding: '4px 8px', maxWidth: 200 }}
+                    value={data.lineManagementMode ?? 'coach'}
+                    onChange={(e) => { void handleSetLineMode(e.target.value as 'coach' | 'fillGaps') }}
+                    title="How your lineup is managed when you sim: the coach can auto-adjust to dress the best available, or only fill gaps and leave the rest as you set it"
+                  >
+                    <option value="coach">Coach adjusts lines</option>
+                    <option value="fillGaps">Coach fills gaps only</option>
+                  </select>
                   {/* Saved line setups: load from the dropdown, or save the current board. */}
                   <select
                     className="input"
