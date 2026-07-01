@@ -1468,7 +1468,7 @@ export class Career {
   /** Rng namespace for the coach hiring market. Unused elsewhere. */
   private static readonly COACH_MARKET_NS = 9262
   /** How many available coaches to surface in the hiring market. */
-  private static readonly COACH_MARKET_SIZE = 8
+  private static readonly COACH_MARKET_SIZE = 16
 
   /**
    * Generate a full TeamStaff for every NHL-tier team.
@@ -7828,7 +7828,7 @@ export class Career {
       competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
       nextOpponentId: this.nextOpponentTeamId(),
       maxScouts: this.maxScouts(),
-      scoutMarket: generateScoutCandidates(this.rngFor(7720), 6).filter(
+      scoutMarket: generateScoutCandidates(this.rngFor(7720), 20).filter(
         (c) => !this.scouting.assignments.some((s) => s.scoutId === c.id)
       ),
     })
@@ -7849,7 +7849,7 @@ export class Career {
     if (this.userScoutStaff().length >= this.maxScouts()) {
       return { ok: false, message: `Your scouting department is full (max ${this.maxScouts()} scouts).` }
     }
-    const cand = generateScoutCandidates(this.rngFor(7720), 6).find((c) => c.id === candidateId)
+    const cand = generateScoutCandidates(this.rngFor(7720), 20).find((c) => c.id === candidateId)
     if (!cand || this.userScoutStaff().some((s) => s.id === candidateId)) {
       return { ok: false, message: 'That scout is no longer available.' }
     }

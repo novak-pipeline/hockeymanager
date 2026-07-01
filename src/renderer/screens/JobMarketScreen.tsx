@@ -2,6 +2,7 @@
  * Job Market — hire staff from the open market: head coaches (with roster-fit
  * preview) and scouts. Firing the head coach installs an interim until you hire.
  */
+import { useState } from 'react'
 import type { ScoutingView, CoachMarketView } from '../../worker/protocol'
 import type { ScoutMarketRow } from '../../engine/career/views'
 import { fmtMoney } from '../components/format'
@@ -160,14 +161,30 @@ export function JobMarketScreen(): JSX.Element {
   }
 
   const full = !!data && data.scouts.length >= data.maxScouts
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const matchCoach = (c: CoachMarketView['entries'][number]): boolean =>
+    q === '' || c.name.toLowerCase().includes(q) || c.systemLabel.toLowerCase().includes(q) || (c.demeanor ?? '').toLowerCase().includes(q)
+  const matchScout = (c: ScoutMarketRow): boolean =>
+    q === '' || c.name.toLowerCase().includes(q) || (c.specialtyNation ?? 'generalist').toLowerCase().includes(q)
+  const filteredCoaches: CoachMarketView | null = coachMarket ? { ...coachMarket, entries: coachMarket.entries.filter(matchCoach) } : null
+  const filteredScouts = data ? data.scoutMarket.filter(matchScout) : []
 
   return (
     <section className="stack">
-      <ScreenHeader title="Job Market" />
+      <ScreenHeader title="Job Market">
+        <input
+          className="input"
+          placeholder="Search by name, system or nation…"
+          style={{ width: 260, fontSize: 12 }}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </ScreenHeader>
 
-      {coachMarket && (
+      {filteredCoaches && (
         <CoachMarketPanel
-          market={coachMarket}
+          market={filteredCoaches}
           busy={coachLoading}
           onFire={() => { void handleFireCoach() }}
           onHire={(id) => { void handleHireCoach(id) }}
@@ -178,7 +195,7 @@ export function JobMarketScreen(): JSX.Element {
       {data && (
         <Panel title={`Scouts for Hire (${data.scouts.length}/${data.maxScouts} employed)`}>
           {full && <p className="muted small" style={{ marginBottom: 8 }}>Your scouting department is full — release a scout (from the Scouting screen) to hire another.</p>}
-          <ScoutMarketTable rows={data.scoutMarket} full={full} onHire={(id) => { void handleHire(id) }} />
+          <ScoutMarketTable rows={filteredScouts} full={full} onHire={(id) => { void handleHire(id) }} />
         </Panel>
       )}
     </section>
