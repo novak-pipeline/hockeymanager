@@ -4325,6 +4325,7 @@ export class Career {
   private makeSelection(playerId: PlayerId): void {
     const os = this.offseason
     if (!os?.draft) throw new Error('no draft in progress')
+    this.draftRankCache = null // the board changes as prospects come off it
     const d = os.draft
     const idx = d.selections.length
     const pick = d.order[idx]
@@ -8441,7 +8442,15 @@ export class Career {
     return m
   }
 
+  /** Memo for the (expensive) draft board — it only changes as scouting
+   *  knowledge accrues during the daily sim, so it's stable within a day. Keyed
+   *  by year+day+phase+scout-count; assignment/UI round-trips reuse it instead of
+   *  rebuilding the whole 5000-prospect board (which was hanging the Scouting UI). */
+  private draftRankCache: { key: string; view: DraftRankingsView } | null = null
+
   getDraftRankings(): DraftRankingsView {
+    const cacheKey = `${this.year}:${this.currentDay}:${this.draftRankPhase()}:${this.userScoutStaff().length}:${this.interviews.size}`
+    if (this.draftRankCache && this.draftRankCache.key === cacheKey) return this.draftRankCache.view
     const phase = this.draftRankPhase()
     type Cand = { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }
     const { board, radarRows } = this.buildDraftBoard()
@@ -8552,7 +8561,9 @@ export class Career {
 
     const fullRankById: Record<string, number> = {}
     ordered.forEach((id, i) => { fullRankById[id] = i + 1 })
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards, fullRankById }
+    const view = { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards, fullRankById }
+    this.draftRankCache = { key: cacheKey, view }
+    return view
   }
 
   getStats(): StatsView {
