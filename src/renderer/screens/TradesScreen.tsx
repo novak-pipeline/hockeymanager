@@ -593,9 +593,6 @@ function ProposeTab(props: {
                 {partner.players.map((p) => {
                   const selected = theirPlayerIds.has(p.playerId)
                   const ntc = p.noTradeClause
-                  const ovrLabel = p.scouted && !p.scouted.exact
-                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
-                    : String(p.overall)
                   return (
                     <button
                       key={p.playerId}
@@ -626,7 +623,13 @@ function ProposeTab(props: {
                         </span>
                         {p.scouted && (
                           <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
-                            {ovrLabel}
+                            {p.scouted.exact
+                              ? <OverallStars value={p.overall} />
+                              : (
+                                <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
+                                  <OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} />
+                                </span>
+                              )}
                           </span>
                         )}
                       </span>
