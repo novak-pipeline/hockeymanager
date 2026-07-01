@@ -678,6 +678,291 @@ function ScoutPickerCell({ playerId, scouts, onPick }: {
   )
 }
 
+/* ── Recruitment Focus: focus-first deployment ─────────────────────────────── */
+
+/** A scouting objective. Scouts get assigned TO a focus (not the other way round). */
+interface FocusDef {
+  key: string
+  target: ScoutTarget
+  icon: string
+  label: string
+  desc: string
+  /** Nation the focus maps to (drives specialist fit), if any. */
+  nation?: string
+  /** Age band a scout inherits when assigned to this focus. */
+  band: ScoutFocus
+}
+
+/** Stable key so a scout's current target maps onto exactly one focus card. */
+function focusKey(t: ScoutTarget): string {
+  switch (t.kind) {
+    case 'nation': return `nation:${t.nation}`
+    case 'competition': return `comp:${t.competitionId}`
+    case 'team': return `team:${t.teamId}`
+    case 'division': return `div:${t.divisionId}`
+    case 'player': return `player:${t.playerId}`
+    default: return t.kind
+  }
+}
+
+/** How well a scout fits a focus — specialists shine on their nation, generalists
+ *  are better spent on the utility briefs. Higher = better fit. */
+function focusFit(scout: ScoutCardView, focus: FocusDef): number {
+  let s = scout.rating + (scout.judgment ?? 60) * 0.25
+  if (focus.nation) {
+    if (scout.specialtyNation === focus.nation) s += 55
+    else if (scout.specialtyNation) s -= 6
+  } else if (scout.specialtyNation) {
+    s -= 6
+  }
+  return s
+}
+
+/** Ranked scout picker — pick a well-fitting scout to add to a focus. */
+function AssignScoutPicker({ focus, candidates, onAssign }: {
+  focus: FocusDef
+  /** All scouts NOT already on this focus, with their current focus label. */
+  candidates: Array<{ scout: ScoutCardView; currentLabel: string }>
+  onAssign: (scoutId: string) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const ranked = [...candidates].sort((a, b) => focusFit(b.scout, focus) - focusFit(a.scout, focus))
+  const best = ranked.length > 0 ? focusFit(ranked[0]!.scout, focus) : 0
+  return (
+    <span style={{ position: 'relative' }}>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen((o) => !o)}>＋ Assign scout</button>
+      {open && (
+        <div style={{
+          position: 'absolute', left: 0, top: '100%', zIndex: 60, marginTop: 4,
+          background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6,
+          minWidth: 280, maxHeight: 340, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+        }}>
+          <div className="muted small" style={{ padding: '7px 12px 3px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Best fit for {focus.label}
+          </div>
+          {ranked.length === 0 && <div className="muted small" style={{ padding: '6px 12px 10px' }}>Every scout is already on this focus.</div>}
+          {ranked.map(({ scout, currentLabel }, i) => {
+            const isBest = i === 0 && focusFit(scout, focus) >= best && (focus.nation ? scout.specialtyNation === focus.nation : true)
+            return (
+              <button
+                key={scout.scoutId}
+                type="button"
+                className="btn-ghost"
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px' }}
+                onClick={() => { onAssign(scout.scoutId); setOpen(false) }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {scout.specialtyNation && <FlagIcon nationality={scout.specialtyNation} size={12} />}
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{scout.name}</span>
+                  <span className="muted small">({scout.rating})</span>
+                  {isBest && <span className="chip" style={{ fontSize: 9, background: 'rgba(52,211,153,0.18)', border: '1px solid var(--success)', color: 'var(--success)', marginLeft: 'auto' }}>Best fit</span>}
+                </div>
+                <div className="muted" style={{ fontSize: 11 }}>
+                  {scout.specialtyNation ? `${scout.specialtyNation} specialist` : 'Generalist'} · currently: {currentLabel}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </span>
+  )
+}
+
+const FOCUS_BAND_LABEL: Record<ScoutFocus, string> = { youth: 'U23', senior: 'Senior', all: 'All ages' }
+
+function FocusCard({ focus, assigned, candidates, onAssign }: {
+  focus: FocusDef
+  assigned: ScoutCardView[]
+  candidates: Array<{ scout: ScoutCardView; currentLabel: string }>
+  onAssign: (scoutId: string, focus: FocusDef) => void
+}): JSX.Element {
+  const coverage = assigned.reduce((s, c) => s + c.coverage, 0)
+  return (
+    <div className="panel" style={{ background: 'var(--bg2)', padding: 'var(--sp-3)' }}>
+      <div className="row-between" style={{ alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 16 }}>{focus.icon}</span>
+            {focus.nation && <FlagIcon nationality={focus.nation} size={14} />}
+            {focus.label}
+            <span className="chip" style={{ fontSize: 9 }}>{FOCUS_BAND_LABEL[focus.band]}</span>
+          </div>
+          <div className="muted small" style={{ marginTop: 2 }}>{focus.desc}</div>
+        </div>
+        <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+          <div style={{ fontWeight: 800, fontSize: 18, color: assigned.length ? 'var(--accent, #f5b301)' : 'var(--muted)' }}>{assigned.length}</div>
+          <div className="muted small">{assigned.length === 1 ? 'scout' : 'scouts'}{coverage > 0 ? ` · ~${coverage}` : ''}</div>
+        </div>
+      </div>
+
+      {assigned.length > 0 && (
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-2)' }}>
+          {assigned.map((s) => (
+            <span key={s.scoutId} className="chip" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {s.specialtyNation && <FlagIcon nationality={s.specialtyNation} size={11} />}
+              <ScoutLink scoutId={s.scoutId} name={s.name} />
+              <span className="muted">({s.rating})</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 'var(--sp-2)' }}>
+        <AssignScoutPicker focus={focus} candidates={candidates} onAssign={(id) => onAssign(id, focus)} />
+      </div>
+    </div>
+  )
+}
+
+function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
+  data: ScoutingView
+  onAssign: (scoutId: string, focus: FocusDef) => void
+  onAutoAssign: () => void
+  scoutCardProps: {
+    onAssign: (scoutId: string, target: ScoutTarget, focus: ScoutFocus, positionFilter: PosFilter, minPotentialStars: number) => void
+    onFire: (scoutId: string) => void
+  }
+}): JSX.Element {
+  const [advanced, setAdvanced] = useState(false)
+  const [extra, setExtra] = useState<FocusDef[]>([])
+  const [adding, setAdding] = useState(false)
+
+  // Canonical objectives — always offered even with zero scouts on them.
+  const canonical: FocusDef[] = [
+    ...(data.hasDraftClass ? [{ key: 'draftClass', target: { kind: 'draftClass' as const }, icon: '🏒', label: 'Draft Class', desc: "Scout this year's draft-eligible prospects", band: 'youth' as ScoutFocus }] : []),
+    { key: 'nextOpponent', target: { kind: 'nextOpponent' }, icon: '🎯', label: 'Next Opponent', desc: data.nextOpponentName ? `Advance-scout ${data.nextOpponentName}` : 'Advance-scout your next game', band: 'all' },
+    { key: 'ownProspects', target: { kind: 'ownProspects' }, icon: '🏠', label: 'Our Players & Prospects', desc: 'Keep internal reads current for lineup & development calls', band: 'all' },
+    { key: 'freeAgents', target: { kind: 'freeAgents' }, icon: '💼', label: 'Free Agents', desc: 'Track available UFAs/RFAs on the market', band: 'senior' },
+  ]
+
+  // Derive a focus for any scout on a nation/league/team not already listed.
+  const derived: FocusDef[] = []
+  for (const s of data.scouts) {
+    const key = focusKey(s.target)
+    if (canonical.some((f) => f.key === key) || extra.some((f) => f.key === key) || derived.some((f) => f.key === key)) continue
+    if (s.target.kind === 'nation' || s.target.kind === 'competition' || s.target.kind === 'team' || s.target.kind === 'division' || s.target.kind === 'player') {
+      derived.push({
+        key, target: s.target,
+        icon: s.target.kind === 'nation' ? '🌍' : s.target.kind === 'player' ? '👤' : '🏆',
+        label: s.assignmentLabel, desc: `Deep coverage — ${s.assignmentLabel}`,
+        ...(s.focusNation ? { nation: s.focusNation } : {}), band: s.focus,
+      })
+    }
+  }
+
+  const focuses = [...canonical, ...derived, ...extra]
+  const assignedFor = (f: FocusDef): ScoutCardView[] => data.scouts.filter((s) => focusKey(s.target) === f.key)
+  const candidatesFor = (f: FocusDef): Array<{ scout: ScoutCardView; currentLabel: string }> =>
+    data.scouts.filter((s) => focusKey(s.target) !== f.key).map((s) => ({ scout: s, currentLabel: s.assignmentLabel }))
+
+  // "New focus" — add a nation or league objective, then assign scouts to it.
+  const addFocus = (target: ScoutTarget, nation: string | undefined, label: string): void => {
+    const key = focusKey(target)
+    if (!focuses.some((f) => f.key === key)) {
+      setExtra((prev) => [...prev, { key, target, icon: target.kind === 'nation' ? '🌍' : '🏆', label, desc: `Deep coverage — ${label}`, ...(nation ? { nation } : {}), band: 'all' }])
+    }
+    setAdding(false)
+  }
+
+  const idle = data.scouts.length - data.activeScouts
+
+  return (
+    <div className="stack">
+      <Panel title={`Recruitment Focus — ${data.scouts.length} scout${data.scouts.length === 1 ? '' : 's'} (${data.maxScouts} cap)`}>
+        <div className="row-between" style={{ marginTop: -4, marginBottom: 10, gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+          <p className="muted small" style={{ margin: 0, flex: 1 }}>
+            Pick an objective and drop well-fitting scouts on it — no need to micromanage each one.
+            The <b>Chief Scout</b> can deploy the whole department for you.{idle > 0 ? ` ${idle} scout${idle === 1 ? '' : 's'} idle.` : ''} Hire more under Staff → Job Market.
+          </p>
+          <button
+            className="btn btn-sm"
+            style={{ whiteSpace: 'nowrap' }}
+            onClick={onAutoAssign}
+            title="Chief Scout auto-assigns every scout: specialists to their region, the rest across the draft class, free agents, next opponent and your own prospects"
+          >
+            ⚙ Chief Scout: auto-assign all
+          </button>
+        </div>
+
+        <div className="grid grid-2" style={{ gap: 'var(--sp-3)' }}>
+          {focuses.map((f) => (
+            <FocusCard key={f.key} focus={f} assigned={assignedFor(f)} candidates={candidatesFor(f)} onAssign={onAssign} />
+          ))}
+        </div>
+
+        {/* New focus: target a specific nation / league */}
+        <div style={{ marginTop: 'var(--sp-3)', paddingTop: 'var(--sp-3)', borderTop: '1px solid var(--line)' }}>
+          {adding ? (
+            <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="small muted">Target a region or league:</span>
+              <div style={{ minWidth: 240 }}>
+                <NewFocusDropdown data={data} onPick={addFocus} />
+              </div>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdding(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdding(true)}>＋ New focus (region / league)</button>
+          )}
+        </div>
+      </Panel>
+
+      {/* Advanced: per-scout briefs (position/min-star/age fine-tuning) */}
+      <Panel title="Advanced — per-scout briefs">
+        <div className="row-between" style={{ marginTop: -4, marginBottom: advanced ? 10 : 0, alignItems: 'center' }}>
+          <p className="muted small" style={{ margin: 0 }}>Fine-tune an individual scout's age band, position brief and minimum potential to flag.</p>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAdvanced((a) => !a)}>{advanced ? 'Hide' : 'Show'}</button>
+        </div>
+        {advanced && (
+          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+            {data.scouts.map((scout) => (
+              <ScoutCard
+                key={scout.scoutId}
+                scout={scout}
+                view={data}
+                canFire={data.scouts.length > 1}
+                onAssign={(id, target, focus, pos, minPot) => scoutCardProps.onAssign(id, target, focus, pos, minPot)}
+                onFire={(id) => scoutCardProps.onFire(id)}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  )
+}
+
+/** Compact region/league selector for creating a new focus. */
+function NewFocusDropdown({ data, onPick }: {
+  data: ScoutingView
+  onPick: (target: ScoutTarget, nation: string | undefined, label: string) => void
+}): JSX.Element {
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const match = (label: string): boolean => q === '' || label.toLowerCase().includes(q)
+  const nations = data.nations.filter((n) => match(n.label))
+  const competitions = data.competitions.filter((c) => match(c.label))
+  return (
+    <div style={{ position: 'relative', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, maxHeight: 300, overflowY: 'auto', minWidth: 240 }}>
+      <input
+        autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter regions & leagues…"
+        style={{ position: 'sticky', top: 0, width: '100%', boxSizing: 'border-box', padding: '7px 10px', background: 'var(--bg0)', border: 'none', borderBottom: '1px solid var(--line)', color: 'var(--text)', fontSize: 12 }}
+      />
+      {nations.length > 0 && <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>REGIONS</div>}
+      {nations.map((n) => (
+        <button key={`n-${n.id}`} type="button" className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
+          onClick={() => onPick({ kind: 'nation', nation: n.id }, n.id, n.label)}>{n.label}</button>
+      ))}
+      {competitions.length > 0 && <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>LEAGUES</div>}
+      {competitions.map((c) => (
+        <button key={`c-${c.id}`} type="button" className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 13 }}
+          onClick={() => onPick({ kind: 'competition', competitionId: c.id }, undefined, c.label)}>{c.label}</button>
+      ))}
+      {nations.length + competitions.length === 0 && <div className="muted small" style={{ padding: '8px 12px' }}>No match.</div>}
+    </div>
+  )
+}
+
 /* ── main screen ───────────────────────────────────────────────────────────── */
 
 export type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage'
@@ -737,31 +1022,15 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
       )}
 
       {data && tab === 'focus' && (
-        <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
-          <div className="row-between" style={{ marginTop: -4, marginBottom: 10, gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
-            <p className="muted small" style={{ margin: 0, flex: 1 }}>Let the <b>Chief Scout</b> deploy the whole department by fit, or hit <b>Edit</b> on any scout to set his own brief (incl. <b>Our players &amp; prospects</b>). Hire more under Staff → Job Market.</p>
-            <button
-              className="btn btn-sm"
-              style={{ whiteSpace: 'nowrap' }}
-              onClick={() => { void handleAutoAssign() }}
-              title="Chief Scout auto-assigns every scout: specialists to their region, the rest across the draft class, free agents, next opponent and your own prospects"
-            >
-              ⚙ Chief Scout: auto-assign all
-            </button>
-          </div>
-          <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-            {data.scouts.map((scout) => (
-              <ScoutCard
-                key={scout.scoutId}
-                scout={scout}
-                view={data}
-                canFire={data.scouts.length > 1}
-                onAssign={(id, target, focus, pos, minPot) => { void handleAssign(id, target, focus, pos, minPot) }}
-                onFire={(id) => { void handleFire(id) }}
-              />
-            ))}
-          </div>
-        </Panel>
+        <RecruitmentFocusTab
+          data={data}
+          onAssign={(scoutId, focus) => { void handleAssign(scoutId, focus.target, focus.band, 'any', 0) }}
+          onAutoAssign={() => { void handleAutoAssign() }}
+          scoutCardProps={{
+            onAssign: (id, target, focus, pos, minPot) => { void handleAssign(id, target, focus, pos, minPot) },
+            onFire: (id) => { void handleFire(id) },
+          }}
+        />
       )}
 
       {data && tab === 'coverage' && (
