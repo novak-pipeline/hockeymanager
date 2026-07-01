@@ -14,6 +14,10 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts'],
-    environment: 'node'
+    environment: 'node',
+    // Fixed-seed full/quick-sim and full-season tests run several seconds each;
+    // under a loaded serial run the 5s default caused false timeouts.
+    testTimeout: 30000,
+    hookTimeout: 30000
   }
 })
