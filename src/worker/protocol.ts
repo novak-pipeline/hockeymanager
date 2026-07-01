@@ -289,6 +289,7 @@ export type WorkerRequestBody =
   | { type: 'getScouting' }
   | { type: 'getScoutProfile'; scoutId: string }
   | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus; positionFilter?: 'any' | 'F' | 'D' | 'G'; minPotentialStars?: number }
+  | { type: 'autoAssignScouts' }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
   /* ── story layer ── */

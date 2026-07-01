@@ -7764,6 +7764,35 @@ export class Career {
     return comp?.abbrev ?? 'NHL'
   }
 
+  /** Chief Scout auto-assigns the whole department by fit, so the GM doesn't
+   *  micromanage every scout: nation specialists go to their region; generalists
+   *  cover the utility briefs (next opponent, free agents, our prospects) with the
+   *  rest on the draft class. Deterministic. */
+  autoAssignScouts(): { ok: true; count: number } {
+    this.syncScoutRoster()
+    const scouts = [...this.scouting.assignments].sort((a, b) => (a.scoutId < b.scoutId ? -1 : 1))
+    const generalists: typeof scouts = []
+    for (const s of scouts) {
+      if (s.specialtyNation) {
+        assignScout(this.scouting, s.scoutId, { kind: 'nation', nation: s.specialtyNation }, 'all')
+      } else {
+        generalists.push(s)
+      }
+    }
+    // Utility briefs first (one each), then the rest scout the draft class.
+    const utility: Array<{ target: ScoutTarget; focus: ScoutFocus }> = [
+      { target: { kind: 'nextOpponent' }, focus: 'all' },
+      { target: { kind: 'freeAgents' }, focus: 'senior' },
+      { target: { kind: 'ownProspects' }, focus: 'all' },
+      { target: { kind: 'ownProspects' }, focus: 'all' },
+    ]
+    generalists.forEach((s, i) => {
+      const brief = i < utility.length ? utility[i]! : { target: { kind: 'draftClass' as const }, focus: 'youth' as ScoutFocus }
+      assignScout(this.scouting, s.scoutId, brief.target, brief.focus)
+    })
+    return { ok: true, count: scouts.length }
+  }
+
   /** Max scouts the club will carry (soft cap for the Job Market). */
   private maxScouts(): number {
     return Math.max(12, this.userScoutStaff().length)

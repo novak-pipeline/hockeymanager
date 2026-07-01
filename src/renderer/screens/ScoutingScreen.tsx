@@ -705,6 +705,14 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
       toast(`Scout assignment failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
     }
   }
+  const handleAutoAssign = async (): Promise<void> => {
+    try {
+      const res = await client.autoAssignScouts()
+      if (res.type === 'error') { toast(res.message, 'error') } else { toast('Chief Scout deployed the department.', 'success'); bumpRefresh(); refetch() }
+    } catch (e) {
+      toast(`Auto-assign failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
+    }
+  }
   const handleFire = async (scoutId: string): Promise<void> => {
     const res = await client.fireScout(scoutId)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
@@ -730,7 +738,17 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
 
       {data && tab === 'focus' && (
         <Panel title={`Recruitment Focus — Scouting Department (${data.scouts.length}/${data.maxScouts})`}>
-          <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>Each scout shows his current brief at a glance — hit <b>Edit</b> to retarget him (incl. <b>Our players &amp; prospects</b> for in-house reads). Hire more under Staff → Job Market.</p>
+          <div className="row-between" style={{ marginTop: -4, marginBottom: 10, gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+            <p className="muted small" style={{ margin: 0, flex: 1 }}>Let the <b>Chief Scout</b> deploy the whole department by fit, or hit <b>Edit</b> on any scout to set his own brief (incl. <b>Our players &amp; prospects</b>). Hire more under Staff → Job Market.</p>
+            <button
+              className="btn btn-sm"
+              style={{ whiteSpace: 'nowrap' }}
+              onClick={() => { void handleAutoAssign() }}
+              title="Chief Scout auto-assigns every scout: specialists to their region, the rest across the draft class, free agents, next opponent and your own prospects"
+            >
+              ⚙ Chief Scout: auto-assign all
+            </button>
+          </div>
           <div className="stack" style={{ gap: 'var(--sp-2)' }}>
             {data.scouts.map((scout) => (
               <ScoutCard

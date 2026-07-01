@@ -319,6 +319,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'autoAssignScouts':
+      must().autoAssignScouts()
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     case 'hireScout': {
       const res = must().hireScoutFromMarket(req.candidateId)
       if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not hire scout' }

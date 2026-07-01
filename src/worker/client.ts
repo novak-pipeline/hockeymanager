@@ -453,6 +453,10 @@ export class SimClient {
     })
   }
 
+  autoAssignScouts(): Promise<WorkerResponse> {
+    return this.send({ type: 'autoAssignScouts' })
+  }
+
   hireScout(candidateId: string): Promise<WorkerResponse> {
     return this.send({ type: 'hireScout', candidateId })
   }
