@@ -377,12 +377,19 @@ export function DashboardScreen(): JSX.Element {
           <Panel title="Next game">
             {d.nextGame ? (
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-                <div className="scoreline" style={{ fontSize: 18 }}>
-                  {d.nextGame.home ? 'vs' : '@'} {d.nextGame.opponentName}
+                <div className="scoreline" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="muted" style={{ fontSize: 14 }}>{d.nextGame.home ? 'vs' : '@'}</span>
+                  <TeamCrest
+                    className="crest"
+                    teamId={d.nextGame.opponentTeamId}
+                    abbr={d.nextGame.opponentAbbr.slice(0, 2)}
+                    style={{ width: 24, height: 24, fontSize: 10, flexShrink: 0 }}
+                  />
+                  <TeamLink teamId={d.nextGame.opponentTeamId} name={d.nextGame.opponentName} />
                   {d.nextGame.rivalryLabel && (
                     <span
                       className="chip chip-danger"
-                      style={{ marginLeft: 10, fontSize: 12, verticalAlign: 'middle' }}
+                      style={{ marginLeft: 6, fontSize: 12, verticalAlign: 'middle' }}
                     >
                       {d.nextGame.rivalryLabel}
                     </span>
