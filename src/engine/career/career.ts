@@ -4508,6 +4508,9 @@ export class Career {
             `Clubs locked up their expiring talent ahead of free agency.`
           )
         }
+        // Season Rhythm M3: development camp opens right after the draft — the
+        // coaches' first live look at the class, delivered as a report.
+        this.pushDevCampReport()
         os.stage = 'resign'
         return true
       }
@@ -5404,6 +5407,68 @@ export class Career {
     for (const nid of touchedNhl) { const t = this.data.teams.get(nid); if (t) repairLines(t, this.data.players) }
   }
 
+  /** Season Rhythm M3: the July development-camp report — the staff's first
+   *  live look at the draft class and the org's young prospects. Fog-aware
+   *  prose (no numbers), deterministic reads, and a small scouting-knowledge
+   *  bump: watching your own kids skate for a week genuinely teaches you. */
+  private pushDevCampReport(): void {
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const coachName = staff.headCoach?.name ?? 'The coaching staff'
+    // The org's young guns: this year's draftees first, then rights-held and
+    // farm prospects, U23 only, best potential first.
+    const draftedIds = new Set(
+      this.chronicle.events
+        .filter((e) => e.kind === 'draftPick' && e.year === this.year && e.teamIds[0] === (this.userTeamId as string))
+        .flatMap((e) => e.playerIds)
+    )
+    const affiliate = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const orgYoung = new Map<string, Player>()
+    for (const [pid, p] of this.data.players) {
+      const id = pid as string
+      if (p.age > 23) continue
+      const inOrg =
+        draftedIds.has(id) ||
+        (p.rightsTeamId as string | undefined) === (this.userTeamId as string) ||
+        this.userTeam.roster.includes(pid) ||
+        (affiliate?.roster.includes(pid) ?? false)
+      if (inOrg) orgYoung.set(id, p)
+    }
+    if (orgYoung.size === 0) return
+    const invitees = [...orgYoung.values()]
+      .sort((a, b) => {
+        const da = draftedIds.has(a.id as string) ? 1 : 0
+        const db = draftedIds.has(b.id as string) ? 1 : 0
+        return db - da || overall(b.potential, b.position) - overall(a.potential, a.position)
+      })
+      .slice(0, 8)
+
+    const lines: string[] = []
+    for (const p of invitees) {
+      // Deterministic camp read; watching him closes a sliver of the fog.
+      const z = this.rngFor(9501, this.year, Career.pidNum(p.id as string)).float(-1, 1)
+      const drafted = draftedIds.has(p.id as string)
+      const tag = drafted ? ' (this year\'s pick)' : ''
+      if (z > 0.5) {
+        lines.push(`${p.name}${tag} — turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}; the staff want him back for main camp.`)
+      } else if (z < -0.5) {
+        lines.push(`${p.name}${tag} — a step behind the group. Nothing alarming at his age, but the summer homework list is long.`)
+      } else {
+        lines.push(`${p.name}${tag} — solid, unspectacular week. Exactly where a kid his age should be.`)
+      }
+      // Knowledge bump: you watched him for a week.
+      const entry = this.scouting.knowledge.find(([id]) => id === (p.id as string))
+      if (entry) entry[1] = Math.min(100, entry[1] + 4)
+      else this.scouting.knowledge.push([p.id as string, 8])
+    }
+    this.pushNews(
+      'scouting',
+      `Development camp report — ${coachName}`,
+      `Development camp wrapped this week: ${invitees.length} of the organisation's young players on the ice, ` +
+      `this year's draft class included. The staff's reads:\n\n• ${lines.join('\n• ')}`,
+      { teamId: this.userTeamId as string }
+    )
+  }
+
   private reassignFarmSystems(): void {
     // Waiver-required veterans aren't dumped to the farm over a small ability dip.
     const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
@@ -5422,17 +5487,32 @@ export class Career {
       if (split.promoted.length === 0 && split.demoted.length === 0) continue
 
       if (team.id === this.userTeamId) {
-        // Suggest, don't apply — surface the staff's recommendation to the GM.
-        const name = (id: PlayerId): string => this.data.players.get(id)?.name ?? 'a player'
-        const ups = split.promoted.slice(0, 4).map(name)
-        const downs = split.demoted.slice(0, 4).map(name)
-        const parts: string[] = []
-        if (ups.length) parts.push(`Call up: ${ups.join(', ')}`)
-        if (downs.length) parts.push(`Send down: ${downs.join(', ')}`)
+        // Season Rhythm M3: suggest, don't apply — but frame it as what it IS:
+        // training camp's position battles, with the waiver trap flagged in
+        // red. The best 23 is not always the safest 23.
+        const staff = this.getTeamStaff(this.userTeamId as string)
+        const coachName = staff.headCoach?.name ?? 'The coaching staff'
+        const battleLines: string[] = []
+        for (const id of split.promoted.slice(0, 5)) {
+          const p = this.data.players.get(id)
+          if (!p) continue
+          battleLines.push(`▲ ${p.name} (${p.position}) won his camp battle — he's making it impossible to send him down. Recommend he starts in the NHL.`)
+        }
+        for (const id of split.demoted.slice(0, 5)) {
+          const p = this.data.players.get(id)
+          if (!p) continue
+          if (this.requiresWaivers(p)) {
+            battleLines.push(`▼ ${p.name} (${p.position}) lost the numbers game — but ⚠ HE NEEDS WAIVERS to go down. Send him to the farm and any club can claim him for nothing. The best 23 isn't always the safest 23.`)
+          } else {
+            battleLines.push(`▼ ${p.name} (${p.position}) lost the numbers game. Waiver-exempt — he can develop in the AHL and be recalled any time.`)
+          }
+        }
         this.pushNews(
           'contract',
-          'Staff roster recommendation',
-          `Your hockey staff suggest some farm moves based on how the roster developed. ${parts.join('. ')}. (Manage them yourself on the squad and farm screens.)`
+          `Training camp report — ${coachName} on the battles`,
+          `Camp is over and the battles have verdicts. The staff's recommendations:\n\n${battleLines.join('\n')}\n\n` +
+          `(These are recommendations — make the calls yourself on the squad and farm screens.)`,
+          { teamId: this.userTeamId as string }
         )
         continue
       }
