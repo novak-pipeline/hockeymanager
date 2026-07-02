@@ -39,32 +39,6 @@ function resultClass(won: boolean, decidedBy: string): string {
   return 'l'
 }
 
-const DOW = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
-
-/** Build a month calendar array (6 weeks x 7 days) for a given ISO month '2026-10'. */
-function buildCalendar(monthKey: string): Array<{ date: string | null; day: number }> {
-  const [yearStr, monStr] = monthKey.split('-')
-  const year = Number(yearStr)
-  const mon = Number(monStr)
-  const firstDow = new Date(Date.UTC(year, mon - 1, 1)).getUTCDay()
-  const daysInMonth = new Date(Date.UTC(year, mon, 0)).getUTCDate()
-  const cells: Array<{ date: string | null; day: number }> = []
-  // leading blanks
-  for (let i = 0; i < firstDow; i++) cells.push({ date: null, day: -1 })
-  for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({
-      date: `${yearStr}-${monStr.padStart(2, '0')}-${String(d).padStart(2, '0')}`,
-      day: d,
-    })
-  }
-  return cells
-}
-
-/** '2026-10-12' → '2026-10' */
-function monthOf(iso: string): string {
-  return iso.slice(0, 7)
-}
-
 /* ═══════════════════════════════════════════════════════════════
    Main screen
    ═══════════════════════════════════════════════════════════════ */
@@ -190,7 +164,6 @@ export function DashboardScreen(): JSX.Element {
   }
 
   const d = data
-  const s = d.userTeam.standing
   const shown = (key: string): boolean => !hiddenPanels.has(key)
 
   return (
@@ -259,6 +232,9 @@ export function DashboardScreen(): JSX.Element {
         </button>
       )}
 
+      {/* ── Status strip: the season at a glance, one dense row ── */}
+      <StatusStrip d={d} onBoard={() => nav.navigate('board')} onMedical={() => nav.navigate('teamMedical')} />
+
       {/* ── 3-col card grid ── */}
       <div className="dash-grid">
 
@@ -309,31 +285,23 @@ export function DashboardScreen(): JSX.Element {
             )}
           </Panel>
 
-          {/* Salary cap */}
-          <Panel title="Salary cap">
-            <CapMeter capUsed={d.capUsed} salaryCap={d.salaryCap} />
-          </Panel>
-
-          {/* Injuries */}
-          {shown('injuries') && (
+          {/* Injuries — only earns a panel when someone is actually hurt
+              (health status lives in the status strip otherwise) */}
+          {shown('injuries') && d.injuries.length > 0 && (
           <Panel title="Injuries">
-            {d.injuries.length === 0 ? (
-              <span className="muted small">Fully healthy.</span>
-            ) : (
-              <div className="list">
-                {d.injuries.map((p) => (
-                  <div key={p.playerId} className="row-between small">
-                    <span className="row">
-                      <span className="muted">{p.position}</span>
-                      <PlayerLink playerId={p.playerId} name={p.name} />
-                    </span>
-                    <span className="chip chip-danger">
-                      {p.injury.description} · {p.injury.gamesRemaining}g
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="list">
+              {d.injuries.map((p) => (
+                <div key={p.playerId} className="row-between small">
+                  <span className="row">
+                    <span className="muted">{p.position}</span>
+                    <PlayerLink playerId={p.playerId} name={p.name} />
+                  </span>
+                  <span className="chip chip-danger">
+                    {p.injury.description} · {p.injury.gamesRemaining}g
+                  </span>
+                </div>
+              ))}
+            </div>
           </Panel>
           )}
 
@@ -341,39 +309,6 @@ export function DashboardScreen(): JSX.Element {
 
         {/* ═══ CENTER COLUMN ═══ */}
         <div className="stack">
-
-          {/* Season hero stats */}
-          <Panel title="Season">
-            <div className="row" style={{ gap: 'var(--sp-5)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              <div className="stat">
-                <div className="stat-value">
-                  {s.wins}–{s.losses}–{s.overtimeLosses}
-                </div>
-                <div className="stat-label">{s.points} pts · #{d.userTeam.rank} overall</div>
-              </div>
-              <div className="stat">
-                <div className="stat-value">#{d.userTeam.conferenceRank}</div>
-                <div className="stat-label">Conference</div>
-              </div>
-              <div>
-                <div className="chip chip-violet" style={{ marginBottom: 6 }}>
-                  Streak {s.streak}
-                </div>
-                <LastFive value={s.lastFive} />
-              </div>
-            </div>
-            <div className="muted small" style={{ marginTop: 'var(--sp-3)' }}>
-              {s.goalsFor} GF · {s.goalsAgainst} GA
-            </div>
-            {/* Media expectation chip */}
-            {d.predictedRank !== undefined && (
-              <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
-            )}
-            {/* Board confidence chip */}
-            {d.board && (
-              <BoardConfidenceChip board={d.board} onNavigate={() => nav.navigate('board')} />
-            )}
-          </Panel>
 
           {/* Storylines ticker strip */}
           {shown('storylines') && d.topArcs && d.topArcs.length > 0 && (
@@ -450,12 +385,13 @@ export function DashboardScreen(): JSX.Element {
             )}
           </Panel>
 
-          {/* Calendar */}
+          {/* The next two weeks — compact strip, not a month of empty cells */}
           {schedule && d.date && (
-            <CalendarCard
+            <FortnightStrip
               entries={schedule.entries}
               todayDate={d.date}
-              nextGameDate={d.nextGame?.date ?? null}
+              onOpenBoxScore={(gameId) => nav.navigate('matchcenter', { gameId })}
+              onOpenCalendar={() => nav.navigate('calendar')}
             />
           )}
 
@@ -763,60 +699,83 @@ function FixturesCard(props: {
   )
 }
 
-/** Month calendar grid with game-day markers. */
-function CalendarCard(props: {
+/** The next fortnight as one compact strip: opponents, H/A, results — every
+ *  cell earns its pixels (the month grid lives on the Calendar screen). */
+function FortnightStrip(props: {
   entries: ScheduleEntryView[]
   todayDate: string
-  nextGameDate: string | null
+  onOpenBoxScore: (gameId: string) => void
+  onOpenCalendar: () => void
 }): JSX.Element {
-  const { entries, todayDate, nextGameDate } = props
-  const monthKey = monthOf(todayDate)
-  const cells = buildCalendar(monthKey)
+  const { entries, todayDate } = props
 
-  const gameSet = new Map<string, { home: boolean; played: boolean }>()
-  for (const e of entries) {
-    if (monthOf(e.date) === monthKey) {
-      gameSet.set(e.date, { home: e.home, played: e.result !== null })
-    }
+  // 14 day cells starting today.
+  const start = new Date(todayDate + 'T00:00:00Z')
+  const byDate = new Map<string, ScheduleEntryView>()
+  for (const e of entries) byDate.set(e.date, e)
+  const days: Array<{ iso: string; dayNum: number; dow: string; game: ScheduleEntryView | null }> = []
+  for (let i = 0; i < 14; i++) {
+    const dt = new Date(start)
+    dt.setUTCDate(start.getUTCDate() + i)
+    const iso = dt.toISOString().slice(0, 10)
+    days.push({
+      iso,
+      dayNum: dt.getUTCDate(),
+      dow: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][dt.getUTCDay()]!,
+      game: byDate.get(iso) ?? null,
+    })
   }
 
   return (
-    <Panel title={new Date(todayDate + 'T00:00:00').toLocaleDateString('en', { month: 'long', year: 'numeric' })}>
-      <div className="cal-grid">
-        {DOW.map((d) => (
-          <div key={d} className="cal-dow">{d}</div>
-        ))}
-        {cells.map((cell, idx) => {
-          if (!cell.date) {
-            return <div key={`blank-${idx}`} className="cal-day" />
-          }
-          const game = gameSet.get(cell.date)
-          const isToday = cell.date === todayDate
-          const isNext = cell.date === nextGameDate
-          let cls = 'cal-day'
-          if (isNext) cls += ' next-game'
-          else if (isToday) cls += ' today'
-          else if (game) cls += ' has-game'
-
+    <Panel title="Next two weeks">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14, 1fr)', gap: 3 }}>
+        {days.map((cell, i) => {
+          const g = cell.game
+          const played = g?.result != null
+          const won = played ? g!.result!.won : false
+          const ot = played && g!.result!.decidedBy !== 'regulation' && !won
+          const userGoals = played ? (g!.home ? g!.result!.homeGoals : g!.result!.awayGoals) : 0
+          const oppGoals = played ? (g!.home ? g!.result!.awayGoals : g!.result!.homeGoals) : 0
+          const clickable = played
           return (
-            <div key={cell.date} className={cls}>
-              {cell.day}
-              {game && (
-                <div
-                  className="cal-day-dot"
-                  style={{
-                    background: game.played
-                      ? 'var(--muted)'
-                      : game.home
-                      ? 'var(--violet)'
-                      : 'var(--cyan)',
-                  }}
-                />
+            <div
+              key={cell.iso}
+              onClick={clickable ? () => props.onOpenBoxScore(g!.gameId) : undefined}
+              title={g ? `${g.home ? 'vs' : '@'} ${g.opponentName}${played ? ` — ${userGoals}–${oppGoals}` : ''}` : undefined}
+              style={{
+                borderRadius: 4,
+                padding: '4px 2px',
+                textAlign: 'center',
+                minHeight: 52,
+                border: i === 0 ? '1px solid var(--violet-h)' : '1px solid var(--line)',
+                background: g
+                  ? played
+                    ? won ? 'rgba(46,160,67,0.12)' : ot ? 'rgba(214,160,86,0.12)' : 'rgba(224,85,85,0.10)'
+                    : 'rgba(var(--accent-rgb),0.10)'
+                  : 'var(--bg0)',
+                cursor: clickable ? 'pointer' : 'default',
+              }}
+            >
+              <div style={{ fontSize: 9, color: 'var(--muted)' }}>{cell.dow} {cell.dayNum}</div>
+              {g ? (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>
+                    {g.home ? '' : '@'}{g.opponentAbbr}
+                  </div>
+                  <div style={{ fontSize: 10, marginTop: 1, color: played ? (won ? 'var(--green, #2ea043)' : ot ? 'var(--amber, #d6a056)' : 'var(--red, #e05555)') : 'var(--muted)' }}>
+                    {played ? `${won ? 'W' : ot ? 'OT' : 'L'} ${userGoals}–${oppGoals}` : g.home ? 'home' : 'away'}
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 10, color: 'var(--line)', marginTop: 8 }}>·</div>
               )}
             </div>
           )
         })}
       </div>
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={props.onOpenCalendar}>
+        Full calendar →
+      </button>
     </Panel>
   )
 }
@@ -922,11 +881,9 @@ function ExpectationChip(props: { predictedRank: number; currentRank: number }):
     delta > 0 ? 'chip chip-success' : delta < 0 ? 'chip chip-danger' : 'chip chip-violet'
   const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '●'
   return (
-    <div style={{ marginTop: 'var(--sp-3)' }}>
-      <span className={chipClass}>
-        {arrow} Picked {predictedRank}{getOrdinalSuffix(predictedRank)} — currently {currentRank}{getOrdinalSuffix(currentRank)}
-      </span>
-    </div>
+    <span className={chipClass}>
+      {arrow} Picked {predictedRank}{getOrdinalSuffix(predictedRank)} — currently {currentRank}{getOrdinalSuffix(currentRank)}
+    </span>
   )
 }
 
@@ -990,37 +947,87 @@ function BoardConfidenceChip(props: {
         ? 'chip chip-warn'
         : 'chip chip-danger'
   return (
-    <div style={{ marginTop: 'var(--sp-2)' }}>
-      <button
-        type="button"
-        className={chipClass}
-        style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-        onClick={props.onNavigate}
-        title="View owner / board expectations"
-      >
-        Board: {board.confidenceLabel} · {board.statusLabel}
-      </button>
-    </div>
+    <button
+      type="button"
+      className={chipClass}
+      style={{ cursor: 'pointer', border: 'none' }}
+      onClick={props.onNavigate}
+      title="View owner / board expectations"
+    >
+      Board: {board.confidenceLabel} · {board.statusLabel}
+    </button>
   )
 }
 
-function CapMeter(props: { capUsed: number; salaryCap: number }): JSX.Element {
-  const pct = props.salaryCap > 0 ? (props.capUsed / props.salaryCap) * 100 : 0
-  const fillClass = pct > 100 ? 'meter-fill over' : pct > 92 ? 'meter-fill warn' : 'meter-fill'
+/** The season at a glance: record, streak, cap, expectation, board mood, and
+ *  squad health — one dense row instead of three half-empty panels. */
+function StatusStrip(props: {
+  d: DashboardView
+  onBoard: () => void
+  onMedical: () => void
+}): JSX.Element {
+  const { d } = props
+  const s = d.userTeam.standing
+  const capFree = d.salaryCap - d.capUsed
+  const capPct = d.salaryCap > 0 ? (d.capUsed / d.salaryCap) * 100 : 0
+  const capColor = capPct > 100 ? 'var(--red, #e05555)' : capPct > 92 ? 'var(--amber, #d6a056)' : 'var(--green, #2ea043)'
+  const divider = <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)' }} />
+
   return (
-    <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-      <div className="row-between small">
-        <span>
-          <strong>{fmtMoney(props.capUsed)}</strong>{' '}
-          <span className="muted">used</span>
-        </span>
-        <span className="muted">cap {fmtMoney(props.salaryCap)}</span>
+    <div
+      className="panel"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 'var(--sp-4)',
+        padding: '10px 16px',
+      }}
+    >
+      {/* record + rank */}
+      <div>
+        <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>
+          {s.wins}–{s.losses}–{s.overtimeLosses}
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)', marginLeft: 8 }}>{s.points} pts</span>
+        </div>
+        <div className="muted" style={{ fontSize: 11 }}>
+          #{d.userTeam.rank} overall · #{d.userTeam.conferenceRank} conference · {s.goalsFor} GF / {s.goalsAgainst} GA
+        </div>
       </div>
-      <div className="meter">
-        <div className={fillClass} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
+      {divider}
+      {/* form */}
+      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+        <span className="chip chip-violet" style={{ fontSize: 11 }}>Streak {s.streak}</span>
+        <LastFive value={s.lastFive} />
       </div>
-      <div className="muted small">
-        {fmtMoney(props.salaryCap - props.capUsed)} remaining
+      {divider}
+      {/* cap */}
+      <div title={`${fmtMoney(d.capUsed)} used of ${fmtMoney(d.salaryCap)}`}>
+        <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Cap space</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: capColor }}>{fmtMoney(capFree)}</div>
+        <div className="meter" style={{ width: 110, height: 4, marginTop: 3 }}>
+          <div
+            className={capPct > 100 ? 'meter-fill over' : capPct > 92 ? 'meter-fill warn' : 'meter-fill'}
+            style={{ width: `${Math.min(100, Math.max(0, capPct))}%` }}
+          />
+        </div>
+      </div>
+      {divider}
+      {/* the verdict chips */}
+      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+        {d.predictedRank !== undefined && (
+          <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
+        )}
+        {d.board && <BoardConfidenceChip board={d.board} onNavigate={props.onBoard} />}
+        <button
+          type="button"
+          className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`}
+          style={{ cursor: 'pointer', border: 'none' }}
+          onClick={props.onMedical}
+          title="Open the Medical Center"
+        >
+          {d.injuries.length === 0 ? '✚ Fully healthy' : `🩹 ${d.injuries.length} injured`}
+        </button>
       </div>
     </div>
   )
