@@ -188,6 +188,56 @@ export async function readFace(faceId: string): Promise<string | null> {
   return null
 }
 
+/* ─── team logos (mods/<mod>/logos/<logoId>.png) ─── */
+
+/** logoId lookup cache: logoId -> absolute PNG path. Misses are NOT cached so
+ *  a freshly imported logo pack shows up without a restart. */
+const logoPathCache = new Map<string, string>()
+
+/**
+ * Search every mod's logos/ directory for <logoId>.png (logoId = the team's
+ * full name sanitized to [A-Za-z0-9._-], mirrored by the renderer and the
+ * dev import script). Returns a data URL or null.
+ */
+export async function readLogo(logoId: string): Promise<string | null> {
+  if (!FACE_ID_PATTERN.test(logoId) || logoId.length > 60) return null
+
+  const cached = logoPathCache.get(logoId)
+  if (cached) {
+    try {
+      const buf = await readFile(cached)
+      return `data:image/png;base64,${buf.toString('base64')}`
+    } catch {
+      logoPathCache.delete(logoId)
+    }
+  }
+
+  for (const dir of modsDirs()) {
+    if (!existsSync(dir)) continue
+    let folderNames: string[]
+    try {
+      folderNames = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    } catch {
+      continue
+    }
+    for (const folderName of folderNames) {
+      const candidate = join(dir, folderName, 'logos', `${logoId}.png`)
+      if (existsSync(candidate)) {
+        logoPathCache.set(logoId, candidate)
+        try {
+          const buf = await readFile(candidate)
+          return `data:image/png;base64,${buf.toString('base64')}`
+        } catch {
+          return null
+        }
+      }
+    }
+  }
+  return null
+}
+
 /* ─── scene backdrops (assets/scenes/<name>.png) ─── */
 
 const scenePathCache = new Map<string, string | null>()
@@ -266,5 +316,10 @@ export function registerModIpc(ipcMain: IpcMain): void {
   ipcMain.handle('mods:scene', (_event, name: unknown) => {
     if (typeof name !== 'string') throw new Error('mods:scene expects (name: string)')
     return readScene(name)
+  })
+
+  ipcMain.handle('mods:logo', (_event, logoId: unknown) => {
+    if (typeof logoId !== 'string') throw new Error('mods:logo expects (logoId: string)')
+    return readLogo(logoId)
   })
 }

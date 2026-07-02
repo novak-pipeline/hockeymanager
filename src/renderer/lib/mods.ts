@@ -16,6 +16,7 @@ interface ModsBridge {
   read(id: string): Promise<unknown>
   face(faceId: string): Promise<string | null>
   scene?(name: string): Promise<string | null>
+  logo?(logoId: string): Promise<string | null>
 }
 
 function bridge(): ModsBridge | null {
@@ -61,4 +62,18 @@ export async function getFace(faceId: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+/** Team logo (mods/<mod>/logos/<logoId>.png) as a data URL, or null. */
+export async function getLogo(logoId: string): Promise<string | null> {
+  try {
+    return (await bridge()?.logo?.(logoId)) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Mirror of the import script's sanitize(): team name -> logoId. */
+export function logoIdFor(teamName: string): string {
+  return teamName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60)
 }
