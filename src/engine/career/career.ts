@@ -119,6 +119,7 @@ import {
   recordDraftProvenance,
   recordAcquisition,
   headToHead as chronicleHeadToHead,
+  anniversaries as chronicleAnniversaries,
   type ChronicleState,
 } from '@engine/story/chronicle'
 import {
@@ -3191,6 +3192,22 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    // LW6: anniversary callbacks — the world remembers its own history. At most
+    // one per day, exact-day matches only, and only your club's durable moments.
+    {
+      const hits = chronicleAnniversaries(this.chronicle, this.year, day, { dayTolerance: 0 })
+        .filter((e) => e.userInvolved || e.kind === 'championship')
+      const hit = hits[0]
+      if (hit) {
+        const yearsAgo = this.year - hit.year
+        this.pushNews(
+          'league',
+          `${yearsAgo} year${yearsAgo === 1 ? '' : 's'} ago today`,
+          `${hit.headline}. ${hit.kind === 'championship' ? 'Banners are forever.' : 'The chronicle keeps the receipts.'}`,
+          hit.teamIds[0] ? { teamId: hit.teamIds[0] } : {}
+        )
+      }
+    }
     this.syncScoutRoster()
     tickScouting({
       state: this.scouting,
