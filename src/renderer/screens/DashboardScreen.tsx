@@ -420,6 +420,11 @@ export function DashboardScreen(): JSX.Element {
                     📜 {d.nextGame.allTime}
                   </div>
                 )}
+                {d.nextGame.storyline && (
+                  <div className="small" style={{ color: 'var(--accent, #d6a056)' }} title="Tonight's storyline, from your club's history">
+                    {d.nextGame.storyline}
+                  </div>
+                )}
                 <div className="row">
                   <button
                     className="btn btn-primary"

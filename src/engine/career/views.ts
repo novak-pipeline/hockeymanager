@@ -207,6 +207,8 @@ export interface NextGameView {
   /** All-time series line vs this opponent from the World Chronicle
    *  ("You lead all-time 12–5 · playoff series 1–1"). Optional/additive. */
   allTime?: string | null
+  /** Pre-game storyline (revenge game etc.) from the chronicle. Optional/additive. */
+  storyline?: string | null
 }
 
 export interface LastResultView {

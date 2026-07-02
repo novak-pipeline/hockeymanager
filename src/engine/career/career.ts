@@ -4030,6 +4030,38 @@ export class Career {
             }
           }
 
+          // LW4 ripple: one year later, the press re-grades your trades. For
+          // each deal you made LAST season, compare what the players actually
+          // produced this season — decisions echo, in print.
+          {
+            const lastYearTrades = this.chronicle.events.filter(
+              (e) => e.kind === 'trade' && e.userInvolved && e.year === this.year - 1 &&
+                e.teamIds[0] === (this.userTeamId as string)
+            )
+            const pts = (pid: string): number => {
+              const s = this.totals.get(asPlayerId(pid))
+              return s ? s.goals + s.assists : 0
+            }
+            for (const trade of lastYearTrades.slice(0, 2)) {
+              const gavePlayers = (trade.details?.assetsOut ?? []).filter((a) => a.kind === 'player' && a.playerId)
+              const gotPlayers = (trade.details?.assetsIn ?? []).filter((a) => a.kind === 'player' && a.playerId)
+              if (gavePlayers.length === 0 && gotPlayers.length === 0) continue
+              const gavePts = gavePlayers.reduce((s, a) => s + pts(a.playerId!), 0)
+              const gotPts = gotPlayers.reduce((s, a) => s + pts(a.playerId!), 0)
+              const verdictLine =
+                gotPts > gavePts + 10 ? 'A year on, the ledger reads clearly in your favour.'
+                : gavePts > gotPts + 10 ? 'A year on, the other side of the deal is aging better — the papers noticed.'
+                : 'A year on, the deal reads about even. Time may still pick a winner.'
+              this.pushNews(
+                'trade',
+                `One year later: re-grading the ${trade.year} trade`,
+                `${trade.headline}. This season the players you acquired produced ${gotPts} points; ` +
+                `the ones you gave up produced ${gavePts}. ${verdictLine}`,
+                { teamId: this.userTeamId as string }
+              )
+            }
+          }
+
           // ── Fanbase: the season's result moves the needle on fan engagement. ──
           const fanDelta = fanInterestDelta({
             finalRank: userFinalRank,
@@ -4677,6 +4709,28 @@ export class Career {
         overallPick: idx + 1,
         eventId: ev.id,
       })
+      // LW4 ripple: if this pick moved through one of YOUR trades, the game
+      // tells you what it became — the moment the name is called.
+      if (viaTradeEventId) {
+        const trade = this.chronicle.events.find((e) => e.id === viaTradeEventId)
+        if (trade?.userInvolved) {
+          const youGaveIt = (trade.details?.assetsOut ?? []).some(
+            (a) => a.kind === 'pick' && a.pickRef === pickRef
+          )
+          this.pushNews(
+            'draft',
+            youGaveIt
+              ? `The pick you traded away just became ${player.name}`
+              : `The pick you acquired just became ${player.name}`,
+            `With the ${d.year} R${pick.round} pick that changed hands in ${trade.year} ` +
+            `(${trade.headline}), ${team.name} select ${player.position} ${player.name} at #${idx + 1}. ` +
+            (youGaveIt
+              ? `Every deal has a long tail — this is that pick's face now. Watch his career with interest.`
+              : `That's your return maturing. The scouts' book on him starts today.`),
+            { playerId: playerId as string }
+          )
+        }
+      }
     }
     if (pick.ownerTeamId === this.userTeamId) {
       this.pushNews(
@@ -6571,6 +6625,31 @@ export class Career {
     const nextSched = this.data.league.schedule.find(
       (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
     )
+    // LW4 ripple: a revenge-game storyline — someone on the other bench used to
+    // be yours (traded away or walked in free agency, within the last 3 years).
+    const revengeLine = (oppId: TeamId): string | null => {
+      const opp = this.data.teams.get(oppId)
+      if (!opp) return null
+      for (const pid of opp.roster) {
+        const prov = this.chronicle.provenance.find(([id]) => id === (pid as string))?.[1]
+        if (!prov) continue
+        // Find the move that took him OUT of your organisation.
+        for (let i = prov.acquisitions.length - 1; i >= 0; i--) {
+          const a = prov.acquisitions[i]!
+          if (this.year - a.year > 3) break
+          const cameFromUs = a.fromTeamId === (this.userTeamId as string)
+          const leftUsInFa = a.via === 'signing' && i > 0 && prov.acquisitions[i - 1]!.teamId === (this.userTeamId as string)
+          if (cameFromUs || leftUsInFa) {
+            const p = this.data.players.get(pid)
+            if (!p) break
+            return cameFromUs
+              ? `📖 ${p.name} faces the club that traded him ${a.year === this.year ? 'this season' : `in ${a.year}`}.`
+              : `📖 ${p.name} returns — he walked from your organisation in ${a.year} free agency.`
+          }
+        }
+      }
+      return null
+    }
     // World Chronicle: the all-time series line vs an opponent ("Leads 12–5 · 1–1 in playoffs").
     const allTimeVs = (oppId: TeamId): string | null => {
       const h = chronicleHeadToHead(this.chronicle, this.userTeamId as string, oppId as string)
@@ -6599,6 +6678,7 @@ export class Career {
         opponentSystem: oppCoach.profile?.meta.label ?? '—',
         rivalryLabel: gi.label,
         allTime: allTimeVs(opp.id),
+        storyline: revengeLine(opp.id),
       }
     } else if (this.phase === 'playoffs' && this.playoffs) {
       const pending = pendingGames(this.playoffs).find(
@@ -6622,6 +6702,7 @@ export class Career {
           opponentSystem: oppCoach.profile?.meta.label ?? '—',
           rivalryLabel: gi.label,
           allTime: allTimeVs(opp.id),
+          storyline: revengeLine(opp.id),
         }
       }
     }
