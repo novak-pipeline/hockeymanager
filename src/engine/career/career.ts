@@ -3231,6 +3231,7 @@ export class Career {
       competitions: this.scoutingCompetitions(),
       nextOpponentId: this.nextOpponentTeamId(),
       protectedIds: this.ownOrgIds(),
+      ownProspectIds: [...this.ownOrgIds()],
       rng: this.rngFor(7008, day),
     })
     // Games reveal players: anyone who suits up becomes better known, so the

@@ -130,3 +130,23 @@ describe('deadline war room (M4)', () => {
     expect(c.getWarRoom()).toBeNull()
   })
 })
+
+describe('ownProspects scouting scope (bugfix)', () => {
+  it('a scout on "our players & prospects" actually watches the org', () => {
+    const d = generateLeague({ seed: 44 })
+    const c = new Career(d, 44, d.league.teams[0])
+    const scouting = c.getScouting()
+    const scout = scouting.scouts[0]!
+    c.assignScoutTarget(scout.scoutId, { kind: 'ownProspects' }, 'all')
+    for (let i = 0; i < 6; i++) c.advanceDay()
+    // His personal history must now include user-org players.
+    const profile = c.getScoutProfile(scout.scoutId)!
+    const userTeam = d.teams.get(d.league.teams[0])!
+    const orgIds = new Set([
+      ...userTeam.roster.map((id) => id as string),
+      ...((userTeam.affiliateId && d.teams.get(userTeam.affiliateId)?.roster) || []).map((id) => id as string),
+    ])
+    const orgSeen = profile.scouted.filter((r) => orgIds.has(r.playerId)).length
+    expect(orgSeen).toBeGreaterThan(0)
+  })
+})

@@ -455,6 +455,9 @@ export interface TickScoutingArgs {
   nextOpponentId?: string | null
   /** Players never subject to knowledge decay (your own org — you always know them). */
   protectedIds?: Set<string>
+  /** The user org's player ids (NHL + AHL + rights-held) — the 'ownProspects'
+   *  scope. Supplied by the career layer, which knows whose org this is. */
+  ownProspectIds?: readonly string[]
   rng: Rng
 }
 
@@ -555,7 +558,8 @@ export function tickScouting(args: TickScoutingArgs): void {
 
   for (const scout of state.assignments) {
     const targetIds = resolveTarget(
-      scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId
+      scout.target, teams, draftProspectIds, freeAgentIds, rosteredIds, competitions, nextOpponentId,
+      args.ownProspectIds ?? []
     )
     // Bandwidth: a scout has finite attention. A narrow brief (one player, a team,
     // the next opponent) gets watched closely; cover a whole nation/league and he's
@@ -676,6 +680,8 @@ function resolveTarget(
   rosteredIds: Set<string>,
   competitions: ScoutingCompetition[],
   nextOpponentId: string | null
+,
+  ownProspectIds: readonly string[] = []
 ): string[] {
   const rostersOf = (teamIds: Iterable<string>): string[] => {
     const ids: string[] = []
@@ -718,9 +724,8 @@ function resolveTarget(
     case 'freeAgents':
       return [...freeAgentIds].filter((id) => !rosteredIds.has(id))
     case 'ownProspects':
-      // Resolved in the career layer (needs the user team + rights-held players);
-      // this league-level util has no user context, so it contributes nothing here.
-      return []
+      // The career layer supplies the org list (this util has no user context).
+      return [...ownProspectIds]
   }
 }
 
