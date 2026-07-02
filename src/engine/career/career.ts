@@ -4432,8 +4432,67 @@ export class Career {
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
         this.faPool = this.faPool.filter((id) => !signedIds.has(id as string))
         for (const s of res.signings) this.lockerArrival(s.teamId, s.playerId)
-        for (const s of res.signings.slice(0, 6)) {
+        // World Chronicle: every signing writes provenance (future "he walked on
+        // us in free agency" callbacks); notable ones get a chronicle event.
+        for (const s of res.signings) {
           const p = this.resolve(s.playerId)
+          recordAcquisition(this.chronicle, {
+            playerId: s.playerId as string, teamId: s.teamId as string,
+            year: this.year, via: 'signing',
+          })
+          if (p.overall >= 75) {
+            const t = this.data.teams.get(s.teamId)!
+            chronicleEvent(this.chronicle, {
+              year: this.year, day: 0, kind: 'signing',
+              teamIds: [s.teamId as string], playerIds: [s.playerId as string],
+              headline: `${t.abbreviation} sign ${p.position} ${p.name} ($${(s.salary / 1e6).toFixed(1)}M × ${s.years}y)`,
+              details: { salary: s.salary, years: s.years },
+              userInvolved: s.teamId === this.userTeamId,
+            })
+          }
+        }
+        // Season Rhythm M2 — July 1 is a FRENZY, not a queue. Day one gets the
+        // full roundup with real money; day two a recap; later days only names
+        // that matter (the August lull is authentic — let it be quiet).
+        if (os.faDay === 1 && res.signings.length > 0) {
+          const total = res.signings.reduce((sum, s) => sum + s.salary * s.years, 0)
+          const top = [...res.signings]
+            .sort((a, b) => b.salary - a.salary)
+            .slice(0, 5)
+            .map((s) => {
+              const p = this.resolve(s.playerId)
+              const t = this.data.teams.get(s.teamId)!
+              return `${p.name} → ${t.abbreviation} ($${(s.salary / 1e6).toFixed(2)}M × ${s.years}y)`
+            })
+          const spendByTeam = new Map<string, number>()
+          for (const s of res.signings) {
+            spendByTeam.set(s.teamId as string, (spendByTeam.get(s.teamId as string) ?? 0) + s.salary * s.years)
+          }
+          const [bigSpenderId, bigSpend] = [...spendByTeam.entries()].sort((a, b) => b[1] - a[1])[0]!
+          const spender = this.data.teams.get(asTeamId(bigSpenderId))!
+          const spenderGm = bigSpenderId === (this.userTeamId as string) ? null : this.gmPersonaFor(asTeamId(bigSpenderId))
+          this.pushNews(
+            'contract',
+            `FRENZY: $${(total / 1e6).toFixed(0)}M committed as free agency opens`,
+            `The market opened at noon and the money moved fast — ${res.signings.length} signings on day one, ` +
+            `$${(total / 1e6).toFixed(0)}M in total commitments. The big tickets: ${top.join('; ')}. ` +
+            `Biggest spender: ${spender.name} at $${(bigSpend / 1e6).toFixed(0)}M${spenderGm ? ` — ${spenderGm.name} (${spenderGm.styleLabel}) came to shop` : ''}.`,
+            { teamId: bigSpenderId }
+          )
+        } else if (os.faDay === 2 && res.signings.length > 0) {
+          const names = res.signings.slice(0, 4).map((s) => this.resolve(s.playerId).name)
+          this.pushNews(
+            'contract',
+            'Frenzy, day two: the second wave signs',
+            `The market kept moving: ${names.join(', ')} all found homes as clubs filled the holes day one left open.`,
+            {}
+          )
+        }
+        // Individual signing items: notable names only (no firehose of depth deals).
+        for (const s of res.signings) {
+          const p = this.resolve(s.playerId)
+          if (p.overall < 72 && os.faDay > 2) continue
+          if (os.faDay <= 2 && p.overall < 70) continue
           const t = this.data.teams.get(s.teamId)!
           this.pushNews(
             'contract',
@@ -5937,6 +5996,17 @@ export class Career {
     this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
     this.lockerArrival(this.userTeamId, id)
     repairLines(this.userTeam, this.data.players)
+    // World Chronicle: your signings are part of your permanent record.
+    recordAcquisition(this.chronicle, {
+      playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing',
+    })
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: 0, kind: 'signing',
+      teamIds: [this.userTeamId as string], playerIds: [playerId],
+      headline: `${this.userTeam.abbreviation} sign ${player.position} ${player.name} ($${(salary / 1e6).toFixed(1)}M × ${years}y)`,
+      details: { salary, years },
+      userInvolved: true,
+    })
     this.pushNews(
       'contract',
       `${player.name} signs with ${this.userTeam.abbreviation}`,
