@@ -99,6 +99,28 @@ fourth-liner it's news.
   posts + persona voice + Kokoro TTS = listenable shows, channel switching
   while simming. Payloads must stay rich enough to be read aloud.
 
+## Event broadcasts — live commentary for tentpole events
+
+The same stack applied to paused, turn-based events; the draft first (it
+already gates the sim, and between-picks time hides generation latency).
+
+- **Panel**: 2-3 personas (anchor, scouting analyst, insider) consuming fact
+  payloads, rendered as a commentary stream beside the draft board.
+- **Shock is computed**: |actual pick − analyst board rank| drives tone —
+  reaches get gasps and insider speculation; big slides get *anticipatory*
+  tension ("he's STILL on the board") generated live from board state
+  before anyone picks him.
+- **Analysis reuses what exists**: scout-report elevator pitch, grades,
+  "Shades of" comps, boom/bust, team needs vs depth chart, pick lineage
+  from the chronicle ("this pick came over in the deadline deal — this
+  player is what that trade bought"). The analyst may disagree with the
+  user's own scouts on air.
+- **User's pick gets the full panel treatment.**
+- Templates floor / LLM restyle ceiling, same as posts; with the voice
+  phase this becomes the first radio broadcast (draft night, Kokoro
+  voices). Framework then extends to deadline day (war room ticker),
+  July 1, awards night, playoff OT.
+
 ## Invariants
 
 - Sim outcomes untouched — feed/writer are pure observers.
