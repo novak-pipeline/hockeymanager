@@ -193,7 +193,16 @@ export async function readFace(faceId: string): Promise<string | null> {
 const scenePathCache = new Map<string, string | null>()
 
 function scenesDirs(): string[] {
-  const dirs: string[] = [join(process.cwd(), 'assets', 'scenes')]
+  const dirs: string[] = []
+  // app.getAppPath() is the project root in dev and the asar root when
+  // packaged — the reliable anchor. cwd is the fallback for odd launchers.
+  try {
+    dirs.push(join(app.getAppPath(), 'assets', 'scenes'))
+  } catch {
+    /* app not ready in tests */
+  }
+  const cwdScenes = join(process.cwd(), 'assets', 'scenes')
+  if (!dirs.includes(cwdScenes)) dirs.push(cwdScenes)
   try {
     const userScenes = join(app.getPath('userData'), 'assets', 'scenes')
     if (!dirs.includes(userScenes)) dirs.push(userScenes)
@@ -217,18 +226,21 @@ export async function readScene(name: string): Promise<string | null> {
       scenePathCache.delete(name)
     }
   }
-  for (const dir of scenesDirs()) {
+  const dirs = scenesDirs()
+  for (const dir of dirs) {
     const candidate = join(dir, `${name}.png`)
     if (existsSync(candidate)) {
       scenePathCache.set(name, candidate)
       try {
         const buf = await readFile(candidate)
         return `data:image/png;base64,${buf.toString('base64')}`
-      } catch {
+      } catch (err) {
+        console.warn(`[scenes] found but unreadable: ${candidate}`, err)
         return null
       }
     }
   }
+  console.warn(`[scenes] '${name}.png' not found in: ${dirs.join(' | ')}`)
   return null
 }
 

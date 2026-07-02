@@ -43,9 +43,13 @@ export async function readModDatabase(id: string): Promise<unknown> {
 
 /** User-supplied scene backdrop (assets/scenes/<name>.png) as a data URL, or null. */
 export async function getScene(name: string): Promise<string | null> {
+  const b = bridge()
+  if (!b) { console.warn('[scenes] mods bridge missing (preload not loaded?)'); return null }
+  if (!b.scene) { console.warn('[scenes] bridge has no scene() — preload is stale, restart the app'); return null }
   try {
-    return (await bridge()?.scene?.(name)) ?? null
-  } catch {
+    return (await b.scene(name)) ?? null
+  } catch (err) {
+    console.warn('[scenes] IPC failed:', err)
     return null
   }
 }
