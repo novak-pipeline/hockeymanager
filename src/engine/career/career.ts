@@ -120,6 +120,8 @@ import {
   recordAcquisition,
   headToHead as chronicleHeadToHead,
   anniversaries as chronicleAnniversaries,
+  provenanceOf as chronicleProvenanceOf,
+  eventsForPlayer as chronicleEventsForPlayer,
   type ChronicleState,
 } from '@engine/story/chronicle'
 import {
@@ -4351,9 +4353,48 @@ export class Career {
         })
         for (const id of retired.retired.slice(0, 8)) {
           const p = this.resolve(id)
-          this.pushNews('league', `${p.name} retires`, `${p.name} hangs up the skates at ${p.age}.`, {
-            playerId: id as string,
-          })
+          // LW6: notable careers get a legacy article grounded in chronicle
+          // facts — where he was drafted, the clubs he wore, the cups he won —
+          // instead of a one-line goodbye. Journeymen keep the short send-off.
+          const ovr = overall(p.composites, p.position)
+          const seasons = p.stats.length
+          if (ovr >= 76 || seasons >= 12) {
+            const prov = chronicleProvenanceOf(this.chronicle, id as string)
+            const events = chronicleEventsForPlayer(this.chronicle, id as string, 50)
+            const cups = events.filter((e) => e.kind === 'championship').map((e) => e.year)
+            const clubs = [...new Set((prov?.acquisitions ?? []).map((a) => a.teamId))]
+              .map((tid) => this.data.teams.get(asTeamId(tid))?.abbreviation)
+              .filter((x): x is string => !!x)
+            const tradedTimes = events.filter((e) => e.kind === 'trade').length
+            let gp = 0, g = 0, a = 0, so = 0
+            for (const s of p.stats) {
+              gp += s.gamesPlayed
+              g += s.ev.goals + s.pp.goals + s.pk.goals
+              a += s.ev.assists + s.pp.assists + s.pk.assists
+              so += s.shutouts
+            }
+            const statLine = p.position === 'G'
+              ? `${gp} games and ${so} shutouts`
+              : `${gp} games, ${g} goals and ${g + a} points`
+            const lines = [
+              `${p.name} retires at ${p.age} after ${seasons} seasons — ${statLine}.`,
+              prov?.draftedBy
+                ? `It began in ${prov.draftYear}, when ${this.data.teams.get(asTeamId(prov.draftedBy))?.abbreviation ?? 'a club'} called his name ${prov.overallPick ? `at #${prov.overallPick}` : `in round ${prov.round ?? '?'}`}.`
+                : '',
+              clubs.length > 1 ? `He wore ${clubs.length} sweaters: ${clubs.join(', ')}.` : '',
+              tradedTimes > 0 ? `Moved at the deadline and in the summer — traded ${tradedTimes} time${tradedTimes > 1 ? 's' : ''} along the way.` : '',
+              cups.length > 0
+                ? `He leaves with ${cups.length === 1 ? 'a championship ring' : `${cups.length} championship rings`} (${cups.join(', ')}).`
+                : `The one line missing from the résumé: a championship.`,
+            ].filter(Boolean)
+            this.pushNews('league', `End of an era: ${p.name} retires`, lines.join(' '), {
+              playerId: id as string,
+            })
+          } else {
+            this.pushNews('league', `${p.name} retires`, `${p.name} hangs up the skates at ${p.age}.`, {
+              playerId: id as string,
+            })
+          }
         }
 
         /* ── notable retirees → club legends registry ("where are they now") ── */
