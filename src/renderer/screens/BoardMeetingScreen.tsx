@@ -34,21 +34,24 @@ export function Backdrop({ children, scene = 'boardroom' }: { children: React.Re
         minHeight: '100%',
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
-        ...(art ? {
-          backgroundImage: `linear-gradient(180deg, rgba(8,10,16,0.72) 0%, rgba(8,10,16,0.55) 40%, rgba(8,10,16,0.82) 100%), url(${art})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        } : {}),
-        background: art ? undefined : [
-          // night skyline through the window
-          'radial-gradient(ellipse 60% 38% at 72% 18%, rgba(120,140,190,0.22), transparent 70%)',
-          // warm boardroom lamp glow
-          'radial-gradient(ellipse 45% 32% at 28% 30%, rgba(214,160,86,0.13), transparent 70%)',
-          // the long table sheen
-          'linear-gradient(178deg, transparent 55%, rgba(90,62,40,0.35) 68%, rgba(24,16,12,0.9) 100%)',
-          // room base
-          'linear-gradient(180deg, #10131c 0%, #151a26 45%, #171310 100%)',
-        ].join(', '),
+        // ONE property for both paths — mixing the `background` shorthand with
+        // `backgroundImage` lets a React re-render's shorthand reset wipe the
+        // freshly-set image. Gradients are images, so everything lives here.
+        backgroundImage: art
+          ? `linear-gradient(180deg, rgba(8,10,16,0.72) 0%, rgba(8,10,16,0.55) 40%, rgba(8,10,16,0.82) 100%), url(${art})`
+          : [
+            // night skyline through the window
+            'radial-gradient(ellipse 60% 38% at 72% 18%, rgba(120,140,190,0.22), transparent 70%)',
+            // warm boardroom lamp glow
+            'radial-gradient(ellipse 45% 32% at 28% 30%, rgba(214,160,86,0.13), transparent 70%)',
+            // the long table sheen
+            'linear-gradient(178deg, transparent 55%, rgba(90,62,40,0.35) 68%, rgba(24,16,12,0.9) 100%)',
+            // room base
+            'linear-gradient(180deg, #10131c 0%, #151a26 45%, #171310 100%)',
+          ].join(', '),
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundColor: '#10131c',
         boxShadow: 'inset 0 0 120px rgba(0,0,0,0.55)',
       }}
     >
