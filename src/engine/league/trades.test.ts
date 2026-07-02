@@ -28,124 +28,8 @@ import {
   type StoredTradeOffer
 } from './trades'
 
-/* ────────────────────────── fixtures ────────────────────────── */
-
-function rawAttrs(v: number, position: Position): RawAttributes {
-  const raw: RawAttributes = {
-    technical: { wristShot: v, slapShot: v, stickhandling: v, passing: v, deflections: v, faceoffs: v },
-    physical: { speed: v, acceleration: v, strength: v, balance: v, stamina: v, agility: v, height: 50 },
-    mental: {
-      offensiveIQ: v,
-      defensiveIQ: v,
-      positioning: v,
-      vision: v,
-      aggression: 50,
-      composure: v,
-      workRate: v,
-      discipline: 55,
-      anticipation: v
-    },
-    defensive: { checking: v, shotBlocking: v, stickChecking: v, takeaway: v }
-  }
-  if (position === 'G') {
-    raw.goalie = {
-      reflexes: v,
-      positioningG: v,
-      reboundControl: v,
-      glove: v,
-      blocker: v,
-      recovery: v,
-      puckHandlingG: v
-    }
-  }
-  return raw
-}
-
-interface PlayerOpts {
-  age?: number
-  position?: Position
-  salary?: number
-  years?: number
-  ntc?: boolean
-  potential?: number
-  morale?: number
-  injuryGames?: number
-}
-
-function makePlayer(id: string, v: number, opts: PlayerOpts = {}): Player {
-  const position = opts.position ?? 'C'
-  const role: PlayerRole = position === 'G' ? 'starter' : 'twoWay'
-  const ratings = rawAttrs(v, position)
-  const years = opts.years ?? 3
-  return {
-    id: asPlayerId(id),
-    name: `Player ${id}`,
-    age: opts.age ?? 25,
-    position,
-    handedness: 'L',
-    role,
-    ratings,
-    potential: rawAttrs(opts.potential ?? v, position),
-    composites: computeComposites(ratings, role, position),
-    personality: { ambition: 10, professionalism: 10, loyalty: 10, temperament: 10, determination: 10 },
-    contract: {
-      salary: opts.salary ?? 3_000_000,
-      yearsRemaining: years,
-      expiryYear: 2026 + years,
-      noTradeClause: opts.ntc ?? false,
-      twoWay: false
-    },
-    stats: [],
-    fatigue: 0,
-    morale: opts.morale ?? 70,
-    injuryStatus:
-      opts.injuryGames !== undefined
-        ? { kind: 'lowerBody', gamesRemaining: opts.injuryGames, description: 'test injury' }
-        : null,
-    form: 0
-  }
-}
-
-function makeTeam(id: string, roster: Player[], opts: { capUsed?: number } = {}): Team {
-  return {
-    id: asTeamId(id),
-    name: `Team ${id.toUpperCase()}`,
-    abbreviation: id.toUpperCase().slice(0, 3),
-    city: 'Test City',
-    colors: { primary: 0x112233, secondary: 0xddeeff },
-    conferenceId: 'c1',
-    divisionId: 'd1',
-    roster: roster.map((p) => p.id),
-    lines: {
-      forwards: [],
-      defensePairs: [],
-      goalies: [asPlayerId(`${id}-gx`), asPlayerId(`${id}-gy`)],
-      powerPlayUnits: [],
-      penaltyKillUnits: []
-    },
-    tactics: {
-      forecheck: '1-2-2',
-      dZoneCoverage: 'zone',
-      tempo: { pace: 0.5, passRisk: 0.5, shotEagerness: 0.5, defensivePinch: 0.5 },
-      specialTeams: { powerPlay: 'umbrella', penaltyKill: 'box' },
-      lineMatching: false
-    },
-    finances: {
-      budget: 90e6,
-      salaryCap: 88e6,
-      capUsed: opts.capUsed ?? roster.reduce((s, p) => s + p.contract.salary, 0),
-      revenue: 0
-    },
-    staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] }
-  }
-}
-
-const makePick = (year: number, round: number, original: string, owner = original): DraftPick => ({
-  year,
-  round,
-  originalTeamId: asTeamId(original),
-  ownerTeamId: asTeamId(owner)
-})
+import { makePlayer, makeTeam, makePick, rawAttrs } from './trades.test.fixtures'
+void rawAttrs
 
 /* ────────────────────────── playerValue ────────────────────────── */
 
@@ -980,8 +864,30 @@ describe('evaluateProposal — persona philosophy override (LW3)', () => {
     const { teams, players, userTeamId } = leagueFixture()
     const partner = [...teams.values()].find((t) => t.id !== userTeamId)!
     const user = teams.get(userTeamId)!
-    const give = { players: [players.get(user.roster[5]!)!], picks: [] }
-    const receive = { players: [players.get(partner.roster[0]!)!], picks: [] }
+    // A pick-heavy borderline package: pick bias is where WinNow (0.85x) and
+    // RebuildDraft (1.25x) diverge hardest, and pick-only packages sidestep the
+    // structural real-GM rules so the philosophy weighing is what decides.
+    // Send a depth forward back so the deal is position-neutral (the fixture
+    // partner runs a minimal roster and the depth guard rightly refuses any
+    // package that nets them a man short up front).
+    const userFwds = user.roster
+      .map((id) => players.get(id)!)
+      .filter((pl) => pl.position !== 'G' && pl.position !== 'D')
+      .sort((a, b) => playerValue(a) - playerValue(b))
+    const give = { players: [userFwds[0]!], picks: [makePick(2026, 1, userTeamId as string)] }
+    // A mid-value SKATER return: stays under the best-player rule's star bar
+    // and clear of the depth guard (never their scarce goalies), so the
+    // stance-dependent pick weighing is what decides the verdict.
+    // The return must sit BETWEEN the two stances' valuations of the picks
+    // (WinNow ~0.85x vs RebuildDraft ~1.25x) so the verdicts can diverge.
+    const pickWorth = pickValue(give.picks[0]!, { year: 2026 }) * 1.6
+    const skaters = partner.roster
+      .map((id) => players.get(id)!)
+      .filter((pl) => pl.position !== 'G' && pl.position !== 'D') // forwards are the one group deep enough to sell from
+      .sort(
+        (a, b) => Math.abs(playerValue(a) - pickWorth) - Math.abs(playerValue(b) - pickWorth)
+      )
+    const receive = { players: [skaters[0]!], picks: [] }
     // Same rng seed both ways — only the philosophy differs.
     const winNow = evaluateProposal({
       give, receive, partnerTeam: partner, partnerPlayers: players,

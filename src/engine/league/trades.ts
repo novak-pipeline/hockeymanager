@@ -464,6 +464,10 @@ export function evaluateProposal(args: {
   /** Persona-derived philosophy override (Living World LW3). Absent → the
    *  original hash-based teamPhilosophy (back-compat). */
   philosophy?: TeamPhilosophy
+  /** Real-GM context (LW3 realism overhaul): the partner's competitive stance
+   *  and deadline proximity (0 = October, 1 = the final hours). Shapes what
+   *  THIS club would actually pay for — rentals, futures, urgency. */
+  context?: { posture: 'contend' | 'retool' | 'rebuild'; deadlineProximity: number }
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
 
@@ -472,7 +476,7 @@ export function evaluateProposal(args: {
   const moodThreshold = 1.03 + rng.float(-0.04, 0.04)
   // Relationship nudge applied AFTER the draw so RNG order is unchanged.
   const relAdj = ((50 - (args.relationship ?? 50)) / 50) * 0.1 // ±0.10 at the extremes
-  const threshold = moodThreshold + relAdj
+  let threshold = moodThreshold + relAdj
 
   const ntc = [...give.players, ...receive.players].find((p) => p.contract.noTradeClause)
   if (ntc) {
@@ -495,6 +499,36 @@ export function evaluateProposal(args: {
     }
   }
 
+  /* ── real-GM rule: never leave yourself short ──
+   * A club will not deal itself below a playable roster at any position, no
+   * matter the value coming back at other spots. Nobody trades their only
+   * goalie for three wingers. */
+  {
+    const post: Record<PositionGroup, number> = { F: 0, D: 0, G: 0 }
+    const outIds = new Set(receive.players.map((pl) => pl.id as string))
+    for (const id of partnerTeam.roster) {
+      if (outIds.has(id as string)) continue
+      const pl = partnerPlayers.get(id)
+      if (pl) post[groupOf(pl.position)]++
+    }
+    for (const pl of give.players) post[groupOf(pl.position)]++
+    // One short up front is recallable from the farm; gutted is gutted.
+    const MIN: Record<PositionGroup, number> = { F: 8, D: 4, G: 2 }
+    for (const g of ['F', 'D', 'G'] as const) {
+      const netOut =
+        receive.players.filter((pl) => groupOf(pl.position) === g).length -
+        give.players.filter((pl) => groupOf(pl.position) === g).length
+      if (netOut > 0 && post[g] < MIN[g]) {
+        const short = g === 'G' ? 'in the crease' : g === 'D' ? 'on the blue line' : 'up front'
+        return {
+          verdict: 'reject',
+          message: `${partnerTeam.name} won't do it — the deal would leave them short ${short}, and no return at other positions fixes that.`,
+          counterAskValue: 0
+        }
+      }
+    }
+  }
+
   const year = baselineYear([...give.picks, ...receive.picks])
 
   // Arrivals at a position the partner is thin at are worth a premium.
@@ -507,10 +541,36 @@ export function evaluateProposal(args: {
 
   const philosophy = args.philosophy ?? teamPhilosophy(partnerTeam.id)
 
+  /* ── real-GM context: what would THIS club, in THIS situation, pay for? ──
+   * A rental (expiring deal, 27+) is deadline gold to a contender and nearly
+   * worthless to a rebuilder; a 31-year-old is a discount to a rebuilder and a
+   * premium to a contender; picks appreciate in a seller's market. */
+  const ctx = args.context
+  const acquiringMult = (p: Player): number => {
+    if (!ctx) return 1
+    let m = 1
+    const rental = p.contract.yearsRemaining <= 1 && p.age >= 27
+    if (rental) {
+      if (ctx.posture === 'contend') m *= 1 + 0.08 * ctx.deadlineProximity
+      else if (ctx.posture === 'rebuild') m *= 0.55
+      else m *= 0.8
+    }
+    if (ctx.posture === 'rebuild') {
+      if (p.age >= 32) m *= 0.6
+      else if (p.age >= 29) m *= 0.75
+      else if (p.age <= 23) m *= 1.12
+    } else if (ctx.posture === 'contend') {
+      if (p.age >= 27 && p.age <= 31) m *= 1.06
+      if (p.age <= 22 && ratedOverall(p) < 70) m *= 0.85
+    }
+    return m
+  }
+  const pickCtxMult = ctx && ctx.posture === 'rebuild' ? 1 + 0.1 * ctx.deadlineProximity : 1
+
   // Gain = what the partner receives (the user's "give" side).
   const gain =
     give.players.reduce((s, p) => {
-      const base = playerValue(p) * needBonus(p.position)
+      const base = playerValue(p) * needBonus(p.position) * acquiringMult(p)
       const bias = philosophyGainBias(philosophy, { kind: 'player', player: p })
       // Cap relief bonus: if the player's salary is retained by the other side,
       // the partner benefits from reduced cap hit.
@@ -520,15 +580,58 @@ export function evaluateProposal(args: {
       return s + base * bias + relief
     }, 0) +
     give.picks.reduce((s, p) => {
-      const pv = pickValue(p, { year })
+      const pv = pickValue(p, { year }) * pickCtxMult
       const bias = philosophyGainBias(philosophy, { kind: 'pick', pick: p })
       return s + pv * bias
     }, 0)
 
   // Loss = what the partner gives up (the user's "receive" side).
+  // Real-GM rule: the endowment effect — every GM values his own players a
+  // shade above market (picks are commodity; players are HIS guys). This is
+  // what makes fleecing the AI impossible: a "fair" offer is not enough.
+  const ENDOWMENT = 1.08
   const loss =
-    receive.players.reduce((s, p) => s + playerValue(p), 0) +
+    receive.players.reduce((s, p) => s + playerValue(p) * ENDOWMENT, 0) +
     receive.picks.reduce((s, p) => s + pickValue(p, { year }), 0)
+
+  /* ── real-GM rule: the young core is basically untouchable ──
+   * Prying a 23-and-under star out of any front office takes a massive
+   * overpay — real GMs get fired for moving those players, and they know it. */
+  const youngStar = receive.players.find((p) => p.age <= 23 && playerValue(p) >= 55)
+  if (youngStar) threshold += 0.35
+
+  /* ── real-GM rule: the best player in the deal wins the deal ──
+   * Nobody trades a top-six player for four third-liners. If the partner is
+   * giving up a clear best asset, the return must be headlined by something
+   * comparable — quantity is not quality. */
+  const bestOut = Math.max(
+    0,
+    ...receive.players.map((p) => playerValue(p)),
+    ...receive.picks.map((p) => pickValue(p, { year }))
+  )
+  const bestIn = Math.max(
+    0,
+    ...give.players.map((p) => playerValue(p)),
+    ...give.picks.map((p) => pickValue(p, { year }))
+  )
+  if (bestOut >= 45 && bestIn < bestOut * 0.6) {
+    return {
+      verdict: 'reject',
+      message: `${partnerTeam.name} pass. ${receive.players.length + receive.picks.length > 1 ? 'Quantity is not quality — ' : ''}they need the best asset in the deal coming back their way, not depth pieces.`,
+      counterAskValue: round1(bestOut * 0.75 - bestIn)
+    }
+  }
+
+  /* ── real-GM rule: blockbusters die on the margin ──
+   * Star-level deals carry career risk for the GM who makes them; the bar is
+   * higher and the phone calls are longer. */
+  if (bestOut >= 70) threshold += 0.05
+
+  /* ── deadline urgency: a contender buying help near the deadline is the one
+   * moment a real GM knowingly pays a little over ── */
+  if (ctx && ctx.posture === 'contend' && give.players.length > 0) {
+    threshold -= 0.04 * ctx.deadlineProximity
+  }
 
   if (loss <= 0) {
     return gain > 0

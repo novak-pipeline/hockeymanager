@@ -6222,6 +6222,12 @@ export class Career {
       // Living World LW3: the partner's stance flows from his GM's persona +
       // the club's live posture, not a static hash.
       philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
+      // LW3 realism: what THIS club would pay, in THIS moment of the season —
+      // rentals to contenders near the deadline, futures to sellers.
+      context: {
+        posture: this.clubPostureFor(partnerId).posture,
+        deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
+      },
     })
     if (evaln.verdict === 'accept') {
       executeTrade({
