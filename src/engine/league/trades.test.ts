@@ -19,6 +19,7 @@ import {
   evaluateProposal,
   executeTrade,
   generateAiOffers,
+  generateAiAiTrade,
   perriPickValue,
   pickValue,
   playerValue,
@@ -845,5 +846,154 @@ describe('evaluateProposal philosophy bias', () => {
     })
     // Cap check should pass now
     expect(withRetain.verdict).not.toBe('reject')
+  })
+})
+
+/* ────────────────────────── Living World LW3 ────────────────────────── */
+
+describe('generateAiOffers — deadline urgency (LW3)', () => {
+  const countOffers = (dayLo: number, dayHi: number, deadlineDay: number): number => {
+    const { teams, players, picks, userTeamId } = leagueFixture()
+    let n = 0
+    let counter = 0
+    for (let day = dayLo; day <= dayHi; day++) {
+      n += generateAiOffers({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(55, day)),
+        nextOfferId: () => `o-${++counter}`,
+        deadlineDay,
+      }).length
+    }
+    return n
+  }
+
+  it('offers arrive much more often in deadline week than in the early season', () => {
+    // Simulate the same 200-day window many "seasons" over: early days
+    // (60+ days from the deadline) vs the final 10 days before it.
+    let early = 0
+    let late = 0
+    for (let rep = 0; rep < 10; rep++) {
+      early += countOffers(1 + rep * 1000, 20 + rep * 1000, 999 + rep * 1000)   // far from deadline
+      late += countOffers(990 + rep * 1000, 999 + rep * 1000, 999 + rep * 1000) // deadline week
+    }
+    // Late window is half the length but should still produce comparable-or-more
+    // offers (rate is up to ~3.5×).
+    expect(late).toBeGreaterThan(early * 0.9)
+  })
+
+  it('without deadlineDay behaves at the original flat rate (back-compat)', () => {
+    const flat = collectOffers(400, 9001)
+    expect(flat.length).toBeGreaterThanOrEqual(20)
+    expect(flat.length).toBeLessThanOrEqual(90)
+  })
+})
+
+describe('generateAiAiTrade (LW3)', () => {
+  /** League where t2 is a clear rebuilder with a movable rental vet and t3/t4
+   *  are contenders holding picks. Rosters padded to 22 so depth guards pass. */
+  function aiAiFixture(): {
+    teams: Map<TeamId, Team>
+    players: Map<PlayerId, Player>
+    picks: DraftPick[]
+    userTeamId: TeamId
+    vetId: PlayerId
+  } {
+    const teams = new Map<TeamId, Team>()
+    const players = new Map<PlayerId, Player>()
+    const mk = (teamId: string, strength: number, vet?: { id: string; ovr: number }): Team => {
+      const roster: Player[] = []
+      for (let i = 0; i < 14; i++) roster.push(makePlayer(`${teamId}f${i}`, strength - i, { position: i % 3 === 0 ? 'C' : 'W' }))
+      for (let i = 0; i < 6; i++) roster.push(makePlayer(`${teamId}d${i}`, strength - 2 - i, { position: 'D' }))
+      for (let i = 0; i < 2; i++) roster.push(makePlayer(`${teamId}g${i}`, strength - 4 - i, { position: 'G' }))
+      if (vet) {
+        // A 30-year-old scoring winger on an expiring deal — the classic rental.
+        roster[13] = makePlayer(vet.id, vet.ovr, { position: 'W', age: 30, years: 1, salary: 4_000_000 })
+      }
+      for (const p of roster) players.set(p.id, p)
+      const team = makeTeam(teamId, roster)
+      teams.set(team.id, team)
+      return team
+    }
+    mk('u1', 70)                                  // user club — must never appear
+    mk('t2', 55, { id: 'vet-rental', ovr: 78 })   // weak rebuilder with the rental
+    mk('t3', 74)                                  // strong contender
+    mk('t4', 73)                                  // strong contender
+    const picks: DraftPick[] = []
+    for (const owner of ['t3', 't4']) {
+      for (let round = 1; round <= 3; round++) {
+        picks.push({ year: 2027, round, originalTeamId: asTeamId(owner), ownerTeamId: asTeamId(owner) })
+      }
+    }
+    return { teams, players, picks, userTeamId: asTeamId('u1'), vetId: asPlayerId('vet-rental') }
+  }
+
+  const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+    (tid as string) === 't2' ? 'rebuild' : (tid as string) === 'u1' ? 'retool' : 'contend'
+
+  it('moves a rental vet from a rebuilder to a contender for fair pick value', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 200 && !deal; day++) {
+      deal = generateAiAiTrade({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(31, day)), postureOf,
+      })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.sellerTeamId).toBe(asTeamId('t2'))
+    expect(['t3', 't4']).toContain(deal!.buyerTeamId as string)
+    expect(deal!.playerIds).toEqual([vetId])
+    expect(deal!.picks.length).toBeGreaterThanOrEqual(1)
+    expect(deal!.picks.length).toBeLessThanOrEqual(2)
+    // Fair value band.
+    const vetValue = playerValue(players.get(vetId)!)
+    const pickTotal = deal!.picks.reduce((s, p) => s + pickValue(p, { year: 2027 }), 0)
+    expect(pickTotal).toBeGreaterThanOrEqual(vetValue * 0.25)
+    expect(pickTotal).toBeLessThanOrEqual(vetValue * 0.85)
+    expect(deal!.summary).toContain('T2')
+  })
+
+  it('never involves the user club and is deterministic per seed', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    for (let day = 1; day <= 100; day++) {
+      const a = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf })
+      const b = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf })
+      expect(a).toEqual(b)
+      if (a) {
+        expect(a.sellerTeamId).not.toBe(userTeamId)
+        expect(a.buyerTeamId).not.toBe(userTeamId)
+      }
+    }
+  })
+
+  it('returns null when no rebuilder has a movable rental', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    const allContend = (): 'contend' => 'contend'
+    for (let day = 1; day <= 60; day++) {
+      expect(generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf: allContend })).toBeNull()
+    }
+  })
+})
+
+describe('evaluateProposal — persona philosophy override (LW3)', () => {
+  it('a philosophy override changes willingness vs the hash default', () => {
+    const { teams, players, userTeamId } = leagueFixture()
+    const partner = [...teams.values()].find((t) => t.id !== userTeamId)!
+    const user = teams.get(userTeamId)!
+    const give = { players: [players.get(user.roster[5]!)!], picks: [] }
+    const receive = { players: [players.get(partner.roster[0]!)!], picks: [] }
+    // Same rng seed both ways — only the philosophy differs.
+    const winNow = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: players,
+      rng: new Rng(1234), philosophy: 'WinNow',
+    })
+    const rebuild = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: players,
+      rng: new Rng(1234), philosophy: 'RebuildDraft',
+    })
+    // Different stances must produce a different evaluation (verdict or ask).
+    expect(
+      winNow.verdict !== rebuild.verdict || winNow.counterAskValue !== rebuild.counterAskValue
+    ).toBe(true)
   })
 })

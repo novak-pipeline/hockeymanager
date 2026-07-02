@@ -221,7 +221,10 @@ export function teamPhilosophy(teamId: TeamId): TeamPhilosophy {
  */
 export function buildTeamProfile(
   team: Team,
-  players: Map<PlayerId, Player>
+  players: Map<PlayerId, Player>,
+  /** Persona-derived philosophy override (Living World LW3). Absent → the
+   *  original hash-based assignment (back-compat). */
+  philosophy?: TeamPhilosophy
 ): TeamProfile {
   const counts = groupCounts(team, players, [])
   const needs: PositionGroup[] = []
@@ -229,7 +232,7 @@ export function buildTeamProfile(
     if (counts[g] < GROUP_TARGET[g]) needs.push(g)
   }
   return {
-    philosophy: teamPhilosophy(team.id),
+    philosophy: philosophy ?? teamPhilosophy(team.id),
     needs,
     capSpace: team.finances.salaryCap - team.finances.capUsed,
   }
@@ -458,6 +461,9 @@ export function evaluateProposal(args: {
    *  GM gets a slightly easier ask; a frosty one a harder one. Omitted/50 → no
    *  change (keeps existing trade behaviour byte-identical). */
   relationship?: number
+  /** Persona-derived philosophy override (Living World LW3). Absent → the
+   *  original hash-based teamPhilosophy (back-compat). */
+  philosophy?: TeamPhilosophy
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
 
@@ -499,7 +505,7 @@ export function evaluateProposal(args: {
     return g === 'G' ? 1.1 : 1.07
   }
 
-  const philosophy = teamPhilosophy(partnerTeam.id)
+  const philosophy = args.philosophy ?? teamPhilosophy(partnerTeam.id)
 
   // Gain = what the partner receives (the user's "give" side).
   const gain =
@@ -734,17 +740,47 @@ export function generateAiOffers(args: {
   picks: DraftPick[]
   rng: Rng
   nextOfferId: () => string
+  /** Trade deadline day — offers ramp up as it approaches (Living World LW3).
+   *  Absent → the original flat 1/8 rate (back-compat). */
+  deadlineDay?: number
+  /** Club stance lookup: contenders shop hardest, rebuilders rarely buy. */
+  postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
+  /** GM aggression lookup, 0–1 — aggressive GMs overpay more. */
+  aggressionOf?: (teamId: TeamId) => number
 }): StoredTradeOffer[] {
   const { day, userTeamId, teams, players, picks, rng, nextOfferId } = args
 
-  if (!rng.chance(1 / 8)) return []
+  // Deadline urgency: quiet in October, frantic in deadline week — up to ~3.5×
+  // the base offer rate in the final days (Living World LW3).
+  const daysLeft = args.deadlineDay !== undefined ? args.deadlineDay - day : undefined
+  let chance = 1 / 8
+  if (daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 20) {
+    chance = (1 / 8) * (1 + 2.5 * (1 - daysLeft / 20))
+  }
+  if (!rng.chance(chance)) return []
 
   const user = teams.get(userTeamId)
   if (!user) return []
   const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId)
   if (aiTeams.length === 0) return []
 
-  const partner = rng.pick(aiTeams)
+  // Posture-weighted partner selection: contenders come calling most often.
+  let partner: Team
+  if (args.postureOf) {
+    const weighted = aiTeams.map((t) => {
+      const posture = args.postureOf!(t.id)
+      return { t, w: posture === 'contend' ? 3 : posture === 'rebuild' ? 0.6 : 1 }
+    })
+    const total = weighted.reduce((s, e) => s + e.w, 0)
+    let roll = rng.float(0, total)
+    partner = weighted[weighted.length - 1]!.t
+    for (const e of weighted) {
+      roll -= e.w
+      if (roll <= 0) { partner = e.t; break }
+    }
+  } else {
+    partner = rng.pick(aiTeams)
+  }
   const need = weakestGroup(partner, players)
 
   // Target one of the user's best few players at the need group. NTC players
@@ -766,7 +802,11 @@ export function generateAiOffers(args: {
   const target = rng.pick(targets)
 
   // Fair-ish aim with a slight overpay tendency — AI clubs chase their need.
-  const aim = target.value * rng.float(1.0, 1.15)
+  // Aggressive GMs stretch further, and deadline week adds desperation.
+  const aggression = args.aggressionOf?.(partner.id)
+  const urgencyBump = daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 7 ? 0.06 : 0
+  const aimHi = aggression === undefined ? 1.15 : 1.03 + 0.18 * aggression + urgencyBump
+  const aim = target.value * rng.float(1.0, aimHi)
 
   const ranks = strengthRanks(teams, players)
   const currentYear =
@@ -827,4 +867,121 @@ export function generateAiOffers(args: {
     expiresOnDay: day + rng.range(6, 8)
   }
   return [offer]
+}
+
+/* ────────────────────────── AI ↔ AI trades (Living World LW3) ────────────────────────── */
+
+/** A league trade between two AI clubs: the seller moves a veteran for draft
+ *  capital. The career layer executes it, chronicles it and reports the news. */
+export interface AiAiTradeResult {
+  sellerTeamId: TeamId
+  buyerTeamId: TeamId
+  /** Players the SELLER gives up. */
+  playerIds: PlayerId[]
+  /** Picks the BUYER gives up. */
+  picks: DraftPick[]
+  summary: string
+}
+
+/**
+ * Occasionally two AI clubs make a deal with each other — the league lives
+ * without the user. A rebuild-posture seller moves a veteran on an expiring
+ * or short deal to a contend-posture buyer for draft capital. Frequency is
+ * quiet early (~1 in 12 match days) and ramps toward the deadline (~1 in 4).
+ * Pure function of its inputs + the seeded Rng.
+ */
+export function generateAiAiTrade(args: {
+  day: number
+  deadlineDay?: number
+  userTeamId: TeamId
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  picks: DraftPick[]
+  rng: Rng
+  postureOf: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
+}): AiAiTradeResult | null {
+  const { day, userTeamId, teams, players, picks, rng, postureOf } = args
+
+  const daysLeft = args.deadlineDay !== undefined ? args.deadlineDay - day : undefined
+  let chance = 1 / 12
+  if (daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 20) {
+    chance = (1 / 12) * (1 + 2 * (1 - daysLeft / 20))
+  }
+  if (!rng.chance(chance)) return null
+
+  const ai = [...teams.values()].filter((t) => t.id !== userTeamId)
+
+  // Sellers: rebuilding clubs with a healthy, movable veteran and roster depth
+  // to spare. The vet must be on an expiring/short deal — a classic rental.
+  const sellers = ai
+    .filter((t) => postureOf(t.id) === 'rebuild' && t.roster.length >= 20)
+    .map((t) => {
+      const vets = t.roster
+        .map((id) => players.get(id))
+        .filter(
+          (p): p is Player =>
+            p !== undefined &&
+            p.age >= 27 &&
+            p.contract.yearsRemaining <= 1 &&
+            !p.contract.noTradeClause &&
+            p.injuryStatus === null &&
+            p.position !== 'G' &&
+            playerValue(p) >= 15
+        )
+        .sort((a, b) => playerValue(b) - playerValue(a) || (a.id < b.id ? -1 : 1))
+      return { team: t, vet: vets[0] }
+    })
+    .filter((s): s is { team: Team; vet: Player } => s.vet !== undefined)
+    .sort((a, b) => (a.team.id < b.team.id ? -1 : 1))
+  if (sellers.length === 0) return null
+  const seller = rng.pick(sellers)
+  const vetValue = playerValue(seller.vet)
+
+  // Buyers: contenders (≠ seller) that can absorb the salary, have roster room,
+  // and own draft capital worth roughly the vet.
+  const ranks = strengthRanks(teams, players)
+  const currentYear = picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
+  const buyers = ai
+    .filter(
+      (t) =>
+        t.id !== seller.team.id &&
+        postureOf(t.id) === 'contend' &&
+        t.roster.length < 23 &&
+        t.finances.capUsed + seller.vet.contract.salary <= t.finances.salaryCap
+    )
+    .sort((a, b) => (a.id < b.id ? -1 : 1))
+  for (const buyer of rng.shuffle(buyers)) {
+    const owned = picks
+      .filter((p) => p.ownerTeamId === buyer.id)
+      .map((pick) => {
+        const rank = ranks.get(pick.originalTeamId)
+        const value = rank === undefined
+          ? pickValue(pick, { year: currentYear })
+          : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
+        return { pick, value }
+      })
+      .sort((x, y) => y.value - x.value)
+    // Greedy 1–2 picks. Rentals fetch well below full player value — the
+    // seller has no leverage on an expiring deal, so the market band is
+    // roughly 30–80% of the vet's trade points in draft capital (a good
+    // rental ≈ a 1st + a mid pick, matching real deadline precedent).
+    const chosen: DraftPick[] = []
+    let total = 0
+    for (const c of owned) {
+      if (chosen.length >= 2 || total >= vetValue * 0.5) break
+      if (total + c.value > vetValue * 0.8) continue
+      chosen.push(c.pick)
+      total += c.value
+    }
+    if (chosen.length === 0 || total < vetValue * 0.3 || total > vetValue * 0.8) continue
+    const pickLabels = chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`).join(' and ')
+    return {
+      sellerTeamId: seller.team.id,
+      buyerTeamId: buyer.id,
+      playerIds: [seller.vet.id],
+      picks: chosen,
+      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${pickLabels}.`,
+    }
+  }
+  return null
 }

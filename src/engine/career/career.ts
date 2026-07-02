@@ -124,6 +124,7 @@ import {
 import {
   buildGmPersona,
   deriveClubPosture,
+  personaPhilosophy,
   type ClubPosture,
   type GmPersona,
 } from '@engine/league/gmPersona'
@@ -223,6 +224,7 @@ import {
   evaluateProposal,
   executeTrade,
   generateAiOffers,
+  generateAiAiTrade,
   pickValue,
   playerValue,
   type StoredTradeOffer,
@@ -3265,6 +3267,11 @@ export class Career {
     }
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
+      // Living World LW3: postures + GM personas drive who calls and how hard,
+      // and the offer rate ramps toward the deadline. Ranks computed once.
+      const ranks = this.strengthRanks()
+      const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+        this.clubPostureFor(tid, ranks).posture
       const offers = generateAiOffers({
         day,
         userTeamId: this.userTeamId,
@@ -3273,15 +3280,70 @@ export class Career {
         picks: this.picks,
         rng: this.rngFor(7002, day),
         nextOfferId: () => `o${this.offerCounter++}`,
+        deadlineDay: this.deadlineDay,
+        postureOf,
+        aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
       })
       for (const o of offers) {
         this.tradeOffers.push(o)
         const partner = this.data.teams.get(o.partnerTeamId)!
+        const gm = this.gmPersonaFor(o.partnerTeamId)
         this.pushNews(
           'trade',
           `Trade offer from ${partner.abbreviation}`,
-          o.message,
+          `${gm.name} (${gm.styleLabel}) is on the phone. ${o.message}`,
           { teamId: o.partnerTeamId as string }
+        )
+      }
+      // The league lives without you: AI clubs deal with each other — rentals
+      // flow from rebuilders to contenders, ramping toward the deadline.
+      const aiDeal = generateAiAiTrade({
+        day,
+        deadlineDay: this.deadlineDay,
+        userTeamId: this.userTeamId,
+        teams: this.data.teams,
+        players: this.data.players,
+        picks: this.picks,
+        rng: this.rngFor(7012, day),
+        postureOf,
+      })
+      if (aiDeal) {
+        executeTrade({
+          teams: this.data.teams,
+          players: this.data.players,
+          teamA: aiDeal.sellerTeamId,
+          teamB: aiDeal.buyerTeamId,
+          aGivesPlayerIds: aiDeal.playerIds,
+          aGivesPicks: [],
+          bGivesPlayerIds: [],
+          bGivesPicks: aiDeal.picks,
+          allPicks: this.picks,
+        })
+        repairLines(this.data.teams.get(aiDeal.sellerTeamId)!, this.data.players)
+        repairLines(this.data.teams.get(aiDeal.buyerTeamId)!, this.data.players)
+        const txResult = recordTransaction(this.transactionLedger, {
+          day,
+          year: this.year,
+          kind: 'trade',
+          teamIds: [aiDeal.sellerTeamId as string, aiDeal.buyerTeamId as string],
+          summary: aiDeal.summary,
+        })
+        this.transactionLedger = txResult.ledger
+        this.chronicleTrade({
+          teamAId: aiDeal.sellerTeamId,
+          teamBId: aiDeal.buyerTeamId,
+          aGivesPlayerIds: aiDeal.playerIds,
+          aGivesPicks: [],
+          bGivesPlayerIds: [],
+          bGivesPicks: aiDeal.picks,
+        })
+        const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
+        const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
+        this.pushNews(
+          'trade',
+          `Trade: ${aiDeal.summary.split('.')[0]}`,
+          `${aiDeal.summary} ${buyerGm.name} adds a piece for the run; ${sellerGm.name} keeps stockpiling futures.`,
+          { teamId: aiDeal.buyerTeamId as string }
         )
       }
     }
@@ -5899,6 +5961,9 @@ export class Career {
       partnerPlayers: this.data.players,
       rng,
       relationship: this.relationshipWith(partnerId as string),
+      // Living World LW3: the partner's stance flows from his GM's persona +
+      // the club's live posture, not a static hash.
+      philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
     })
     if (evaln.verdict === 'accept') {
       executeTrade({
@@ -9106,10 +9171,10 @@ export class Career {
         .filter((tid) => tid !== this.userTeamId)
         .map((tid) => {
           const team = this.data.teams.get(tid)!
-          const profile = buildTeamProfile(team, this.data.players)
-          const needLabels: Record<string, string> = { F: 'Forwards', D: 'Defence', G: 'Goaltending' }
           const gm = this.gmPersonaFor(tid)
           const posture = this.clubPostureFor(tid, ranks)
+          const profile = buildTeamProfile(team, this.data.players, personaPhilosophy(gm, posture.posture))
+          const needLabels: Record<string, string> = { F: 'Forwards', D: 'Defence', G: 'Goaltending' }
           return {
             teamId: tid as string,
             teamName: team.name,
