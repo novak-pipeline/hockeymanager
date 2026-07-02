@@ -221,6 +221,7 @@ import {
   type TentpolesState,
 } from '@engine/league/tentpoles'
 import {
+  requiresWaivers as requiresWaiversRule,
   aiFreeAgencyDay,
   aiResignDay,
   askTerms,
@@ -5548,9 +5549,9 @@ export class Career {
   }
 
   /** A one-way veteran must clear waivers to go to the AHL; young/two-way players
-   *  are exempt. (Simplified from the NHL's age+games formula.) */
+   *  are exempt. Shared rule lives in contracts.ts (also drives the squad UI). */
   private requiresWaivers(p: Player): boolean {
-    return p.contract.twoWay === false && p.age >= 25
+    return requiresWaiversRule(p)
   }
 
   /**

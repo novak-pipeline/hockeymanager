@@ -315,6 +315,9 @@ export interface SquadRowView extends PlayerBadge {
   goalie: GoalieSeasonLine | null
   /** True if listed as a healthy scratch for the next game. */
   scratched: boolean
+  /** True if sending him to the AHL means clearing waivers (claimable for
+   *  nothing) — the training-camp trap, surfaced EHM-style. Optional/additive. */
+  waiverRequired?: boolean
   /** EHM-style form string from last 5 game ratings, e.g. "BABCA" newest-first. */
   gameRatingForm: string
   /** Season average game rating (0 = no games played). */

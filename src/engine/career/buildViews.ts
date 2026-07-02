@@ -27,7 +27,7 @@ import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
-import { contractStatus, CAP_FLOOR } from '@engine/league/contracts'
+import { contractStatus, requiresWaivers, CAP_FLOOR } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -361,6 +361,7 @@ export function buildSquadView(
         skater: p.position === 'G' ? null : skaterLine(ctx, id),
         goalie: p.position === 'G' ? goalieLine(ctx, id) : null,
         scratched: scratchedSet.has(pid),
+        waiverRequired: requiresWaivers(p),
         gameRatingForm: formString(ratings),
         avgRating: seasonAvgRating(ratings),
       }

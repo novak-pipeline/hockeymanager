@@ -85,6 +85,12 @@ const roundTo25k = (salary: number): number => Math.round(salary / 25_000) * 25_
  * Matches the age-27 RFA/UFA boundary the profile view already displays, so the
  * label a GM sees and the way the engine treats the player agree.
  */
+/** A one-way veteran must clear waivers to go to the AHL; young/two-way players
+ *  are exempt. (Simplified from the NHL's age+games formula.) */
+export function requiresWaivers(player: Player): boolean {
+  return player.contract.twoWay === false && player.age >= 25
+}
+
 export function contractStatus(player: Player): 'ELC' | 'RFA' | 'UFA' {
   if (player.age >= 27 || player.stats.length >= 7) return 'UFA'
   if (player.age <= 23 && player.stats.length <= 3) return 'ELC'

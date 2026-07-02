@@ -505,7 +505,16 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                 <td>
                                   {row.contract.noTradeClause && <span className="chip chip-warn" style={{ fontSize: 9 }}>NTC</span>}
                                   {row.contract.twoWay && <span className="chip" style={{ fontSize: 9, marginLeft: 2 }}>2-way</span>}
-                                  {!row.contract.noTradeClause && !row.contract.twoWay && <span className="muted">—</span>}
+                                  {row.waiverRequired && (
+                                    <span
+                                      className="chip chip-danger"
+                                      style={{ fontSize: 9, marginLeft: 2 }}
+                                      title="Sending him to the AHL requires clearing waivers — any club can claim him for nothing"
+                                    >
+                                      WV
+                                    </span>
+                                  )}
+                                  {!row.contract.noTradeClause && !row.contract.twoWay && !row.waiverRequired && <span className="muted">—</span>}
                                 </td>
                               </>
                             )}
