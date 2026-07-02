@@ -6669,6 +6669,95 @@ export class Career {
     )
   }
 
+  /** Season Rhythm M4: the deadline war-room briefing — staged while the sim
+   *  is held on deadline day. Everything in it is read from the LIVE market:
+   *  postures, personas, expiring contracts, your cap sheet. */
+  getWarRoom(): {
+    stance: string
+    capLine: string
+    coachLine: string
+    agmLine: string
+    targets: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; gmName: string; gmStyle: string }>
+    suitors: Array<{ teamAbbr: string; gmName: string; gmStyle: string; wantsName: string }>
+    cast: Array<{ id: string; name: string; title: string; faceId?: string }>
+  } | null {
+    if (!this.deadlineHold) return null
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const ranks = this.strengthRanks()
+    const myPosture = this.clubPostureFor(this.userTeamId, ranks)
+    const buying = myPosture.posture === 'contend'
+    const capUsed = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const space = this.userTeam.finances.salaryCap - capUsed - this.userDeadCap
+    const weakest = this.rosterCounts(this.userTeam)
+    const need = weakest.d <= 6 ? 'the blue line' : weakest.g < 2 ? 'the crease' : 'scoring depth'
+
+    // Rentals on selling clubs — what a buyer would actually call about.
+    const targets: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; gmName: string; gmStyle: string }> = []
+    for (const [tid, team] of this.data.teams) {
+      if (targets.length >= 4) break
+      if (tid === this.userTeamId || team.tier === 'ahl' || team.tier === 'world') continue
+      const posture = this.clubPostureFor(tid, ranks).posture
+      if (posture === 'contend') continue // contenders aren't selling
+      const gm = this.gmPersonaFor(tid)
+      for (const pid of team.roster) {
+        if (targets.length >= 4) break
+        const p = this.data.players.get(pid)
+        if (!p || p.contract.noTradeClause || p.injuryStatus) continue
+        if (p.contract.yearsRemaining > 1 || p.age < 27) continue // rentals only
+        const value = ratedOverall(p)
+        if (value < 74 || p.contract.salary > space) continue
+        targets.push({
+          playerId: pid as string, name: p.name, position: p.position, age: p.age,
+          teamAbbr: team.abbreviation, gmName: gm.name, gmStyle: gm.styleLabel,
+        })
+      }
+    }
+
+    // If we're the seller: which contending GMs are hungriest, and for whom.
+    const suitors: Array<{ teamAbbr: string; gmName: string; gmStyle: string; wantsName: string }> = []
+    if (!buying) {
+      const myRentals = this.userTeam.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.contract.yearsRemaining <= 1 && p.age >= 27 && !p.contract.noTradeClause)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+        .slice(0, 2)
+      const contenders = [...this.data.teams.values()]
+        .filter((t) => t.id !== this.userTeamId && t.tier !== 'ahl' && t.tier !== 'world' &&
+          this.clubPostureFor(t.id, ranks).posture === 'contend')
+        .map((t) => ({ t, gm: this.gmPersonaFor(t.id) }))
+        .sort((a, b) => b.gm.aggression - a.gm.aggression)
+        .slice(0, 3)
+      for (let i = 0; i < contenders.length && i < myRentals.length * 2; i++) {
+        const c = contenders[i]!
+        const want = myRentals[i % Math.max(1, myRentals.length)]
+        if (!want) break
+        suitors.push({ teamAbbr: c.t.abbreviation, gmName: c.gm.name, gmStyle: c.gm.styleLabel, wantsName: want.name })
+      }
+    }
+
+    return {
+      stance: buying
+        ? `We're contenders — ${myPosture.reason}. Today we buy, or we explain to the room why we didn't.`
+        : myPosture.posture === 'rebuild'
+          ? `We're selling — ${myPosture.reason}. Every expiring veteran is a draft pick wearing skates.`
+          : `We're on the fence — ${myPosture.reason}. Pick a side before the phones decide for you.`,
+      capLine: this.userDeadCap > 0
+        ? `Space to work with: $${(space / 1e6).toFixed(2)}M after $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap.`
+        : `Space to work with: $${(space / 1e6).toFixed(2)}M.`,
+      coachLine: `If we add anywhere, add to ${need}. Don't bring me another project — bring me someone who plays TONIGHT.`,
+      agmLine: buying
+        ? `The sellers' boards are up. These names are realistic — expiring deals we can actually fit.`
+        : `The phones started at seven this morning. These are the clubs hungriest for what we have.`,
+      targets,
+      suitors,
+      cast: [
+        { id: 'agm', name: staff.agm?.name ?? 'Your Assistant GM', title: 'Assistant GM', ...(staff.agm?.faceId ? { faceId: staff.agm.faceId } : {}) },
+        { id: 'coach', name: staff.headCoach?.name ?? 'The Head Coach', title: 'Head Coach', ...(staff.headCoach?.faceId ? { faceId: staff.headCoach.faceId } : {}) },
+      ],
+    }
+  }
+
   /** The GM skipped the meeting (simmed past it) — the AGM attends instead. */
   private autoResolveBoardMeeting(): void {
     const scene = this.getBoardMeeting()

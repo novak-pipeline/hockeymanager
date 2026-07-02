@@ -39,6 +39,7 @@ const api = {
     > => ipcRenderer.invoke('mods:list'),
     read: (id: string): Promise<unknown> => ipcRenderer.invoke('mods:read', id),
     face: (faceId: string): Promise<string | null> => ipcRenderer.invoke('mods:face', faceId),
+    scene: (name: string): Promise<string | null> => ipcRenderer.invoke('mods:scene', name),
   },
   press: {
     setKey: (key: string): Promise<{ ok: boolean }> =>

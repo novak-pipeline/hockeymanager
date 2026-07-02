@@ -188,6 +188,50 @@ export async function readFace(faceId: string): Promise<string | null> {
   return null
 }
 
+/* ─── scene backdrops (assets/scenes/<name>.png) ─── */
+
+const scenePathCache = new Map<string, string | null>()
+
+function scenesDirs(): string[] {
+  const dirs: string[] = [join(process.cwd(), 'assets', 'scenes')]
+  try {
+    const userScenes = join(app.getPath('userData'), 'assets', 'scenes')
+    if (!dirs.includes(userScenes)) dirs.push(userScenes)
+  } catch {
+    /* app not ready in tests */
+  }
+  return dirs
+}
+
+/** User-supplied backdrop art for meeting scenes ('boardroom', 'war-room'…).
+ *  Returns a data URL or null; null results are NOT cached so newly dropped
+ *  artwork appears without a restart. */
+export async function readScene(name: string): Promise<string | null> {
+  if (!/^[a-z0-9-]{1,40}$/.test(name)) return null
+  const cached = scenePathCache.get(name)
+  if (cached) {
+    try {
+      const buf = await readFile(cached)
+      return `data:image/png;base64,${buf.toString('base64')}`
+    } catch {
+      scenePathCache.delete(name)
+    }
+  }
+  for (const dir of scenesDirs()) {
+    const candidate = join(dir, `${name}.png`)
+    if (existsSync(candidate)) {
+      scenePathCache.set(name, candidate)
+      try {
+        const buf = await readFile(candidate)
+        return `data:image/png;base64,${buf.toString('base64')}`
+      } catch {
+        return null
+      }
+    }
+  }
+  return null
+}
+
 /* ─── IPC registration ─── */
 
 /**
@@ -205,5 +249,10 @@ export function registerModIpc(ipcMain: IpcMain): void {
   ipcMain.handle('mods:face', (_event, faceId: unknown) => {
     if (typeof faceId !== 'string') throw new Error('mods:face expects (faceId: string)')
     return readFace(faceId)
+  })
+
+  ipcMain.handle('mods:scene', (_event, name: unknown) => {
+    if (typeof name !== 'string') throw new Error('mods:scene expects (name: string)')
+    return readScene(name)
   })
 }

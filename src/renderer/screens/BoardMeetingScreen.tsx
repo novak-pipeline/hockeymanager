@@ -7,7 +7,8 @@
  * are BETS — every commitment becomes a chronicle promise the owner will read
  * back to you in April.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { getScene } from '../lib/mods'
 import type { BoardMeetingScene, MeetingLine } from '../../worker/protocol'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice } from '../components/ui'
@@ -17,7 +18,15 @@ import { bumpRefresh, toast } from '../components/store'
 
 /* ── the room (CSS scene; artwork slot documented above) ── */
 
-function Backdrop({ children }: { children: React.ReactNode }): JSX.Element {
+export function Backdrop({ children, scene = 'boardroom' }: { children: React.ReactNode; scene?: string }): JSX.Element {
+  // User-supplied artwork (assets/scenes/<scene>.png) wins; the layered CSS
+  // room below is the always-available fallback.
+  const [art, setArt] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    void getScene(scene).then((url) => { if (alive) setArt(url) })
+    return () => { alive = false }
+  }, [scene])
   return (
     <div
       style={{
@@ -25,7 +34,12 @@ function Backdrop({ children }: { children: React.ReactNode }): JSX.Element {
         minHeight: '100%',
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
-        background: [
+        ...(art ? {
+          backgroundImage: `linear-gradient(180deg, rgba(8,10,16,0.72) 0%, rgba(8,10,16,0.55) 40%, rgba(8,10,16,0.82) 100%), url(${art})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        } : {}),
+        background: art ? undefined : [
           // night skyline through the window
           'radial-gradient(ellipse 60% 38% at 72% 18%, rgba(120,140,190,0.22), transparent 70%)',
           // warm boardroom lamp glow
@@ -38,12 +52,12 @@ function Backdrop({ children }: { children: React.ReactNode }): JSX.Element {
         boxShadow: 'inset 0 0 120px rgba(0,0,0,0.55)',
       }}
     >
-      {/* window mullions, purely decorative */}
-      <div style={{ position: 'absolute', top: 0, left: '55%', right: '6%', height: '38%', display: 'flex', gap: 2, opacity: 0.25, pointerEvents: 'none' }}>
+      {/* window mullions, purely decorative (CSS room only) */}
+      {!art && <div style={{ position: 'absolute', top: 0, left: '55%', right: '6%', height: '38%', display: 'flex', gap: 2, opacity: 0.25, pointerEvents: 'none' }}>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} style={{ flex: 1, borderLeft: '2px solid #0a0d14', borderBottom: '2px solid #0a0d14' }} />
         ))}
-      </div>
+      </div>}
       <div style={{ position: 'relative', zIndex: 1, padding: 'var(--sp-5)' }}>{children}</div>
     </div>
   )
@@ -143,7 +157,7 @@ export function BoardMeetingScreen({ variant = 'preseason' }: { variant?: 'prese
 
   return (
     <section style={{ height: '100%' }}>
-      <Backdrop>
+      <Backdrop scene={isReview ? 'boardroom-day' : 'boardroom'}>
         {/* header */}
         <div className="row-between" style={{ alignItems: 'flex-start', marginBottom: 'var(--sp-4)' }}>
           <div>

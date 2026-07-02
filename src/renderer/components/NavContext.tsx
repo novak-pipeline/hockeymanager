@@ -17,6 +17,7 @@ export type ScreenId =
   | 'board'
   | 'boardMeeting'
   | 'seasonReview'
+  | 'warRoom'
   | 'gmCareer'
   | 'staffMeeting'
   // News section

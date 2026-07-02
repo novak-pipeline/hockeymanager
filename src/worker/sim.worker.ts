@@ -328,6 +328,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'searchAll':
       return { id: req.id, type: 'searchResults', results: must().searchAll(req.query) }
+    case 'getWarRoom':
+      return { id: req.id, type: 'warRoom', warRoom: must().getWarRoom() }
     case 'getSeasonReview':
       return { id: req.id, type: 'boardMeeting', scene: must().getSeasonReview() }
     case 'submitSeasonReview': {

@@ -15,6 +15,7 @@ interface ModsBridge {
   list(): Promise<ModListEntry[]>
   read(id: string): Promise<unknown>
   face(faceId: string): Promise<string | null>
+  scene?(name: string): Promise<string | null>
 }
 
 function bridge(): ModsBridge | null {
@@ -35,6 +36,15 @@ export async function listMods(): Promise<ModListEntry[]> {
 export async function readModDatabase(id: string): Promise<unknown> {
   try {
     return (await bridge()?.read(id)) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** User-supplied scene backdrop (assets/scenes/<name>.png) as a data URL, or null. */
+export async function getScene(name: string): Promise<string | null> {
+  try {
+    return (await bridge()?.scene?.(name)) ?? null
   } catch {
     return null
   }

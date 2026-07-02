@@ -305,6 +305,8 @@ export type WorkerRequestBody =
   | { type: 'getBoardMeeting' }
   /** Attend the meeting with your chosen answers per agenda item. */
   | { type: 'submitBoardMeeting'; choices: Record<string, string> }
+  /** The deadline war-room briefing (only while the deadline hold is active). */
+  | { type: 'getWarRoom' }
   /** The staged End-of-Season Review scene (M4), or null. */
   | { type: 'getSeasonReview' }
   /** Answer for the season (single 'answer' agenda choice). */
@@ -468,6 +470,18 @@ export type WorkerResponse = { id: number } & (
         players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }>
         teams: Array<{ teamId: string; name: string; abbr: string }>
       }
+    }
+  | {
+      type: 'warRoom'
+      warRoom: {
+        stance: string
+        capLine: string
+        coachLine: string
+        agmLine: string
+        targets: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; gmName: string; gmStyle: string }>
+        suitors: Array<{ teamAbbr: string; gmName: string; gmStyle: string; wantsName: string }>
+        cast: Array<{ id: string; name: string; title: string; faceId?: string }>
+      } | null
     }
   /* ── season rhythm: meetings (M1) ── */
   | { type: 'boardMeeting'; scene: BoardMeetingScene | null }

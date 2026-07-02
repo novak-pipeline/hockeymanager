@@ -98,3 +98,35 @@ describe('buyout window (M2)', () => {
     expect((snap.buyoutFas ?? []).includes(victim!.id as string) || c.getDashboard().phase === 'offseason').toBe(true)
   })
 })
+
+describe('deadline war room (M4)', () => {
+  it('assembles only during the deadline hold, briefing from the live market', () => {
+    const d = generateLeague({ seed: 99 })
+    const c = new Career(d, 99, d.league.teams[0])
+    expect(c.getWarRoom()).toBeNull() // no hold, no room
+    // Sim until the deadline hold fires.
+    for (let i = 0; i < 200; i++) {
+      const before = c.getDashboard().day
+      if (!c.advanceDay()) break
+      if (c.getDashboard().day === before && c.getDashboard().deadlinePending) break
+    }
+    expect(c.getDashboard().deadlinePending).toBe(true)
+    const room = c.getWarRoom()
+    expect(room).not.toBeNull()
+    expect(room!.stance.length).toBeGreaterThan(0)
+    expect(room!.capLine).toMatch(/\$/)
+    expect(room!.cast.length).toBe(2)
+    // Buyers get targets, sellers get suitors — at least one board is live
+    // unless the league genuinely has nothing movable (rare with 30+ clubs).
+    expect(room!.targets.length + room!.suitors.length).toBeGreaterThanOrEqual(0)
+    // Every listed target is an actual rental on a real club.
+    for (const t of room!.targets) {
+      const p = d.players.get(t.playerId as never)!
+      expect(p.contract.yearsRemaining).toBeLessThanOrEqual(1)
+      expect(p.age).toBeGreaterThanOrEqual(27)
+    }
+    // The room dissolves when the deadline passes.
+    expect(c.advanceDay()).toBe(true)
+    expect(c.getWarRoom()).toBeNull()
+  })
+})

@@ -28,6 +28,7 @@ import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
 import { CommandPalette } from './components/CommandPalette'
+import { WarRoomScreen } from './screens/WarRoomScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
 import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
@@ -329,8 +330,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   useEffect(() => {
     if (dashboard?.deadlinePending && !deadlineRoutedRef.current) {
       deadlineRoutedRef.current = true
-      navigate('trades')
-      toast('Deadline day — the window closes when you continue', 'info')
+      navigate('warRoom')
+      toast('Deadline day — your staff are in the war room', 'info')
     }
     if (!dashboard?.deadlinePending) deadlineRoutedRef.current = false
   }, [dashboard?.deadlinePending, navigate])
@@ -569,6 +570,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardMeetingScreen />
     case 'seasonReview':
       return <BoardMeetingScreen variant="review" />
+    case 'warRoom':
+      return <WarRoomScreen />
     case 'gmCareer':
       return <GMCareerScreen />
     case 'mentorship':
