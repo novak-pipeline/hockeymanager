@@ -6248,6 +6248,16 @@ export class Career {
       throw new Error('player is not a free agent')
     }
     const player = this.resolve(id)
+    // Dead cap from buyouts is real: the signing must fit under ceiling MINUS
+    // the dead charge, or the buyout was free money.
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return {
+        signed: false,
+        message: `That contract doesn't fit under the cap once your $${(this.userDeadCap / 1e6).toFixed(2)}M in buyout dead cap is counted.`,
+      }
+    }
     const ask = askTerms(player, this.year)
     const rng = this.rngFor(8007, os.faDay, Number((playerId.match(/\d+/) ?? ['0'])[0]))
     if (!offerAcceptable(player, { salary, years }, ask, rng)) {
@@ -9765,7 +9775,14 @@ export class Career {
   }
 
   getFinances(): FinanceView {
-    return buildFinanceView(this.ctx())
+    const view = buildFinanceView(this.ctx())
+    if (this.userDeadCap > 0) {
+      // Buyout dead cap is real money against the ceiling — show it and count it.
+      view.deadCap = this.userDeadCap
+      view.capUsed += this.userDeadCap
+      view.capSpace = Math.max(0, view.salaryCap - view.capUsed)
+    }
+    return view
   }
 
   getInbox(): InboxView {

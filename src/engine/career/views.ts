@@ -1364,6 +1364,8 @@ export interface FinanceView {
   salaryCap: number
   capUsed: number
   capSpace: number
+  /** Buyout dead-cap charge counted against this club's cap (M2). Optional/additive. */
+  deadCap?: number
   /** League salary floor (minimum payroll). */
   salaryFloor?: number
   /** True when this club's payroll sits below the floor. */

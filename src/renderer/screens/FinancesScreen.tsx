@@ -90,6 +90,11 @@ function FinancesBody(props: { data: FinanceView }): JSX.Element {
           capSpace={d.capSpace}
           leagueAvg={d.leagueAvgPayroll}
         />
+        {d.deadCap !== undefined && d.deadCap > 0 && (
+          <div className="small" style={{ marginTop: 8, color: 'var(--danger)' }}>
+            Buyout dead cap: {fmtMoney(d.deadCap)} — counted in the cap figure above; clears at season's end.
+          </div>
+        )}
         {d.salaryFloor !== undefined && (
           <div className="small" style={{ marginTop: 8, color: d.underFloor ? 'var(--danger)' : 'var(--muted)' }}>
             Salary floor: {fmtMoney(d.salaryFloor)}
