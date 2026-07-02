@@ -38,7 +38,7 @@ export function Backdrop({ children, scene = 'boardroom' }: { children: React.Re
         // `backgroundImage` lets a React re-render's shorthand reset wipe the
         // freshly-set image. Gradients are images, so everything lives here.
         backgroundImage: art
-          ? `linear-gradient(180deg, rgba(8,10,16,0.72) 0%, rgba(8,10,16,0.55) 40%, rgba(8,10,16,0.82) 100%), url(${art})`
+          ? `linear-gradient(90deg, rgba(6,8,13,0.92) 0%, rgba(6,8,13,0.82) 42%, rgba(6,8,13,0.30) 72%, rgba(6,8,13,0.55) 100%), linear-gradient(180deg, rgba(6,8,13,0.35) 0%, transparent 30%, rgba(6,8,13,0.5) 100%), url(${art})`
           : [
             // night skyline through the window
             'radial-gradient(ellipse 60% 38% at 72% 18%, rgba(120,140,190,0.22), transparent 70%)',
@@ -74,17 +74,19 @@ function SpeechRow({ line, cast }: { line: MeetingLine; cast: BoardMeetingScene[
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', maxWidth: 720 }}>
       <PlayerFace faceId={who?.faceId} name={who?.name ?? '?'} size={40} />
       <div>
-        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.6, textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
           {who?.name} · {who?.title}
         </div>
         <div
           style={{
-            background: 'rgba(255,255,255,0.055)',
-            border: '1px solid rgba(255,255,255,0.09)',
+            background: 'rgba(10,12,18,0.86)',
+            backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(255,255,255,0.14)',
             borderRadius: '4px 14px 14px 14px',
             padding: '10px 14px',
             fontSize: 14.5,
             lineHeight: 1.55,
+            boxShadow: '0 2px 12px rgba(0,0,0,0.45)',
           }}
         >
           {line.text}
@@ -255,12 +257,14 @@ export function BoardMeetingScreen({ variant = 'preseason' }: { variant?: 'prese
                         onClick={() => pick(item.id, o.id)}
                         style={{
                           textAlign: 'left', cursor: 'pointer',
-                          background: 'rgba(255,255,255,0.04)',
-                          border: '1px solid rgba(255,255,255,0.14)',
+                          background: 'rgba(10,12,18,0.86)',
+                          backdropFilter: 'blur(6px)',
+                          border: '1px solid rgba(255,255,255,0.16)',
                           borderRadius: 'var(--radius-sm)', padding: '10px 14px', color: 'var(--text)',
+                          boxShadow: '0 2px 12px rgba(0,0,0,0.45)',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent, #d6a056)'; e.currentTarget.style.background = 'rgba(214,160,86,0.07)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; e.currentTarget.style.background = 'rgba(255,255,255,0.04)' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent, #d6a056)'; e.currentTarget.style.background = 'rgba(30,24,14,0.92)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.16)'; e.currentTarget.style.background = 'rgba(10,12,18,0.86)' }}
                       >
                         <div style={{ fontWeight: 700, fontSize: 13.5 }}>{o.label}</div>
                         <div className="muted" style={{ fontSize: 12, marginTop: 3, lineHeight: 1.5 }}>{o.detail}</div>

@@ -56,7 +56,7 @@ export function WarRoomScreen(): JSX.Element {
 
         {/* the briefing */}
         <div className="stack" style={{ gap: 'var(--sp-2)', maxWidth: 780, marginBottom: 'var(--sp-4)' }}>
-          <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '10px 14px', fontSize: 14, lineHeight: 1.55 }}>
+          <div style={{ background: 'rgba(10,12,18,0.86)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: '10px 14px', fontSize: 14, lineHeight: 1.55 }}>
             <b>The stance:</b> {room.stance}
           </div>
           <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
@@ -76,7 +76,7 @@ export function WarRoomScreen(): JSX.Element {
             <div style={{ fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--accent, #d6a056)', marginBottom: 6 }}>
               Realistic targets — expiring deals on selling clubs
             </div>
-            <div className="table-wrap" style={{ background: 'rgba(0,0,0,0.35)', borderRadius: 8 }}>
+            <div className="table-wrap" style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8 }}>
               <table className="table">
                 <thead>
                   <tr><th>Player</th><th className="num">Age</th><th>Club</th><th>The man to call</th></tr>
@@ -102,7 +102,7 @@ export function WarRoomScreen(): JSX.Element {
             </div>
             <div className="stack" style={{ gap: 6 }}>
               {room.suitors.map((s2, i) => (
-                <div key={i} style={{ background: 'rgba(0,0,0,0.35)', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+                <div key={i} style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
                   📞 <b>{s2.gmName}</b> ({s2.teamAbbr}) <span className="muted">— {s2.gmStyle} —</span> asking about <b>{s2.wantsName}</b>
                 </div>
               ))}
