@@ -4088,6 +4088,47 @@ export class Career {
             }
           }
 
+          // LW4 ripple: the REDRAFT — one year on, the press re-ranks last
+          // year's draft class by how the players actually developed. Steals
+          // get their flowers; slides get named. Your picks are flagged.
+          {
+            const classEvents = this.chronicle.events.filter(
+              (e) => e.kind === 'draftPick' && e.year === this.year - 1 && (e.details?.overallPick ?? 999) <= 64
+            )
+            if (classEvents.length >= 10) {
+              const ranked = classEvents
+                .map((e) => {
+                  const p = this.data.players.get(asPlayerId(e.playerIds[0] ?? ''))
+                  return p ? { e, p, now: ratedOverall(p) + 0.4 * Math.max(0, overall(p.potential, p.position) - ratedOverall(p)) } : null
+                })
+                .filter((x): x is NonNullable<typeof x> => x !== null)
+                .sort((a, b) => b.now - a.now)
+              const top5 = ranked.slice(0, 5).map((x, i) => {
+                const orig = x.e.details?.overallPick ?? 0
+                const yours = x.e.userInvolved ? ' (YOUR pick)' : ''
+                return `${i + 1}. ${x.p.name} — drafted #${orig} by ${x.e.teamIds[0] ? this.data.teams.get(asTeamId(x.e.teamIds[0]))?.abbreviation ?? '?' : '?'}${yours}`
+              })
+              const steal = ranked.slice(0, 8).reduce((best, x) =>
+                (x.e.details?.overallPick ?? 0) > (best?.e.details?.overallPick ?? 0) ? x : best, ranked[0])
+              const slide = ranked
+                .filter((x) => (x.e.details?.overallPick ?? 99) <= 5)
+                .sort((a, b) => ranked.indexOf(b) - ranked.indexOf(a))[0]
+              const slideIdx = slide ? ranked.indexOf(slide) + 1 : 0
+              this.pushNews(
+                'draft',
+                `The ${this.year - 1} redraft — one year later`,
+                `Twelve months of development later, the press re-ranks the ${this.year - 1} class:\n\n${top5.join('\n')}\n\n` +
+                (steal && (steal.e.details?.overallPick ?? 0) > 10
+                  ? `Steal of the class: ${steal.p.name}, taken #${steal.e.details?.overallPick}. Somebody's scout earned his miles.\n`
+                  : '') +
+                (slide && slideIdx > 10
+                  ? `Hardest slide: ${slide.p.name} went #${slide.e.details?.overallPick} and re-ranks ${slideIdx}th today. It's early — but the whispers have started.`
+                  : ''),
+                {}
+              )
+            }
+          }
+
           // LW4 ripple: one year later, the press re-grades your trades. For
           // each deal you made LAST season, compare what the players actually
           // produced this season — decisions echo, in print.
