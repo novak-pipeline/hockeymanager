@@ -698,6 +698,10 @@ export class Career {
   private ownerPerk: string | null = null
   /** Staged End-of-Season Review facts (M4); null once attended or lapsed. */
   private reviewFacts: SeasonReviewFacts | null = null
+  /** True while the sim is held on deadline day (one continue's grace). */
+  private deadlineHold = false
+  /** The deadline hold already happened this season. */
+  private deadlineHoldDone = false
   private recordsState!: RecordsState
   private expectationsState!: ExpectationsState
   private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
@@ -3399,6 +3403,28 @@ export class Career {
     // in your place (safe defaults, a news item, and the meeting is gone).
     if (this.boardMeetingYear !== null) this.autoResolveBoardMeeting()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
+    // Deadline day pauses the sim like draft day: the FIRST continue that would
+    // cross the deadline is held — one last chance to work the phones — and the
+    // next one proceeds. One press, once a season.
+    if (this.deadlineHold) {
+      this.deadlineHold = false // the GM has had his day; the window closes
+    } else if (
+      !this.deadlineHoldDone &&
+      nextDay !== undefined &&
+      this.currentDay <= this.deadlineDay &&
+      nextDay > this.deadlineDay
+    ) {
+      this.deadlineHold = true
+      this.deadlineHoldDone = true
+      this.pushNews(
+        'trade',
+        'DEADLINE DAY — the window closes tonight',
+        'This is it: the last hours of the trade window. Every GM in the league is on the phone. ' +
+        'Make your calls — when you continue, the deadline passes and the roster you have is the roster you ride.',
+        { teamId: this.userTeamId as string }
+      )
+      return true
+    }
     if (nextDay === undefined) return false
     // Resolve any waiver-wire claims whose window has elapsed before today's games.
     this.resolveExpiredWaivers(nextDay)
@@ -5115,6 +5141,9 @@ export class Career {
       this.ownerPerk = null
       // M4: an unattended season review lapses quietly (its news already ran).
       this.reviewFacts = null
+      // Deadline-day hold re-arms for the new season.
+      this.deadlineHold = false
+      this.deadlineHoldDone = false
     }
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
@@ -6841,6 +6870,7 @@ export class Career {
       draftPending: this.draftPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       reviewPending: this.reviewFacts !== null,
+      deadlinePending: this.deadlineHold,
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,
@@ -10651,6 +10681,8 @@ export class Career {
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
       ownerPerk: this.ownerPerk,
       reviewFacts: this.reviewFacts ? structuredClone(this.reviewFacts) : null,
+      deadlineHold: this.deadlineHold,
+      deadlineHoldDone: this.deadlineHoldDone,
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10777,6 +10809,8 @@ export class Career {
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null
     career.ownerPerk = snapshot.ownerPerk ?? null
     career.reviewFacts = snapshot.reviewFacts ? structuredClone(snapshot.reviewFacts) : null
+    career.deadlineHold = snapshot.deadlineHold ?? false
+    career.deadlineHoldDone = snapshot.deadlineHoldDone ?? false
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

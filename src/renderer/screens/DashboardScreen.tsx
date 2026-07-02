@@ -219,6 +219,16 @@ export function DashboardScreen(): JSX.Element {
         </button>
       )}
 
+      {d.deadlinePending && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
+          onClick={() => nav.navigate('trades')}
+        >
+          ⏰ DEADLINE DAY — the trade window closes when you continue. Last chance to work the phones.
+        </button>
+      )}
+
       {d.boardMeetingPending && (
         <button
           className="dash-banner"

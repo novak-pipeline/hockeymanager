@@ -323,6 +323,18 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [watched, actions, nav, dashboard?.unreadNews])
 
+  // Deadline day: when the engine holds the sim, walk the GM into the trade
+  // office automatically — the draft-day pattern, once a season.
+  const deadlineRoutedRef = useRef(false)
+  useEffect(() => {
+    if (dashboard?.deadlinePending && !deadlineRoutedRef.current) {
+      deadlineRoutedRef.current = true
+      navigate('trades')
+      toast('Deadline day — the window closes when you continue', 'info')
+    }
+    if (!dashboard?.deadlinePending) deadlineRoutedRef.current = false
+  }, [dashboard?.deadlinePending, navigate])
+
   const closeViewer = useCallback(() => {
     setWatched(null)
     setNav({ screen: 'dashboard', params: {} })

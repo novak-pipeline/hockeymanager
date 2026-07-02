@@ -239,6 +239,8 @@ export interface DashboardView {
   boardMeetingPending?: boolean
   /** True when the End-of-Season Review is staged (Season Rhythm M4). */
   reviewPending?: boolean
+  /** True while the sim is held on deadline day (last chance to trade). */
+  deadlinePending?: boolean
   userTeam: {
     teamId: string
     name: string
@@ -1646,6 +1648,9 @@ export interface CareerSnapshot {
   ownerPerk?: string | null
   /** Staged End-of-Season Review facts (Season Rhythm M4). Optional/additive. */
   reviewFacts?: SeasonReviewFacts | null
+  /** Deadline-day hold state. Optional/additive. */
+  deadlineHold?: boolean
+  deadlineHoldDone?: boolean
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */

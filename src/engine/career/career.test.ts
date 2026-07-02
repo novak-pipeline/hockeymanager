@@ -200,7 +200,10 @@ describe('Career — regular season', () => {
     const career = new Career(data, 5, data.league.teams[0])
     let days = 0
     while (career.advanceDay()) days++
-    expect(days).toBe(120) // 60 rounds × 2 staggered match days each (4 RR × 15 rounds)
+    // 60 rounds × 2 staggered match days each (4 RR × 15 rounds), plus ONE
+    // deadline-day hold: the continue that would cross the trade deadline is
+    // consumed by the pause (the GM's last chance to deal) before play resumes.
+    expect(days).toBe(121)
     expect(career.done).toBe(true)
     expect(career.advanceDay()).toBe(false)
     expect(career.getDashboard().phase).toBe('playoffs')

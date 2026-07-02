@@ -25,3 +25,35 @@ describe('searchAll (command palette)', () => {
     expect(career.searchAll('a')).toEqual({ players: [], teams: [] })
   })
 })
+
+describe('deadline-day hold', () => {
+  it('holds the sim exactly once when a continue would cross the deadline, then proceeds', () => {
+    const data2 = generateLeague({ seed: 66 })
+    const c = new Career(data2, 66, data2.league.teams[0])
+    // Sim until the hold fires: the day BEFORE crossing, advanceDay returns true
+    // without moving the calendar.
+    let held = false
+    let lastDay = -1
+    for (let i = 0; i < 200; i++) {
+      const before = c.getDashboard().day
+      const ok = c.advanceDay()
+      if (!ok) break
+      const after = c.getDashboard().day
+      if (after === before && c.getDashboard().deadlinePending) {
+        held = true
+        lastDay = after
+        break
+      }
+    }
+    expect(held).toBe(true)
+    expect(c.getDashboard().deadlinePending).toBe(true)
+    // The NEXT continue proceeds past the deadline — and never holds again.
+    expect(c.advanceDay()).toBe(true)
+    expect(c.getDashboard().deadlinePending).toBe(false)
+    expect(c.getDashboard().day).toBeGreaterThan(lastDay)
+    // Round-trip keeps the once-a-season latch.
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(snap.deadlineHoldDone).toBe(true)
+    expect(snap.deadlineHold).toBe(false)
+  })
+})
