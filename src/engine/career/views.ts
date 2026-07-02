@@ -33,6 +33,7 @@ export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/sta
 export type { TeamLeadersView, LeaderChip, TeamLeadersEntry } from '@engine/league/playerRating'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
+import type { ChronicleState } from '@engine/story/chronicle'
 import type {
   AwardRecord,
   LegendRecord,
@@ -1613,6 +1614,8 @@ export interface CareerSnapshot {
   arcs?: ArcsState
   records?: RecordsState
   expectations?: ExpectationsState
+  /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
+  chronicle?: ChronicleState
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */

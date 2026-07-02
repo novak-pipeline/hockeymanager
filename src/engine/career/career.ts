@@ -112,6 +112,15 @@ import {
   type ArcsState,
 } from '@engine/story/arcs'
 import {
+  emptyChronicle,
+  recordEvent as chronicleEvent,
+  recordMeeting as chronicleMeeting,
+  recordSeries as chronicleSeries,
+  recordDraftProvenance,
+  recordAcquisition,
+  type ChronicleState,
+} from '@engine/story/chronicle'
+import {
   archiveSeason,
   emptyRecords,
   inductHallOfFame,
@@ -656,6 +665,8 @@ export class Career {
 
   /* ── story layer (Wave 1) ── */
   private arcsState!: ArcsState
+  /** World Chronicle — permanent event memory (Living World LW1). */
+  private chronicle: ChronicleState = emptyChronicle()
   private recordsState!: RecordsState
   private expectationsState!: ExpectationsState
   private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
@@ -2826,6 +2837,15 @@ export class Career {
     // before merging into totals (so totals pick up the physical counts too).
     this.creditPhysicalStats(res)
     applyStandingsResult(this.standings, res)
+    // World Chronicle: all-time head-to-head record for this matchup (pure observer).
+    chronicleMeeting(this.chronicle, {
+      homeTeamId: res.homeTeamId as string,
+      awayTeamId: res.awayTeamId as string,
+      homeGoals: res.homeGoals,
+      awayGoals: res.awayGoals,
+      overtime: res.decidedBy !== 'regulation',
+      year: this.year,
+    })
     // Hot/cold streak tracking → ambient league news (a tie is impossible in hockey).
     this.updateStreak(res.homeTeamId as string, res.homeGoals > res.awayGoals)
     this.updateStreak(res.awayTeamId as string, res.awayGoals > res.homeGoals)
@@ -3675,7 +3695,40 @@ export class Career {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
         if (watchUser) watched = this.buildWatched(g.homeTeamId, g.awayTeamId, res.stream)
       }
+      // World Chronicle: playoff meetings count toward the all-time matchup record.
+      chronicleMeeting(this.chronicle, {
+        homeTeamId: g.homeTeamId as string,
+        awayTeamId: g.awayTeamId as string,
+        homeGoals: res.homeGoals,
+        awayGoals: res.awayGoals,
+        overtime: res.decidedBy !== 'regulation',
+        year: this.year,
+      })
       const series = po.rounds.flatMap((r) => r.series).find((s) => s.id === g.seriesId)
+      if (series?.winnerTeamId) {
+        // Series decided today (one game per series per day → fires exactly once).
+        const loserTeamId =
+          series.winnerTeamId === series.highSeedTeamId ? series.lowSeedTeamId : series.highSeedTeamId
+        const winAbbr = this.data.teams.get(series.winnerTeamId)?.abbreviation ?? '???'
+        const loseAbbr = this.data.teams.get(loserTeamId)?.abbreviation ?? '???'
+        const winGames = series.winnerTeamId === series.highSeedTeamId ? series.highSeedWins : series.lowSeedWins
+        const loseGames = series.winnerTeamId === series.highSeedTeamId ? series.lowSeedWins : series.highSeedWins
+        chronicleSeries(this.chronicle, {
+          winnerTeamId: series.winnerTeamId as string,
+          loserTeamId: loserTeamId as string,
+          year: this.year,
+        })
+        chronicleEvent(this.chronicle, {
+          year: this.year,
+          day,
+          kind: 'playoffSeries',
+          teamIds: [series.winnerTeamId as string, loserTeamId as string],
+          headline: `${winAbbr} defeat ${loseAbbr} ${winGames}–${loseGames}`,
+          details: { result: `${winAbbr} ${winGames}–${loseGames} ${loseAbbr}` },
+          userInvolved:
+            series.winnerTeamId === this.userTeamId || loserTeamId === this.userTeamId,
+        })
+      }
       if (series?.winnerTeamId && isUser) {
         const won = series.winnerTeamId === this.userTeamId
         const opp = this.data.teams.get(
@@ -3721,6 +3774,15 @@ export class Career {
           : `The ${champ.name} lift the cup. Next year it should be yours.`,
         { teamId: champ.id as string }
       )
+      // World Chronicle: the championship is forever.
+      chronicleEvent(this.chronicle, {
+        year: this.year,
+        day,
+        kind: 'championship',
+        teamIds: [po.championTeamId as string],
+        headline: `${champ.name} win the ${this.year} championship`,
+        userInvolved: po.championTeamId === this.userTeamId,
+      })
       // Queue a champion tentpole press job.
       const champSpecial: string[] = [
         `${champ.name} are the champions of year ${this.year}.`,
@@ -4375,6 +4437,46 @@ export class Career {
         }
       }
     }
+    /* ── World Chronicle: every selection, with provenance + trade lineage ── */
+    {
+      // If this pick changed hands, link the selection to the trade that moved it
+      // (so "the 2nd you gave up became X" is answerable later).
+      const pickRef = `${d.year}-R${pick.round}-${pick.originalTeamId as string}`
+      let viaTradeEventId: string | undefined
+      if (pick.ownerTeamId !== pick.originalTeamId) {
+        for (let i = this.chronicle.events.length - 1; i >= 0; i--) {
+          const e = this.chronicle.events[i]!
+          if (e.kind !== 'trade') continue
+          const assets = [...(e.details?.assetsOut ?? []), ...(e.details?.assetsIn ?? [])]
+          if (assets.some((a) => a.kind === 'pick' && a.pickRef === pickRef)) {
+            viaTradeEventId = e.id
+            break
+          }
+        }
+      }
+      const ev = chronicleEvent(this.chronicle, {
+        year: this.year,
+        day: 0,
+        kind: 'draftPick',
+        teamIds: [pick.ownerTeamId as string],
+        playerIds: [playerId as string],
+        headline: `${team.abbreviation} select ${player.position} ${player.name} (R${pick.round}, #${idx + 1})`,
+        details: {
+          round: pick.round,
+          overallPick: idx + 1,
+          ...(viaTradeEventId ? { viaTradeEventId } : {}),
+        },
+        userInvolved: pick.ownerTeamId === this.userTeamId,
+      })
+      recordDraftProvenance(this.chronicle, {
+        playerId: playerId as string,
+        teamId: pick.ownerTeamId as string,
+        year: d.year,
+        round: pick.round,
+        overallPick: idx + 1,
+        eventId: ev.id,
+      })
+    }
     if (pick.ownerTeamId === this.userTeamId) {
       this.pushNews(
         'draft',
@@ -4695,7 +4797,11 @@ export class Career {
     // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
     for (const arc of this.arcsState.arcs) {
       if (arc.status === 'resolved') continue
-      if (arc.kind === 'feud' || arc.kind === 'mentorship' || arc.kind === 'milestoneWatch') continue
+      if (arc.kind === 'feud' || arc.kind === 'mentorship' || arc.kind === 'milestoneWatch') {
+        // Durable arcs live on — stamp a continuity beat so the saga reads across years.
+        arc.beats.push({ day: 0, year: newYear, summary: `The story carries into the ${newYear} season.` })
+        continue
+      }
       resolveArc(this.arcsState, arc.id, 'The season came to an end.', 0, newYear)
     }
     const odds = buildPreseasonOdds({
@@ -5822,6 +5928,14 @@ export class Career {
         summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
       })
       this.transactionLedger = txResult.ledger
+      this.chronicleTrade({
+        teamAId: this.userTeamId,
+        teamBId: partnerId,
+        aGivesPlayerIds: give.players.map((p) => p.id),
+        aGivesPicks: give.picks,
+        bGivesPlayerIds: receive.players.map((p) => p.id),
+        bGivesPicks: receive.picks,
+      })
       // A completed deal builds rapport with that front office.
       this.adjustRelationship(partnerId as string, 6)
     }
@@ -5882,6 +5996,14 @@ export class Career {
       })
       this.transactionLedger = txResult.ledger
     }
+    this.chronicleTrade({
+      teamAId: this.userTeamId,
+      teamBId: offer.partnerTeamId,
+      aGivesPlayerIds: offer.userGivesPlayerIds,
+      aGivesPicks: offer.userGivesPicks,
+      bGivesPlayerIds: offer.userReceivesPlayerIds,
+      bGivesPicks: offer.userReceivesPicks,
+    })
   }
 
   rejectTrade(offerId: string): void {
@@ -5890,6 +6012,57 @@ export class Career {
 
   private tradingOpen(): boolean {
     return this.phase === 'regularSeason' && this.currentDay <= this.deadlineDay
+  }
+
+  /** World Chronicle: record a completed trade with full asset lists + player
+   *  provenance, so future news can cite the deal ("the 2nd you gave up
+   *  became…"). Pure observer — call AFTER executeTrade has moved the assets. */
+  private chronicleTrade(args: {
+    teamAId: TeamId
+    teamBId: TeamId
+    aGivesPlayerIds: PlayerId[]
+    aGivesPicks: DraftPick[]
+    bGivesPlayerIds: PlayerId[]
+    bGivesPicks: DraftPick[]
+  }): void {
+    const abbr = (id: TeamId): string => this.data.teams.get(id)?.abbreviation ?? '???'
+    const playerAsset = (pid: PlayerId): { kind: 'player'; playerId: string; label: string } => {
+      const p = this.data.players.get(pid)
+      return { kind: 'player', playerId: pid as string, label: p ? `${p.position} ${p.name}` : 'a player' }
+    }
+    const pickAsset = (pk: DraftPick): { kind: 'pick'; pickRef: string; label: string } => ({
+      kind: 'pick',
+      pickRef: `${pk.year}-R${pk.round}-${pk.originalTeamId as string}`,
+      label: `${pk.year} R${pk.round} (${abbr(pk.originalTeamId)})`,
+    })
+    const assetsOut = [...args.aGivesPlayerIds.map(playerAsset), ...args.aGivesPicks.map(pickAsset)]
+    const assetsIn = [...args.bGivesPlayerIds.map(playerAsset), ...args.bGivesPicks.map(pickAsset)]
+    const sideLabel = (assets: Array<{ label: string }>): string =>
+      assets.map((a) => a.label).join(', ') || 'future considerations'
+    const userInvolved = args.teamAId === this.userTeamId || args.teamBId === this.userTeamId
+    const ev = chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: this.phase === 'regularSeason' ? this.currentDay : 0,
+      kind: 'trade',
+      teamIds: [args.teamAId as string, args.teamBId as string],
+      playerIds: [...args.aGivesPlayerIds, ...args.bGivesPlayerIds].map((id) => id as string),
+      headline: `${abbr(args.teamAId)} trade ${sideLabel(assetsOut)} to ${abbr(args.teamBId)} for ${sideLabel(assetsIn)}`,
+      details: { assetsOut, assetsIn },
+      userInvolved,
+    })
+    // Provenance: every moved player changed organisations via this deal.
+    for (const pid of args.aGivesPlayerIds) {
+      recordAcquisition(this.chronicle, {
+        playerId: pid as string, teamId: args.teamBId as string, year: this.year,
+        via: 'trade', fromTeamId: args.teamAId as string, eventId: ev.id,
+      })
+    }
+    for (const pid of args.bGivesPlayerIds) {
+      recordAcquisition(this.chronicle, {
+        playerId: pid as string, teamId: args.teamAId as string, year: this.year,
+        via: 'trade', fromTeamId: args.teamBId as string, eventId: ev.id,
+      })
+    }
   }
 
   /* ────────────────────────── view builders ────────────────────────── */
@@ -9832,6 +10005,7 @@ export class Career {
         scoutHistory: (this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, [...pids]] as [string, string[]]),
       },
       arcs: structuredClone(this.arcsState),
+      chronicle: structuredClone(this.chronicle),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -9951,6 +10125,7 @@ export class Career {
 
     // Restore the story layer; older saves fall back to fresh initial states.
     career.arcsState = snapshot.arcs ? structuredClone(snapshot.arcs) : createInitialArcsState()
+    career.chronicle = snapshot.chronicle ? structuredClone(snapshot.chronicle) : emptyChronicle()
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)
