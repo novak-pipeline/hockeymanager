@@ -29,6 +29,41 @@ Writer laws:
 - Generated text is **persisted into the save** — posts read identically on
   every view and after reload; no regeneration bills.
 
+## The salience engine — noticing what's interesting
+
+Detection is its own subsystem (`story/salience.ts`), separate from writing.
+Principle: **interesting = deviation from a recorded expectation.** Nothing is
+inherently a story; a 4-point night from a star is Tuesday, from a 7th-round
+fourth-liner it's news.
+
+- **Priors ledger** (persisted at season start): media predicted ranks,
+  playoff odds, scout projections, draft slot, contract size, career
+  baselines, league distributions. Deviation is computable AND citable —
+  "we picked them 28th in October" is what turns a stat into a story.
+- **Two detector classes:**
+  1. *Authored* (high precision, known collisions): revenge games,
+     pick-became, broken promise near the deadline, coach vs old team,
+     return-from-injury heroics, milestone/record approaches.
+  2. *Statistical* (coverage of the unimagined): generic z-score machinery
+     over tracked stat streams — anything in the tail (~top 1%) of the
+     current league distribution fires, whoever it is. This is what catches
+     the backup goalie's quiet .945 without a hand-written trigger.
+- **Salience score + daily budget**: 0-100 per candidate (deviation size ×
+  actor prominence × user-relevance × novelty); only the top few per day
+  become posts. The rest still write to the chronicle silently — fuel for
+  anniversaries, retrospectives, the redraft.
+- **Novelty memory (self-tuning)**: per-save counts of how often each
+  detector fires; common patterns auto-dampen, rare ones auto-boost.
+  "Surprise" is defined empirically from the save's own history.
+- **Arc awareness**: streaks/droughts emit into story arcs with beats
+  (game 5, game 10, record watch), never one post per game.
+- **Division of labor**: detection is deterministic and engine-side — the
+  LLM never decides what's newsworthy (it can't see the whole league; the
+  salience engine can). It only writes up the top payloads.
+- **Proof harness**: sim full seasons, dump the salience log, review volume/
+  coverage/detector balance; hand-built scenario tests (underdog sweep,
+  rookie outburst, backup steals the net) must fire.
+
 ## Channels & authors
 
 - **The Feed** (public): insider accounts (existing press personas), the stats
