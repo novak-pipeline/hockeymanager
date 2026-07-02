@@ -480,6 +480,28 @@ function ProposeTab(props: {
       {partner && (
         <Panel title={`${partner.teamName} profile`}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+            {partner.gmName && (
+              <div>
+                <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>General Manager</span>
+                <span style={{ fontWeight: 700 }}>{partner.gmName}</span>
+                {partner.gmStyle && <div className="muted" style={{ fontSize: 11 }}>{partner.gmStyle}</div>}
+              </div>
+            )}
+            {partner.posture && (
+              <div>
+                <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Stance</span>
+                <span
+                  className="chip"
+                  title={partner.postureReason}
+                  style={{
+                    fontSize: 11, textTransform: 'capitalize',
+                    color: partner.posture === 'contend' ? 'var(--success)' : partner.posture === 'rebuild' ? 'var(--amber, #f59e0b)' : undefined,
+                  }}
+                >
+                  {partner.posture}
+                </span>
+              </div>
+            )}
             <div>
               <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Philosophy</span>
               <span className="chip" style={{ fontSize: 11 }}>{partner.philosophy}</span>

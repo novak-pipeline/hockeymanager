@@ -122,6 +122,12 @@ import {
   type ChronicleState,
 } from '@engine/story/chronicle'
 import {
+  buildGmPersona,
+  deriveClubPosture,
+  type ClubPosture,
+  type GmPersona,
+} from '@engine/league/gmPersona'
+import {
   archiveSeason,
   emptyRecords,
   inductHallOfFame,
@@ -668,6 +674,8 @@ export class Career {
   private arcsState!: ArcsState
   /** World Chronicle — permanent event memory (Living World LW1). */
   private chronicle: ChronicleState = emptyChronicle()
+  /** Named AI GM personas per club (Living World LW2). Lazily built, persisted. */
+  private gmPersonas: Array<[string, GmPersona]> = []
   private recordsState!: RecordsState
   private expectationsState!: ExpectationsState
   private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
@@ -6015,6 +6023,42 @@ export class Career {
     return this.phase === 'regularSeason' && this.currentDay <= this.deadlineDay
   }
 
+  /** The named GM running an AI club (Living World LW2). Lazily built once per
+   *  club, deterministic per (seed, teamId), persisted so he never changes name
+   *  mid-save. */
+  gmPersonaFor(teamId: TeamId): GmPersona {
+    const key = teamId as string
+    const existing = this.gmPersonas.find(([id]) => id === key)?.[1]
+    if (existing) return existing
+    const taken = new Set(this.gmPersonas.map(([, p]) => p.name))
+    const persona = buildGmPersona({ seed: this.seed, teamId: key, year: this.year, takenNames: taken })
+    this.gmPersonas.push([key, persona])
+    return persona
+  }
+
+  /** League-wide roster-strength ranks (1 = strongest), computed once per call site. */
+  private strengthRanks(): Map<string, number> {
+    const teams = this.data.league.teams
+    const strengths = teams.map((tid) => {
+      const t = this.data.teams.get(tid)!
+      return { tid: tid as string, s: teamStrengthRating(t.roster.map((id) => this.resolve(id))) }
+    }).sort((a, b) => b.s - a.s)
+    return new Map(strengths.map((e, i) => [e.tid, i + 1]))
+  }
+
+  /** A club's competitive stance, derived live from roster shape + league rank. */
+  clubPostureFor(teamId: TeamId, ranks?: Map<string, number>): ClubPosture {
+    const teams = this.data.league.teams
+    const strengthRank = (ranks ?? this.strengthRanks()).get(teamId as string) ?? Math.ceil(teams.length / 2)
+    const team = this.data.teams.get(teamId)!
+    const top6 = team.roster
+      .map((id) => this.resolve(id))
+      .sort((a, b) => b.overall - a.overall)
+      .slice(0, 6)
+    const coreAge = top6.length > 0 ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
+    return deriveClubPosture({ coreAge, strengthRank, teamCount: teams.length })
+  }
+
   /** World Chronicle: record a completed trade with full asset lists + player
    *  provenance, so future news can cite the deal ("the 2nd you gave up
    *  became…"). Pure observer — call AFTER executeTrade has moved the assets. */
@@ -9058,12 +9102,14 @@ export class Career {
     const myCapSpace = userTeam.finances.salaryCap - userTeam.finances.capUsed
     return {
       incoming: this.tradeOffers.map((o) => this.offerView(o)),
-      partners: this.data.league.teams
+      partners: (() => { const ranks = this.strengthRanks(); return this.data.league.teams
         .filter((tid) => tid !== this.userTeamId)
         .map((tid) => {
           const team = this.data.teams.get(tid)!
           const profile = buildTeamProfile(team, this.data.players)
           const needLabels: Record<string, string> = { F: 'Forwards', D: 'Defence', G: 'Goaltending' }
+          const gm = this.gmPersonaFor(tid)
+          const posture = this.clubPostureFor(tid, ranks)
           return {
             teamId: tid as string,
             teamName: team.name,
@@ -9073,8 +9119,12 @@ export class Career {
             capSpace: profile.capSpace,
             needs: profile.needs.map((g) => needLabels[g] ?? g),
             philosophy: profile.philosophy,
+            gmName: gm.name,
+            gmStyle: gm.styleLabel,
+            posture: posture.posture,
+            postureReason: posture.reason,
           }
-        }),
+        }) })(),
       myPlayers: tradable(this.userTeamId),
       myPicks: this.picks
         .filter((p) => p.ownerTeamId === this.userTeamId)
@@ -10018,6 +10068,7 @@ export class Career {
       },
       arcs: structuredClone(this.arcsState),
       chronicle: structuredClone(this.chronicle),
+      gmPersonas: structuredClone(this.gmPersonas),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10138,6 +10189,7 @@ export class Career {
     // Restore the story layer; older saves fall back to fresh initial states.
     career.arcsState = snapshot.arcs ? structuredClone(snapshot.arcs) : createInitialArcsState()
     career.chronicle = snapshot.chronicle ? structuredClone(snapshot.chronicle) : emptyChronicle()
+    career.gmPersonas = snapshot.gmPersonas ? structuredClone(snapshot.gmPersonas) : []
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

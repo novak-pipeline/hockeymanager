@@ -34,6 +34,7 @@ export type { TeamLeadersView, LeaderChip, TeamLeadersEntry } from '@engine/leag
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
 import type { ChronicleState } from '@engine/story/chronicle'
+import type { GmPersona } from '@engine/league/gmPersona'
 import type {
   AwardRecord,
   LegendRecord,
@@ -1066,6 +1067,14 @@ export interface TradePartnerView {
   needs: string[]
   /** Philosophy label shown in the UI. */
   philosophy: string
+  /** The club's named GM (Living World LW2). Optional/additive. */
+  gmName?: string
+  /** His public reputation ("aggressive dealer, analytics believer"). */
+  gmStyle?: string
+  /** Seasonal stance: 'contend' | 'retool' | 'rebuild'. */
+  posture?: string
+  /** One factual line explaining the posture read. */
+  postureReason?: string
 }
 
 export interface TradesView {
@@ -1619,6 +1628,8 @@ export interface CareerSnapshot {
   expectations?: ExpectationsState
   /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
   chronicle?: ChronicleState
+  /** Named AI GM personas per club (Living World LW2). Optional/additive. */
+  gmPersonas?: Array<[string, GmPersona]>
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */
