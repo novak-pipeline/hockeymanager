@@ -453,6 +453,10 @@ export class SimClient {
     })
   }
 
+  buyoutPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'buyoutPlayer', playerId })
+  }
+
   searchAll(query: string): Promise<WorkerResponse> {
     return this.send({ type: 'searchAll', query })
   }

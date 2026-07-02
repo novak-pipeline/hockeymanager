@@ -1654,6 +1654,10 @@ export interface CareerSnapshot {
   /** Deadline-day hold state. Optional/additive. */
   deadlineHold?: boolean
   deadlineHoldDone?: boolean
+  /** Buyout dead-cap charge on next season's books (M2). Optional/additive. */
+  userDeadCap?: number
+  /** Players bought out mid-resign-stage, pending the FA pool. Optional/additive. */
+  buyoutFas?: string[]
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */

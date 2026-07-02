@@ -699,6 +699,11 @@ export class Career {
   private ownerPerk: string | null = null
   /** Staged End-of-Season Review facts (M4); null once attended or lapsed. */
   private reviewFacts: SeasonReviewFacts | null = null
+  /** Dead-cap charge from buyouts, counted against next season's cap (M2). */
+  private userDeadCap = 0
+  /** Players bought out during the resign stage — they join the FA pool when
+   *  free agency opens (the transition rebuilds faPool from expiries). */
+  private buyoutFas: PlayerId[] = []
   /** True while the sim is held on deadline day (one continue's grace). */
   private deadlineHold = false
   /** The deadline hold already happened this season. */
@@ -4524,7 +4529,8 @@ export class Career {
           players: this.data.players,
           year: this.year,
         })
-        this.faPool = expired.map((e) => e.playerId)
+        this.faPool = [...expired.map((e) => e.playerId), ...this.buyoutFas]
+        this.buyoutFas = []
         for (const e of expired) this.lockerDeparture(e.teamId, e.playerId)
         for (const e of expired) {
           if (e.teamId === this.userTeamId) {
@@ -5148,6 +5154,16 @@ export class Career {
       // Deadline-day hold re-arms for the new season.
       this.deadlineHold = false
       this.deadlineHoldDone = false
+      // Buyout dead cap is a one-season penance — the books clear.
+      if (this.userDeadCap > 0) {
+        this.pushNews(
+          'contract',
+          'Buyout charges come off the books',
+          `The dead cap from last summer's buyouts ($${(this.userDeadCap / 1e6).toFixed(2)}M) has cleared. The ledger is clean.`,
+          { teamId: this.userTeamId as string }
+        )
+        this.userDeadCap = 0
+      }
     }
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
@@ -5266,6 +5282,57 @@ export class Career {
   markNewsRead(ids: string[]): void {
     const set = new Set(ids)
     for (const n of this.news) if (set.has(n.id)) n.read = true
+  }
+
+  /** Season Rhythm M2: the buyout window. During the offseason (re-sign and
+   *  free-agency stages) a club can eat a bad contract: the player becomes a
+   *  free agent and ONE-THIRD of his remaining money sticks to next season's
+   *  cap as a dead charge (simplified from the NHL's 2/3-over-2x-years rule —
+   *  one painful season instead of a long tail). */
+  buyoutContract(playerId: string): { ok: boolean; message: string; charge?: number } {
+    const os = this.offseason
+    if (this.phase !== 'offseason' || !os || (os.stage !== 'resign' && os.stage !== 'freeAgency')) {
+      return { ok: false, message: 'The buyout window is only open during the offseason (before the season starts).' }
+    }
+    const pid = asPlayerId(playerId)
+    if (!this.userTeam.roster.includes(pid)) {
+      return { ok: false, message: 'He is not on your NHL roster.' }
+    }
+    const p = this.resolve(pid)
+    if (p.contract.yearsRemaining < 1) {
+      return { ok: false, message: 'His contract is already expiring — let him walk for free instead.' }
+    }
+    const remaining = p.contract.salary * p.contract.yearsRemaining
+    const charge = Math.round(remaining / 3)
+    // The player walks: off the roster, contract terminated, into free agency.
+    releaseFromTeam({ team: this.userTeam, playerId: pid, players: this.data.players })
+    this.lockerDeparture(this.userTeamId, pid)
+    repairLines(this.userTeam, this.data.players)
+    p.contract.yearsRemaining = 0
+    if (os.stage === 'freeAgency') this.faPool.push(pid)
+    else this.buyoutFas.push(pid)
+    this.userDeadCap += charge
+    this.pushNews(
+      'contract',
+      `${p.name} bought out`,
+      `The club has bought out the remainder of ${p.name}'s contract. He becomes an unrestricted free agent; ` +
+      `$${(charge / 1e6).toFixed(2)}M in dead cap stays on next season's books. Expensive freedom — but freedom.`,
+      { playerId }
+    )
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: 0, kind: 'release',
+      teamIds: [this.userTeamId as string], playerIds: [playerId],
+      headline: `${this.userTeam.abbreviation} buy out ${p.position} ${p.name} ($${(charge / 1e6).toFixed(2)}M dead cap)`,
+      details: { salary: p.contract.salary },
+      userInvolved: true,
+    })
+    const txResult = recordTransaction(this.transactionLedger, {
+      day: this.currentDay, year: this.year, kind: 'release',
+      teamIds: [this.userTeamId as string],
+      summary: `${this.userTeam.abbreviation} buy out ${p.name}.`,
+    })
+    this.transactionLedger = txResult.ledger
+    return { ok: true, message: `${p.name} bought out — $${(charge / 1e6).toFixed(2)}M dead cap next season.`, charge }
   }
 
   releasePlayer(playerId: string): void {
@@ -10770,6 +10837,8 @@ export class Career {
       reviewFacts: this.reviewFacts ? structuredClone(this.reviewFacts) : null,
       deadlineHold: this.deadlineHold,
       deadlineHoldDone: this.deadlineHoldDone,
+      userDeadCap: this.userDeadCap,
+      buyoutFas: this.buyoutFas.map((id) => id as string),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10898,6 +10967,8 @@ export class Career {
     career.reviewFacts = snapshot.reviewFacts ? structuredClone(snapshot.reviewFacts) : null
     career.deadlineHold = snapshot.deadlineHold ?? false
     career.deadlineHoldDone = snapshot.deadlineHoldDone ?? false
+    career.userDeadCap = snapshot.userDeadCap ?? 0
+    career.buyoutFas = (snapshot.buyoutFas ?? []).map((id) => asPlayerId(id))
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

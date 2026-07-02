@@ -319,6 +319,11 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'buyoutPlayer': {
+      const res = must().buyoutContract(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
     case 'searchAll':
       return { id: req.id, type: 'searchResults', results: must().searchAll(req.query) }
     case 'getSeasonReview':

@@ -8,6 +8,71 @@ import { OverallStars } from '../components/Stars'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
+// ─── buyout window (Season Rhythm M2) ─────────────────────────────────────────
+
+/** Eat a bad contract: player walks, one-third of his remaining money sticks
+ *  to next season's cap. Only multi-year deals qualify (expiring ones walk free). */
+function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | null {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const { data: squad, refetch: refetchSquad } = useScreenData(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+  if (!squad) return null
+  const candidates = squad.rows
+    .filter((r) => r.contract.yearsRemaining >= 1 && !r.contract.twoWay)
+    .sort((a, b) => b.contract.salary - a.contract.salary)
+    .slice(0, 12)
+  if (candidates.length === 0) return null
+
+  const doBuyout = async (playerId: string, name: string, charge: number): Promise<void> => {
+    if (!window.confirm(`Buy out ${name}? He becomes a free agent and $${(charge / 1e6).toFixed(2)}M dead cap stays on next season's books. This cannot be undone.`)) return
+    setBusy(true)
+    const res = await client.buyoutPlayer(playerId)
+    setBusy(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else { toast(res.type === 'ok' && res.note ? res.note : 'Bought out', 'success'); onRefetch(); refetchSquad() }
+  }
+
+  return (
+    <Panel title="Buyout window">
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+        The one time of year you can eat a bad contract: the player becomes a free agent and
+        <b> one-third of his remaining money</b> counts against next season's cap as a dead charge.
+        Expensive freedom — use it on the deal you regret most.
+      </p>
+      <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+        <table className="table">
+          <thead>
+            <tr><th>Player</th><th className="num">Age</th><th className="num">Salary</th><th className="num">Years</th><th className="num">Dead cap</th><th></th></tr>
+          </thead>
+          <tbody>
+            {candidates.map((r) => {
+              const charge = Math.round((r.contract.salary * r.contract.yearsRemaining) / 3)
+              return (
+                <tr key={r.playerId}>
+                  <td><PlayerLink playerId={r.playerId} name={r.name} /> <span className="muted small">{r.position}</span></td>
+                  <td className="num muted">{r.age}</td>
+                  <td className="num">{fmtMoney(r.contract.salary)}</td>
+                  <td className="num muted">{r.contract.yearsRemaining}</td>
+                  <td className="num" style={{ color: 'var(--danger)' }}>{fmtMoney(charge)}</td>
+                  <td className="num">
+                    <button className="btn btn-ghost small" disabled={busy}
+                      onClick={() => { void doBuyout(r.playerId, r.name, charge) }}>
+                      Buy out
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
 // ─── stage stepper ────────────────────────────────────────────────────────────
 
 const STAGE_ORDER: OffseasonView['stage'][] = ['awards', 'draft', 'resign', 'freeAgency', 'preseason']
@@ -633,6 +698,9 @@ export function OffseasonScreen(): JSX.Element {
           )}
           {data.stage === 'resign' && (
             <ResignPanel view={data} onRefetch={refetch} />
+          )}
+          {(data.stage === 'resign' || data.stage === 'freeAgency') && (
+            <BuyoutPanel onRefetch={refetch} />
           )}
 
           {data.stage === 'freeAgency' && (

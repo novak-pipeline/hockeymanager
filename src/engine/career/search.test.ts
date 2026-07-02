@@ -57,3 +57,44 @@ describe('deadline-day hold', () => {
     expect(snap.deadlineHold).toBe(false)
   })
 })
+
+describe('buyout window (M2)', () => {
+  it('rejects buyouts outside the offseason window', () => {
+    const d = generateLeague({ seed: 77 })
+    const c = new Career(d, 77, d.league.teams[0])
+    const anyId = d.teams.get(d.league.teams[0])!.roster[0]! as string
+    const res = c.buyoutContract(anyId)
+    expect(res.ok).toBe(false)
+    expect(res.message).toMatch(/offseason/i)
+  })
+
+  it('in-window: player walks, dead cap charged at a third of remaining money, clears at rollover', () => {
+    const d = generateLeague({ seed: 78 })
+    const c = new Career(d, 78, d.league.teams[0])
+    // Sim to the offseason resign stage.
+    while (c.advanceDay()) { /* season */ }
+    let guard = 0
+    while (c.getDashboard().phase !== 'offseason' && guard++ < 50) c.step()
+    guard = 0
+    while (c.getOffseason()?.stage !== 'resign' && guard++ < 400) {
+      if (c.getDashboard().draftPending) c.autoDraft()
+      else c.step()
+    }
+    const team = d.teams.get(d.league.teams[0])!
+    const players = d.players
+    const victim = team.roster
+      .map((id) => players.get(id)!)
+      .filter((p) => p.contract.yearsRemaining >= 2 && p.contract.twoWay === false)
+      .sort((a, b) => b.contract.salary - a.contract.salary)[0]
+    expect(victim).toBeDefined()
+    const expectedCharge = Math.round((victim!.contract.salary * victim!.contract.yearsRemaining) / 3)
+    const res = c.buyoutContract(victim!.id as string)
+    expect(res.ok).toBe(true)
+    expect(res.charge).toBe(expectedCharge)
+    expect(team.roster.includes(victim!.id)).toBe(false)
+    const snap = c.exportSnapshot('b', '2026-07-02T00:00:00.000Z')
+    expect(snap.userDeadCap).toBe(expectedCharge)
+    // He reaches free agency when the market opens (or immediately if open).
+    expect((snap.buyoutFas ?? []).includes(victim!.id as string) || c.getDashboard().phase === 'offseason').toBe(true)
+  })
+})

@@ -296,6 +296,8 @@ export type WorkerRequestBody =
   | { type: 'fireScout'; scoutId: string }
   /** Global search for the command palette (players + teams by name). */
   | { type: 'searchAll'; query: string }
+  /** Buy out a contract during the offseason window (M2). */
+  | { type: 'buyoutPlayer'; playerId: string }
   /* ── season rhythm: meetings (M1) ── */
   /** The pending preseason board-meeting scene (null once attended). */
   | { type: 'getBoardMeeting' }
