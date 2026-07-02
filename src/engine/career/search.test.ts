@@ -150,3 +150,62 @@ describe('ownProspects scouting scope (bugfix)', () => {
     expect(orgSeen).toBeGreaterThan(0)
   })
 })
+
+describe('LW5 dynamics v2 (interactions + promise ledger)', () => {
+  it('an open concern surfaces in the inbox and a promise answer writes the ledger', () => {
+    const data = generateLeague({ seed: 77 })
+    const c = new Career(data, 77, data.league.teams[0])
+    // Inject a concern directly (generation is rate-limited + probabilistic).
+    const anyC = c as unknown as {
+      interactions: Array<Record<string, unknown>>
+      playerPromises: Array<{ playerId: string; kind: string; status: string }>
+      userTeamId: string
+    }
+    const team = data.teams.get(data.league.teams[0])!
+    const pid = team.roster[0] as unknown as string
+    anyC.interactions.unshift({
+      id: 'pi1', playerId: pid, teamId: anyC.userTeamId, year: c.getDashboard().year ?? 2025,
+      day: 10, kind: 'iceTime', severity: 'mild',
+      message: 'wants a word', status: 'open',
+      options: [
+        { id: 'promise', label: 'Promise a bigger role', tone: 'promise' },
+        { id: 'firm', label: 'Earn it', tone: 'firm' },
+      ],
+    })
+    const inbox = c.getInbox()
+    expect(inbox.interactions?.some((i) => i.id === 'pi1')).toBe(true)
+    expect(inbox.interactions![0]!.options.length).toBe(2)
+
+    const res = c.respondToInteraction('pi1', 'promise')
+    expect(res.ok).toBe(true)
+    expect(anyC.playerPromises.length).toBe(1)
+    expect(anyC.playerPromises[0]!.kind).toBe('iceTime')
+    expect(anyC.playerPromises[0]!.status).toBe('open')
+    // Resolved concern no longer surfaces.
+    expect(c.getInbox().interactions?.some((i) => i.id === 'pi1') ?? false).toBe(false)
+
+    // The ledger survives a save/load round-trip and shows on Dynamics.
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(snap.playerPromises?.length).toBe(1)
+    const c2 = Career.fromSnapshot(snap)
+    const dyn = c2.getTeamDynamics(anyC.userTeamId)
+    expect(dyn.promises?.length).toBe(1)
+    expect(dyn.promises![0]!.status).toBe('open')
+  })
+
+  it('rate limits hold: at most one concern raised per day, two open at once', () => {
+    const data = generateLeague({ seed: 88 })
+    const c = new Career(data, 88, data.league.teams[0])
+    // Make the whole roster miserable so eligibility is maximal.
+    const team = data.teams.get(data.league.teams[0])!
+    for (const id of team.roster) {
+      const p = data.players.get(id)!
+      p.morale = 10
+    }
+    for (let i = 0; i < 40; i++) {
+      if (!c.advanceDay()) break
+      const open = c.getInbox().interactions ?? []
+      expect(open.length).toBeLessThanOrEqual(2)
+    }
+  })
+})

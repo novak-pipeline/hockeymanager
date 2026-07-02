@@ -64,6 +64,84 @@ export interface InteractionResult {
   news?: { headline: string; body: string }
 }
 
+/* ─────────────────────────── promises (LW5) ─────────────────────────── */
+
+export type PromiseKind = 'iceTime' | 'newDeal' | 'exploreTrade'
+
+/**
+ * A promise the GM made to a player's face. JSON-safe; lives in the save.
+ * Words are cheap the day you say them — the ledger makes them expensive later:
+ * every promise has a measurable keep-condition and a due date, and a broken
+ * one costs far more morale than the promise bought.
+ */
+export interface PlayerPromise {
+  id: string
+  playerId: string
+  kind: PromiseKind
+  /** Your words, quoted back to you when the bill comes due. */
+  text: string
+  year: number
+  day: number
+  /** In-season due day. Absent = evaluated at season rollover. */
+  dueDay?: number
+  /** iceTime baseline: games/TOI at the moment of the promise. */
+  baselineGp?: number
+  baselineToi?: number
+  /** newDeal baseline: contract years remaining when promised. */
+  baselineYears?: number
+  /** One grace extension granted (injury/short sample). */
+  extended?: boolean
+  status: 'open' | 'kept' | 'broken'
+}
+
+/**
+ * Turn a promise-tone response into a ledger entry. Returns null for kinds
+ * where "promising" is just reassurance with nothing measurable behind it.
+ */
+export function promiseFromResponse(args: {
+  interaction: PlayerInteraction
+  player: Player
+  nextId: string
+  deadlineDay: number
+  seasonGp: number
+  seasonToi: number
+}): PlayerPromise | null {
+  const { interaction: it, player: p } = args
+  const base = { id: args.nextId, playerId: it.playerId, year: it.year, day: it.day, status: 'open' as const }
+  switch (it.kind) {
+    case 'iceTime':
+      return {
+        ...base, kind: 'iceTime',
+        text: 'a bigger role and more ice time',
+        dueDay: it.day + 35,
+        baselineGp: args.seasonGp, baselineToi: args.seasonToi,
+      }
+    case 'future':
+      return {
+        ...base, kind: 'newDeal',
+        text: 'a new contract is coming',
+        baselineYears: p.contract.yearsRemaining,
+      }
+    case 'tradeRequest':
+      return {
+        ...base, kind: 'exploreTrade',
+        text: 'we will work to find you a move',
+        // Before the deadline the deadline IS the due date; after it, the
+        // promise carries to season's end (evaluated at rollover).
+        ...(it.day < args.deadlineDay ? { dueDay: args.deadlineDay } : {}),
+      }
+    default:
+      return null
+  }
+}
+
+/** Human label for when a promise comes due, for the ledger UI. */
+export function promiseDueLabel(pr: PlayerPromise): string {
+  if (pr.status === 'kept') return 'Kept'
+  if (pr.status === 'broken') return 'Broken'
+  return pr.dueDay !== undefined ? `Due day ${pr.dueDay}` : 'Due at season end'
+}
+
 /* ─────────────────────────── generation ─────────────────────────── */
 
 /** Per-check probability that an eligible player actually speaks up. */

@@ -401,6 +401,11 @@ export function InboxScreen(): JSX.Element {
         })}
       </div>
 
+      {/* ── LW5: open player concerns — the knock on your office door ── */}
+      {(data.interactions ?? []).map((concern) => (
+        <ConcernCard key={concern.id} concern={concern} client={client} onDone={refetch} />
+      ))}
+
       {/* ── Two-column layout (fills the viewport so the reading pane is large) ── */}
       <div
         style={{
@@ -458,6 +463,69 @@ export function InboxScreen(): JSX.Element {
         )}
       </div>
     </section>
+  )
+}
+
+/** LW5: an open player concern — face, his words, and your response options.
+ *  Rare by design (hard rate limits in the engine), so it can afford presence. */
+function ConcernCard({
+  concern,
+  client,
+  onDone,
+}: {
+  concern: NonNullable<InboxView['interactions']>[number]
+  client: ReturnType<typeof useClient>
+  onDone: () => void
+}): JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const serious = concern.severity === 'serious'
+
+  async function respond(optionId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    const res = await client.respondToInteraction(concern.id, optionId)
+    setBusy(false)
+    if (res.type === 'error') toast(res.message ?? 'Could not respond.', 'error')
+    else {
+      toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')
+      onDone()
+    }
+  }
+
+  return (
+    <div
+      className="panel"
+      style={{
+        borderLeft: `3px solid ${serious ? 'var(--danger, #e05555)' : 'var(--amber, #d6a056)'}`,
+        padding: 'var(--sp-3) var(--sp-4)',
+      }}
+    >
+      <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+        <PlayerFace faceId={concern.faceId} name={concern.playerName} size={44} />
+        <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <PlayerLink playerId={concern.playerId} name={concern.playerName} />
+            <span className={`chip ${serious ? 'chip-danger' : 'chip-warn'}`} style={{ fontSize: 10 }}>
+              {serious ? 'Serious' : 'Wants a word'}
+            </span>
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>{concern.message}</div>
+          <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 2 }}>
+            {concern.options.map((o) => (
+              <button
+                key={o.id}
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => void respond(o.id)}
+                title={o.id === 'promise' ? 'Promises go in the book — break one and he will remember.' : undefined}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

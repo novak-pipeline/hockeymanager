@@ -199,8 +199,10 @@ import {
 import {
   applyInteractionResponse,
   maybeRaiseInteraction,
+  promiseFromResponse,
   INTERACTION_COOLDOWN_DAYS,
   type PlayerInteraction,
+  type PlayerPromise,
 } from '@engine/league/interactions'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
@@ -646,6 +648,8 @@ export class Career {
   /** Player→GM concerns (open + recently resolved). Story-first core. */
   private interactions: PlayerInteraction[] = []
   private interactionCounter = 0
+  /** LW5 promise ledger: every promise-tone answer becomes a tracked debt. */
+  private playerPromises: PlayerPromise[] = []
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -1922,20 +1926,35 @@ export class Career {
     }
     return this.gmStateInternal
   }
-  /** Master switch for the player→GM concern system. Off for now (morale/
-   *  dynamics rework pending); flip to true to bring the prompts back. */
-  private static readonly INTERACTIONS_ENABLED: boolean = false
+  /** Master switch for the player→GM concern system (LW5: back on, with hard
+   *  rate limits so it reads as a living room, never a chore). */
+  private static readonly INTERACTIONS_ENABLED: boolean = true
   /** Keep at most this many open concerns at once, and this many total stored. */
-  private static readonly MAX_OPEN_INTERACTIONS = 3
+  private static readonly MAX_OPEN_INTERACTIONS = 2
   private static readonly INTERACTION_HISTORY_LIMIT = 40
+  /** A player speaks up at most this many times per season. */
+  private static readonly MAX_INTERACTIONS_PER_PLAYER_SEASON = 2
+  /** Minimum quiet days between ANY two concerns being raised. */
+  private static readonly INTERACTION_GLOBAL_SPACING_DAYS = 6
 
   /** Scan the user roster after a match day and maybe raise new concerns.
-   *  Temporarily disabled while the morale/dynamics layer is reworked — the GM
-   *  shouldn't be pestered by player complaints until that system returns. */
+   *  LW5 game-theory rules: at most one new concern per day, none within 6
+   *  days of the last one, at most 2 open at once, and a player gets at most
+   *  2 conversations a season — a request should feel like an event. */
   private maybeRaiseInteractions(day: number): void {
     if (Career.INTERACTIONS_ENABLED === false) return
     const open = this.interactions.filter((i) => i.status === 'open')
     if (open.length >= Career.MAX_OPEN_INTERACTIONS) return
+
+    // Global pacing + per-player season quota, derived from history (no new state).
+    const seasonCount = new Map<string, number>()
+    let lastRaisedDay = -99
+    for (const i of this.interactions) {
+      if (i.year !== this.year) continue
+      seasonCount.set(i.playerId, (seasonCount.get(i.playerId) ?? 0) + 1)
+      if (i.day > lastRaisedDay) lastRaisedDay = i.day
+    }
+    if (day - lastRaisedDay < Career.INTERACTION_GLOBAL_SPACING_DAYS) return
 
     const team = this.data.teams.get(this.userTeamId)
     if (!team) return
@@ -1948,11 +1967,10 @@ export class Career {
       else if (day - i.day < INTERACTION_COOLDOWN_DAYS) busy.add(i.playerId)
     }
 
-    let slots = Career.MAX_OPEN_INTERACTIONS - open.length
     for (const pid of team.roster) {
-      if (slots <= 0) break
       const pidStr = pid as unknown as string
       if (busy.has(pidStr)) continue
+      if ((seasonCount.get(pidStr) ?? 0) >= Career.MAX_INTERACTIONS_PER_PLAYER_SEASON) continue
       const p = this.data.players.get(pid)
       if (!p) continue
 
@@ -1982,9 +2000,9 @@ export class Career {
       interaction.teamId = this.userTeamId as string
       this.interactionCounter++
       this.interactions.unshift(interaction)
-      slots--
-      // The interaction surfaces as a card at the top of the inbox (see
-      // getInbox); no separate news item is pushed so it doesn't crowd the feed.
+      // One per day, max — the interaction surfaces as a card at the top of
+      // the inbox (see getInbox); no separate news item crowds the feed.
+      break
     }
 
     // Trim resolved history so the save doesn't grow unbounded.
@@ -2021,6 +2039,24 @@ export class Career {
     interaction.chosenOptionId = optionId
     interaction.outcome = result.outcome
 
+    // LW5: a promise-tone answer is written into the ledger — measurable
+    // keep-condition, due date, and your exact words for later quoting.
+    if (option.tone === 'promise') {
+      const cur = player.stats.find((s) => s.season === this.year)
+      const promise = promiseFromResponse({
+        interaction,
+        player,
+        nextId: `pp${this.interactionCounter++}`,
+        deadlineDay: this.deadlineDay,
+        seasonGp: cur?.gamesPlayed ?? 0,
+        seasonToi: cur ? cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce : 0,
+      })
+      if (promise) {
+        this.playerPromises.push(promise)
+        interaction.outcome = `${result.outcome} Your words — “${promise.text}” — went in the book.`
+      }
+    }
+
     if (result.news) {
       this.pushNews('league', result.news.headline, result.news.body, {
         teamId: interaction.teamId,
@@ -2037,7 +2073,98 @@ export class Career {
       )
     }
 
-    return { ok: true }
+    return { ok: true, message: interaction.outcome ?? 'Message delivered.' }
+  }
+
+  /** LW5: settle promise debts that have come due. In-season kinds (ice time,
+   *  explore-trade) are checked daily; newDeal promises settle at rollover.
+   *  Kept word buys a little trust; a broken one costs double and can turn a
+   *  simmering player into a formal trade request. */
+  private evaluatePlayerPromises(day: number): void {
+    const team = this.data.teams.get(this.userTeamId)
+    for (const pr of this.playerPromises) {
+      if (pr.status !== 'open' || pr.year !== this.year) continue
+      if (pr.dueDay === undefined || day < pr.dueDay) continue
+      const p = this.data.players.get(asPlayerId(pr.playerId))
+      const onRoster = !!team && team.roster.some((id) => (id as string) === pr.playerId)
+
+      if (pr.kind === 'exploreTrade') {
+        if (!onRoster) {
+          // He got his move — word kept, and the room noticed.
+          pr.status = 'kept'
+          if (p) {
+            this.pushNews('trade', `A promise kept`, `You told ${p.name} “${pr.text}” — and you delivered. The room takes note of a GM whose word holds.`, { playerId: pr.playerId })
+          }
+        } else {
+          pr.status = 'broken'
+          if (p) {
+            p.morale = Math.max(0, p.morale - 16)
+            this.pushNews('trade', `${p.name}'s camp goes public`, `On ${dayToDateISO(pr.year, pr.day)} you told ${p.name} “${pr.text}”. The deadline has passed and he is still here. His agent has let the press know exactly what was said.`, { playerId: pr.playerId })
+            createArc(this.arcsState, 'tradeRumor', { playerIds: [pr.playerId], teamIds: [this.userTeamId as string] }, `${p.name}'s trade request went unanswered`, day, this.year)
+          }
+        }
+        this.chroniclePromise(pr, day)
+        continue
+      }
+
+      if (pr.kind === 'iceTime') {
+        if (!p || !onRoster) { pr.status = 'broken'; continue } // moved on — the trade story covers it
+        const cur = p.stats.find((s) => s.season === this.year)
+        const gpNow = cur?.gamesPlayed ?? 0
+        const toiNow = cur ? cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce : 0
+        const dGp = gpNow - (pr.baselineGp ?? 0)
+        // Short sample (injury, scratch run)? One grace extension.
+        if (dGp < 5 && !pr.extended) { pr.extended = true; pr.dueDay = day + 20; continue }
+        const perBefore = (pr.baselineGp ?? 0) > 0 ? (pr.baselineToi ?? 0) / (pr.baselineGp ?? 1) : 0
+        const perAfter = dGp > 0 ? (toiNow - (pr.baselineToi ?? 0)) / dGp : 0
+        const kept = perBefore <= 0 ? perAfter > 0 : perAfter >= perBefore * 1.05
+        if (kept) {
+          pr.status = 'kept'
+          p.morale = Math.min(100, p.morale + 8)
+          this.pushNews('league', `${p.name} responding to a bigger role`, `You promised him “${pr.text}” — his minutes are up since that conversation, and he knows you made it happen.`, { playerId: pr.playerId })
+        } else {
+          pr.status = 'broken'
+          p.morale = Math.max(0, p.morale - 14)
+          this.pushNews('league', `${p.name} feels misled`, `On ${dayToDateISO(pr.year, pr.day)} you promised him “${pr.text}”. His ice time hasn't moved. Players talk — and so do agents.`, { playerId: pr.playerId })
+          if (p.personality.ambition >= 14 && p.morale < 40) {
+            // The broken promise hardens into a formal request, on the spot.
+            this.interactionCounter++
+            this.interactions.unshift({
+              id: `pi${this.interactionCounter}`,
+              playerId: pr.playerId,
+              teamId: this.userTeamId as string,
+              year: this.year,
+              day,
+              kind: 'tradeRequest',
+              severity: 'serious',
+              message: `${p.name} hasn't forgotten what you promised him. The role never came — and now he wants out.`,
+              options: [
+                { id: 'promise', label: 'Promise to explore his options', tone: 'promise' },
+                { id: 'supportive', label: 'Ask for one more chance to fix it', tone: 'supportive' },
+                { id: 'firm', label: 'Make clear he’s going nowhere', tone: 'firm' },
+              ],
+              status: 'open',
+            })
+          }
+        }
+        this.chroniclePromise(pr, day)
+      }
+    }
+  }
+
+  /** Write a settled promise into the permanent chronicle. */
+  private chroniclePromise(pr: PlayerPromise, day: number): void {
+    const p = this.data.players.get(asPlayerId(pr.playerId))
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day,
+      kind: 'promise',
+      teamIds: [this.userTeamId as string],
+      playerIds: [pr.playerId],
+      headline: `${pr.status === 'kept' ? 'Kept' : 'Broken'}: you promised ${p?.name ?? 'a player'} ${pr.text}`,
+      details: { resolved: pr.status === 'kept' ? 1 : 0 },
+      userInvolved: true,
+    })
   }
 
   /** AI-AI deadline-day flurry, exactly once per season when the deadline is reached. */
@@ -2248,6 +2375,7 @@ export class Career {
 
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.maybeRaiseInteractions(day)
+    this.evaluatePlayerPromises(day)
 
     /* ── trade rumor mill + the deadline-day flurry ── */
     if (day <= this.deadlineDay) {
@@ -5279,6 +5407,34 @@ export class Career {
       this.deadlineHoldDone = false
       // Last season's box scores don't need to survive the summer.
       this.boxScoreHistory = []
+      // LW5: settle the season's remaining promise debts before the page turns.
+      for (const pr of this.playerPromises) {
+        if (pr.status !== 'open') continue
+        const p = this.data.players.get(asPlayerId(pr.playerId))
+        const onOrg = p ? this.ownOrgIds().some((id) => (id as string) === pr.playerId) : false
+        if (pr.kind === 'newDeal') {
+          // Kept if he's still in the organization (the deal came, or he chose
+          // to stay); broken if he walked or you shipped him after promising.
+          pr.status = onOrg ? 'kept' : 'broken'
+          if (pr.status === 'kept' && p) {
+            p.morale = Math.min(100, p.morale + 6)
+          } else if (p) {
+            this.pushNews('contract', `A promise that never came`, `Last season you told ${p.name} “${pr.text}”. He never saw the deal — and he has left the organization. Agents remember these things.`, { playerId: pr.playerId })
+          }
+        } else {
+          // In-season promises that never came due (season ended first) — the
+          // explore-trade ones settle here: gone = kept, still here = broken.
+          pr.status = onOrg && pr.kind === 'exploreTrade' ? 'broken' : 'kept'
+          if (pr.status === 'broken' && p) {
+            p.morale = Math.max(0, p.morale - 12)
+            this.pushNews('trade', `${p.name} still waiting on your word`, `You told him “${pr.text}” and the season ended with him still here. The conversation this summer will not be warm.`, { playerId: pr.playerId })
+          }
+        }
+        this.chroniclePromise(pr, 0)
+      }
+      // Only the settled history of the past year matters; drop older entries.
+      this.playerPromises = this.playerPromises.filter((pr) => pr.year >= this.year)
+
       // Buyout dead cap is a one-season penance — the books clear.
       if (this.userDeadCap > 0) {
         this.pushNews(
@@ -8512,7 +8668,7 @@ export class Career {
     const roster = team ? team.roster.map((id) => this.resolve(id)) : []
     const lr = this.lockerRooms.get(tid) ?? null
     const coach = this.getTeamStaff(teamId).headCoach
-    return buildTeamDynamics({
+    const view = buildTeamDynamics({
       teamId,
       teamName: team?.name ?? teamId,
       roster,
@@ -8520,6 +8676,28 @@ export class Career {
       headCoachName: coach.name,
       ...(coach.faceId !== undefined ? { headCoachFaceId: coach.faceId } : {}),
     })
+    // LW5: the user club's dynamics page carries the promise ledger — your
+    // word, in writing, with the receipts.
+    if (teamId === (this.userTeamId as string) && this.playerPromises.length > 0) {
+      view.promises = [...this.playerPromises]
+        .sort((a, b) => (b.year - a.year) || (b.day - a.day))
+        .slice(0, 12)
+        .map((pr) => {
+          const p = this.data.players.get(asPlayerId(pr.playerId))
+          return {
+            playerId: pr.playerId,
+            playerName: p?.name ?? 'Former player',
+            ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
+            text: pr.text,
+            madeLabel: dayToDateISO(pr.year, Math.max(1, pr.day)),
+            dueLabel: pr.status === 'open'
+              ? (pr.dueDay !== undefined ? dayToDateISO(pr.year, pr.dueDay) : 'season end')
+              : (pr.status === 'kept' ? 'kept' : 'broken'),
+            status: pr.status,
+          }
+        })
+    }
+    return view
   }
 
   /** Medical Center: condition / fatigue / injury / injury-risk for the user roster. */
@@ -10084,9 +10262,24 @@ export class Career {
     // Coach-quote items carry speakerFaceId directly on the item — no extra lookup needed.
     // The InboxScreen reads item.speaker and item.speakerFaceId to render the quote card.
 
-    // Player→GM concerns are suppressed for now (the morale/dynamics layer is
-    // being reworked) — the inbox no longer surfaces these prompt cards.
-    return { items, unread, playerInfo, teamInfo }
+    // LW5: open player→GM concerns surface as response cards atop the inbox.
+    const openConcerns = this.interactions.filter((i) => i.status === 'open')
+    const interactions = openConcerns.map((i) => {
+      const p = this.data.players.get(asPlayerId(i.playerId))
+      return {
+        id: i.id,
+        playerId: i.playerId,
+        playerName: p?.name ?? 'Unknown',
+        ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
+        kind: i.kind,
+        severity: i.severity,
+        message: i.message,
+        day: i.day,
+        year: i.year,
+        options: i.options.map((o) => ({ id: o.id, label: o.label })),
+      }
+    })
+    return { items, unread, playerInfo, teamInfo, ...(interactions.length > 0 ? { interactions } : {}) }
   }
 
   /** Record a played user game's box score for later viewing (bounded). */
@@ -11146,6 +11339,7 @@ export class Career {
       ),
       interactions: this.interactions.map((i) => structuredClone(i)),
       interactionCounter: this.interactionCounter,
+      playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -11288,6 +11482,7 @@ export class Career {
       career.interactions = snapshot.interactions.map((i) => structuredClone(i))
     }
     career.interactionCounter = snapshot.interactionCounter ?? 0
+    if (snapshot.playerPromises) career.playerPromises = snapshot.playerPromises.map((pr) => ({ ...pr }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

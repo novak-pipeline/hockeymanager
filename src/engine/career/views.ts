@@ -45,8 +45,8 @@ import type {
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
-import type { PlayerInteraction } from '@engine/league/interactions'
-export type { PlayerInteraction, InteractionKind } from '@engine/league/interactions'
+import type { PlayerInteraction, PlayerPromise } from '@engine/league/interactions'
+export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/league/interactions'
 import type { AgendaItem } from '@engine/league/staffMeeting'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/league/staffMeeting'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
@@ -1671,6 +1671,8 @@ export interface CareerSnapshot {
   /** Player→GM concerns (open + recently resolved). Optional/additive. */
   interactions?: PlayerInteraction[]
   interactionCounter?: number
+  /** LW5 promise ledger — tracked debts from promise-tone answers. Optional/additive. */
+  playerPromises?: PlayerPromise[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */

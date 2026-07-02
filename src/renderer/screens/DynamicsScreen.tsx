@@ -114,6 +114,41 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
         </Panel>
       )}
 
+      {/* LW5: the promise ledger — your word, in writing, with receipts */}
+      {(d.promises ?? []).length > 0 && (
+        <Panel title="The Promise Ledger">
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Player</th><th>What you said</th><th>When</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {d.promises!.map((pr, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                        <PlayerFace faceId={pr.faceId} name={pr.playerName} size={26} />
+                        <PlayerLink playerId={pr.playerId} name={pr.playerName} />
+                      </div>
+                    </td>
+                    <td style={{ fontStyle: 'italic' }}>“{pr.text}”</td>
+                    <td className="muted small">{pr.madeLabel}</td>
+                    <td>
+                      {pr.status === 'open' && <span className="chip chip-warn" style={{ fontSize: 10 }}>Due {pr.dueLabel}</span>}
+                      {pr.status === 'kept' && <span className="chip chip-success" style={{ fontSize: 10 }}>Kept</span>}
+                      {pr.status === 'broken' && <span className="chip chip-danger" style={{ fontSize: 10 }}>Broken</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="muted small" style={{ marginTop: 6, fontStyle: 'italic' }}>
+            Players remember. A kept promise buys trust; a broken one costs double.
+          </div>
+        </Panel>
+      )}
+
       {/* Hierarchy pyramid */}
       <Panel title="Squad Hierarchy">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>

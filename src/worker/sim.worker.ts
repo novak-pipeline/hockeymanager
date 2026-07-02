@@ -190,7 +190,7 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'respondToInteraction': {
       const res = must().respondToInteraction(req.interactionId, req.optionId)
       if (!res.ok) throw new Error(res.message ?? 'Could not respond.')
-      return { id: req.id, type: 'ok' }
+      return { id: req.id, type: 'ok', ...(res.message ? { note: res.message } : {}) }
     }
     case 'requestInterview': {
       const res = must().requestInterview(req.playerId)

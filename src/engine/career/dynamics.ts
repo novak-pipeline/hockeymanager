@@ -49,6 +49,20 @@ export interface TeamDynamicsView {
   leadership: DynamicsBar
   /** Top influencers (≤4), most influential first. */
   topInfluencers: Array<{ playerId: string; name: string; faceId?: string; tierLabel: string }>
+  /**
+   * LW5 promise ledger (user club only): every promise you've made to a
+   * player's face, with its due date and whether you kept your word.
+   * Optional/additive.
+   */
+  promises?: Array<{
+    playerId: string
+    playerName: string
+    faceId?: string
+    text: string
+    madeLabel: string
+    dueLabel: string
+    status: 'open' | 'kept' | 'broken'
+  }>
   hierarchy: {
     leaders: DynamicsPlayerView[]
     highlyInfluential: DynamicsPlayerView[]
