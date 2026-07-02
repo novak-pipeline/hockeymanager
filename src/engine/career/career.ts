@@ -130,11 +130,14 @@ import {
 } from '@engine/league/gmPersona'
 import {
   buildBoardMeeting,
+  buildSeasonReviewScene,
   defaultChoices as boardMeetingDefaults,
   resolveBoardMeeting,
+  resolveSeasonReview,
   type BoardMeetingFacts,
   type BoardMeetingScene,
   type MeetingEffects,
+  type SeasonReviewFacts,
 } from './boardMeeting'
 import {
   archiveSeason,
@@ -692,6 +695,8 @@ export class Career {
   private lastSeasonMeta: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null = null
   /** Owner-investment perk chosen at the board meeting ('scouting' | 'development'). */
   private ownerPerk: string | null = null
+  /** Staged End-of-Season Review facts (M4); null once attended or lapsed. */
+  private reviewFacts: SeasonReviewFacts | null = null
   private recordsState!: RecordsState
   private expectationsState!: ExpectationsState
   private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
@@ -3915,6 +3920,17 @@ export class Career {
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
   advanceOffseason(): boolean {
+    // M4: continuing past a staged season review lets it lapse — the owner
+    // notices you didn't show.
+    if (this.reviewFacts) {
+      this.reviewFacts = null
+      this.pushNews(
+        'league',
+        'You skipped the season review',
+        'The board met to close the book on the season; you sent regrets. The minutes note your absence.',
+        { teamId: this.userTeamId as string }
+      )
+    }
     const os = this.offseason
     if (!os) return false
     switch (os.stage) {
@@ -3983,6 +3999,35 @@ export class Career {
             // he can catch on elsewhere (the user keeps playing — see acceptGMJob).
             endStint(gm, this.year, 'fired')
             this.gmJobMarket = this.buildGMOpenings(sorted)
+          }
+
+          // Season Rhythm M4: stage the End-of-Season Review — same boardroom,
+          // same people, your September promises read back with verdicts.
+          {
+            const facts = this.boardMeetingFacts()
+            const promises = this.chronicle.events
+              .filter((e) => e.kind === 'promise' && e.userInvolved && e.details?.dueYear === this.year && e.details.resolved)
+              .map((e) => ({
+                text: e.headline.replace('Board-room promise: ', ''),
+                resolved: e.details!.resolved as 'met' | 'missed',
+              }))
+            this.reviewFacts = {
+              year: this.year,
+              teamName: this.userTeam.name,
+              owner: facts.owner,
+              coach: { id: facts.coach.id, name: facts.coach.name, ...(facts.coach.faceId ? { faceId: facts.coach.faceId } : {}) },
+              agm: facts.agm,
+              finalRank: userFinalRank,
+              targetRank: this.boardState.targetRank,
+              mandateText: this.boardState.mandateText,
+              madePlayoffs,
+              wonCup,
+              verdict: reviewResult.verdict,
+              fired: reviewResult.fired,
+              promises,
+              confidence: this.boardState.confidence,
+              patience: this.boardState.patience,
+            }
           }
 
           // ── Fanbase: the season's result moves the needle on fan engagement. ──
@@ -4997,6 +5042,8 @@ export class Career {
       // Season Rhythm M1: schedule next preseason's board meeting; perks lapse.
       this.boardMeetingYear = newYear
       this.ownerPerk = null
+      // M4: an unattended season review lapses quietly (its news already ran).
+      this.reviewFacts = null
     }
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
@@ -6367,6 +6414,28 @@ export class Career {
     )
   }
 
+  /** The staged End-of-Season Review scene (M4), or null. */
+  getSeasonReview(): BoardMeetingScene | null {
+    if (!this.reviewFacts) return null
+    return buildSeasonReviewScene(this.reviewFacts, this.rngFor(9402, this.reviewFacts.year))
+  }
+
+  /** Answer for the season. Applies the small trust effects and closes the scene. */
+  submitSeasonReview(choice: string): { ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string } {
+    if (!this.reviewFacts) return { ok: false, lines: [], summary: 'No review is staged.' }
+    const outcome = resolveSeasonReview(this.reviewFacts, choice)
+    const clamp = (v: number): number => Math.max(0, Math.min(100, v))
+    this.boardState.confidence = clamp(this.boardState.confidence + outcome.confidenceDelta)
+    this.boardState.patience = clamp(this.boardState.patience + outcome.patienceDelta)
+    if (outcome.summary) {
+      this.pushNews('league', 'Season review: the year, answered for', outcome.summary, {
+        teamId: this.userTeamId as string,
+      })
+    }
+    this.reviewFacts = null
+    return { ok: true, lines: outcome.closingLines, summary: outcome.summary }
+  }
+
   /** Judge this season's board-room promises — the receipts, read back. */
   private evaluateBoardPromises(finalRank: number, madePlayoffs: boolean): void {
     const clamp = (v: number): number => Math.max(0, Math.min(100, v))
@@ -6673,6 +6742,7 @@ export class Career {
       continueLabel,
       draftPending: this.draftPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
+      reviewPending: this.reviewFacts !== null,
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,
@@ -10448,6 +10518,7 @@ export class Career {
       boardMeetingYear: this.boardMeetingYear,
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
       ownerPerk: this.ownerPerk,
+      reviewFacts: this.reviewFacts ? structuredClone(this.reviewFacts) : null,
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10573,6 +10644,7 @@ export class Career {
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null
     career.ownerPerk = snapshot.ownerPerk ?? null
+    career.reviewFacts = snapshot.reviewFacts ? structuredClone(snapshot.reviewFacts) : null
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

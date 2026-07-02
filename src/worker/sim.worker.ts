@@ -319,6 +319,12 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'getSeasonReview':
+      return { id: req.id, type: 'boardMeeting', scene: must().getSeasonReview() }
+    case 'submitSeasonReview': {
+      const res = must().submitSeasonReview(req.choice)
+      return { id: req.id, type: 'boardMeetingResult', ok: res.ok, lines: res.lines, summary: res.summary }
+    }
     case 'getBoardMeeting':
       return { id: req.id, type: 'boardMeeting', scene: must().getBoardMeeting() }
     case 'submitBoardMeeting': {

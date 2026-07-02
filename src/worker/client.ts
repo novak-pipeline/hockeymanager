@@ -453,6 +453,14 @@ export class SimClient {
     })
   }
 
+  getSeasonReview(): Promise<WorkerResponse> {
+    return this.send({ type: 'getSeasonReview' })
+  }
+
+  submitSeasonReview(choice: string): Promise<WorkerResponse> {
+    return this.send({ type: 'submitSeasonReview', choice })
+  }
+
   getBoardMeeting(): Promise<WorkerResponse> {
     return this.send({ type: 'getBoardMeeting' })
   }

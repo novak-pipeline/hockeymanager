@@ -35,6 +35,7 @@ export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
 import type { ChronicleState } from '@engine/story/chronicle'
 import type { GmPersona } from '@engine/league/gmPersona'
+import type { SeasonReviewFacts } from '@engine/career/boardMeeting'
 import type {
   AwardRecord,
   LegendRecord,
@@ -234,6 +235,8 @@ export interface DashboardView {
   /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
    *  past it sends the AGM in your place — a soft gate, not a hard one. */
   boardMeetingPending?: boolean
+  /** True when the End-of-Season Review is staged (Season Rhythm M4). */
+  reviewPending?: boolean
   userTeam: {
     teamId: string
     name: string
@@ -1639,6 +1642,8 @@ export interface CareerSnapshot {
   lastSeasonMeta?: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null
   /** Owner-investment perk in force this season. Optional/additive. */
   ownerPerk?: string | null
+  /** Staged End-of-Season Review facts (Season Rhythm M4). Optional/additive. */
+  reviewFacts?: SeasonReviewFacts | null
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */

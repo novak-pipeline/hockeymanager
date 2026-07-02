@@ -552,3 +552,158 @@ export function defaultChoices(scene: BoardMeetingScene): Record<string, string>
   }
   return out
 }
+
+/* ────────────────────────── the End-of-Season Review (M4) ────────────────────────── */
+
+/**
+ * The receipts meeting. Same boardroom, same people — but now the season has
+ * happened, and the owner reads your September commitments back to you with
+ * the verdicts attached. One real choice: how you answer for it.
+ */
+
+export interface SeasonReviewFacts {
+  year: number
+  teamName: string
+  owner: { id: string; name: string; faceId?: string; demeanor?: string }
+  coach: { id: string; name: string; faceId?: string }
+  agm: { id: string; name: string; faceId?: string }
+  finalRank: number
+  targetRank: number
+  mandateText: string
+  madePlayoffs: boolean
+  wonCup: boolean
+  verdict: 'exceeded' | 'met' | 'missed' | 'failed'
+  fired: boolean
+  /** This season's board-room promises with their verdicts. */
+  promises: Array<{ text: string; resolved: 'met' | 'missed' }>
+  confidence: number
+  patience: number
+}
+
+export function buildSeasonReviewScene(facts: SeasonReviewFacts, rng: Rng): BoardMeetingScene {
+  const cast: MeetingSpeaker[] = [
+    { id: 'owner', name: facts.owner.name, title: 'Owner', ...(facts.owner.faceId ? { faceId: facts.owner.faceId } : {}) },
+    { id: 'coach', name: facts.coach.name, title: 'Head Coach', ...(facts.coach.faceId ? { faceId: facts.coach.faceId } : {}) },
+    { id: 'agm', name: facts.agm.name, title: 'Assistant GM', ...(facts.agm.faceId ? { faceId: facts.agm.faceId } : {}) },
+  ]
+  const voice = ownerVoice(facts.owner.demeanor, rng)
+
+  const opening: MeetingLine[] = []
+  // The verdict, in the owner's voice, with the season's real shape.
+  if (facts.wonCup) {
+    opening.push({ speakerId: 'owner', text: `Sit down — no, actually, stand. Everyone should be standing. We won the whole thing. Whatever was said in September, tonight it's champagne.` })
+  } else {
+    switch (facts.verdict) {
+      case 'exceeded':
+        opening.push({ speakerId: 'owner', text: voice.onExceeded(facts.finalRank, facts.targetRank) })
+        break
+      case 'met':
+        opening.push({ speakerId: 'owner', text: `${ord(facts.finalRank)}, against a bar of ${ord(facts.targetRank)}. You did what you said. In this business that's rarer than it should be.` })
+        break
+      case 'missed':
+        opening.push({ speakerId: 'owner', text: voice.onMissed(facts.finalRank, facts.targetRank) })
+        break
+      case 'failed':
+        opening.push({ speakerId: 'owner', text: `${ord(facts.finalRank)}. The ask was "${facts.mandateText}" We're not going to pretend that's close. Talk.` })
+        break
+    }
+  }
+  // The receipts: every promise, quoted, with its verdict.
+  for (const p of facts.promises) {
+    opening.push({
+      speakerId: 'owner',
+      text: p.resolved === 'met'
+        ? `September, this room, your words: "${p.text}." Delivered. Noted.`
+        : `September, this room, your words: "${p.text}." It didn't happen. I keep the minutes.`,
+    })
+  }
+  if (facts.promises.length === 0) {
+    opening.push({ speakerId: 'agm', text: `For the record — no outstanding commitments from September. The slate was the standings.` })
+  }
+  if (facts.fired) {
+    opening.push({ speakerId: 'owner', text: `You know how this ends. The league office has the paperwork. I wanted to tell you across the table, not through a press release.` })
+  }
+
+  // One agenda item: your answer. Options vary by how the year went.
+  const options: MeetingOption[] =
+    facts.verdict === 'exceeded' || facts.wonCup
+      ? [
+        { id: 'credit', label: 'Share the credit with the room', detail: `Point at the coach, the staff, the players. Costs nothing; the building hears it.` },
+        { id: 'leverage', label: `Ask for more backing while you're up`, detail: `Cash in the goodwill: the board extends patience into next season — though the owner notes the ambition.` },
+      ]
+      : facts.verdict === 'met'
+        ? [
+          { id: 'steady', label: `"We did what we said we would."`, detail: `Solid, unremarkable, professional. Confidence firms up.` },
+          { id: 'raise', label: `"Next year we take the next step."`, detail: `Signal ambition. The board will remember the phrase when September's objective is set.` },
+        ]
+        : [
+          { id: 'own', label: 'Own it', detail: `No excuses, take the year on the chin. Accountability buys back a little trust.` },
+          { id: 'defend', label: 'Defend the process', detail: `Argue injuries, growth, the underlying numbers. The owner has heard this speech before — it lands only if he reads the same numbers you do.` },
+        ]
+
+  return {
+    year: facts.year,
+    venue: 'boardroom',
+    cast,
+    opening,
+    agenda: [{
+      id: 'answer',
+      title: 'Your answer',
+      intro: [{ speakerId: 'owner', text: facts.fired ? `Anything you want on the record before we shake hands?` : `So. What do I tell the papers tomorrow?` }],
+      options,
+    }],
+  }
+}
+
+export interface SeasonReviewOutcome {
+  confidenceDelta: number
+  patienceDelta: number
+  closingLines: MeetingLine[]
+  summary: string
+}
+
+export function resolveSeasonReview(facts: SeasonReviewFacts, choice: string): SeasonReviewOutcome {
+  const out = (text: string, confidenceDelta: number, patienceDelta: number, summary: string): SeasonReviewOutcome =>
+    ({ confidenceDelta, patienceDelta, closingLines: [{ speakerId: 'owner', text }], summary })
+  switch (choice) {
+    case 'credit':
+      return out(
+        `Humility from a winner. The room will run through walls for that. Enjoy the summer — you've earned a short one.`,
+        2, 0, 'You shared the credit; the building noticed.'
+      )
+    case 'leverage':
+      return out(
+        `Fine — you've banked the right to ask. You'll have your rope. Use it on something that hangs banners.`,
+        -1, 8, 'You cashed in the goodwill: the board extends its patience into next season.'
+      )
+    case 'steady':
+      return out(
+        `"Did what they said." I've fired a dozen men who couldn't manage that sentence. Good year.`,
+        3, 0, 'A professional year, closed professionally.'
+      )
+    case 'raise':
+      return out(
+        `The next step. I'll hold you to the phrase — September me will remember it.`,
+        2, 0, `You promised a step forward — expect September's bar to reflect it.`
+      )
+    case 'own':
+      return out(
+        `No excuses. That's the only answer that doesn't make it worse. We go again — but the leash is what it is.`,
+        3, 0, 'You owned the season. It bought back a little trust — not much, but real.'
+      )
+    case 'defend': {
+      const patientOwner = facts.owner.demeanor === 'calm' || facts.owner.demeanor === 'analytical'
+      return patientOwner
+        ? out(
+          `…I've looked at the same numbers. There's a case. It had better cash next year.`,
+          1, 0, 'You defended the process — and this owner, to his credit, actually read the numbers.'
+        )
+        : out(
+          `The process. I bought the process last year. I'm running out of shelf space for process.`,
+          -2, -4, 'You defended the process; the owner has heard that speech before.'
+        )
+    }
+    default:
+      return { confidenceDelta: 0, patienceDelta: 0, closingLines: [], summary: 'The meeting adjourned.' }
+  }
+}

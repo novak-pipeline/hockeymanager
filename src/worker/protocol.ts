@@ -299,6 +299,10 @@ export type WorkerRequestBody =
   | { type: 'getBoardMeeting' }
   /** Attend the meeting with your chosen answers per agenda item. */
   | { type: 'submitBoardMeeting'; choices: Record<string, string> }
+  /** The staged End-of-Season Review scene (M4), or null. */
+  | { type: 'getSeasonReview' }
+  /** Answer for the season (single 'answer' agenda choice). */
+  | { type: 'submitSeasonReview'; choice: string }
   /* ── story layer ── */
   /** All-time record boards, season archive, awards, legends/Hall of Fame. */
   | { type: 'getHistory' }

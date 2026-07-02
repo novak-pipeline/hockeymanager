@@ -3,9 +3,12 @@ import { Rng } from '@engine/shared/rng'
 import type { BoardState } from '@engine/league/board'
 import {
   buildBoardMeeting,
+  buildSeasonReviewScene,
   defaultChoices,
   resolveBoardMeeting,
+  resolveSeasonReview,
   type BoardMeetingFacts,
+  type SeasonReviewFacts,
 } from './boardMeeting'
 
 function baseFacts(over: Partial<BoardMeetingFacts> = {}): BoardMeetingFacts {
@@ -146,5 +149,74 @@ describe('resolveBoardMeeting', () => {
     const facts = baseFacts()
     const scene = buildBoardMeeting(facts, new Rng(2))
     expect(JSON.parse(JSON.stringify(scene))).toEqual(scene)
+  })
+})
+
+/* ── End-of-Season Review (M4) ── */
+
+function reviewFacts(over: Partial<SeasonReviewFacts> = {}): SeasonReviewFacts {
+  return {
+    year: 2027,
+    teamName: 'Pittsburgh',
+    owner: { id: 'own1', name: 'Marlene Brandt', demeanor: 'fiery' },
+    coach: { id: 'hc1', name: 'Ray Solari' },
+    agm: { id: 'agm1', name: 'Dev Okafor' },
+    finalRank: 9,
+    targetRank: 12,
+    mandateText: 'Make the playoffs.',
+    madePlayoffs: true,
+    wonCup: false,
+    verdict: 'met',
+    fired: false,
+    promises: [
+      { text: 'Finish 9th or better — your own raised bar', resolved: 'met' },
+      { text: 'Two U23 players play 40+ NHL games', resolved: 'missed' },
+    ],
+    confidence: 62,
+    patience: 70,
+    ...over,
+  }
+}
+
+describe('buildSeasonReviewScene', () => {
+  it('reads every promise back with its verdict, quoting the original words', () => {
+    const scene = buildSeasonReviewScene(reviewFacts(), new Rng(9))
+    const text = scene.opening.map((l) => l.text).join(' | ')
+    expect(text).toContain('Finish 9th or better')
+    expect(text).toContain('Delivered')
+    expect(text).toContain('Two U23 players')
+    expect(text).toContain("It didn't happen")
+    expect(scene.agenda).toHaveLength(1)
+  })
+
+  it('options track the verdict: success offers leverage, failure offers accountability', () => {
+    const good = buildSeasonReviewScene(reviewFacts({ verdict: 'exceeded' }), new Rng(9))
+    expect(good.agenda[0]!.options.map((o) => o.id)).toContain('leverage')
+    const bad = buildSeasonReviewScene(reviewFacts({ verdict: 'failed', finalRank: 26 }), new Rng(9))
+    expect(bad.agenda[0]!.options.map((o) => o.id)).toContain('own')
+    expect(bad.opening.map((l) => l.text).join(' ')).toContain('26th')
+  })
+
+  it('a firing is delivered across the table, not by press release', () => {
+    const scene = buildSeasonReviewScene(reviewFacts({ verdict: 'failed', fired: true }), new Rng(9))
+    expect(scene.opening.map((l) => l.text).join(' ')).toContain('paperwork')
+  })
+})
+
+describe('resolveSeasonReview', () => {
+  it('owning a bad year buys back a little trust; defending it depends on the owner', () => {
+    const own = resolveSeasonReview(reviewFacts({ verdict: 'failed' }), 'own')
+    expect(own.confidenceDelta).toBeGreaterThan(0)
+    const defendFiery = resolveSeasonReview(reviewFacts({ verdict: 'failed' }), 'defend')
+    expect(defendFiery.confidenceDelta).toBeLessThan(0)
+    const defendCalm = resolveSeasonReview(
+      reviewFacts({ verdict: 'failed', owner: { id: 'o', name: 'X', demeanor: 'analytical' } }), 'defend')
+    expect(defendCalm.confidenceDelta).toBeGreaterThanOrEqual(0)
+  })
+
+  it('leverage after a great year trades a sliver of confidence for patience', () => {
+    const r = resolveSeasonReview(reviewFacts({ verdict: 'exceeded' }), 'leverage')
+    expect(r.patienceDelta).toBeGreaterThan(0)
+    expect(r.confidenceDelta).toBeLessThan(1)
   })
 })

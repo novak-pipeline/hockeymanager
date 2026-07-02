@@ -16,6 +16,7 @@ export type ScreenId =
   | 'dashboard'
   | 'board'
   | 'boardMeeting'
+  | 'seasonReview'
   | 'gmCareer'
   | 'staffMeeting'
   // News section

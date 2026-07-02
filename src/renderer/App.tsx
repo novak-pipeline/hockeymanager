@@ -251,6 +251,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('boardMeeting')
           return
         }
+        // End-of-season review: one Continue press walks you in; continuing
+        // FROM the review screen (or anywhere twice) lets it lapse engine-side.
+        if (dashboard?.reviewPending && nav.screen !== 'seasonReview') {
+          navigate('seasonReview')
+          return
+        }
         void run(() => client.continueGame())
       },
       advanceDays: (days: number) => {
@@ -269,7 +275,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.boardMeetingPending, nav.screen, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -528,6 +534,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <WaiverWireScreen />
     case 'boardMeeting':
       return <BoardMeetingScreen />
+    case 'seasonReview':
+      return <BoardMeetingScreen variant="review" />
     case 'gmCareer':
       return <GMCareerScreen />
     case 'mentorship':

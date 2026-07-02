@@ -85,11 +85,12 @@ const SAFE: Record<string, string> = {
   'wc-payroll': 'shed', 'wc-rebuild': 'ride', 'wc-fans': 'wins', 'wc-invest': 'development',
 }
 
-export function BoardMeetingScreen(): JSX.Element {
+export function BoardMeetingScreen({ variant = 'preseason' }: { variant?: 'preseason' | 'review' } = {}): JSX.Element {
   const client = useClient()
   const nav = useNav()
+  const isReview = variant === 'review'
   const { data: scene, loading } = useScreenData<BoardMeetingScene | null>(
-    () => client.getBoardMeeting(),
+    () => (isReview ? client.getSeasonReview() : client.getBoardMeeting()),
     (r) => (r.type === 'boardMeeting' ? r.scene : null)
   )
 
@@ -105,7 +106,9 @@ export function BoardMeetingScreen(): JSX.Element {
 
   const submit = async (finalChoices: Record<string, string>): Promise<void> => {
     setSubmitting(true)
-    const res = await client.submitBoardMeeting(finalChoices)
+    const res = isReview
+      ? await client.submitSeasonReview(finalChoices['answer'] ?? '')
+      : await client.submitBoardMeeting(finalChoices)
     setSubmitting(false)
     if (res.type === 'boardMeetingResult' && res.ok) {
       setClosing({ lines: res.lines, summary: res.summary })
@@ -145,11 +148,13 @@ export function BoardMeetingScreen(): JSX.Element {
         <div className="row-between" style={{ alignItems: 'flex-start', marginBottom: 'var(--sp-4)' }}>
           <div>
             <div style={{ fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--muted)' }}>
-              Executive boardroom · September {scene?.year ?? closing ? '' : ''}
+              Executive boardroom · {isReview ? 'April' : 'September'}
             </div>
-            <h2 style={{ margin: '2px 0 0', fontSize: 22, fontWeight: 800 }}>Preseason Board Meeting</h2>
+            <h2 style={{ margin: '2px 0 0', fontSize: 22, fontWeight: 800 }}>
+              {isReview ? 'End-of-Season Review' : 'Preseason Board Meeting'}
+            </h2>
           </div>
-          {!closing && (
+          {!closing && !isReview && (
             <button className="btn btn-ghost btn-sm" disabled={submitting} onClick={sendAgm}
               title="Skip the meeting — your assistant GM attends and plays every question safe">
               Send the AGM instead →
