@@ -1348,6 +1348,8 @@ export interface OffseasonView {
   offerSheets?: OfferSheetRowView[]
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
+  /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
+  arbitration?: Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }>
   capUsed: number
   salaryCap: number
 }
@@ -1655,6 +1657,8 @@ export interface CareerSnapshot {
   reviewFacts?: SeasonReviewFacts | null
   /** Per-game box scores for the user's played games this season. Optional/additive. */
   boxScoreHistory?: Array<[string, BoxScoreView]>
+  /** Pending arbitration awards for the user's RFAs (M2). Optional/additive. */
+  arbitrationCases?: Array<{ playerId: string; salary: number; years: number }>
   /** Deadline-day hold state. Optional/additive. */
   deadlineHold?: boolean
   deadlineHoldDone?: boolean

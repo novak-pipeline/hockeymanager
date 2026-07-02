@@ -706,6 +706,9 @@ export class Career {
   /** Players bought out during the resign stage — they join the FA pool when
    *  free agency opens (the transition rebuilds faPool from expiries). */
   private buyoutFas: PlayerId[] = []
+  /** Pending arbitration awards for the user's unsigned RFAs (M2). Each is an
+   *  ultimatum: accept the award or walk away and lose him to the open market. */
+  private arbitrationCases: Array<{ playerId: string; salary: number; years: number }> = []
   /** True while the sim is held on deadline day (one continue's grace). */
   private deadlineHold = false
   /** The deadline hold already happened this season. */
@@ -4535,7 +4538,29 @@ export class Career {
           players: this.data.players,
           year: this.year,
         })
-        this.faPool = [...expired.map((e) => e.playerId), ...this.buyoutFas]
+        // Season Rhythm M2 — ARBITRATION: the user's unsigned RFAs don't just
+        // walk to the open market; they file. An arbitrator sets a one-year
+        // award near their ask, and the club faces the classic ultimatum:
+        // accept the number, or walk away and lose him for nothing.
+        const arbFiled = new Set<string>()
+        for (const e of expired) {
+          if (e.teamId !== this.userTeamId) continue
+          const p = this.data.players.get(e.playerId)
+          if (!p || contractStatus(p) !== 'RFA' || ratedOverall(p) < 60) continue
+          const ask = askTerms(p, this.year)
+          const award = Math.round(ask.salary * this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.98, 1.12) / 25000) * 25000
+          this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1 })
+          arbFiled.add(e.playerId as string)
+          this.pushNews(
+            'contract',
+            `${p.name} files for arbitration`,
+            `Unsigned and restricted, ${p.name} has taken the club to arbitration. The arbitrator's award: ` +
+            `$${(award / 1e6).toFixed(2)}M × 1 year. Accept it and he's signed at that number — or walk away and he ` +
+            `becomes an unrestricted free agent. Decide before free agency closes; an unanswered award binds the club.`,
+            { playerId: e.playerId as string }
+          )
+        }
+        this.faPool = [...expired.map((e) => e.playerId).filter((id) => !arbFiled.has(id as string)), ...this.buyoutFas]
         this.buyoutFas = []
         for (const e of expired) this.lockerDeparture(e.teamId, e.playerId)
         for (const e of expired) {
@@ -4639,6 +4664,9 @@ export class Career {
         }
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         if (os.faDay >= FA_WINDOW_DAYS) {
+          // Unanswered arbitration awards bind the club (cap permitting).
+          for (const c of [...this.arbitrationCases]) this.acceptArbitration(c.playerId)
+          for (const c of [...this.arbitrationCases]) this.walkAwayArbitration(c.playerId) // cap-blocked leftovers walk
           this.runWorldFreeAgency()
           os.stage = 'preseason'
         }
@@ -5341,6 +5369,60 @@ export class Career {
     })
     this.transactionLedger = txResult.ledger
     return { ok: true, message: `${p.name} bought out — $${(charge / 1e6).toFixed(2)}M dead cap next season.`, charge }
+  }
+
+  /** Pending arbitration cases (for the offseason screen). */
+  getArbitrationCases(): Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }> {
+    return this.arbitrationCases.map((c) => {
+      const p = this.data.players.get(asPlayerId(c.playerId))
+      return {
+        playerId: c.playerId, name: p?.name ?? '—', position: p?.position ?? '?',
+        age: p?.age ?? 0, salary: c.salary, years: c.years,
+      }
+    })
+  }
+
+  /** Accept the arbitrator's award: he signs at that number, like it or not. */
+  acceptArbitration(playerId: string): { ok: boolean; message: string } {
+    const c = this.arbitrationCases.find((x) => x.playerId === playerId)
+    if (!c) return { ok: false, message: 'No arbitration case for that player.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Player not found.' }
+    const capUsed = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    if (capUsed + this.userDeadCap + c.salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: 'The award does not fit under your cap — clear space or walk away.' }
+    }
+    signPlayer({ team: this.userTeam, player: p, salary: c.salary, years: c.years, year: this.year, players: this.data.players })
+    this.faPool = this.faPool.filter((id) => (id as string) !== playerId)
+    this.arbitrationCases = this.arbitrationCases.filter((x) => x.playerId !== playerId)
+    this.lockerArrival(this.userTeamId, asPlayerId(playerId))
+    repairLines(this.userTeam, this.data.players)
+    this.pushNews(
+      'contract',
+      `${p.name} signs his arbitration award`,
+      `The club accepts the arbitrator's number: $${(c.salary / 1e6).toFixed(2)}M × ${c.years} year. Nobody hugged.`,
+      { playerId }
+    )
+    return { ok: true, message: `${p.name} signed at the award: $${(c.salary / 1e6).toFixed(2)}M.` }
+  }
+
+  /** Walk away from the award: he becomes a UFA and the market gets him. */
+  walkAwayArbitration(playerId: string): { ok: boolean; message: string } {
+    const c = this.arbitrationCases.find((x) => x.playerId === playerId)
+    if (!c) return { ok: false, message: 'No arbitration case for that player.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    this.arbitrationCases = this.arbitrationCases.filter((x) => x.playerId !== playerId)
+    if (!this.faPool.some((id) => (id as string) === playerId)) this.faPool.push(asPlayerId(playerId))
+    if (p) {
+      this.pushNews(
+        'contract',
+        `Club walks away from ${p.name}'s award`,
+        `The arbitrator said $${(c.salary / 1e6).toFixed(2)}M; the club said no. ${p.name} is now an unrestricted free agent — and the league knows exactly what he costs.`,
+        { playerId }
+      )
+    }
+    return { ok: true, message: p ? `Walked away — ${p.name} hits the open market.` : 'Walked away.' }
   }
 
   releasePlayer(playerId: string): void {
@@ -10113,7 +10195,7 @@ export class Career {
     }
     const team = this.userTeam
     const roster = team.roster.map((id) => this.resolve(id))
-    const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
+    const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0) + this.userDeadCap
     const awards =
       os.stage === 'awards' || os.stage === 'draft' ? this.computeAwards() : null
     return {
@@ -10136,6 +10218,7 @@ export class Career {
           status,
         }
       }),
+      arbitration: this.getArbitrationCases(),
       freeAgents: this.faPool
         .map((id) => this.resolve(id))
         .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))
@@ -10965,6 +11048,7 @@ export class Career {
       deadlineHoldDone: this.deadlineHoldDone,
       userDeadCap: this.userDeadCap,
       buyoutFas: this.buyoutFas.map((id) => id as string),
+      arbitrationCases: this.arbitrationCases.map((c) => ({ ...c })),
       boxScoreHistory: structuredClone(this.boxScoreHistory),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
@@ -11096,6 +11180,7 @@ export class Career {
     career.deadlineHoldDone = snapshot.deadlineHoldDone ?? false
     career.userDeadCap = snapshot.userDeadCap ?? 0
     career.buyoutFas = (snapshot.buyoutFas ?? []).map((id) => asPlayerId(id))
+    career.arbitrationCases = (snapshot.arbitrationCases ?? []).map((c) => ({ ...c }))
     career.boxScoreHistory = snapshot.boxScoreHistory ? structuredClone(snapshot.boxScoreHistory) : []
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles

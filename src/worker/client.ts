@@ -457,6 +457,14 @@ export class SimClient {
     return this.send({ type: 'getBoxScoreFor', gameId })
   }
 
+  acceptArbitration(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'acceptArbitration', playerId })
+  }
+
+  walkArbitration(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'walkArbitration', playerId })
+  }
+
   buyoutPlayer(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'buyoutPlayer', playerId })
   }

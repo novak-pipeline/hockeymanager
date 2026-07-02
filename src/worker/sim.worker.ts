@@ -321,6 +321,16 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     case 'getBoxScoreFor':
       return { id: req.id, type: 'boxScore', boxScore: must().getBoxScoreFor(req.gameId) }
+    case 'acceptArbitration': {
+      const res = must().acceptArbitration(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
+    case 'walkArbitration': {
+      const res = must().walkAwayArbitration(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
     case 'buyoutPlayer': {
       const res = must().buyoutContract(req.playerId)
       if (!res.ok) return { id: req.id, type: 'error', message: res.message }

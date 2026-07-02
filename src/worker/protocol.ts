@@ -298,6 +298,9 @@ export type WorkerRequestBody =
   | { type: 'searchAll'; query: string }
   /** Buy out a contract during the offseason window (M2). */
   | { type: 'buyoutPlayer'; playerId: string }
+  /** Arbitration ultimatum: accept the award or walk away (M2). */
+  | { type: 'acceptArbitration'; playerId: string }
+  | { type: 'walkArbitration'; playerId: string }
   /** Box score of a specific played user game (calendar/schedule click-through). */
   | { type: 'getBoxScoreFor'; gameId: string }
   /* ── season rhythm: meetings (M1) ── */

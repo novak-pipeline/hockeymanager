@@ -8,6 +8,55 @@ import { OverallStars } from '../components/Stars'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
+// ─── arbitration hearings (Season Rhythm M2) ──────────────────────────────────
+
+/** The classic ultimatum: the arbitrator set the number — sign it or lose him. */
+function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch: () => void }): JSX.Element | null {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const cases = view.arbitration ?? []
+  if (cases.length === 0) return null
+
+  const act = async (kind: 'accept' | 'walk', playerId: string, name: string): Promise<void> => {
+    if (kind === 'walk' && !window.confirm(`Walk away from ${name}'s award? He becomes an unrestricted free agent immediately.`)) return
+    setBusy(true)
+    const res = kind === 'accept' ? await client.acceptArbitration(playerId) : await client.walkArbitration(playerId)
+    setBusy(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else { toast(res.type === 'ok' && res.note ? res.note : 'Done', 'success'); onRefetch() }
+  }
+
+  return (
+    <Panel title={`Arbitration hearings (${cases.length})`}>
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+        The arbitrator has ruled. Accept the award and he's signed at that number —
+        or walk away and he hits the open market. Unanswered awards bind the club when free agency closes.
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr><th>Player</th><th className="num">Age</th><th className="num">Award</th><th className="num">Term</th><th></th></tr>
+          </thead>
+          <tbody>
+            {cases.map((c) => (
+              <tr key={c.playerId}>
+                <td><PlayerLink playerId={c.playerId} name={c.name} /> <span className="muted small">{c.position}</span></td>
+                <td className="num muted">{c.age}</td>
+                <td className="num" style={{ fontWeight: 700 }}>{fmtMoney(c.salary)}</td>
+                <td className="num muted">{c.years}y</td>
+                <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn btn-ghost small" disabled={busy} onClick={() => { void act('accept', c.playerId, c.name) }}>Accept award</button>
+                  <button className="btn btn-ghost small" style={{ color: 'var(--danger)', marginLeft: 4 }} disabled={busy} onClick={() => { void act('walk', c.playerId, c.name) }}>Walk away</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
 // ─── buyout window (Season Rhythm M2) ─────────────────────────────────────────
 
 /** Eat a bad contract: player walks, one-third of his remaining money sticks
@@ -704,7 +753,10 @@ export function OffseasonScreen(): JSX.Element {
           )}
 
           {data.stage === 'freeAgency' && (
-            <FreeAgencyPanel view={data} onRefetch={refetch} />
+            <>
+              <ArbitrationPanel view={data} onRefetch={refetch} />
+              <FreeAgencyPanel view={data} onRefetch={refetch} />
+            </>
           )}
 
           {data.stage === 'preseason' && (
