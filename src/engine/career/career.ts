@@ -4547,6 +4547,13 @@ export class Career {
           if (e.teamId !== this.userTeamId) continue
           const p = this.data.players.get(e.playerId)
           if (!p || contractStatus(p) !== 'RFA' || ratedOverall(p) < 60) continue
+          // Arbitration is RARE in real life: only established RFAs are
+          // eligible (past the entry-level years), and filing is a choice —
+          // the confident, high-value ones go to a hearing; the rest simply
+          // reach the market unsigned. Expect 0-2 cases in a normal summer.
+          if (p.age < 23) continue
+          const fileChance = ratedOverall(p) >= 70 ? 0.65 : 0.3
+          if (!this.rngFor(8010, Career.pidNum(e.playerId as string)).chance(fileChance)) continue
           const ask = askTerms(p, this.year)
           const award = Math.round(ask.salary * this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.98, 1.12) / 25000) * 25000
           this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1 })
