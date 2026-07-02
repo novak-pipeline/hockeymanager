@@ -319,6 +319,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'assignScout':
       must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'searchAll':
+      return { id: req.id, type: 'searchResults', results: must().searchAll(req.query) }
     case 'getSeasonReview':
       return { id: req.id, type: 'boardMeeting', scene: must().getSeasonReview() }
     case 'submitSeasonReview': {

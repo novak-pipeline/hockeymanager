@@ -8573,6 +8573,40 @@ export class Career {
     })))
   }
 
+  /** Global search for the Ctrl+K palette: players and teams by name substring.
+   *  Read-only, cheap (single linear pass), fog-of-war safe (names only). */
+  searchAll(query: string, limit = 8): {
+    players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }>
+    teams: Array<{ teamId: string; name: string; abbr: string }>
+  } {
+    const q = query.trim().toLowerCase()
+    if (q.length < 2) return { players: [], teams: [] }
+    const players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }> = []
+    const teams: Array<{ teamId: string; name: string; abbr: string }> = []
+    for (const t of this.data.teams.values()) {
+      if (teams.length < limit && (t.name.toLowerCase().includes(q) || t.abbreviation.toLowerCase().includes(q))) {
+        teams.push({ teamId: t.id as string, name: t.name, abbr: t.abbreviation })
+      }
+    }
+    // Prefer prefix matches so "cro" surfaces Crosby before someone mid-name.
+    const prefix: typeof players = []
+    const contains: typeof players = []
+    for (const p of this.data.players.values()) {
+      if (prefix.length >= limit) break
+      const name = p.name.toLowerCase()
+      if (!name.includes(q)) continue
+      const teamId = this.teamOf(p.id)
+      const abbr = teamId ? (this.data.teams.get(teamId)?.abbreviation ?? '—') : 'FA'
+      const row = {
+        playerId: p.id as string, name: p.name, position: p.position, age: p.age,
+        teamAbbr: abbr, ...(p.faceId ? { faceId: p.faceId } : {}),
+      }
+      if (name.startsWith(q) || name.includes(` ${q}`)) prefix.push(row)
+      else if (contains.length < limit) contains.push(row)
+    }
+    return { players: [...prefix, ...contains].slice(0, limit), teams }
+  }
+
   getScouting(): ScoutingView {
     this.syncScoutRoster()
     return buildScoutingView({

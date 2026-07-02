@@ -294,6 +294,8 @@ export type WorkerRequestBody =
   | { type: 'autoAssignScouts' }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
+  /** Global search for the command palette (players + teams by name). */
+  | { type: 'searchAll'; query: string }
   /* ── season rhythm: meetings (M1) ── */
   /** The pending preseason board-meeting scene (null once attended). */
   | { type: 'getBoardMeeting' }
@@ -456,6 +458,13 @@ export type WorkerResponse = { id: number } & (
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
+  | {
+      type: 'searchResults'
+      results: {
+        players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }>
+        teams: Array<{ teamId: string; name: string; abbr: string }>
+      }
+    }
   /* ── season rhythm: meetings (M1) ── */
   | { type: 'boardMeeting'; scene: BoardMeetingScene | null }
   | { type: 'boardMeetingResult'; ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string }

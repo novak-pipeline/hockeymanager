@@ -453,6 +453,10 @@ export class SimClient {
     })
   }
 
+  searchAll(query: string): Promise<WorkerResponse> {
+    return this.send({ type: 'searchAll', query })
+  }
+
   getSeasonReview(): Promise<WorkerResponse> {
     return this.send({ type: 'getSeasonReview' })
   }

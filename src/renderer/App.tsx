@@ -27,6 +27,7 @@ import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
+import { CommandPalette } from './components/CommandPalette'
 import { GMCareerScreen } from './screens/GMCareerScreen'
 import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
@@ -393,6 +394,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   onLoad={onLoad}
                 />
                 {nav.screen === 'dashboard' && <LeagueTicker />}
+                <CommandPalette />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <ScreenBoundary screen={nav.screen}>
