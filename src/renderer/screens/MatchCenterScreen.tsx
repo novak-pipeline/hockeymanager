@@ -30,11 +30,11 @@ const STRENGTH_CLASS: Record<GoalLogRow['strength'], string> = {
   en: 'chip-danger',
 }
 
-export function MatchCenterScreen(): JSX.Element {
+export function MatchCenterScreen({ gameId }: { gameId?: string } = {}): JSX.Element {
   const client = useClient()
   const colorMap = useTeamColorMap()
   const { data, loading, error } = useScreenData<BoxScoreView>(
-    () => client.getLastBoxScore(),
+    () => (gameId ? client.getBoxScoreFor(gameId) : client.getLastBoxScore()),
     (r) => (r.type === 'boxScore' ? r.boxScore : null)
   )
 

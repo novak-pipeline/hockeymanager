@@ -667,6 +667,8 @@ export class Career {
   private offerCounter = 0
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
+  /** Box scores for every played user game this season (calendar click-through). */
+  private boxScoreHistory: Array<[string, BoxScoreView]> = []
   private readonly resignStatus = new Map<PlayerId, ResignStatus>()
   /** Per-team signed current streak (+wins / −winless), for ambient league news.
    *  NHL games only; reset each season. Serialized additively. */
@@ -3451,6 +3453,7 @@ export class Career {
       }
       if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
+        this.recordBoxScore(game.id as string, this.lastBoxScore)
       }
     }
     // ── AHL day: sim any AHL games scheduled on the same match day ──────
@@ -3708,6 +3711,7 @@ export class Career {
       if (isUser) {
         watched = this.buildWatched(game.homeTeamId, game.awayTeamId, res.stream)
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
+        this.recordBoxScore(game.id as string, this.lastBoxScore)
       }
     }
     // ── AHL day (same logic as advanceDay) ────────────────────────────
@@ -3837,6 +3841,7 @@ export class Career {
       if (isUser) {
         this.recordUserResultNews(day, res)
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
+        this.recordBoxScore(`${g.seriesId}-g${g.gameNumber}`, this.lastBoxScore)
         if (watchUser) watched = this.buildWatched(g.homeTeamId, g.awayTeamId, res.stream)
       }
       // World Chronicle: playoff meetings count toward the all-time matchup record.
@@ -5154,6 +5159,8 @@ export class Career {
       // Deadline-day hold re-arms for the new season.
       this.deadlineHold = false
       this.deadlineHoldDone = false
+      // Last season's box scores don't need to survive the summer.
+      this.boxScoreHistory = []
       // Buyout dead cap is a one-season penance — the books clear.
       if (this.userDeadCap > 0) {
         this.pushNews(
@@ -9821,6 +9828,18 @@ export class Career {
     return { items, unread, playerInfo, teamInfo }
   }
 
+  /** Record a played user game's box score for later viewing (bounded). */
+  private recordBoxScore(gameId: string, bs: BoxScoreView): void {
+    this.boxScoreHistory = this.boxScoreHistory.filter(([id]) => id !== gameId)
+    this.boxScoreHistory.push([gameId, bs])
+    if (this.boxScoreHistory.length > 130) this.boxScoreHistory.shift()
+  }
+
+  /** Box score of a specific played user game, or null if not recorded. */
+  getBoxScoreFor(gameId: string): BoxScoreView | null {
+    return this.boxScoreHistory.find(([id]) => id === gameId)?.[1] ?? null
+  }
+
   getLastBoxScore(): BoxScoreView | null {
     return this.lastBoxScore
   }
@@ -10856,6 +10875,7 @@ export class Career {
       deadlineHoldDone: this.deadlineHoldDone,
       userDeadCap: this.userDeadCap,
       buyoutFas: this.buyoutFas.map((id) => id as string),
+      boxScoreHistory: structuredClone(this.boxScoreHistory),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10986,6 +11006,7 @@ export class Career {
     career.deadlineHoldDone = snapshot.deadlineHoldDone ?? false
     career.userDeadCap = snapshot.userDeadCap ?? 0
     career.buyoutFas = (snapshot.buyoutFas ?? []).map((id) => asPlayerId(id))
+    career.boxScoreHistory = snapshot.boxScoreHistory ? structuredClone(snapshot.boxScoreHistory) : []
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

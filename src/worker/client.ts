@@ -453,6 +453,10 @@ export class SimClient {
     })
   }
 
+  getBoxScoreFor(gameId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getBoxScoreFor', gameId })
+  }
+
   buyoutPlayer(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'buyoutPlayer', playerId })
   }

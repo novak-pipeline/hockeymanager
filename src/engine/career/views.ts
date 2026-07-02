@@ -1653,6 +1653,8 @@ export interface CareerSnapshot {
   ownerPerk?: string | null
   /** Staged End-of-Season Review facts (Season Rhythm M4). Optional/additive. */
   reviewFacts?: SeasonReviewFacts | null
+  /** Per-game box scores for the user's played games this season. Optional/additive. */
+  boxScoreHistory?: Array<[string, BoxScoreView]>
   /** Deadline-day hold state. Optional/additive. */
   deadlineHold?: boolean
   deadlineHoldDone?: boolean

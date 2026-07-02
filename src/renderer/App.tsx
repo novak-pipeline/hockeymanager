@@ -558,7 +558,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
 
     // ── Shared screens ──
     case 'matchcenter':
-      return <MatchCenterScreen />
+      return <MatchCenterScreen gameId={params.gameId as string | undefined} />
     case 'calendar':
       return <CalendarScreen />
     case 'trades':

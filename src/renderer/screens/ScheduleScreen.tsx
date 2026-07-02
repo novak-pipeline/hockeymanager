@@ -3,10 +3,12 @@ import { fmtDate } from '../components/format'
 import { TeamCrest } from '../components/Crest'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { useNav } from '../components/NavContext'
 
 /** Fixtures grouped by month; next game highlighted; results shown as chips. Rival fixtures get a badge. */
 export function ScheduleScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
+  const nav = useNav()
   const { teamId } = props
   const { data, loading, error } = useScreenData<ScheduleView>(
     () => (teamId ? client.getTeamSchedule(teamId) : client.getSchedule()),
@@ -44,7 +46,13 @@ export function ScheduleScreen(props: { teamId?: string } = {}): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="No schedule yet."
       />
-      {data && <ScheduleBody entries={data.entries} rivalTeamIds={rivalTeamIds} />}
+      {data && (
+        <ScheduleBody
+          entries={data.entries}
+          rivalTeamIds={rivalTeamIds}
+          onOpenBoxScore={(gameId) => nav.navigate('matchcenter', { gameId })}
+        />
+      )}
     </section>
   )
 }
@@ -89,7 +97,9 @@ function resultChip(entry: ScheduleEntryView): JSX.Element | null {
   return <span className={cls}>{label} · {score}</span>
 }
 
-function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<string> }): JSX.Element {
+function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<string>
+  onOpenBoxScore: (gameId: string) => void
+}): JSX.Element {
   const groups = groupByMonth(props.entries)
   const played = props.entries.filter((e) => e.result !== null).length
   const total = props.entries.length
@@ -127,10 +137,14 @@ function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<s
               <tbody>
                 {g.rows.map((e) => {
                   const isRival = props.rivalTeamIds.has(e.opponentTeamId)
+                  const playedGame = e.result !== null
                   return (
                     <tr
                       key={e.gameId}
                       className={e.isNext ? 'is-user' : undefined}
+                      style={playedGame ? { cursor: 'pointer' } : undefined}
+                      title={playedGame ? 'View the box score' : undefined}
+                      onClick={playedGame ? () => props.onOpenBoxScore(e.gameId) : undefined}
                     >
                       <td className="muted">{fmtDate(e.date)}</td>
                       <td>
