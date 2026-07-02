@@ -231,6 +231,9 @@ export interface DashboardView {
   /** True on draft day: the offseason is parked on an unfinished entry draft.
    *  The UI must route the GM into the Draft screen — Continue can't sim past it. */
   draftPending?: boolean
+  /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
+   *  past it sends the AGM in your place — a soft gate, not a hard one. */
+  boardMeetingPending?: boolean
   userTeam: {
     teamId: string
     name: string
@@ -1630,6 +1633,12 @@ export interface CareerSnapshot {
   chronicle?: ChronicleState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */
   gmPersonas?: Array<[string, GmPersona]>
+  /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
+  boardMeetingYear?: number | null
+  /** Last season's story for the owner's meeting opener. Optional/additive. */
+  lastSeasonMeta?: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null
+  /** Owner-investment perk in force this season. Optional/additive. */
+  ownerPerk?: string | null
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */

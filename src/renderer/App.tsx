@@ -26,6 +26,7 @@ import { CalendarScreen } from './screens/CalendarScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
+import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
 import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
@@ -244,6 +245,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('draft')
           return
         }
+        // Preseason board meeting: the first Continue of the year walks you into
+        // the boardroom. Skipping from there sends the AGM (engine-safe defaults).
+        if (dashboard?.boardMeetingPending && nav.screen !== 'boardMeeting') {
+          navigate('boardMeeting')
+          return
+        }
         void run(() => client.continueGame())
       },
       advanceDays: (days: number) => {
@@ -262,7 +269,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.boardMeetingPending, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -519,6 +526,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <TradesScreen />
     case 'waivers':
       return <WaiverWireScreen />
+    case 'boardMeeting':
+      return <BoardMeetingScreen />
     case 'gmCareer':
       return <GMCareerScreen />
     case 'mentorship':

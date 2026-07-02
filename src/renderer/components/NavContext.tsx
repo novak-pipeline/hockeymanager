@@ -15,6 +15,7 @@ export type ScreenId =
   // Front Office section
   | 'dashboard'
   | 'board'
+  | 'boardMeeting'
   | 'gmCareer'
   | 'staffMeeting'
   // News section

@@ -73,6 +73,12 @@ export interface ChronicleEvent {
     /** promise: what was promised + due horizon. */
     promiseKind?: string
     dueYear?: number
+    /** promise criterion value (rank / GP threshold / …). */
+    value?: number
+    /** promise: how many players must satisfy the criterion. */
+    count?: number
+    /** promise: verdict once evaluated ('met' | 'missed'). */
+    resolved?: string
   }
   /** True when the user's club was involved (fast filter for "your history"). */
   userInvolved: boolean

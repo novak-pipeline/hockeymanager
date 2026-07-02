@@ -129,6 +129,14 @@ import {
   type GmPersona,
 } from '@engine/league/gmPersona'
 import {
+  buildBoardMeeting,
+  defaultChoices as boardMeetingDefaults,
+  resolveBoardMeeting,
+  type BoardMeetingFacts,
+  type BoardMeetingScene,
+  type MeetingEffects,
+} from './boardMeeting'
+import {
   archiveSeason,
   emptyRecords,
   inductHallOfFame,
@@ -678,6 +686,12 @@ export class Career {
   private chronicle: ChronicleState = emptyChronicle()
   /** Named AI GM personas per club (Living World LW2). Lazily built, persisted. */
   private gmPersonas: Array<[string, GmPersona]> = []
+  /** Year of the pending preseason board meeting, or null when attended (M1). */
+  private boardMeetingYear: number | null = null
+  /** Last season's story, for the owner's opening lines at the board meeting. */
+  private lastSeasonMeta: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null = null
+  /** Owner-investment perk chosen at the board meeting ('scouting' | 'development'). */
+  private ownerPerk: string | null = null
   private recordsState!: RecordsState
   private expectationsState!: ExpectationsState
   private readonly lockerRooms = new Map<TeamId, LockerRoomState>()
@@ -855,6 +869,8 @@ export class Career {
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
+      // Season Rhythm M1: the preseason board meeting awaits before the opener.
+      this.boardMeetingYear = this.year
 
       // The user's GM identity (name generated; reputation starts unproven).
       this.gmStateInternal = createGMState(
@@ -3357,6 +3373,9 @@ export class Career {
   /** Advance to (and simulate) the next match day. Returns false if none left. */
   advanceDay(): boolean {
     if (this.phase !== 'regularSeason') return false
+    // Season Rhythm M1: simming past the preseason board meeting sends the AGM
+    // in your place (safe defaults, a news item, and the meeting is gone).
+    if (this.boardMeetingYear !== null) this.autoResolveBoardMeeting()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     if (nextDay === undefined) return false
     // Resolve any waiver-wire claims whose window has elapsed before today's games.
@@ -3932,6 +3951,10 @@ export class Career {
             : false
           const wonCup =
             (this.playoffs?.championTeamId as string | null) === (this.userTeamId as string)
+          // Season Rhythm M1: judge the board-room promises FIRST, so broken
+          // commitments already weigh on confidence/patience when the board
+          // renders its season verdict.
+          this.evaluateBoardPromises(userFinalRank, madePlayoffs)
           const reviewResult = seasonReview({
             state: this.boardState,
             finalRank: userFinalRank,
@@ -4105,7 +4128,10 @@ export class Career {
                 // is just the locker-room factor so we don't double-count.
               }
             }
-            return lockerMod * this.mentorshipDevBonus(id as string)
+            // Owner-investment perk: a funded development-staff upgrade gives
+            // the user's own organisation a modest tailwind this season.
+            const perkMod = this.ownerPerk === 'development' && tid === this.userTeamId ? 1.15 : 1
+            return lockerMod * this.mentorshipDevBonus(id as string) * perkMod
           },
         })
         for (const seed of dev.newsSeeds) {
@@ -4884,12 +4910,24 @@ export class Career {
 
     /* ── Wave 4: board mandate rollover + rivalry decay ── */
     {
+      // Capture last season's story BEFORE the mandate rolls over — the owner
+      // opens next year's board meeting with these exact numbers.
+      const wonCupLastYear =
+        (this.playoffs?.championTeamId as string | null) === (this.userTeamId as string)
+      const actualRank = finalRanks.get(this.userTeamId as string)
+      if (actualRank !== undefined) {
+        this.lastSeasonMeta = {
+          predictedRank: this.boardState.targetRank,
+          actualRank,
+          madePlayoffs: actualRank <= 16,
+          wonCup: wonCupLastYear,
+        }
+      }
       const boardResult = setSeasonMandate({
         teamStrengthRank: this.userStrengthRank(),
         teamsInLeague: this.data.league.teams.length,
         lastYearRank: finalRanks.get(this.userTeamId as string),
-        wonCupLastYear:
-          (this.playoffs?.championTeamId as string | null) === (this.userTeamId as string),
+        wonCupLastYear,
         rng: this.rngFor(9301),
         year: newYear,
         teamId: this.userTeamId as string,
@@ -4897,6 +4935,9 @@ export class Career {
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
+      // Season Rhythm M1: schedule next preseason's board meeting; perks lapse.
+      this.boardMeetingYear = newYear
+      this.ownerPerk = null
     }
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
@@ -6124,6 +6165,203 @@ export class Career {
     return deriveClubPosture({ coreAge, strengthRank, teamCount: teams.length })
   }
 
+  /* ────────────────────────── preseason board meeting (M1) ────────────────────────── */
+
+  /** Assemble the live facts the board-meeting scene is built from. */
+  private boardMeetingFacts(): BoardMeetingFacts {
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const posture = this.clubPostureFor(this.userTeamId)
+    const team = this.userTeam
+    const top6 = team.roster.map((id) => this.resolve(id)).sort((a, b) => b.overall - a.overall).slice(0, 6)
+    const coreAge = top6.length > 0 ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
+    // Best U23s across the org (NHL + farm + rights-held), for the AGM's pitch.
+    const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    const youngIds = [...team.roster, ...(affiliate?.roster ?? [])]
+    const prospects = youngIds
+      .map((id) => this.resolve(id))
+      .filter((p) => p.age <= 23)
+      .sort((a, b) => (b.potential ? 1 : 0) - (a.potential ? 1 : 0) || b.overall - a.overall)
+      .slice(0, 3)
+      .map((p) => p.name)
+    const coachProfile = staff.headCoach?.profile
+    // Defensive: some generated staffs miss a member — the meeting still holds.
+    const owner = staff.owner ?? { id: 'owner', name: 'The Owner' }
+    const coach = staff.headCoach ?? { id: 'coach', name: 'The Head Coach' }
+    const agm = staff.agm ?? { id: 'agm', name: 'Your Assistant GM' }
+    return {
+      year: this.year,
+      teamName: team.name,
+      board: this.boardState,
+      owner: {
+        id: owner.id, name: owner.name,
+        ...(owner.faceId !== undefined ? { faceId: owner.faceId } : {}),
+        ...(owner.demeanor !== undefined ? { demeanor: owner.demeanor } : {}),
+      },
+      coach: {
+        id: coach.id, name: coach.name,
+        ...(coach.faceId !== undefined ? { faceId: coach.faceId } : {}),
+        systemLabel: coachProfile?.meta.label ?? 'his system',
+      },
+      agm: {
+        id: agm.id, name: agm.name,
+        ...(agm.faceId !== undefined ? { faceId: agm.faceId } : {}),
+      },
+      ...(this.lastSeasonMeta ? { lastSeason: this.lastSeasonMeta } : {}),
+      capUsed: team.finances.capUsed,
+      salaryCap: team.finances.salaryCap,
+      posture: posture.posture,
+      postureReason: posture.reason,
+      coreAge,
+      fanInterest: this.fanInterest,
+      topProspects: prospects,
+      teamCount: this.data.league.teams.length,
+    }
+  }
+
+  /** The pending preseason board meeting scene, or null if already attended. */
+  getBoardMeeting(): BoardMeetingScene | null {
+    if (this.boardMeetingYear === null || this.phase !== 'regularSeason') return null
+    return buildBoardMeeting(this.boardMeetingFacts(), this.rngFor(9401, this.boardMeetingYear))
+  }
+
+  /** Attend the meeting: apply the chosen answers with all their teeth. */
+  submitBoardMeeting(choices: Record<string, string>): { ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string } {
+    const scene = this.getBoardMeeting()
+    if (!scene) return { ok: false, lines: [], summary: 'No board meeting is scheduled.' }
+    const facts = this.boardMeetingFacts()
+    const fx = resolveBoardMeeting(scene, facts, choices)
+    this.applyBoardMeetingEffects(fx, choices)
+    this.boardMeetingYear = null
+    return { ok: true, lines: fx.closingLines, summary: fx.summary }
+  }
+
+  private applyBoardMeetingEffects(fx: MeetingEffects, choices: Record<string, string>): void {
+    const clamp = (v: number): number => Math.max(0, Math.min(100, v))
+    this.boardState.confidence = clamp(this.boardState.confidence + fx.confidenceDelta)
+    this.boardState.patience = clamp(this.boardState.patience + fx.patienceDelta)
+    if (fx.mandateOverride) {
+      this.boardState.mandate = fx.mandateOverride.mandate
+      this.boardState.mandateText = fx.mandateOverride.text
+    }
+    if (fx.targetRankOverride !== undefined) this.boardState.targetRank = fx.targetRankOverride
+    if (fx.sanctionRebuild) {
+      const res = this.setClubDirection('rebuild')
+      if (!res.ok) this.clubDirection = 'retool' // board wouldn't sanction after all
+    } else if (fx.direction) {
+      this.clubDirection = fx.direction
+      if (fx.direction === 'compete') this.boardState.rebuildSanctioned = false
+    }
+    // Owner-investment perk (season-scoped).
+    if (choices['wc-invest']) this.ownerPerk = choices['wc-invest']
+    // Every commitment becomes a chronicle promise — the receipts.
+    for (const p of fx.promises) {
+      chronicleEvent(this.chronicle, {
+        year: this.year,
+        day: 0,
+        kind: 'promise',
+        teamIds: [this.userTeamId as string],
+        headline: `Board-room promise: ${p.text}`,
+        details: {
+          promiseKind: p.kind,
+          dueYear: p.dueYear,
+          value: p.value,
+          ...(p.count !== undefined ? { count: p.count } : {}),
+        },
+        userInvolved: true,
+      })
+    }
+    const receipts = fx.promises.length > 0
+      ? ` Commitments on the record: ${fx.promises.map((p) => p.text).join('; ')}.`
+      : ''
+    this.pushNews(
+      'league',
+      'Preseason board meeting concluded',
+      `${fx.summary}${receipts}`,
+      { teamId: this.userTeamId as string }
+    )
+  }
+
+  /** The GM skipped the meeting (simmed past it) — the AGM attends instead. */
+  private autoResolveBoardMeeting(): void {
+    const scene = this.getBoardMeeting()
+    if (!scene) { this.boardMeetingYear = null; return }
+    const facts = this.boardMeetingFacts()
+    const fx = resolveBoardMeeting(scene, facts, boardMeetingDefaults(scene))
+    this.applyBoardMeetingEffects(fx, boardMeetingDefaults(scene))
+    this.boardMeetingYear = null
+    this.pushNews(
+      'league',
+      `${facts.agm.name} handled the board meeting`,
+      `You sent your assistant GM to the preseason board meeting. He played it safe — accepted the objective, made no waves. ${fx.summary}`,
+      { teamId: this.userTeamId as string }
+    )
+  }
+
+  /** Judge this season's board-room promises — the receipts, read back. */
+  private evaluateBoardPromises(finalRank: number, madePlayoffs: boolean): void {
+    const clamp = (v: number): number => Math.max(0, Math.min(100, v))
+    for (const ev of this.chronicle.events) {
+      if (ev.kind !== 'promise' || !ev.userInvolved) continue
+      if (ev.details?.dueYear !== this.year || ev.details.resolved) continue
+      let met: boolean | null = null
+      switch (ev.details.promiseKind) {
+        case 'finishAtLeast':
+          met = finalRank <= (ev.details.value ?? 1)
+          break
+        case 'playoffBerth':
+          met = madePlayoffs
+          break
+        case 'youthGames': {
+          const threshold = ev.details.value ?? 40
+          const need = ev.details.count ?? 2
+          const youngWithGames = this.userTeam.roster
+            .map((id) => this.resolve(id))
+            .filter((p) => p.age <= 23 && (this.gp.get(p.id) ?? 0) >= threshold)
+          met = youngWithGames.length >= need
+          break
+        }
+        case 'shedSalary':
+          met = this.userTeam.finances.capUsed <= this.userTeam.finances.salaryCap
+          break
+        case 'marqueeName': {
+          // Did the user land a big name this season? (chronicled trades)
+          met = this.chronicle.events.some(
+            (t) =>
+              t.kind === 'trade' && t.year === this.year && t.userInvolved &&
+              t.teamIds[0] === (this.userTeamId as string) &&
+              (t.details?.assetsIn ?? []).some((a) => {
+                if (a.kind !== 'player' || !a.playerId) return false
+                const p = this.data.players.get(asPlayerId(a.playerId))
+                return p !== undefined && p.overall >= 80
+              })
+          )
+          break
+        }
+      }
+      if (met === null) continue
+      ev.details.resolved = met ? 'met' : 'missed'
+      const promiseText = ev.headline.replace('Board-room promise: ', '')
+      if (met) {
+        this.boardState.confidence = clamp(this.boardState.confidence + 6)
+        this.pushNews(
+          'league',
+          'A promise kept',
+          `At the preseason board meeting you committed to this: "${promiseText}". You delivered. The owner remembers that too.`,
+          { teamId: this.userTeamId as string }
+        )
+      } else {
+        this.boardState.confidence = clamp(this.boardState.confidence - 8)
+        this.boardState.patience = clamp(this.boardState.patience - 6)
+        this.pushNews(
+          'league',
+          'A promise broken',
+          `At the preseason board meeting you committed to this: "${promiseText}". It didn't happen — and the board's trust takes the hit.`,
+          { teamId: this.userTeamId as string }
+        )
+      }
+    }
+  }
+
   /** World Chronicle: record a completed trade with full asset lists + player
    *  provenance, so future news can cite the deal ("the 2nd you gave up
    *  became…"). Pure observer — call AFTER executeTrade has moved the assets. */
@@ -6364,6 +6602,7 @@ export class Career {
       date: dayToDateISO(this.year, Math.max(1, this.currentDay)),
       continueLabel,
       draftPending: this.draftPending(),
+      boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,
@@ -8089,7 +8328,9 @@ export class Career {
 
   /** Max scouts the club will carry (soft cap for the Job Market). */
   private maxScouts(): number {
-    return Math.max(12, this.userScoutStaff().length)
+    // Owner-investment perk from the board meeting funds two extra positions.
+    const perkBonus = this.ownerPerk === 'scouting' ? 2 : 0
+    return Math.max(12, this.userScoutStaff().length) + perkBonus
   }
 
   /** The user club's staff scouts — the deployable scouting roster. */
@@ -10134,6 +10375,9 @@ export class Career {
       arcs: structuredClone(this.arcsState),
       chronicle: structuredClone(this.chronicle),
       gmPersonas: structuredClone(this.gmPersonas),
+      boardMeetingYear: this.boardMeetingYear,
+      lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
+      ownerPerk: this.ownerPerk,
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
       lockerRooms: [...this.lockerRooms.entries()].map(
@@ -10255,6 +10499,10 @@ export class Career {
     career.arcsState = snapshot.arcs ? structuredClone(snapshot.arcs) : createInitialArcsState()
     career.chronicle = snapshot.chronicle ? structuredClone(snapshot.chronicle) : emptyChronicle()
     career.gmPersonas = snapshot.gmPersonas ? structuredClone(snapshot.gmPersonas) : []
+    // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
+    career.boardMeetingYear = snapshot.boardMeetingYear ?? null
+    career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null
+    career.ownerPerk = snapshot.ownerPerk ?? null
     career.recordsState = snapshot.records ? structuredClone(snapshot.records) : emptyRecords()
     career.tentpoles = snapshot.tentpoles
       ? structuredClone(snapshot.tentpoles)

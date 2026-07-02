@@ -219,6 +219,16 @@ export function DashboardScreen(): JSX.Element {
         </button>
       )}
 
+      {d.boardMeetingPending && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
+          onClick={() => nav.navigate('boardMeeting')}
+        >
+          🏛 The preseason board meeting is waiting upstairs — the owner wants the season's plan before the opener.
+        </button>
+      )}
+
       {d.ownerRequestPending && (
         <button
           className="dash-banner"

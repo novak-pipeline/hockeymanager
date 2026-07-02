@@ -453,6 +453,14 @@ export class SimClient {
     })
   }
 
+  getBoardMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'getBoardMeeting' })
+  }
+
+  submitBoardMeeting(choices: Record<string, string>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitBoardMeeting', choices })
+  }
+
   autoAssignScouts(): Promise<WorkerResponse> {
     return this.send({ type: 'autoAssignScouts' })
   }

@@ -12,6 +12,8 @@
  * structured clone.
  */
 export type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
+export type { BoardMeetingScene, MeetingAgendaItem, MeetingLine, MeetingOption, MeetingSpeaker } from '@engine/career/boardMeeting'
+import type { BoardMeetingScene } from '@engine/career/boardMeeting'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
@@ -292,6 +294,11 @@ export type WorkerRequestBody =
   | { type: 'autoAssignScouts' }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
+  /* ── season rhythm: meetings (M1) ── */
+  /** The pending preseason board-meeting scene (null once attended). */
+  | { type: 'getBoardMeeting' }
+  /** Attend the meeting with your chosen answers per agenda item. */
+  | { type: 'submitBoardMeeting'; choices: Record<string, string> }
   /* ── story layer ── */
   /** All-time record boards, season archive, awards, legends/Hall of Fame. */
   | { type: 'getHistory' }
@@ -445,6 +452,9 @@ export type WorkerResponse = { id: number } & (
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
+  /* ── season rhythm: meetings (M1) ── */
+  | { type: 'boardMeeting'; scene: BoardMeetingScene | null }
+  | { type: 'boardMeetingResult'; ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string }
   /* ── story layer ── */
   | { type: 'history'; history: HistoryView }
   | { type: 'lockerRoom'; lockerRoom: LockerRoomView }
