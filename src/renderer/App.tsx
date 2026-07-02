@@ -214,6 +214,24 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   // Press-conference pop-up disabled for now (got in the way of testing).
   // To re-enable: restore the pollPress pump + <PressConference /> render below.
 
+  // Autosave: after world-mutating calls, snapshot to the 'autosave' slot at
+  // most once every 3 minutes. Silent and fire-and-forget — zero progress-loss
+  // anxiety without save-spam. Load already picks the newest slot by mtime.
+  const lastAutosaveRef = useRef(0)
+  const maybeAutosave = useCallback((): void => {
+    const now = Date.now()
+    if (now - lastAutosaveRef.current < 3 * 60 * 1000) return
+    lastAutosaveRef.current = now
+    void (async () => {
+      try {
+        const res = await client.exportSave('Autosave')
+        if (res.type === 'save') await saveCareer('autosave', res.snapshot)
+      } catch {
+        /* autosave is best-effort; the manual Save button reports real errors */
+      }
+    })()
+  }, [client])
+
   /** Serialize world-mutating calls; toast errors; bump the refresh bus. */
   const run = useCallback(
     async (fn: () => Promise<WorkerResponse>): Promise<WorkerResponse | null> => {
@@ -227,13 +245,14 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           return null
         }
         bumpRefresh()
+        maybeAutosave()
         return res
       } finally {
         busyRef.current = false
         setBusy(false)
       }
     },
-    []
+    [maybeAutosave]
   )
 
   const actions = useMemo<ShellActions>(
