@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { CalendarEntry, CalendarView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
+import { useNav } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -301,6 +302,7 @@ function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
 }
 
 function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
+  const nav = useNav()
   if (entry.kind === 'keydate') {
     return (
       <span
@@ -312,10 +314,13 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
     )
   }
 
-  // game entry
+  // game entry — played games open the historical box score
   const isNext = entry.isNext
+  const played = entry.result !== null
   return (
     <div
+      onClick={played ? () => nav.navigate('matchcenter', { gameId: entry.gameId }) : undefined}
+      title={played ? 'View box score' : undefined}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -325,6 +330,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
         background: isNext ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
         border: isNext ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid transparent',
         boxSizing: 'border-box',
+        cursor: played ? 'pointer' : 'default',
       }}
     >
       {/* H/A + opponent row */}
