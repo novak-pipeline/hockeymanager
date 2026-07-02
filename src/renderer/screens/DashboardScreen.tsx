@@ -405,6 +405,11 @@ export function DashboardScreen(): JSX.Element {
                     <> · plays <span style={{ color: 'var(--accent)' }}>{d.nextGame.opponentSystem}</span></>
                   )}
                 </div>
+                {d.nextGame.allTime && (
+                  <div className="muted small" title="All-time series record from your club's history">
+                    📜 {d.nextGame.allTime}
+                  </div>
+                )}
                 <div className="row">
                   <button
                     className="btn btn-primary"

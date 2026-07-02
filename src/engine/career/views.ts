@@ -202,6 +202,9 @@ export interface NextGameView {
   opponentSystem: string
   /** Non-null when this is a rivalry game (intensity >= 60). */
   rivalryLabel: string | null
+  /** All-time series line vs this opponent from the World Chronicle
+   *  ("You lead all-time 12–5 · playoff series 1–1"). Optional/additive. */
+  allTime?: string | null
 }
 
 export interface LastResultView {

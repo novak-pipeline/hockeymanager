@@ -118,6 +118,7 @@ import {
   recordSeries as chronicleSeries,
   recordDraftProvenance,
   recordAcquisition,
+  headToHead as chronicleHeadToHead,
   type ChronicleState,
 } from '@engine/story/chronicle'
 import {
@@ -6084,6 +6085,15 @@ export class Career {
     const nextSched = this.data.league.schedule.find(
       (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
     )
+    // World Chronicle: the all-time series line vs an opponent ("Leads 12–5 · 1–1 in playoffs").
+    const allTimeVs = (oppId: TeamId): string | null => {
+      const h = chronicleHeadToHead(this.chronicle, this.userTeamId as string, oppId as string)
+      if (!h || h.wins + h.losses === 0) return null
+      const lead = h.wins > h.losses ? 'You lead' : h.wins < h.losses ? 'They lead' : 'Series tied'
+      const nums = h.wins > h.losses ? `${h.wins}–${h.losses}` : `${h.losses}–${h.wins}`
+      const series = h.seriesWins + h.seriesLosses > 0 ? ` · playoff series ${h.seriesWins}–${h.seriesLosses}` : ''
+      return `${lead} all-time ${h.wins === h.losses ? `${h.wins}–${h.losses}` : nums}${series}`
+    }
     let nextGame: DashboardView['nextGame'] = null
     if (this.phase === 'regularSeason' && nextSched) {
       const home = nextSched.homeTeamId === this.userTeamId
@@ -6102,6 +6112,7 @@ export class Career {
         opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
         opponentSystem: oppCoach.profile?.meta.label ?? '—',
         rivalryLabel: gi.label,
+        allTime: allTimeVs(opp.id),
       }
     } else if (this.phase === 'playoffs' && this.playoffs) {
       const pending = pendingGames(this.playoffs).find(
@@ -6124,6 +6135,7 @@ export class Career {
           opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
           opponentSystem: oppCoach.profile?.meta.label ?? '—',
           rivalryLabel: gi.label,
+          allTime: allTimeVs(opp.id),
         }
       }
     }
