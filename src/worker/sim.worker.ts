@@ -147,6 +147,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
     case 'getTeamDynamics':
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
+    case 'getFeed':
+      return { id: req.id, type: 'feed', feed: must().getFeed() }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
     case 'getDevelopment':

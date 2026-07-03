@@ -70,6 +70,7 @@ export type ScreenId =
   | 'waivers'
   | 'lockerRoom'
   | 'calendar'
+  | 'feed'
   | 'settings'
   // Legacy aliases kept for backward compat (redirect to new equivalents)
   | 'schedule'
@@ -81,6 +82,7 @@ export type SectionId = 'frontOffice' | 'news' | 'team' | 'league'
 export function sectionOf(screen: ScreenId): SectionId {
   switch (screen) {
     case 'inbox':
+    case 'feed':
       return 'news'
     case 'squad':
     case 'teamStats':

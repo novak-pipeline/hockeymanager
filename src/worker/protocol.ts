@@ -95,6 +95,8 @@ export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
 import type { TeamLegendsView } from '@engine/career/views'
 export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/views'
 import type { TeamDynamicsView } from '@engine/career/views'
+export type { FeedView, FeedAuthor } from '@engine/career/views'
+import type { FeedView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
 export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
@@ -203,6 +205,7 @@ export type WorkerRequestBody =
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
+  | { type: 'getFeed' }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -443,6 +446,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
+  | { type: 'feed'; feed: FeedView }
   | { type: 'medical'; medical: MedicalView }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }

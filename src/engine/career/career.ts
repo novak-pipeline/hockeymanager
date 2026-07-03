@@ -125,6 +125,15 @@ import {
   type ChronicleState,
 } from '@engine/story/chronicle'
 import {
+  DETECTORS,
+  FEED_AUTHORS,
+  engagementFor,
+  noveltyClassOf,
+  selectPosts,
+  type SalienceCtx,
+  type StoryPriors,
+} from '@engine/story/salience'
+import {
   buildGmPersona,
   deriveClubPosture,
   personaPhilosophy,
@@ -391,6 +400,7 @@ import {
   type ClubLegend,
   type TeamLegendsView,
   type TeamDynamicsView,
+  type FeedView,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -650,6 +660,12 @@ export class Career {
   private interactionCounter = 0
   /** LW5 promise ledger: every promise-tone answer becomes a tracked debt. */
   private playerPromises: PlayerPromise[] = []
+  /** Feed Phase A: priors ledger + save-wide novelty memory (THE-FEED.md). */
+  private storyPriors: StoryPriors | null = null
+  /** The social feed — separate from inbox news so posts never crowd the
+   *  GM's mailbox (curation lands in Phase B). Bounded, newest first. */
+  private feedPosts: NewsItem[] = []
+  private feedCounter = 0
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -1335,6 +1351,10 @@ export class Career {
       press?: { byline: string; kind: string }
       speaker?: string
       speakerFaceId?: string
+      channel?: 'feed' | 'wire'
+      authorId?: string
+      salience?: number
+      engagement?: { likes: number; reposts: number }
     } = {}
   ): void {
     const item: NewsItem = {
@@ -1350,6 +1370,10 @@ export class Career {
       ...(refs.press !== undefined ? { press: refs.press } : {}),
       ...(refs.speaker !== undefined ? { speaker: refs.speaker } : {}),
       ...(refs.speakerFaceId !== undefined ? { speakerFaceId: refs.speakerFaceId } : {}),
+      ...(refs.channel !== undefined ? { channel: refs.channel } : {}),
+      ...(refs.authorId !== undefined ? { authorId: refs.authorId } : {}),
+      ...(refs.salience !== undefined ? { salience: refs.salience } : {}),
+      ...(refs.engagement !== undefined ? { engagement: refs.engagement } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -2076,6 +2100,82 @@ export class Career {
     return { ok: true, message: interaction.outcome ?? 'Message delivered.' }
   }
 
+  /* ────────────────────── the salience engine (THE-FEED.md) ────────────────────── */
+
+  /** Capture the priors ledger for this season if missing (new season, new
+   *  save, or legacy save loading in mid-year — the one-time mid-season
+   *  capture is slightly stale but honest thereafter). Novelty memory
+   *  carries across seasons: surprise is save-wide, not season-wide. */
+  private ensureStoryPriors(): StoryPriors {
+    if (this.storyPriors && this.storyPriors.year === this.year) return this.storyPriors
+    const carried = this.storyPriors?.noveltyCounts ?? []
+    this.storyPriors = {
+      year: this.year,
+      preseasonRanks: [...this.strengthRanks().entries()],
+      noveltyCounts: carried,
+    }
+    return this.storyPriors
+  }
+
+  /** Run the detector library over today's league state, apply novelty
+   *  dampening + the daily budget, and publish the survivors as feed posts. */
+  private runSalience(day: number): void {
+    const priors = this.ensureStoryPriors()
+    const standings = sortStandings([...this.standings.values()])
+    const currentRanks = new Map<string, number>()
+    standings.forEach((s, i) => currentRanks.set(s.teamId as string, i + 1))
+    const teams = new Map<string, { name: string; abbreviation: string }>()
+    for (const t of this.data.teams.values()) {
+      teams.set(t.id as string, { name: t.name, abbreviation: t.abbreviation })
+    }
+    const ctx: SalienceCtx = {
+      day,
+      year: this.year,
+      currentRanks,
+      preseasonRanks: new Map(priors.preseasonRanks),
+      streaks: this.teamStreaks,
+      teams,
+      userTeamId: this.userTeamId as string,
+      teamsInLeague: this.data.league.teams.length,
+    }
+    const candidates = DETECTORS.flatMap((d) => d(ctx))
+    if (candidates.length === 0) return
+    const counts = new Map(priors.noveltyCounts)
+    const rng = this.rngFor(9800, day)
+    const selected = selectPosts(candidates, counts, rng)
+    for (const post of selected) {
+      counts.set(post.key, (counts.get(post.key) ?? 0) + 1)
+      const cls = noveltyClassOf(post.key)
+      counts.set(cls, (counts.get(cls) ?? 0) + 1)
+      const author = FEED_AUTHORS[post.authorId]
+      this.feedPosts.unshift({
+        id: `fp${this.feedCounter++}`,
+        day,
+        year: this.year,
+        category: 'league',
+        headline: `@${author?.handle ?? post.authorId}`,
+        body: post.text,
+        read: true, // the feed has no unread obligation — it's a browse surface
+        ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
+        ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
+        channel: post.channel,
+        authorId: post.authorId,
+        salience: Math.round(post.score),
+        engagement: engagementFor(post.score, rng),
+      })
+    }
+    if (this.feedPosts.length > 400) this.feedPosts.length = 400
+    priors.noveltyCounts = [...counts.entries()]
+  }
+
+  /** The social feed, newest first, plus the author directory. */
+  getFeed(): FeedView {
+    return {
+      posts: this.feedPosts.map((p) => ({ ...p })),
+      authors: FEED_AUTHORS,
+    }
+  }
+
   /** LW5: settle promise debts that have come due. In-season kinds (ice time,
    *  explore-trade) are checked daily; newDeal promises settle at rollover.
    *  Kept word buys a little trust; a broken one costs double and can turn a
@@ -2376,6 +2476,9 @@ export class Career {
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.maybeRaiseInteractions(day)
     this.evaluatePlayerPromises(day)
+
+    /* ── the salience engine: publish today's genuinely interesting stories ── */
+    this.runSalience(day)
 
     /* ── trade rumor mill + the deadline-day flurry ── */
     if (day <= this.deadlineDay) {
@@ -11340,6 +11443,9 @@ export class Career {
       interactions: this.interactions.map((i) => structuredClone(i)),
       interactionCounter: this.interactionCounter,
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
+      ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
+      feedPosts: this.feedPosts.map((p) => ({ ...p })),
+      feedCounter: this.feedCounter,
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -11483,6 +11589,9 @@ export class Career {
     }
     career.interactionCounter = snapshot.interactionCounter ?? 0
     if (snapshot.playerPromises) career.playerPromises = snapshot.playerPromises.map((pr) => ({ ...pr }))
+    if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
+    if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
+    career.feedCounter = snapshot.feedCounter ?? 0
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

@@ -1,0 +1,222 @@
+/**
+ * The salience engine — noticing what's interesting (docs/THE-FEED.md).
+ *
+ * Principle: interesting = deviation from a RECORDED expectation. Nothing is
+ * inherently a story; a hot month from the preseason favourite is Tuesday,
+ * the same month from the team everyone picked last is news.
+ *
+ * This module is PURE and JSON-safe. The career layer owns the priors ledger
+ * (captured at season start), feeds detectors a context each day, applies the
+ * daily budget, and publishes the survivors as feed posts. Detection is
+ * deterministic and engine-side — a future LLM writer only restyles what this
+ * engine surfaces; it never decides newsworthiness.
+ *
+ * Phase A ships the framework + two proof detectors (expectation gap, streak
+ * outlier). The detector library fans out from here — each detector is a pure
+ * function of the context, independently testable.
+ */
+
+import type { Rng } from '@engine/shared/rng'
+
+/* ────────────────────────── authors ────────────────────────── */
+
+export type FeedChannel = 'feed' | 'wire'
+
+export interface FeedAuthor {
+  id: string
+  name: string
+  handle: string
+  /** Voice: insider = terse facts, analyst = takes, stats = numbers, wire = official. */
+  kind: 'insider' | 'analyst' | 'stats' | 'wire'
+  outlet: string
+}
+
+/** The launch author pool. Names continue the existing press-corps personas
+ *  so the world stays coherent (Vic Mercer the byline IS Vic Mercer the account). */
+export const FEED_AUTHORS: Record<string, FeedAuthor> = {
+  insider: { id: 'insider', name: 'Vic Mercer', handle: 'MercerHockey', kind: 'insider', outlet: 'National Hockey Wire' },
+  analyst: { id: 'analyst', name: 'Sam Carver', handle: 'CarverNotes', kind: 'analyst', outlet: 'The Daily Gazette' },
+  stats: { id: 'stats', name: 'PuckModel', handle: 'puckmodel', kind: 'stats', outlet: 'model & viz' },
+  wire: { id: 'wire', name: 'League Wire', handle: 'TheWire', kind: 'wire', outlet: 'league sources' },
+}
+
+/* ────────────────────────── facts & priors ────────────────────────── */
+
+/** Structured payload behind every post — what a template (or later, the
+ *  local writer) renders. All facts, no prose. */
+export interface PostFacts {
+  kind: string
+  teamIds?: string[]
+  playerIds?: string[]
+  /** The numbers: ranks, streaks, gaps — everything the text may cite. */
+  numbers: Record<string, number | string>
+  /** The receipt: which recorded expectation this deviates from. */
+  priorNote?: string
+}
+
+/** Priors ledger — captured once per season, persisted in the save, so every
+ *  deviation is computable AND citable ("picked 28th in October"). */
+export interface StoryPriors {
+  year: number
+  /** [teamId, preseason strength rank 1..N] for every club. */
+  preseasonRanks: Array<[string, number]>
+  /** [noveltyKey, timesFired this save] — the self-tuning surprise memory. */
+  noveltyCounts: Array<[string, number]>
+}
+
+/* ────────────────────────── detection ────────────────────────── */
+
+export interface SalienceCandidate {
+  /** Novelty key: fires of the same key dampen each other over the save. */
+  key: string
+  /** Raw 0-100 before novelty dampening. */
+  score: number
+  channel: FeedChannel
+  authorId: string
+  text: string
+  facts: PostFacts
+  teamId?: string
+  playerId?: string
+}
+
+export interface SalienceCtx {
+  day: number
+  year: number
+  /** Current overall standings rank per teamId (1 = best). */
+  currentRanks: Map<string, number>
+  /** Preseason rank per teamId, from the priors ledger. */
+  preseasonRanks: Map<string, number>
+  /** Signed win(+)/loss(-) streak per teamId. */
+  streaks: Map<string, number>
+  /** teamId -> display info. */
+  teams: Map<string, { name: string; abbreviation: string }>
+  userTeamId: string
+  teamsInLeague: number
+}
+
+/** Days on which the expectation-gap detector takes its readings. Checkpoints
+ *  (not daily) so the story is "a month in, X is not who we thought" — and so
+ *  one team's season produces beats, not a drumbeat. */
+const EXPECTATION_CHECKPOINT_DAYS = [25, 50, 80]
+
+/** Standings vs the preseason book: gap >= 10 spots either way is a story.
+ *  Overachievers get the feel-good write-up, collapses get the autopsy. */
+export function detectExpectationGap(ctx: SalienceCtx): SalienceCandidate[] {
+  if (!EXPECTATION_CHECKPOINT_DAYS.includes(ctx.day)) return []
+  const out: SalienceCandidate[] = []
+  for (const [teamId, rank] of ctx.currentRanks) {
+    const pre = ctx.preseasonRanks.get(teamId)
+    if (pre === undefined) continue
+    const gap = pre - rank // positive = outperforming
+    if (Math.abs(gap) < 10) continue
+    const t = ctx.teams.get(teamId)
+    if (!t) continue
+    const up = gap > 0
+    const text = up
+      ? `Nobody had ${t.name} here. Picked ${ordinal(pre)} before the season — they sit ${ordinal(rank)} today. ${gap} spots above the book, and it doesn't look like a heater.`
+      : `Time to say it about the ${t.name}: picked ${ordinal(pre)}, currently ${ordinal(rank)}. That's ${-gap} spots below where the league had them, and the schedule isn't getting kinder.`
+    out.push({
+      key: `expgap-${up ? 'up' : 'down'}-${teamId}`,
+      score: Math.min(90, 38 + Math.abs(gap) * 2 + (teamId === ctx.userTeamId ? 10 : 0)),
+      channel: 'feed',
+      authorId: 'analyst',
+      text,
+      facts: {
+        kind: 'expectationGap',
+        teamIds: [teamId],
+        numbers: { preseasonRank: pre, currentRank: rank, gap, day: ctx.day },
+        priorNote: `preseason media rank ${pre}`,
+      },
+      teamId,
+    })
+  }
+  return out
+}
+
+/** Streak outliers: 6+ wins or losses in a row, re-firing only as the streak
+ *  grows (the key includes the length band so day-after-day silence holds). */
+export function detectStreakOutlier(ctx: SalienceCtx): SalienceCandidate[] {
+  const out: SalienceCandidate[] = []
+  for (const [teamId, streak] of ctx.streaks) {
+    const len = Math.abs(streak)
+    if (len < 6) continue
+    // Beat bands: 6, 8, 10, 12... — one post per band per team-season.
+    const band = len < 8 ? 6 : len - (len % 2)
+    const t = ctx.teams.get(teamId)
+    if (!t) continue
+    const hot = streak > 0
+    const text = hot
+      ? `${t.name} have won ${len} straight. ${len >= 10 ? 'This is officially a problem for the rest of the league.' : 'The room believes, and the numbers are starting to agree.'}`
+      : `${len} in a row now for the ${t.name} — the wrong kind. ${len >= 10 ? 'Jobs get lost over stretches like this.' : 'Someone in that room needs to say something.'}`
+    out.push({
+      key: `streak-${hot ? 'w' : 'l'}-${teamId}-${ctx.year}-${band}`,
+      score: Math.min(88, 26 + len * 4 + (teamId === ctx.userTeamId ? 8 : 0)),
+      channel: 'feed',
+      authorId: hot ? 'insider' : 'analyst',
+      text,
+      facts: {
+        kind: 'streakOutlier',
+        teamIds: [teamId],
+        numbers: { streak, day: ctx.day },
+      },
+      teamId,
+    })
+  }
+  return out
+}
+
+/** The Phase A detector library. Fan out here (ultracode session). */
+export const DETECTORS: Array<(ctx: SalienceCtx) => SalienceCandidate[]> = [
+  detectExpectationGap,
+  detectStreakOutlier,
+]
+
+/* ────────────────────────── budget & novelty ────────────────────────── */
+
+/** Max posts published per day — rarity in presentation is what makes a
+ *  catch feel special. Everything else still reaches the chronicle/logs. */
+export const DAILY_POST_BUDGET = 2
+/** Candidates below this (post-dampening) never publish. */
+export const MIN_PUBLISH_SCORE = 30
+
+/** Novelty class: fires of the same *pattern* dampen each other save-wide,
+ *  so what counts as remarkable evolves with the world's own history. */
+export function noveltyClassOf(key: string): string {
+  return key.split('-').slice(0, 2).join('-')
+}
+
+/**
+ * Apply self-tuning novelty dampening + the daily budget. Returns the posts
+ * to publish (score-desc) and the novelty keys/classes that fired (caller
+ * persists the updated counts). Keys that already fired are dropped outright
+ * (a 12-game streak is one post per band, forever).
+ */
+export function selectPosts(
+  candidates: SalienceCandidate[],
+  noveltyCounts: Map<string, number>,
+  rng: Rng
+): SalienceCandidate[] {
+  const fresh = candidates.filter((c) => !noveltyCounts.has(c.key))
+  const scored = fresh
+    .map((c) => {
+      const classCount = noveltyCounts.get(noveltyClassOf(c.key)) ?? 0
+      // Each prior firing of the same pattern knocks ~12% off; jitter keeps
+      // ties from resolving identically forever.
+      const damp = Math.pow(0.88, classCount)
+      return { c, eff: c.score * damp + rng.float(0, 2) }
+    })
+    .filter((x) => x.eff >= MIN_PUBLISH_SCORE)
+    .sort((a, b) => b.eff - a.eff)
+  return scored.slice(0, DAILY_POST_BUDGET).map((x) => x.c)
+}
+
+/** Deterministic engagement numbers — bigger stories travel further. */
+export function engagementFor(score: number, rng: Rng): { likes: number; reposts: number } {
+  const likes = Math.round(score * rng.float(9, 26))
+  return { likes, reposts: Math.round(likes * rng.float(0.12, 0.3)) }
+}
+
+function ordinal(n: number): string {
+  const s = n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'
+  return `${n}${s}`
+}

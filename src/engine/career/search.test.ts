@@ -209,3 +209,35 @@ describe('LW5 dynamics v2 (interactions + promise ledger)', () => {
     }
   })
 })
+
+describe('Feed Phase A (salience engine)', () => {
+  it('publishes budget-capped posts as the season runs and survives save/load', () => {
+    const data = generateLeague({ seed: 99 })
+    const c = new Career(data, 99, data.league.teams[0])
+    // Run deep enough to pass the first expectation checkpoint (day 25) and
+    // give streaks a chance to form.
+    for (let i = 0; i < 60; i++) if (!c.advanceDay()) break
+
+    const feed = c.getFeed()
+    expect(Object.keys(feed.authors).length).toBeGreaterThanOrEqual(4)
+    // Posts are optional (a boring league is allowed) but every post that
+    // exists must be well-formed and inbox must NOT contain them.
+    for (const p of feed.posts) {
+      expect(p.channel === 'feed' || p.channel === 'wire').toBe(true)
+      expect(p.authorId && feed.authors[p.authorId]).toBeTruthy()
+      expect(p.salience).toBeGreaterThanOrEqual(30)
+      expect(p.engagement!.likes).toBeGreaterThan(0)
+      expect(p.body.length).toBeGreaterThan(20)
+    }
+    const perDay = new Map<number, number>()
+    for (const p of feed.posts) perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
+    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2)
+    expect(c.getInbox().items.every((n) => n.channel === undefined)).toBe(true)
+
+    // Round-trip: priors, novelty memory, and the posts all survive.
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(snap.storyPriors?.preseasonRanks.length).toBe(data.league.teams.length)
+    const c2 = Career.fromSnapshot(snap)
+    expect(c2.getFeed().posts).toEqual(feed.posts)
+  })
+})

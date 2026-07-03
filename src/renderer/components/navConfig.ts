@@ -41,7 +41,8 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
   return [
     { id: 'home', label: 'Home', icon: 'home', section: 'overview', screen: 'dashboard', match: ['dashboard', 'staffMeeting'],
       subTabs: [{ id: 'dashboard', label: 'Overview' }, { id: 'staffMeeting', label: 'Staff Meeting' }] },
-    { id: 'inbox', label: 'Inbox', icon: 'inbox', section: 'overview', screen: 'inbox', match: ['inbox'], badge: 'unread' },
+    { id: 'inbox', label: 'Inbox', icon: 'inbox', section: 'overview', screen: 'inbox', match: ['inbox', 'feed'], badge: 'unread',
+      subTabs: [{ id: 'inbox', label: 'Inbox' }, { id: 'feed', label: 'The Feed' }] },
     { id: 'squad', label: 'Roster', icon: 'squad', section: 'team', screen: 'squad', match: ['squad', 'teamStats', 'report'],
       subTabs: [{ id: 'squad', label: 'Roster' }, { id: 'teamStats', label: 'Statistics' }, { id: 'report', label: 'Report' }] },
     { id: 'planner', label: 'Roster Planner', icon: 'squadPlanner', section: 'team', screen: 'teamPlanner', match: ['teamPlanner'] },

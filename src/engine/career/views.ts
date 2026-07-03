@@ -47,6 +47,14 @@ import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { PlayerInteraction, PlayerPromise } from '@engine/league/interactions'
 export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/league/interactions'
+import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
+export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
+
+/** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
+export interface FeedView {
+  posts: NewsItem[]
+  authors: Record<string, FeedAuthor>
+}
 import type { AgendaItem } from '@engine/league/staffMeeting'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/league/staffMeeting'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
@@ -1673,6 +1681,11 @@ export interface CareerSnapshot {
   interactionCounter?: number
   /** LW5 promise ledger — tracked debts from promise-tone answers. Optional/additive. */
   playerPromises?: PlayerPromise[]
+  /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
+  storyPriors?: StoryPriors
+  /** Social-feed posts (separate from inbox news). Optional/additive. */
+  feedPosts?: NewsItem[]
+  feedCounter?: number
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */

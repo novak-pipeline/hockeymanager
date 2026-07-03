@@ -241,6 +241,10 @@ export class SimClient {
     return this.send({ type: 'getTeamLegends', teamId })
   }
 
+  getFeed(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFeed' })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

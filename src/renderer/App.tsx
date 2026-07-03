@@ -23,6 +23,7 @@ import { InboxScreen } from './screens/InboxScreen'
 import { MatchCenterScreen } from './screens/MatchCenterScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
+import { FeedScreen } from './screens/FeedScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
@@ -562,6 +563,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <MatchCenterScreen gameId={params.gameId as string | undefined} />
     case 'calendar':
       return <CalendarScreen />
+    case 'feed':
+      return <FeedScreen />
     case 'trades':
       return <TradesScreen />
     case 'waivers':

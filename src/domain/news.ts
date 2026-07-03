@@ -47,4 +47,14 @@ export interface NewsItem {
   speaker?: string
   /** Facepack image key resolved to faces/<faceId>.png (mirrors StaffMember.faceId). */
   speakerFaceId?: string
+  /**
+   * Present on social-feed posts (docs/THE-FEED.md): which stream the post
+   * belongs to ('feed' = public social, 'wire' = GM terminal), the account
+   * that wrote it, the salience engine's 0-100 score, and frozen engagement
+   * numbers. All additive/optional for save compat.
+   */
+  channel?: 'feed' | 'wire'
+  authorId?: string
+  salience?: number
+  engagement?: { likes: number; reposts: number }
 }
