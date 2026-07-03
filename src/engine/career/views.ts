@@ -54,6 +54,8 @@ export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/st
 export interface FeedView {
   posts: NewsItem[]
   authors: Record<string, FeedAuthor>
+  /** Author ids the GM follows (Phase B curation). Optional/additive. */
+  following?: string[]
 }
 import type { AgendaItem } from '@engine/league/staffMeeting'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/league/staffMeeting'
@@ -1686,6 +1688,8 @@ export interface CareerSnapshot {
   /** Social-feed posts (separate from inbox news). Optional/additive. */
   feedPosts?: NewsItem[]
   feedCounter?: number
+  /** Followed feed accounts (Phase B curation). Optional/additive. */
+  followedFeedAuthors?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */

@@ -206,6 +206,7 @@ export type WorkerRequestBody =
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
   | { type: 'getFeed' }
+  | { type: 'toggleFollowAuthor'; authorId: string }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }

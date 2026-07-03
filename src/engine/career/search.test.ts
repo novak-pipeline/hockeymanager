@@ -232,12 +232,29 @@ describe('Feed Phase A (salience engine)', () => {
     const perDay = new Map<number, number>()
     for (const p of feed.posts) perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2)
-    expect(c.getInbox().items.every((n) => n.channel === undefined)).toBe(true)
+    // Curation floor: with no follows, only floor-clearing (70+) posts may
+    // have mirrored into the inbox.
+    for (const n of c.getInbox().items) {
+      if (n.channel !== undefined) expect(n.salience).toBeGreaterThanOrEqual(70)
+    }
 
     // Round-trip: priors, novelty memory, and the posts all survive.
     const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
     expect(snap.storyPriors?.preseasonRanks.length).toBe(data.league.teams.length)
     const c2 = Career.fromSnapshot(snap)
     expect(c2.getFeed().posts).toEqual(feed.posts)
+  })
+
+  it('follows toggle, persist, and gate the inbox mirror', () => {
+    const data = generateLeague({ seed: 101 })
+    const c = new Career(data, 101, data.league.teams[0])
+    expect(c.getFeed().following).toEqual([])
+    expect(c.toggleFollowAuthor('analyst')).toEqual({ following: true })
+    expect(c.toggleFollowAuthor('nonsense')).toEqual({ following: false })
+    expect(c.getFeed().following).toEqual(['analyst'])
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(Career.fromSnapshot(snap).getFeed().following).toEqual(['analyst'])
+    expect(c.toggleFollowAuthor('analyst')).toEqual({ following: false })
+    expect(c.getFeed().following).toEqual([])
   })
 })

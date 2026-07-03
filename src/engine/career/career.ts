@@ -130,6 +130,7 @@ import {
   engagementFor,
   noveltyClassOf,
   selectPosts,
+  shouldReachInbox,
   type SalienceCtx,
   type StoryPriors,
 } from '@engine/story/salience'
@@ -666,6 +667,9 @@ export class Career {
    *  GM's mailbox (curation lands in Phase B). Bounded, newest first. */
   private feedPosts: NewsItem[] = []
   private feedCounter = 0
+  /** Phase B curation: accounts the GM follows — their posts reach the inbox
+   *  (as do any posts above the importance floor, follows or not). */
+  private followedFeedAuthors: string[] = []
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -2165,7 +2169,32 @@ export class Career {
       })
     }
     if (this.feedPosts.length > 400) this.feedPosts.length = 400
+    // Phase B curation: followed authors and floor-clearing stories ALSO
+    // reach the inbox — the feed is browseable, the inbox is guaranteed.
+    for (const post of selected) {
+      if (!shouldReachInbox(post, this.followedFeedAuthors)) continue
+      const author = FEED_AUTHORS[post.authorId]
+      this.pushNews('league', `@${author?.handle ?? post.authorId}`, post.text, {
+        ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
+        ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
+        channel: post.channel,
+        authorId: post.authorId,
+        salience: Math.round(post.score),
+      })
+    }
     priors.noveltyCounts = [...counts.entries()]
+  }
+
+  /** Follow/unfollow a feed account. Followed posts land in the inbox. */
+  toggleFollowAuthor(authorId: string): { following: boolean } {
+    if (!FEED_AUTHORS[authorId]) return { following: false }
+    const i = this.followedFeedAuthors.indexOf(authorId)
+    if (i >= 0) {
+      this.followedFeedAuthors.splice(i, 1)
+      return { following: false }
+    }
+    this.followedFeedAuthors.push(authorId)
+    return { following: true }
   }
 
   /** The social feed, newest first, plus the author directory. */
@@ -2173,6 +2202,7 @@ export class Career {
     return {
       posts: this.feedPosts.map((p) => ({ ...p })),
       authors: FEED_AUTHORS,
+      following: [...this.followedFeedAuthors],
     }
   }
 
@@ -11446,6 +11476,7 @@ export class Career {
       ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
       feedPosts: this.feedPosts.map((p) => ({ ...p })),
       feedCounter: this.feedCounter,
+      followedFeedAuthors: [...this.followedFeedAuthors],
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -11592,6 +11623,7 @@ export class Career {
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
     career.feedCounter = snapshot.feedCounter ?? 0
+    if (snapshot.followedFeedAuthors) career.followedFeedAuthors = [...snapshot.followedFeedAuthors]
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

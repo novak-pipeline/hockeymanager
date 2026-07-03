@@ -10,6 +10,7 @@ import {
   engagementFor,
   noveltyClassOf,
   selectPosts,
+  shouldReachInbox,
   type SalienceCandidate,
   type SalienceCtx,
 } from './salience'
@@ -110,6 +111,17 @@ describe('selectPosts — novelty + budget', () => {
 
   it('drops candidates below the publish floor', () => {
     expect(selectPosts([cand('a-1-x', 10)], new Map(), new Rng(1))).toHaveLength(0)
+  })
+})
+
+describe('shouldReachInbox — the curation floor', () => {
+  it('followed authors always reach the inbox; strangers need the floor', () => {
+    const low = { score: 45, authorId: 'analyst' }
+    const big = { score: 82, authorId: 'insider' }
+    expect(shouldReachInbox(low, [])).toBe(false)
+    expect(shouldReachInbox(low, ['analyst'])).toBe(true)
+    expect(shouldReachInbox(big, [])).toBe(true)
+    expect(shouldReachInbox(low, ['insider'])).toBe(false)
   })
 })
 

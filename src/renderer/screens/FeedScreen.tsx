@@ -26,10 +26,15 @@ export function FeedScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
   const [filter, setFilter] = useState<Filter>('all')
-  const { data, loading, error } = useScreenData<FeedView>(
+  const { data, loading, error, refetch } = useScreenData<FeedView>(
     () => client.getFeed(),
     (r) => (r.type === 'feed' ? r.feed : null)
   )
+
+  async function toggleFollow(authorId: string): Promise<void> {
+    await client.toggleFollowAuthor(authorId)
+    refetch()
+  }
 
   return (
     <section className="stack">
@@ -48,27 +53,68 @@ export function FeedScreen(): JSX.Element {
         </div>
       </ScreenHeader>
       <ScreenStateNotices loading={loading && !data} error={error} empty={false} emptyText="" />
-      {data && <FeedBody feed={data} filter={filter} onTeam={(id) => nav.navigate('teamInfo', { teamId: id })} />}
+      {data && (
+        <FeedBody
+          feed={data}
+          filter={filter}
+          onTeam={(id) => nav.navigate('teamInfo', { teamId: id })}
+          onFollow={(id) => void toggleFollow(id)}
+        />
+      )}
     </section>
   )
 }
 
-function FeedBody({ feed, filter, onTeam }: {
+function FeedBody({ feed, filter, onTeam, onFollow }: {
   feed: FeedView
   filter: Filter
   onTeam: (teamId: string) => void
+  onFollow: (authorId: string) => void
 }): JSX.Element {
   const posts = feed.posts.filter((p) => filter === 'all' || p.channel === filter)
+  const following = feed.following ?? []
+
+  const whoToFollow = (
+    <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+      <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>
+        Accounts
+      </span>
+      {Object.values(feed.authors).map((a) => {
+        const isFollowing = following.includes(a.id)
+        return (
+          <button
+            key={a.id}
+            className={`chip${isFollowing ? ' chip-accent' : ''}`}
+            style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+            onClick={() => onFollow(a.id)}
+            title={isFollowing
+              ? `Unfollow — @${a.handle}'s posts stop reaching your inbox`
+              : `Follow — @${a.handle}'s posts land in your inbox`}
+          >
+            {isFollowing ? '✓ ' : '+ '}@{a.handle}
+          </button>
+        )
+      })}
+      <span className="muted small" style={{ fontStyle: 'italic' }}>
+        Followed accounts reach your inbox. The biggest stories reach it either way.
+      </span>
+    </div>
+  )
+
   if (posts.length === 0) {
     return (
-      <Notice kind="info">
-        Quiet timeline. The feed lights up when something genuinely unexpected happens —
-        keep playing; the league will give people something to talk about.
-      </Notice>
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        {whoToFollow}
+        <Notice kind="info">
+          Quiet timeline. The feed lights up when something genuinely unexpected happens —
+          keep playing; the league will give people something to talk about.
+        </Notice>
+      </div>
     )
   }
   return (
     <div className="stack" style={{ gap: 'var(--sp-2)', maxWidth: 680 }}>
+      {whoToFollow}
       {posts.map((p) => {
         const author = p.authorId ? feed.authors[p.authorId] : undefined
         return (

@@ -245,6 +245,10 @@ export class SimClient {
     return this.send({ type: 'getFeed' })
   }
 
+  toggleFollowAuthor(authorId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleFollowAuthor', authorId })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

@@ -210,6 +210,22 @@ export function selectPosts(
   return scored.slice(0, DAILY_POST_BUDGET).map((x) => x.c)
 }
 
+/* ────────────────────────── curation (Phase B) ────────────────────────── */
+
+/** Posts at or above this salience reach the GM's inbox regardless of
+ *  follows — you can curate a cozy bubble, but the game never lets a
+ *  league-shaking story slip past you. */
+export const INBOX_IMPORTANCE_FLOOR = 70
+
+/** Should this post ALSO land in the inbox? Followed author, or important
+ *  enough that any GM would hear about it by breakfast. */
+export function shouldReachInbox(
+  post: { score: number; authorId: string },
+  followedAuthorIds: readonly string[]
+): boolean {
+  return post.score >= INBOX_IMPORTANCE_FLOOR || followedAuthorIds.includes(post.authorId)
+}
+
 /** Deterministic engagement numbers — bigger stories travel further. */
 export function engagementFor(score: number, rng: Rng): { likes: number; reposts: number } {
   const likes = Math.round(score * rng.float(9, 26))
