@@ -41,6 +41,15 @@ let shot = 0
 
 async function snap(win, slug) {
   shot += 1
+  // Clicking topbar controls can leave scroll containers shifted at narrow
+  // widths (the shell overflows below ~1400px — known UI debt); reset every
+  // scrollable element so every shot is anchored top-left.
+  await win.evaluate(() => {
+    window.scrollTo(0, 0)
+    for (const el of document.querySelectorAll('*')) {
+      if (el.scrollLeft) el.scrollLeft = 0
+    }
+  })
   const file = join(outDir, `${String(shot).padStart(2, '0')}-${slug}.png`)
   await win.screenshot({ path: file })
   console.log(`  📸 ${file}`)
@@ -51,6 +60,12 @@ const app = await _electron.launch({
   cwd: root,
 })
 const win = await app.firstWindow()
+// Photograph at a realistic desktop size — the app's default window is
+// narrower than the shell's comfortable width.
+try {
+  const bw = await app.browserWindow(win)
+  await bw.evaluate((w) => { w.setSize(1760, 990); w.center() })
+} catch { /* best effort */ }
 win.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text())
 })
