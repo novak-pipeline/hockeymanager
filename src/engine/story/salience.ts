@@ -92,6 +92,26 @@ export interface SalienceCtx {
   teams: Map<string, { name: string; abbreviation: string }>
   userTeamId: string
   teamsInLeague: number
+  /** NHL skater season lines (the prior is his rating — deviation = story). */
+  skaters?: Array<{
+    playerId: string
+    name: string
+    teamId: string
+    gp: number
+    points: number
+    /** The recorded expectation: his current rated overall. */
+    ratedOverall: number
+    age: number
+  }>
+  /** NHL goalie season lines. */
+  goalies?: Array<{
+    playerId: string
+    name: string
+    teamId: string
+    saves: number
+    shotsAgainst: number
+    ratedOverall: number
+  }>
 }
 
 /** Days on which the expectation-gap detector takes its readings. Checkpoints
@@ -165,10 +185,85 @@ export function detectStreakOutlier(ctx: SalienceCtx): SalienceCandidate[] {
   return out
 }
 
+/** Same checkpoint cadence for the player-level readings. Exported so the
+ *  career layer only assembles the (700-player) stat arrays on these days. */
+export const PLAYER_CHECKPOINT_DAYS = [30, 60, 90]
+
+/** The breakout: a skater scoring like a star who isn't rated like one.
+ *  The prior is his own rating — a 90-rated player leading the league is
+ *  Tuesday; a 71-rated third-liner in the top handful of scorers is news. */
+export function detectBreakoutSkater(ctx: SalienceCtx): SalienceCandidate[] {
+  if (!ctx.skaters || !PLAYER_CHECKPOINT_DAYS.includes(ctx.day)) return []
+  const qualified = ctx.skaters.filter((s) => s.gp >= 10)
+  if (qualified.length < 50) return []
+  const byPace = [...qualified].sort((a, b) => b.points / b.gp - a.points / a.gp)
+  const out: SalienceCandidate[] = []
+  for (let i = 0; i < Math.min(12, byPace.length); i++) {
+    const s = byPace[i]!
+    if (s.ratedOverall > 76) continue // scoring like he's rated — not a story
+    const t = ctx.teams.get(s.teamId)
+    if (!t) continue
+    const pace = (s.points / s.gp) * 82
+    out.push({
+      key: `breakout-${s.playerId}-${ctx.year}`,
+      score: Math.min(92, 46 + (76 - s.ratedOverall) * 1.5 + (12 - i) + (s.age <= 23 ? 8 : 0)),
+      channel: 'feed',
+      authorId: 'stats',
+      text: `${s.name} check-in: ${s.points} points in ${s.gp} games — a ${Math.round(pace)}-point pace, ${ordinal(i + 1)} in the league. Nobody's model had him here. This is what a breakout looks like in the data.`,
+      facts: {
+        kind: 'breakoutSkater',
+        playerIds: [s.playerId],
+        teamIds: [s.teamId],
+        numbers: { points: s.points, gp: s.gp, pace: Math.round(pace), paceRank: i + 1, ratedOverall: s.ratedOverall, day: ctx.day },
+        priorNote: `rated ${s.ratedOverall} overall`,
+      },
+      teamId: s.teamId,
+      playerId: s.playerId,
+    })
+  }
+  return out
+}
+
+/** The quiet wall: a goalie stopping everything without the reputation.
+ *  Needs a real workload so small samples don't canonize a backup's week. */
+export function detectGoalieHeater(ctx: SalienceCtx): SalienceCandidate[] {
+  if (!ctx.goalies || !PLAYER_CHECKPOINT_DAYS.includes(ctx.day)) return []
+  const out: SalienceCandidate[] = []
+  for (const g of ctx.goalies) {
+    if (g.shotsAgainst < 250) continue
+    const svPct = g.saves / g.shotsAgainst
+    if (svPct < 0.93) continue
+    const t = ctx.teams.get(g.teamId)
+    if (!t) continue
+    const unheralded = g.ratedOverall <= 78
+    out.push({
+      key: `goalieheat-${g.playerId}-${ctx.year}`,
+      score: Math.min(90, Math.round((svPct - 0.93) * 2000) + (unheralded ? 52 : 34)),
+      channel: 'feed',
+      authorId: unheralded ? 'analyst' : 'stats',
+      text: unheralded
+        ? `Quiet story of the season so far: ${g.name} is at .${Math.round(svPct * 1000)} on ${g.shotsAgainst} shots for ${t.name}. That's elite work from a name nobody circled in September.`
+        : `${g.name}: .${Math.round(svPct * 1000)} save percentage on ${g.shotsAgainst} shots. The workload is real and so is the number.`,
+      facts: {
+        kind: 'goalieHeater',
+        playerIds: [g.playerId],
+        teamIds: [g.teamId],
+        numbers: { svPct: Math.round(svPct * 1000), shotsAgainst: g.shotsAgainst, ratedOverall: g.ratedOverall, day: ctx.day },
+        priorNote: `rated ${g.ratedOverall} overall`,
+      },
+      teamId: g.teamId,
+      playerId: g.playerId,
+    })
+  }
+  return out
+}
+
 /** The Phase A detector library. Fan out here (ultracode session). */
 export const DETECTORS: Array<(ctx: SalienceCtx) => SalienceCandidate[]> = [
   detectExpectationGap,
   detectStreakOutlier,
+  detectBreakoutSkater,
+  detectGoalieHeater,
 ]
 
 /* ────────────────────────── budget & novelty ────────────────────────── */

@@ -131,6 +131,7 @@ import {
   noveltyClassOf,
   selectPosts,
   shouldReachInbox,
+  PLAYER_CHECKPOINT_DAYS,
   type SalienceCtx,
   type StoryPriors,
 } from '@engine/story/salience'
@@ -2141,6 +2142,47 @@ export class Career {
       teams,
       userTeamId: this.userTeamId as string,
       teamsInLeague: this.data.league.teams.length,
+    }
+    // Player-level readings only on checkpoint days — assembling ~700 stat
+    // lines daily would be waste; the detectors only look on these days.
+    if (PLAYER_CHECKPOINT_DAYS.includes(day)) {
+      const skaters: NonNullable<SalienceCtx['skaters']> = []
+      const goalies: NonNullable<SalienceCtx['goalies']> = []
+      for (const tid of this.data.league.teams) {
+        const team = this.data.teams.get(tid)
+        if (!team) continue
+        for (const pid of team.roster) {
+          const p = this.data.players.get(pid)
+          if (!p) continue
+          const cur = p.stats.find((st) => st.season === this.year)
+          if (!cur) continue
+          if (p.position === 'G') {
+            goalies.push({
+              playerId: pid as string,
+              name: p.name,
+              teamId: tid as string,
+              saves: cur.saves,
+              shotsAgainst: cur.shotsAgainst,
+              ratedOverall: ratedOverall(p),
+            })
+          } else {
+            const pts =
+              cur.ev.goals + cur.pp.goals + cur.pk.goals +
+              cur.ev.assists + cur.pp.assists + cur.pk.assists
+            skaters.push({
+              playerId: pid as string,
+              name: p.name,
+              teamId: tid as string,
+              gp: cur.gamesPlayed,
+              points: pts,
+              ratedOverall: ratedOverall(p),
+              age: p.age,
+            })
+          }
+        }
+      }
+      ctx.skaters = skaters
+      ctx.goalies = goalies
     }
     const candidates = DETECTORS.flatMap((d) => d(ctx))
     if (candidates.length === 0) return

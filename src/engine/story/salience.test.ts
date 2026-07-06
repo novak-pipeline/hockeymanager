@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { Rng } from '@engine/shared/rng'
 import {
   DAILY_POST_BUDGET,
+  detectBreakoutSkater,
   detectExpectationGap,
+  detectGoalieHeater,
   detectStreakOutlier,
   engagementFor,
   noveltyClassOf,
@@ -73,6 +75,55 @@ describe('detectStreakOutlier', () => {
     expect(hits[0]!.key).toContain('-8')
     expect(hits[1]!.text).toContain('the wrong kind')
     expect(detectStreakOutlier(ctxWith({ streaks: new Map([['t1', 4]]) }))).toHaveLength(0)
+  })
+})
+
+describe('detectBreakoutSkater', () => {
+  const filler = Array.from({ length: 60 }, (_, i) => ({
+    playerId: `f${i}`, name: `Filler ${i}`, teamId: 't2',
+    gp: 15, points: 8, ratedOverall: 80, age: 27,
+  }))
+
+  it('flags a low-rated player on a star pace; ignores stars doing star things', () => {
+    const ctx = ctxWith({
+      day: 30,
+      skaters: [
+        { playerId: 'p1', name: 'Cinderella Story', teamId: 't1', gp: 15, points: 24, ratedOverall: 71, age: 22 },
+        { playerId: 'p2', name: 'Known Superstar', teamId: 't1', gp: 15, points: 26, ratedOverall: 93, age: 28 },
+        ...filler,
+      ],
+    })
+    const hits = detectBreakoutSkater(ctx)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]!.playerId).toBe('p1')
+    expect(hits[0]!.facts.priorNote).toContain('71')
+    expect(hits[0]!.text).toContain('Cinderella Story')
+  })
+
+  it('stays silent off checkpoint days and on thin samples', () => {
+    const hot = { playerId: 'p1', name: 'X', teamId: 't1', gp: 15, points: 24, ratedOverall: 70, age: 22 }
+    expect(detectBreakoutSkater(ctxWith({ day: 31, skaters: [hot, ...filler] }))).toHaveLength(0)
+    expect(detectBreakoutSkater(ctxWith({ day: 30, skaters: [hot] }))).toHaveLength(0)
+  })
+})
+
+describe('detectGoalieHeater', () => {
+  it('needs a real workload and a real number; unheralded names score higher', () => {
+    const ctx = ctxWith({
+      day: 60,
+      goalies: [
+        { playerId: 'g1', name: 'Unknown Wall', teamId: 't1', saves: 290, shotsAgainst: 310, ratedOverall: 72 },
+        { playerId: 'g2', name: 'Famous Wall', teamId: 't2', saves: 290, shotsAgainst: 310, ratedOverall: 90 },
+        { playerId: 'g3', name: 'Small Sample', teamId: 't1', saves: 96, shotsAgainst: 100, ratedOverall: 70 },
+        { playerId: 'g4', name: 'Ordinary', teamId: 't2', saves: 270, shotsAgainst: 300, ratedOverall: 75 },
+      ],
+    })
+    const hits = detectGoalieHeater(ctx)
+    expect(hits.map((h) => h.playerId).sort()).toEqual(['g1', 'g2'])
+    const known = hits.find((h) => h.playerId === 'g2')!
+    const unknown = hits.find((h) => h.playerId === 'g1')!
+    expect(unknown.score).toBeGreaterThan(known.score)
+    expect(unknown.text).toContain('.935')
   })
 })
 
