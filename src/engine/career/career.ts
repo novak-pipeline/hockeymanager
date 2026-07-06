@@ -3897,6 +3897,20 @@ export class Career {
     return this.advanceOffseason()
   }
 
+  /** Offseason takeover (#145): simulate the club's "year zero" without the
+   *  user — full regular season and playoffs, auto-resolved gates — and hand
+   *  over control on day one of the offseason. The summer (awards fallout,
+   *  the draft, re-signings, free agency) becomes the GM's first act, and the
+   *  world arrives with a real season of history, storylines and receipts. */
+  fastForwardToOffseason(): void {
+    for (let guard = 0; guard < 400; guard++) {
+      if (this.phase === 'offseason') return
+      // step() auto-passes soft gates (board meeting resolves via the AGM,
+      // the deadline hold consumes one press) — nothing in-season needs us.
+      if (!this.step()) return
+    }
+  }
+
   /** Advance until the user's next game has been played (or phase changes). */
   advanceToNextGame(): void {
     const before = this.userGamesPlayed()

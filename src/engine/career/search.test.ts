@@ -258,3 +258,21 @@ describe('Feed Phase A (salience engine)', () => {
     expect(c.getFeed().following).toEqual([])
   })
 })
+
+describe('offseason takeover (#145)', () => {
+  it('fast-forwards year zero and hands over at the start of the offseason', () => {
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0])
+    c.fastForwardToOffseason()
+    const dash = c.getDashboard()
+    expect(dash.phase).toBe('offseason')
+    // The summer is still ahead: the draft has not been run for the user.
+    const os = c.getOffseason()
+    expect(os).toBeTruthy()
+    // Year zero left real history behind: standings existed, news flowed.
+    expect(c.getInbox().items.length).toBeGreaterThan(5)
+    // And the world is playable from here: a save round-trips.
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(Career.fromSnapshot(snap).getDashboard().phase).toBe('offseason')
+  })
+})

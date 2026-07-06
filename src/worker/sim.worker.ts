@@ -52,6 +52,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'startCareer': {
       if (!pendingData) throw new Error('no league generated; call newLeague first')
       career = new Career(pendingData, pendingSeed, asTeamId(req.teamId))
+      // Offseason takeover: the club plays year zero without you; you arrive
+      // in the summer with the draft and free agency ahead of you.
+      if (req.startAt === 'offseason') career.fastForwardToOffseason()
       return { id: req.id, type: 'view', view: career.view() }
     }
 

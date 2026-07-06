@@ -176,7 +176,7 @@ export type WorkerRequestBody =
   | { type: 'newLeague'; seed: number; teamCount?: number }
   /** Load a real-roster mod database (parsed JSON from the mod bridge). */
   | { type: 'newLeagueFromMod'; mod: unknown; seed: number }
-  | { type: 'startCareer'; teamId: string }
+  | { type: 'startCareer'; teamId: string; startAt?: 'seasonStart' | 'offseason' }
   /* ── calendar ── */
   | { type: 'advance'; days?: number }
   /** Advance through match days until the user's next fixture has been played. */

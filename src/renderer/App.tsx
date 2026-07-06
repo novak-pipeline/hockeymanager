@@ -62,6 +62,9 @@ export function App(): JSX.Element {
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
   const [busy, setBusy] = useState(false)
+  // When the GM takes over: opening night, or the summer before (year zero
+  // is simulated without you — draft + free agency become your first act).
+  const [startAt, setStartAt] = useState<'seasonStart' | 'offseason'>('seasonStart')
   // Mod picker state
   const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
   const [selectedModId, setSelectedModId] = useState<string>('') // '' = fictional default
@@ -108,7 +111,7 @@ export function App(): JSX.Element {
   const pickTeam = async (team: TeamInfo): Promise<void> => {
     if (!client || busy) return
     setBusy(true)
-    const res = await client.startCareer(team.teamId)
+    const res = await client.startCareer(team.teamId, startAt)
     setBusy(false)
     if (res.type === 'error') {
       toast(res.message, 'error')
@@ -126,6 +129,8 @@ export function App(): JSX.Element {
             <SetupHero
               seed={seed}
               setSeed={setSeed}
+              startAt={startAt}
+              setStartAt={setStartAt}
               busy={busy}
               availableMods={availableMods}
               selectedModId={selectedModId}
@@ -602,6 +607,8 @@ function randomSeed(): number {
 function SetupHero(props: {
   seed: number
   setSeed: (n: number) => void
+  startAt: 'seasonStart' | 'offseason'
+  setStartAt: (v: 'seasonStart' | 'offseason') => void
   busy: boolean
   availableMods: ModListEntry[]
   selectedModId: string
@@ -638,6 +645,32 @@ function SetupHero(props: {
             </select>
           </div>
         )}
+        <div>
+          <label className="field-label">Take over</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-2)' }}>
+            {([
+              ['seasonStart', 'Opening night', 'Roster is set — coach camp, then the season.'],
+              ['offseason', 'The summer before', 'Year zero plays out without you; you arrive for the draft and free agency.'],
+            ] as const).map(([id, title, blurb]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => props.setStartAt(id)}
+                style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  background: props.startAt === id ? 'rgba(var(--accent-rgb, 108,92,231),0.16)' : 'var(--bg1)',
+                  border: props.startAt === id ? '1px solid var(--violet-h, #a78bfa)' : '1px solid var(--line)',
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{title}</div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{blurb}</div>
+              </button>
+            ))}
+          </div>
+        </div>
         <div>
           <label className="field-label" htmlFor="seed-input">
             World seed <span className="muted" style={{ fontWeight: 400 }}>— random by default; set one only to replay a specific world</span>

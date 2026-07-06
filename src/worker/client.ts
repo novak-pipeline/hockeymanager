@@ -90,8 +90,8 @@ export class SimClient {
     return this.send({ type: 'newLeagueFromMod', mod, seed })
   }
 
-  startCareer(teamId: string): Promise<WorkerResponse> {
-    return this.send({ type: 'startCareer', teamId })
+  startCareer(teamId: string, startAt?: 'seasonStart' | 'offseason'): Promise<WorkerResponse> {
+    return this.send({ type: 'startCareer', teamId, ...(startAt ? { startAt } : {}) })
   }
 
   /* ── calendar ── */
