@@ -28,3 +28,4 @@ EHM.Editor*
 # Local 3D asset working files (concept art, source models). Authored assets get
 # committed deliberately under the renderer's asset path, not from this scratch dir.
 3D assets/
+scripts/dev/ui-snaps/
