@@ -5115,6 +5115,10 @@ export class Career {
       }
       case 'freeAgency': {
         os.faDay++
+        // AI clubs work the phones a beat behind the user: released veterans
+        // don't all sign within 24 hours, and the GM you play gets the same
+        // first-mover window a real front office fights for. (Cadence law —
+        // the market should be a week of decisions, not one press.)
         const res = aiFreeAgencyDay({
           teams: this.data.teams,
           players: this.data.players,
@@ -5122,7 +5126,7 @@ export class Career {
           userTeamId: this.userTeamId,
           year: this.year,
           rng: this.rngFor(8004, os.faDay),
-          faDay: os.faDay,
+          faDay: Math.max(0, os.faDay - 2),
         })
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
         this.faPool = this.faPool.filter((id) => !signedIds.has(id as string))

@@ -98,13 +98,43 @@ try {
     console.log('  ⚠ dev camp flow not reachable — skipped')
   }
 
-  // ── advance a few days so screens have real content ──
-  for (let i = 0; i < 8; i++) {
+  // ── advance into early free agency (the frenzy window, days 1–3) ──
+  for (let i = 0; i < 3; i++) {
     try {
       await win.click('button:has-text("Continue")', { timeout: 5000 })
       await win.waitForTimeout(600)
     } catch {
       break // a modal/meeting screen holds the button — fine, photograph as-is
+    }
+  }
+
+  // ── the negotiation room: open talks while the market is still stocked ──
+  try {
+    // The offseason desk = the League screen's Offseason tab.
+    await win.click('text="Competitions"', { timeout: 4000 })
+    await win.waitForTimeout(500)
+    // "Offseason" also appears as the topbar phase chip — click the TAB (last match).
+    await win.click(':nth-match(:text("Offseason"), 2)', { timeout: 4000 })
+    await win.waitForTimeout(500)
+    await snap(win, 'offseason-desk')
+    await win.click('button:has-text("Open talks")', { timeout: 5000 })
+    await win.waitForSelector('text=Contract talks', { timeout: 8000 })
+    await snap(win, 'negotiation-open')
+    // Table a real offer: use whatever the builder pre-seeded and submit.
+    await win.click('button:has-text("Table the offer")', { timeout: 5000 })
+    await win.waitForTimeout(900)
+    await snap(win, 'negotiation-round')
+  } catch (e) {
+    console.log(`  ⚠ negotiation room not reachable — skipped (${e.message?.split('\n')[0]})`)
+  }
+
+  // ── advance a few more days so the rest of the screens have content ──
+  for (let i = 0; i < 5; i++) {
+    try {
+      await win.click('button:has-text("Continue")', { timeout: 5000 })
+      await win.waitForTimeout(600)
+    } catch {
+      break
     }
   }
 
@@ -130,22 +160,6 @@ try {
     console.log('  ⚠ feed subtab not reachable — skipped')
   }
 
-  // ── the negotiation room: open talks from the offseason desk (DEPTH 1) ──
-  try {
-    await win.click('text="Competitions"', { timeout: 4000 })
-    await win.waitForTimeout(400)
-    // The offseason tab is the active League view in summer; find any table
-    // row's "Open talks" entrance (re-sign list or FA market).
-    await win.click('button:has-text("Open talks")', { timeout: 5000 })
-    await win.waitForSelector('text=Contract talks', { timeout: 8000 })
-    await snap(win, 'negotiation-open')
-    // Table a real offer: use whatever the builder pre-seeded and submit.
-    await win.click('button:has-text("Table the offer")', { timeout: 5000 })
-    await win.waitForTimeout(900)
-    await snap(win, 'negotiation-round')
-  } catch {
-    console.log('  ⚠ negotiation room not reachable — skipped')
-  }
 } finally {
   writeFileSync(join(outDir, 'console-errors.txt'), consoleErrors.join('\n') || '(none)')
   console.log(`\n${shot} screenshots → ${outDir}`)
