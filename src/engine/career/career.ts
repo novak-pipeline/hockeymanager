@@ -248,6 +248,17 @@ import {
   releasePlayer as releaseFromTeam,
 } from '@engine/league/contracts'
 import {
+  agentFor,
+  evaluateRound,
+  findComparables,
+  openNegotiation,
+  openingLines,
+  priorityHints,
+  type Comparable,
+  type ContractOffer,
+  type NegotiationState,
+} from '@engine/league/negotiation'
+import {
   buildTeamProfile,
   evaluateProposal,
   executeTrade,
@@ -425,6 +436,7 @@ import {
   type LinesUpdate,
   type LockerRoomView,
   type OffseasonView,
+  type NegotiationView,
   type WaiverWireRowView,
   type LeagueWireView,
   type GMProfileView,
@@ -675,6 +687,9 @@ export class Career {
   /** Phase B curation: accounts the GM follows — their posts reach the inbox
    *  (as do any posts above the importance floor, follows or not). */
   private followedFeedAuthors: string[] = []
+  /** DEPTH 1: live contract-negotiation sessions, keyed by playerId. Sessions
+   *  are per-offseason; stale ones are dropped when eligibility lapses. */
+  private negotiations = new Map<string, NegotiationState>()
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -7208,6 +7223,279 @@ export class Career {
     return { signed: true, message: `${player.name} is yours.` }
   }
 
+  /* ─────────────── contract negotiation sessions (DEPTH 1) ─────────────── */
+
+  /** Can talks be held with this player right now, and in what capacity? */
+  private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | null {
+    const os = this.offseason
+    if (!os) return null
+    if (os.stage === 'resign' && this.resignStatus.get(asPlayerId(playerId)) === 'pending') return 'resign'
+    if (os.stage === 'freeAgency' && this.faPool.some((f) => (f as string) === playerId)) return 'freeAgent'
+    return null
+  }
+
+  /** Signed NHL contracts the agent can argue from — real deals, never invented. */
+  private comparablePool(): Comparable[] {
+    const pool: Comparable[] = []
+    for (const team of this.data.teams.values()) {
+      if (team.tier === 'ahl') continue
+      for (const id of team.roster) {
+        const p = this.data.players.get(id)
+        if (!p || p.contract.yearsRemaining <= 0 || p.contract.salary < 900_000) continue
+        pool.push({
+          name: p.name,
+          teamAbbr: team.abbreviation,
+          overall: ratedOverall(p),
+          age: p.age,
+          salary: p.contract.salary,
+          years: p.contract.yearsRemaining,
+        })
+      }
+    }
+    return pool
+  }
+
+  /** Rival appetite for a free agent, 0–1 — hot names negotiate from strength. */
+  private marketHeatFor(player: Player): number {
+    const ovr = ratedOverall(player)
+    return Math.max(0, Math.min(1, (ovr - 74) / 18))
+  }
+
+  private buildNegotiationView(state: NegotiationState): NegotiationView {
+    const player = this.resolve(asPlayerId(state.playerId))
+    const agent = agentFor(player)
+    const comps = findComparables(player, this.comparablePool())
+    const hints = priorityHints(player)
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const temperature =
+      state.patience > 65 ? 'warm' : state.patience > 40 ? 'guarded' : state.patience > 15 ? 'testy' : 'hostile'
+    return {
+      player: badge(player),
+      kind: state.kind,
+      status: state.status,
+      rightsLabel: contractStatus(player),
+      currentSalary: player.contract.salary,
+      agentName: agent.name,
+      agentStyle: agent.style,
+      askSalary: state.ask.salary,
+      askYears: state.ask.years,
+      askBonusPct: state.ask.signingBonusPct,
+      askClause: state.ask.clause,
+      temperature,
+      openingLines: openingLines(player, state, { comparables: comps }),
+      rounds: state.rounds.map((r) => ({
+        offerSalary: r.offer.salary,
+        offerYears: r.offer.years,
+        offerBonusPct: r.offer.signingBonusPct,
+        offerClause: r.offer.clause,
+        verdict: r.verdict,
+        agentLines: r.agentLines,
+      })),
+      comparables: comps,
+      revealedHints: state.revealedHints.map((i) => hints[i]).filter((h): h is string => !!h),
+      capSpace: this.userTeam.finances.salaryCap - capUsedNow - this.userDeadCap,
+      ...(state.status === 'paused'
+        ? { pausedNote: 'His camp has pulled out of talks. They are not returning your calls this window.' }
+        : {}),
+    }
+  }
+
+  /** Open (or resume) a negotiation session with an eligible player. */
+  startNegotiation(playerId: string): NegotiationView {
+    const kind = this.negotiationKindFor(playerId)
+    const existing = this.negotiations.get(playerId)
+    // Stale sessions from another year or another capacity are discarded.
+    if (existing && (existing.year !== this.year || (kind && existing.kind !== kind && existing.status !== 'open'))) {
+      this.negotiations.delete(playerId)
+    }
+    const live = this.negotiations.get(playerId)
+    if (live && live.kind === (kind ?? live.kind)) return this.buildNegotiationView(live)
+    if (!kind) throw new Error('this player is not available for contract talks right now')
+
+    const player = this.resolve(asPlayerId(playerId))
+    const heat = kind === 'freeAgent' ? this.marketHeatFor(player) : 0
+    const state = openNegotiation({
+      player,
+      year: this.year,
+      kind,
+      marketHeat: 1 + heat * 0.08,
+    })
+    // A camp burned earlier this summer (paused/walked re-sign talks) opens colder.
+    if (existing && (existing.status === 'paused' || existing.status === 'walked')) {
+      state.patience = Math.max(20, state.patience - 20)
+    }
+    this.negotiations.set(playerId, state)
+    return this.buildNegotiationView(state)
+  }
+
+  getNegotiation(playerId: string): NegotiationView | null {
+    const state = this.negotiations.get(playerId)
+    if (!state || state.year !== this.year) return null
+    return this.buildNegotiationView(state)
+  }
+
+  /** One round at the table. On acceptance the contract is executed here. */
+  submitNegotiationOffer(
+    playerId: string,
+    offer: ContractOffer
+  ): { view: NegotiationView; signed: boolean; message: string } {
+    const state = this.negotiations.get(playerId)
+    if (!state || state.year !== this.year) throw new Error('no open negotiation with this player')
+    if (state.status !== 'open') {
+      return {
+        view: this.buildNegotiationView(state),
+        signed: state.status === 'signed',
+        message:
+          state.status === 'signed'
+            ? 'The deal is already done.'
+            : 'Talks are off — his camp is not at the table.',
+      }
+    }
+    const kind = this.negotiationKindFor(playerId)
+    if (!kind) {
+      // The market moved while you deliberated (AI signing, stage change).
+      state.status = 'walked'
+      return {
+        view: this.buildNegotiationView(state),
+        signed: false,
+        message: 'He is off the board — the market moved while you deliberated.',
+      }
+    }
+
+    // Cap sanity BEFORE the round: an offer you cannot execute is not an offer.
+    const player = this.resolve(asPlayerId(playerId))
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const replacing = kind === 'resign' ? player.contract.salary : 0
+    if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
+      return {
+        view: this.buildNegotiationView(state),
+        signed: false,
+        message: 'That offer does not fit under your cap — clear space before you table it.',
+      }
+    }
+
+    const rng = this.rngFor(8020, state.rounds.length, Career.pidNum(playerId))
+    const comps = findComparables(player, this.comparablePool())
+    const result = evaluateRound(state, player, offer, {
+      rng,
+      comparables: comps,
+      marketHeat: kind === 'freeAgent' ? this.marketHeatFor(player) : 0,
+      teamName: this.userTeam.name,
+    })
+    state.rounds.push(result.round)
+    state.ask = result.ask
+    state.patience = result.patience
+    state.status = result.status
+    state.revealedHints = result.revealedHints
+
+    // A leaker's jab becomes a real feed post — the conversation touches the world.
+    if (result.round.agentLines.some((l) => l.startsWith('(Within the hour'))) {
+      const author = FEED_AUTHORS['insider']
+      this.feedPosts.unshift({
+        id: `fp${this.feedCounter++}`,
+        day: Math.max(0, this.currentDay),
+        year: this.year,
+        category: 'league',
+        headline: `@${author?.handle ?? 'insider'}`,
+        body: `Talks between ${this.userTeam.abbreviation} and ${player.name}'s camp are "not close," per a source. The ask: north of $${(state.ask.salary / 1e6).toFixed(1)}M a year.`,
+        read: true,
+        playerId,
+        channel: 'feed',
+        authorId: 'insider',
+        salience: 62,
+      })
+    }
+
+    if (result.status === 'signed') {
+      this.commitNegotiatedContract(player, offer, kind)
+      return {
+        view: this.buildNegotiationView(state),
+        signed: true,
+        message: `${player.name} signs — $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years.`,
+      }
+    }
+    if (result.status === 'walked') {
+      if (kind === 'resign') this.resignStatus.set(asPlayerId(playerId), 'walked')
+      return {
+        view: this.buildNegotiationView(state),
+        signed: false,
+        message: `${player.name}'s camp has walked away from the table.`,
+      }
+    }
+    if (result.status === 'paused') {
+      return {
+        view: this.buildNegotiationView(state),
+        signed: false,
+        message: 'His agent has pulled out of talks for now.',
+      }
+    }
+    return { view: this.buildNegotiationView(state), signed: false, message: 'The talks continue.' }
+  }
+
+  /** Execute a negotiated deal: sign, stamp clause/bonus structure, tell the world. */
+  private commitNegotiatedContract(player: Player, offer: ContractOffer, kind: 'resign' | 'freeAgent'): void {
+    const playerId = player.id as string
+    signPlayer({
+      team: this.userTeam,
+      player,
+      salary: offer.salary,
+      years: offer.years,
+      year: this.year,
+      players: this.data.players,
+    })
+    // Structure the deal beyond salary×years (additive contract fields).
+    player.contract.noTradeClause = offer.clause !== 'none'
+    player.contract.clause = offer.clause
+    if (offer.signingBonusPct > 0) player.contract.signingBonusPct = offer.signingBonusPct
+    if (offer.twoWay) player.contract.twoWay = true
+
+    const structure: string[] = []
+    if (offer.signingBonusPct > 0) structure.push(`${offer.signingBonusPct}% signing bonus`)
+    if (offer.clause === 'full') structure.push('full no-move clause')
+    if (offer.clause === 'modified') structure.push('modified no-trade clause')
+    const structureStr = structure.length > 0 ? ` Structure: ${structure.join(', ')}.` : ''
+
+    if (kind === 'resign') {
+      this.resignStatus.set(asPlayerId(playerId), 'signed')
+      this.pushNews(
+        'contract',
+        `${player.name} re-signs`,
+        `${player.name} stays for $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years, negotiated across ${(this.negotiations.get(playerId)?.rounds.length ?? 1)} rounds with ${agentFor(player).name}.${structureStr}`,
+        { playerId }
+      )
+    } else {
+      this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
+      this.lockerArrival(this.userTeamId, asPlayerId(playerId))
+      repairLines(this.userTeam, this.data.players)
+      recordAcquisition(this.chronicle, {
+        playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing',
+      })
+      chronicleEvent(this.chronicle, {
+        year: this.year, day: 0, kind: 'signing',
+        teamIds: [this.userTeamId as string], playerIds: [playerId],
+        headline: `${this.userTeam.abbreviation} sign ${player.position} ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}y)`,
+        details: { salary: offer.salary, years: offer.years },
+        userInvolved: true,
+      })
+      this.pushNews(
+        'contract',
+        `${player.name} signs with ${this.userTeam.abbreviation}`,
+        `Deal done at the table: $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years.${structureStr}`,
+        { playerId }
+      )
+    }
+    const txResult = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${this.userTeam.abbreviation} ${kind === 'resign' ? 're-signs' : 'signs FA'} ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}).`,
+    })
+    this.transactionLedger = txResult.ledger
+  }
+
   /* ────────────────────────── trades ────────────────────────── */
 
   private pickId(p: DraftPick): string {
@@ -11926,6 +12214,9 @@ export class Career {
       feedPosts: this.feedPosts.map((p) => ({ ...p })),
       feedCounter: this.feedCounter,
       followedFeedAuthors: [...this.followedFeedAuthors],
+      negotiations: [...this.negotiations.entries()].map(
+        ([k, v]) => [k, structuredClone(v)] as [string, NegotiationState]
+      ),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -12076,6 +12367,11 @@ export class Career {
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
     career.feedCounter = snapshot.feedCounter ?? 0
     if (snapshot.followedFeedAuthors) career.followedFeedAuthors = [...snapshot.followedFeedAuthors]
+    if (snapshot.negotiations) {
+      career.negotiations = new Map(
+        snapshot.negotiations.map(([k, v]) => [k, structuredClone(v)])
+      )
+    }
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

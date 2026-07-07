@@ -62,6 +62,7 @@ export type ScreenId =
   // Contextual (phase-gated)
   | 'draft'
   | 'offseason'
+  | 'negotiation'
   | 'playoffs'
   // Shared / overlay
   | 'player'
@@ -125,6 +126,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'dataHub':
     case 'draft':
     case 'offseason':
+    case 'negotiation':
     case 'playoffs':
       return 'league'
     case 'board':

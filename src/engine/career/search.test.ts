@@ -396,3 +396,127 @@ describe('summer takeover (#145) + camps (M3)', () => {
     }
   })
 })
+
+describe('negotiation sessions (DEPTH 1)', () => {
+  /** Fresh summer career with real re-sign business: a generated league has no
+   *  day-one expiries, so we walk two veterans' deals to the end first. */
+  function summerCareer(seed = 414): Career {
+    const data = generateLeague({ seed })
+    const userRoster = data.teams.get(data.league.teams[0])!.roster
+    let expired = 0
+    for (const id of userRoster) {
+      const p = data.players.get(id)!
+      if (p.age >= 27 && expired < 2) {
+        p.contract.yearsRemaining = 0
+        expired++
+      }
+    }
+    const c = new Career(data, seed, data.league.teams[0])
+    c.startAtOffseason()
+    return c
+  }
+
+  it('opens a session with an expiring player: agent, ask, comparables, opening lines', () => {
+    const c = summerCareer()
+    const os = c.getOffseason()!
+    const row = os.expiring.find((r) => r.status === 'pending')
+    expect(row).toBeTruthy()
+    const v = c.startNegotiation(row!.playerId)
+    expect(v.status).toBe('open')
+    expect(v.kind).toBe('resign')
+    expect(v.agentName.length).toBeGreaterThan(3)
+    expect(v.askSalary).toBeGreaterThan(0)
+    expect(v.openingLines.length).toBeGreaterThanOrEqual(2)
+    expect(['warm', 'guarded', 'testy', 'hostile']).toContain(v.temperature)
+    // Resuming returns the same session, not a fresh one.
+    const again = c.startNegotiation(row!.playerId)
+    expect(again.askSalary).toBe(v.askSalary)
+  })
+
+  it('meeting the full ask signs the player and executes the contract', () => {
+    const c = summerCareer()
+    const row = c.getOffseason()!.expiring.find((r) => r.status === 'pending')!
+    const v = c.startNegotiation(row.playerId)
+    const res = c.submitNegotiationOffer(row.playerId, {
+      salary: v.askSalary,
+      years: v.askYears,
+      signingBonusPct: v.askBonusPct,
+      clause: v.askClause,
+      twoWay: false,
+    })
+    expect(res.signed).toBe(true)
+    expect(res.view.status).toBe('signed')
+    // The offseason view agrees.
+    const after = c.getOffseason()!.expiring.find((r) => r.playerId === row.playerId)
+    expect(after?.status).toBe('signed')
+    // The signing is chronicled in the inbox.
+    expect(c.getInbox().items.some((n) => n.headline.includes('re-signs'))).toBe(true)
+  })
+
+  it('a lowball draws a rejection with prose, burns patience, and rounds accumulate', () => {
+    const c = summerCareer()
+    const row = c.getOffseason()!.expiring.find((r) => r.status === 'pending')!
+    const v = c.startNegotiation(row.playerId)
+    const res = c.submitNegotiationOffer(row.playerId, {
+      salary: Math.round(v.askSalary * 0.4),
+      years: 1,
+      signingBonusPct: 0,
+      clause: 'none',
+      twoWay: false,
+    })
+    expect(res.signed).toBe(false)
+    expect(res.view.rounds.length).toBe(1)
+    expect(res.view.rounds[0]!.verdict).not.toBe('accept')
+    expect(res.view.rounds[0]!.agentLines.length).toBeGreaterThan(0)
+  })
+
+  it('sessions survive a save/load round-trip mid-negotiation', () => {
+    const c = summerCareer()
+    const row = c.getOffseason()!.expiring.find((r) => r.status === 'pending')!
+    const v = c.startNegotiation(row.playerId)
+    c.submitNegotiationOffer(row.playerId, {
+      salary: Math.round(v.askSalary * 0.9 / 25_000) * 25_000,
+      years: v.askYears,
+      signingBonusPct: 0,
+      clause: 'none',
+      twoWay: false,
+    })
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    const c2 = Career.fromSnapshot(snap)
+    const restored = c2.getNegotiation(row.playerId)
+    expect(restored).toBeTruthy()
+    expect(restored!.rounds.length).toBe(1)
+    expect(restored!.askSalary).toBeGreaterThan(0)
+  })
+
+  it('free agents negotiate too, and signing pulls them off the market', () => {
+    const c = summerCareer()
+    for (let i = 0; i < 6; i++) {
+      if (c.getOffseason()?.stage === 'freeAgency') break
+      c.advanceOffseason()
+    }
+    const os = c.getOffseason()!
+    expect(os.stage).toBe('freeAgency')
+    const fa = os.freeAgents.find((f) => f.askSalary < 3_000_000)
+    expect(fa).toBeTruthy()
+    const v = c.startNegotiation(fa!.playerId)
+    expect(v.kind).toBe('freeAgent')
+    const res = c.submitNegotiationOffer(fa!.playerId, {
+      salary: v.askSalary,
+      years: v.askYears,
+      signingBonusPct: v.askBonusPct,
+      clause: v.askClause,
+      twoWay: false,
+    })
+    expect(res.signed).toBe(true)
+    expect(c.getOffseason()!.freeAgents.some((f) => f.playerId === fa!.playerId)).toBe(false)
+  })
+
+  it('players not on the table refuse to open talks', () => {
+    const c = summerCareer()
+    const rosteredWithTerm = c.getSquad().rows.find((p) => p.contract.yearsRemaining > 0)
+    if (rosteredWithTerm) {
+      expect(() => c.startNegotiation(rosteredWithTerm.playerId)).toThrow()
+    }
+  })
+})

@@ -1,5 +1,6 @@
 import type {
   CareerSnapshot,
+  ContractOffer,
   LinesUpdate,
   PressTone,
   TeamPracticeState,
@@ -269,6 +270,18 @@ export class SimClient {
 
   toggleFollowAuthor(authorId: string): Promise<WorkerResponse> {
     return this.send({ type: 'toggleFollowAuthor', authorId })
+  }
+
+  getNegotiation(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getNegotiation', playerId })
+  }
+
+  startNegotiation(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'startNegotiation', playerId })
+  }
+
+  submitNegotiationOffer(playerId: string, offer: ContractOffer): Promise<WorkerResponse> {
+    return this.send({ type: 'submitNegotiationOffer', playerId, offer })
   }
 
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {

@@ -26,6 +26,7 @@ import { CalendarScreen } from './screens/CalendarScreen'
 import { FeedScreen } from './screens/FeedScreen'
 import { DevCampScreen } from './screens/DevCampScreen'
 import { TrainingCampScreen } from './screens/TrainingCampScreen'
+import { NegotiationScreen } from './screens/NegotiationScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
@@ -583,6 +584,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <DevCampScreen />
     case 'trainingCamp':
       return <TrainingCampScreen />
+    case 'negotiation':
+      return <NegotiationScreen />
     case 'trades':
       return <TradesScreen />
     case 'waivers':

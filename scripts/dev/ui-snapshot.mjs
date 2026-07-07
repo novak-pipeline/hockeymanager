@@ -129,6 +129,23 @@ try {
   } catch {
     console.log('  ⚠ feed subtab not reachable — skipped')
   }
+
+  // ── the negotiation room: open talks from the offseason desk (DEPTH 1) ──
+  try {
+    await win.click('text="Competitions"', { timeout: 4000 })
+    await win.waitForTimeout(400)
+    // The offseason tab is the active League view in summer; find any table
+    // row's "Open talks" entrance (re-sign list or FA market).
+    await win.click('button:has-text("Open talks")', { timeout: 5000 })
+    await win.waitForSelector('text=Contract talks', { timeout: 8000 })
+    await snap(win, 'negotiation-open')
+    // Table a real offer: use whatever the builder pre-seeded and submit.
+    await win.click('button:has-text("Table the offer")', { timeout: 5000 })
+    await win.waitForTimeout(900)
+    await snap(win, 'negotiation-round')
+  } catch {
+    console.log('  ⚠ negotiation room not reachable — skipped')
+  }
 } finally {
   writeFileSync(join(outDir, 'console-errors.txt'), consoleErrors.join('\n') || '(none)')
   console.log(`\n${shot} screenshots → ${outDir}`)

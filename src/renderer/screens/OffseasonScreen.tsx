@@ -311,13 +311,8 @@ function ResignRow(props: {
   row: ResignRowView
   onRefetch: () => void
 }): JSX.Element {
-  const client = useClient()
+  const nav = useNav()
   const { row } = props
-
-  const [salary, setSalary] = useState(String(Math.round(row.askSalary / 100_000) * 100_000))
-  const [years, setYears] = useState(String(row.askYears))
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
 
   if (row.status === 'signed') {
     return (
@@ -351,84 +346,33 @@ function ResignRow(props: {
     )
   }
 
-  async function doResign() {
-    setBusy(true)
-    setErr(null)
-    const salNum = parseFloat(salary)
-    const yrNum = parseInt(years, 10)
-    if (isNaN(salNum) || isNaN(yrNum) || yrNum < 1) {
-      setErr('Invalid salary or years.')
-      setBusy(false)
-      return
-    }
-    const r = await client.resignPlayer(row.playerId, salNum, yrNum)
-    setBusy(false)
-    if (r.type === 'error') {
-      setErr(r.message)
-    } else {
-      toast(`${row.name} re-signed.`, 'success')
-      props.onRefetch()
-    }
-  }
-
   const morale = row.morale
   const moraleColor = morale >= 75 ? 'var(--success)' : morale >= 40 ? 'var(--accent2)' : 'var(--danger)'
 
   return (
-    <>
-      <tr>
-        <td>
-          <PlayerLink playerId={row.playerId} name={row.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num"><OverallStars value={row.overall} /></td>
-        <td className="num">{fmtMoney(row.currentSalary)}</td>
-        <td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              className="input"
-              type="number"
-              min={100000}
-              step={50000}
-              value={salary}
-              onChange={(e) => setSalary(e.target.value)}
-              style={{ width: 100, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>×</span>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={8}
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-              style={{ width: 52, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>yr</span>
-          </div>
-        </td>
-        <td style={{ color: moraleColor, fontSize: 12 }}>
-          Ask: {fmtMoney(row.askSalary)} / {row.askYears}yr
-        </td>
-        <td>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '3px 12px', fontSize: 12 }}
-            disabled={busy}
-            onClick={doResign}
-          >
-            {busy ? '…' : 'Re-sign'}
-          </button>
-        </td>
-      </tr>
-      {err && (
-        <tr>
-          <td colSpan={7} style={{ paddingTop: 0 }}>
-            <Notice kind="warn">{err}</Notice>
-          </td>
-        </tr>
-      )}
-    </>
+    <tr>
+      <td>
+        <PlayerLink playerId={row.playerId} name={row.name} />
+      </td>
+      <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
+      <td className="num"><OverallStars value={row.overall} /></td>
+      <td className="num">{fmtMoney(row.currentSalary)}</td>
+      <td style={{ fontSize: 12 }}>
+        {fmtMoney(row.askSalary)} × {row.askYears}yr
+      </td>
+      <td style={{ color: moraleColor, fontSize: 12 }}>
+        {morale >= 75 ? 'Happy' : morale >= 40 ? 'Content' : 'Unsettled'}
+      </td>
+      <td>
+        <button
+          className="btn btn-primary"
+          style={{ padding: '3px 12px', fontSize: 12 }}
+          onClick={() => nav.navigate('negotiation', { playerId: row.playerId })}
+        >
+          Open talks →
+        </button>
+      </td>
+    </tr>
   )
 }
 
@@ -488,8 +432,8 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
               <th>Pos / Age</th>
               <th className="num">OVR</th>
               <th className="num">Current</th>
-              <th>Offer</th>
-              <th>Ask</th>
+              <th>Their ask</th>
+              <th>Mood</th>
               <th />
             </tr>
           </thead>
@@ -512,54 +456,11 @@ function FARow(props: {
   salaryCap: number
   onRefetch: () => void
 }): JSX.Element {
-  const client = useClient()
+  const nav = useNav()
   const { fa } = props
 
-  const [salary, setSalary] = useState(String(Math.round(fa.askSalary / 100_000) * 100_000))
-  const [years, setYears] = useState(String(fa.askYears))
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [signed, setSigned] = useState(false)
-
   const capSpace = props.salaryCap - props.capUsed
-  const askNum = parseFloat(salary)
-  const capTight = !isNaN(askNum) && askNum > capSpace
-
-  if (signed) {
-    return (
-      <tr>
-        <td>
-          <PlayerLink playerId={fa.playerId} name={fa.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num"><OverallStars value={fa.overall} /></td>
-        <td colSpan={4}>
-          <span className="chip chip-success">Signed</span>
-        </td>
-      </tr>
-    )
-  }
-
-  async function doSign() {
-    setBusy(true)
-    setErr(null)
-    const salNum = parseFloat(salary)
-    const yrNum = parseInt(years, 10)
-    if (isNaN(salNum) || isNaN(yrNum) || yrNum < 1) {
-      setErr('Invalid salary or years.')
-      setBusy(false)
-      return
-    }
-    const r = await client.signFreeAgent(fa.playerId, salNum, yrNum)
-    setBusy(false)
-    if (r.type === 'error') {
-      setErr(r.message)
-    } else {
-      toast(`${fa.name} signed.`, 'success')
-      setSigned(true)
-      props.onRefetch()
-    }
-  }
+  const capTight = fa.askSalary > capSpace
 
   const daysChip =
     fa.decidesInDays <= 0
@@ -569,64 +470,27 @@ function FARow(props: {
         : <span className="chip" style={{ fontSize: 10 }}>~{fa.decidesInDays}d left</span>
 
   return (
-    <>
-      <tr>
-        <td>
-          <PlayerLink playerId={fa.playerId} name={fa.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num"><OverallStars value={fa.overall} /></td>
-        <td>{daysChip}</td>
-        <td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              className="input"
-              type="number"
-              min={100000}
-              step={50000}
-              value={salary}
-              onChange={(e) => setSalary(e.target.value)}
-              style={{ width: 100, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>×</span>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={8}
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-              style={{ width: 52, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>yr</span>
-          </div>
-        </td>
-        <td style={{ color: 'var(--muted)', fontSize: 12 }}>
-          Ask: {fmtMoney(fa.askSalary)} / {fa.askYears}yr
-        </td>
-        <td>
-          {capTight ? (
-            <span style={{ fontSize: 12, color: 'var(--danger)' }}>Cap full</span>
-          ) : (
-            <button
-              className="btn btn-primary"
-              style={{ padding: '3px 12px', fontSize: 12 }}
-              disabled={busy}
-              onClick={doSign}
-            >
-              {busy ? '…' : 'Sign'}
-            </button>
-          )}
-        </td>
-      </tr>
-      {err && (
-        <tr>
-          <td colSpan={7} style={{ paddingTop: 0 }}>
-            <Notice kind="warn">{err}</Notice>
-          </td>
-        </tr>
-      )}
-    </>
+    <tr>
+      <td>
+        <PlayerLink playerId={fa.playerId} name={fa.name} />
+      </td>
+      <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
+      <td className="num"><OverallStars value={fa.overall} /></td>
+      <td>{daysChip}</td>
+      <td style={{ fontSize: 12 }}>
+        {fmtMoney(fa.askSalary)} × {fa.askYears}yr
+        {capTight && <span style={{ color: 'var(--danger)', marginLeft: 6 }}>over your cap</span>}
+      </td>
+      <td>
+        <button
+          className="btn btn-primary"
+          style={{ padding: '3px 12px', fontSize: 12 }}
+          onClick={() => nav.navigate('negotiation', { playerId: fa.playerId })}
+        >
+          Open talks →
+        </button>
+      </td>
+    </tr>
   )
 }
 
@@ -653,8 +517,7 @@ function FreeAgencyPanel(props: { view: OffseasonView; onRefetch: () => void }):
                 <th>Pos / Age</th>
                 <th className="num">OVR</th>
                 <th>Decides</th>
-                <th>Offer</th>
-                <th>Ask</th>
+                <th>Their ask</th>
                 <th />
               </tr>
             </thead>

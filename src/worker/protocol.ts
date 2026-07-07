@@ -99,6 +99,8 @@ export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'
 export type { DevCampView, TrainingCampView, TrainingCampState } from '@engine/career/views'
 import type { DevCampView, TrainingCampView } from '@engine/career/views'
+export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
+import type { NegotiationView, ContractOffer } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
 export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
@@ -214,6 +216,9 @@ export type WorkerRequestBody =
   | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }
   | { type: 'getFeed' }
   | { type: 'toggleFollowAuthor'; authorId: string }
+  | { type: 'getNegotiation'; playerId: string }
+  | { type: 'startNegotiation'; playerId: string }
+  | { type: 'submitNegotiationOffer'; playerId: string; offer: ContractOffer }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -455,6 +460,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
   | { type: 'feed'; feed: FeedView }
+  | { type: 'negotiation'; negotiation: NegotiationView | null; signed?: boolean; message?: string }
   | { type: 'devCamp'; devCamp: DevCampView | null }
   | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
   | { type: 'medical'; medical: MedicalView }

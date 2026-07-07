@@ -172,6 +172,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       must().toggleFollowAuthor(req.authorId)
       return { id: req.id, type: 'feed', feed: must().getFeed() }
     }
+    case 'getNegotiation':
+      return { id: req.id, type: 'negotiation', negotiation: must().getNegotiation(req.playerId) }
+    case 'startNegotiation':
+      return { id: req.id, type: 'negotiation', negotiation: must().startNegotiation(req.playerId) }
+    case 'submitNegotiationOffer': {
+      const res = must().submitNegotiationOffer(req.playerId, req.offer)
+      return { id: req.id, type: 'negotiation', negotiation: res.view, signed: res.signed, message: res.message }
+    }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
     case 'getDevelopment':

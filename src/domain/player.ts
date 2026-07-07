@@ -20,6 +20,11 @@ export interface Contract {
   expiryYear: number
   noTradeClause: boolean
   twoWay: boolean
+  /** Negotiated clause detail behind noTradeClause: modified = partial
+   *  no-trade list, full = no-move. Optional/additive (DEPTH 1). */
+  clause?: 'none' | 'modified' | 'full'
+  /** Percent of salary structured as signing bonus. Optional/additive. */
+  signingBonusPct?: number
 }
 
 export type InjuryKind = 'upperBody' | 'lowerBody' | 'concussion' | 'illness'

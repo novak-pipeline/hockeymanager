@@ -49,6 +49,17 @@ import type { PlayerInteraction, PlayerPromise } from '@engine/league/interactio
 export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/league/interactions'
 import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
 export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
+import type { NegotiationState } from '@engine/league/negotiation'
+export type {
+  AgentPersona,
+  ClauseLevel,
+  Comparable,
+  ContractOffer,
+  NegotiationKind,
+  NegotiationState,
+  NegotiationStatus,
+  RoundVerdict,
+} from '@engine/league/negotiation'
 
 /* ────────────────────────── camps (Season Rhythm M3) ────────────────────────── */
 
@@ -1283,6 +1294,55 @@ export interface FreeAgentRowView extends PlayerBadge {
   decidesInDays: number
 }
 
+/* ───────────────────── contract negotiation (DEPTH 1) ───────────────────── */
+
+/** One committed round as the UI sees it. */
+export interface NegotiationRoundView {
+  offerSalary: number
+  offerYears: number
+  offerBonusPct: number
+  offerClause: 'none' | 'modified' | 'full'
+  verdict: 'accept' | 'close' | 'reject' | 'walk'
+  agentLines: string[]
+}
+
+/** A live negotiation session — the NegotiationScreen's whole world. */
+export interface NegotiationView {
+  player: PlayerBadge
+  kind: 'resign' | 'freeAgent' | 'extension'
+  status: 'open' | 'signed' | 'paused' | 'walked'
+  /** ELC / RFA / UFA. */
+  rightsLabel: string
+  currentSalary: number
+  agentName: string
+  /** One-line persona read ("a hard-line anchor, talks to the press"). */
+  agentStyle: string
+  /** The agent's current position. */
+  askSalary: number
+  askYears: number
+  askBonusPct: number
+  askClause: 'none' | 'modified' | 'full'
+  /** Mood band, not the raw meter — negotiations keep their fog. */
+  temperature: 'warm' | 'guarded' | 'testy' | 'hostile'
+  openingLines: string[]
+  rounds: NegotiationRoundView[]
+  /** Real signed contracts the agent argues from. */
+  comparables: Array<{
+    name: string
+    teamAbbr: string
+    overall: number
+    age: number
+    salary: number
+    years: number
+  }>
+  /** What you've learned about his priorities so far. */
+  revealedHints: string[]
+  /** Your cap room right now (offers are validated against it). */
+  capSpace: number
+  /** When paused: the label the UI shows ("talks resume in a few days"). */
+  pausedNote?: string
+}
+
 export interface OfferSheetRowView extends PlayerBadge {
   /** Rival club that tendered the sheet. */
   fromTeamAbbr: string
@@ -1760,6 +1820,8 @@ export interface CareerSnapshot {
   feedCounter?: number
   /** Followed feed accounts (Phase B curation). Optional/additive. */
   followedFeedAuthors?: string[]
+  /** DEPTH 1: open/paused contract negotiation sessions by playerId. Optional/additive. */
+  negotiations?: Array<[string, NegotiationState]>
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */
