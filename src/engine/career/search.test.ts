@@ -520,3 +520,67 @@ describe('negotiation sessions (DEPTH 1)', () => {
     }
   })
 })
+
+describe('FA hub (DEPTH 2)', () => {
+  function faCareer(seed = 515): Career {
+    const data = generateLeague({ seed })
+    const c = new Career(data, seed, data.league.teams[0])
+    c.startAtOffseason()
+    for (let i = 0; i < 6; i++) {
+      if (c.getOffseason()?.stage === 'freeAgency') break
+      c.advanceOffseason()
+    }
+    return c
+  }
+
+  it('the hub triages the market: asks, agents, two-way interest, honest clocks', () => {
+    const c = faCareer()
+    const hub = c.getFaHub()
+    expect(hub.rows.length).toBeGreaterThan(0)
+    for (const r of hub.rows) {
+      expect(r.askSalary).toBeGreaterThan(0)
+      expect(r.agentName.length).toBeGreaterThan(3)
+      expect(['keen', 'warm', 'cold']).toContain(r.interest)
+      expect(r.interestNote.length).toBeGreaterThan(10)
+      expect(r.wants.length).toBeGreaterThan(10)
+      expect(r.decidesInDays).toBeGreaterThanOrEqual(0)
+    }
+    expect(hub.capSpace).toBeDefined()
+  })
+
+  it('shortlist toggles, shows on rows, and survives save/load', () => {
+    const c = faCareer()
+    const first = c.getFaHub().rows[0]!
+    expect(c.toggleFaShortlist(first.playerId)).toEqual({ shortlisted: true })
+    expect(c.getFaHub().rows[0]!.shortlisted).toBe(true)
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    const c2 = Career.fromSnapshot(snap)
+    expect(c2.getFaHub().rows[0]!.shortlisted).toBe(true)
+    expect(c.toggleFaShortlist(first.playerId)).toEqual({ shortlisted: false })
+  })
+
+  it('losing a shortlisted name brings a debrief with the reason', () => {
+    const c = faCareer()
+    // Track everyone so whoever the AI signs, we were "in on him".
+    for (const r of c.getFaHub().rows) c.toggleFaShortlist(r.playerId)
+    // Advance days until the AI market moves (head start = 2 days, then signings).
+    let lossMail = false
+    for (let i = 0; i < 10 && !lossMail; i++) {
+      c.advanceOffseason()
+      lossMail = c.getInbox().items.some((n) => n.headline.startsWith('You lose '))
+      if (c.getOffseason()?.stage !== 'freeAgency') break
+    }
+    expect(lossMail).toBe(true)
+    // The debrief names the reason category.
+    const mail = c.getInbox().items.find((n) => n.headline.startsWith('You lose '))!
+    expect(mail.body).toMatch(/came down to (the money|the term|the fit)/)
+  })
+
+  it('open talks show on the hub row', () => {
+    const c = faCareer()
+    const fa = c.getFaHub().rows.find((r) => !r.hot) ?? c.getFaHub().rows[0]!
+    c.startNegotiation(fa.playerId)
+    const row = c.getFaHub().rows.find((r) => r.playerId === fa.playerId)!
+    expect(row.inTalks).toBe(true)
+  })
+})

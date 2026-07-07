@@ -1294,6 +1294,33 @@ export interface FreeAgentRowView extends PlayerBadge {
   decidesInDays: number
 }
 
+/* ───────────────────────── free-agency hub (DEPTH 2) ───────────────────────── */
+
+/** One name on the open market, with everything a GM triages by. */
+export interface FaHubRowView extends PlayerBadge {
+  askSalary: number
+  askYears: number
+  /** Honest market clock: days before AI clubs can sign him out from under you. */
+  decidesInDays: number
+  agentName: string
+  /** HIS read on YOUR club — the market is two-way. */
+  interest: 'keen' | 'warm' | 'cold'
+  interestNote: string
+  /** What his camp leads with (top priority hint). */
+  wants: string
+  /** Rival appetite — hot names negotiate from strength. */
+  hot: boolean
+  shortlisted: boolean
+  /** An open/paused negotiation session exists with this player. */
+  inTalks: boolean
+}
+
+export interface FaHubView {
+  rows: FaHubRowView[]
+  faDay: number
+  capSpace: number
+}
+
 /* ───────────────────── contract negotiation (DEPTH 1) ───────────────────── */
 
 /** One committed round as the UI sees it. */
@@ -1822,6 +1849,8 @@ export interface CareerSnapshot {
   followedFeedAuthors?: string[]
   /** DEPTH 1: open/paused contract negotiation sessions by playerId. Optional/additive. */
   negotiations?: Array<[string, NegotiationState]>
+  /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
+  faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */

@@ -284,6 +284,14 @@ export class SimClient {
     return this.send({ type: 'submitNegotiationOffer', playerId, offer })
   }
 
+  getFaHub(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFaHub' })
+  }
+
+  toggleFaShortlist(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleFaShortlist', playerId })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

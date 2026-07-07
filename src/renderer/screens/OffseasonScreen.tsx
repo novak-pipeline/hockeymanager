@@ -448,59 +448,48 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
   )
 }
 
-// ─── free-agency stage ────────────────────────────────────────────────────────
+// ─── free-agency stage: the FA hub (DEPTH 2) ─────────────────────────────────
 
-function FARow(props: {
-  fa: FreeAgentRowView
-  capUsed: number
-  salaryCap: number
-  onRefetch: () => void
-}): JSX.Element {
-  const nav = useNav()
-  const { fa } = props
-
-  const capSpace = props.salaryCap - props.capUsed
-  const capTight = fa.askSalary > capSpace
-
-  const daysChip =
-    fa.decidesInDays <= 0
-      ? <span className="chip chip-danger" style={{ fontSize: 10 }}>Decides today</span>
-      : fa.decidesInDays <= 3
-        ? <span className="chip chip-warn" style={{ fontSize: 10 }}>~{fa.decidesInDays}d left</span>
-        : <span className="chip" style={{ fontSize: 10 }}>~{fa.decidesInDays}d left</span>
-
-  return (
-    <tr>
-      <td>
-        <PlayerLink playerId={fa.playerId} name={fa.name} />
-      </td>
-      <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-      <td className="num"><OverallStars value={fa.overall} /></td>
-      <td>{daysChip}</td>
-      <td style={{ fontSize: 12 }}>
-        {fmtMoney(fa.askSalary)} × {fa.askYears}yr
-        {capTight && <span style={{ color: 'var(--danger)', marginLeft: 6 }}>over your cap</span>}
-      </td>
-      <td>
-        <button
-          className="btn btn-primary"
-          style={{ padding: '3px 12px', fontSize: 12 }}
-          onClick={() => nav.navigate('negotiation', { playerId: fa.playerId })}
-        >
-          Open talks →
-        </button>
-      </td>
-    </tr>
-  )
+const INTEREST_META: Record<'keen' | 'warm' | 'cold', { label: string; color: string }> = {
+  keen: { label: 'Keen', color: 'var(--success, #4caf7d)' },
+  warm: { label: 'Warm', color: 'var(--amber, #d6a056)' },
+  cold: { label: 'Cold', color: 'var(--muted)' },
 }
 
+/** The market, triaged: filter, search, shortlist, two-way interest, honest
+ *  clocks — and every name opens the same negotiation room. */
 function FreeAgencyPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX.Element {
+  const client = useClient()
+  const nav = useNav()
   const { view } = props
+  const [posFilter, setPosFilter] = useState<'all' | 'F' | 'D' | 'G' | 'starred'>('all')
+  const [search, setSearch] = useState('')
+  const { data: hub, refetch: refetchHub } = useScreenData(
+    () => client.getFaHub(),
+    (r) => (r.type === 'faHub' ? r.faHub : null)
+  )
 
-  if (view.freeAgents.length === 0) {
+  const rows = (hub?.rows ?? []).filter((r) => {
+    if (posFilter === 'starred' && !r.shortlisted) return false
+    if (posFilter === 'F' && (r.position === 'D' || r.position === 'G')) return false
+    if (posFilter === 'D' && r.position !== 'D') return false
+    if (posFilter === 'G' && r.position !== 'G') return false
+    if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const star = async (playerId: string): Promise<void> => {
+    const r = await client.toggleFaShortlist(playerId)
+    if (r.type === 'error') toast(r.message, 'error')
+    else refetchHub()
+  }
+
+  if ((hub?.rows ?? []).length === 0) {
     return (
-      <Panel title="Free agents">
-        <Notice kind="info">No free agents available.</Notice>
+      <Panel title="The open market">
+        <Notice kind="info">
+          The market is picked clean — every name worth a contract has signed. The next class arrives after the season.
+        </Notice>
       </Panel>
     )
   }
@@ -508,29 +497,100 @@ function FreeAgencyPanel(props: { view: OffseasonView; onRefetch: () => void }):
   return (
     <div className="stack">
       <CapBar used={view.capUsed} cap={view.salaryCap} />
-      <Panel title="Free agents">
+      <Panel title={`The open market — ${hub?.rows.length ?? 0} available`}>
+        {/* triage bar */}
+        <div className="row" style={{ gap: 6, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {(['all', 'F', 'D', 'G', 'starred'] as const).map((f) => (
+            <button
+              key={f}
+              className={`chip${posFilter === f ? ' chip-accent' : ''}`}
+              style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+              onClick={() => setPosFilter(f)}
+            >
+              {f === 'all' ? 'All' : f === 'starred' ? '★ Shortlist' : f === 'F' ? 'Forwards' : f === 'D' ? 'Defense' : 'Goalies'}
+            </button>
+          ))}
+          <span style={{ flex: 1 }} />
+          <input
+            className="input"
+            placeholder="Search name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: 180, padding: '4px 10px', fontSize: 12 }}
+          />
+        </div>
+
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
+                <th style={{ width: 26 }} />
                 <th>Player</th>
                 <th>Pos / Age</th>
                 <th className="num">OVR</th>
-                <th>Decides</th>
                 <th>Their ask</th>
+                <th>Agent</th>
+                <th>His interest in you</th>
+                <th>Clock</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {view.freeAgents.map((fa) => (
-                <FARow
-                  key={fa.playerId}
-                  fa={fa}
-                  capUsed={view.capUsed}
-                  salaryCap={view.salaryCap}
-                  onRefetch={props.onRefetch}
-                />
-              ))}
+              {rows.map((fa) => {
+                const im = INTEREST_META[fa.interest]
+                const capTight = fa.askSalary > (hub?.capSpace ?? 0)
+                return (
+                  <tr key={fa.playerId} style={fa.shortlisted ? { background: 'rgba(var(--accent-rgb, 108,92,231), 0.06)' } : undefined}>
+                    <td>
+                      <button
+                        title={fa.shortlisted ? 'Remove from shortlist' : 'Track this player — you get told if someone signs him'}
+                        onClick={() => void star(fa.playerId)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, padding: 0,
+                          color: fa.shortlisted ? 'var(--amber, #d6a056)' : 'var(--line)',
+                        }}
+                      >
+                        ★
+                      </button>
+                    </td>
+                    <td>
+                      <PlayerLink playerId={fa.playerId} name={fa.name} />
+                      {fa.hot && <span className="chip chip-danger" style={{ fontSize: 9, marginLeft: 6 }} title="Multiple clubs circling — he negotiates from strength">HOT</span>}
+                      {fa.inTalks && <span className="chip chip-violet" style={{ fontSize: 9, marginLeft: 6 }}>in talks</span>}
+                    </td>
+                    <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
+                    <td className="num"><OverallStars value={fa.overall} /></td>
+                    <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                      {fmtMoney(fa.askSalary)} × {fa.askYears}yr
+                      {capTight && <div style={{ color: 'var(--danger)', fontSize: 10 }}>over your cap</div>}
+                    </td>
+                    <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{fa.agentName}</td>
+                    <td style={{ fontSize: 11.5, maxWidth: 240 }}>
+                      <span style={{ color: im.color, fontWeight: 700 }}>{im.label}</span>
+                      <span className="muted" style={{ marginLeft: 6 }} title={fa.wants}>{fa.interestNote}</span>
+                    </td>
+                    <td>
+                      {fa.decidesInDays <= 0
+                        ? <span className="chip chip-danger" style={{ fontSize: 10 }}>any day</span>
+                        : fa.decidesInDays <= 2
+                          ? <span className="chip chip-warn" style={{ fontSize: 10 }}>~{fa.decidesInDays}d</span>
+                          : <span className="chip" style={{ fontSize: 10 }}>~{fa.decidesInDays}d</span>}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-primary"
+                        style={{ padding: '3px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+                        onClick={() => nav.navigate('negotiation', { playerId: fa.playerId })}
+                      >
+                        {fa.inTalks ? 'Resume talks →' : 'Open talks →'}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+              {rows.length === 0 && (
+                <tr><td colSpan={9} className="muted small" style={{ padding: 12 }}>No names match the filter.</td></tr>
+              )}
             </tbody>
           </table>
         </div>

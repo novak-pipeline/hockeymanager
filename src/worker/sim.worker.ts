@@ -180,6 +180,12 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().submitNegotiationOffer(req.playerId, req.offer)
       return { id: req.id, type: 'negotiation', negotiation: res.view, signed: res.signed, message: res.message }
     }
+    case 'getFaHub':
+      return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
+    case 'toggleFaShortlist': {
+      must().toggleFaShortlist(req.playerId)
+      return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
+    }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
     case 'getDevelopment':

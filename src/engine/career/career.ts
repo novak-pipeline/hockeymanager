@@ -254,6 +254,7 @@ import {
   openNegotiation,
   openingLines,
   priorityHints,
+  priorityWeights,
   type Comparable,
   type ContractOffer,
   type NegotiationState,
@@ -437,6 +438,7 @@ import {
   type LockerRoomView,
   type OffseasonView,
   type NegotiationView,
+  type FaHubView,
   type WaiverWireRowView,
   type LeagueWireView,
   type GMProfileView,
@@ -690,6 +692,9 @@ export class Career {
   /** DEPTH 1: live contract-negotiation sessions, keyed by playerId. Sessions
    *  are per-offseason; stale ones are dropped when eligibility lapses. */
   private negotiations = new Map<string, NegotiationState>()
+  /** DEPTH 2: free agents the GM is tracking — shortlisted names get loss
+   *  mail with a reason when a rival signs them. */
+  private faShortlist = new Set<string>()
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -5230,6 +5235,34 @@ export class Career {
             { playerId: s.playerId as string, teamId: s.teamId as string }
           )
         }
+        // Losses teach: a name YOU were tracking (shortlist or open talks)
+        // signing elsewhere gets a personal debrief with the WHY.
+        for (const s of res.signings) {
+          const pid = s.playerId as string
+          const tracked = this.faShortlist.has(pid)
+          const session = this.negotiations.get(pid)
+          const inTalks = session !== undefined && session.year === this.year &&
+            (session.status === 'open' || session.status === 'paused')
+          if (!tracked && !inTalks) continue
+          const p = this.resolve(s.playerId)
+          const t = this.data.teams.get(s.teamId)!
+          const w = priorityWeights(p)
+          const reason =
+            w.money >= 0.35
+              ? `the money — $${(s.salary / 1e6).toFixed(2)}M a year was the market, and someone paid it`
+              : w.term >= 0.3
+                ? `the term — ${s.years} guaranteed years bought the security his camp wanted`
+                : `the fit — ${t.name} offered the role his agent kept asking about`
+          this.pushNews(
+            'contract',
+            `You lose ${p.name} to ${t.abbreviation}`,
+            `${p.name} was on your board, but he signs with ${t.name} ` +
+            `($${(s.salary / 1e6).toFixed(2)}M × ${s.years}). His agent's read: it came down to ${reason}.`,
+            { playerId: pid, teamId: s.teamId as string }
+          )
+          this.faShortlist.delete(pid)
+          if (session && session.status !== 'signed') session.status = 'walked'
+        }
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         if (os.faDay >= FA_WINDOW_DAYS) {
           // Unanswered arbitration awards bind the club (cap permitting).
@@ -7255,6 +7288,101 @@ export class Career {
       this.transactionLedger = txResult.ledger
     }
     return { signed: true, message: `${player.name} is yours.` }
+  }
+
+  /* ───────────────────── free-agency hub (DEPTH 2) ─────────────────────── */
+
+  toggleFaShortlist(playerId: string): { shortlisted: boolean } {
+    if (this.faShortlist.has(playerId)) {
+      this.faShortlist.delete(playerId)
+      return { shortlisted: false }
+    }
+    this.faShortlist.add(playerId)
+    return { shortlisted: true }
+  }
+
+  /** A free agent's interest in YOUR club — the market is two-way. Derived
+   *  from real state (roster hole, cap fit, contender status) plus a stable
+   *  per-player lean, so a fourth-liner returns your call and a star on a
+   *  contender-chaser's list doesn't. */
+  private faInterestFor(p: Player): { interest: 'keen' | 'warm' | 'cold'; note: string } {
+    const ask = askTerms(p, this.year)
+    const grp = p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
+    const targets: Record<string, number> = { F: 14, D: 7, G: 2 }
+    let secure = 0
+    for (const id of this.userTeam.roster) {
+      const r = this.data.players.get(id)
+      if (!r || r.contract.yearsRemaining <= 0) continue
+      const g = r.position === 'G' ? 'G' : r.position === 'D' ? 'D' : 'F'
+      if (g === grp) secure++
+    }
+    const holeAtPosition = secure < targets[grp]!
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capFits = capUsedNow + this.userDeadCap + ask.salary <= this.userTeam.finances.salaryCap
+    const contender = (expectedRankOf(this.expectationsState, this.userTeamId as string) ?? 16) <= 8
+    const w = priorityWeights(p)
+
+    let score = 25
+    if (holeAtPosition) score += 30
+    if (capFits) score += 20
+    else score -= 25
+    if (contender) score += 15
+    // Stable personal lean (family/geography flavor the fog never fully explains).
+    score += Math.round((Number((p.id.match(/\d+/) ?? ['0'])[0]) % 31) - 15)
+
+    const interest = score >= 60 ? 'keen' : score >= 35 ? 'warm' : 'cold'
+    const note = !capFits
+      ? 'His agent knows your cap sheet — the money is not there today.'
+      : holeAtPosition
+        ? `He sees the open ${grp === 'G' ? 'crease' : grp === 'D' ? 'pairing' : 'forward slot'} — a real role is on offer.`
+        : contender && w.money < 0.35
+          ? 'A contender pick — winning moves him more than the last dollar.'
+          : interest === 'cold'
+            ? 'His camp is listening elsewhere first.'
+            : 'Open to the conversation if the terms respect the market.'
+    return { interest, note }
+  }
+
+  /** The market, triaged: everything a GM filters and decides by. */
+  getFaHub(): FaHubView {
+    const os = this.offseason
+    const faDay = os?.faDay ?? 0
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+
+    // The honest clock: aiFreeAgencyDay signs rank r on effective day 1+r/3,
+    // and the AI runs 2 days behind the user (the head start).
+    const pool = this.faPool
+      .map((id) => this.resolve(id))
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
+
+    const rows = pool.map((p, rank) => {
+      const ask = askTerms(p, this.year)
+      const agent = agentFor(p)
+      const { interest, note } = this.faInterestFor(p)
+      const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
+      const session = this.negotiations.get(p.id as string)
+      return {
+        ...badge(p),
+        askSalary: ask.salary,
+        askYears: ask.years,
+        decidesInDays: Math.max(0, decideDay - faDay),
+        agentName: agent.name,
+        interest,
+        interestNote: note,
+        wants: priorityHints(p)[0] ?? '',
+        hot: this.marketHeatFor(p) > 0.35,
+        shortlisted: this.faShortlist.has(p.id as string),
+        inTalks: session !== undefined && session.year === this.year && session.status !== 'signed' && session.status !== 'walked',
+      }
+    })
+
+    return {
+      rows,
+      faDay,
+      capSpace: this.userTeam.finances.salaryCap - capUsedNow - this.userDeadCap,
+    }
   }
 
   /* ─────────────── contract negotiation sessions (DEPTH 1) ─────────────── */
@@ -12251,6 +12379,7 @@ export class Career {
       negotiations: [...this.negotiations.entries()].map(
         ([k, v]) => [k, structuredClone(v)] as [string, NegotiationState]
       ),
+      faShortlist: [...this.faShortlist],
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -12406,6 +12535,7 @@ export class Career {
         snapshot.negotiations.map(([k, v]) => [k, structuredClone(v)])
       )
     }
+    if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }
