@@ -290,6 +290,8 @@ export interface DashboardView {
   /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
    *  past it sends the AGM in your place — a soft gate, not a hard one. */
   boardMeetingPending?: boolean
+  /** Offseason: human stage label for headers ('Free agency — day 3'). Optional/additive. */
+  offseasonStageLabel?: string
   /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
   devCampPending?: boolean
   /** M3: cut day — training camp decisions await before opening night. Optional/additive. */

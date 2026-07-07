@@ -234,7 +234,10 @@ def contract_from_row(row):
         return None
     parts = str(row[C_EXPIRES] or "").split(".")
     exp_year = to_int(parts[2]) if len(parts) == 3 else 0
-    years = clamp(exp_year - SEASON_YEAR, 1, 8) if exp_year else 2
+    # Floor at 0, not 1: a contract already expired in the DB means the player
+    # reaches free agency at the game's opening summer (accurate day-one UFAs
+    # for exports that carry them; the post-frenzy Pivot rosters have none).
+    years = clamp(exp_year - SEASON_YEAR, 0, 8) if exp_year else 2
     return {"salary": salary, "years": years}
 
 def personality_from_row(row):

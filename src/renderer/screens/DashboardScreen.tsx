@@ -172,7 +172,7 @@ export function DashboardScreen(): JSX.Element {
       <ScreenHeader title={d.userTeam.name}>
         <CustomizeMenu hidden={hiddenPanels} onToggle={togglePanel} />
         <span className="muted small">
-          {d.leagueName} · {d.year} · Day {d.day}/{d.totalDays}
+          {d.leagueName} · {d.year} · {d.phase === 'offseason' ? (d.offseasonStageLabel ?? 'Offseason') : `Day ${d.day}/${d.totalDays}`}
         </span>
       </ScreenHeader>
 
@@ -199,6 +199,26 @@ export function DashboardScreen(): JSX.Element {
           onClick={() => nav.navigate('trades')}
         >
           ⏰ DEADLINE DAY — the trade window closes when you continue. Last chance to work the phones.
+        </button>
+      )}
+
+      {d.campPending && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
+          onClick={() => nav.navigate('trainingCamp')}
+        >
+          {'\u2702\ufe0f'} CUT DAY {'\u2014'} camp verdicts are in. Pick your 23 before the opener, or the coach picks for you.
+        </button>
+      )}
+
+      {d.devCampPending && (
+        <button
+          className="dash-banner"
+          style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
+          onClick={() => nav.navigate('devCamp')}
+        >
+          {'\ud83c\udfd2'} Development camp is on the ice this week {'\u2014'} the org kids, your staff first live reads.
         </button>
       )}
 
@@ -315,8 +335,11 @@ export function DashboardScreen(): JSX.Element {
             <StorylinesStrip arcs={d.topArcs} />
           )}
 
+          {/* The Summer hub (offseason): the working panels for July-September */}
+          {d.phase === 'offseason' && <SummerPanel stageLabel={d.offseasonStageLabel} onOpen={() => nav.navigate('offseason')} />}
+
           {/* News / last result hero */}
-          {d.lastResult ? (
+          {d.phase !== 'offseason' && (d.lastResult ? (
             <LastResultHero
               result={d.lastResult}
               boxScore={boxScore ?? null}
@@ -326,9 +349,10 @@ export function DashboardScreen(): JSX.Element {
             <Panel title="Match result">
               <span className="muted small">No games played yet.</span>
             </Panel>
-          )}
+          ))}
 
           {/* Next game */}
+          {d.phase !== 'offseason' && (
           <Panel title="Next game">
             {d.nextGame ? (
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
@@ -384,9 +408,10 @@ export function DashboardScreen(): JSX.Element {
               <span className="muted small">No fixture scheduled.</span>
             )}
           </Panel>
+          )}
 
           {/* The next two weeks — compact strip, not a month of empty cells */}
-          {schedule && d.date && (
+          {d.phase !== 'offseason' && schedule && d.date && (
             <FortnightStrip
               entries={schedule.entries}
               todayDate={d.date}
@@ -959,6 +984,129 @@ function BoardConfidenceChip(props: {
   )
 }
 
+/** The Summer hub — the offseason dashboard centerpiece. Shows where you are
+ *  in the summer (July 1 anchors free agency), what needs your signature, and
+ *  who is on the market, instead of dead in-season match panels. */
+function SummerPanel({ stageLabel, onOpen }: { stageLabel?: string; onOpen: () => void }): JSX.Element {
+  const client = useClient()
+  const nav = useNav()
+  const { data: os } = useScreenData(
+    () => client.getOffseason(),
+    (r) => (r.type === 'offseason' ? r.offseason : null)
+  )
+
+  const stages: Array<{ key: string; label: string }> = [
+    { key: 'resign', label: 'Re-sign' },
+    { key: 'freeAgency', label: 'Jul 1 · Free agency' },
+    { key: 'preseason', label: 'Sept · Training camp' },
+  ]
+  const currentKey = os?.stage ?? 'resign'
+
+  return (
+    <Panel title="The Summer">
+      {/* stage timeline */}
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
+        {stages.map((st, i) => {
+          const activeIdx = stages.findIndex((x) => x.key === currentKey)
+          const state = i < activeIdx ? 'done' : i === activeIdx ? 'now' : 'next'
+          return (
+            <span key={st.key} className="row" style={{ gap: 6, alignItems: 'center' }}>
+              <span
+                className="chip"
+                style={{
+                  fontSize: 11,
+                  ...(state === 'now'
+                    ? { background: 'rgba(var(--accent-rgb),0.2)', color: 'var(--violet-h)', fontWeight: 700, border: '1px solid var(--violet-h)' }
+                    : state === 'done'
+                      ? { opacity: 0.55, textDecoration: 'line-through' }
+                      : { opacity: 0.75 }),
+                }}
+              >
+                {st.label}
+              </span>
+              {i < stages.length - 1 && <span className="muted small">→</span>}
+            </span>
+          )
+        })}
+        <span className="chip chip-warn" style={{ fontSize: 11 }}>🏒 Opening night · Oct 1</span>
+      </div>
+
+      {/* stage content */}
+      {os?.stage === 'resign' && (
+        <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+          {os.expiring.filter((r) => r.status === 'pending').length === 0 ? (
+            <span className="muted small">No expiring contracts need your signature. The desk is clear for July 1.</span>
+          ) : (
+            <>
+              <div className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>
+                Expiring contracts — your call first
+              </div>
+              <div className="list">
+                {os.expiring.filter((r) => r.status === 'pending').slice(0, 6).map((r) => (
+                  <div key={r.playerId} className="row-between small">
+                    <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                      <PlayerFace faceId={r.faceId} name={r.name} size={24} />
+                      <span className="muted" style={{ width: 20 }}>{r.position}</span>
+                      <PlayerLink playerId={r.playerId} name={r.name} />
+                      <span className="muted">{r.age}</span>
+                    </span>
+                    <span className="mono muted">asks {fmtMoney(r.askSalary)} × {r.askYears}y</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {(os.arbitration?.length ?? 0) > 0 && (
+            <span className="chip chip-danger" style={{ fontSize: 11 }}>
+              ⚖ {os.arbitration!.length} arbitration case{os.arbitration!.length === 1 ? '' : 's'} pending
+            </span>
+          )}
+        </div>
+      )}
+      {os?.stage === 'freeAgency' && (
+        <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+          <div className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>
+            Best available on the open market
+          </div>
+          {os.freeAgents.length === 0 ? (
+            <span className="muted small">
+              The market is picked clean — every name worth a contract is signed. The next class arrives after the season.
+            </span>
+          ) : (
+            <div className="list">
+              {[...os.freeAgents].sort((a, b) => b.overall - a.overall).slice(0, 6).map((f) => (
+                <div key={f.playerId} className="row-between small">
+                  <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                    <PlayerFace faceId={f.faceId} name={f.name} size={24} />
+                    <span className="muted" style={{ width: 20 }}>{f.position}</span>
+                    <PlayerLink playerId={f.playerId} name={f.name} />
+                    <span className="muted">{f.age}</span>
+                  </span>
+                  <span className="mono muted">asks {fmtMoney(f.askSalary)} × {f.askYears}y · decides {f.decidesInDays}d</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {os?.stage === 'preseason' && (
+        <span className="muted small">Camp is underway — the roster battles resolve before the opener.</span>
+      )}
+
+      <div className="row" style={{ marginTop: 'var(--sp-3)' }}>
+        <button className="btn btn-primary btn-sm" onClick={onOpen}>
+          Open the offseason desk →
+        </button>
+        {stageLabel && <span className="muted small" style={{ alignSelf: 'center', marginLeft: 8 }}>{stageLabel}</span>}
+        <span style={{ flex: 1 }} />
+        <button className="btn btn-ghost btn-sm" onClick={() => nav.navigate('calendar')}>
+          Full calendar
+        </button>
+      </div>
+    </Panel>
+  )
+}
+
 /** The season at a glance: record, streak, cap, expectation, board mood, and
  *  squad health — one dense row instead of three half-empty panels. */
 function StatusStrip(props: {
@@ -995,12 +1143,16 @@ function StatusStrip(props: {
         </div>
       </div>
       {divider}
-      {/* form */}
-      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-        <span className="chip chip-violet" style={{ fontSize: 11 }}>Streak {s.streak}</span>
-        <LastFive value={s.lastFive} />
-      </div>
-      {divider}
+      {/* form (only once games exist — a day-zero streak is noise) */}
+      {s.wins + s.losses + s.overtimeLosses > 0 && (
+        <>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <span className="chip chip-violet" style={{ fontSize: 11 }}>Streak {s.streak}</span>
+            <LastFive value={s.lastFive} />
+          </div>
+          {divider}
+        </>
+      )}
       {/* cap */}
       <div title={`${fmtMoney(d.capUsed)} used of ${fmtMoney(d.salaryCap)}`}>
         <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Cap space</div>
@@ -1015,8 +1167,11 @@ function StatusStrip(props: {
       {divider}
       {/* the verdict chips */}
       <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-        {d.predictedRank !== undefined && (
+        {d.predictedRank !== undefined && s.wins + s.losses + s.overtimeLosses > 0 && (
           <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
+        )}
+        {d.predictedRank !== undefined && s.wins + s.losses + s.overtimeLosses === 0 && (
+          <span className="chip chip-violet">Media pick: {d.predictedRank}{getOrdinalSuffix(d.predictedRank)}</span>
         )}
         {d.board && <BoardConfidenceChip board={d.board} onNavigate={props.onBoard} />}
         <button

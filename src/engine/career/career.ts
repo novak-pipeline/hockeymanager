@@ -7642,6 +7642,21 @@ export class Career {
 
   /* ────────────────────────── view builders ────────────────────────── */
 
+  /** The summer calendar: offseason stages map to real dates. July 1 is the
+   *  anchor — free agency opens exactly there, day by day. */
+  private offseasonDateISO(): string {
+    const os = this.offseason
+    const summerYear = this.currentDay === 0 ? this.year : this.year + 1
+    if (!os) return `${summerYear}-07-01`
+    switch (os.stage) {
+      case 'awards': return `${summerYear}-06-18`
+      case 'draft': return `${summerYear}-06-27`
+      case 'resign': return `${summerYear}-07-01`
+      case 'freeAgency': return `${summerYear}-07-${String(Math.min(31, 1 + os.faDay)).padStart(2, '0')}`
+      case 'preseason': return `${summerYear}-09-15`
+    }
+  }
+
   getDashboard(): DashboardView {
     const ctx = this.ctx()
     const sorted = ctx.standingsSorted
@@ -7853,11 +7868,24 @@ export class Career {
       phase: this.phase,
       day: this.currentDay,
       totalDays: this.matchDays[this.matchDays.length - 1] ?? 0,
-      date: dayToDateISO(this.year, Math.max(1, this.currentDay)),
+      date: this.phase === 'offseason' ? this.offseasonDateISO() : dayToDateISO(this.year, Math.max(1, this.currentDay)),
       continueLabel,
       draftPending: this.draftPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       devCampPending: this.devCampPending && this.phase === 'offseason',
+      ...(this.phase === 'offseason' && this.offseason
+        ? {
+            offseasonStageLabel: (
+              {
+                awards: 'Season awards',
+                draft: 'Entry draft',
+                resign: 'Re-signing window',
+                freeAgency: `Free agency — day ${this.offseason.faDay + 1}`,
+                preseason: 'Training camp',
+              } as Record<string, string>
+            )[this.offseason.stage],
+          }
+        : {}),
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
