@@ -6,7 +6,6 @@
 import { useState } from 'react'
 import type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
-import { MarkForMeetingButton } from '../components/MarkForMeetingButton'
 import { fmtToi } from '../components/format'
 import { Notice, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -173,7 +172,6 @@ export function LeagueStatsTableScreen(props: { teamId?: string } = {}): JSX.Ele
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <PlayerLink playerId={r.playerId} name={r.name} />
-                    <MarkForMeetingButton playerId={r.playerId} />
                   </span>
                 </td>
                 {!scoped && <td className="muted small">{r.teamAbbr}</td>}

@@ -26,7 +26,6 @@ import type {
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
-import { MarkForMeetingButton } from '../components/MarkForMeetingButton'
 
 /* ═══════════════════════════════════════════════════════════════════
    Helpers
@@ -476,7 +475,6 @@ function PlayerLeaderTable({
                       <button type="button" className="player-link" style={{ fontWeight: isUser ? 700 : 400, fontSize: 12 }} onClick={() => onPlayerClick(row.playerId)}>
                         {row.name}
                       </button>
-                      <MarkForMeetingButton playerId={row.playerId} />
                     </span>
                   </td>
                   <td style={{ color: 'var(--muted)', fontSize: 11 }}>{row.teamAbbr}</td>
