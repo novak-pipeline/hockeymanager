@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { NewsCategory } from '@domain'
 import type {
   BoardSummaryView,
+  CalendarEntry,
+  CalendarView,
   BoxScoreView,
   DashboardView,
   InboxView,
@@ -115,6 +117,11 @@ export function DashboardScreen(): JSX.Element {
     (r) => (r.type === 'schedule' ? r.schedule : null)
   )
 
+  const { data: calendar } = useScreenData(
+    () => client.getCalendar(),
+    (r) => (r.type === 'calendar' ? r.calendar : null)
+  )
+
   const { data: boxScore } = useScreenData<BoxScoreView | null>(
     () => client.getLastBoxScore(),
     (r) => (r.type === 'boxScore' ? r.boxScore : null)
@@ -168,13 +175,8 @@ export function DashboardScreen(): JSX.Element {
 
   return (
     <section className="stack">
-      {/* title row */}
-      <ScreenHeader title={d.userTeam.name}>
-        <CustomizeMenu hidden={hiddenPanels} onToggle={togglePanel} />
-        <span className="muted small">
-          {d.leagueName} · {d.year} · {d.phase === 'offseason' ? (d.offseasonStageLabel ?? 'Offseason') : `Day ${d.day}/${d.totalDays}`}
-        </span>
-      </ScreenHeader>
+      {/* hero identity band */}
+      <DashHero d={d} customize={<CustomizeMenu hidden={hiddenPanels} onToggle={togglePanel} />} />
 
       {d.championTeamName !== null && (
         <div className="dash-banner">
@@ -252,8 +254,6 @@ export function DashboardScreen(): JSX.Element {
         </button>
       )}
 
-      {/* ── Status strip: the season at a glance, one dense row ── */}
-      <StatusStrip d={d} onBoard={() => nav.navigate('board')} onMedical={() => nav.navigate('teamMedical')} />
 
       {/* ── 3-col card grid ── */}
       <div className="dash-grid">
@@ -335,8 +335,18 @@ export function DashboardScreen(): JSX.Element {
             <StorylinesStrip arcs={d.topArcs} />
           )}
 
-          {/* The Summer hub (offseason): the working panels for July-September */}
-          {d.phase === 'offseason' && <SummerPanel stageLabel={d.offseasonStageLabel} onOpen={() => nav.navigate('offseason')} />}
+          {/* The Week Ahead — the dashboard centerpiece, in every phase */}
+          <WeekAhead
+            d={d}
+            calendar={calendar ?? null}
+            onOpenCalendar={() => nav.navigate('calendar')}
+            onOpenOffseason={() => nav.navigate('offseason')}
+            onWatch={actions.watchNext}
+            busy={actions.busy}
+          />
+
+          {/* Offseason: the working desk (market / expiring) */}
+          {d.phase === 'offseason' && <SummerDesk onOpen={() => nav.navigate('offseason')} />}
 
           {/* News / last result hero */}
           {d.phase !== 'offseason' && (d.lastResult ? (
@@ -410,15 +420,6 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
           )}
 
-          {/* The next two weeks — compact strip, not a month of empty cells */}
-          {d.phase !== 'offseason' && schedule && d.date && (
-            <FortnightStrip
-              entries={schedule.entries}
-              todayDate={d.date}
-              onOpenBoxScore={(gameId) => nav.navigate('matchcenter', { gameId })}
-              onOpenCalendar={() => nav.navigate('calendar')}
-            />
-          )}
 
         </div>
 
@@ -724,86 +725,6 @@ function FixturesCard(props: {
   )
 }
 
-/** The next fortnight as one compact strip: opponents, H/A, results — every
- *  cell earns its pixels (the month grid lives on the Calendar screen). */
-function FortnightStrip(props: {
-  entries: ScheduleEntryView[]
-  todayDate: string
-  onOpenBoxScore: (gameId: string) => void
-  onOpenCalendar: () => void
-}): JSX.Element {
-  const { entries, todayDate } = props
-
-  // 14 day cells starting today.
-  const start = new Date(todayDate + 'T00:00:00Z')
-  const byDate = new Map<string, ScheduleEntryView>()
-  for (const e of entries) byDate.set(e.date, e)
-  const days: Array<{ iso: string; dayNum: number; dow: string; game: ScheduleEntryView | null }> = []
-  for (let i = 0; i < 14; i++) {
-    const dt = new Date(start)
-    dt.setUTCDate(start.getUTCDate() + i)
-    const iso = dt.toISOString().slice(0, 10)
-    days.push({
-      iso,
-      dayNum: dt.getUTCDate(),
-      dow: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][dt.getUTCDay()]!,
-      game: byDate.get(iso) ?? null,
-    })
-  }
-
-  return (
-    <Panel title="Next two weeks">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14, 1fr)', gap: 3 }}>
-        {days.map((cell, i) => {
-          const g = cell.game
-          const played = g?.result != null
-          const won = played ? g!.result!.won : false
-          const ot = played && g!.result!.decidedBy !== 'regulation' && !won
-          const userGoals = played ? (g!.home ? g!.result!.homeGoals : g!.result!.awayGoals) : 0
-          const oppGoals = played ? (g!.home ? g!.result!.awayGoals : g!.result!.homeGoals) : 0
-          const clickable = played
-          return (
-            <div
-              key={cell.iso}
-              onClick={clickable ? () => props.onOpenBoxScore(g!.gameId) : undefined}
-              title={g ? `${g.home ? 'vs' : '@'} ${g.opponentName}${played ? ` — ${userGoals}–${oppGoals}` : ''}` : undefined}
-              style={{
-                borderRadius: 4,
-                padding: '4px 2px',
-                textAlign: 'center',
-                minHeight: 52,
-                border: i === 0 ? '1px solid var(--violet-h)' : '1px solid var(--line)',
-                background: g
-                  ? played
-                    ? won ? 'rgba(46,160,67,0.12)' : ot ? 'rgba(214,160,86,0.12)' : 'rgba(224,85,85,0.10)'
-                    : 'rgba(var(--accent-rgb),0.10)'
-                  : 'var(--bg0)',
-                cursor: clickable ? 'pointer' : 'default',
-              }}
-            >
-              <div style={{ fontSize: 9, color: 'var(--muted)' }}>{cell.dow} {cell.dayNum}</div>
-              {g ? (
-                <>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>
-                    {g.home ? '' : '@'}{g.opponentAbbr}
-                  </div>
-                  <div style={{ fontSize: 10, marginTop: 1, color: played ? (won ? 'var(--green, #2ea043)' : ot ? 'var(--amber, #d6a056)' : 'var(--red, #e05555)') : 'var(--muted)' }}>
-                    {played ? `${won ? 'W' : ot ? 'OT' : 'L'} ${userGoals}–${oppGoals}` : g.home ? 'home' : 'away'}
-                  </div>
-                </>
-              ) : (
-                <div style={{ fontSize: 10, color: 'var(--line)', marginTop: 8 }}>·</div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={props.onOpenCalendar}>
-        Full calendar →
-      </button>
-    </Panel>
-  )
-}
 
 /** Compact division standings table with rank chips + user row highlight. */
 function MiniTable(props: { rows: StandingRowView[]; userTeamId: string }): JSX.Element {
@@ -987,7 +908,7 @@ function BoardConfidenceChip(props: {
 /** The Summer hub — the offseason dashboard centerpiece. Shows where you are
  *  in the summer (July 1 anchors free agency), what needs your signature, and
  *  who is on the market, instead of dead in-season match panels. */
-function SummerPanel({ stageLabel, onOpen }: { stageLabel?: string; onOpen: () => void }): JSX.Element {
+function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
   const client = useClient()
   const nav = useNav()
   const { data: os } = useScreenData(
@@ -995,41 +916,8 @@ function SummerPanel({ stageLabel, onOpen }: { stageLabel?: string; onOpen: () =
     (r) => (r.type === 'offseason' ? r.offseason : null)
   )
 
-  const stages: Array<{ key: string; label: string }> = [
-    { key: 'resign', label: 'Re-sign' },
-    { key: 'freeAgency', label: 'Jul 1 · Free agency' },
-    { key: 'preseason', label: 'Sept · Training camp' },
-  ]
-  const currentKey = os?.stage ?? 'resign'
-
   return (
-    <Panel title="The Summer">
-      {/* stage timeline */}
-      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
-        {stages.map((st, i) => {
-          const activeIdx = stages.findIndex((x) => x.key === currentKey)
-          const state = i < activeIdx ? 'done' : i === activeIdx ? 'now' : 'next'
-          return (
-            <span key={st.key} className="row" style={{ gap: 6, alignItems: 'center' }}>
-              <span
-                className="chip"
-                style={{
-                  fontSize: 11,
-                  ...(state === 'now'
-                    ? { background: 'rgba(var(--accent-rgb),0.2)', color: 'var(--violet-h)', fontWeight: 700, border: '1px solid var(--violet-h)' }
-                    : state === 'done'
-                      ? { opacity: 0.55, textDecoration: 'line-through' }
-                      : { opacity: 0.75 }),
-                }}
-              >
-                {st.label}
-              </span>
-              {i < stages.length - 1 && <span className="muted small">→</span>}
-            </span>
-          )
-        })}
-        <span className="chip chip-warn" style={{ fontSize: 11 }}>🏒 Opening night · Oct 1</span>
-      </div>
+    <Panel title="The Offseason Desk">
 
       {/* stage content */}
       {os?.stage === 'resign' && (
@@ -1095,95 +983,202 @@ function SummerPanel({ stageLabel, onOpen }: { stageLabel?: string; onOpen: () =
 
       <div className="row" style={{ marginTop: 'var(--sp-3)' }}>
         <button className="btn btn-primary btn-sm" onClick={onOpen}>
-          Open the offseason desk →
+          Work the desk →
         </button>
-        {stageLabel && <span className="muted small" style={{ alignSelf: 'center', marginLeft: 8 }}>{stageLabel}</span>}
         <span style={{ flex: 1 }} />
-        <button className="btn btn-ghost btn-sm" onClick={() => nav.navigate('calendar')}>
-          Full calendar
+        <button className="btn btn-ghost btn-sm" onClick={() => nav.navigate('transfers' as never)}>
+          Trade office
         </button>
       </div>
     </Panel>
   )
 }
 
-/** The season at a glance: record, streak, cap, expectation, board mood, and
- *  squad health — one dense row instead of three half-empty panels. */
-function StatusStrip(props: {
-  d: DashboardView
-  onBoard: () => void
-  onMedical: () => void
-}): JSX.Element {
-  const { d } = props
+/** The hero identity band: who you are, where you stand, what matters —
+ *  painted in the club's colours instead of a generic header row. */
+function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNode }): JSX.Element {
+  const nav = useNav()
   const s = d.userTeam.standing
+  const played = s.wins + s.losses + s.overtimeLosses > 0
   const capFree = d.salaryCap - d.capUsed
   const capPct = d.salaryCap > 0 ? (d.capUsed / d.salaryCap) * 100 : 0
   const capColor = capPct > 100 ? 'var(--red, #e05555)' : capPct > 92 ? 'var(--amber, #d6a056)' : 'var(--green, #2ea043)'
-  const divider = <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)' }} />
-
   return (
     <div
       className="panel"
       style={{
         display: 'flex',
         alignItems: 'center',
-        flexWrap: 'wrap',
         gap: 'var(--sp-4)',
-        padding: '10px 16px',
+        flexWrap: 'wrap',
+        padding: '14px 18px',
+        background:
+          'linear-gradient(100deg, rgba(var(--accent-rgb, 108,92,231), 0.22) 0%, rgba(var(--accent-rgb, 108,92,231), 0.07) 38%, var(--bg1) 72%)',
+        borderLeft: '3px solid rgb(var(--accent-rgb, 108,92,231))',
       }}
     >
-      {/* record + rank */}
+      <TeamCrest className="crest" teamId={d.userTeam.teamId} abbr={d.userTeam.name.slice(0, 2)} style={{ width: 54, height: 54, fontSize: 18 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.1, letterSpacing: -0.3 }}>{d.userTeam.name}</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+          {d.leagueName} · {d.year} ·{' '}
+          {d.phase === 'offseason' ? (d.offseasonStageLabel ?? 'Offseason') : `Day ${d.day}/${d.totalDays}`}
+        </div>
+      </div>
+
+      <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--line)' }} />
+
+      {/* record block */}
       <div>
-        <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>
+        <div style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.1 }}>
           {s.wins}–{s.losses}–{s.overtimeLosses}
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)', marginLeft: 8 }}>{s.points} pts</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginLeft: 7 }}>{s.points} pts</span>
         </div>
         <div className="muted" style={{ fontSize: 11 }}>
-          #{d.userTeam.rank} overall · #{d.userTeam.conferenceRank} conference · {s.goalsFor} GF / {s.goalsAgainst} GA
+          {played ? `#${d.userTeam.rank} overall · #${d.userTeam.conferenceRank} conf` : 'season ahead'}
         </div>
       </div>
-      {divider}
-      {/* form (only once games exist — a day-zero streak is noise) */}
-      {s.wins + s.losses + s.overtimeLosses > 0 && (
-        <>
-          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-            <span className="chip chip-violet" style={{ fontSize: 11 }}>Streak {s.streak}</span>
-            <LastFive value={s.lastFive} />
-          </div>
-          {divider}
-        </>
+
+      {played && (
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          <span className="chip chip-violet" style={{ fontSize: 11 }}>Streak {s.streak}</span>
+          <LastFive value={s.lastFive} />
+        </div>
       )}
-      {/* cap */}
-      <div title={`${fmtMoney(d.capUsed)} used of ${fmtMoney(d.salaryCap)}`}>
-        <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Cap space</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: capColor }}>{fmtMoney(capFree)}</div>
-        <div className="meter" style={{ width: 110, height: 4, marginTop: 3 }}>
-          <div
-            className={capPct > 100 ? 'meter-fill over' : capPct > 92 ? 'meter-fill warn' : 'meter-fill'}
-            style={{ width: `${Math.min(100, Math.max(0, capPct))}%` }}
-          />
-        </div>
-      </div>
-      {divider}
+
+      <span style={{ flex: 1 }} />
+
       {/* the verdict chips */}
-      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-        {d.predictedRank !== undefined && s.wins + s.losses + s.overtimeLosses > 0 && (
+      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div title={`${fmtMoney(d.capUsed)} used of ${fmtMoney(d.salaryCap)}`} style={{ textAlign: 'right' }}>
+          <div className="muted" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: 1 }}>Cap space</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: capColor, lineHeight: 1.1 }}>{fmtMoney(capFree)}</div>
+        </div>
+        {d.predictedRank !== undefined && played && (
           <ExpectationChip predictedRank={d.predictedRank} currentRank={d.userTeam.rank} />
         )}
-        {d.predictedRank !== undefined && s.wins + s.losses + s.overtimeLosses === 0 && (
+        {d.predictedRank !== undefined && !played && (
           <span className="chip chip-violet">Media pick: {d.predictedRank}{getOrdinalSuffix(d.predictedRank)}</span>
         )}
-        {d.board && <BoardConfidenceChip board={d.board} onNavigate={props.onBoard} />}
-        <button
-          type="button"
-          className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`}
-          style={{ cursor: 'pointer', border: 'none' }}
-          onClick={props.onMedical}
-          title="Open the Medical Center"
-        >
-          {d.injuries.length === 0 ? '✚ Fully healthy' : `🩹 ${d.injuries.length} injured`}
-        </button>
+        {d.board && <BoardConfidenceChip board={d.board} onNavigate={() => nav.navigate('board')} />}
+        <span className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 11 }}>
+          {d.injuries.length === 0 ? '✚ Healthy' : `🩹 ${d.injuries.length} injured`}
+        </span>
+        {customize}
       </div>
     </div>
   )
 }
+
+/** The Week Ahead — the dashboard centerpiece. A vertical agenda derived from
+ *  the calendar: today highlighted, then everything coming — games, summer
+ *  beats, decisions. Continue visibly walks down this list. */
+function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy }: {
+  d: DashboardView
+  calendar: CalendarView | null
+  onOpenCalendar: () => void
+  onOpenOffseason: () => void
+  onWatch: () => void
+  busy: boolean
+}): JSX.Element {
+  const nav = useNav()
+  const offseason = d.phase === 'offseason'
+  const todayISO = calendar?.todayISO ?? d.date ?? ''
+
+  // Upcoming rows from the calendar: games + key dates after today.
+  const horizonEnd = ((): string => {
+    if (offseason) return '9999'
+    const t = new Date(todayISO + 'T00:00:00Z')
+    t.setUTCDate(t.getUTCDate() + 8)
+    return t.toISOString().slice(0, 10)
+  })()
+  const all = (calendar?.entries ?? []).filter((e) => e.dateISO > todayISO && e.dateISO < horizonEnd)
+  const gameDates = new Set(all.filter((e) => e.kind === 'game').map((e) => e.dateISO))
+  const upcoming = all
+    .filter((e) => !(e.kind === 'keydate' && e.label === 'Season Begins' && gameDates.has(e.dateISO)))
+    .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
+    .slice(0, offseason ? 6 : 8)
+
+  const dateCell = (iso: string): JSX.Element => {
+    const dt = new Date(iso + 'T00:00:00Z')
+    const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][dt.getUTCMonth()]
+    return (
+      <div style={{ width: 44, textAlign: 'center', flexShrink: 0 }}>
+        <div style={{ fontSize: 9, letterSpacing: 1.2, color: 'var(--muted)' }}>{mon}</div>
+        <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1 }}>{dt.getUTCDate()}</div>
+      </div>
+    )
+  }
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
+    padding: '8px 10px', borderTop: '1px solid var(--line)',
+  }
+
+  return (
+    <Panel title="The Week Ahead">
+      {/* today — the highlighted head of the agenda */}
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '10px 12px',
+          borderRadius: 8, marginBottom: 2,
+          background: 'rgba(var(--accent-rgb, 108,92,231), 0.13)',
+          border: '1px solid rgba(var(--accent-rgb, 108,92,231), 0.45)',
+        }}
+      >
+        {todayISO && dateCell(todayISO)}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10, letterSpacing: 1.4, textTransform: 'uppercase', color: 'var(--violet-h)' }}>Today</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>
+            {offseason
+              ? (d.offseasonStageLabel ?? 'The offseason')
+              : d.nextGame && d.nextGame.date === todayISO
+                ? <>vs <TeamLink teamId={d.nextGame.opponentTeamId} name={d.nextGame.opponentName} /></>
+                : 'Training day — no fixture'}
+          </div>
+        </div>
+        {offseason ? (
+          <button className="btn btn-primary btn-sm" onClick={onOpenOffseason}>Open the desk →</button>
+        ) : d.nextGame && d.nextGame.date === todayISO ? (
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={onWatch}>Watch</button>
+        ) : null}
+      </div>
+
+      {/* the coming days */}
+      {upcoming.map((e, i) => (
+        <div key={i} style={rowStyle}>
+          {dateCell(e.dateISO)}
+          {e.kind === 'game' ? (
+            <>
+              <TeamCrest className="crest" teamId={e.opponentAbbr} abbr={e.opponentAbbr.slice(0, 2)} style={{ width: 22, height: 22, fontSize: 9, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
+                <span className="muted">{e.home ? 'vs' : '@'}</span>{' '}
+                <span style={{ fontWeight: 600 }}>{e.opponentName}</span>
+              </div>
+              {e.result ? (
+                <span className={`chip ${e.result.won ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 10 }}>
+                  {e.result.won ? 'W' : 'L'} {e.result.homeGoals}–{e.result.awayGoals}
+                </span>
+              ) : e.isNext ? (
+                <span className="chip chip-warn" style={{ fontSize: 10 }}>next</span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>📌</span>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600 }}>{e.label}</div>
+            </>
+          )}
+        </div>
+      ))}
+      {upcoming.length === 0 && (
+        <div className="muted small" style={{ padding: '10px 12px' }}>A quiet stretch — the calendar has the full picture.</div>
+      )}
+
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={onOpenCalendar}>
+        Full calendar →
+      </button>
+    </Panel>
+  )
+}
+

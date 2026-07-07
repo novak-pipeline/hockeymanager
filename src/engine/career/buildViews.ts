@@ -1800,8 +1800,11 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
     const firstDay = Math.min(...allDays)
     const lastDay = Math.max(...allDays)
 
-    // Pre-season: training camp (mid-September, before the Oct 1 season start).
-    entries.push({ kind: 'keydate', dateISO: `${ctx.year}-09-18`, label: 'Training Camp Opens' })
+    // Pre-season: training camp (the summer beat list owns the exact date, so
+    // only add the legacy marker when no extra key dates were provided).
+    if (!ctx.extraKeyDates?.length) {
+      entries.push({ kind: 'keydate', dateISO: `${ctx.year}-09-15`, label: 'Training Camp Opens' })
+    }
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
 
     // Holiday roster freeze (late December).
