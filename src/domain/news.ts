@@ -22,6 +22,9 @@ export interface NewsItem {
   day: number
   /** Season year the item belongs to. */
   year: number
+  /** Real calendar date when day/year can't derive it (offseason mail).
+   *  Optional/additive for save compat. */
+  dateISO?: string
   category: NewsCategory
   headline: string
   body: string

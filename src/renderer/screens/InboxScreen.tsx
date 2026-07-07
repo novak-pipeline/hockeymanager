@@ -160,7 +160,7 @@ function HeroImage(props: {
 
 /** Format item date: "Day 12 · Oct 2026" style. */
 function itemDate(item: NewsItem): string {
-  return fmtDate(dayToDateISO(item.year, item.day))
+  return fmtDate(item.dateISO ?? dayToDateISO(item.year, item.day))
 }
 
 export function InboxScreen(): JSX.Element {

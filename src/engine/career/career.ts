@@ -1378,6 +1378,7 @@ export class Career {
       id: `n${this.newsCounter++}`,
       day: this.currentDay,
       year: this.year,
+      ...(this.phase === 'offseason' ? { dateISO: this.offseasonDateISO() } : {}),
       category,
       headline,
       body,
@@ -7369,6 +7370,9 @@ export class Career {
   }
 
   private tradingOpen(): boolean {
+    // Open all season until the deadline, closed through the playoffs, and
+    // OPEN again all summer — July trades are half the fun of an offseason.
+    if (this.phase === 'offseason') return true
     return this.phase === 'regularSeason' && this.currentDay <= this.deadlineDay
   }
 
@@ -11552,7 +11556,7 @@ export class Career {
         sinceDay: r.sinceDay,
       })),
       deadlineDay: this.deadlineDay,
-      deadlinePassed: this.phase !== 'regularSeason' || this.currentDay >= this.deadlineDay,
+      deadlinePassed: this.phase === 'playoffs' || (this.phase === 'regularSeason' && this.currentDay >= this.deadlineDay),
       lastDeadlineRecap: this.lastDeadlineRecap
         ? this.lastDeadlineRecap.map((t) => ({
             teamAAbbr: abbrFor(t.teamA),

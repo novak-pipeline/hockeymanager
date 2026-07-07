@@ -1371,7 +1371,23 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       focusNation: scopeNation(s.target as { kind: string }),
     }
   })
-  const scoutedNations = [...new Set(scouts.map((s) => s.focusNation).filter((n): n is string => !!n))]
+  // Nations covered: a WORLD brief covers every scouted nation; league/team/
+  // draft briefs cover North America; narrow briefs contribute their nation.
+  const allCompNations = [...new Set(competitions.map((c) => c.nation).filter((n) => n !== 'North America'))]
+  const coveredNations = new Set<string>()
+  for (const s of scouts) {
+    const kind = (s.target as { kind: string }).kind
+    if (kind === 'world') {
+      for (const n of allCompNations) coveredNations.add(n)
+      coveredNations.add('North America')
+    } else if (s.focusNation) {
+      coveredNations.add(s.focusNation)
+    } else {
+      // League / division / NA team / own prospects / draft class / next opp.
+      coveredNations.add('North America')
+    }
+  }
+  const scoutedNations = [...coveredNations]
   const activeScouts = scouting.assignments.length
 
   // Teams list for dropdown options
