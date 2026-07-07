@@ -317,12 +317,32 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(c.getInbox().items.some((n) => n.headline.includes('camp standout'))).toBe(true)
   })
 
-  it('dev camp auto-resolves (report mailed) when simmed past', () => {
+  it('dev camp is a WEEK: each Continue is a beat, then the wrap auto-resolves', () => {
     const data = generateLeague({ seed: 414 })
     const c = new Career(data, 414, data.league.teams[0])
     c.startAtOffseason()
     expect(c.getDashboard().devCampPending).toBe(true)
-    c.advanceOffseason() // simming past the camp sends the staff
+    expect(c.getDevCamp()!.day).toBe(1)
+
+    // Beat 1 -> scrimmage day: real stat lines and a scoreline appear.
+    c.advanceOffseason()
+    const day2 = c.getDevCamp()!
+    expect(day2.day).toBe(2)
+    expect(day2.scoreline).toMatch(/White \d+, Blue \d+/)
+    const skaters = day2.invitees.filter((i) => i.position !== 'G')
+    expect(skaters.some((i) => i.line !== undefined)).toBe(true)
+    // Scrimmage news carried the scoreline.
+    expect(c.getInbox().items.some((n) => n.headline.startsWith('Dev camp scrimmage'))).toBe(true)
+
+    // Beat 2 -> wrap day; the week state round-trips a save.
+    c.advanceOffseason()
+    expect(c.getDevCamp()!.day).toBe(3)
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(Career.fromSnapshot(snap).getDevCamp()!.day).toBe(3)
+
+    // Pressing on from the wrap sends the staff: report mailed, gate cleared,
+    // and the offseason stage actually advances on the same press.
+    c.advanceOffseason()
     expect(c.getDashboard().devCampPending).toBe(false)
     expect(c.getInbox().items.some((n) => n.headline.startsWith('Development camp report'))).toBe(true)
   })

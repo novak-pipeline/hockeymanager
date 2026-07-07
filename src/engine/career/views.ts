@@ -77,8 +77,21 @@ export interface TrainingCampView {
   cast: Array<{ name: string; title: string; faceId?: string }>
 }
 
+/** Dev camp is a WEEK, not a click: arrival -> scrimmage -> wrap. Persisted. */
+export interface DevCampState {
+  /** 1 = arrival, 2 = scrimmage day (lines exist), 3 = wrap (decision). */
+  day: number
+  /** [playerId, scrimmage line] accumulated on day 2. */
+  lines: Array<[string, { g: number; a: number; sog: number; squad: 'white' | 'blue' }]>
+  /** "White 4, Blue 3" once the scrimmage has been played. */
+  scoreline?: string
+}
+
 /** The July development camp — the org's kids on the rink, live. */
 export interface DevCampView {
+  /** Which beat of the week we're on (1 arrival / 2 scrimmage / 3 wrap). */
+  day: number
+  scoreline?: string
   invitees: Array<{
     playerId: string
     name: string
@@ -89,6 +102,8 @@ export interface DevCampView {
     drafted: boolean
     grade: 'A' | 'B' | 'C'
     read: string
+    /** Scrimmage line, present from day 2. */
+    line?: { g: number; a: number; sog: number; squad: 'white' | 'blue' }
   }>
   cast: Array<{ name: string; title: string; faceId?: string }>
 }
@@ -1710,6 +1725,8 @@ export interface CareerSnapshot {
   boardMeetingYear?: number | null
   /** M3 dev camp soft gate. Optional/additive. */
   devCampPending?: boolean
+  /** Dev-camp week progress (day + scrimmage lines). Optional/additive. */
+  devCampState?: DevCampState | null
   /** M3 training-camp cut day (staged decisions). Optional/additive. */
   trainingCamp?: TrainingCampState | null
   /** Last season's story for the owner's meeting opener. Optional/additive. */

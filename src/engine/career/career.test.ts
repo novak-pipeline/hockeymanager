@@ -2309,8 +2309,11 @@ describe('Career — GM career', () => {
     while (career.getDashboard().phase === 'playoffs') career.step()
     career.advanceOffseason() // awards → draft
     career.autoDraft()
-    career.advanceOffseason() // draft → resign
-    career.advanceOffseason() // resign → free agency
+    career.advanceOffseason() // draft → resign (dev camp opens)
+    // Dev camp is a week now — presses walk its beats before the stage moves.
+    for (let i = 0; i < 8 && career.getOffseason()!.stage !== 'freeAgency'; i++) {
+      career.advanceOffseason()
+    }
     expect(career.getOffseason()!.stage).toBe('freeAgency')
 
     const internals = career as unknown as { faPool: Array<{ toString(): string }> }

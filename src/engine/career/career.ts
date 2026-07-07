@@ -404,6 +404,7 @@ import {
   type TeamDynamicsView,
   type FeedView,
   type DevCampView,
+  type DevCampState,
   type TrainingCampState,
   type TrainingCampView,
   type MedicalView,
@@ -728,6 +729,8 @@ export class Career {
   /** M3 dev camp: soft gate — the first Continue after the draft (or at a new
    *  summer-start career) walks you onto the rink. */
   private devCampPending = false
+  /** Dev-camp week progress: null until camp opens; day 1..3 while running. */
+  private devCampState: DevCampState | null = null
   /** M3 training camp: cut-day decisions staged at the preseason stage;
    *  resolved (by you or the coach) before opening night. */
   private trainingCamp: TrainingCampState | null = null
@@ -4340,8 +4343,16 @@ export class Career {
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
   advanceOffseason(): boolean {
-    // M3: simming past development camp sends the staff without you.
-    if (this.devCampPending) this.autoResolveDevCamp()
+    // Dev camp is a WEEK (Offseason 2.0): while it runs, each Continue is the
+    // next camp day — arrival, the scrimmage, the wrap. Pressing on from the
+    // wrap without naming a standout sends the staff and mails the report.
+    if (this.devCampPending) {
+      if ((this.devCampState?.day ?? 0) < 3) {
+        this.advanceDevCampDay()
+        return true
+      }
+      this.autoResolveDevCamp()
+    }
     // M4: continuing past a staged season review lets it lapse — the owner
     // notices you didn't show.
     if (this.reviewFacts) {
@@ -6125,7 +6136,7 @@ export class Career {
       .sort((a, b) => {
         const da = draftedIds.has(a.id as string) ? 1 : 0
         const db = draftedIds.has(b.id as string) ? 1 : 0
-        return db - da || overall(b.potential, b.position) - overall(a.potential, a.position)
+        return db - da || ratedPotential(b) - ratedPotential(a)
       })
       .slice(0, 8)
     return { invitees, draftedIds }
@@ -6138,6 +6149,48 @@ export class Career {
     return { grade: z > 0.5 ? 'A' : z < -0.5 ? 'C' : 'B', z }
   }
 
+  /** Advance the camp week one beat. Day 2 plays the intra-squad scrimmage:
+   *  deterministic stat lines weighted by talent, an actual scoreline, and
+   *  fuel for the wrap-day grades. */
+  advanceDevCampDay(): void {
+    // Arrival (day 1) is on display from the moment camp opens — the first
+    // press plays the scrimmage, the second files the final reads.
+    const day = (this.devCampState?.day ?? 1) + 1
+    if (day > 3) return
+    if (day === 2) {
+      const { invitees } = this.devCampInvitees()
+      const lines: DevCampState['lines'] = []
+      let white = 0
+      let blue = 0
+      invitees.forEach((p, i) => {
+        const squad: 'white' | 'blue' = i % 2 === 0 ? 'white' : 'blue'
+        const rng = this.rngFor(9503, this.year, Career.pidNum(p.id as string))
+        const talent = (ratedPotential(p) + ratedOverall(p)) / 2
+        const sog = p.position === 'G' ? 0 : Math.max(0, Math.round(rng.float(0, 2) + talent / 30))
+        const g = p.position === 'G' ? 0 : (rng.chance(Math.min(0.6, 0.08 + talent / 200)) ? 1 : 0) + (rng.chance(talent / 400) ? 1 : 0)
+        const a = p.position === 'G' ? 0 : rng.chance(0.35 + talent / 300) ? 1 : 0
+        if (squad === 'white') white += g
+        else blue += g
+        lines.push([p.id as string, { g, a, sog, squad }])
+      })
+      // Filler goals so the scoreline reads like a real scrimmage.
+      const rng = this.rngFor(9504, this.year)
+      white += rng.range(0, 2)
+      blue += rng.range(0, 2)
+      this.devCampState = { day: 2, lines, scoreline: `White ${white}, Blue ${blue}` }
+      const top = [...lines].sort((a, b) => (b[1].g * 2 + b[1].a) - (a[1].g * 2 + a[1].a))[0]
+      const topName = top ? this.data.players.get(asPlayerId(top[0]))?.name : undefined
+      this.pushNews(
+        'scouting',
+        `Dev camp scrimmage: ${this.devCampState.scoreline}`,
+        `The kids played a full intra-squad game today.${topName ? ` ${topName} was the best player on the ice.` : ''} ` +
+        `The staff file their final reads tomorrow — then you name the camp standout.`,
+        { teamId: this.userTeamId as string }
+      )
+      return
+    }
+    this.devCampState = { ...(this.devCampState ?? { lines: [] }), day: 3 }
+  }
   /** The live development camp (M3): the rink, the kids, the staff's reads —
    *  and one call that is yours: name the camp standout. */
   getDevCamp(): DevCampView | null {
@@ -6148,9 +6201,25 @@ export class Career {
     const cast: DevCampView['cast'] = []
     if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
     if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
+    const day = this.devCampState?.day ?? 1
+    const lineOf = new Map(this.devCampState?.lines ?? [])
     return {
+      day,
+      ...(this.devCampState?.scoreline ? { scoreline: this.devCampState.scoreline } : {}),
       invitees: invitees.map((p) => {
-        const { grade, z } = this.devCampRead(p)
+        const { grade: baseGrade, z } = this.devCampRead(p)
+        // Wrap-day grades argue from the scrimmage: production can lift a
+        // read one notch; an invisible night can drop one.
+        const ln = lineOf.get(p.id as string)
+        const pts = ln ? ln.g * 2 + ln.a : 0
+        const grade: 'A' | 'B' | 'C' =
+          day >= 2 && ln
+            ? pts >= 3
+              ? 'A'
+              : pts === 0 && ln.sog === 0 && baseGrade !== 'A'
+                ? 'C'
+                : baseGrade
+            : baseGrade
         const drafted = draftedIds.has(p.id as string)
         const read =
           z > 0.5
@@ -6166,6 +6235,7 @@ export class Career {
           drafted,
           grade,
           read,
+          ...(lineOf.has(p.id as string) ? { line: lineOf.get(p.id as string)! } : {}),
           ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         }
       }),
@@ -6204,6 +6274,7 @@ export class Career {
       { playerId: standoutId, teamId: this.userTeamId as string }
     )
     this.devCampPending = false
+    this.devCampState = null
     return { ok: true }
   }
 
@@ -6211,6 +6282,7 @@ export class Career {
   autoResolveDevCamp(): void {
     if (!this.devCampPending) return
     this.devCampPending = false
+    this.devCampState = null
     this.pushDevCampReport()
   }
 
@@ -11824,6 +11896,7 @@ export class Career {
       gmPersonas: structuredClone(this.gmPersonas),
       boardMeetingYear: this.boardMeetingYear,
       devCampPending: this.devCampPending,
+      devCampState: this.devCampState ? structuredClone(this.devCampState) : null,
       trainingCamp: this.trainingCamp ? structuredClone(this.trainingCamp) : null,
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
       ownerPerk: this.ownerPerk,
@@ -11963,6 +12036,7 @@ export class Career {
     // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
     career.devCampPending = snapshot.devCampPending ?? false
+    career.devCampState = snapshot.devCampState ? structuredClone(snapshot.devCampState) : null
     career.trainingCamp = snapshot.trainingCamp ? structuredClone(snapshot.trainingCamp) : null
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null
     career.ownerPerk = snapshot.ownerPerk ?? null

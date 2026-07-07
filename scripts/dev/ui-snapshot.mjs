@@ -83,6 +83,21 @@ try {
   await win.waitForSelector('text=Continue', { timeout: 300000 })
   await snap(win, 'shell-first-load')
 
+  // ── the dev-camp week: first Continue routes onto the rink ──
+  try {
+    await win.click('button:has-text("Continue")', { timeout: 5000 })
+    await win.waitForSelector('text=Development Camp', { timeout: 8000 })
+    await snap(win, 'devcamp-arrival')
+    await win.click('button:has-text("Run the scrimmage")', { timeout: 5000 })
+    await win.waitForTimeout(700)
+    await snap(win, 'devcamp-scrimmage')
+    await win.click('button:has-text("Hear the final reads")', { timeout: 5000 })
+    await win.waitForTimeout(700)
+    await snap(win, 'devcamp-wrap')
+  } catch {
+    console.log('  ⚠ dev camp flow not reachable — skipped')
+  }
+
   // ── advance a few days so screens have real content ──
   for (let i = 0; i < 8; i++) {
     try {
