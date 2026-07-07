@@ -24,6 +24,8 @@ import { MatchCenterScreen } from './screens/MatchCenterScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { FeedScreen } from './screens/FeedScreen'
+import { DevCampScreen } from './screens/DevCampScreen'
+import { TrainingCampScreen } from './screens/TrainingCampScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
@@ -62,9 +64,6 @@ export function App(): JSX.Element {
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
   const [busy, setBusy] = useState(false)
-  // When the GM takes over: opening night, or the summer before (year zero
-  // is simulated without you — draft + free agency become your first act).
-  const [startAt, setStartAt] = useState<'seasonStart' | 'offseason'>('seasonStart')
   // Mod picker state
   const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
   const [selectedModId, setSelectedModId] = useState<string>('') // '' = fictional default
@@ -111,7 +110,7 @@ export function App(): JSX.Element {
   const pickTeam = async (team: TeamInfo): Promise<void> => {
     if (!client || busy) return
     setBusy(true)
-    const res = await client.startCareer(team.teamId, startAt)
+    const res = await client.startCareer(team.teamId, 'offseason')
     setBusy(false)
     if (res.type === 'error') {
       toast(res.message, 'error')
@@ -129,8 +128,6 @@ export function App(): JSX.Element {
             <SetupHero
               seed={seed}
               setSeed={setSeed}
-              startAt={startAt}
-              setStartAt={setStartAt}
               busy={busy}
               availableMods={availableMods}
               selectedModId={selectedModId}
@@ -272,6 +269,18 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('draft')
           return
         }
+        // Cut day: camp's verdicts await before opening night. Continuing from
+        // the camp screen itself lets the coach apply his plan.
+        if (dashboard?.campPending && nav.screen !== 'trainingCamp') {
+          navigate('trainingCamp')
+          return
+        }
+        // Development camp (July): the first Continue after the draft walks you
+        // onto the rink. Skipping from there mails the staff report instead.
+        if (dashboard?.devCampPending && nav.screen !== 'devCamp') {
+          navigate('devCamp')
+          return
+        }
         // Preseason board meeting: the first Continue of the year walks you into
         // the boardroom. Skipping from there sends the AGM (engine-safe defaults).
         if (dashboard?.boardMeetingPending && nav.screen !== 'boardMeeting') {
@@ -302,7 +311,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, nav.screen, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -570,6 +579,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <CalendarScreen />
     case 'feed':
       return <FeedScreen />
+    case 'devCamp':
+      return <DevCampScreen />
+    case 'trainingCamp':
+      return <TrainingCampScreen />
     case 'trades':
       return <TradesScreen />
     case 'waivers':
@@ -607,8 +620,6 @@ function randomSeed(): number {
 function SetupHero(props: {
   seed: number
   setSeed: (n: number) => void
-  startAt: 'seasonStart' | 'offseason'
-  setStartAt: (v: 'seasonStart' | 'offseason') => void
   busy: boolean
   availableMods: ModListEntry[]
   selectedModId: string
@@ -619,7 +630,8 @@ function SetupHero(props: {
     <div className="hero">
       <h1 className="hero-title">HOCKEY MANAGER</h1>
       <p className="hero-sub">
-        Generate a league, choose a club, and live the season from behind the bench.
+        Generate a league and choose a club. You take over in the summer — the draft,
+        free agency and training camp are yours before the puck drops.
       </p>
       <div className="panel stack">
         {/* Database picker — only shown when at least one mod is installed */}
@@ -645,32 +657,6 @@ function SetupHero(props: {
             </select>
           </div>
         )}
-        <div>
-          <label className="field-label">Take over</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-2)' }}>
-            {([
-              ['seasonStart', 'Opening night', 'Roster is set — coach camp, then the season.'],
-              ['offseason', 'The summer before', 'Year zero plays out without you; you arrive for the draft and free agency.'],
-            ] as const).map(([id, title, blurb]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => props.setStartAt(id)}
-                style={{
-                  textAlign: 'left',
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  background: props.startAt === id ? 'rgba(var(--accent-rgb, 108,92,231),0.16)' : 'var(--bg1)',
-                  border: props.startAt === id ? '1px solid var(--violet-h, #a78bfa)' : '1px solid var(--line)',
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{title}</div>
-                <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{blurb}</div>
-              </button>
-            ))}
-          </div>
-        </div>
         <div>
           <label className="field-label" htmlFor="seed-input">
             World seed <span className="muted" style={{ fontWeight: 400 }}>— random by default; set one only to replay a specific world</span>
@@ -713,6 +699,15 @@ function TeamPicker(props: {
         <h1 className="screen-title">Choose your club</h1>
         <span className="muted small">sorted by squad rating</span>
       </div>
+      {props.busy && (
+        <div
+          className="panel"
+          style={{ padding: '12px 16px', marginBottom: 'var(--sp-3)', fontSize: 14 }}
+        >
+          ⏳ Simulating the season before your arrival — standings, storylines and a
+          draft class are being written. This takes a moment…
+        </div>
+      )}
       <div className="grid grid-auto">
         {props.teams.map((t) => (
           <button

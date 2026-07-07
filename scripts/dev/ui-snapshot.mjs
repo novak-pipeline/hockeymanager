@@ -78,7 +78,9 @@ try {
   await win.waitForSelector('.team-card', { timeout: 60000 })
   await snap(win, 'team-picker')
   await win.click('.team-card >> nth=0')
-  await win.waitForSelector('text=Continue', { timeout: 60000 })
+  // Picking a club simulates the entire year-zero season in the worker —
+  // give it minutes. The shell appears at the start of the offseason.
+  await win.waitForSelector('text=Continue', { timeout: 300000 })
   await snap(win, 'shell-first-load')
 
   // ── advance a few days so screens have real content ──

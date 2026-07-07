@@ -50,6 +50,49 @@ export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/
 import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
 export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
 
+/* ────────────────────────── camps (Season Rhythm M3) ────────────────────────── */
+
+/** One cut-day roster call staged out of training camp. JSON-safe, persisted. */
+export interface TrainingCampState {
+  decisions: Array<{
+    playerId: string
+    name: string
+    position: string
+    age: number
+    faceId?: string
+    /** Where he is right now. */
+    current: 'nhl' | 'ahl'
+    /** Where the coach wants him. */
+    coachPlan: 'nhl' | 'ahl'
+    /** Sending him down runs REAL waivers — he can be claimed for nothing. */
+    waiverRequired: boolean
+    /** The coach's one-line verdict. */
+    line: string
+  }>
+  resolved: boolean
+}
+
+export interface TrainingCampView {
+  decisions: TrainingCampState['decisions']
+  cast: Array<{ name: string; title: string; faceId?: string }>
+}
+
+/** The July development camp — the org's kids on the rink, live. */
+export interface DevCampView {
+  invitees: Array<{
+    playerId: string
+    name: string
+    age: number
+    position: string
+    faceId?: string
+    /** Drafted by you this summer. */
+    drafted: boolean
+    grade: 'A' | 'B' | 'C'
+    read: string
+  }>
+  cast: Array<{ name: string; title: string; faceId?: string }>
+}
+
 /** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
 export interface FeedView {
   posts: NewsItem[]
@@ -247,6 +290,10 @@ export interface DashboardView {
   /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
    *  past it sends the AGM in your place — a soft gate, not a hard one. */
   boardMeetingPending?: boolean
+  /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
+  devCampPending?: boolean
+  /** M3: cut day — training camp decisions await before opening night. Optional/additive. */
+  campPending?: boolean
   /** True when the End-of-Season Review is staged (Season Rhythm M4). */
   reviewPending?: boolean
   /** True while the sim is held on deadline day (last chance to trade). */
@@ -1659,6 +1706,10 @@ export interface CareerSnapshot {
   gmPersonas?: Array<[string, GmPersona]>
   /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
   boardMeetingYear?: number | null
+  /** M3 dev camp soft gate. Optional/additive. */
+  devCampPending?: boolean
+  /** M3 training-camp cut day (staged decisions). Optional/additive. */
+  trainingCamp?: TrainingCampState | null
   /** Last season's story for the owner's meeting opener. Optional/additive. */
   lastSeasonMeta?: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null
   /** Owner-investment perk in force this season. Optional/additive. */

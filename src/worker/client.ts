@@ -58,12 +58,12 @@ export class SimClient {
     }
   }
 
-  private send(req: WorkerRequestBody): Promise<WorkerResponse> {
+  private send(req: WorkerRequestBody, timeoutMs = REQUEST_TIMEOUT_MS): Promise<WorkerResponse> {
     const id = this.nextId++
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) resolve({ id, type: 'error', message: 'timeout' })
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.pending.set(id, { resolve, timer })
       this.worker.postMessage({ ...req, id } as WorkerRequest)
     })
@@ -91,7 +91,9 @@ export class SimClient {
   }
 
   startCareer(teamId: string, startAt?: 'seasonStart' | 'offseason'): Promise<WorkerResponse> {
-    return this.send({ type: 'startCareer', teamId, ...(startAt ? { startAt } : {}) })
+    // The offseason takeover simulates the club's entire year zero inside the
+    // worker — give it minutes, not the default request deadline.
+    return this.send({ type: 'startCareer', teamId, ...(startAt ? { startAt } : {}) }, 300_000)
   }
 
   /* ── calendar ── */
@@ -239,6 +241,26 @@ export class SimClient {
 
   getTeamLegends(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamLegends', teamId })
+  }
+
+  getDevCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDevCamp' })
+  }
+
+  submitDevCamp(standoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'submitDevCamp', standoutId })
+  }
+
+  skipDevCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'skipDevCamp' })
+  }
+
+  getTrainingCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'getTrainingCamp' })
+  }
+
+  submitTrainingCamp(placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitTrainingCamp', placements })
   }
 
   getFeed(): Promise<WorkerResponse> {

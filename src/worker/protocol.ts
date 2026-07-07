@@ -97,6 +97,8 @@ export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/
 import type { TeamDynamicsView } from '@engine/career/views'
 export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'
+export type { DevCampView, TrainingCampView, TrainingCampState } from '@engine/career/views'
+import type { DevCampView, TrainingCampView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
 export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
@@ -205,6 +207,11 @@ export type WorkerRequestBody =
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
+  | { type: 'getDevCamp' }
+  | { type: 'submitDevCamp'; standoutId: string }
+  | { type: 'skipDevCamp' }
+  | { type: 'getTrainingCamp' }
+  | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }
   | { type: 'getFeed' }
   | { type: 'toggleFollowAuthor'; authorId: string }
   | { type: 'getMedical' }
@@ -448,6 +455,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
   | { type: 'feed'; feed: FeedView }
+  | { type: 'devCamp'; devCamp: DevCampView | null }
+  | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
   | { type: 'medical'; medical: MedicalView }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }

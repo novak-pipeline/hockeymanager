@@ -259,20 +259,101 @@ describe('Feed Phase A (salience engine)', () => {
   })
 })
 
-describe('offseason takeover (#145)', () => {
-  it('fast-forwards year zero and hands over at the start of the offseason', () => {
+describe('summer takeover (#145) + camps (M3)', () => {
+  it('starts instantly at the post-draft summer: resign stage, dev camp pending, no draft', () => {
     const data = generateLeague({ seed: 313 })
     const c = new Career(data, 313, data.league.teams[0])
-    c.fastForwardToOffseason()
+    c.startAtOffseason()
     const dash = c.getDashboard()
     expect(dash.phase).toBe('offseason')
-    // The summer is still ahead: the draft has not been run for the user.
+    expect(dash.devCampPending).toBe(true)
     const os = c.getOffseason()
-    expect(os).toBeTruthy()
-    // Year zero left real history behind: standings existed, news flowed.
-    expect(c.getInbox().items.length).toBeGreaterThan(5)
-    // And the world is playable from here: a save round-trips.
+    expect(os?.stage).toBe('resign')
+    // No draft was run — the class the DB reflects is already on the rosters;
+    // the FIRST in-game draft arrives at the end of season one.
+    expect(c.getDraft()).toBeNull()
+    // Save round-trips with the pending camp gate intact.
     const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
-    expect(Career.fromSnapshot(snap).getDashboard().phase).toBe('offseason')
+    const c2 = Career.fromSnapshot(snap)
+    expect(c2.getDashboard().devCampPending).toBe(true)
+  })
+
+  it('dev camp: the scene lists org kids with grades; naming a standout resolves the gate', () => {
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0])
+    c.startAtOffseason()
+    const camp = c.getDevCamp()
+    expect(camp).toBeTruthy()
+    expect(camp!.invitees.length).toBeGreaterThan(0)
+    for (const i of camp!.invitees) {
+      expect(['A', 'B', 'C']).toContain(i.grade)
+      expect(i.read.length).toBeGreaterThan(10)
+    }
+    const pick = camp!.invitees[0]!
+    expect(c.submitDevCamp('nope')).toMatchObject({ ok: false })
+    expect(c.submitDevCamp(pick.playerId)).toMatchObject({ ok: true })
+    expect(c.getDashboard().devCampPending).toBe(false)
+    expect(c.getDevCamp()).toBeNull()
+    // News names him.
+    expect(c.getInbox().items.some((n) => n.headline.includes('camp standout'))).toBe(true)
+  })
+
+  it('dev camp auto-resolves (report mailed) when simmed past', () => {
+    const data = generateLeague({ seed: 414 })
+    const c = new Career(data, 414, data.league.teams[0])
+    c.startAtOffseason()
+    expect(c.getDashboard().devCampPending).toBe(true)
+    c.advanceOffseason() // simming past the camp sends the staff
+    expect(c.getDashboard().devCampPending).toBe(false)
+    expect(c.getInbox().items.some((n) => n.headline.startsWith('Development camp report'))).toBe(true)
+  })
+
+  it('training camp: cut day is staged at preseason and resolves decisions through real roster moves', () => {
+    const data = generateLeague({ seed: 515 })
+    const c = new Career(data, 515, data.league.teams[0])
+    c.startAtOffseason()
+    // Walk the offseason to the preseason transition (draft is skipped at start).
+    for (let i = 0; i < 40; i++) {
+      if (c.getDashboard().phase !== 'offseason') break
+      c.advanceOffseason()
+    }
+    // Season has started; if battles existed, cut day is pending.
+    const dash = c.getDashboard()
+    expect(dash.phase).toBe('regularSeason')
+    const camp = c.getTrainingCamp()
+    if (camp) {
+      expect(dash.campPending).toBe(true)
+      for (const d of camp.decisions) {
+        expect(['nhl', 'ahl']).toContain(d.coachPlan)
+        expect(d.line.length).toBeGreaterThan(10)
+      }
+      // Round-trip with the camp staged.
+      const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+      expect(Career.fromSnapshot(snap).getTrainingCamp()?.decisions.length).toBe(camp.decisions.length)
+      // Resolve with the coach plan; notes come back and the gate clears.
+      const res = c.submitTrainingCamp([])
+      expect(res.ok).toBe(true)
+      expect(res.notes.length).toBeGreaterThan(0)
+      expect(c.getDashboard().campPending).toBe(false)
+      expect(c.getTrainingCamp()).toBeNull()
+    }
+    // Either way the season is playable from here.
+    expect(c.advanceDay()).toBe(true)
+  })
+
+  it('simming past cut day lets the coach break camp himself', () => {
+    const data = generateLeague({ seed: 616 })
+    const c = new Career(data, 616, data.league.teams[0])
+    c.startAtOffseason()
+    for (let i = 0; i < 40; i++) {
+      if (c.getDashboard().phase !== 'offseason') break
+      c.advanceOffseason()
+    }
+    const staged = c.getTrainingCamp() !== null
+    c.advanceDay()
+    expect(c.getDashboard().campPending).toBe(false)
+    if (staged) {
+      expect(c.getInbox().items.some((n) => n.headline.includes('Camp breaks'))).toBe(true)
+    }
   })
 })

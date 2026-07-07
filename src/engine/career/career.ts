@@ -403,6 +403,9 @@ import {
   type TeamLegendsView,
   type TeamDynamicsView,
   type FeedView,
+  type DevCampView,
+  type TrainingCampState,
+  type TrainingCampView,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -722,6 +725,12 @@ export class Career {
   private gmPersonas: Array<[string, GmPersona]> = []
   /** Year of the pending preseason board meeting, or null when attended (M1). */
   private boardMeetingYear: number | null = null
+  /** M3 dev camp: soft gate — the first Continue after the draft (or at a new
+   *  summer-start career) walks you onto the rink. */
+  private devCampPending = false
+  /** M3 training camp: cut-day decisions staged at the preseason stage;
+   *  resolved (by you or the coach) before opening night. */
+  private trainingCamp: TrainingCampState | null = null
   /** Last season's story, for the owner's opening lines at the board meeting. */
   private lastSeasonMeta: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null = null
   /** Owner-investment perk chosen at the board meeting ('scouting' | 'development'). */
@@ -3716,6 +3725,9 @@ export class Career {
   /** Advance to (and simulate) the next match day. Returns false if none left. */
   advanceDay(): boolean {
     if (this.phase !== 'regularSeason') return false
+    // Season Rhythm M3: simming past cut day hands the coach the clipboard —
+    // his camp plan is applied (waiver exposure and all) before games begin.
+    if (this.trainingCamp && !this.trainingCamp.resolved) this.autoResolveTrainingCamp()
     // Season Rhythm M1: simming past the preseason board meeting sends the AGM
     // in your place (safe defaults, a news item, and the meeting is gone).
     if (this.boardMeetingYear !== null) this.autoResolveBoardMeeting()
@@ -3939,18 +3951,46 @@ export class Career {
     return this.advanceOffseason()
   }
 
-  /** Offseason takeover (#145): simulate the club's "year zero" without the
-   *  user — full regular season and playoffs, auto-resolved gates — and hand
-   *  over control on day one of the offseason. The summer (awards fallout,
-   *  the draft, re-signings, free agency) becomes the GM's first act, and the
-   *  world arrives with a real season of history, storylines and receipts. */
-  fastForwardToOffseason(): void {
-    for (let guard = 0; guard < 400; guard++) {
-      if (this.phase === 'offseason') return
-      // step() auto-passes soft gates (board meeting resolves via the AGM,
-      // the deadline hold consumes one press) — nothing in-season needs us.
-      if (!this.step()) return
+  /** Summer takeover (#145): the game begins the day AFTER the draft that the
+   *  database already reflects — every roster exactly as imported, no fake
+   *  season simulated. Your first acts as GM: re-signings and arbitration,
+   *  July 1 free agency, development camp, then training camp and the roster
+   *  cuts before opening night. Your first draft comes at the end of your
+   *  first season — with the class the real world is waiting on. */
+  startAtOffseason(): void {
+    if (this.phase !== 'regularSeason' || this.currentDay > 0) return
+    this.phase = 'offseason'
+    this.offseason = { year: this.year, stage: 'resign', draft: null, faDay: 0 }
+    // The resign-stage prep that normally runs at the draft→resign transition.
+    this.resignStatus.clear()
+    for (const id of this.userTeam.roster) {
+      if (this.resolve(id).contract.yearsRemaining === 0) this.resignStatus.set(id, 'pending')
     }
+    this.generateOfferSheets()
+    const ai = aiResignDay({
+      teams: this.data.teams,
+      players: this.data.players,
+      userTeamId: this.userTeamId,
+      year: this.year,
+      rng: this.rngFor(8003),
+    })
+    if (ai.signings.length > 0) {
+      this.pushNews(
+        'contract',
+        `${ai.signings.length} re-signings around the league`,
+        `Clubs locked up their expiring talent ahead of free agency.`
+      )
+    }
+    // Development camp opens in early July — your first beat as GM.
+    // (Only armed when the org actually has kids to skate.)
+    this.devCampPending = this.devCampInvitees().invitees.length > 0
+    this.pushNews(
+      'league',
+      `Welcome to the ${this.userTeam.name} front office`,
+      `The draft is behind the league and the summer is yours: settle your expiring contracts, work July 1, ` +
+      `run development camp, and pick your 23 out of training camp. The season will judge all of it.`,
+      { teamId: this.userTeamId as string }
+    )
   }
 
   /** Advance until the user's next game has been played (or phase changes). */
@@ -4297,6 +4337,8 @@ export class Career {
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
   advanceOffseason(): boolean {
+    // M3: simming past development camp sends the staff without you.
+    if (this.devCampPending) this.autoResolveDevCamp()
     // M4: continuing past a staged season review lets it lapse — the owner
     // notices you didn't show.
     if (this.reviewFacts) {
@@ -4922,9 +4964,10 @@ export class Career {
             `Clubs locked up their expiring talent ahead of free agency.`
           )
         }
-        // Season Rhythm M3: development camp opens right after the draft — the
-        // coaches' first live look at the class, delivered as a report.
-        this.pushDevCampReport()
+        // Season Rhythm M3: development camp opens right after the draft — a
+        // live beat. The next Continue walks you onto the rink; simming past
+        // sends the staff and mails the report instead.
+        this.devCampPending = this.devCampInvitees().invitees.length > 0
         os.stage = 'resign'
         return true
       }
@@ -6003,11 +6046,9 @@ export class Career {
    *  live look at the draft class and the org's young prospects. Fog-aware
    *  prose (no numbers), deterministic reads, and a small scouting-knowledge
    *  bump: watching your own kids skate for a week genuinely teaches you. */
-  private pushDevCampReport(): void {
-    const staff = this.getTeamStaff(this.userTeamId as string)
-    const coachName = staff.headCoach?.name ?? 'The coaching staff'
-    // The org's young guns: this year's draftees first, then rights-held and
-    // farm prospects, U23 only, best potential first.
+  /** The dev-camp roster: this year's draftees first, then rights-held and
+   *  farm prospects, U23 only, best potential first (top 8). */
+  private devCampInvitees(): { invitees: Player[]; draftedIds: Set<string> } {
     const draftedIds = new Set(
       this.chronicle.events
         .filter((e) => e.kind === 'draftPick' && e.year === this.year && e.teamIds[0] === (this.userTeamId as string))
@@ -6025,7 +6066,6 @@ export class Career {
         (affiliate?.roster.includes(pid) ?? false)
       if (inOrg) orgYoung.set(id, p)
     }
-    if (orgYoung.size === 0) return
     const invitees = [...orgYoung.values()]
       .sort((a, b) => {
         const da = draftedIds.has(a.id as string) ? 1 : 0
@@ -6033,11 +6073,102 @@ export class Career {
         return db - da || overall(b.potential, b.position) - overall(a.potential, a.position)
       })
       .slice(0, 8)
+    return { invitees, draftedIds }
+  }
+
+  /** Deterministic camp read for an invitee — the same roll the report uses,
+   *  so the live scene and the mailed report never disagree. */
+  private devCampRead(p: Player): { grade: 'A' | 'B' | 'C'; z: number } {
+    const z = this.rngFor(9501, this.year, Career.pidNum(p.id as string)).float(-1, 1)
+    return { grade: z > 0.5 ? 'A' : z < -0.5 ? 'C' : 'B', z }
+  }
+
+  /** The live development camp (M3): the rink, the kids, the staff's reads —
+   *  and one call that is yours: name the camp standout. */
+  getDevCamp(): DevCampView | null {
+    if (!this.devCampPending) return null
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const { invitees, draftedIds } = this.devCampInvitees()
+    if (invitees.length === 0) return null
+    const cast: DevCampView['cast'] = []
+    if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
+    if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
+    return {
+      invitees: invitees.map((p) => {
+        const { grade, z } = this.devCampRead(p)
+        const drafted = draftedIds.has(p.id as string)
+        const read =
+          z > 0.5
+            ? (p.position === 'G' ? 'Tracked pucks like a veteran all week.' : 'Quicker release and better pace than the book had.')
+            : z < -0.5
+              ? 'A step behind the group — the summer homework list is long.'
+              : 'Solid, unspectacular week. Exactly where a kid his age should be.'
+        return {
+          playerId: p.id as string,
+          name: p.name,
+          age: p.age,
+          position: p.position,
+          drafted,
+          grade,
+          read,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      }),
+      cast,
+    }
+  }
+
+  /** Name the camp standout: he leaves camp walking taller, and your staff's
+   *  book on him gets a real chapter. Everyone else gets the normal bump. */
+  submitDevCamp(standoutId: string): { ok: boolean; message?: string } {
+    if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
+    const { invitees } = this.devCampInvitees()
+    const standout = invitees.find((p) => (p.id as string) === standoutId)
+    if (!standout) return { ok: false, message: 'He is not at this camp.' }
+    for (const p of invitees) {
+      const gain = (p.id as string) === standoutId ? 9 : 4
+      const entry = this.scouting.knowledge.find(([id]) => id === (p.id as string))
+      if (entry) entry[1] = Math.min(100, entry[1] + gain)
+      else this.scouting.knowledge.push([p.id as string, gain + 4])
+    }
+    standout.morale = Math.min(100, standout.morale + 6)
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: 0,
+      kind: 'award',
+      teamIds: [this.userTeamId as string],
+      playerIds: [standoutId],
+      headline: `${standout.name} named ${this.userTeam.name} development-camp standout`,
+      userInvolved: true,
+    })
+    this.pushNews(
+      'scouting',
+      `${standout.name} named camp standout`,
+      `You singled him out in front of the group at the end of development camp. ` +
+      `The staff will build his summer program around it — and he skated off the ice a foot taller.`,
+      { playerId: standoutId, teamId: this.userTeamId as string }
+    )
+    this.devCampPending = false
+    return { ok: true }
+  }
+
+  /** Simming past dev camp: the staff run it without you and mail the report. */
+  autoResolveDevCamp(): void {
+    if (!this.devCampPending) return
+    this.devCampPending = false
+    this.pushDevCampReport()
+  }
+
+  private pushDevCampReport(): void {
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const coachName = staff.headCoach?.name ?? 'The coaching staff'
+    const { invitees, draftedIds } = this.devCampInvitees()
+    if (invitees.length === 0) return
 
     const lines: string[] = []
     for (const p of invitees) {
       // Deterministic camp read; watching him closes a sliver of the fog.
-      const z = this.rngFor(9501, this.year, Career.pidNum(p.id as string)).float(-1, 1)
+      const { z } = this.devCampRead(p)
       const drafted = draftedIds.has(p.id as string)
       const tag = drafted ? ' (this year\'s pick)' : ''
       if (z > 0.5) {
@@ -6061,6 +6192,66 @@ export class Career {
     )
   }
 
+  /** The live training camp (M3): cut day. The coach's verdicts, your calls. */
+  getTrainingCamp(): TrainingCampView | null {
+    if (!this.trainingCamp || this.trainingCamp.resolved) return null
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const cast: TrainingCampView['cast'] = []
+    if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
+    if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
+    return { decisions: this.trainingCamp.decisions.map((d) => ({ ...d })), cast }
+  }
+
+  /** Resolve cut day. `placements` overrides the coach's plan per player;
+   *  anyone not mentioned follows the plan. Send-downs run REAL waivers —
+   *  a claimed player is gone for nothing, and the notes say so. */
+  submitTrainingCamp(placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }>): { ok: boolean; notes: string[] } {
+    const camp = this.trainingCamp
+    if (!camp || camp.resolved) return { ok: false, notes: ['Camp has already broken.'] }
+    const notes: string[] = []
+    // Adds before cuts: the plan is valid as a set, but applying send-downs
+    // first can transiently trip the NHL roster minimums and refuse moves.
+    const ordered = [...camp.decisions].sort((a, b) => {
+      const wa = placements.find((pl) => pl.playerId === a.playerId)?.place ?? a.coachPlan
+      const wb = placements.find((pl) => pl.playerId === b.playerId)?.place ?? b.coachPlan
+      return (wa === 'nhl' ? 0 : 1) - (wb === 'nhl' ? 0 : 1)
+    })
+    for (const d of ordered) {
+      const want = placements.find((pl) => pl.playerId === d.playerId)?.place ?? d.coachPlan
+      if (want === d.current) {
+        if (want === 'nhl' && d.coachPlan === 'ahl') notes.push(`${d.name} stays on the NHL roster — you overruled the coach.`)
+        continue
+      }
+      if (want === 'nhl') {
+        const res = this.callUp(d.playerId)
+        notes.push(res.ok ? `${d.name} makes the team out of camp.` : `${d.name} could not be recalled: ${res.message ?? 'roster rules'}.`)
+      } else {
+        const res = this.sendDown(d.playerId)
+        if (!res.ok) notes.push(`${d.name} could not be sent down: ${res.message ?? 'roster rules'}.`)
+        else if (res.note) notes.push(res.note)
+        else notes.push(`${d.name} is assigned to the farm.`)
+      }
+    }
+    camp.resolved = true
+    const team = this.data.teams.get(this.userTeamId)
+    const ahl = team?.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    if (team) repairLines(team, this.data.players)
+    if (ahl) repairLines(ahl, this.data.players)
+    this.pushNews(
+      'contract',
+      'Camp breaks — the roster is set',
+      `Cut day is done:\n\n• ${notes.join('\n• ')}\n\nOpening night is next. This is your team now.`,
+      { teamId: this.userTeamId as string }
+    )
+    return { ok: true, notes }
+  }
+
+  /** Simming past cut day: the coach applies his own plan, waivers and all. */
+  autoResolveTrainingCamp(): void {
+    if (!this.trainingCamp || this.trainingCamp.resolved) return
+    this.submitTrainingCamp([])
+  }
+
   private reassignFarmSystems(): void {
     // Waiver-required veterans aren't dumped to the farm over a small ability dip.
     const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
@@ -6079,33 +6270,53 @@ export class Career {
       if (split.promoted.length === 0 && split.demoted.length === 0) continue
 
       if (team.id === this.userTeamId) {
-        // Season Rhythm M3: suggest, don't apply — but frame it as what it IS:
-        // training camp's position battles, with the waiver trap flagged in
-        // red. The best 23 is not always the safest 23.
-        const staff = this.getTeamStaff(this.userTeamId as string)
-        const coachName = staff.headCoach?.name ?? 'The coaching staff'
-        const battleLines: string[] = []
-        for (const id of split.promoted.slice(0, 5)) {
+        // Season Rhythm M3: camp's battle verdicts become CUT DAY — a staged
+        // set of keep/send decisions the GM resolves on the camp screen
+        // before opening night. Simming past hands the coach the clipboard.
+        const decisions: TrainingCampState['decisions'] = []
+        for (const id of split.promoted.slice(0, 6)) {
           const p = this.data.players.get(id)
           if (!p) continue
-          battleLines.push(`▲ ${p.name} (${p.position}) won his camp battle — he's making it impossible to send him down. Recommend he starts in the NHL.`)
+          decisions.push({
+            playerId: id as string,
+            name: p.name,
+            position: p.position,
+            age: p.age,
+            current: 'ahl',
+            coachPlan: 'nhl',
+            waiverRequired: false,
+            line: "Won his camp battle — he's making it impossible to send him down.",
+            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          })
         }
-        for (const id of split.demoted.slice(0, 5)) {
+        for (const id of split.demoted.slice(0, 6)) {
           const p = this.data.players.get(id)
           if (!p) continue
-          if (this.requiresWaivers(p)) {
-            battleLines.push(`▼ ${p.name} (${p.position}) lost the numbers game — but ⚠ HE NEEDS WAIVERS to go down. Send him to the farm and any club can claim him for nothing. The best 23 isn't always the safest 23.`)
-          } else {
-            battleLines.push(`▼ ${p.name} (${p.position}) lost the numbers game. Waiver-exempt — he can develop in the AHL and be recalled any time.`)
-          }
+          const waiver = this.requiresWaivers(p)
+          decisions.push({
+            playerId: id as string,
+            name: p.name,
+            position: p.position,
+            age: p.age,
+            current: 'nhl',
+            coachPlan: 'ahl',
+            waiverRequired: waiver,
+            line: waiver
+              ? 'Lost the numbers game — but he NEEDS WAIVERS to go down. Any club can claim him for nothing.'
+              : 'Lost the numbers game. Waiver-exempt — he can develop in the AHL and be recalled any time.',
+            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          })
         }
-        this.pushNews(
-          'contract',
-          `Training camp report — ${coachName} on the battles`,
-          `Camp is over and the battles have verdicts. The staff's recommendations:\n\n${battleLines.join('\n')}\n\n` +
-          `(These are recommendations — make the calls yourself on the squad and farm screens.)`,
-          { teamId: this.userTeamId as string }
-        )
+        if (decisions.length > 0) {
+          this.trainingCamp = { decisions, resolved: false }
+          this.pushNews(
+            'contract',
+            'Cut day — camp verdicts are in',
+            'Training camp is over and the battles have verdicts. The final roster calls are yours — ' +
+            'make them before the opener, or the coach makes them for you.',
+            { teamId: this.userTeamId as string }
+          )
+        }
         continue
       }
 
@@ -7646,6 +7857,8 @@ export class Career {
       continueLabel,
       draftPending: this.draftPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
+      devCampPending: this.devCampPending && this.phase === 'offseason',
+      campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
       userTeam: {
@@ -11512,6 +11725,8 @@ export class Career {
       chronicle: structuredClone(this.chronicle),
       gmPersonas: structuredClone(this.gmPersonas),
       boardMeetingYear: this.boardMeetingYear,
+      devCampPending: this.devCampPending,
+      trainingCamp: this.trainingCamp ? structuredClone(this.trainingCamp) : null,
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
       ownerPerk: this.ownerPerk,
       reviewFacts: this.reviewFacts ? structuredClone(this.reviewFacts) : null,
@@ -11649,6 +11864,8 @@ export class Career {
     career.gmPersonas = snapshot.gmPersonas ? structuredClone(snapshot.gmPersonas) : []
     // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
+    career.devCampPending = snapshot.devCampPending ?? false
+    career.trainingCamp = snapshot.trainingCamp ? structuredClone(snapshot.trainingCamp) : null
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null
     career.ownerPerk = snapshot.ownerPerk ?? null
     career.reviewFacts = snapshot.reviewFacts ? structuredClone(snapshot.reviewFacts) : null

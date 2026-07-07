@@ -52,9 +52,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'startCareer': {
       if (!pendingData) throw new Error('no league generated; call newLeague first')
       career = new Career(pendingData, pendingSeed, asTeamId(req.teamId))
-      // Offseason takeover: the club plays year zero without you; you arrive
-      // in the summer with the draft and free agency ahead of you.
-      if (req.startAt === 'offseason') career.fastForwardToOffseason()
+      // Summer takeover: the game begins the day after the draft the database
+      // already reflects — instant, rosters exactly as imported.
+      if (req.startAt === 'offseason') career.startAtOffseason()
       return { id: req.id, type: 'view', view: career.view() }
     }
 
@@ -150,6 +150,22 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
     case 'getTeamDynamics':
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
+    case 'getDevCamp':
+      return { id: req.id, type: 'devCamp', devCamp: must().getDevCamp() }
+    case 'submitDevCamp': {
+      const res = must().submitDevCamp(req.standoutId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not resolve development camp.')
+      return { id: req.id, type: 'devCamp', devCamp: null }
+    }
+    case 'skipDevCamp':
+      must().autoResolveDevCamp()
+      return { id: req.id, type: 'devCamp', devCamp: null }
+    case 'getTrainingCamp':
+      return { id: req.id, type: 'trainingCamp', camp: must().getTrainingCamp() }
+    case 'submitTrainingCamp': {
+      const res = must().submitTrainingCamp(req.placements)
+      return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
+    }
     case 'getFeed':
       return { id: req.id, type: 'feed', feed: must().getFeed() }
     case 'toggleFollowAuthor': {
