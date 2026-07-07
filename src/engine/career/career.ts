@@ -3859,9 +3859,12 @@ export class Career {
     for (const s of notable) {
       const p = this.data.players.get(s.playerId)
       if (!p) continue
+      const domestic = s.competitionNation === 'canada' || s.competitionNation === 'usa'
       this.pushNews(
         'contract',
-        `${p.name} heads overseas to the ${s.competitionName}`,
+        domestic
+          ? `${p.name} signs on with the ${s.competitionName}`
+          : `${p.name} heads overseas to the ${s.competitionName}`,
         `${p.name} (${p.age}) — unsigned in the NHL — has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
         { playerId: s.playerId as string, teamId: s.teamId as string }
       )

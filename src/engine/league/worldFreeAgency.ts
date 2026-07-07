@@ -17,6 +17,8 @@ export interface WorldSigning {
   teamId: TeamId
   competitionId: string
   competitionName: string
+  /** League's nation (lowercase), for news copy — the OHL is not "overseas". */
+  competitionNation: string
   salary: number
   years: number
   /** A recognisable name (aging ex-NHLer / quality player) worth a news item. */
@@ -81,8 +83,14 @@ export function worldFreeAgencySweep(args: {
     // Prefer a league in the player's nation with room; else the strongest
     // league with room. Stronger players are tried against stronger leagues
     // first (slots are pre-sorted by strength).
-    const withRoom = slots.filter((s) => roomOf(s.teamId) > 0)
-    if (withRoom.length === 0) break
+    // Age eligibility: junior loops enforce their upper limit, and the NCAA
+    // is amateur — no professional signs there whatever the export says.
+    const eligible = (comp: Competition): boolean => {
+      const cap = comp.upperAgeLimit ?? (comp.abbrev.toUpperCase() === 'NCAA' ? 24 : 99)
+      return p.age <= cap
+    }
+    const withRoom = slots.filter((s) => roomOf(s.teamId) > 0 && eligible(s.comp))
+    if (withRoom.length === 0) continue
     const homeFirst = nat
       ? [...withRoom.filter((s) => s.nation === nat), ...withRoom.filter((s) => s.nation !== nat)]
       : withRoom
@@ -105,6 +113,7 @@ export function worldFreeAgencySweep(args: {
       teamId: slot.teamId,
       competitionId: slot.comp.id,
       competitionName: slot.comp.name,
+      competitionNation: slot.comp.nation.toLowerCase(),
       salary,
       years,
       // Aging ex-NHLers and quality players make the headlines.

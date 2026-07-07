@@ -92,6 +92,36 @@ describe('worldFreeAgencySweep', () => {
     expect(typeof res.signings[0]!.notable).toBe('boolean')
   })
 
+  it('never signs an adult into a junior loop — age limits gate eligibility', () => {
+    const lg = generateLeague({ seed: 33 })
+    const ohlTeams = lg.league.teams.slice(0, 4)
+    const comps: RawCompetition[] = [
+      { id: 'ohl', name: 'Ontario Hockey League', abbrev: 'OHL', nation: 'Canada', level: 2, reputation: 9, upperAgeLimit: 20 },
+    ]
+    const membership = ohlTeams.map((teamId) => ({ teamId, competitionId: 'ohl' }))
+    const competitions = buildCompetitions({ comps, membership, season: 2025 })
+    // A 30-year-old ex-NHLer with nowhere to go: the OHL must NOT take him.
+    const vetTeam = lg.teams.get(lg.league.teams[8]!)!
+    const vet = lg.players.get(vetTeam.roster[0]!)!
+    vet.age = 30
+    const res = worldFreeAgencySweep({
+      competitions, teams: lg.teams, players: lg.players,
+      faPool: [vet.id], year: 2025, rng: new Rng(7), minOverall: 0,
+    })
+    expect(res.signings).toHaveLength(0)
+    expect(res.remaining).toContain(vet.id)
+    // A 19-year-old in the same spot signs fine.
+    const kidTeam = lg.teams.get(lg.league.teams[9]!)!
+    const kid = lg.players.get(kidTeam.roster[0]!)!
+    kid.age = 19
+    const res2 = worldFreeAgencySweep({
+      competitions, teams: lg.teams, players: lg.players,
+      faPool: [kid.id], year: 2025, rng: new Rng(7), minOverall: 0,
+    })
+    expect(res2.signings).toHaveLength(1)
+    expect(res2.signings[0]!.competitionNation).toBe('canada')
+  })
+
   it('is deterministic for the same seed', () => {
     const a = world(25)
     const b = world(25)
