@@ -19,6 +19,7 @@ import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, TeamLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate, fmtMoney } from '../components/format'
+import { dayToDateISO } from '../../engine/career/views'
 import { TeamCrest } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -261,49 +262,8 @@ export function DashboardScreen(): JSX.Element {
         {/* ═══ LEFT COLUMN ═══ */}
         <div className="stack">
 
-          {/* Messages card */}
-          <Panel
-            title={`Inbox${d.unreadNews > 0 ? ` · ${d.unreadNews} unread` : ''}`}
-            className="stack"
-          >
-            {!inbox || inbox.items.length === 0 ? (
-              <span className="muted small">No messages.</span>
-            ) : (
-              <div>
-                {[...inbox.items]
-                  .sort((a, b) => {
-                    if (a.read !== b.read) return a.read ? 1 : -1
-                    return b.day - a.day
-                  })
-                  .slice(0, 8)
-                  .map((item) => (
-                    <div
-                      key={item.id}
-                      className={`inbox-preview-row${item.read ? '' : ' unread'}`}
-                      onClick={() => nav.navigate('inbox')}
-                    >
-                      <span
-                        className="inbox-preview-icon"
-                        style={{ color: CAT_COLOR[item.category] }}
-                      >
-                        {CAT_ICON[item.category]}
-                      </span>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <div className="inbox-preview-headline">{item.headline}</div>
-                      </span>
-                      <span className="inbox-preview-day">Day {item.day}</span>
-                    </div>
-                  ))}
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ width: '100%', marginTop: 6 }}
-                  onClick={() => nav.navigate('inbox')}
-                >
-                  View all messages
-                </button>
-              </div>
-            )}
-          </Panel>
+          {/* Messages pane — day-grouped, FM-portal style */}
+          <MessagesPane inbox={inbox ?? null} unread={d.unreadNews} onOpen={() => nav.navigate('inbox')} />
 
           {/* Injuries — only earns a panel when someone is actually hurt
               (health status lives in the status strip otherwise) */}
@@ -334,6 +294,9 @@ export function DashboardScreen(): JSX.Element {
           {shown('storylines') && d.topArcs && d.topArcs.length > 0 && (
             <StorylinesStrip arcs={d.topArcs} />
           )}
+
+          {/* News hero — the day's story, big, with a carousel of recents */}
+          <NewsHero inbox={inbox ?? null} onOpen={() => nav.navigate('inbox')} />
 
           {/* The Week Ahead — the dashboard centerpiece, in every phase */}
           <WeekAhead
@@ -991,6 +954,165 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
         </button>
       </div>
     </Panel>
+  )
+}
+
+/** FM-portal messages pane: day-grouped, sender lines, unread dots, filters.
+ *  A digest with the texture of a real mailbox — click-through to the inbox. */
+function MessagesPane({ inbox, unread, onOpen }: {
+  inbox: InboxView | null
+  unread: number
+  onOpen: () => void
+}): JSX.Element {
+  const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const items = [...(inbox?.items ?? [])]
+    .filter((i) => filter === 'all' || !i.read)
+    .sort((a, b) => (b.day - a.day) || b.id.localeCompare(a.id))
+    .slice(0, 12)
+
+  // Group by display date (offseason mail carries dateISO; season mail has day).
+  const dateLabel = (i: (typeof items)[number]): string =>
+    fmtDate(i.dateISO ?? dayToDateISO(i.year, Math.max(1, i.day)))
+  const groups: Array<{ label: string; rows: typeof items }> = []
+  for (const it of items) {
+    const label = dateLabel(it)
+    const g = groups[groups.length - 1]
+    if (g && g.label === label) g.rows.push(it)
+    else groups.push({ label, rows: [it] })
+  }
+
+  const SENDER: Record<string, string> = {
+    result: 'Match Report', injury: 'Medical Staff', trade: 'Front Office',
+    contract: 'Front Office', draft: 'Scouting Dept', award: 'League Office',
+    league: 'League Office', milestone: 'Club News', playoffs: 'League Office',
+    scouting: 'Scouting Dept',
+  }
+
+  return (
+    <Panel title="Messages" className="stack">
+      <div className="row" style={{ gap: 6, marginBottom: 4 }}>
+        {(['all', 'unread'] as const).map((f) => (
+          <button
+            key={f}
+            className={`chip${filter === f ? ' chip-accent' : ''}`}
+            style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+            onClick={() => setFilter(f)}
+          >
+            {f === 'all' ? 'All' : `Unread (${unread})`}
+          </button>
+        ))}
+      </div>
+      {groups.length === 0 && <span className="muted small">Nothing here — a quiet desk.</span>}
+      {groups.map((g) => (
+        <div key={g.label}>
+          <div
+            style={{
+              fontSize: 10, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--muted)',
+              background: 'var(--bg0)', borderRadius: 4, padding: '3px 8px', margin: '6px 0 2px',
+            }}
+          >
+            {g.label}
+          </div>
+          {g.rows.map((item) => (
+            <div
+              key={item.id}
+              onClick={onOpen}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px',
+                borderBottom: '1px solid var(--line)', cursor: 'pointer', minWidth: 0,
+              }}
+            >
+              <span style={{ fontSize: 13, flexShrink: 0, color: CAT_COLOR[item.category] }}>
+                {CAT_ICON[item.category] ?? '🏒'}
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <div className="muted" style={{ fontSize: 10 }}>
+                  {item.speaker ?? item.press?.byline?.split('—')[0]?.trim() ?? SENDER[item.category] ?? 'Club'}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5, fontWeight: item.read ? 400 : 700,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    color: item.read ? 'var(--muted)' : 'var(--text)',
+                  }}
+                >
+                  {item.headline}
+                </div>
+              </span>
+              {!item.read && (
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--violet-h)', flexShrink: 0 }} />
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={onOpen}>
+        Open inbox →
+      </button>
+    </Panel>
+  )
+}
+
+/** The news hero: the most recent stories as a big rotating card — category
+ *  chip, headline at display size, a two-line excerpt, byline, page dots. */
+function NewsHero({ inbox, onOpen }: { inbox: InboxView | null; onOpen: () => void }): JSX.Element | null {
+  const [page, setPage] = useState(0)
+  const stories = [...(inbox?.items ?? [])]
+    .filter((i) => i.body.length > 60)
+    .sort((a, b) => (b.day - a.day) || b.id.localeCompare(a.id))
+    .slice(0, 5)
+  if (stories.length === 0) return null
+  const story = stories[Math.min(page, stories.length - 1)]!
+
+  return (
+    <div
+      className="panel"
+      onClick={onOpen}
+      style={{
+        padding: '18px 22px', cursor: 'pointer', position: 'relative', overflow: 'hidden',
+        background: 'linear-gradient(115deg, var(--bg1) 55%, rgba(var(--accent-rgb, 108,92,231), 0.14) 100%)',
+        minHeight: 148,
+      }}
+    >
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <span className="chip chip-accent" style={{ fontSize: 10 }}>
+          {CAT_ICON[story.category]} {story.category.toUpperCase()}
+        </span>
+        <span className="muted" style={{ fontSize: 11 }}>
+          {story.press?.byline ?? story.speaker ?? 'Club News'}
+        </span>
+      </div>
+      <div style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.2, letterSpacing: -0.3, marginBottom: 6 }}>
+        {story.headline}
+      </div>
+      <div
+        className="muted"
+        style={{
+          fontSize: 13, lineHeight: 1.5, maxWidth: '92%',
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}
+      >
+        {story.body}
+      </div>
+      {/* pagination dots */}
+      <div className="row" style={{ gap: 6, marginTop: 12 }}>
+        {stories.map((_, i) => (
+          <button
+            key={i}
+            onClick={(e) => { e.stopPropagation(); setPage(i) }}
+            aria-label={`story ${i + 1}`}
+            style={{
+              width: i === page ? 26 : 8, height: 8, borderRadius: 4, border: 'none', cursor: 'pointer',
+              background: i === page ? 'rgb(var(--accent-rgb, 108,92,231))' : 'var(--line)',
+              transition: 'width 120ms ease',
+              padding: 0,
+            }}
+          />
+        ))}
+        <span style={{ flex: 1 }} />
+        <span className="muted small">See all news →</span>
+      </div>
+    </div>
   )
 }
 

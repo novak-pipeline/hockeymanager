@@ -3988,6 +3988,9 @@ export class Career {
         `Clubs locked up their expiring talent ahead of free agency.`
       )
     }
+    // Construction-era mail (welcome, mandate, season-begins) was stamped
+    // before the phase flip — it all belongs to July 1 of the start summer.
+    for (const n of this.news) if (!n.dateISO) n.dateISO = `${this.year}-07-01`
     // Development camp opens in early July — your first beat as GM.
     // (Only armed when the org actually has kids to skate.)
     this.devCampPending = this.devCampInvitees().invitees.length > 0
