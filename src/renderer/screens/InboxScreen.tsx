@@ -191,6 +191,19 @@ export function InboxScreen(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Deep-link: a dashboard message click arrives with the exact item to open.
+  const openedFromParam = useRef(false)
+  useEffect(() => {
+    if (openedFromParam.current) return
+    const id = nav.params.newsId
+    if (!id || !data) return
+    const item = data.items.find((i) => i.id === id)
+    if (item) {
+      openedFromParam.current = true
+      setSelected(item)
+    }
+  }, [data, nav.params.newsId])
+
   if (error) {
     return (
       <section>

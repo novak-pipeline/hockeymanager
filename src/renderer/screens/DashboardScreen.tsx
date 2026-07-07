@@ -10,8 +10,6 @@ import type {
   LeagueComparisonView,
   LeagueComparisonCard,
   PlayoffOddsView,
-  ScheduleEntryView,
-  ScheduleView,
   StandingRowView,
   TentpoleView,
 } from '../../worker/protocol'
@@ -21,6 +19,7 @@ import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate, fmtMoney } from '../components/format'
 import { dayToDateISO } from '../../engine/career/views'
 import { TeamCrest } from '../components/Crest'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -35,13 +34,6 @@ const CAT_COLOR: Record<NewsCategory, string> = {
   league: 'var(--muted)', milestone: 'var(--amber)', playoffs: 'var(--amber)',
 }
 
-/* ── helpers ── */
-function resultClass(won: boolean, decidedBy: string): string {
-  if (won) return 'w'
-  if (decidedBy === 'overtime' || decidedBy === 'shootout') return 'o'
-  return 'l'
-}
-
 /* ═══════════════════════════════════════════════════════════════
    Main screen
    ═══════════════════════════════════════════════════════════════ */
@@ -51,7 +43,6 @@ function resultClass(won: boolean, decidedBy: string): string {
 const OPTIONAL_PANELS: Array<{ key: string; label: string }> = [
   { key: 'injuries', label: 'Injuries' },
   { key: 'storylines', label: 'Storylines' },
-  { key: 'fixtures', label: 'Fixtures' },
   { key: 'topScorers', label: 'Top scorers' },
   { key: 'playoff', label: 'Playoff picture' },
   { key: 'stacksUp', label: 'How you stack up' },
@@ -113,9 +104,9 @@ export function DashboardScreen(): JSX.Element {
     (r) => (r.type === 'inbox' ? r.inbox : null)
   )
 
-  const { data: schedule } = useScreenData<ScheduleView>(
-    () => client.getSchedule(),
-    (r) => (r.type === 'schedule' ? r.schedule : null)
+  const { data: squad } = useScreenData(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
   )
 
   const { data: calendar } = useScreenData(
@@ -175,7 +166,7 @@ export function DashboardScreen(): JSX.Element {
   const shown = (key: string): boolean => !hiddenPanels.has(key)
 
   return (
-    <section className="stack">
+    <section className="dash-viewport">
       {/* hero identity band */}
       <DashHero d={d} customize={<CustomizeMenu hidden={hiddenPanels} onToggle={togglePanel} />} />
 
@@ -283,7 +274,12 @@ export function DashboardScreen(): JSX.Element {
           )}
 
           {/* Messages pane — the column's grower: fills to the bottom, scrolls */}
-          <MessagesPane inbox={inbox ?? null} unread={d.unreadNews} onOpen={() => nav.navigate('inbox')} />
+          <MessagesPane
+            inbox={inbox ?? null}
+            unread={d.unreadNews}
+            onOpen={() => nav.navigate('inbox')}
+            onOpenItem={(id) => nav.navigate('inbox', { newsId: id })}
+          />
 
         </div>
 
@@ -308,7 +304,7 @@ export function DashboardScreen(): JSX.Element {
             busy={actions.busy}
           />
 
-          {/* Offseason: the working desk (market / expiring) */}
+          {/* Offseason: the working desk (market / expiring) — the center grower */}
           {d.phase === 'offseason' && <SummerDesk onOpen={() => nav.navigate('offseason')} />}
 
           {/* News / last result hero */}
@@ -324,9 +320,9 @@ export function DashboardScreen(): JSX.Element {
             </Panel>
           ))}
 
-          {/* Next game */}
+          {/* Next game — the center grower in season */}
           {d.phase !== 'offseason' && (
-          <Panel title="Next game">
+          <Panel title="Next game" className="dash-fill">
             {d.nextGame ? (
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
                 <div className="scoreline" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -389,11 +385,45 @@ export function DashboardScreen(): JSX.Element {
         {/* ═══ RIGHT COLUMN ═══ */}
         <div className="dash-col">
 
-          {/* Fixtures card */}
-          {shown('fixtures') && (
-          <Panel title="Fixtures">
-            <FixturesCard entries={schedule?.entries ?? []} todayDate={d.date} />
-          </Panel>
+          {/* Top scorers — points once the season runs; your projected core in summer */}
+          {shown('topScorers') && (
+            <Panel title={d.topScorers.length > 0 ? 'Top scorers' : 'The core — season ahead'}>
+              <div className="list">
+                {d.topScorers.length > 0
+                  ? d.topScorers.map((p) => (
+                      <div key={p.playerId} className="row-between small">
+                        <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
+                          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                          <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
+                          <PlayerLink playerId={p.playerId} name={p.name} />
+                        </span>
+                        <span className="mono" style={{ flexShrink: 0 }}>
+                          {p.goals}G {p.assists}A ·{' '}
+                          <strong style={{ color: 'var(--violet-h)' }}>{p.points} pts</strong>
+                        </span>
+                      </div>
+                    ))
+                  : (squad?.rows ?? [])
+                      .filter((r) => r.position !== 'G')
+                      .sort((a, b) => b.overall - a.overall)
+                      .slice(0, 5)
+                      .map((p) => (
+                        <div key={p.playerId} className="row-between small">
+                          <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
+                            <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                            <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
+                            <PlayerLink playerId={p.playerId} name={p.name} />
+                          </span>
+                          <span className="mono" style={{ flexShrink: 0 }}>
+                            <OverallStars value={p.overall} />
+                          </span>
+                        </div>
+                      ))}
+                {d.topScorers.length === 0 && (squad?.rows ?? []).length === 0 && (
+                  <span className="muted small">Roster loading…</span>
+                )}
+              </div>
+            </Panel>
           )}
 
           {/* Division standings mean nothing in July — the table only appears
@@ -407,27 +437,6 @@ export function DashboardScreen(): JSX.Element {
           {/* Offseason: around the league — real signings/trades as they land */}
           {d.phase === 'offseason' && <MarketPulse />}
 
-          {/* Top scorers — only once someone has actually scored */}
-          {shown('topScorers') && d.topScorers.length > 0 && (
-          <Panel title="Top scorers">
-            <div className="list">
-              {d.topScorers.map((p) => (
-                <div key={p.playerId} className="row-between small">
-                  <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
-                    <PlayerFace faceId={p.faceId} name={p.name} size={26} />
-                    <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
-                    <PlayerLink playerId={p.playerId} name={p.name} />
-                  </span>
-                  <span className="mono" style={{ flexShrink: 0 }}>
-                    {p.goals}G {p.assists}A ·{' '}
-                    <strong style={{ color: 'var(--violet-h)' }}>{p.points} pts</strong>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-          )}
-
           {/* Playoff picture */}
           {shown('playoff') && playoffOdds?.available && (
             <Panel title="Playoff picture">
@@ -435,10 +444,12 @@ export function DashboardScreen(): JSX.Element {
             </Panel>
           )}
 
-          {/* How your club stacks up */}
+          {/* How your club stacks up — the column's grower, scrolls internally */}
           {shown('stacksUp') && comparison && comparison.cards.length > 0 && (
-            <Panel title="How you stack up">
-              <StacksUpCard view={comparison} />
+            <Panel title="How you stack up" className="dash-fill">
+              <div className="dash-scroll">
+                <StacksUpCard view={comparison} />
+              </div>
             </Panel>
           )}
 
@@ -627,69 +638,6 @@ function LastResultHero(props: {
     </div>
   )
 }
-
-/** Last 3 results + next 3 upcoming, styled with W/L/OTL chips. */
-function FixturesCard(props: {
-  entries: ScheduleEntryView[]
-  todayDate: string
-}): JSX.Element {
-  const { entries } = props
-  if (entries.length === 0) {
-    return <span className="muted small">No fixtures.</span>
-  }
-
-  const played = entries.filter((e) => e.result !== null)
-  const upcoming = entries.filter((e) => e.result === null)
-  const lastPlayed = played.slice(-3)
-  const nextThree = upcoming.slice(0, 3)
-
-  return (
-    <div>
-      {lastPlayed.length > 0 && (
-        <>
-          <div className="muted small" style={{ marginBottom: 4 }}>Results</div>
-          {lastPlayed.map((e) => {
-            const r = e.result!
-            const cls = resultClass(r.won, r.decidedBy)
-            // homeGoals/awayGoals from GameResult
-            const userGoals = e.home ? r.homeGoals : r.awayGoals
-            const oppGoals  = e.home ? r.awayGoals : r.homeGoals
-            return (
-              <div key={e.gameId} className="fixture-row">
-                <span className={`fixture-result ${cls}`}>
-                  {cls === 'w' ? 'W' : cls === 'o' ? 'OT' : 'L'}
-                </span>
-                <span style={{ flex: 1, fontSize: 13 }}>
-                  {e.home ? 'vs' : '@'} {e.opponentAbbr}
-                </span>
-                <span className="mono small" style={{ color: cls === 'w' ? 'var(--green)' : cls === 'o' ? 'var(--amber)' : 'var(--red)' }}>
-                  {userGoals}–{oppGoals}
-                </span>
-              </div>
-            )
-          })}
-        </>
-      )}
-      {nextThree.length > 0 && (
-        <>
-          <div className="muted small" style={{ marginTop: 8, marginBottom: 4 }}>Upcoming</div>
-          {nextThree.map((e) => (
-            <div key={e.gameId} className="fixture-row">
-              <span className="fixture-result upcoming">
-                {e.home ? 'H' : 'A'}
-              </span>
-              <span style={{ flex: 1, fontSize: 13 }}>
-                {e.home ? 'vs' : '@'} {e.opponentName}
-              </span>
-              <span className="muted small">{fmtDate(e.date)}</span>
-            </div>
-          ))}
-        </>
-      )}
-    </div>
-  )
-}
-
 
 /** Compact division standings table with rank chips + user row highlight. */
 function MiniTable(props: { rows: StandingRowView[]; userTeamId: string }): JSX.Element {
@@ -882,8 +830,9 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
   )
 
   return (
-    <Panel title="The Offseason Desk">
+    <Panel title="The Offseason Desk" className="dash-fill">
 
+      <div className="dash-scroll">
       {/* stage content */}
       {os?.stage === 'resign' && (
         <div className="stack" style={{ gap: 'var(--sp-2)' }}>
@@ -945,8 +894,9 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
       {os?.stage === 'preseason' && (
         <span className="muted small">Camp is underway — the roster battles resolve before the opener.</span>
       )}
+      </div>
 
-      <div className="row" style={{ marginTop: 'var(--sp-3)' }}>
+      <div className="row" style={{ marginTop: 'var(--sp-2)', flexShrink: 0 }}>
         <button className="btn btn-primary btn-sm" onClick={onOpen}>
           Work the desk →
         </button>
@@ -961,10 +911,11 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
 
 /** FM-portal messages pane: day-grouped, sender lines, unread dots, filters.
  *  A digest with the texture of a real mailbox — click-through to the inbox. */
-function MessagesPane({ inbox, unread, onOpen }: {
+function MessagesPane({ inbox, unread, onOpen, onOpenItem }: {
   inbox: InboxView | null
   unread: number
   onOpen: () => void
+  onOpenItem: (id: string) => void
 }): JSX.Element {
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
   const items = [...(inbox?.items ?? [])]
@@ -1019,7 +970,7 @@ function MessagesPane({ inbox, unread, onOpen }: {
           {g.rows.map((item) => (
             <div
               key={item.id}
-              onClick={onOpen}
+              onClick={() => onOpenItem(item.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px',
                 borderBottom: '1px solid var(--line)', cursor: 'pointer', minWidth: 0,
@@ -1127,12 +1078,12 @@ function NewsHero({ inbox, onOpen }: { inbox: InboxView | null; onOpen: () => vo
       className="panel"
       onClick={onOpen}
       style={{
-        padding: '18px 22px', cursor: 'pointer', position: 'relative', overflow: 'hidden',
+        padding: '12px 18px', cursor: 'pointer', position: 'relative', overflow: 'hidden',
         background: 'linear-gradient(115deg, var(--bg1) 55%, rgba(var(--accent-rgb, 108,92,231), 0.14) 100%)',
-        minHeight: 148,
+        flexShrink: 0,
       }}
     >
-      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 4 }}>
         <span className="chip chip-accent" style={{ fontSize: 10 }}>
           {CAT_ICON[story.category]} {story.category.toUpperCase()}
         </span>
@@ -1140,20 +1091,20 @@ function NewsHero({ inbox, onOpen }: { inbox: InboxView | null; onOpen: () => vo
           {story.press?.byline ?? story.speaker ?? 'Club News'}
         </span>
       </div>
-      <div style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.2, letterSpacing: -0.3, marginBottom: 6 }}>
+      <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.2, letterSpacing: -0.3, marginBottom: 4 }}>
         {story.headline}
       </div>
       <div
         className="muted"
         style={{
-          fontSize: 13, lineHeight: 1.5, maxWidth: '92%',
+          fontSize: 12.5, lineHeight: 1.45, maxWidth: '94%',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
         }}
       >
         {story.body}
       </div>
       {/* pagination dots */}
-      <div className="row" style={{ gap: 6, marginTop: 12 }}>
+      <div className="row" style={{ gap: 6, marginTop: 8 }}>
         {stories.map((_, i) => (
           <button
             key={i}
@@ -1191,15 +1142,16 @@ function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNo
         alignItems: 'center',
         gap: 'var(--sp-4)',
         flexWrap: 'wrap',
-        padding: '14px 18px',
+        padding: '9px 16px',
+        flexShrink: 0,
         background:
           'linear-gradient(100deg, rgba(var(--accent-rgb, 108,92,231), 0.22) 0%, rgba(var(--accent-rgb, 108,92,231), 0.07) 38%, var(--bg1) 72%)',
         borderLeft: '3px solid rgb(var(--accent-rgb, 108,92,231))',
       }}
     >
-      <TeamCrest className="crest" teamId={d.userTeam.teamId} abbr={d.userTeam.name.slice(0, 2)} style={{ width: 54, height: 54, fontSize: 18 }} />
+      <TeamCrest className="crest" teamId={d.userTeam.teamId} abbr={d.userTeam.name.slice(0, 2)} style={{ width: 44, height: 44, fontSize: 15 }} />
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.1, letterSpacing: -0.3 }}>{d.userTeam.name}</div>
+        <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1, letterSpacing: -0.3 }}>{d.userTeam.name}</div>
         <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
           {d.leagueName} · {d.year} ·{' '}
           {d.phase === 'offseason' ? (d.offseasonStageLabel ?? 'Offseason') : `Day ${d.day}/${d.totalDays}`}
@@ -1277,31 +1229,30 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   const upcoming = all
     .filter((e) => !(e.kind === 'keydate' && e.label === 'Season Begins' && gameDates.has(e.dateISO)))
     .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
-    .slice(0, offseason ? 9 : 8)
+    .slice(0, 5)
 
   const dateCell = (iso: string): JSX.Element => {
     const dt = new Date(iso + 'T00:00:00Z')
     const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][dt.getUTCMonth()]
     return (
-      <div style={{ width: 44, textAlign: 'center', flexShrink: 0 }}>
-        <div style={{ fontSize: 9, letterSpacing: 1.2, color: 'var(--muted)' }}>{mon}</div>
-        <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1 }}>{dt.getUTCDate()}</div>
+      <div style={{ width: 38, textAlign: 'center', flexShrink: 0 }}>
+        <div style={{ fontSize: 8.5, letterSpacing: 1.1, color: 'var(--muted)' }}>{mon}</div>
+        <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1 }}>{dt.getUTCDate()}</div>
       </div>
     )
   }
 
   const rowStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 'var(--sp-3)',
-    padding: '8px 10px', borderTop: '1px solid var(--line)',
+    display: 'flex', alignItems: 'center', gap: 'var(--sp-2)',
+    padding: '4px 8px', borderTop: '1px solid var(--line)',
   }
 
   return (
-    <Panel title="The Week Ahead" className="dash-fill">
-      <div className="dash-scroll">
+    <Panel title="The Week Ahead">
       {/* today — the highlighted head of the agenda */}
       <div
         style={{
-          display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '10px 12px',
+          display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '7px 10px',
           borderRadius: 8, marginBottom: 2,
           background: 'rgba(var(--accent-rgb, 108,92,231), 0.13)',
           border: '1px solid rgba(var(--accent-rgb, 108,92,231), 0.45)',
@@ -1353,11 +1304,10 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
         </div>
       ))}
       {upcoming.length === 0 && (
-        <div className="muted small" style={{ padding: '10px 12px' }}>A quiet stretch — the calendar has the full picture.</div>
+        <div className="muted small" style={{ padding: '8px 10px' }}>A quiet stretch — the calendar has the full picture.</div>
       )}
-      </div>
 
-      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 8, flexShrink: 0 }} onClick={onOpenCalendar}>
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={onOpenCalendar}>
         Full calendar →
       </button>
     </Panel>

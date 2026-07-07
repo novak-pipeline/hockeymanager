@@ -143,6 +143,8 @@ export interface NavParams {
   teamId?: string
   /** Scout being viewed in the scout profile screen. */
   scoutId?: string
+  /** Inbox deep-link: open this message on arrival (dashboard click-through). */
+  newsId?: string
 }
 
 export interface NavApi {
