@@ -117,6 +117,10 @@ try {
     await win.click(':nth-match(:text("Offseason"), 2)', { timeout: 4000 })
     await win.waitForTimeout(500)
     await snap(win, 'offseason-desk')
+    // The market is its own sidebar tab now — the desk links to it.
+    await win.click('text="Free Agents"', { timeout: 4000 })
+    await win.waitForTimeout(600)
+    await snap(win, 'fa-market')
     await win.click('button:has-text("Open talks")', { timeout: 5000 })
     await win.waitForSelector('text=Contract talks', { timeout: 8000 })
     await snap(win, 'negotiation-open')

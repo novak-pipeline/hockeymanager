@@ -69,6 +69,7 @@ export type ScreenId =
   | 'matchcenter'
   | 'trades'
   | 'waivers'
+  | 'faMarket'
   | 'lockerRoom'
   | 'calendar'
   | 'feed'
@@ -127,6 +128,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'draft':
     case 'offseason':
     case 'negotiation':
+    case 'faMarket':
     case 'playoffs':
       return 'league'
     case 'board':

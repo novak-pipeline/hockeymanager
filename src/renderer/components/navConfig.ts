@@ -87,6 +87,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
       ] },
     { id: 'transfers', label: 'Transfers', icon: 'transfers', section: 'competition', screen: 'trades', match: ['trades', 'waivers'],
       subTabs: [{ id: 'trades', label: 'Trade Block' }, { id: 'waivers', label: 'Waiver Wire' }] },
+    { id: 'faMarket', label: 'Free Agents', icon: 'transfers', section: 'competition', screen: 'faMarket', match: ['faMarket', 'negotiation'] },
     { id: 'clubInfo', label: 'Club Info', icon: 'clubInfo', section: 'club', screen: 'teamInfo', match: ['teamInfo', 'teamHistory'],
       subTabs: [{ id: 'teamInfo', label: 'Profile' }, { id: 'teamHistory', label: 'History' }] },
     { id: 'clubVision', label: 'Club Vision', icon: 'clubVision', section: 'club', screen: 'board', match: ['board'] },

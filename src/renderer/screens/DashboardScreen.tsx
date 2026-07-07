@@ -7,9 +7,6 @@ import type {
   BoxScoreView,
   DashboardView,
   InboxView,
-  LeagueComparisonView,
-  LeagueComparisonCard,
-  PlayoffOddsView,
   StandingRowView,
   TentpoleView,
 } from '../../worker/protocol'
@@ -44,8 +41,6 @@ const OPTIONAL_PANELS: Array<{ key: string; label: string }> = [
   { key: 'injuries', label: 'Injuries' },
   { key: 'storylines', label: 'Storylines' },
   { key: 'topScorers', label: 'Top scorers' },
-  { key: 'playoff', label: 'Playoff picture' },
-  { key: 'stacksUp', label: 'How you stack up' },
 ]
 const HIDDEN_PANELS_KEY = 'hg.dash.hiddenPanels'
 
@@ -122,16 +117,6 @@ export function DashboardScreen(): JSX.Element {
   const { data: tentpoles } = useScreenData<TentpoleView>(
     () => client.getTentpoles(),
     (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
-  )
-
-  const { data: comparison } = useScreenData<LeagueComparisonView>(
-    () => client.getLeagueComparison(),
-    (r) => (r.type === 'leagueComparison' ? r.comparison : null)
-  )
-
-  const { data: playoffOdds } = useScreenData<PlayoffOddsView>(
-    () => client.getPlayoffOdds(),
-    (r) => (r.type === 'playoffOdds' ? r.odds : null)
   )
 
   const [hiddenPanels, setHiddenPanels] = useState<Set<string>>(() => loadHiddenPanels())
@@ -286,15 +271,23 @@ export function DashboardScreen(): JSX.Element {
         {/* ═══ CENTER COLUMN ═══ */}
         <div className="dash-col">
 
-          {/* Storylines ticker strip */}
-          {shown('storylines') && d.topArcs && d.topArcs.length > 0 && (
-            <StorylinesStrip arcs={d.topArcs} />
+          {/* News hero — the day's story with the live storyline chips inside */}
+          <NewsHero
+            inbox={inbox ?? null}
+            arcs={shown('storylines') ? (d.topArcs ?? []) : []}
+            onOpen={() => nav.navigate('inbox')}
+          />
+
+          {/* Last result — right under the headline, always above the fold */}
+          {d.phase !== 'offseason' && d.lastResult && (
+            <LastResultHero
+              result={d.lastResult}
+              boxScore={boxScore ?? null}
+              onBoxScore={() => nav.navigate('matchcenter')}
+            />
           )}
 
-          {/* News hero — the day's story, big, with a carousel of recents */}
-          <NewsHero inbox={inbox ?? null} onOpen={() => nav.navigate('inbox')} />
-
-          {/* The Week Ahead — the dashboard centerpiece, in every phase */}
+          {/* The Week Ahead — the agenda, in every phase */}
           <WeekAhead
             d={d}
             calendar={calendar ?? null}
@@ -306,19 +299,6 @@ export function DashboardScreen(): JSX.Element {
 
           {/* Offseason: the working desk (market / expiring) — the center grower */}
           {d.phase === 'offseason' && <SummerDesk onOpen={() => nav.navigate('offseason')} />}
-
-          {/* News / last result hero */}
-          {d.phase !== 'offseason' && (d.lastResult ? (
-            <LastResultHero
-              result={d.lastResult}
-              boxScore={boxScore ?? null}
-              onBoxScore={() => nav.navigate('matchcenter')}
-            />
-          ) : (
-            <Panel title="Match result">
-              <span className="muted small">No games played yet.</span>
-            </Panel>
-          ))}
 
           {/* Next game — the center grower in season */}
           {d.phase !== 'offseason' && (
@@ -427,125 +407,22 @@ export function DashboardScreen(): JSX.Element {
           )}
 
           {/* Division standings mean nothing in July — the table only appears
-              once there are results to rank. Summer gets the market instead. */}
+              once there are results to rank; it grows to fill the column.
+              Summer gets the market instead. */}
           {d.phase !== 'offseason' && (
-            <Panel title={`${d.divisionName} Division`}>
-              <MiniTable rows={d.divisionStandings} userTeamId={d.userTeam.teamId} />
+            <Panel title={`${d.divisionName} Division`} className="dash-fill">
+              <div className="dash-scroll">
+                <MiniTable rows={d.divisionStandings} userTeamId={d.userTeam.teamId} />
+              </div>
             </Panel>
           )}
 
           {/* Offseason: around the league — real signings/trades as they land */}
           {d.phase === 'offseason' && <MarketPulse />}
 
-          {/* Playoff picture */}
-          {shown('playoff') && playoffOdds?.available && (
-            <Panel title="Playoff picture">
-              <PlayoffOddsCard view={playoffOdds} />
-            </Panel>
-          )}
-
-          {/* How your club stacks up — the column's grower, scrolls internally */}
-          {shown('stacksUp') && comparison && comparison.cards.length > 0 && (
-            <Panel title="How you stack up" className="dash-fill">
-              <div className="dash-scroll">
-                <StacksUpCard view={comparison} />
-              </div>
-            </Panel>
-          )}
-
         </div>
       </div>
     </section>
-  )
-}
-
-/* ── Playoff odds card ── */
-
-function oddsColor(pct: number): string {
-  if (pct >= 85) return 'var(--success)'
-  if (pct >= 45) return 'var(--accent, #f5b301)'
-  if (pct >= 15) return 'var(--amber, #f59e0b)'
-  return 'var(--danger)'
-}
-
-function PlayoffOddsCard({ view }: { view: PlayoffOddsView }): JSX.Element {
-  const user = view.rows.find((r) => r.isUser)
-  // The user's conference, by projected points, with the top-4 playoff cut line.
-  const conf = user ? view.rows.filter((r) => r.conference === user.conference) : []
-
-  return (
-    <div className="list">
-      {user && (
-        <div className="row-between" style={{ alignItems: 'baseline', marginBottom: 6 }}>
-          <span>
-            <span style={{ fontSize: 22, fontWeight: 800, color: oddsColor(user.playoffPct) }}>{user.playoffPct}%</span>
-            <span className="muted small"> to make the playoffs</span>
-          </span>
-          <span className="muted small">proj. {user.projectedPoints} pts</span>
-        </div>
-      )}
-      <div className="muted small" style={{ marginBottom: 4, opacity: 0.7 }}>
-        {user?.conference} — top 4 make it ({view.simulations} sims)
-      </div>
-      {conf.map((r, i) => (
-        <div key={r.teamId}>
-          {i === 4 && <div style={{ borderTop: '1px dashed var(--danger)', opacity: 0.5, margin: '3px 0' }} />}
-          <div
-            className="row-between small"
-            style={{ alignItems: 'center', gap: 8, fontWeight: r.isUser ? 700 : 400, color: r.isUser ? 'var(--violet-h)' : undefined }}
-          >
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {i + 1}. <TeamLink teamId={r.teamId} name={r.abbreviation} /> <span className="muted">{r.points}p · {r.gamesRemaining} left</span>
-            </span>
-            <span className="mono" style={{ color: oddsColor(r.playoffPct), fontWeight: 700, minWidth: 38, textAlign: 'right' }}>
-              {r.playoffPct}%
-            </span>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/* ── League comparison card ── */
-
-function rankColor(percentile: number): string {
-  if (percentile >= 0.66) return 'var(--success)'
-  if (percentile >= 0.33) return 'var(--amber, #f59e0b)'
-  return 'var(--danger)'
-}
-
-function StacksUpCard({ view }: { view: LeagueComparisonView }): JSX.Element {
-  return (
-    <div className="list">
-      <div className="muted small" style={{ marginBottom: 4, opacity: 0.75 }}>
-        Your rank across the NHL — 1 is best.
-      </div>
-      {view.cards.map((c: LeagueComparisonCard) => {
-        const color = rankColor(c.percentile)
-        return (
-          <div key={c.key} className="row-between small" style={{ alignItems: 'center', gap: 8 }} title={c.blurb}>
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {c.label}
-              <span className="muted" style={{ marginLeft: 6 }}>{c.display}</span>
-            </span>
-            <span className="row" style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
-              {!c.isUserLeader && (
-                <span className="muted" style={{ fontSize: 10 }} title={`League leader: ${c.leaderAbbr} (${c.leaderDisplay})`}>
-                  led by <TeamLink teamId={c.leaderTeamId} name={c.leaderAbbr} />
-                </span>
-              )}
-              <span
-                className="mono"
-                style={{ color, fontWeight: 700, minWidth: 52, textAlign: 'right' }}
-              >
-                {c.isUserLeader ? '★ ' : ''}{c.rank}<span className="muted" style={{ fontWeight: 400 }}>/{c.outOf}</span>
-              </span>
-            </span>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -754,43 +631,6 @@ function getOrdinalSuffix(n: number): string {
     case 3: return 'rd'
     default: return 'th'
   }
-}
-
-/** Thin storylines ticker strip listing topArcs headlines as chips. */
-function StorylinesStrip(props: { arcs: Array<{ kind: string; headline: string }> }): JSX.Element {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 'var(--sp-2)',
-        padding: '8px 12px',
-        background: 'var(--bg1)',
-        border: '1px solid var(--line)',
-        borderRadius: 'var(--radius-sm)',
-      }}
-    >
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.8px',
-          color: 'var(--muted)',
-          alignSelf: 'center',
-          whiteSpace: 'nowrap',
-          marginRight: 4,
-        }}
-      >
-        Storylines
-      </span>
-      {props.arcs.map((arc, i) => (
-        <span key={i} className="chip chip-violet" style={{ fontSize: 11 }}>
-          {arc.headline}
-        </span>
-      ))}
-    </div>
-  )
 }
 
 /** Small board-confidence chip for the dashboard season panel. */
@@ -1063,8 +903,13 @@ function MarketPulse(): JSX.Element | null {
 }
 
 /** The news hero: the most recent stories as a big rotating card — category
- *  chip, headline at display size, a two-line excerpt, byline, page dots. */
-function NewsHero({ inbox, onOpen }: { inbox: InboxView | null; onOpen: () => void }): JSX.Element | null {
+ *  chip, headline at display size, a two-line excerpt, byline, page dots —
+ *  with the league's live storyline chips folded into the same card. */
+function NewsHero({ inbox, arcs, onOpen }: {
+  inbox: InboxView | null
+  arcs: Array<{ kind: string; headline: string }>
+  onOpen: () => void
+}): JSX.Element | null {
   const [page, setPage] = useState(0)
   const stories = [...(inbox?.items ?? [])]
     .filter((i) => i.body.length > 60)
@@ -1103,6 +948,16 @@ function NewsHero({ inbox, onOpen }: { inbox: InboxView | null; onOpen: () => vo
       >
         {story.body}
       </div>
+      {/* storylines — the league's running threads, folded into the card */}
+      {arcs.length > 0 && (
+        <div className="row" style={{ gap: 5, marginTop: 8, flexWrap: 'wrap' }}>
+          {arcs.slice(0, 3).map((arc, i) => (
+            <span key={i} className="chip chip-violet" style={{ fontSize: 10 }}>
+              {arc.headline}
+            </span>
+          ))}
+        </div>
+      )}
       {/* pagination dots */}
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
         {stories.map((_, i) => (
