@@ -123,8 +123,10 @@ function ResultChip({ entry }: ResultChipProps): JSX.Element | null {
 function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
   const months = monthKeys(calendar.entries)
 
-  // Default month: next unplayed game's month, else last game's month.
+  // Default month: the in-world today (offseason-aware) when known, else the
+  // next unplayed game's month, else last game's month.
   const defaultMonth = useMemo((): string => {
+    if (calendar.todayISO) return monthOf(calendar.todayISO)
     const nextEntry = calendar.entries.find(
       (e): e is Extract<CalendarEntry, { kind: 'game' }> => e.kind === 'game' && e.isNext
     )
@@ -132,7 +134,7 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
     const last = [...calendar.entries].reverse().find((e) => e.kind === 'game')
     if (last) return monthOf(last.dateISO)
     return months[0] ?? monthOf(new Date().toISOString())
-  }, [calendar.entries, months])
+  }, [calendar.entries, calendar.todayISO, months])
 
   const [currentMonthKey, setCurrentMonthKey] = useState(defaultMonth)
   const currentIndex = months.indexOf(currentMonthKey)
@@ -254,8 +256,15 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
                       cellDate.getUTCFullYear() === y && cellDate.getUTCMonth() === monthNum
                     const cellEntries = byDate.get(isoDate) ?? []
                     const dayNum = cellDate.getUTCDate()
+                    const isToday = calendar.todayISO === isoDate
                     return (
-                      <td key={di} style={cellStyle(inMonth, cellEntries.length > 0)}>
+                      <td
+                        key={di}
+                        style={{
+                          ...cellStyle(inMonth, cellEntries.length > 0),
+                          ...(isToday ? { outline: '2px solid var(--violet-h)', outlineOffset: -2 } : {}),
+                        }}
+                      >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           {/* Day number */}
                           <span

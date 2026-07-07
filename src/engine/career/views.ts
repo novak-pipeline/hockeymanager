@@ -2618,6 +2618,8 @@ export type CalendarEntry =
 export interface CalendarView {
   year: number
   entries: CalendarEntry[]
+  /** Current in-world date (offseason-aware). Optional/additive. */
+  todayISO?: string
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */

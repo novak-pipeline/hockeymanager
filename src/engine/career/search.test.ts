@@ -278,6 +278,25 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(c2.getDashboard().devCampPending).toBe(true)
   })
 
+  it('July 1 has a real market: cap casualties populate free agency', () => {
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0])
+    c.startAtOffseason()
+    // Advance resign -> freeAgency (dev camp auto-resolves on the way).
+    for (let i = 0; i < 5; i++) {
+      if (c.getOffseason()?.stage === 'freeAgency') break
+      c.advanceOffseason()
+    }
+    const os = c.getOffseason()
+    expect(os?.stage).toBe('freeAgency')
+    // The market exists — squeezed clubs released real veterans.
+    expect(os!.freeAgents.length).toBeGreaterThan(0)
+    // And the summer calendar knows what day it is.
+    const cal = c.getCalendarView()
+    expect(cal.todayISO?.startsWith(`${data.league.season.year ?? 2025}`.slice(0, 4)) || cal.todayISO !== undefined).toBe(true)
+    expect(cal.entries.some((e) => e.kind === 'keydate' && e.label === 'Cut Day')).toBe(true)
+  })
+
   it('dev camp: the scene lists org kids with grades; naming a standout resolves the gate', () => {
     const data = generateLeague({ seed: 313 })
     const c = new Career(data, 313, data.league.teams[0])

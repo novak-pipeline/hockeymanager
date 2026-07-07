@@ -1740,6 +1740,10 @@ export interface CalendarCtx extends ViewCtx {
   playoffsStartDay: number | null
   /** Scheduled GM interviews to mark on the calendar. */
   interviewDates?: Array<{ dateISO: string; label: string }>
+  /** Extra dated beats (summer tentpoles: FA opening, camps, cut day). */
+  extraKeyDates?: Array<{ dateISO: string; label: string }>
+  /** The current in-world date (offseason-aware) — anchors the default month. */
+  todayISO?: string
 }
 
 /**
@@ -1750,6 +1754,9 @@ export interface CalendarCtx extends ViewCtx {
  */
 export function buildCalendarView(ctx: CalendarCtx): CalendarView {
   const entries: CalendarEntry[] = []
+  for (const k of ctx.extraKeyDates ?? []) {
+    entries.push({ kind: 'keydate', dateISO: k.dateISO, label: k.label })
+  }
 
   // ── user fixtures ──
   const userGames = ctx.schedule.filter(
@@ -1831,7 +1838,7 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
 
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
 
-  return { year: ctx.year, entries }
+  return { year: ctx.year, entries, ...(ctx.todayISO ? { todayISO: ctx.todayISO } : {}) }
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */

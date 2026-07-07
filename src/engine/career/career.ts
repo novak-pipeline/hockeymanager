@@ -5023,6 +5023,58 @@ export class Career {
             )
           }
         }
+        // July cap casualties: AI clubs squeezed on space or carrying surplus
+        // non-tender their weakest one-way veterans — the real late-summer
+        // market GMs actually shop. Keeps July 1 alive even in a post-frenzy
+        // imported world where every star is already signed.
+        {
+          const casualties: string[] = []
+          for (const team of this.data.teams.values()) {
+            if (team.tier === 'ahl' || team.tier === 'world') continue
+            if (team.id === this.userTeamId) continue
+            const roster = team.roster
+              .map((id) => this.data.players.get(id))
+              .filter((p): p is Player => !!p)
+            const payroll = roster.reduce((n, p) => n + p.contract.salary, 0)
+            const squeezed = roster.length > 23 || payroll > team.finances.salaryCap * 0.96
+            const rng = this.rngFor(8012, this.year, Career.pidNum(team.id as string))
+            if (!rng.chance(squeezed ? 0.55 : 0.18)) continue
+            const cut = roster
+              .filter((p) => p.age >= 27 && p.contract.twoWay === false && ratedOverall(p) < 76)
+              .sort((a, b) => ratedOverall(a) - ratedOverall(b))[0]
+            if (!cut) continue
+            team.roster = team.roster.filter((id) => id !== cut.id)
+            cut.contract.yearsRemaining = 0
+            casualties.push(cut.id as string)
+            this.lockerDeparture(team.id, cut.id)
+            chronicleEvent(this.chronicle, {
+              year: this.year,
+              day: 0,
+              kind: 'release',
+              teamIds: [team.id as string],
+              playerIds: [cut.id as string],
+              headline: `${team.abbreviation} release ${cut.name} into free agency`,
+            })
+          }
+          if (casualties.length > 0) {
+            this.faPool.push(...casualties)
+            const names = casualties
+              .slice(0, 6)
+              .map((id) => {
+                const p = this.data.players.get(asPlayerId(id))
+                return p ? `${p.name} (${p.position}, ${p.age})` : ''
+              })
+              .filter(Boolean)
+            this.pushNews(
+              'contract',
+              `July cap casualties: ${casualties.length} veterans hit the market`,
+              `The books forced hands around the league — clubs cleared space by letting depth veterans go. ` +
+              `Available now: ${names.join(', ')}${casualties.length > names.length ? ' and more' : ''}. ` +
+              `Value shopping season is open.`,
+              {}
+            )
+          }
+        }
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         os.stage = 'freeAgency'
         os.faDay = 0
@@ -9962,6 +10014,21 @@ export class Career {
         dateISO: dayToDateISO(i.year, i.dueDay),
         label: `Interview: ${this.data.players.get(asPlayerId(i.playerId))?.name ?? 'Player'}`,
       })),
+      // The summer, dated: the calendar shows the offseason as real weeks.
+      ...(this.phase === 'offseason'
+        ? {
+            todayISO: this.offseasonDateISO(),
+            extraKeyDates: (() => {
+              const y = this.currentDay === 0 ? this.year : this.year + 1
+              return [
+                { dateISO: `${y}-07-01`, label: 'Free Agency Opens' },
+                { dateISO: `${y}-07-08`, label: 'Development Camp' },
+                { dateISO: `${y}-09-15`, label: 'Training Camp Opens' },
+                { dateISO: `${y}-09-28`, label: 'Cut Day' },
+              ]
+            })(),
+          }
+        : {}),
     }
     return buildCalendarView(ctx)
   }
