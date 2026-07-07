@@ -1121,12 +1121,36 @@ a:hover { text-decoration: underline; }
   font-size: 15px;
 }
 
-/* 3-col card grid */
+/* 3-col card grid. Columns STRETCH to the tallest neighbour — a dashboard
+   never shows a dead column; each column nominates one .dash-fill card that
+   absorbs the slack and scrolls internally. */
 .dash-grid {
   display: grid;
   grid-template-columns: 1fr 1.6fr 1fr;
   gap: var(--sp-4);
-  align-items: start;
+  align-items: stretch;
+}
+
+.dash-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* The column's designated grower: fills leftover height, children scroll.
+   flex-basis 0 keeps its CONTENT from inflating the grid row — the tallest
+   fixed-content column sets the height, growers absorb the difference. */
+.dash-fill {
+  flex: 1 1 0;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+.dash-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 @media (max-width: 1100px) {

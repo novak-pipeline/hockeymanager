@@ -260,10 +260,7 @@ export function DashboardScreen(): JSX.Element {
       <div className="dash-grid">
 
         {/* ═══ LEFT COLUMN ═══ */}
-        <div className="stack">
-
-          {/* Messages pane — day-grouped, FM-portal style */}
-          <MessagesPane inbox={inbox ?? null} unread={d.unreadNews} onOpen={() => nav.navigate('inbox')} />
+        <div className="dash-col">
 
           {/* Injuries — only earns a panel when someone is actually hurt
               (health status lives in the status strip otherwise) */}
@@ -285,10 +282,13 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
           )}
 
+          {/* Messages pane — the column's grower: fills to the bottom, scrolls */}
+          <MessagesPane inbox={inbox ?? null} unread={d.unreadNews} onOpen={() => nav.navigate('inbox')} />
+
         </div>
 
         {/* ═══ CENTER COLUMN ═══ */}
-        <div className="stack">
+        <div className="dash-col">
 
           {/* Storylines ticker strip */}
           {shown('storylines') && d.topArcs && d.topArcs.length > 0 && (
@@ -387,7 +387,7 @@ export function DashboardScreen(): JSX.Element {
         </div>
 
         {/* ═══ RIGHT COLUMN ═══ */}
-        <div className="stack">
+        <div className="dash-col">
 
           {/* Fixtures card */}
           {shown('fixtures') && (
@@ -396,33 +396,35 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
           )}
 
-          {/* Division standings */}
-          <Panel title={`${d.divisionName} Division`}>
-            <MiniTable rows={d.divisionStandings} userTeamId={d.userTeam.teamId} />
-          </Panel>
+          {/* Division standings mean nothing in July — the table only appears
+              once there are results to rank. Summer gets the market instead. */}
+          {d.phase !== 'offseason' && (
+            <Panel title={`${d.divisionName} Division`}>
+              <MiniTable rows={d.divisionStandings} userTeamId={d.userTeam.teamId} />
+            </Panel>
+          )}
 
-          {/* Top scorers */}
-          {shown('topScorers') && (
+          {/* Offseason: around the league — real signings/trades as they land */}
+          {d.phase === 'offseason' && <MarketPulse />}
+
+          {/* Top scorers — only once someone has actually scored */}
+          {shown('topScorers') && d.topScorers.length > 0 && (
           <Panel title="Top scorers">
-            {d.topScorers.length === 0 ? (
-              <span className="muted small">No points scored yet.</span>
-            ) : (
-              <div className="list">
-                {d.topScorers.map((p) => (
-                  <div key={p.playerId} className="row-between small">
-                    <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
-                      <PlayerFace faceId={p.faceId} name={p.name} size={26} />
-                      <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
-                      <PlayerLink playerId={p.playerId} name={p.name} />
-                    </span>
-                    <span className="mono" style={{ flexShrink: 0 }}>
-                      {p.goals}G {p.assists}A ·{' '}
-                      <strong style={{ color: 'var(--violet-h)' }}>{p.points} pts</strong>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="list">
+              {d.topScorers.map((p) => (
+                <div key={p.playerId} className="row-between small">
+                  <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', minWidth: 0 }}>
+                    <PlayerFace faceId={p.faceId} name={p.name} size={26} />
+                    <span className="muted" style={{ width: 22, flexShrink: 0 }}>{p.position}</span>
+                    <PlayerLink playerId={p.playerId} name={p.name} />
+                  </span>
+                  <span className="mono" style={{ flexShrink: 0 }}>
+                    {p.goals}G {p.assists}A ·{' '}
+                    <strong style={{ color: 'var(--violet-h)' }}>{p.points} pts</strong>
+                  </span>
+                </div>
+              ))}
+            </div>
           </Panel>
           )}
 
@@ -968,7 +970,7 @@ function MessagesPane({ inbox, unread, onOpen }: {
   const items = [...(inbox?.items ?? [])]
     .filter((i) => filter === 'all' || !i.read)
     .sort((a, b) => (b.day - a.day) || b.id.localeCompare(a.id))
-    .slice(0, 12)
+    .slice(0, 40)
 
   // Group by display date (offseason mail carries dateISO; season mail has day).
   const dateLabel = (i: (typeof items)[number]): string =>
@@ -989,8 +991,8 @@ function MessagesPane({ inbox, unread, onOpen }: {
   }
 
   return (
-    <Panel title="Messages" className="stack">
-      <div className="row" style={{ gap: 6, marginBottom: 4 }}>
+    <Panel title="Messages" className="dash-fill">
+      <div className="row" style={{ gap: 6, marginBottom: 4, flexShrink: 0 }}>
         {(['all', 'unread'] as const).map((f) => (
           <button
             key={f}
@@ -1002,6 +1004,7 @@ function MessagesPane({ inbox, unread, onOpen }: {
           </button>
         ))}
       </div>
+      <div className="dash-scroll">
       {groups.length === 0 && <span className="muted small">Nothing here — a quiet desk.</span>}
       {groups.map((g) => (
         <div key={g.label}>
@@ -1046,8 +1049,63 @@ function MessagesPane({ inbox, unread, onOpen }: {
           ))}
         </div>
       ))}
-      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={onOpen}>
+      </div>
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6, flexShrink: 0 }} onClick={onOpen}>
         Open inbox →
+      </button>
+    </Panel>
+  )
+}
+
+/* ── kind metadata for the market pulse rows ── */
+const TX_META: Record<string, { icon: string; color: string }> = {
+  signing: { icon: '🖊', color: 'var(--amber)' },
+  trade: { icon: '🔄', color: 'var(--violet-h)' },
+  waiver: { icon: '📋', color: 'var(--muted)' },
+  buyout: { icon: '✂️', color: 'var(--red)' },
+  callup: { icon: '⬆', color: 'var(--cyan)' },
+  senddown: { icon: '⬇', color: 'var(--muted)' },
+}
+
+/** Around the league — the July story is the market. Real transactions from
+ *  the ledger, newest first, so the right column earns its space in summer. */
+function MarketPulse(): JSX.Element | null {
+  const client = useClient()
+  const nav = useNav()
+  const { data: tx } = useScreenData(
+    () => client.getTransactions(14),
+    (r) => (r.type === 'transactions' ? r.transactions : null)
+  )
+  const items = tx?.items ?? []
+
+  return (
+    <Panel title="Around the league" className="dash-fill">
+      <div className="dash-scroll">
+        {items.length === 0 && (
+          <span className="muted small">The wire is quiet today — no deals to report.</span>
+        )}
+        {items.map((t) => {
+          const meta = TX_META[t.kind] ?? { icon: '🏒', color: 'var(--muted)' }
+          return (
+            <div
+              key={t.id}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                padding: '7px 2px', borderBottom: '1px solid var(--line)',
+              }}
+            >
+              <span style={{ fontSize: 12, flexShrink: 0, color: meta.color, marginTop: 1 }}>{meta.icon}</span>
+              <span style={{ fontSize: 12.5, lineHeight: 1.45, minWidth: 0 }}>{t.summary}</span>
+            </div>
+          )
+        })}
+      </div>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ width: '100%', marginTop: 6, flexShrink: 0 }}
+        onClick={() => nav.navigate('leagueTransactions')}
+      >
+        All transactions →
       </button>
     </Panel>
   )
@@ -1219,7 +1277,7 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   const upcoming = all
     .filter((e) => !(e.kind === 'keydate' && e.label === 'Season Begins' && gameDates.has(e.dateISO)))
     .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
-    .slice(0, offseason ? 6 : 8)
+    .slice(0, offseason ? 9 : 8)
 
   const dateCell = (iso: string): JSX.Element => {
     const dt = new Date(iso + 'T00:00:00Z')
@@ -1238,7 +1296,8 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   }
 
   return (
-    <Panel title="The Week Ahead">
+    <Panel title="The Week Ahead" className="dash-fill">
+      <div className="dash-scroll">
       {/* today — the highlighted head of the agenda */}
       <div
         style={{
@@ -1296,8 +1355,9 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
       {upcoming.length === 0 && (
         <div className="muted small" style={{ padding: '10px 12px' }}>A quiet stretch — the calendar has the full picture.</div>
       )}
+      </div>
 
-      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={onOpenCalendar}>
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 8, flexShrink: 0 }} onClick={onOpenCalendar}>
         Full calendar →
       </button>
     </Panel>

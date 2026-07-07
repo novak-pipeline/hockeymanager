@@ -4002,6 +4002,21 @@ export class Career {
         `${ai.signings.length} re-signings around the league`,
         `Clubs locked up their expiring talent ahead of free agency.`
       )
+      // The biggest of those deals hit the transaction ledger too, so the
+      // July board opens with real paper instead of an empty wire.
+      const notable = [...ai.signings].sort((a, b) => b.salary - a.salary).slice(0, 20)
+      for (const s of notable) {
+        const p = this.resolve(s.playerId)
+        const t = this.data.teams.get(s.teamId)!
+        const txResult = recordTransaction(this.transactionLedger, {
+          day: this.currentDay,
+          year: this.year,
+          kind: 'signing',
+          teamIds: [s.teamId as string],
+          summary: `${t.abbreviation} re-sign ${p.position} ${p.name} ($${(s.salary / 1e6).toFixed(2)}M × ${s.years}y).`,
+        })
+        this.transactionLedger = txResult.ledger
+      }
     }
     // Construction-era mail (welcome, mandate, season-begins) was stamped
     // before the phase flip — it all belongs to July 1 of the start summer.
@@ -5133,8 +5148,21 @@ export class Career {
         for (const s of res.signings) this.lockerArrival(s.teamId, s.playerId)
         // World Chronicle: every signing writes provenance (future "he walked on
         // us in free agency" callbacks); notable ones get a chronicle event.
+        // Every deal ALSO hits the transaction ledger — the July market is the
+        // league's paper trail, not just headlines.
         for (const s of res.signings) {
           const p = this.resolve(s.playerId)
+          {
+            const t = this.data.teams.get(s.teamId)!
+            const txResult = recordTransaction(this.transactionLedger, {
+              day: this.currentDay,
+              year: this.year,
+              kind: 'signing',
+              teamIds: [s.teamId as string],
+              summary: `${t.abbreviation} sign ${p.position} ${p.name} ($${(s.salary / 1e6).toFixed(2)}M × ${s.years}y).`,
+            })
+            this.transactionLedger = txResult.ledger
+          }
           recordAcquisition(this.chronicle, {
             playerId: s.playerId as string, teamId: s.teamId as string,
             year: this.year, via: 'signing',
@@ -5150,10 +5178,12 @@ export class Career {
             })
           }
         }
-        // Season Rhythm M2 — July 1 is a FRENZY, not a queue. Day one gets the
-        // full roundup with real money; day two a recap; later days only names
-        // that matter (the August lull is authentic — let it be quiet).
-        if (os.faDay === 1 && res.signings.length > 0) {
+        // Season Rhythm M2 — July 1 is a FRENZY, not a queue. The AI market
+        // runs two beats behind the user (the head start above), so the
+        // roundup keys on the EFFECTIVE market day: the first day AI money
+        // actually moves gets the full story, the next day the recap.
+        const marketDay = Math.max(0, os.faDay - 2)
+        if (marketDay === 1 && res.signings.length > 0) {
           const total = res.signings.reduce((sum, s) => sum + s.salary * s.years, 0)
           const top = [...res.signings]
             .sort((a, b) => b.salary - a.salary)
@@ -5178,7 +5208,7 @@ export class Career {
             `Biggest spender: ${spender.name} at $${(bigSpend / 1e6).toFixed(0)}M${spenderGm ? ` — ${spenderGm.name} (${spenderGm.styleLabel}) came to shop` : ''}.`,
             { teamId: bigSpenderId }
           )
-        } else if (os.faDay === 2 && res.signings.length > 0) {
+        } else if (marketDay === 2 && res.signings.length > 0) {
           const names = res.signings.slice(0, 4).map((s) => this.resolve(s.playerId).name)
           this.pushNews(
             'contract',
@@ -5190,8 +5220,8 @@ export class Career {
         // Individual signing items: notable names only (no firehose of depth deals).
         for (const s of res.signings) {
           const p = this.resolve(s.playerId)
-          if (p.overall < 72 && os.faDay > 2) continue
-          if (os.faDay <= 2 && p.overall < 70) continue
+          if (p.overall < 72 && marketDay > 2) continue
+          if (marketDay <= 2 && p.overall < 70) continue
           const t = this.data.teams.get(s.teamId)!
           this.pushNews(
             'contract',
