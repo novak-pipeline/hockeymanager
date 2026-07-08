@@ -10834,6 +10834,15 @@ export class Career {
 
   /** Global search for the Ctrl+K palette: players and teams by name substring.
    *  Read-only, cheap (single linear pass), fog-of-war safe (names only). */
+  /** Compact [id, name] index of every player in the world, for linkifying
+   *  names wherever they appear in prose (news, reports, tickers). Fetched once
+   *  and cached by the renderer. */
+  getNameIndex(): Array<[string, string]> {
+    const out: Array<[string, string]> = []
+    for (const p of this.data.players.values()) out.push([p.id as string, p.name])
+    return out
+  }
+
   searchAll(query: string, limit = 8): {
     players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }>
     teams: Array<{ teamId: string; name: string; abbr: string }>

@@ -6,6 +6,7 @@ import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods
 import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
+import { resetNameIndex } from './components/Linkify'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
 import { LeagueTicker } from './components/LeagueTicker'
@@ -405,6 +406,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           toast(`Load failed: ${res.message}`, 'error')
           return
         }
+        resetNameIndex() // the loaded world may have different players
         setNav({ screen: 'dashboard', params: {} })
         setHistory([])
         bumpRefresh()

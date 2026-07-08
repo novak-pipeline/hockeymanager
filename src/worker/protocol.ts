@@ -317,6 +317,8 @@ export type WorkerRequestBody =
   | { type: 'fireScout'; scoutId: string }
   /** Global search for the command palette (players + teams by name). */
   | { type: 'searchAll'; query: string }
+  /** [id, name] index of every player, for linkifying names in prose. */
+  | { type: 'getNameIndex' }
   /** Buy out a contract during the offseason window (M2). */
   | { type: 'buyoutPlayer'; playerId: string }
   /** Arbitration ultimatum: accept the award or walk away (M2). */
@@ -502,6 +504,7 @@ export type WorkerResponse = { id: number } & (
         teams: Array<{ teamId: string; name: string; abbr: string }>
       }
     }
+  | { type: 'nameIndex'; entries: Array<[string, string]> }
   | {
       type: 'warRoom'
       warRoom: {

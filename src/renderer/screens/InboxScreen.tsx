@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { NewsCategory } from '@domain'
 import type { InboxView, NewsItem } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { Linkify } from '../components/Linkify'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
 import { dayToDateISO } from '../../engine/career/views'
@@ -669,7 +670,7 @@ function ReadingPane(props: {
                   maxWidth: '62ch',
                 }}
               >
-                {para}
+                <Linkify text={para} />
               </p>
             ))}
           </div>
@@ -885,7 +886,7 @@ function PressArticlePane(props: {
                 color: 'var(--text)',
               }}
             >
-              {para}
+              <Linkify text={para} />
             </p>
           ))}
         </div>

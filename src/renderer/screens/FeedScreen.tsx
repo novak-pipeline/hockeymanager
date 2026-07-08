@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import type { FeedView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
+import { Linkify } from '../components/Linkify'
 import { useNav } from '../components/NavContext'
 import { Notice, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -146,7 +147,7 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
                 )}
                 <span className="muted small">· Day {p.day}</span>
               </div>
-              <div style={{ fontSize: 14, lineHeight: 1.5, margin: '4px 0 6px' }}>{p.body}</div>
+              <div style={{ fontSize: 14, lineHeight: 1.5, margin: '4px 0 6px' }}><Linkify text={p.body} /></div>
               <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
                 {p.engagement && (
                   <>

@@ -528,6 +528,10 @@ export class SimClient {
     return this.send({ type: 'searchAll', query })
   }
 
+  getNameIndex(): Promise<WorkerResponse> {
+    return this.send({ type: 'getNameIndex' })
+  }
+
   getWarRoom(): Promise<WorkerResponse> {
     return this.send({ type: 'getWarRoom' })
   }
