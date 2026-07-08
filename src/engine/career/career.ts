@@ -12601,14 +12601,19 @@ export class Career {
       // aren't trade chips that matter to the GM.
       rumors: tp.rumors
         .filter((r) => this.data.teams.get(asTeamId(r.teamId))?.tier === 'nhl')
-        .map((r) => ({
-          playerId: r.playerId,
-          playerName: this.data.players.get(asPlayerId(r.playerId))?.name ?? r.playerId,
-          teamId: r.teamId,
-          teamAbbr: abbrFor(r.teamId),
-          heat: Math.round(r.heat),
-          sinceDay: r.sinceDay,
-        })),
+        .map((r) => {
+          const p = this.data.players.get(asPlayerId(r.playerId))
+          return {
+            playerId: r.playerId,
+            playerName: p?.name ?? r.playerId,
+            teamId: r.teamId,
+            teamAbbr: abbrFor(r.teamId),
+            heat: Math.round(r.heat),
+            sinceDay: r.sinceDay,
+            ...(p ? { position: p.position, age: p.age } : {}),
+            ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
+          }
+        }),
       deadlineDay: this.deadlineDay,
       deadlinePassed: this.phase === 'playoffs' || (this.phase === 'regularSeason' && this.currentDay >= this.deadlineDay),
       lastDeadlineRecap: this.lastDeadlineRecap

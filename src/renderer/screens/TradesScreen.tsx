@@ -8,6 +8,7 @@ import type {
   TradeRumorView,
 } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
@@ -862,8 +863,9 @@ function RumorMillPanel(props: {
             <thead>
               <tr>
                 <th>Player</th>
+                <th>Pos / Age</th>
                 <th>Team</th>
-                <th style={{ width: 80 }}>Heat</th>
+                <th style={{ width: 120 }}>Heat</th>
                 <th className="num" style={{ width: 60 }}>Since</th>
               </tr>
             </thead>
@@ -873,14 +875,18 @@ function RumorMillPanel(props: {
                 .map((r) => (
                   <tr key={r.playerId}>
                     <td>
-                      <button
-                        type="button"
-                        className="player-link"
-                        onClick={() => nav.navigate('player', { playerId: r.playerId })}
-                      >
-                        {r.playerName}
-                      </button>
+                      <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+                        <PlayerFace faceId={r.faceId} name={r.playerName} size={26} />
+                        <button
+                          type="button"
+                          className="player-link"
+                          onClick={() => nav.navigate('player', { playerId: r.playerId })}
+                        >
+                          {r.playerName}
+                        </button>
+                      </span>
                     </td>
+                    <td className="muted small">{r.position ?? '—'}{r.age !== undefined ? ` · ${r.age}` : ''}</td>
                     <td>
                       <span className="chip" style={{ fontSize: 11 }}>
                         {r.teamAbbr}
@@ -1026,7 +1032,7 @@ function DeadlineRecapCard(props: {
 
 // ─── main screen ──────────────────────────────────────────────────────────────
 
-type Tab = 'incoming' | 'propose'
+type Tab = 'offers' | 'build' | 'block'
 
 export function TradesScreen(): JSX.Element {
   const client = useClient()
@@ -1040,17 +1046,19 @@ export function TradesScreen(): JSX.Element {
     (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
-  const [tab, setTab] = useState<Tab>('incoming')
+  const [tab, setTab] = useState<Tab>('offers')
 
   // infer currentDay from expiry info — use 0 as fallback
   const currentDay = 0
+  const incomingCount = data?.incoming.length ?? 0
+  const rumorCount = tentpoles?.rumors.length ?? 0
 
   return (
-    <section>
-      <ScreenHeader title="Trades">
+    <section className="stack">
+      <ScreenHeader title="Trade Centre">
         {data && (
           <span className={data.tradingOpen ? 'chip chip-success' : 'chip chip-danger'}>
-            {data.tradingOpen ? 'Trading open' : 'Trading closed'}
+            {data.tradingOpen ? 'Trading open' : 'Deadline passed — frozen'}
           </span>
         )}
       </ScreenHeader>
@@ -1062,75 +1070,59 @@ export function TradesScreen(): JSX.Element {
         emptyText="No trade data yet."
       />
 
-      {/* Rumor mill panel — always shown when tentpoles available */}
-      {tentpoles ? (
-        <div style={{ marginBottom: 'var(--sp-4)' }}>
-          <RumorMillPanel
-            rumors={tentpoles.rumors}
-            deadlineDay={tentpoles.deadlineDay}
-            deadlinePassed={tentpoles.deadlinePassed}
-            currentDay={currentDay}
-            lastDeadlineRecap={tentpoles.lastDeadlineRecap}
-          />
-        </div>
-      ) : (
-        !loading && (
-          <div style={{ marginBottom: 'var(--sp-4)' }}>
-            <Notice kind="warn">Rumor mill not available yet.</Notice>
-          </div>
-        )
-      )}
-
-      {data && !data.tradingOpen && (
-        <Notice kind="warn" >
-          The trade deadline has passed. Trades are frozen for the remainder of the season.
-        </Notice>
-      )}
-
       {data && (
         <>
-          {!data.tradingOpen && <div style={{ marginBottom: 16 }} />}
-
+          {/* segmented tab bar */}
           <div className="tabs">
-            <button
-              className={`tab${tab === 'incoming' ? ' active' : ''}`}
-              onClick={() => setTab('incoming')}
-            >
-              Incoming offers
-              {data.incoming.length > 0 && (
-                <span className="badge" style={{ marginLeft: 6 }}>
-                  {data.incoming.length}
-                </span>
-              )}
+            <button className={`tab${tab === 'offers' ? ' active' : ''}`} onClick={() => setTab('offers')}>
+              📨 Offers{incomingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{incomingCount}</span>}
             </button>
             <button
-              className={`tab${tab === 'propose' ? ' active' : ''}`}
-              onClick={() => setTab('propose')}
+              className={`tab${tab === 'build' ? ' active' : ''}`}
+              onClick={() => setTab('build')}
               disabled={!data.tradingOpen}
+              title={data.tradingOpen ? undefined : 'The deadline has passed — no new deals.'}
             >
-              Propose trade
+              🛠 Build a Trade
+            </button>
+            <button className={`tab${tab === 'block' ? ' active' : ''}`} onClick={() => setTab('block')}>
+              🔥 Trade Block{rumorCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{rumorCount}</span>}
             </button>
           </div>
 
-          {tab === 'incoming' && (
+          {tab === 'offers' && (
             <div className="stack">
+              {!data.tradingOpen && (
+                <Notice kind="warn">The trade deadline has passed. Trades are frozen for the rest of the season.</Notice>
+              )}
               {data.incoming.length === 0 ? (
-                <Notice kind="info">No incoming offers at this time.</Notice>
+                <Notice kind="info">
+                  No offers on your desk right now. Shop a player from <b>Build a Trade</b>, or watch the <b>Trade Block</b> for names on the move.
+                </Notice>
               ) : (
                 data.incoming.map((offer) => (
-                  <OfferCard
-                    key={offer.offerId}
-                    offer={offer}
-                    currentDay={currentDay}
-                    onAction={refetch}
-                  />
+                  <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} />
                 ))
               )}
             </div>
           )}
 
-          {tab === 'propose' && data.tradingOpen && (
-            <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} />
+          {tab === 'build' && (
+            data.tradingOpen
+              ? <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} />
+              : <Notice kind="warn">The trade deadline has passed — no new deals until the offseason.</Notice>
+          )}
+
+          {tab === 'block' && (
+            tentpoles
+              ? <RumorMillPanel
+                  rumors={tentpoles.rumors}
+                  deadlineDay={tentpoles.deadlineDay}
+                  deadlinePassed={tentpoles.deadlinePassed}
+                  currentDay={currentDay}
+                  lastDeadlineRecap={tentpoles.lastDeadlineRecap}
+                />
+              : <Notice kind="info">The trade block is quiet — no names on the move yet.</Notice>
           )}
         </>
       )}

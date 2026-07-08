@@ -2483,6 +2483,10 @@ export interface TradeRumorView {
   /** 0–100 rumor heat. */
   heat: number
   sinceDay: number
+  /* additive display fields for the trade block */
+  position?: string
+  age?: number
+  faceId?: string
 }
 
 export interface CombineRowView {
