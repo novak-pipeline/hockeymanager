@@ -60,11 +60,23 @@ const app = await _electron.launch({
   cwd: root,
 })
 const win = await app.firstWindow()
-// Photograph at a realistic desktop size — the app's default window is
-// narrower than the shell's comfortable width.
+// Photograph at a realistic desktop size, and keep the window OFF the user's
+// main monitor: put it on a secondary display if one exists, else nudge it
+// just past the primary's edge (off-screen). Playwright captures via the
+// DevTools protocol, so an off-screen window still screenshots correctly.
 try {
   const bw = await app.browserWindow(win)
-  await bw.evaluate((w) => { w.setSize(1760, 990); w.center() })
+  await bw.evaluate((w) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { screen } = require('electron')
+    const primary = screen.getPrimaryDisplay()
+    const other = screen.getAllDisplays().find((d) => d.id !== primary.id)
+    w.setSize(1760, 990)
+    const target = other
+      ? { x: other.bounds.x + 40, y: other.bounds.y + 40 } // a real secondary monitor
+      : { x: primary.bounds.x + primary.bounds.width + 60, y: primary.bounds.y + 40 } // just off the primary's right edge
+    w.setPosition(Math.round(target.x), Math.round(target.y))
+  })
 } catch { /* best effort */ }
 win.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text())
