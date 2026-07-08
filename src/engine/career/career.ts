@@ -12597,14 +12597,18 @@ export class Career {
     const cls = this.data.league.draftClasses[this.data.league.draftClasses.length - 1]
     const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
     return {
-      rumors: tp.rumors.map((r) => ({
-        playerId: r.playerId,
-        playerName: this.data.players.get(asPlayerId(r.playerId))?.name ?? r.playerId,
-        teamId: r.teamId,
-        teamAbbr: abbrFor(r.teamId),
-        heat: Math.round(r.heat),
-        sinceDay: r.sinceDay,
-      })),
+      // The trade block only lists NHL players — AHL/junior/European bodies
+      // aren't trade chips that matter to the GM.
+      rumors: tp.rumors
+        .filter((r) => this.data.teams.get(asTeamId(r.teamId))?.tier === 'nhl')
+        .map((r) => ({
+          playerId: r.playerId,
+          playerName: this.data.players.get(asPlayerId(r.playerId))?.name ?? r.playerId,
+          teamId: r.teamId,
+          teamAbbr: abbrFor(r.teamId),
+          heat: Math.round(r.heat),
+          sinceDay: r.sinceDay,
+        })),
       deadlineDay: this.deadlineDay,
       deadlinePassed: this.phase === 'playoffs' || (this.phase === 'regularSeason' && this.currentDay >= this.deadlineDay),
       lastDeadlineRecap: this.lastDeadlineRecap
