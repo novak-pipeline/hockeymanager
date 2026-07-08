@@ -262,20 +262,42 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
                         key={di}
                         style={{
                           ...cellStyle(inMonth, cellEntries.length > 0),
-                          ...(isToday ? { outline: '2px solid var(--violet-h)', outlineOffset: -2 } : {}),
+                          ...(isToday
+                            ? {
+                                outline: '2px solid rgb(var(--accent-rgb, 108,92,231))',
+                                outlineOffset: -2,
+                                background: 'rgba(var(--accent-rgb, 108,92,231), 0.14)',
+                                boxShadow: 'inset 0 0 0 9999px rgba(var(--accent-rgb, 108,92,231), 0.06)',
+                              }
+                            : {}),
                         }}
                       >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {/* Day number */}
+                          {/* Day number (a TODAY pill marks the current day) */}
                           <span
                             style={{
                               fontSize: 11,
-                              color: inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              color: isToday ? 'rgb(var(--accent-rgb, 108,92,231))' : inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              fontWeight: isToday ? 800 : 400,
                               fontVariantNumeric: 'tabular-nums',
                               alignSelf: 'flex-end',
                               lineHeight: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 5,
                             }}
                           >
+                            {isToday && (
+                              <span
+                                style={{
+                                  fontSize: 8, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase',
+                                  color: '#fff', background: 'rgb(var(--accent-rgb, 108,92,231))',
+                                  borderRadius: 4, padding: '1px 5px',
+                                }}
+                              >
+                                Today
+                              </span>
+                            )}
                             {dayNum}
                           </span>
 

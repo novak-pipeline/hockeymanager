@@ -9113,7 +9113,7 @@ export class Career {
       lastResult,
       divisionStandings: divisionRows,
       divisionName: division?.name ?? '',
-      unreadNews: this.news.filter((n) => !n.read).length,
+      unreadNews: this.curatedInboxNews().filter((n) => !n.read).length,
       topScorers: scorers.map(({ id, pts, g, a }) => ({
         ...badge(this.resolve(id)),
         points: pts,
@@ -11183,7 +11183,9 @@ export class Career {
         dateISO: dayToDateISO(i.year, i.dueDay),
         label: `Interview: ${this.data.players.get(asPlayerId(i.playerId))?.name ?? 'Player'}`,
       })),
-      // The summer, dated: the calendar shows the offseason as real weeks.
+      // Today, dated — anchors the "you are here" highlight on the calendar in
+      // every phase (regular season maps the day index to its date; the summer
+      // uses the offseason clock).
       ...(this.phase === 'offseason'
         ? {
             todayISO: this.offseasonDateISO(),
@@ -11197,7 +11199,7 @@ export class Career {
               ]
             })(),
           }
-        : {}),
+        : { todayISO: dayToDateISO(this.year, this.currentDay) }),
     }
     return buildCalendarView(ctx)
   }
@@ -11897,8 +11899,28 @@ export class Career {
     return view
   }
 
+  /** The curated inbox: your team's business + genuine headlines, minus the
+   *  league-wide ambient colour (every player's point streak/drought, rival
+   *  standings takes, trade-rumour chatter about other clubs, and feed posts).
+   *  Anything touching your club or a player of yours always stays. Shared by
+   *  {@link getInbox} and the dashboard unread badge so the two never disagree. */
+  private curatedInboxNews(): NewsItem[] {
+    const userTid = this.userTeamId as string
+    const userRoster = new Set(this.userTeam.roster.map((id) => id as string))
+    const involvesUser = (n: NewsItem): boolean =>
+      n.teamId === userTid || (n.playerId !== undefined && userRoster.has(n.playerId))
+    const AMBIENT_NOISE =
+      /point streak|point drought|heater hits|\bon fire\b|streak snapped|What went wrong|gap widens|struggling to meet|lagging|Trade talk heats up/i
+    return this.news.filter((n) => {
+      if (n.channel === 'feed') return false // feed posts belong to the Feed
+      if (involvesUser(n)) return true
+      if ((n.category === 'league' || n.category === 'trade') && AMBIENT_NOISE.test(n.headline)) return false
+      return true
+    })
+  }
+
   getInbox(): InboxView {
-    const items = [...this.news]
+    const items = this.curatedInboxNews()
     const unread = items.filter((n) => !n.read).length
 
     // Collect unique player/team ids referenced by news items.

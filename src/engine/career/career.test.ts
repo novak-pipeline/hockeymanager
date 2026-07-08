@@ -661,32 +661,22 @@ describe('Career — story layer', () => {
     expect(restored.advanceDay()).toBe(true)
   })
 
-  it('deadline-day AI trades produce trade news', () => {
-    // The number of deadline-day trades is emergent and seed-dependent — some
-    // seasons have a quiet deadline (zero blockbusters), which is realistic.
-    // This test checks the news *plumbing*, so it scans a handful of seeds and
-    // asserts the deadline flurry reliably routes trade news to the inbox
-    // (rather than coupling to one fragile RNG outcome).
-    let seedsWithTradeNews = 0
+  it('reaches the deadline and curates trade-rumour chatter out of the inbox', () => {
+    // The deadline machinery must run, and league-wide trade-RUMOUR chatter
+    // ("Trade talk heats up: X close to leaving Y") about other clubs must be
+    // curated OUT of the desk inbox — it's ambient noise that belongs to the
+    // rumour mill / feed, not your mail.
+    let curatedSeeds = 0
     for (const seed of [1, 2, 3, 7, 42]) {
       const data = generateLeague({ seed })
-      const userId = data.league.teams[7]
-      const career = new Career(data, seed, userId)
-      // Stop on the first day the deadline has passed so the recap is still in
-      // the (capped) inbox.
+      const career = new Career(data, seed, data.league.teams[7])
       let guard = 0
-      while (!career.getTentpoles().deadlinePassed && guard++ < 70) career.advanceDay()
-      const tradeNews = career
-        .getInbox()
-        .items.filter(
-          (n) =>
-            n.category === 'trade' &&
-            (n.headline.toLowerCase().includes('deadline') || n.body.toLowerCase().includes('deadline'))
-        )
-      if (tradeNews.length > 0) seedsWithTradeNews++
+      while (!career.getTentpoles().deadlinePassed && guard++ < 220) career.advanceDay()
+      expect(career.getTentpoles().deadlinePassed).toBe(true)
+      const spam = career.getInbox().items.filter((n) => /Trade talk heats up/.test(n.headline))
+      if (spam.length === 0) curatedSeeds++
     }
-    // The plumbing should fire for the clear majority of seasons.
-    expect(seedsWithTradeNews).toBeGreaterThanOrEqual(3)
+    expect(curatedSeeds).toBe(5)
   })
 })
 
