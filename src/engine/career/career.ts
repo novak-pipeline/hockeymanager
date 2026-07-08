@@ -5079,12 +5079,18 @@ export class Career {
             )
           }
         }
-        // July cap casualties: AI clubs squeezed on space or carrying surplus
-        // non-tender their weakest one-way veterans — the real late-summer
-        // market GMs actually shop. Keeps July 1 alive even in a post-frenzy
-        // imported world where every star is already signed.
+        // July free-agent market: in a real NHL summer ~10-15% of the league
+        // turns over. The imported DB has everyone signed with no natural
+        // expiries, so we source the class honestly from the rosters: every
+        // AI club sheds its SURPLUS depth (bodies beyond a healthy 23) plus a
+        // couple of aging one-way non-tenders it wouldn't re-sign. Stars are
+        // never dumped; no club is gutted below 20. Scales with roster size,
+        // so a bloated imported world produces a busy market and a tight
+        // generated league a modest one.
         {
           const casualties: string[] = []
+          const KEEP = 23 // healthy NHL roster; bodies beyond this are surplus
+          const FLOOR = 20 // never strip a club below this
           for (const team of this.data.teams.values()) {
             if (team.tier === 'ahl' || team.tier === 'world') continue
             if (team.id === this.userTeamId) continue
@@ -5092,25 +5098,35 @@ export class Career {
               .map((id) => this.data.players.get(id))
               .filter((p): p is Player => !!p)
             const payroll = roster.reduce((n, p) => n + p.contract.salary, 0)
-            const squeezed = roster.length > 23 || payroll > team.finances.salaryCap * 0.96
+            const overCap = payroll > team.finances.salaryCap * 0.97
             const rng = this.rngFor(8012, this.year, Career.pidNum(team.id as string))
-            if (!rng.chance(squeezed ? 0.55 : 0.18)) continue
-            const cut = roster
-              .filter((p) => p.age >= 27 && p.contract.twoWay === false && ratedOverall(p) < 76)
-              .sort((a, b) => ratedOverall(a) - ratedOverall(b))[0]
-            if (!cut) continue
-            team.roster = team.roster.filter((id) => id !== cut.id)
-            cut.contract.yearsRemaining = 0
-            casualties.push(cut.id as string)
-            this.lockerDeparture(team.id, cut.id)
-            chronicleEvent(this.chronicle, {
-              year: this.year,
-              day: 0,
-              kind: 'release',
-              teamIds: [team.id as string],
-              playerIds: [cut.id as string],
-              headline: `${team.abbreviation} release ${cut.name} into free agency`,
-            })
+            // Candidates a club would let walk: aging one-way depth, never stars.
+            const sheddable = roster
+              .filter((p) => p.contract.twoWay === false && p.age >= 27 && ratedOverall(p) < 80)
+              .sort((a, b) => ratedOverall(a) - ratedOverall(b))
+            // Shed all surplus beyond KEEP, plus 1-3 natural non-tenders
+            // (more when the club is over the cap).
+            const surplus = Math.max(0, roster.length - KEEP)
+            const nonTenders = rng.range(overCap ? 2 : 1, overCap ? 4 : 3)
+            let toShed = surplus + nonTenders
+            let onRoster = roster.length
+            for (const cut of sheddable) {
+              if (toShed <= 0 || onRoster <= FLOOR) break
+              toShed--
+              onRoster--
+              team.roster = team.roster.filter((id) => id !== cut.id)
+              cut.contract.yearsRemaining = 0
+              casualties.push(cut.id as string)
+              this.lockerDeparture(team.id, cut.id)
+              chronicleEvent(this.chronicle, {
+                year: this.year,
+                day: 0,
+                kind: 'release',
+                teamIds: [team.id as string],
+                playerIds: [cut.id as string],
+                headline: `${team.abbreviation} release ${cut.name} into free agency`,
+              })
+            }
           }
           if (casualties.length > 0) {
             this.faPool.push(...casualties)
@@ -5123,10 +5139,10 @@ export class Career {
               .filter(Boolean)
             this.pushNews(
               'contract',
-              `July cap casualties: ${casualties.length} veterans hit the market`,
-              `The books forced hands around the league — clubs cleared space by letting depth veterans go. ` +
-              `Available now: ${names.join(', ')}${casualties.length > names.length ? ' and more' : ''}. ` +
-              `Value shopping season is open.`,
+              `Free agency opens: ${casualties.length} players hit the open market`,
+              `July 1 shook loose a full class — clubs cleared surplus depth and let their aging bodies walk. ` +
+              `Names on the board include ${names.join(', ')}${casualties.length > names.length ? `, and ${casualties.length - names.length} more` : ''}. ` +
+              `The Free Agents desk has the whole market.`,
               {}
             )
           }
@@ -6227,8 +6243,29 @@ export class Career {
         const db = draftedIds.has(b.id as string) ? 1 : 0
         return db - da || ratedPotential(b) - ratedPotential(a)
       })
-      .slice(0, 8)
+      // A real development camp is the WHOLE prospect pool, not a handful —
+      // every drafted/rights-held/young signed player in the org gets a look.
+      .slice(0, 60)
     return { invitees, draftedIds }
+  }
+
+  /** The coach's pick for camp standout: the best week (highest read roll),
+   *  drafted players edging ties. Deterministic — the same across every call. */
+  private devCampStandout(): { player: Player; reason: string } | null {
+    const { invitees, draftedIds } = this.devCampInvitees()
+    if (invitees.length === 0) return null
+    let best: Player | null = null
+    let bestScore = -Infinity
+    for (const p of invitees) {
+      const { z } = this.devCampRead(p)
+      const score = z + (draftedIds.has(p.id as string) ? 0.05 : 0)
+      if (score > bestScore) { bestScore = score; best = p }
+    }
+    if (!best) return null
+    const reason = best.position === 'G'
+      ? 'tracked pucks like a veteran all week and stood tallest in the scrimmage'
+      : 'brought the best pace and compete of the group, and the scrimmage sheet backed it up'
+    return { player: best, reason }
   }
 
   /** Deterministic camp read for an invitee — the same roll the report uses,
@@ -6273,7 +6310,7 @@ export class Career {
         'scouting',
         `Dev camp scrimmage: ${this.devCampState.scoreline}`,
         `The kids played a full intra-squad game today.${topName ? ` ${topName} was the best player on the ice.` : ''} ` +
-        `The staff file their final reads tomorrow — then you name the camp standout.`,
+        `The staff file their final reads tomorrow, and name their camp standout.`,
         { teamId: this.userTeamId as string }
       )
       return
@@ -6329,45 +6366,29 @@ export class Career {
         }
       }),
       cast,
+      // On wrap day, surface the COACHES' standout pick (read-only) — it's
+      // their read, not the GM's call.
+      ...(day >= 3
+        ? (() => {
+            const s = this.devCampStandout()
+            return s ? { coachStandout: { playerId: s.player.id as string, name: s.player.name, reason: s.reason } } : {}
+          })()
+        : {}),
     }
   }
 
-  /** Name the camp standout: he leaves camp walking taller, and your staff's
-   *  book on him gets a real chapter. Everyone else gets the normal bump. */
-  submitDevCamp(standoutId: string): { ok: boolean; message?: string } {
+  /** Close the book on camp — the STAFF name the standout and file the report.
+   *  (Arg kept for protocol back-compat; ignored — the coaches decide now.) */
+  submitDevCamp(_standoutId?: string): { ok: boolean; message?: string } {
     if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
-    const { invitees } = this.devCampInvitees()
-    const standout = invitees.find((p) => (p.id as string) === standoutId)
-    if (!standout) return { ok: false, message: 'He is not at this camp.' }
-    for (const p of invitees) {
-      const gain = (p.id as string) === standoutId ? 9 : 4
-      const entry = this.scouting.knowledge.find(([id]) => id === (p.id as string))
-      if (entry) entry[1] = Math.min(100, entry[1] + gain)
-      else this.scouting.knowledge.push([p.id as string, gain + 4])
-    }
-    standout.morale = Math.min(100, standout.morale + 6)
-    chronicleEvent(this.chronicle, {
-      year: this.year,
-      day: 0,
-      kind: 'award',
-      teamIds: [this.userTeamId as string],
-      playerIds: [standoutId],
-      headline: `${standout.name} named ${this.userTeam.name} development-camp standout`,
-      userInvolved: true,
-    })
-    this.pushNews(
-      'scouting',
-      `${standout.name} named camp standout`,
-      `You singled him out in front of the group at the end of development camp. ` +
-      `The staff will build his summer program around it — and he skated off the ice a foot taller.`,
-      { playerId: standoutId, teamId: this.userTeamId as string }
-    )
     this.devCampPending = false
     this.devCampState = null
+    this.pushDevCampReport()
     return { ok: true }
   }
 
-  /** Simming past dev camp: the staff run it without you and mail the report. */
+  /** Simming past dev camp: the staff run it and mail the report. Same path
+   *  as closing it yourself — the coaches always name the standout. */
   autoResolveDevCamp(): void {
     if (!this.devCampPending) return
     this.devCampPending = false
@@ -6381,12 +6402,27 @@ export class Career {
     const { invitees, draftedIds } = this.devCampInvitees()
     if (invitees.length === 0) return
 
+    // The coaches name their standout — his summer program is built around it.
+    const standout = this.devCampStandout()
+    const standoutId = standout ? (standout.player.id as string) : null
+    if (standout) {
+      standout.player.morale = Math.min(100, standout.player.morale + 6)
+      chronicleEvent(this.chronicle, {
+        year: this.year, day: 0, kind: 'award',
+        teamIds: [this.userTeamId as string],
+        playerIds: [standoutId as string],
+        headline: `${standout.player.name} named ${this.userTeam.name} development-camp standout`,
+        userInvolved: true,
+      })
+    }
+
     const lines: string[] = []
     for (const p of invitees) {
       // Deterministic camp read; watching him closes a sliver of the fog.
       const { z } = this.devCampRead(p)
       const drafted = draftedIds.has(p.id as string)
-      const tag = drafted ? ' (this year\'s pick)' : ''
+      const isStandout = (p.id as string) === standoutId
+      const tag = `${drafted ? " (this year's pick)" : ''}${isStandout ? ' ★ CAMP STANDOUT' : ''}`
       if (z > 0.5) {
         lines.push(`${p.name}${tag} — turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}; the staff want him back for main camp.`)
       } else if (z < -0.5) {
@@ -6394,17 +6430,20 @@ export class Career {
       } else {
         lines.push(`${p.name}${tag} — solid, unspectacular week. Exactly where a kid his age should be.`)
       }
-      // Knowledge bump: you watched him for a week.
+      // Knowledge bump: you watched him for a week (standout a little more).
+      const gain = isStandout ? 9 : 4
       const entry = this.scouting.knowledge.find(([id]) => id === (p.id as string))
-      if (entry) entry[1] = Math.min(100, entry[1] + 4)
-      else this.scouting.knowledge.push([p.id as string, 8])
+      if (entry) entry[1] = Math.min(100, entry[1] + gain)
+      else this.scouting.knowledge.push([p.id as string, gain + 4])
     }
     this.pushNews(
       'scouting',
       `Development camp report — ${coachName}`,
       `Development camp wrapped this week: ${invitees.length} of the organisation's young players on the ice, ` +
-      `this year's draft class included. The staff's reads:\n\n• ${lines.join('\n• ')}`,
-      { teamId: this.userTeamId as string }
+      `this year's draft class included.` +
+      `${standout ? ` The staff named ${standout.player.name} the camp standout — he ${standout.reason}.` : ''}` +
+      `\n\nThe reads:\n\n• ${lines.join('\n• ')}`,
+      { teamId: this.userTeamId as string, ...(standoutId ? { playerId: standoutId } : {}) }
     )
   }
 

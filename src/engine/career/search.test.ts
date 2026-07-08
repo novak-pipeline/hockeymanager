@@ -297,7 +297,7 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(cal.entries.some((e) => e.kind === 'keydate' && e.label === 'Cut Day')).toBe(true)
   })
 
-  it('dev camp: the scene lists org kids with grades; naming a standout resolves the gate', () => {
+  it('dev camp: the scene lists org kids with grades; closing the book files the staff report', () => {
     const data = generateLeague({ seed: 313 })
     const c = new Career(data, 313, data.league.teams[0])
     c.startAtOffseason()
@@ -308,13 +308,12 @@ describe('summer takeover (#145) + camps (M3)', () => {
       expect(['A', 'B', 'C']).toContain(i.grade)
       expect(i.read.length).toBeGreaterThan(10)
     }
-    const pick = camp!.invitees[0]!
-    expect(c.submitDevCamp('nope')).toMatchObject({ ok: false })
-    expect(c.submitDevCamp(pick.playerId)).toMatchObject({ ok: true })
+    // The GM no longer picks — the coaches decide. Closing camp files the report.
+    expect(c.submitDevCamp()).toMatchObject({ ok: true })
     expect(c.getDashboard().devCampPending).toBe(false)
     expect(c.getDevCamp()).toBeNull()
-    // News names him.
-    expect(c.getInbox().items.some((n) => n.headline.includes('camp standout'))).toBe(true)
+    // The staff's report names their standout (in the body) + reads on the group.
+    expect(c.getInbox().items.some((n) => n.headline.startsWith('Development camp report'))).toBe(true)
   })
 
   it('dev camp is a WEEK: each Continue is a beat, then the wrap auto-resolves', () => {
@@ -627,5 +626,54 @@ describe('FA hub (DEPTH 2)', () => {
     c.startNegotiation(fa.playerId)
     const row = c.getFaHub().rows.find((r) => r.playerId === fa.playerId)!
     expect(row.inTalks).toBe(true)
+  })
+})
+
+describe('realistic pool sizes (2026-07-08 feedback)', () => {
+  it('the July FA market is a real class, not a handful of cap casualties', () => {
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0])
+    c.startAtOffseason()
+    for (let i = 0; i < 8; i++) {
+      if (c.getOffseason()?.stage === 'freeAgency') break
+      c.advanceOffseason()
+    }
+    expect(c.getOffseason()?.stage).toBe('freeAgency')
+    // A generated 16-team league at 23-ish rosters sheds ~1-4 per club → a
+    // market of dozens, not 3. (An imported bloated DB produces far more.)
+    expect(c.getFaHub().rows.length).toBeGreaterThanOrEqual(15)
+    // No club was gutted below a fieldable roster.
+    for (const t of data.teams.values()) {
+      if (t.tier === 'ahl' || t.tier === 'world') continue
+      expect(t.roster.length).toBeGreaterThanOrEqual(19)
+    }
+  })
+
+  it('dev camp is the whole prospect pool and the COACHES name the standout', () => {
+    // Seed a chunky org prospect pool: mark several young players as rights-held.
+    const data = generateLeague({ seed: 515 })
+    const userId = data.league.teams[0]!
+    let staged = 0
+    for (const p of data.players.values()) {
+      if (p.age <= 21 && staged < 25) { p.rightsTeamId = userId; staged++ }
+    }
+    const c = new Career(data, 515, userId)
+    c.startAtOffseason()
+    const dev = c.getDevCamp()
+    expect(dev).toBeTruthy()
+    // The camp is the pool — not capped at a handful.
+    expect(dev!.invitees.length).toBeGreaterThan(12)
+    // Advance to wrap day; the coaches' standout is surfaced (no GM pick).
+    c.advanceOffseason() // arrival -> scrimmage
+    c.advanceOffseason() // scrimmage -> wrap
+    const wrap = c.getDevCamp()
+    if (wrap && wrap.day >= 3) {
+      expect(wrap.coachStandout).toBeTruthy()
+      expect(wrap.coachStandout!.name.length).toBeGreaterThan(2)
+    }
+    // Closing camp files the report naming the staff's standout; no arg needed.
+    const res = c.submitDevCamp()
+    expect(res.ok).toBe(true)
+    expect(c.getInbox().items.some((n) => n.body.includes('camp standout'))).toBe(true)
   })
 })

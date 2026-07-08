@@ -1,7 +1,8 @@
 /**
  * Development camp (Season Rhythm M3) — early July, the practice rink. The
- * org's kids skate for a week; the staff hand you their reads; you name the
- * camp standout. One decision, real effects, and the world moves on.
+ * whole prospect pool skates for a week; the coaching staff file their reads
+ * on every kid and name their own camp standout. The GM watches and closes
+ * the book. One scene, real effects, and the world moves on.
  *
  * Artwork slot: assets/scenes/dev-camp-rink.png (CSS fallback otherwise).
  */
@@ -27,20 +28,19 @@ export function DevCampScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
   const actions = useShellActions()
-  const [picked, setPicked] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const { data: camp, loading } = useScreenData<DevCampView>(
     () => client.getDevCamp(),
     (r) => (r.type === 'devCamp' ? r.devCamp : null)
   )
 
-  async function nameStandout(): Promise<void> {
-    if (!picked || busy) return
+  async function closeCamp(): Promise<void> {
+    if (busy) return
     setBusy(true)
-    const res = await client.submitDevCamp(picked)
+    const res = await client.submitDevCamp()
     setBusy(false)
     if (res.type === 'error') { toast(res.message ?? 'Could not resolve camp.', 'error'); return }
-    toast('Camp standout named — the staff will build his summer around it.', 'info')
+    toast('Camp closed — the staff filed their reads.', 'info')
     nav.navigate('dashboard')
   }
 
@@ -83,11 +83,14 @@ export function DevCampScreen(): JSX.Element {
           )}
           {camp.day === 2 && (
             <>A full intra-squad game — <b>{camp.scoreline}</b>. The lines below are real production.
-            The staff file final grades tomorrow, then you name the standout.</>
+            The staff file final grades tomorrow, and name their camp standout.</>
           )}
           {camp.day === 3 && (
-            <>The week is done and the grades below argue from the scrimmage sheet. Pick <b>one player
-            to name camp standout</b> — it goes on his wall, and your scouts&apos; book on him gets a real chapter.</>
+            <>The week is done and the grades below argue from the scrimmage sheet.{' '}
+            {camp.coachStandout
+              ? <>The staff&apos;s standout is <b>{camp.coachStandout.name}</b> — he {camp.coachStandout.reason}.</>
+              : <>The staff have filed their reads on the whole group.</>}
+            </>
           )}
         </div>
 
@@ -100,17 +103,19 @@ export function DevCampScreen(): JSX.Element {
                   <th></th><th>Player</th><th className="num">Age</th>
                   {camp.day >= 2 && <th>Scrimmage</th>}
                   <th>Camp</th><th>The staff&apos;s read</th>
-                  {camp.day >= 3 && <th></th>}
                 </tr>
               </thead>
               <tbody>
-                {camp.invitees.map((p) => (
-                  <tr key={p.playerId} style={picked === p.playerId ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
+                {camp.invitees.map((p) => {
+                  const isStandout = camp.coachStandout?.playerId === p.playerId
+                  return (
+                  <tr key={p.playerId} style={isStandout ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
                     <td><PlayerFace faceId={p.faceId} name={p.name} size={28} /></td>
                     <td>
                       <PlayerLink playerId={p.playerId} name={p.name} />{' '}
                       <span className="muted small">{p.position}</span>
                       {p.drafted && <span className="chip chip-accent" style={{ fontSize: 9, marginLeft: 6 }}>YOUR PICK</span>}
+                      {isStandout && <span className="chip chip-success" style={{ fontSize: 9, marginLeft: 6 }}>★ STANDOUT</span>}
                     </td>
                     <td className="num muted">{p.age}</td>
                     {camp.day >= 2 && (
@@ -123,18 +128,9 @@ export function DevCampScreen(): JSX.Element {
                     )}
                     <td><span style={{ fontWeight: 800, color: GRADE_COLOR[p.grade] }}>{p.grade}</span></td>
                     <td className="small" style={{ maxWidth: 340 }}>{p.read}</td>
-                    {camp.day >= 3 && (
-                      <td>
-                        <button
-                          className={`btn btn-sm${picked === p.playerId ? ' btn-primary' : ''}`}
-                          onClick={() => setPicked(p.playerId)}
-                        >
-                          {picked === p.playerId ? 'Standout ✓' : 'Pick'}
-                        </button>
-                      </td>
-                    )}
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -146,8 +142,8 @@ export function DevCampScreen(): JSX.Element {
               {camp.day === 1 ? 'Run the scrimmage ▶' : 'Hear the final reads ▶'}
             </button>
           ) : (
-            <button className="btn btn-primary" disabled={!picked || busy} onClick={() => void nameStandout()}>
-              Name the camp standout
+            <button className="btn btn-primary" disabled={busy} onClick={() => void closeCamp()}>
+              Close the book on camp
             </button>
           )}
           <button

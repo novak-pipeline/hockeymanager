@@ -248,8 +248,8 @@ export class SimClient {
     return this.send({ type: 'getDevCamp' })
   }
 
-  submitDevCamp(standoutId: string): Promise<WorkerResponse> {
-    return this.send({ type: 'submitDevCamp', standoutId })
+  submitDevCamp(standoutId?: string): Promise<WorkerResponse> {
+    return this.send({ type: 'submitDevCamp', ...(standoutId !== undefined ? { standoutId } : {}) })
   }
 
   skipDevCamp(): Promise<WorkerResponse> {

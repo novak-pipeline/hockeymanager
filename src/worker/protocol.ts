@@ -212,7 +212,7 @@ export type WorkerRequestBody =
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
   | { type: 'getDevCamp' }
-  | { type: 'submitDevCamp'; standoutId: string }
+  | { type: 'submitDevCamp'; standoutId?: string }
   | { type: 'skipDevCamp' }
   | { type: 'getTrainingCamp' }
   | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }

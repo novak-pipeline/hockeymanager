@@ -196,6 +196,8 @@ export interface DevCampView {
     line?: { g: number; a: number; sog: number; squad: 'white' | 'blue' }
   }>
   cast: Array<{ name: string; title: string; faceId?: string }>
+  /** The COACHES' pick for camp standout (wrap day) — not the GM's. Additive. */
+  coachStandout?: { playerId: string; name: string; reason: string }
 }
 
 /** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
