@@ -8178,8 +8178,81 @@ export class Career {
       })
       // A completed deal builds rapport with that front office.
       this.adjustRelationship(partnerId as string, 6)
+      return { verdict: 'accept', message: evaln.message, counter: null }
     }
-    return { verdict: evaln.verdict, message: evaln.message, counter: null }
+    // DEPTH 3: a near-miss draws a concrete counter — the AI names the extra
+    // asset(s) it wants added and tables it as a real, acceptable offer.
+    if (evaln.verdict === 'counter' && evaln.counterAskValue > 0) {
+      const counter = this.buildCounterOffer(partnerId, give, receive, evaln.counterAskValue)
+      if (counter) {
+        this.tradeOffers.push(counter)
+        return { verdict: 'counter', message: counter.message, counter: this.offerView(counter) }
+      }
+      // Nothing on the user's side bridges the gap — say so honestly.
+      return {
+        verdict: 'reject',
+        message: `${evaln.message} There's nothing else on your side that would close the gap.`,
+        counter: null,
+      }
+    }
+    return { verdict: 'reject', message: evaln.message, counter: null }
+  }
+
+  /** DEPTH 3: turn the partner's residual "wants this much more" into a concrete
+   *  counter — the smallest user asset that covers the gap (or the two biggest
+   *  if none does), tabled as a real, acceptable {@link StoredTradeOffer}. */
+  private buildCounterOffer(
+    partnerId: TeamId,
+    give: { players: Player[]; picks: DraftPick[] },
+    receive: { players: Player[]; picks: DraftPick[] },
+    gap: number
+  ): StoredTradeOffer | null {
+    const inGivePlayers = new Set(give.players.map((p) => p.id as string))
+    const inGivePicks = new Set(give.picks.map((pk) => this.pickId(pk)))
+    const assets: Array<{ value: number; player?: Player; pick?: DraftPick }> = []
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (!p || inGivePlayers.has(p.id as string) || p.contract.noTradeClause) continue
+      assets.push({ value: playerValue(p), player: p })
+    }
+    for (const pk of this.picks) {
+      if (pk.ownerTeamId !== this.userTeamId || inGivePicks.has(this.pickId(pk))) continue
+      assets.push({ value: pickValue(pk, { year: this.year }), pick: pk })
+    }
+    if (assets.length === 0) return null
+
+    // Prefer the least-overpaying single asset that covers the gap; failing
+    // that, the two most valuable pieces — but only if together they get there.
+    const covering = assets.filter((a) => a.value >= gap).sort((a, b) => a.value - b.value)
+    let chosen: Array<{ value: number; player?: Player; pick?: DraftPick }>
+    if (covering.length > 0) {
+      chosen = [covering[0]]
+    } else {
+      const top = [...assets].sort((a, b) => b.value - a.value).slice(0, 2)
+      if (top.reduce((s, a) => s + a.value, 0) < gap * 0.9) return null
+      chosen = top
+    }
+
+    const addPlayers = chosen.filter((a) => a.player).map((a) => a.player!)
+    const addPicks = chosen.filter((a) => a.pick).map((a) => a.pick!)
+    const gm = this.gmPersonaFor(partnerId)
+    const names = [
+      ...addPlayers.map((p) => p.name),
+      ...addPicks.map((pk) => `a ${pk.year} round-${pk.round} pick`),
+    ]
+    const nameList =
+      names.length <= 1 ? (names[0] ?? 'a sweetener')
+        : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    return {
+      offerId: `c${this.offerCounter++}`,
+      partnerTeamId: partnerId,
+      userReceivesPlayerIds: receive.players.map((p) => p.id),
+      userReceivesPicks: [...receive.picks],
+      userGivesPlayerIds: [...give.players.map((p) => p.id), ...addPlayers.map((p) => p.id)],
+      userGivesPicks: [...give.picks, ...addPicks],
+      message: `${gm.name}: We're close. Add ${nameList} and you've got a deal.`,
+      expiresOnDay: this.currentDay + 3,
+    }
   }
 
   acceptTrade(offerId: string): void {

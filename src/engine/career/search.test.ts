@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
+import { playerValue } from '@engine/league/trades'
 import { Career } from './career'
 
 describe('searchAll (command palette)', () => {
@@ -717,5 +718,55 @@ describe('realistic pool sizes (2026-07-08 feedback)', () => {
     const res = c.submitDevCamp()
     expect(res.ok).toBe(true)
     expect(c.getInbox().items.some((n) => n.body.includes('camp standout'))).toBe(true)
+  })
+})
+
+describe('trade counter-offers (DEPTH 3)', () => {
+  it('a near-miss proposal draws a concrete counter that adds a user asset — and is acceptable', () => {
+    const data = generateLeague({ seed: 616 })
+    const userId = data.league.teams[0]!
+    const c = new Career(data, userId, userId)
+    c.startAtOffseason() // trading is open all summer
+    const userPlayers = data.teams.get(userId)!.roster
+      .map((id) => data.players.get(id)!)
+      .filter((p) => p && !p.contract.noTradeClause)
+
+    let counter: ReturnType<Career['proposeTrade']>['counter'] = null
+    let origGiveCount = 0
+    outer: for (const pid of data.league.teams) {
+      if (pid === userId) continue
+      const partner = data.teams.get(pid)!
+      for (const R of partner.roster.map((id) => data.players.get(id)!).filter(Boolean)) {
+        const rv = playerValue(R)
+        // A user body worth slightly LESS than the target: a near-miss that
+        // can't be accepted outright but is close enough to draw a counter.
+        const give = userPlayers.find((p) => {
+          const v = playerValue(p)
+          return v >= rv * 0.82 && v <= rv * 0.98
+        })
+        if (!give) continue
+        const proposal = {
+          partnerTeamId: pid as string,
+          givePlayerIds: [give.id as string],
+          givePickIds: [] as string[],
+          receivePlayerIds: [R.id as string],
+          receivePickIds: [] as string[],
+        }
+        const ev = c.proposeTrade(proposal)
+        if (ev.verdict === 'counter') {
+          counter = ev.counter
+          origGiveCount = 1
+          break outer
+        }
+        // (underpay ⇒ never 'accept', so no state-mutating trade executes here)
+      }
+    }
+
+    expect(counter).not.toBeNull()
+    // The counter asks for MORE than the original one-player offer.
+    expect(counter!.give.players.length + counter!.give.picks.length).toBeGreaterThan(origGiveCount)
+    expect(counter!.message).toMatch(/Add /)
+    // And it's a real, acceptable offer: accepting it executes without throwing.
+    expect(() => c.acceptTrade(counter!.offerId)).not.toThrow()
   })
 })
