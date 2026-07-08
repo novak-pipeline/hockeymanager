@@ -1401,6 +1401,9 @@ export interface FaHubRowView extends PlayerBadge {
   shortlisted: boolean
   /** An open/paused negotiation session exists with this player. */
   inTalks: boolean
+  /** Rival clubs known to be circling (abbreviations) — the competition you're
+   *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
+  rivals?: string[]
 }
 
 export interface FaHubView {

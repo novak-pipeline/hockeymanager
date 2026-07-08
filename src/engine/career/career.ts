@@ -7864,12 +7864,52 @@ export class Career {
       .map((id) => this.resolve(id))
       .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
 
+    // Precompute rival-club appetite ONCE: each AI club's positional need +
+    // cap room. A club "circles" a FA if it's thin at his group, can fit the
+    // ask, and a deterministic lean lands (bigger names draw more suitors).
+    const rivalTargets: Record<'F' | 'D' | 'G', number> = { F: 13, D: 7, G: 2 }
+    const grpOf = (p: Player): 'F' | 'D' | 'G' => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
+    // league.teams IS the NHL club set (AHL/junior/European teams live in
+    // competitions, not here) — so membership, not the context-dependent
+    // `tier` field, is the reliable "is an NHL rival" signal.
+    const aiCtx = this.data.league.teams
+      .filter((tid) => tid !== this.userTeamId)
+      .map((tid) => this.data.teams.get(tid))
+      .filter((t): t is NonNullable<typeof t> => !!t)
+      .map((t) => {
+        const capRoom = t.finances.salaryCap - t.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+        const counts: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
+        for (const id of t.roster) {
+          const r = this.data.players.get(id)
+          if (r && r.contract.yearsRemaining > 0) counts[grpOf(r)]++
+        }
+        return { abbr: t.abbreviation, idNum: Career.pidNum(t.id as string), capRoom, counts }
+      })
+    const rivalsFor = (p: Player): string[] => {
+      const g = grpOf(p)
+      const ovr = ratedOverall(p)
+      // Suitor appetite scales with talent (out of 12): a star draws most of the
+      // league, a depth body a handful. Cap room only ORDERS the list (clubs
+      // with room first) — it can't gate, because generated AI payrolls aren't
+      // yet cap-realistic (#176), and interest shouldn't hinge on broken numbers.
+      const appetite = ovr >= 80 ? 7 : ovr >= 74 ? 4 : ovr >= 68 ? 3 : 2
+      return aiCtx
+        .filter((c) => (Career.pidNum(p.id as string) ^ c.idNum) % 12 < appetite)
+        .sort(
+          (a, b) =>
+            (a.counts[g] >= rivalTargets[g] ? 1 : 0) - (b.counts[g] >= rivalTargets[g] ? 1 : 0) ||
+            b.capRoom - a.capRoom
+        )
+        .map((c) => c.abbr)
+    }
+
     const rows = pool.map((p, rank) => {
       const ask = askTerms(p, this.year)
       const agent = agentFor(p)
       const { interest, note } = this.faInterestFor(p)
       const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
       const session = this.negotiations.get(p.id as string)
+      const rivals = rivalsFor(p)
       return {
         ...badge(p),
         askSalary: ask.salary,
@@ -7879,9 +7919,10 @@ export class Career {
         interest,
         interestNote: note,
         wants: priorityHints(p)[0] ?? '',
-        hot: this.marketHeatFor(p) > 0.35,
+        hot: this.marketHeatFor(p) > 0.35 || rivals.length >= 3,
         shortlisted: this.faShortlist.has(p.id as string),
         inTalks: session !== undefined && session.year === this.year && session.status !== 'signed' && session.status !== 'walked',
+        ...(rivals.length > 0 ? { rivals } : {}),
       }
     })
 
@@ -12660,10 +12701,14 @@ export class Career {
     const rankOf = new Map(cls?.prospects.map((p) => [p.playerId as string, p.rank]) ?? [])
     return {
       // The trade block only lists NHL players — AHL/junior/European bodies
-      // aren't trade chips that matter to the GM.
-      rumors: tp.rumors
-        .filter((r) => this.data.teams.get(asTeamId(r.teamId))?.tier === 'nhl')
-        .map((r) => {
+      // aren't trade chips that matter to the GM. NHL clubs are exactly the
+      // league.teams set (the `tier` field is null in base leagues, so we can't
+      // rely on it); anyone outside that set is a non-NHL body.
+      rumors: (() => {
+        const nhlTeams = new Set(this.data.league.teams.map((t) => t as string))
+        return tp.rumors
+          .filter((r) => nhlTeams.has(r.teamId as string))
+          .map((r) => {
           const p = this.data.players.get(asPlayerId(r.playerId))
           return {
             playerId: r.playerId,
@@ -12675,7 +12720,8 @@ export class Career {
             ...(p ? { position: p.position, age: p.age } : {}),
             ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
           }
-        }),
+        })
+      })(),
       deadlineDay: this.deadlineDay,
       deadlinePassed: this.phase === 'playoffs' || (this.phase === 'regularSeason' && this.currentDay >= this.deadlineDay),
       lastDeadlineRecap: this.lastDeadlineRecap

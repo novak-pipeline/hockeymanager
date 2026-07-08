@@ -154,9 +154,15 @@ export function FreeAgentMarketScreen(): JSX.Element {
                         {capTight && <div style={{ color: 'var(--danger)', fontSize: 10 }}>over your cap</div>}
                       </td>
                       <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{fa.agentName}</td>
-                      <td style={{ fontSize: 11.5, maxWidth: 240 }}>
+                      <td style={{ fontSize: 11.5, maxWidth: 260 }}>
                         <span style={{ color: im.color, fontWeight: 700 }}>{im.label}</span>
                         <span className="muted" style={{ marginLeft: 6 }} title={fa.wants}>{fa.interestNote}</span>
+                        {fa.rivals && fa.rivals.length > 0 && (
+                          <div style={{ marginTop: 3, fontSize: 10, color: 'var(--muted)' }}>
+                            <span style={{ color: fa.rivals.length >= 3 ? 'var(--danger)' : 'var(--muted)' }}>◦ circling: </span>
+                            {fa.rivals.slice(0, 4).join(' · ')}{fa.rivals.length > 4 ? ` +${fa.rivals.length - 4}` : ''}
+                          </div>
+                        )}
                       </td>
                       <td>
                         {fa.decidesInDays <= 0
