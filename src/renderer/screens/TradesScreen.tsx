@@ -635,10 +635,13 @@ function ProposeTab(props: {
                         gap: 8,
                       }}
                     >
-                      <span>
-                        <PlayerLink playerId={p.playerId} name={p.name} />
-                        <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                          {p.position} · {p.age}
+                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                        <span>
+                          <PlayerLink playerId={p.playerId} name={p.name} />
+                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                            {p.position} · {p.age}
+                          </span>
                         </span>
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -730,7 +733,9 @@ function ProposeTab(props: {
                         gap: 8,
                       }}
                     >
-                      <span>
+                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                        <span>
                         <PlayerLink playerId={p.playerId} name={p.name} />
                         <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
                           {p.position} · {p.age}
@@ -746,6 +751,7 @@ function ProposeTab(props: {
                               )}
                           </span>
                         )}
+                        </span>
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
