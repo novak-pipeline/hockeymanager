@@ -323,59 +323,59 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
     )
   }
 
-  // game entry — played games open the historical box score
+  // game entry — the opponent's crest fills the cell (EHM-style), with the
+  // H/A tag and the result / Next badge overlaid. Played games open the box score.
   const isNext = entry.isNext
   const played = entry.result !== null
   return (
     <div
       onClick={played ? () => nav.navigate('matchcenter', { gameId: entry.gameId }) : undefined}
-      title={played ? 'View box score' : undefined}
+      title={played ? `${entry.home ? 'vs' : '@'} ${entry.opponentName} — view box score` : `${entry.home ? 'vs' : '@'} ${entry.opponentName}`}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
-        padding: '2px 3px',
-        borderRadius: 3,
-        background: isNext ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
+        position: 'relative',
+        minHeight: 52,
+        borderRadius: 4,
+        overflow: 'hidden',
+        background: isNext ? 'rgba(var(--accent-rgb),0.14)' : 'transparent',
         border: isNext ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid transparent',
         boxSizing: 'border-box',
         cursor: played ? 'pointer' : 'default',
+        opacity: played ? 0.92 : 1,
       }}
     >
-      {/* H/A + opponent row */}
-      <div className="row" style={{ gap: 3, alignItems: 'center', flexWrap: 'nowrap' }}>
-        <span
-          className={entry.home ? 'chip chip-accent' : 'chip'}
-          style={{ fontSize: 10, padding: '1px 5px', flexShrink: 0 }}
-        >
-          {entry.home ? 'H' : 'A'}
-        </span>
-        <TeamCrest
-          className="crest"
-          teamId={entry.opponentAbbr}
-          abbr={entry.opponentAbbr.slice(0, 2)}
-          style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
-        />
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: isNext ? 'var(--violet-h)' : 'var(--text)',
-          }}
-          title={entry.opponentName}
-        >
-          {entry.opponentAbbr}
-        </span>
+      {/* the big watermark crest */}
+      <TeamCrest
+        className="crest"
+        teamId={entry.opponentAbbr}
+        abbr={entry.opponentAbbr}
+        style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 20, fontWeight: 800, borderRadius: 0,
+          opacity: played ? 0.5 : 0.9, pointerEvents: 'none',
+        }}
+      />
+      {/* readability scrim so overlays pop over busy logos */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(8,10,15,0.35) 0%, rgba(8,10,15,0) 40%, rgba(8,10,15,0.55) 100%)', pointerEvents: 'none' }} />
+      {/* top-left H/A tag */}
+      <span
+        style={{
+          position: 'absolute', top: 2, left: 2, zIndex: 1,
+          fontSize: 9, fontWeight: 800, padding: '1px 4px', borderRadius: 3,
+          background: entry.home ? 'rgba(var(--accent-rgb),0.85)' : 'rgba(0,0,0,0.55)',
+          color: '#fff',
+        }}
+      >
+        {entry.home ? 'H' : 'A'}
+      </span>
+      {/* bottom result / Next */}
+      <div style={{ position: 'absolute', bottom: 2, left: 2, right: 2, zIndex: 1, display: 'flex', justifyContent: 'center' }}>
+        {entry.result ? (
+          <ResultChip entry={entry} />
+        ) : isNext ? (
+          <span className="chip chip-warn" style={{ fontSize: 9, padding: '1px 5px' }}>Next</span>
+        ) : null}
       </div>
-      {/* Result chip or "Next" badge */}
-      {entry.result ? (
-        <ResultChip entry={entry} />
-      ) : isNext ? (
-        <span className="chip chip-warn" style={{ fontSize: 9, padding: '1px 5px' }}>Next</span>
-      ) : null}
     </div>
   )
 }
