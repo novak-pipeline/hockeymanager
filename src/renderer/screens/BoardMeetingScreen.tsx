@@ -117,6 +117,13 @@ export function BoardMeetingScreen({ variant = 'preseason' }: { variant?: 'prese
   const [closing, setClosing] = useState<{ lines: MeetingLine[]; summary: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Never strand the GM in a dark boardroom: if there's no meeting to hold
+  // (it lapsed, or the sim moved on), fall back to the dashboard rather than
+  // showing an empty scene as if it were the default view.
+  useEffect(() => {
+    if (!loading && !scene && !closing) nav.navigate('dashboard')
+  }, [loading, scene, closing, nav])
+
   // The current agenda item = first without an answer.
   const currentIdx = useMemo(
     () => (scene ? scene.agenda.findIndex((a) => !(a.id in choices)) : -1),

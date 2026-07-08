@@ -52,6 +52,12 @@ export function TrainingCampScreen(): JSX.Element {
     setPlacements(init)
   }, [camp])
 
+  // Camp's broken and there's no cut-day report to show — don't strand the GM
+  // on an empty scene; the season has started, so return to the dashboard.
+  useEffect(() => {
+    if (!loading && !camp && !notes) nav.navigate('dashboard')
+  }, [loading, camp, notes, nav])
+
   async function breakCamp(): Promise<void> {
     if (!camp || busy) return
     setBusy(true)

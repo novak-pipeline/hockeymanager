@@ -6,7 +6,7 @@
  *
  * Artwork slot: assets/scenes/dev-camp-rink.png (CSS fallback otherwise).
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { WorkerResponse } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { useShellActions } from '../components/ActionsContext'
@@ -33,6 +33,13 @@ export function DevCampScreen(): JSX.Element {
     () => client.getDevCamp(),
     (r) => (r.type === 'devCamp' ? r.devCamp : null)
   )
+
+  // Once camp has wrapped, don't strand the GM on an empty scene — the sim has
+  // moved on, so send them back to the dashboard rather than showing this as a
+  // default view.
+  useEffect(() => {
+    if (!loading && !camp) nav.navigate('dashboard')
+  }, [loading, camp, nav])
 
   async function closeCamp(): Promise<void> {
     if (busy) return
