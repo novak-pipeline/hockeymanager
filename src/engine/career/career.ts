@@ -3546,6 +3546,36 @@ export class Career {
     }
   }
 
+  /** If the user's club cannot ice a legal lineup (12 healthy F / 6 D / 2 G)
+   *  even after pulling every healthy AHL body up, return a plain-English,
+   *  actionable message; otherwise null. Counts the AHL as available depth
+   *  because {@link emergencyRecalls} will pull those bodies up before puck drop. */
+  private userLineupShortfall(): string | null {
+    const grpOf = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+    const nhl = this.userTeam
+    const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+    const healthy = (roster: PlayerId[], grp: 'F' | 'D' | 'G'): number =>
+      roster.reduce((n, id) => {
+        const p = this.data.players.get(id)
+        return p && p.injuryStatus === null && grpOf(p) === grp ? n + 1 : n
+      }, 0)
+    const avail = (grp: 'F' | 'D' | 'G'): number => healthy(nhl.roster, grp) + (ahl ? healthy(ahl.roster, grp) : 0)
+    const need: Record<'F' | 'D' | 'G', number> = { F: 12, D: 6, G: 2 }
+    const label: Record<'F' | 'D' | 'G', string> = { F: 'forward', D: 'defenceman', G: 'goalie' }
+    const missing: string[] = []
+    for (const grp of ['F', 'D', 'G'] as const) {
+      const gap = need[grp] - avail(grp)
+      if (gap > 0) missing.push(`${gap} more ${label[grp]}${gap > 1 ? 's' : ''}`)
+    }
+    if (missing.length === 0) return null
+    return (
+      `Your club can't ice a legal lineup — you're short ${missing.join(', ')}. ` +
+      `A game needs 12 healthy forwards, 6 defencemen and 2 goalies (AHL call-ups counted). ` +
+      `Sign a free agent, swing a trade, or recall from the AHL before the next game.`
+    )
+  }
+
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
@@ -3791,6 +3821,16 @@ export class Career {
       return true
     }
     if (nextDay === undefined) return false
+    // Roster gate: if the user plays on the next match day but can't dress a
+    // legal lineup even with AHL call-ups, hold the sim with a clear, actionable
+    // message rather than grinding on an impossible lineup (which used to lock up).
+    const userPlaysNext = this.data.league.schedule.some(
+      (g) => g.day === nextDay && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
+    )
+    if (userPlaysNext) {
+      const shortfall = this.userLineupShortfall()
+      if (shortfall) throw new Error(shortfall)
+    }
     // Resolve any waiver-wire claims whose window has elapsed before today's games.
     this.resolveExpiredWaivers(nextDay)
     this.prepareTeamsForDay()

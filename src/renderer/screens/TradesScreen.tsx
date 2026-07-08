@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
@@ -9,6 +9,7 @@ import type {
 } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
+import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
@@ -394,6 +395,73 @@ function EvalPanel(props: {
   )
 }
 
+// ─── partner dropdown (crest-rich, re-render-proof) ─────────────────────────────
+
+function PartnerDropdown(props: {
+  partners: TradePartnerView[]
+  value: string
+  onChange: (id: string) => void
+}): JSX.Element {
+  const { partners, value, onChange } = props
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+  const cur = partners.find((p) => p.teamId === value)
+  const crestStyle = { width: 20, height: 20, flexShrink: 0 }
+  return (
+    <div ref={ref} style={{ position: 'relative', maxWidth: 360 }}>
+      <button
+        type="button"
+        className="select"
+        onClick={() => setOpen((o) => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+          {cur && <TeamCrest teamId={cur.teamId} abbr={cur.teamAbbr} style={crestStyle} />}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {cur ? `${cur.teamName} (${cur.teamAbbr})` : 'Select a team…'}
+          </span>
+        </span>
+        <span className="muted" style={{ fontSize: 10 }}>▾</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+            maxHeight: 340, overflowY: 'auto', background: 'var(--bg1)',
+            border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
+          }}
+        >
+          {partners.map((p) => (
+            <button
+              key={p.teamId}
+              type="button"
+              onClick={() => { onChange(p.teamId); setOpen(false) }}
+              className="row"
+              style={{
+                width: '100%', gap: 8, alignItems: 'center', padding: '7px 12px',
+                background: p.teamId === value ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                border: 'none', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: 13,
+              }}
+            >
+              <TeamCrest teamId={p.teamId} abbr={p.teamAbbr} style={crestStyle} />
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.teamName}</span>
+              <span className="muted small">{p.teamAbbr}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── propose tab ──────────────────────────────────────────────────────────────
 
 function ProposeTab(props: {
@@ -473,23 +541,15 @@ function ProposeTab(props: {
 
   return (
     <div className="stack">
-      {/* partner selector */}
+      {/* partner selector — custom dropdown (a native <select>'s popup gets
+          closed by the screen's periodic re-renders, so it wouldn't open
+          reliably in-season). */}
       <Panel title="Trade partner">
-        <select
-          className="select"
+        <PartnerDropdown
+          partners={data.partners}
           value={partnerId}
-          onChange={(e) => {
-            setPartnerId(e.target.value)
-            resetSelections()
-          }}
-          style={{ maxWidth: 320 }}
-        >
-          {data.partners.map((p) => (
-            <option key={p.teamId} value={p.teamId}>
-              {p.teamName} ({p.teamAbbr})
-            </option>
-          ))}
-        </select>
+          onChange={(id) => { setPartnerId(id); resetSelections() }}
+        />
       </Panel>
 
       {partner && (

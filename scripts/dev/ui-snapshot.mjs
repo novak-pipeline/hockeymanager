@@ -197,6 +197,18 @@ try {
       await win.click(`text="${label}"`, { timeout: 4000 })
       await win.waitForTimeout(500)
       await snap(win, slug)
+      // On the trade centre, also photograph the Build-a-Trade tab (partner
+      // dropdown + asset lists) and the Trade Block tab.
+      if (slug === 'transfers') {
+        try {
+          await win.click('button:has-text("Build a Trade")', { timeout: 3000 })
+          await win.waitForTimeout(400)
+          await snap(win, 'trades-build')
+          await win.click('button:has-text("Trade Block")', { timeout: 3000 })
+          await win.waitForTimeout(400)
+          await snap(win, 'trades-block')
+        } catch { /* tabs not present (deadline passed) — skip */ }
+      }
     } catch {
       console.log(`  ⚠ could not open "${label}" — skipped`)
     }
