@@ -94,47 +94,79 @@ export function DevCampScreen(): JSX.Element {
           )}
         </div>
 
-        {/* the invitees */}
-        <div style={{ maxWidth: 860, marginBottom: 'var(--sp-4)' }}>
-          <div className="table-wrap" style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8 }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th></th><th>Player</th><th className="num">Age</th>
-                  {camp.day >= 2 && <th>Scrimmage</th>}
-                  <th>Camp</th><th>The staff&apos;s read</th>
-                </tr>
-              </thead>
-              <tbody>
-                {camp.invitees.map((p) => {
-                  const isStandout = camp.coachStandout?.playerId === p.playerId
-                  return (
-                  <tr key={p.playerId} style={isStandout ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
-                    <td><PlayerFace faceId={p.faceId} name={p.name} size={28} /></td>
-                    <td>
-                      <PlayerLink playerId={p.playerId} name={p.name} />{' '}
-                      <span className="muted small">{p.position}</span>
-                      {p.drafted && <span className="chip chip-accent" style={{ fontSize: 9, marginLeft: 6 }}>YOUR PICK</span>}
-                      {isStandout && <span className="chip chip-success" style={{ fontSize: 9, marginLeft: 6 }}>★ STANDOUT</span>}
-                    </td>
-                    <td className="num muted">{p.age}</td>
-                    {camp.day >= 2 && (
-                      <td className="mono small">
-                        {p.line
-                          ? `${p.line.g}G ${p.line.a}A · ${p.line.sog} SOG`
-                          : p.position === 'G' ? 'in net' : '—'}
-                        {p.line && <span className="muted"> ({p.line.squad})</span>}
-                      </td>
-                    )}
-                    <td><span style={{ fontWeight: 800, color: GRADE_COLOR[p.grade] }}>{p.grade}</span></td>
-                    <td className="small" style={{ maxWidth: 340 }}>{p.read}</td>
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* the invitees — sorted by grade, densest tier first, so the pool
+            reads as tiers rather than an undifferentiated scroll */}
+        {(() => {
+          const rank: Record<string, number> = { A: 0, B: 1, C: 2 }
+          const pts = (p: DevCampView['invitees'][number]) => (p.line ? p.line.g * 2 + p.line.a : -1)
+          const sorted = [...camp.invitees].sort(
+            (a, b) => (rank[a.grade] ?? 3) - (rank[b.grade] ?? 3) || pts(b) - pts(a) || a.name.localeCompare(b.name)
+          )
+          const counts: Record<string, number> = { A: 0, B: 0, C: 0 }
+          for (const p of camp.invitees) counts[p.grade] = (counts[p.grade] ?? 0) + 1
+          const picks = camp.invitees.filter((p) => p.drafted).length
+          // Drop the repeated boilerplate tail — keep the first, telling clause.
+          const shortRead = (r: string): string => {
+            const s = (r.split(/\s[—–]\s|\. /)[0] ?? r).trim().replace(/\.$/, '')
+            return s.length > 48 ? s.slice(0, 46) + '…' : s
+          }
+          return (
+            <div style={{ maxWidth: 880, marginBottom: 'var(--sp-4)' }}>
+              {/* distribution — scan the shape of the class at a glance */}
+              <div className="row" style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap', fontSize: 11, alignItems: 'center' }}>
+                <span className="muted">{camp.invitees.length} skaters at camp:</span>
+                {(['A', 'B', 'C'] as const).map((g) => (
+                  <span key={g} className="chip" style={{ fontSize: 10, borderColor: GRADE_COLOR[g], color: GRADE_COLOR[g] }}>
+                    {counts[g] ?? 0} · {g === 'A' ? 'standing out' : g === 'B' ? 'on track' : 'behind'}
+                  </span>
+                ))}
+                {picks > 0 && <span className="chip chip-accent" style={{ fontSize: 10 }}>{picks} of your picks</span>}
+              </div>
+              <div
+                className="table-wrap"
+                style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8, maxHeight: '44vh', overflowY: 'auto' }}
+              >
+                <table className="table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 24 }}></th><th>Player</th><th className="num">Age</th>
+                      {camp.day >= 2 && <th className="num">G-A</th>}
+                      <th className="num">Grade</th><th>Read</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((p) => {
+                      const isStandout = camp.coachStandout?.playerId === p.playerId
+                      return (
+                        <tr key={p.playerId} style={isStandout ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
+                          <td><PlayerFace faceId={p.faceId} name={p.name} size={22} /></td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <PlayerLink playerId={p.playerId} name={p.name} /> <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
+                            {p.drafted && <span className="chip chip-accent" style={{ fontSize: 8, marginLeft: 5 }}>PICK</span>}
+                            {isStandout && <span className="chip chip-success" style={{ fontSize: 8, marginLeft: 5 }}>★</span>}
+                          </td>
+                          <td className="num muted">{p.age}</td>
+                          {camp.day >= 2 && (
+                            <td
+                              className="num mono"
+                              title={p.line ? `${p.line.g}G ${p.line.a}A · ${p.line.sog} SOG (${p.line.squad})` : undefined}
+                            >
+                              {p.line ? `${p.line.g}-${p.line.a}` : p.position === 'G' ? 'G' : '—'}
+                            </td>
+                          )}
+                          <td className="num"><span style={{ fontWeight: 800, color: GRADE_COLOR[p.grade] }}>{p.grade}</span></td>
+                          <td className="muted" style={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.read}>
+                            {shortRead(p.read)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })()}
 
         <div className="row" style={{ gap: 'var(--sp-3)' }}>
           {camp.day < 3 ? (

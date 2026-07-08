@@ -6312,6 +6312,39 @@ export class Career {
     if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
     const day = this.devCampState?.day ?? 1
     const lineOf = new Map(this.devCampState?.lines ?? [])
+    // Bucket-appropriate read variants, picked deterministically per player so
+    // a 40-kid pool reads with variety instead of three sentences on a loop.
+    const RISER_SK = [
+      'Quicker release and better pace than the book had.',
+      'Looked a level up — dictated shifts and won his battles.',
+      'Real pop in his game; the compete showed every drill.',
+      'Made plays at a pace the group couldn\'t match.',
+      'Skating and hands both ahead of schedule.',
+      'Drove play whenever he was on the ice.',
+    ]
+    const RISER_G = [
+      'Tracked pucks like a veteran all week.',
+      'Calm and square in the net; nothing rattled him.',
+      'Swallowed rebounds and stole the scrimmage.',
+      'Read plays early and beat the shooters to the spot.',
+    ]
+    const ONTRACK = [
+      'Solid, unspectacular week — right where his age should be.',
+      'Did his job quietly; no red flags, no fireworks.',
+      'Blended in with the group — steady if unspectacular.',
+      'Competent all week; tools there to build on.',
+      'Held his own without forcing the staff\'s eye.',
+      'Fine week — nothing that moves the needle either way.',
+    ]
+    const BEHIND = [
+      'A step behind the group — the summer homework list is long.',
+      'Overwhelmed by the pace; plenty to clean up.',
+      'Looked raw next to his peers — patience required.',
+      'Chasing the play too often; the gap to close is real.',
+      'Not ready — the details need a full year of work.',
+      'Struggled to keep up; a project for now.',
+    ]
+    const pickRead = (arr: string[], p: Player): string => arr[Career.pidNum(p.id as string) % arr.length]!
     return {
       day,
       ...(this.devCampState?.scoreline ? { scoreline: this.devCampState.scoreline } : {}),
@@ -6330,12 +6363,19 @@ export class Career {
                 : baseGrade
             : baseGrade
         const drafted = draftedIds.has(p.id as string)
+        // Keep the read consistent with what's SHOWN: once the scrimmage has
+        // (re)graded a kid, his read follows the final grade rather than the
+        // stale pre-camp baseline — no "A" next to "struggled to keep up".
+        const bucket: 'riser' | 'ontrack' | 'behind' =
+          day >= 2 && ln
+            ? grade === 'A' ? 'riser' : grade === 'C' ? 'behind' : 'ontrack'
+            : z > 0.5 ? 'riser' : z < -0.5 ? 'behind' : 'ontrack'
         const read =
-          z > 0.5
-            ? (p.position === 'G' ? 'Tracked pucks like a veteran all week.' : 'Quicker release and better pace than the book had.')
-            : z < -0.5
-              ? 'A step behind the group — the summer homework list is long.'
-              : 'Solid, unspectacular week. Exactly where a kid his age should be.'
+          bucket === 'riser'
+            ? pickRead(p.position === 'G' ? RISER_G : RISER_SK, p)
+            : bucket === 'behind'
+              ? pickRead(BEHIND, p)
+              : pickRead(ONTRACK, p)
         return {
           playerId: p.id as string,
           name: p.name,
