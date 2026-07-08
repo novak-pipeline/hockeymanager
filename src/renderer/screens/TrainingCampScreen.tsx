@@ -352,7 +352,8 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
       <div style={{ ...CARD, padding: '10px 14px', fontSize: 13, lineHeight: 1.5 }}>
         The battles have verdicts. Every row defaults to the coach&apos;s plan — overrule him where you disagree.{' '}
-        <b>⚠ Waiver-required players sent down can be claimed by any club, for nothing.</b>
+        <b>⚠ Waiver-required players sent down can be claimed by any club, for nothing.</b>{' '}
+        <span className="muted">PTO invitees either earn a league-minimum deal or return to the open market.</span>
         {nhlDelta !== 0 && <span className="muted"> (Net NHL change: {nhlDelta > 0 ? `+${nhlDelta}` : nhlDelta})</span>}
       </div>
       <div style={{ ...CARD }}>
@@ -366,14 +367,24 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
                   <td><PlayerFace faceId={d.faceId} name={d.name} size={28} /></td>
                   <td>
                     <PlayerLink playerId={d.playerId} name={d.name} /> <span className="muted small">{d.position}</span>
+                    {d.tryout && <span className="chip chip-violet" style={{ fontSize: 9, marginLeft: 6 }} title="Professional tryout — unsigned, must earn a contract">PTO</span>}
                     {d.waiverRequired && <span className="chip chip-danger" style={{ fontSize: 9, marginLeft: 6 }}>WV</span>}
                   </td>
                   <td className="num muted">{d.age}</td>
                   <td className="small" style={{ maxWidth: 360 }}>{d.coachPlan === 'nhl' ? '▲ ' : '▼ '}{d.line}</td>
                   <td>
                     <div className="row" style={{ gap: 4 }}>
-                      <button className={`btn btn-sm${want === 'nhl' ? ' btn-primary' : ''}`} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'nhl' }))}>NHL</button>
-                      <button className={`btn btn-sm${want === 'ahl' ? ' btn-primary' : ''}`} title={d.waiverRequired ? 'He must clear waivers — any club can claim him.' : undefined} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'ahl' }))}>{d.waiverRequired ? 'AHL ⚠' : 'AHL'}</button>
+                      {d.tryout ? (
+                        <>
+                          <button className={`btn btn-sm${want === 'nhl' ? ' btn-primary' : ''}`} title="Sign him to a one-year, league-minimum deal" onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'nhl' }))}>Sign</button>
+                          <button className={`btn btn-sm${want === 'ahl' ? ' btn-primary' : ''}`} title="End the tryout — he returns to the open market" onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'ahl' }))}>Release</button>
+                        </>
+                      ) : (
+                        <>
+                          <button className={`btn btn-sm${want === 'nhl' ? ' btn-primary' : ''}`} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'nhl' }))}>NHL</button>
+                          <button className={`btn btn-sm${want === 'ahl' ? ' btn-primary' : ''}`} title={d.waiverRequired ? 'He must clear waivers — any club can claim him.' : undefined} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'ahl' }))}>{d.waiverRequired ? 'AHL ⚠' : 'AHL'}</button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

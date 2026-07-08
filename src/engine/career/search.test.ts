@@ -434,6 +434,33 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(c2.getTrainingCamp()?.campDay).toBe(8)
   })
 
+  it('training camp PTOs: an unsigned vet on a tryout can be signed out of camp', () => {
+    let staged: Career | null = null
+    let ptoId = ''
+    for (const seed of [515, 616, 7, 42, 313, 99, 1234, 88, 2024, 555, 31, 777]) {
+      const data = generateLeague({ seed })
+      const c = new Career(data, seed, data.league.teams[0])
+      c.startAtOffseason()
+      for (let i = 0; i < 40; i++) {
+        if (c.getDashboard().phase !== 'offseason') break
+        c.advanceOffseason()
+      }
+      const camp = c.getTrainingCamp()
+      const pto = camp?.decisions.find((d) => d.tryout)
+      if (camp && pto) { staged = c; ptoId = pto.playerId; break }
+    }
+    expect(staged).not.toBeNull()
+    const camp = staged!.getTrainingCamp()!
+    // The tryout body is tagged PTO in the camp roster.
+    expect((camp.roster ?? []).find((r) => r.playerId === ptoId)?.status).toBe('PTO')
+    // Sign him out of camp → a real contract, and he leaves the open market.
+    const before = staged!.getFaHub().rows.some((r) => r.playerId === ptoId)
+    const res = staged!.submitTrainingCamp([{ playerId: ptoId, place: 'nhl' }])
+    expect(res.ok).toBe(true)
+    expect(res.notes.some((n) => /earns a contract|makes the team/.test(n))).toBe(true)
+    if (before) expect(staged!.getFaHub().rows.some((r) => r.playerId === ptoId)).toBe(false)
+  })
+
   it('simming past cut day lets the coach break camp himself', () => {
     const data = generateLeague({ seed: 616 })
     const c = new Career(data, 616, data.league.teams[0])

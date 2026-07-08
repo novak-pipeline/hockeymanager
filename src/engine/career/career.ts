@@ -6481,13 +6481,14 @@ export class Career {
       inGrp.forEach((p, i) => teamOf.set(p.id as string, i % 2 === 0 ? 'Blue' : 'Red'))
     }
     const ahlSet = new Set(ahlBattleIds)
+    const ptoSet = new Set(decisions.filter((d) => d.tryout).map((d) => d.playerId))
     camp.roster = bodies.map((p) => ({
       playerId: p.id as string,
       name: p.name,
       position: p.position,
       age: p.age,
       team: teamOf.get(p.id as string) ?? 'Blue',
-      status: ahlSet.has(p.id as string) ? 'AHL invite' : 'On Roster',
+      status: ptoSet.has(p.id as string) ? 'PTO' : ahlSet.has(p.id as string) ? 'AHL invite' : 'On Roster',
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
     }))
 
@@ -6607,9 +6608,14 @@ export class Career {
     camp.reports = camp.decisions.map((d) => {
       const p = this.resolve(asPlayerId(d.playerId))
       const rating = ratingOf.get(d.playerId) ?? 6.5
-      const rec: CampReport['recommendation'] = d.coachPlan === 'nhl' ? 'keep' : 'develop'
-      const verdict =
-        d.coachPlan === 'nhl'
+      const rec: CampReport['recommendation'] = d.tryout
+        ? (d.coachPlan === 'nhl' ? 'sign' : 'watch')
+        : d.coachPlan === 'nhl' ? 'keep' : 'develop'
+      const verdict = d.tryout
+        ? d.coachPlan === 'nhl'
+          ? `${coachName} likes the tryout — ${p.name} looked the part (avg ${rating.toFixed(1)}) and earned a contract offer. Worth a league-minimum deal.`
+          : `${coachName} has seen enough of ${p.name} on his tryout. A fine camp body, but not worth a contract — let him walk.`
+        : d.coachPlan === 'nhl'
           ? `${coachName} was impressed — ${p.name} pushed hard at camp (avg ${rating.toFixed(1)}) and has earned an NHL look. He recommends keeping him up.`
           : rating >= 7
             ? `${coachName} liked what he saw from ${p.name}, but feels another year of development in the AHL serves him best.`
@@ -6619,7 +6625,7 @@ export class Career {
         name: d.name,
         position: d.position,
         recommendation: rec,
-        tryout: false,
+        tryout: d.tryout ?? false,
         verdict,
         ...(d.faceId !== undefined ? { faceId: d.faceId } : {}),
       }
@@ -6712,6 +6718,19 @@ export class Career {
     })
     for (const d of ordered) {
       const want = placements.find((pl) => pl.playerId === d.playerId)?.place ?? d.coachPlan
+      // PTO invitees: 'nhl' signs him to a league-minimum deal, anything else
+      // ends the tryout and returns him to the open market.
+      if (d.tryout) {
+        if (want === 'nhl') {
+          const res = this.signTryout(d.playerId)
+          notes.push(res.ok
+            ? `${d.name} earns a contract out of his tryout — he makes the team on a league-minimum deal.`
+            : `${d.name}'s tryout ends without a deal: ${res.message ?? 'no room'}.`)
+        } else {
+          notes.push(`${d.name}'s tryout ends without a contract — he returns to the open market.`)
+        }
+        continue
+      }
       if (want === d.current) {
         if (want === 'nhl' && d.coachPlan === 'ahl') notes.push(`${d.name} stays on the NHL roster — you overruled the coach.`)
         continue
@@ -6738,6 +6757,30 @@ export class Career {
       { teamId: this.userTeamId as string }
     )
     return { ok: true, notes }
+  }
+
+  /** Sign a PTO invitee to a one-year, league-minimum deal out of camp. Returns
+   *  a failure note (no cap room / roster full) rather than throwing. */
+  private signTryout(playerId: string): { ok: boolean; message?: string } {
+    const id = asPlayerId(playerId)
+    if (!this.faPool.some((f) => (f as string) === playerId)) return { ok: false, message: 'he is no longer available' }
+    const player = this.data.players.get(id)
+    if (!player) return { ok: false, message: 'unknown player' }
+    const salary = 750_000
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: 'no cap room for even a minimum deal' }
+    }
+    try {
+      signPlayer({ team: this.userTeam, player, salary, years: 1, year: this.year, players: this.data.players })
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : 'roster rules' }
+    }
+    this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
+    this.lockerArrival(this.userTeamId, id)
+    recordAcquisition(this.chronicle, { playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
+    return { ok: true }
   }
 
   /** Simming past cut day: fast-forward any camp days still unplayed (so the
@@ -6805,6 +6848,36 @@ export class Career {
             ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
           })
         }
+        // PTOs (professional tryouts): the AGM brings a few unsigned veterans
+        // to camp on tryout deals — depth bodies who must earn a contract.
+        // Stock the market first (idempotent) so there's a deep pool of aging
+        // depth to draw tryouts from, then pick deterministically.
+        this.stockFreeAgentMarket()
+        const ptoRng = this.rngFor(9604, this.year)
+        const invitees = this.faPool
+          .map((id) => this.data.players.get(asPlayerId(id as string)))
+          .filter((p): p is Player => !!p && p.age >= 29 && ratedOverall(p) >= 66 && ratedOverall(p) <= 79)
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a) + ptoRng.float(-2, 2))
+          .slice(0, 3)
+        for (const p of invitees) {
+          const ovr = ratedOverall(p)
+          const worthNhl = ovr >= 73
+          decisions.push({
+            playerId: p.id as string,
+            name: p.name,
+            position: p.position,
+            age: p.age,
+            current: 'ahl', // not on the club — a tryout body fighting for a deal
+            coachPlan: worthNhl ? 'nhl' : 'ahl',
+            waiverRequired: false,
+            tryout: true,
+            line: worthNhl
+              ? 'In on a tryout and turning heads — the staff think he can still play a role. Worth a contract.'
+              : 'In on a tryout as a look. Fine body for camp, but not pushing for a roster spot.',
+            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          })
+        }
+
         if (decisions.length > 0) {
           this.trainingCamp = { decisions, resolved: false }
           // Training Camp v2: flesh out the week (roster, schedule, box score,

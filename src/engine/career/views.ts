@@ -126,6 +126,9 @@ export interface TrainingCampState {
     waiverRequired: boolean
     /** The coach's one-line verdict. */
     line: string
+    /** PTO invitee: unsigned, on a tryout. 'nhl' = sign him to a deal, 'ahl' =
+     *  release him back to the market (there's no farm assignment for a tryout). */
+    tryout?: boolean
   }>
   resolved: boolean
   /* ── Training Camp v2 (EHM-style), all additive/optional ── */
