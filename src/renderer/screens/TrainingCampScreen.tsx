@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import type { WorkerResponse } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
+import { useShellActions } from '../components/ActionsContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice } from '../components/ui'
@@ -34,6 +35,7 @@ const REC_META: Record<string, { label: string; color: string }> = {
 export function TrainingCampScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
+  const actions = useShellActions()
   const [tab, setTab] = useState<Tab>('overview')
   const [placements, setPlacements] = useState<Record<string, 'nhl' | 'ahl'>>({})
   const [busy, setBusy] = useState(false)
@@ -85,6 +87,10 @@ export function TrainingCampScreen(): JSX.Element {
 
   const blue = (camp.roster ?? []).filter((r) => r.team === 'Blue')
   const red = (camp.roster ?? []).filter((r) => r.team === 'Red')
+  const campDay = camp.campDay ?? 8
+  const CUT_DAY = 8
+  const atCutDay = campDay >= CUT_DAY
+  const todaysBeat = camp.schedule?.[campDay - 1]
   const fmtDate = (iso?: string): string => {
     if (!iso) return ''
     const d = new Date(iso + 'T00:00:00Z')
@@ -120,18 +126,53 @@ export function TrainingCampScreen(): JSX.Element {
           </div>
         </div>
 
+        {/* day cadence strip: where we are in the week + advance */}
+        <div style={{ ...CARD, padding: '9px 14px', marginBottom: 'var(--sp-3)' }}>
+          <div className="row-between" style={{ alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--muted)' }}>
+                Day {Math.min(campDay, CUT_DAY)} of {CUT_DAY}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{todaysBeat?.activity ?? 'Final Cuts'}</div>
+            </div>
+            {/* 8-pip progress */}
+            <div className="row" style={{ gap: 4 }}>
+              {Array.from({ length: CUT_DAY }, (_, i) => (
+                <span
+                  key={i}
+                  title={camp.schedule?.[i]?.activity}
+                  style={{
+                    width: 22, height: 5, borderRadius: 3,
+                    background: i < campDay ? 'rgb(var(--accent-rgb, 108,92,231))' : 'rgba(255,255,255,0.15)',
+                  }}
+                />
+              ))}
+            </div>
+            {atCutDay ? (
+              <button className="btn btn-primary" onClick={() => setTab('cuts')}>It&apos;s cut day — set the roster →</button>
+            ) : (
+              <button className="btn btn-primary" disabled={actions.busy} onClick={actions.continueGame}>
+                Advance to Day {campDay + 1} →
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* tab bar */}
         <div className="row" style={{ gap: 6, marginBottom: 'var(--sp-3)', flexWrap: 'wrap' }}>
-          {TABS.map(([id, label]) => (
-            <button
-              key={id}
-              className={`chip${tab === id ? ' chip-accent' : ''}`}
-              style={{ cursor: 'pointer', border: 'none', fontSize: 12, padding: '5px 12px' }}
-              onClick={() => setTab(id)}
-            >
-              {label}{id === 'cuts' && camp.decisions.length > 0 ? ` (${camp.decisions.length})` : ''}
-            </button>
-          ))}
+          {TABS.map(([id, label]) => {
+            const locked = id === 'cuts' && !atCutDay
+            return (
+              <button
+                key={id}
+                className={`chip${tab === id ? ' chip-accent' : ''}`}
+                style={{ cursor: 'pointer', border: 'none', fontSize: 12, padding: '5px 12px', opacity: locked ? 0.5 : 1 }}
+                onClick={() => setTab(id)}
+              >
+                {locked ? '🔒 ' : ''}{label}{id === 'cuts' && camp.decisions.length > 0 ? ` (${camp.decisions.length})` : ''}
+              </button>
+            )
+          })}
         </div>
 
         <div style={{ maxWidth: 1000 }}>
@@ -169,23 +210,36 @@ export function TrainingCampScreen(): JSX.Element {
               <table className="table">
                 <thead><tr><th>Day</th><th>Activity</th><th>Information</th></tr></thead>
                 <tbody>
-                  {(camp.schedule ?? []).map((s, i) => (
-                    <tr key={i}>
-                      <td className="muted" style={{ whiteSpace: 'nowrap' }}>{s.label}</td>
-                      <td style={{ fontWeight: 600 }}>{s.activity}</td>
-                      <td className="muted small">{s.info ?? '—'}</td>
-                    </tr>
-                  ))}
+                  {(camp.schedule ?? []).map((s, i) => {
+                    const dayNo = i + 1
+                    const isToday = dayNo === Math.min(campDay, CUT_DAY)
+                    const done = dayNo < campDay
+                    return (
+                      <tr key={i} style={isToday ? { background: 'rgba(var(--accent-rgb, 108,92,231), 0.12)' } : done ? undefined : { opacity: 0.5 }}>
+                        <td className="muted" style={{ whiteSpace: 'nowrap' }}>
+                          {isToday ? '▶ ' : done ? '✓ ' : ''}{s.label}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{s.activity}</td>
+                        <td className="muted small">{done || isToday ? (s.info ?? '—') : 'Upcoming'}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {tab === 'scrimmage' && camp.scrimmage && (
+          {tab === 'scrimmage' && camp.scrimmage && camp.scrimmage.results.length === 0 && (
+            <div style={{ ...CARD, padding: '14px 16px', fontSize: 13, lineHeight: 1.5 }}>
+              No scrimmages have been played yet — the first intra-squad game is on <b>Day 2</b>. The box score
+              accumulates here as the week goes on.
+            </div>
+          )}
+          {tab === 'scrimmage' && camp.scrimmage && camp.scrimmage.results.length > 0 && (
             <div className="stack" style={{ gap: 'var(--sp-3)' }}>
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
                 {camp.scrimmage.results.map((r, i) => (
-                  <span key={i} className="chip" style={{ fontSize: 11 }}>{r}</span>
+                  <span key={i} className="chip" style={{ fontSize: 11 }}>Scrimmage {i + 1}: {r}</span>
                 ))}
               </div>
               <div style={{ ...CARD }}>
@@ -236,7 +290,12 @@ export function TrainingCampScreen(): JSX.Element {
 
           {tab === 'reports' && (
             <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-              {(camp.reports ?? []).length === 0 && <div className="muted small">No reports filed yet.</div>}
+              {(camp.reports ?? []).length === 0 && (
+                <div style={{ ...CARD, padding: '14px 16px', fontSize: 13, lineHeight: 1.5 }}>
+                  The coaches file their per-player reports at the <b>end of camp</b> (Day 7), once they&apos;ve seen the
+                  scrimmages and the week of practice. Nothing filed yet — keep advancing.
+                </div>
+              )}
               {(camp.reports ?? []).map((r) => {
                 const m = REC_META[r.recommendation] ?? REC_META.watch
                 return (
@@ -258,7 +317,17 @@ export function TrainingCampScreen(): JSX.Element {
           )}
 
           {tab === 'cuts' && (
-            <CutDay camp={camp} placements={placements} setPlacements={setPlacements} busy={busy} onBreak={() => void breakCamp()} onLater={() => nav.navigate('dashboard')} />
+            atCutDay ? (
+              <CutDay camp={camp} placements={placements} setPlacements={setPlacements} busy={busy} onBreak={() => void breakCamp()} onLater={() => nav.navigate('dashboard')} />
+            ) : (
+              <div style={{ ...CARD, padding: '14px 16px', fontSize: 13, lineHeight: 1.5 }}>
+                <b>Cut day isn&apos;t here yet.</b> The coaches are still running the week and filing their reads —
+                you make the roster calls on <b>Day {CUT_DAY}</b>. Keep advancing camp (Day {campDay} of {CUT_DAY} so far).
+                <div style={{ marginTop: 10 }}>
+                  <button className="btn btn-primary" disabled={actions.busy} onClick={actions.continueGame}>Advance to Day {campDay + 1} →</button>
+                </div>
+              </div>
+            )
           )}
         </div>
       </Backdrop>

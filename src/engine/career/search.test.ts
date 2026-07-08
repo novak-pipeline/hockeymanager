@@ -393,15 +393,24 @@ describe('summer takeover (#145) + camps (M3)', () => {
       if (c.getTrainingCamp()) { staged = c; break }
     }
     expect(staged).not.toBeNull()
+    // Camp opens on Day 1 with a Blue/Red roster but an EMPTY box score — the
+    // week plays out beat by beat, not all at once.
+    const day1 = staged!.getTrainingCamp()!
+    expect(day1.campDay).toBe(1)
+    expect((day1.roster ?? []).length).toBeGreaterThan(10)
+    expect((day1.roster ?? []).some((r) => r.team === 'Blue')).toBe(true)
+    expect((day1.roster ?? []).some((r) => r.team === 'Red')).toBe(true)
+    expect((day1.schedule ?? []).length).toBeGreaterThanOrEqual(6)
+    expect(day1.scrimmage!.results.length).toBe(0) // nothing played yet
+    expect((day1.reports ?? []).length).toBe(0)   // reports come at the end
+    // Day-1 mail is the camp-opens read (not a scrimmage yet).
+    expect(staged!.getInbox().items.some((n) => n.headline === 'Training camp opens')).toBe(true)
+
+    // Walk the week to cut day: scrimmages accumulate, reports get filed.
+    for (let i = 0; i < 7; i++) staged!.advanceTrainingCampDay()
     const camp = staged!.getTrainingCamp()!
-    // Blue/Red camp roster.
-    expect((camp.roster ?? []).length).toBeGreaterThan(10)
-    expect((camp.roster ?? []).some((r) => r.team === 'Blue')).toBe(true)
-    expect((camp.roster ?? []).some((r) => r.team === 'Red')).toBe(true)
-    // Day-by-day schedule.
-    expect((camp.schedule ?? []).length).toBeGreaterThanOrEqual(6)
+    expect(camp.campDay).toBe(8)
     // Accumulating scrimmage box score (sorted by points, skaters have GP).
-    expect(camp.scrimmage).toBeTruthy()
     expect(camp.scrimmage!.skaters.length).toBeGreaterThan(10)
     expect(camp.scrimmage!.results.length).toBe(2)
     for (const s of camp.scrimmage!.skaters) {
@@ -414,14 +423,15 @@ describe('summer takeover (#145) + camps (M3)', () => {
       expect(['sign', 'keep', 'develop', 'watch']).toContain(r.recommendation)
       expect(r.verdict.length).toBeGreaterThan(20)
     }
-    // Rinkside evaluation mail arrived.
+    // Rinkside evaluation mail arrived across the week (scrimmage results).
     const inbox = staged!.getInbox().items
-    expect(inbox.some((n) => n.headline === 'Training camp up to speed')).toBe(true)
-    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage:'))).toBe(true)
-    // Round-trips whole.
+    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage 1'))).toBe(true)
+    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage 2'))).toBe(true)
+    // Round-trips whole (campDay + accumulated box score preserved).
     const snap = staged!.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
     const c2 = Career.fromSnapshot(snap)
     expect(c2.getTrainingCamp()?.scrimmage?.skaters.length).toBe(camp.scrimmage!.skaters.length)
+    expect(c2.getTrainingCamp()?.campDay).toBe(8)
   })
 
   it('simming past cut day lets the coach break camp himself', () => {
@@ -433,7 +443,10 @@ describe('summer takeover (#145) + camps (M3)', () => {
       c.advanceOffseason()
     }
     const staged = c.getTrainingCamp() !== null
-    c.advanceDay()
+    // Camp is a beat-by-beat week now: each Continue before cut day walks one
+    // day; the Continue past cut day hands the coach the clipboard.
+    let guard = 0
+    while (c.getDashboard().campPending && guard++ < 12) c.advanceDay()
     expect(c.getDashboard().campPending).toBe(false)
     if (staged) {
       expect(c.getInbox().items.some((n) => n.headline.includes('Camp breaks'))).toBe(true)

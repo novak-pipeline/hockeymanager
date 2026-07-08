@@ -142,36 +142,50 @@ try {
     }
   }
 
-  // ── drive to training camp (Sept) and photograph its tabs ──
+  // ── drive to training camp (Sept) and photograph its beat-by-beat week ──
   try {
     let reached = false
-    for (let i = 0; i < 30 && !reached; i++) {
+    for (let i = 0; i < 80 && !reached; i++) {
       await win.click('button:has-text("Continue")', { timeout: 6000 })
-      await win.waitForTimeout(500)
+      await win.waitForTimeout(400)
       // Camp gate routes onto the camp screen; detect its header.
       reached = await win.locator('text=Camp is on the ice').count().then((n) => n > 0).catch(() => false)
       // A dev-camp beat may intercept — its Continue keeps the loop moving.
     }
     if (reached) {
-      await snap(win, 'camp-overview')
-      for (const [tab, slug] of [['Camp Schedule', 'camp-schedule'], ['Scrimmage Stats', 'camp-scrimmage'], ['Coach Reports', 'camp-reports'], ['Cut Day', 'camp-cuts']]) {
+      // Day 1 (camp opens): overview + the empty/early tabs.
+      await snap(win, 'camp-day1-overview')
+      for (const [tab, slug] of [['Camp Schedule', 'camp-schedule'], ['Scrimmage Stats', 'camp-scrimmage-empty'], ['Coach Reports', 'camp-reports-early']]) {
         try {
           await win.click(`button:has-text("${tab}")`, { timeout: 4000 })
-          await win.waitForTimeout(400)
+          await win.waitForTimeout(300)
           await snap(win, slug)
         } catch { /* tab missing — skip */ }
       }
-      // Break camp so the rest of the walk sees a normal in-season shell.
+      // Walk the week day by day via the in-screen advance button.
+      for (let d = 0; d < 8; d++) {
+        const atCut = await win.locator('button:has-text("set the roster")').count().then((n) => n > 0).catch(() => false)
+        if (atCut) break
+        try {
+          await win.click('button:has-text("Advance to Day")', { timeout: 4000 })
+          await win.waitForTimeout(400)
+        } catch { break }
+      }
+      // Mid/late-week: the box score + reports have filled in.
+      try { await win.click('button:has-text("Scrimmage Stats")', { timeout: 4000 }); await win.waitForTimeout(300); await snap(win, 'camp-scrimmage-filled') } catch {}
+      try { await win.click('button:has-text("Coach Reports")', { timeout: 4000 }); await win.waitForTimeout(300); await snap(win, 'camp-reports-filed') } catch {}
+      // Cut day: the roster calls are live.
       try {
         await win.click('button:has-text("Cut Day")', { timeout: 3000 })
         await win.waitForTimeout(300)
+        await snap(win, 'camp-cutday')
         await win.click('button:has-text("Break camp")', { timeout: 4000 })
         await win.waitForTimeout(500)
         await win.click('button:has-text("opening night")', { timeout: 4000 })
         await win.waitForTimeout(400)
       } catch { /* leave as-is */ }
     } else {
-      console.log('  ⚠ training camp not reached in 30 presses — skipped')
+      console.log('  ⚠ training camp not reached in 80 presses — skipped')
     }
   } catch (e) {
     console.log(`  ⚠ training camp not reachable — skipped (${e.message?.split('\n')[0]})`)

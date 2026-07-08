@@ -304,9 +304,20 @@ describe('Career — full year cycle', () => {
     const squad = career.getSquad()
     expect(squad.rows.length).toBeGreaterThanOrEqual(18)
 
-    // And the next season actually plays.
-    expect(career.advanceDay()).toBe(true)
-    expect(career.view().userTeam.standing.gamesPlayed).toBe(1)
+    // The new season opens with training camp — a beat-by-beat week that gates
+    // opening night. Walk it; no games are simmed until the camp resolves (the
+    // final Continue past cut day hands the coach the clipboard AND plays the
+    // opener).
+    expect(career.getTrainingCamp()).not.toBeNull()
+    expect(career.view().userTeam.standing.gamesPlayed).toBe(0)
+    let campGuard = 0
+    while (career.getTrainingCamp() && campGuard++ < 12) {
+      expect(career.advanceDay()).toBe(true)
+    }
+    expect(career.getTrainingCamp()).toBeNull() // camp resolved
+
+    // And the next season actually played.
+    expect(career.view().userTeam.standing.gamesPlayed).toBeGreaterThanOrEqual(1)
   })
 
   it('the draft completes with every pick used on a real prospect', () => {

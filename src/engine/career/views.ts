@@ -129,6 +129,8 @@ export interface TrainingCampState {
   }>
   resolved: boolean
   /* ── Training Camp v2 (EHM-style), all additive/optional ── */
+  /** Which day of the camp week we're on (1..8); 8 = final cuts. */
+  campDay?: number
   /** Camp window, e.g. "Sep 12 – Sep 20". */
   startISO?: string
   endISO?: string
@@ -159,6 +161,8 @@ export interface TrainingCampState {
 export interface TrainingCampView {
   decisions: TrainingCampState['decisions']
   cast: Array<{ name: string; title: string; faceId?: string }>
+  /** Which day of the camp week we're on (1..8); 8 = final cuts. */
+  campDay?: number
   startISO?: string
   endISO?: string
   roster?: TrainingCampState['roster']
