@@ -3997,6 +3997,9 @@ export class Career {
       if (this.resolve(id).contract.yearsRemaining === 0) this.resignStatus.set(id, 'pending')
     }
     this.generateOfferSheets()
+    // Stock the open market from day one — the FA desk should never be empty
+    // when the user arrives at July 1.
+    this.stockFreeAgentMarket()
     const ai = aiResignDay({
       teams: this.data.teams,
       players: this.data.players,
@@ -5024,6 +5027,9 @@ export class Career {
         // live beat. The next Continue walks you onto the rink; simming past
         // sends the staff and mails the report instead.
         this.devCampPending = this.devCampInvitees().invitees.length > 0
+        // Stock the open market so the resign stage (July 1) already has a
+        // deep board — the FA desk is never empty.
+        this.stockFreeAgentMarket()
         os.stage = 'resign'
         return true
       }
@@ -5065,7 +5071,13 @@ export class Career {
             { playerId: e.playerId as string }
           )
         }
-        this.faPool = [...expired.map((e) => e.playerId).filter((id) => !arbFiled.has(id as string)), ...this.buyoutFas]
+        // Expiries + buyouts JOIN the standing market (which was stocked when
+        // the resign stage opened) — they don't replace it.
+        for (const e of expired) {
+          const id = e.playerId as string
+          if (!arbFiled.has(id) && !this.faPool.some((f) => (f as string) === id)) this.faPool.push(e.playerId)
+        }
+        for (const id of this.buyoutFas) if (!this.faPool.some((f) => (f as string) === (id as string))) this.faPool.push(id)
         this.buyoutFas = []
         for (const e of expired) this.lockerDeparture(e.teamId, e.playerId)
         for (const e of expired) {
@@ -5079,69 +5091,23 @@ export class Career {
             )
           }
         }
-        // July free-agent market: in a real NHL summer ~10-15% of the league
-        // turns over. The imported DB has everyone signed with no natural
-        // expiries, so we source the class honestly from the rosters: every
-        // AI club sheds its SURPLUS depth (bodies beyond a healthy 23) plus a
-        // couple of aging one-way non-tenders it wouldn't re-sign. Stars are
-        // never dumped; no club is gutted below 20. Scales with roster size,
-        // so a bloated imported world produces a busy market and a tight
-        // generated league a modest one.
+        // July 1: the market is already stocked (stocked when resign opened);
+        // a light top-up plus the expiries make it a full frenzy. Announce it.
+        this.stockFreeAgentMarket()
         {
-          const casualties: string[] = []
-          const KEEP = 23 // healthy NHL roster; bodies beyond this are surplus
-          const FLOOR = 20 // never strip a club below this
-          for (const team of this.data.teams.values()) {
-            if (team.tier === 'ahl' || team.tier === 'world') continue
-            if (team.id === this.userTeamId) continue
-            const roster = team.roster
-              .map((id) => this.data.players.get(id))
-              .filter((p): p is Player => !!p)
-            const payroll = roster.reduce((n, p) => n + p.contract.salary, 0)
-            const overCap = payroll > team.finances.salaryCap * 0.97
-            const rng = this.rngFor(8012, this.year, Career.pidNum(team.id as string))
-            // Candidates a club would let walk: aging one-way depth, never stars.
-            const sheddable = roster
-              .filter((p) => p.contract.twoWay === false && p.age >= 27 && ratedOverall(p) < 80)
-              .sort((a, b) => ratedOverall(a) - ratedOverall(b))
-            // Shed all surplus beyond KEEP, plus 1-3 natural non-tenders
-            // (more when the club is over the cap).
-            const surplus = Math.max(0, roster.length - KEEP)
-            const nonTenders = rng.range(overCap ? 2 : 1, overCap ? 4 : 3)
-            let toShed = surplus + nonTenders
-            let onRoster = roster.length
-            for (const cut of sheddable) {
-              if (toShed <= 0 || onRoster <= FLOOR) break
-              toShed--
-              onRoster--
-              team.roster = team.roster.filter((id) => id !== cut.id)
-              cut.contract.yearsRemaining = 0
-              casualties.push(cut.id as string)
-              this.lockerDeparture(team.id, cut.id)
-              chronicleEvent(this.chronicle, {
-                year: this.year,
-                day: 0,
-                kind: 'release',
-                teamIds: [team.id as string],
-                playerIds: [cut.id as string],
-                headline: `${team.abbreviation} release ${cut.name} into free agency`,
-              })
-            }
-          }
-          if (casualties.length > 0) {
-            this.faPool.push(...casualties)
-            const names = casualties
-              .slice(0, 6)
-              .map((id) => {
-                const p = this.data.players.get(asPlayerId(id))
-                return p ? `${p.name} (${p.position}, ${p.age})` : ''
-              })
-              .filter(Boolean)
+          const poolNames = this.faPool
+            .slice(0, 6)
+            .map((id) => {
+              const p = this.data.players.get(asPlayerId(id as string))
+              return p ? `${p.name} (${p.position}, ${p.age})` : ''
+            })
+            .filter(Boolean)
+          if (this.faPool.length > 0) {
             this.pushNews(
               'contract',
-              `Free agency opens: ${casualties.length} players hit the open market`,
-              `July 1 shook loose a full class — clubs cleared surplus depth and let their aging bodies walk. ` +
-              `Names on the board include ${names.join(', ')}${casualties.length > names.length ? `, and ${casualties.length - names.length} more` : ''}. ` +
+              `Free agency is open: ${this.faPool.length} on the market`,
+              `The window is open and the board is deep — unsigned veterans, cap casualties and expiring deals all on offer. ` +
+              `Names to know: ${poolNames.join(', ')}${this.faPool.length > poolNames.length ? `, and ${this.faPool.length - poolNames.length} more` : ''}. ` +
               `The Free Agents desk has the whole market.`,
               {}
             )
@@ -5715,11 +5681,19 @@ export class Career {
     this.tradeOffers = []
     this.lastBoxScore = null
     this.resignStatus.clear()
-    this.faPool = []
+    // Unsigned players stay unsigned into the new season — the market never
+    // resets to empty. Drop only those who found a roster; keep the rest.
+    {
+      const rostered = new Set<string>()
+      for (const t of this.data.teams.values()) for (const id of t.roster) rostered.add(id as string)
+      this.faPool = this.faPool.filter((id) => !rostered.has(id as string))
+    }
     this.playoffs = null
     this.offseason = null
     this.currentDay = 0
     this.phase = 'regularSeason'
+    // Keep the market open + deep in-season (persists across seasons + AI shops it).
+    this.stockFreeAgentMarket()
     // Reset press schedule for the new season.
     this.pressScheduleState = initialPressScheduleState()
 
@@ -7406,8 +7380,9 @@ export class Career {
   }
 
   signFreeAgent(playerId: string, salary: number, years: number): { signed: boolean; message: string } {
+    // The market is open year-round; the roster only freezes in the playoffs.
+    if (this.phase === 'playoffs') throw new Error('the roster is frozen during the playoffs')
     const os = this.offseason
-    if (!os || os.stage !== 'freeAgency') throw new Error('free agency is not open')
     const id = asPlayerId(playerId)
     if (!this.faPool.some((f) => (f as string) === playerId)) {
       throw new Error('player is not a free agent')
@@ -7424,7 +7399,7 @@ export class Career {
       }
     }
     const ask = askTerms(player, this.year)
-    const rng = this.rngFor(8007, os.faDay, Number((playerId.match(/\d+/) ?? ['0'])[0]))
+    const rng = this.rngFor(8007, os?.faDay ?? this.currentDay, Number((playerId.match(/\d+/) ?? ['0'])[0]))
     if (!offerAcceptable(player, { salary, years }, ask, rng)) {
       return {
         signed: false,
@@ -7508,6 +7483,70 @@ export class Career {
   }
 
   /* ───────────────────── free-agency hub (DEPTH 2) ─────────────────────── */
+
+  /**
+   * Keep a standing pool of unsigned players on the market at all times. In a
+   * real NHL summer ~10-15% of the league turns over, and there's always a
+   * pool of unsigned journeymen through the season — but the imported DB has
+   * everyone signed with no natural expiries. So we source the class honestly
+   * from rosters: every AI club sheds surplus depth (bodies beyond a healthy
+   * 23) plus aging one-way non-tenders it wouldn't re-sign, topping the pool up
+   * to a floor. Stars are never dumped; no club is gutted below 20. Idempotent
+   * (already-released players are skipped), so it's safe to call repeatedly.
+   */
+  private stockFreeAgentMarket(): number {
+    const KEEP = 23 // healthy NHL roster; bodies beyond this are surplus
+    const FLOOR = 20 // never strip a club below this
+    const POOL_FLOOR = 45 // aim for a market of at least this many names
+    const inPool = new Set(this.faPool.map((id) => id as string))
+    let added = 0
+    // Weakest-first across the league so the floor is filled with true depth.
+    const clubs = [...this.data.teams.values()].filter(
+      (t) => t.tier !== 'ahl' && t.tier !== 'world' && t.id !== this.userTeamId
+    )
+    const release = (team: Team, cut: Player): void => {
+      team.roster = team.roster.filter((id) => id !== cut.id)
+      cut.contract.yearsRemaining = 0
+      this.faPool.push(cut.id)
+      inPool.add(cut.id as string)
+      added++
+      this.lockerDeparture(team.id, cut.id)
+      chronicleEvent(this.chronicle, {
+        year: this.year, day: 0, kind: 'release',
+        teamIds: [team.id as string], playerIds: [cut.id as string],
+        headline: `${team.abbreviation} release ${cut.name} into free agency`,
+      })
+    }
+    // 1) Bloated rosters shed their SURPLUS (bodies beyond a healthy 23) — this
+    //    handles imported DBs carrying 26-30 per club; it's 0 for tight rosters.
+    for (const team of clubs) {
+      const surplus = Math.max(0, team.roster.length - KEEP)
+      if (surplus <= 0) continue
+      const sheddable = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.contract.twoWay === false && p.age >= 27 && ratedOverall(p) < 80 && !inPool.has(p.id as string))
+        .sort((a, b) => ratedOverall(a) - ratedOverall(b))
+      for (let i = 0; i < surplus && i < sheddable.length; i++) {
+        if (team.roster.length <= FLOOR) break
+        release(team, sheddable[i]!)
+      }
+    }
+    // 2) Floor-fill: if the market is still thin, shed the weakest aging one-way
+    //    depth across the league until it reaches the floor (never below FLOOR
+    //    per club). Guarantees a deep board even when nobody's contract expires.
+    if (this.faPool.length < POOL_FLOOR) {
+      const extra = clubs
+        .flatMap((t) => t.roster.map((id) => ({ t, p: this.data.players.get(id) })))
+        .filter((x): x is { t: Team; p: Player } => !!x.p && x.p.contract.twoWay === false && x.p.age >= 28 && ratedOverall(x.p) < 74 && !inPool.has(x.p.id as string))
+        .sort((a, b) => ratedOverall(a.p) - ratedOverall(b.p))
+      for (const { t, p } of extra) {
+        if (this.faPool.length >= POOL_FLOOR) break
+        if (t.roster.length <= FLOOR) continue
+        release(t, p)
+      }
+    }
+    return added
+  }
 
   toggleFaShortlist(playerId: string): { shortlisted: boolean } {
     if (this.faShortlist.has(playerId)) {
@@ -7606,10 +7645,12 @@ export class Career {
 
   /** Can talks be held with this player right now, and in what capacity? */
   private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | null {
+    // The FA market is open year-round: any club-less player can be signed
+    // whenever the roster isn't frozen (offseason, or regular season). Re-sign
+    // talks with your own expiring RFAs are the offseason resign stage.
     const os = this.offseason
-    if (!os) return null
-    if (os.stage === 'resign' && this.resignStatus.get(asPlayerId(playerId)) === 'pending') return 'resign'
-    if (os.stage === 'freeAgency' && this.faPool.some((f) => (f as string) === playerId)) return 'freeAgent'
+    if (os?.stage === 'resign' && this.resignStatus.get(asPlayerId(playerId)) === 'pending') return 'resign'
+    if (this.phase !== 'playoffs' && this.faPool.some((f) => (f as string) === playerId)) return 'freeAgent'
     return null
   }
 

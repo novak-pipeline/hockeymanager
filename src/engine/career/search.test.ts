@@ -630,18 +630,20 @@ describe('FA hub (DEPTH 2)', () => {
 })
 
 describe('realistic pool sizes (2026-07-08 feedback)', () => {
-  it('the July FA market is a real class, not a handful of cap casualties', () => {
+  it('the FA market is stocked and open at all times — not empty until July 1', () => {
     const data = generateLeague({ seed: 313 })
     const c = new Career(data, 313, data.league.teams[0])
     c.startAtOffseason()
+    // The market is deep the MOMENT the user arrives (resign stage, July 1) —
+    // no longer empty until the freeAgency transition.
+    expect(c.getOffseason()?.stage).toBe('resign')
+    expect(c.getFaHub().rows.length).toBeGreaterThanOrEqual(30)
+    // And it stays open through the FA window.
     for (let i = 0; i < 8; i++) {
       if (c.getOffseason()?.stage === 'freeAgency') break
       c.advanceOffseason()
     }
-    expect(c.getOffseason()?.stage).toBe('freeAgency')
-    // A generated 16-team league at 23-ish rosters sheds ~1-4 per club → a
-    // market of dozens, not 3. (An imported bloated DB produces far more.)
-    expect(c.getFaHub().rows.length).toBeGreaterThanOrEqual(15)
+    expect(c.getFaHub().rows.length).toBeGreaterThanOrEqual(20)
     // No club was gutted below a fieldable roster.
     for (const t of data.teams.values()) {
       if (t.tier === 'ahl' || t.tier === 'world') continue

@@ -81,8 +81,8 @@ export function FreeAgentMarketScreen(): JSX.Element {
       {(hub?.rows ?? []).length === 0 ? (
         <Panel title="The open market">
           <Notice kind="info">
-            No unrestricted free agents on the board right now. The market opens July 1 —
-            unsigned veterans and cap casualties land here.
+            The board is momentarily clear — the league's unsigned depth has all found homes.
+            More names hit the market as clubs make cuts and clear cap space.
           </Notice>
         </Panel>
       ) : (
