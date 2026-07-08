@@ -360,6 +360,10 @@ export class SimClient {
     return this.send({ type: 'proposeTrade', proposal })
   }
 
+  shopPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'shopPlayer', playerId })
+  }
+
   acceptTrade(offerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptTrade', offerId })
   }

@@ -267,6 +267,7 @@ import {
   generateAiAiTrade,
   pickValue,
   playerValue,
+  solicitOffersForPlayer,
   type StoredTradeOffer,
 } from '@engine/league/trades'
 import {
@@ -8253,6 +8254,52 @@ export class Career {
       message: `${gm.name}: We're close. Add ${nameList} and you've got a deal.`,
       expiresOnDay: this.currentDay + 3,
     }
+  }
+
+  /** DEPTH 3: actively shop a player. Every AI club thin at his position group
+   *  tables its best package; the strongest few land in the trade centre as
+   *  real incoming offers. Replaces any earlier offers for the same player. */
+  shopPlayer(playerId: string): { count: number; message: string } {
+    if (!this.tradingOpen()) throw new Error('the trade market is closed')
+    const id = asPlayerId(playerId)
+    if (!this.userTeam.roster.includes(id)) throw new Error('that player is not on your roster')
+    const player = this.resolve(id)
+    if (player.contract.noTradeClause) {
+      return { count: 0, message: `${player.name} holds a no-trade clause — you can't shop him without his say-so.` }
+    }
+    // Clear stale offers that were shopping THIS player before re-soliciting.
+    this.tradeOffers = this.tradeOffers.filter(
+      (o) => !(o.userGivesPlayerIds.length === 1 && (o.userGivesPlayerIds[0] as string) === playerId)
+    )
+    const offers = solicitOffersForPlayer({
+      target: player,
+      userTeamId: this.userTeamId,
+      teams: this.data.teams,
+      players: this.data.players,
+      picks: this.picks,
+      rng: this.rngFor(7009, this.currentDay, Career.pidNum(playerId)),
+      nextOfferId: () => `s${this.offerCounter++}`,
+      expiresOnDay: this.currentDay + 4,
+      aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
+      maxOffers: 4,
+    })
+    for (const o of offers) this.tradeOffers.push(o)
+    if (offers.length === 0) {
+      this.pushNews(
+        'trade',
+        `No takers for ${player.name}`,
+        `You put out feelers on ${player.name}, but no club tabled an offer worth relaying. Try again closer to the deadline, or shop someone else.`,
+        { teamId: this.userTeamId as string }
+      )
+      return { count: 0, message: `No club tabled an offer for ${player.name}.` }
+    }
+    this.pushNews(
+      'trade',
+      `${offers.length} club${offers.length > 1 ? 's inquire' : ' inquires'} on ${player.name}`,
+      `You shopped ${player.name}. ${offers.length} offer${offers.length > 1 ? 's are' : ' is'} on your desk — review ${offers.length > 1 ? 'them' : 'it'} in the trade centre.`,
+      { teamId: this.userTeamId as string }
+    )
+    return { count: offers.length, message: `${offers.length} offer${offers.length > 1 ? 's' : ''} came in for ${player.name}.` }
   }
 
   acceptTrade(offerId: string): void {

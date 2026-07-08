@@ -769,4 +769,40 @@ describe('trade counter-offers (DEPTH 3)', () => {
     // And it's a real, acceptable offer: accepting it executes without throwing.
     expect(() => c.acceptTrade(counter!.offerId)).not.toThrow()
   })
+
+  it('shopping a player brings back concrete offers from clubs that need him', () => {
+    const data = generateLeague({ seed: 616 })
+    const userId = data.league.teams[0]!
+    const c = new Career(data, userId, userId)
+    c.startAtOffseason()
+    const roster = data.teams.get(userId)!.roster
+      .map((id) => data.players.get(id)!)
+      .filter((p) => p && !p.contract.noTradeClause)
+
+    // Some depth bodies have no market; a decent player will draw interest.
+    let shoppedId = ''
+    let count = 0
+    for (const p of roster) {
+      const r = c.shopPlayer(p.id as string)
+      if (r.count > 0) { shoppedId = p.id as string; count = r.count; break }
+    }
+    expect(count).toBeGreaterThan(0)
+
+    // The offers are now in the trade centre, each giving up exactly that player
+    // and returning real assets.
+    const forHim = c.getTrades().incoming.filter(
+      (o) => o.give.players.length === 1 && o.give.players[0]!.playerId === shoppedId
+    )
+    expect(forHim.length).toBe(count)
+    for (const o of forHim) {
+      expect(o.receive.players.length + o.receive.picks.length).toBeGreaterThan(0)
+    }
+
+    // Re-shopping replaces his offers rather than piling up duplicates.
+    const again = c.shopPlayer(shoppedId)
+    const forHim2 = c.getTrades().incoming.filter(
+      (o) => o.give.players.length === 1 && o.give.players[0]!.playerId === shoppedId
+    )
+    expect(forHim2.length).toBe(again.count)
+  })
 })

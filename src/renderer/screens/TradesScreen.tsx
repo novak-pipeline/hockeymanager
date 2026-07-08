@@ -453,6 +453,20 @@ function ProposeTab(props: {
     }
   }
 
+  // DEPTH 3: shop the single selected player around the whole league — every
+  // club that needs him tables its best package, landing in the offers tab.
+  async function handleShop(playerId: string) {
+    setBusy(true)
+    setErr(null)
+    const r = await client.shopPlayer(playerId)
+    setBusy(false)
+    if (r.type === 'error') { setErr(r.message); return }
+    if (r.type === 'shopResult') {
+      toast(r.message, r.count > 0 ? 'success' : 'info')
+      props.onRefetch()
+    }
+  }
+
   const hasSelections =
     myPlayerIds.size > 0 || myPickIds.size > 0 || theirPlayerIds.size > 0 || theirPickIds.size > 0
 
@@ -576,6 +590,23 @@ function ProposeTab(props: {
                   )
                 })}
               </div>
+              {/* DEPTH 3: shop the one selected player around the whole league */}
+              {myPlayerIds.size === 1 && (() => {
+                const shopId = [...myPlayerIds][0]!
+                const shopName = data.myPlayers.find((p) => p.playerId === shopId)?.name ?? 'him'
+                return (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() => void handleShop(shopId)}
+                    style={{ marginTop: 8, width: '100%', fontSize: 12 }}
+                    title="Solicit concrete offers for this player from every club that needs him"
+                  >
+                    📣 Shop {shopName} around the league
+                  </button>
+                )
+              })()}
             </div>
             {data.myPicks.length > 0 && (
               <div>

@@ -243,6 +243,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'proposeTrade':
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
+    case 'shopPlayer': {
+      const r = must().shopPlayer(req.playerId)
+      return { id: req.id, type: 'shopResult', count: r.count, message: r.message }
+    }
     case 'acceptTrade':
       must().acceptTrade(req.offerId)
       return { id: req.id, type: 'ok' }

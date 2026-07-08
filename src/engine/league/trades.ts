@@ -972,6 +972,98 @@ export function generateAiOffers(args: {
   return [offer]
 }
 
+/**
+ * DEPTH 3: the user actively SHOPS a specific player. Every AI club that is
+ * thin at his position group tables its best concrete package (same value +
+ * overpay logic as the unsolicited offers), and the strongest few are returned,
+ * sorted by generosity. Pure function of its inputs + the seeded Rng.
+ */
+export function solicitOffersForPlayer(args: {
+  target: Player
+  userTeamId: TeamId
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  picks: DraftPick[]
+  rng: Rng
+  nextOfferId: () => string
+  expiresOnDay: number
+  /** GM aggression lookup, 0–1 — aggressive GMs stretch their package further. */
+  aggressionOf?: (teamId: TeamId) => number
+  /** Cap on how many offers come back (default 4). */
+  maxOffers?: number
+}): StoredTradeOffer[] {
+  const { target, userTeamId, teams, players, picks, rng, nextOfferId, expiresOnDay } = args
+  const tgtGroup = groupOf(target.position)
+  const tgtValue = playerValue(target)
+  const ranks = strengthRanks(teams, players)
+  const currentYear =
+    picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
+
+  const built: Array<{ offer: StoredTradeOffer; total: number }> = []
+  for (const partner of teams.values()) {
+    if (partner.id === userTeamId) continue
+    // Interested only if this club is below its target depth at his group.
+    if (groupCounts(partner, players, [])[tgtGroup] >= GROUP_TARGET[tgtGroup]) continue
+
+    const aggression = args.aggressionOf?.(partner.id)
+    const aimHi = aggression === undefined ? 1.15 : 1.03 + 0.18 * aggression
+    const aim = tgtValue * rng.float(1.0, aimHi)
+
+    // Candidate assets: the partner's players (keeping his need group + both
+    // goalies at home) plus the picks he owns.
+    const candidates: Asset[] = []
+    for (const id of partner.roster) {
+      const p = players.get(id)
+      if (!p || p.contract.noTradeClause || p.injuryStatus !== null) continue
+      if (p.position === 'G' || groupOf(p.position) === tgtGroup) continue
+      candidates.push({ kind: 'player', player: p, value: playerValue(p) })
+    }
+    for (const pick of picks) {
+      if (pick.ownerTeamId !== partner.id) continue
+      const rank = ranks.get(pick.originalTeamId)
+      const value =
+        rank === undefined
+          ? pickValue(pick, { year: currentYear })
+          : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
+      candidates.push({ kind: 'pick', pick, value })
+    }
+    candidates.sort((x, y) => y.value - x.value || (assetKey(x) < assetKey(y) ? -1 : 1))
+
+    const chosen: Asset[] = []
+    let total = 0
+    for (const c of candidates) {
+      if (chosen.length >= 3 || total >= aim) break
+      if (total + c.value > aim * 1.2) continue
+      chosen.push(c)
+      total += c.value
+    }
+    if (chosen.length === 0 || total < tgtValue * 0.85) continue
+
+    const salaryOut = chosen.reduce((s, c) => s + (c.kind === 'player' ? c.player.contract.salary : 0), 0)
+    if (partner.finances.capUsed + target.contract.salary - salaryOut > partner.finances.salaryCap) continue
+
+    built.push({
+      total,
+      offer: {
+        offerId: nextOfferId(),
+        partnerTeamId: partner.id,
+        userReceivesPlayerIds: chosen
+          .filter((c): c is Extract<Asset, { kind: 'player' }> => c.kind === 'player')
+          .map((c) => c.player.id),
+        userReceivesPicks: chosen
+          .filter((c): c is Extract<Asset, { kind: 'pick' }> => c.kind === 'pick')
+          .map((c) => ({ ...c.pick })),
+        userGivesPlayerIds: [target.id],
+        userGivesPicks: [],
+        message: `${partner.name} have interest in ${target.name}. On the table: ${chosen.map(assetLabel).join(', ')}.`,
+        expiresOnDay,
+      },
+    })
+  }
+  built.sort((a, b) => b.total - a.total || (a.offer.partnerTeamId < b.offer.partnerTeamId ? -1 : 1))
+  return built.slice(0, args.maxOffers ?? 4).map((b) => b.offer)
+}
+
 /* ────────────────────────── AI ↔ AI trades (Living World LW3) ────────────────────────── */
 
 /** A league trade between two AI clubs: the seller moves a veteran for draft

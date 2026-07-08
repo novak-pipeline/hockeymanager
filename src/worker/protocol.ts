@@ -253,6 +253,7 @@ export type WorkerRequestBody =
   | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
+  | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
   | { type: 'resignPlayer'; playerId: string; salary: number; years: number }
@@ -485,6 +486,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
+  /** Result of shopping a player: how many offers came in + a summary line. */
+  | { type: 'shopResult'; count: number; message: string }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */
