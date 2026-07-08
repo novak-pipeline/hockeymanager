@@ -64,6 +64,53 @@ export type {
 /* ────────────────────────── camps (Season Rhythm M3) ────────────────────────── */
 
 /** One cut-day roster call staged out of training camp. JSON-safe, persisted. */
+/** One skater's accumulated line across the camp scrimmages. */
+export interface CampSkaterLine {
+  playerId: string
+  name: string
+  position: string
+  faceId?: string
+  team: 'Blue' | 'Red'
+  gp: number
+  g: number
+  a: number
+  p: number
+  plusMinus: number
+  pim: number
+  sog: number
+  /** Coach's average rating out of 10 (EHM "Av R"). */
+  rating: number
+}
+
+/** One goalie's accumulated line across the camp scrimmages. */
+export interface CampGoalieLine {
+  playerId: string
+  name: string
+  faceId?: string
+  team: 'Blue' | 'Red'
+  gp: number
+  mins: number
+  ga: number
+  saves: number
+  gaa: number
+  svPct: number
+  rating: number
+}
+
+/** The coach's end-of-camp verdict on a camp player (EHM "files his report"). */
+export interface CampReport {
+  playerId: string
+  name: string
+  position: string
+  faceId?: string
+  /** sign = PTO worth a contract · keep = makes the roster · develop = farm ·
+   *  watch = fringe/uncertain. Drives the tone. */
+  recommendation: 'sign' | 'keep' | 'develop' | 'watch'
+  /** Whether he was a try-out (PTO) invitee rather than a signed body. */
+  tryout: boolean
+  verdict: string
+}
+
 export interface TrainingCampState {
   decisions: Array<{
     playerId: string
@@ -81,11 +128,43 @@ export interface TrainingCampState {
     line: string
   }>
   resolved: boolean
+  /* ── Training Camp v2 (EHM-style), all additive/optional ── */
+  /** Camp window, e.g. "Sep 12 – Sep 20". */
+  startISO?: string
+  endISO?: string
+  /** The camp roster split into intra-squad teams (Overview tab). */
+  roster?: Array<{
+    playerId: string
+    name: string
+    position: string
+    age: number
+    faceId?: string
+    team: 'Blue' | 'Red'
+    /** "On Roster" | "Try-out" | "AHL invite". */
+    status: string
+  }>
+  /** Day-by-day beats (Camp Schedule tab). */
+  schedule?: Array<{ label: string; activity: string; info?: string }>
+  /** Accumulated scrimmage box score (Scrimmage Stats tab). */
+  scrimmage?: {
+    skaters: CampSkaterLine[]
+    goalies: CampGoalieLine[]
+    /** "Team Blue 6, Team Red 2" per scrimmage played. */
+    results: string[]
+  }
+  /** The coach's end-of-camp reports on notable camp players. */
+  reports?: CampReport[]
 }
 
 export interface TrainingCampView {
   decisions: TrainingCampState['decisions']
   cast: Array<{ name: string; title: string; faceId?: string }>
+  startISO?: string
+  endISO?: string
+  roster?: TrainingCampState['roster']
+  schedule?: TrainingCampState['schedule']
+  scrimmage?: TrainingCampState['scrimmage']
+  reports?: CampReport[]
 }
 
 /** Dev camp is a WEEK, not a click: arrival -> scrimmage -> wrap. Persisted. */

@@ -380,6 +380,51 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(c.advanceDay()).toBe(true)
   })
 
+  it('training camp v2: the week has a roster, schedule, box score, reports + eval mail', () => {
+    // Find a seed whose camp actually stages battles, then check the week.
+    let staged: Career | null = null
+    for (const seed of [515, 616, 7, 42, 313, 99, 1234, 88]) {
+      const data = generateLeague({ seed })
+      const c = new Career(data, seed, data.league.teams[0])
+      c.startAtOffseason()
+      for (let i = 0; i < 40; i++) {
+        if (c.getDashboard().phase !== 'offseason') break
+        c.advanceOffseason()
+      }
+      if (c.getTrainingCamp()) { staged = c; break }
+    }
+    expect(staged).not.toBeNull()
+    const camp = staged!.getTrainingCamp()!
+    // Blue/Red camp roster.
+    expect((camp.roster ?? []).length).toBeGreaterThan(10)
+    expect((camp.roster ?? []).some((r) => r.team === 'Blue')).toBe(true)
+    expect((camp.roster ?? []).some((r) => r.team === 'Red')).toBe(true)
+    // Day-by-day schedule.
+    expect((camp.schedule ?? []).length).toBeGreaterThanOrEqual(6)
+    // Accumulating scrimmage box score (sorted by points, skaters have GP).
+    expect(camp.scrimmage).toBeTruthy()
+    expect(camp.scrimmage!.skaters.length).toBeGreaterThan(10)
+    expect(camp.scrimmage!.results.length).toBe(2)
+    for (const s of camp.scrimmage!.skaters) {
+      expect(s.p).toBe(s.g + s.a)
+      expect(s.gp).toBeGreaterThan(0)
+    }
+    // Coach reports, one per battle decision, with a recommendation.
+    expect((camp.reports ?? []).length).toBe(camp.decisions.length)
+    for (const r of camp.reports ?? []) {
+      expect(['sign', 'keep', 'develop', 'watch']).toContain(r.recommendation)
+      expect(r.verdict.length).toBeGreaterThan(20)
+    }
+    // Rinkside evaluation mail arrived.
+    const inbox = staged!.getInbox().items
+    expect(inbox.some((n) => n.headline === 'Training camp up to speed')).toBe(true)
+    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage:'))).toBe(true)
+    // Round-trips whole.
+    const snap = staged!.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    const c2 = Career.fromSnapshot(snap)
+    expect(c2.getTrainingCamp()?.scrimmage?.skaters.length).toBe(camp.scrimmage!.skaters.length)
+  })
+
   it('simming past cut day lets the coach break camp himself', () => {
     const data = generateLeague({ seed: 616 })
     const c = new Career(data, 616, data.league.teams[0])

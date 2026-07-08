@@ -419,6 +419,9 @@ import {
   type DevCampState,
   type TrainingCampState,
   type TrainingCampView,
+  type CampSkaterLine,
+  type CampGoalieLine,
+  type CampReport,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -6412,7 +6415,179 @@ export class Career {
     const cast: TrainingCampView['cast'] = []
     if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
     if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
-    return { decisions: this.trainingCamp.decisions.map((d) => ({ ...d })), cast }
+    const c = this.trainingCamp
+    return {
+      decisions: c.decisions.map((d) => ({ ...d })),
+      cast,
+      ...(c.startISO ? { startISO: c.startISO } : {}),
+      ...(c.endISO ? { endISO: c.endISO } : {}),
+      ...(c.roster ? { roster: c.roster.map((r) => ({ ...r })) } : {}),
+      ...(c.schedule ? { schedule: c.schedule.map((s) => ({ ...s })) } : {}),
+      ...(c.scrimmage ? { scrimmage: structuredClone(c.scrimmage) } : {}),
+      ...(c.reports ? { reports: c.reports.map((r) => ({ ...r })) } : {}),
+    }
+  }
+
+  /** Build the EHM-style camp week around the cut decisions: the camp roster
+   *  split Blue/Red, the day-by-day schedule, an accumulating scrimmage box
+   *  score (deterministic from talent), and the coach's per-player reports.
+   *  Also pushes the rinkside evaluation mail (fitness reads + scrimmage
+   *  results) so camp READS like a week, not a button. */
+  private buildTrainingCampWeek(decisions: TrainingCampState['decisions']): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const year = this.year
+    camp.startISO = `${year}-09-15`
+    camp.endISO = `${year}-09-23`
+
+    // Camp roster = the NHL group + the AHL bodies fighting for a spot.
+    const nhlIds = [...this.userTeam.roster]
+    const ahlBattleIds = decisions.filter((d) => d.current === 'ahl').map((d) => d.playerId)
+    const seen = new Set<string>()
+    const bodies: Player[] = []
+    for (const id of [...nhlIds.map((x) => x as string), ...ahlBattleIds]) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      const p = this.data.players.get(asPlayerId(id))
+      if (p) bodies.push(p)
+    }
+    // Split into balanced Blue/Red teams within each position group.
+    const teamOf = new Map<string, 'Blue' | 'Red'>()
+    for (const grp of ['G', 'D', 'F'] as const) {
+      const inGrp = bodies.filter((p) => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F') === grp)
+      inGrp.forEach((p, i) => teamOf.set(p.id as string, i % 2 === 0 ? 'Blue' : 'Red'))
+    }
+    const ahlSet = new Set(ahlBattleIds)
+    camp.roster = bodies.map((p) => ({
+      playerId: p.id as string,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      team: teamOf.get(p.id as string) ?? 'Blue',
+      status: ahlSet.has(p.id as string) ? 'AHL invite' : 'On Roster',
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+    }))
+
+    // Scrimmage box score across 2 intra-squad games (accumulated).
+    const SCRIMMAGES = 2
+    const skaters: CampSkaterLine[] = []
+    const goalies: CampGoalieLine[] = []
+    let blueGoals = 0
+    let redGoals = 0
+    for (const p of bodies) {
+      const team = teamOf.get(p.id as string) ?? 'Blue'
+      const talent = (ratedPotential(p) + ratedOverall(p)) / 2
+      const rng = this.rngFor(9601, year, Career.pidNum(p.id as string))
+      if (p.position === 'G') {
+        // A camp goalie splits ~one scrimmage (20 min) of work.
+        const mins = 20 + rng.range(0, 20)
+        const shots = Math.round(mins * rng.float(0.9, 1.3))
+        const svBase = Math.min(0.945, 0.86 + talent / 700)
+        const saves = Math.round(shots * rng.float(svBase - 0.05, svBase + 0.03))
+        const ga = Math.max(0, shots - saves)
+        goalies.push({
+          playerId: p.id as string, name: p.name, team,
+          gp: 1, mins, ga, saves: Math.max(saves, 0),
+          gaa: Math.round((ga * 60 / Math.max(1, mins)) * 100) / 100,
+          svPct: shots > 0 ? Math.round((saves / shots) * 1000) / 1000 : 0,
+          rating: Math.round((5.5 + (saves / Math.max(1, shots) - 0.86) * 40) * 10) / 10,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        })
+        continue
+      }
+      let g = 0, a = 0, sog = 0, pim = 0, plusMinus = 0
+      for (let s = 0; s < SCRIMMAGES; s++) {
+        sog += Math.max(0, Math.round(rng.float(0, 3) + talent / 28))
+        g += (rng.chance(Math.min(0.55, 0.06 + talent / 220)) ? 1 : 0) + (rng.chance(talent / 500) ? 1 : 0)
+        a += (rng.chance(0.3 + talent / 320) ? 1 : 0)
+        pim += rng.chance(0.12) ? 2 : 0
+        plusMinus += rng.range(-2, 2)
+      }
+      if (team === 'Blue') blueGoals += g
+      else redGoals += g
+      skaters.push({
+        playerId: p.id as string, name: p.name, position: p.position, team,
+        gp: SCRIMMAGES, g, a, p: g + a, plusMinus, pim, sog,
+        rating: Math.round((6.5 + (g * 2 + a) * 0.35 + (talent - 70) / 25) * 10) / 10,
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      })
+    }
+    skaters.sort((x, y) => y.p - x.p || y.rating - x.rating || y.sog - x.sog)
+    // Filler goals so scorelines read like real games, split ~evenly across
+    // the two scrimmages (neither reads 0–0 when the camp actually scored).
+    const fillRng = this.rngFor(9602, year)
+    blueGoals += fillRng.range(1, 3)
+    redGoals += fillRng.range(1, 3)
+    const half = (n: number): number => Math.max(0, Math.round(n / 2) + fillRng.range(-1, 1))
+    const g1b = Math.min(blueGoals, half(blueGoals)), g1r = Math.min(redGoals, half(redGoals))
+    camp.scrimmage = {
+      skaters, goalies,
+      results: [
+        `Team Blue ${g1b}, Team Red ${g1r}`,
+        `Team Blue ${blueGoals - g1b}, Team Red ${redGoals - g1r}`,
+      ],
+    }
+
+    // Day-by-day schedule.
+    camp.schedule = [
+      { label: 'Day 1', activity: 'Fitness Tests & Camp Meeting', info: 'Physical evaluations of all players' },
+      { label: 'Day 2', activity: 'Intra-squad Scrimmage', info: camp.scrimmage.results[0] },
+      { label: 'Day 3', activity: 'Skating Drills · Staff Meeting' },
+      { label: 'Day 4', activity: 'Intra-squad Scrimmage', info: camp.scrimmage.results[1] },
+      { label: 'Day 5', activity: 'Video Sessions · Dryland' },
+      { label: 'Day 6', activity: 'Morning Skate · General Practice' },
+      { label: 'Day 7', activity: 'Final Practice — coaches file reports' },
+      { label: 'Day 8', activity: 'Final Cuts — the roster is set' },
+    ]
+
+    // Coach reports on the players who fought for a spot (EHM "files his report").
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The head coach'
+    const ratingOf = new Map(skaters.map((s) => [s.playerId, s.rating] as const))
+    camp.reports = decisions.map((d) => {
+      const p = this.resolve(asPlayerId(d.playerId))
+      const battledIn = d.current === 'ahl'
+      const rating = ratingOf.get(d.playerId) ?? 6.5
+      const rec: CampReport['recommendation'] =
+        d.coachPlan === 'nhl' ? 'keep' : battledIn ? 'develop' : 'develop'
+      const verdict =
+        d.coachPlan === 'nhl'
+          ? `${coachName} was impressed — ${p.name} pushed hard at camp (avg ${rating.toFixed(1)}) and has earned an NHL look. He recommends keeping him up.`
+          : rating >= 7
+            ? `${coachName} liked what he saw from ${p.name}, but feels another year of development in the AHL serves him best.`
+            : `${coachName} feels ${p.name} still has work to do and belongs in the AHL to start the year.`
+      return {
+        playerId: d.playerId,
+        name: d.name,
+        position: d.position,
+        recommendation: rec,
+        tryout: false,
+        verdict,
+        ...(d.faceId !== undefined ? { faceId: d.faceId } : {}),
+      }
+    })
+
+    // ── Rinkside evaluation mail: camp reads as a WEEK, not a click. ──
+    const topFitness = skaters.slice(0, 2).map((s) => s.name)
+    const questions = [...skaters].reverse().find((s) => s.gp > 0)?.name
+    if (topFitness.length > 0) {
+      this.pushNews(
+        'scouting',
+        'Training camp up to speed',
+        `Day one saw physical evaluations of the whole camp roster. ` +
+        `${topFitness.join(' and ')} ${topFitness.length > 1 ? 'were' : 'was'} sharpest in early fitness drills.` +
+        `${questions ? ` ${questions} was the one with questions to answer.` : ''}`,
+        { teamId: this.userTeamId as string }
+      )
+    }
+    const best = skaters[0]
+    this.pushNews(
+      'scouting',
+      `Camp scrimmage: ${camp.scrimmage.results[0]}`,
+      `The camp roster split into Blue and Red for a full intra-squad game.` +
+      `${best ? ` The staff agreed ${best.name} (${best.g}G ${best.a}A) was the best player on the ice.` : ''} ` +
+      `More scrimmages and the coaches' final reads come before cut day.`,
+      { teamId: this.userTeamId as string }
+    )
   }
 
   /** Resolve cut day. `placements` overrides the coach's plan per player;
@@ -6522,6 +6697,9 @@ export class Career {
         }
         if (decisions.length > 0) {
           this.trainingCamp = { decisions, resolved: false }
+          // Training Camp v2: flesh out the week (roster, schedule, box score,
+          // reports) + push the rinkside evaluation mail.
+          this.buildTrainingCampWeek(decisions)
           this.pushNews(
             'contract',
             'Cut day — camp verdicts are in',

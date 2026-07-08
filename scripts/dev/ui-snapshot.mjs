@@ -142,6 +142,41 @@ try {
     }
   }
 
+  // ── drive to training camp (Sept) and photograph its tabs ──
+  try {
+    let reached = false
+    for (let i = 0; i < 30 && !reached; i++) {
+      await win.click('button:has-text("Continue")', { timeout: 6000 })
+      await win.waitForTimeout(500)
+      // Camp gate routes onto the camp screen; detect its header.
+      reached = await win.locator('text=Camp is on the ice').count().then((n) => n > 0).catch(() => false)
+      // A dev-camp beat may intercept — its Continue keeps the loop moving.
+    }
+    if (reached) {
+      await snap(win, 'camp-overview')
+      for (const [tab, slug] of [['Camp Schedule', 'camp-schedule'], ['Scrimmage Stats', 'camp-scrimmage'], ['Coach Reports', 'camp-reports'], ['Cut Day', 'camp-cuts']]) {
+        try {
+          await win.click(`button:has-text("${tab}")`, { timeout: 4000 })
+          await win.waitForTimeout(400)
+          await snap(win, slug)
+        } catch { /* tab missing — skip */ }
+      }
+      // Break camp so the rest of the walk sees a normal in-season shell.
+      try {
+        await win.click('button:has-text("Cut Day")', { timeout: 3000 })
+        await win.waitForTimeout(300)
+        await win.click('button:has-text("Break camp")', { timeout: 4000 })
+        await win.waitForTimeout(500)
+        await win.click('button:has-text("opening night")', { timeout: 4000 })
+        await win.waitForTimeout(400)
+      } catch { /* leave as-is */ }
+    } else {
+      console.log('  ⚠ training camp not reached in 30 presses — skipped')
+    }
+  } catch (e) {
+    console.log(`  ⚠ training camp not reachable — skipped (${e.message?.split('\n')[0]})`)
+  }
+
   // ── walk the sidebar ──
   for (const [label, slug] of SIDEBAR_STOPS) {
     try {
