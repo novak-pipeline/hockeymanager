@@ -204,6 +204,8 @@ import {
   developmentModifier,
   electCaptain,
   initLockerRoom,
+  leadershipScore,
+  isCaptainEligible,
   onPlayerArrived,
   onPlayerDeparted,
   tickLockerRoom,
@@ -472,6 +474,8 @@ import {
   type SeasonSummary,
   type SeriesView,
   type SquadView,
+  type LeadershipView,
+  type LeadershipRowView,
   type StandingsView,
   type StatsView,
   type TacticsView,
@@ -1744,7 +1748,32 @@ export class Career {
           rng: this.rngFor(9102, idx),
         })
       )
+      // #189: re-apply any GM-declared captain/alternates over the auto-picked room
+      // so the choice survives a season re-init / roster churn.
+      this.syncCaptainOverride(teamId)
     })
+  }
+
+  /**
+   * #189: fold the team's GM-declared captain/alternates (Team.captainId /
+   * alternateCaptainIds) into the live locker-room state so the dynamics model
+   * honours the GM's choice. Silently drops any letter-wearer no longer on the
+   * roster. No-op when the GM hasn't overridden (auto-pick stands).
+   */
+  private syncCaptainOverride(teamId: TeamId): void {
+    const team = this.data.teams.get(teamId)
+    const lr = this.lockerRooms.get(teamId)
+    if (!team || !lr) return
+    const onRoster = new Set(team.roster.map((id) => id as string))
+    const hasOverride = team.captainId !== undefined || (team.alternateCaptainIds?.length ?? 0) > 0
+    if (!hasOverride) return
+    const capId = team.captainId && onRoster.has(team.captainId as string) ? (team.captainId as string) : null
+    lr.captainId = capId
+    const maxAlts = capId ? 2 : 3
+    lr.alternateIds = (team.alternateCaptainIds ?? [])
+      .map((id) => id as string)
+      .filter((id) => onRoster.has(id) && id !== capId)
+      .slice(0, maxAlts)
   }
 
   /** All-time totals (archived seasons + current season counters). */
@@ -10102,10 +10131,15 @@ export class Career {
         profile.squadStatusLabel = SQUAD_STATUS_LABEL[playerForLeague.squadStatus]
       }
       if (playerForLeague.tradeStatus) profile.tradeStatus = playerForLeague.tradeStatus
-      // Leadership read for captaincy decisions (own players). Captaincy letters
-      // land with #189; until then this surfaces the raw leadership rating.
-      if (profile.isOwn && playerForLeague.leadership !== undefined) {
-        profile.leadershipRating = playerForLeague.leadership
+      // Leadership read for captaincy decisions (own players) + the letter he
+      // currently wears (#189).
+      if (profile.isOwn) {
+        if (playerForLeague.leadership !== undefined) profile.leadershipRating = playerForLeague.leadership
+        const lr = playerTeamId ? this.lockerRooms.get(playerTeamId) : undefined
+        if (lr) {
+          profile.captaincy = lr.captainId === (pid as string) ? 'C'
+            : lr.alternateIds.includes(pid as string) ? 'A' : null
+        }
       }
     }
 
@@ -10984,6 +11018,7 @@ export class Career {
     })
     // LW5: the user club's dynamics page carries the promise ledger — your
     // word, in writing, with the receipts.
+    if (teamId === (this.userTeamId as string)) view.isUserClub = true
     if (teamId === (this.userTeamId as string) && this.playerPromises.length > 0) {
       view.promises = [...this.playerPromises]
         .sort((a, b) => (b.year - a.year) || (b.day - a.day))
@@ -13151,6 +13186,149 @@ export class Career {
     if (!p) return { ok: false }
     if (status === null) delete p.tradeStatus
     else p.tradeStatus = status
+    return { ok: true }
+  }
+
+  /* ─────────────────────── #189 captains + jersey numbers ─────────────────────── */
+
+  /** Normalise a raw leadership score (~0–60) onto a 0–99 display scale. */
+  private leadershipDisplay(p: Player): number {
+    if (p.leadership !== undefined) return Math.round(p.leadership)
+    return Math.max(1, Math.min(99, Math.round(leadershipScore(p) * 1.6)))
+  }
+
+  /**
+   * #189: captaincy + jersey-number board for the user's NHL club. Rows are the
+   * skaters sorted by leadership (goalies last), each with the letter he wears now,
+   * his leadership + room influence, captain eligibility, and jersey number.
+   */
+  getLeadership(): LeadershipView {
+    const team = this.userTeam
+    const lr = this.lockerRooms.get(this.userTeamId)
+    const influenceOf = (id: string): number => {
+      if (!lr) return 0
+      for (const [pid, v] of lr.influence) if (pid === id) return Math.round(v)
+      return 0
+    }
+    const capId = lr?.captainId ?? null
+    const altSet = new Set(lr?.alternateIds ?? [])
+    const rows: LeadershipRowView[] = team.roster
+      .map((id) => {
+        const p = this.data.players.get(id)!
+        const sid = id as string
+        const letter: 'C' | 'A' | null = capId === sid ? 'C' : altSet.has(sid) ? 'A' : null
+        return {
+          playerId: sid,
+          name: p.name,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          position: p.position,
+          age: p.age,
+          letter,
+          leadership: this.leadershipDisplay(p),
+          influence: influenceOf(sid),
+          captainEligible: isCaptainEligible(p),
+          ...(p.jerseyNumber !== undefined ? { jerseyNumber: p.jerseyNumber } : {}),
+        }
+      })
+      .sort((a, b) => {
+        const ga = a.position === 'G' ? 1 : 0
+        const gb = b.position === 'G' ? 1 : 0
+        return ga - gb || b.leadership - a.leadership
+      })
+    const retiredNumbers = (team.retiredNumbers ?? []).map((r) => r.number)
+    return {
+      teamName: team.name,
+      captainId: capId,
+      alternateIds: lr?.alternateIds ?? [],
+      maxAlternates: capId ? 2 : 3,
+      retiredNumbers,
+      rows,
+    }
+  }
+
+  /**
+   * #189: name (or clear, with null) the club captain. Must be a skater on the
+   * user's NHL roster. Promoting an alternate to captain vacates his A. Writes the
+   * GM override onto the team and syncs the locker room so dynamics honour it; the
+   * new captain gets a small morale lift and the room hears about it.
+   */
+  setCaptain(playerId: string | null): { ok: boolean; message?: string } {
+    const team = this.userTeam
+    const lr = this.lockerRooms.get(this.userTeamId)
+    if (playerId === null) {
+      team.captainId = undefined
+      if (lr) lr.captainId = null
+      this.syncCaptainOverride(this.userTeamId)
+      return { ok: true }
+    }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p || !team.roster.includes(asPlayerId(playerId))) return { ok: false, message: 'Not on your roster.' }
+    if (p.position === 'G') return { ok: false, message: 'A goaltender cannot wear the C.' }
+    team.captainId = asPlayerId(playerId)
+    // A new captain vacates his old alternate slot; keep ≤2 alternates with a C.
+    team.alternateCaptainIds = (team.alternateCaptainIds ?? [])
+      .filter((id) => (id as string) !== playerId)
+      .slice(0, 2)
+    this.syncCaptainOverride(this.userTeamId)
+    p.morale = Math.max(0, Math.min(100, p.morale + 5))
+    this.pushNews('league', `${p.name} named captain`,
+      `${p.name} will wear the C for the ${team.name}. A vote of confidence from the front office.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true }
+  }
+
+  /**
+   * #189: toggle a player's alternate-captain (A) status. Enforces the NHL letter
+   * cap (2 alternates with a captain, 3 without) and never lets the captain also
+   * hold an A. Returns a message when the request can't be honoured.
+   */
+  toggleAlternate(playerId: string): { ok: boolean; message?: string } {
+    const team = this.userTeam
+    if (!team.roster.includes(asPlayerId(playerId))) return { ok: false, message: 'Not on your roster.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false }
+    if (p.position === 'G') return { ok: false, message: 'A goaltender cannot wear a letter.' }
+    if ((team.captainId as string) === playerId) return { ok: false, message: 'He already wears the C.' }
+    const current = new Set((team.alternateCaptainIds ?? []).map((id) => id as string))
+    if (current.has(playerId)) {
+      current.delete(playerId)
+    } else {
+      const cap = team.captainId ? 2 : 3
+      if (current.size >= cap) return { ok: false, message: `Only ${cap} alternates allowed${team.captainId ? ' with a captain' : ''}.` }
+      current.add(playerId)
+    }
+    team.alternateCaptainIds = [...current].map((id) => asPlayerId(id))
+    this.syncCaptainOverride(this.userTeamId)
+    return { ok: true }
+  }
+
+  /**
+   * #189: set (or clear, with null) a player's jersey number. Must be on the user's
+   * NHL roster or AHL affiliate. Rejects out-of-range, retired, and already-worn
+   * numbers so the sweater map stays consistent.
+   */
+  setJerseyNumber(playerId: string, number: number | null): { ok: boolean; message?: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false }
+    if (!this.ownOrgIds().has(playerId)) return { ok: false, message: 'Not in your organisation.' }
+    if (number === null) { delete p.jerseyNumber; return { ok: true } }
+    if (!Number.isInteger(number) || number < 1 || number > 98) {
+      return { ok: false, message: 'Pick a number from 1 to 98.' }
+    }
+    const team = this.userTeam
+    if ((team.retiredNumbers ?? []).some((r) => r.number === number)) {
+      return { ok: false, message: `#${number} is retired by the club.` }
+    }
+    // No collision within the same roster the player belongs to.
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    const rosterOf = team.roster.includes(asPlayerId(playerId)) ? team.roster : (ahl?.roster ?? [])
+    for (const id of rosterOf) {
+      if ((id as string) === playerId) continue
+      if (this.data.players.get(id)?.jerseyNumber === number) {
+        return { ok: false, message: `#${number} is already worn by ${this.data.players.get(id)?.name}.` }
+      }
+    }
+    p.jerseyNumber = number
     return { ok: true }
   }
 

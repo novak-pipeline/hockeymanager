@@ -208,6 +208,20 @@ function handle(req: WorkerRequest): WorkerResponse {
       must().setTradeStatus(req.playerId, req.status)
       return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
     }
+    case 'getLeadership':
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership() }
+    case 'setCaptain': {
+      const r = must().setCaptain(req.playerId)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
+    case 'toggleAlternate': {
+      const r = must().toggleAlternate(req.playerId)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
+    case 'setJerseyNumber': {
+      const r = must().setJerseyNumber(req.playerId, req.number)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

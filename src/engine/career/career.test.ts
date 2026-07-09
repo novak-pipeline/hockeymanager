@@ -2505,3 +2505,61 @@ describe('#188 squad status / trade posture', () => {
     expect(prof.tradeStatus).toBe('untouchable')
   })
 })
+
+describe('#189 captains + jersey numbers', () => {
+  function skaterOnUser(data: ReturnType<typeof generateLeague>, userId: string): string {
+    return data.teams.get(asTeamId(userId))!.roster
+      .map((id) => id as string)
+      .find((id) => data.players.get(asPlayerId(id))!.position !== 'G')!
+  }
+
+  it('names a captain and reflects the C in the leadership view', () => {
+    const data = generateLeague({ seed: 620 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 620, userId)
+    const sk = skaterOnUser(data, userId as string)
+
+    expect(career.setCaptain(sk).ok).toBe(true)
+    const v = career.getLeadership()
+    expect(v.captainId).toBe(sk)
+    expect(v.rows.find((r) => r.playerId === sk)?.letter).toBe('C')
+    // With a captain, max 2 alternates.
+    expect(v.maxAlternates).toBe(2)
+  })
+
+  it('rejects a goalie as captain and caps alternates', () => {
+    const data = generateLeague({ seed: 621 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 621, userId)
+    const roster = data.teams.get(asTeamId(userId as string))!.roster.map((id) => id as string)
+    const goalie = roster.find((id) => data.players.get(asPlayerId(id))!.position === 'G')!
+    expect(career.setCaptain(goalie).ok).toBe(false)
+
+    const skaters = roster.filter((id) => data.players.get(asPlayerId(id))!.position !== 'G')
+    career.setCaptain(skaters[0])
+    // Two alternates fill the cap; the third is rejected.
+    expect(career.toggleAlternate(skaters[1]).ok).toBe(true)
+    expect(career.toggleAlternate(skaters[2]).ok).toBe(true)
+    expect(career.toggleAlternate(skaters[3]).ok).toBe(false)
+  })
+
+  it('validates jersey numbers (range, duplicates) and persists across a round-trip', () => {
+    const data = generateLeague({ seed: 622 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 622, userId)
+    const roster = data.teams.get(asTeamId(userId as string))!.roster.map((id) => id as string)
+
+    expect(career.setJerseyNumber(roster[0], 91).ok).toBe(true)
+    expect(career.setJerseyNumber(roster[0], 0).ok).toBe(false) // out of range
+    expect(career.setJerseyNumber(roster[1], 91).ok).toBe(false) // duplicate
+
+    // Set a captain too, then round-trip.
+    const sk = skaterOnUser(data, userId as string)
+    career.setCaptain(sk)
+    const snap = career.exportSnapshot('s189', '2026-06-10T00:00:00.000Z')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const v = restored.getLeadership()
+    expect(v.rows.find((r) => r.playerId === roster[0])?.jerseyNumber).toBe(91)
+    expect(v.captainId).toBe(sk)
+  })
+})

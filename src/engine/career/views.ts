@@ -527,6 +527,37 @@ export interface SquadView {
   salaryCap: number
 }
 
+/** #189: one roster player as a captaincy candidate + jersey number. */
+export interface LeadershipRowView {
+  playerId: string
+  name: string
+  faceId?: string
+  position: string
+  age: number
+  /** Current letter worn: 'C', 'A', or null. */
+  letter: 'C' | 'A' | null
+  /** Leadership rating on a 0–99 display scale (DB rating or a personality proxy). */
+  leadership: number
+  /** Room influence 0–100 (from the locker-room model). */
+  influence: number
+  /** Eligible to wear the C (standing gate — age/leadership). */
+  captainEligible: boolean
+  /** Current jersey number, if assigned. */
+  jerseyNumber?: number
+}
+
+/** #189: captains + jersey-number management for the user's club. */
+export interface LeadershipView {
+  teamName: string
+  captainId: string | null
+  alternateIds: string[]
+  /** Max alternates allowed given the current captain state (2 with a C, else 3). */
+  maxAlternates: number
+  /** Retired numbers at this club (unavailable for assignment). */
+  retiredNumbers: number[]
+  rows: LeadershipRowView[]
+}
+
 export interface AttributeGroupView {
   /** "Technical" | "Physical" | "Mental" | "Defensive" | "Goaltending" */
   name: string

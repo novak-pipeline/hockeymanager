@@ -88,4 +88,15 @@ export interface Team {
   arenaCapacity?: number
   /** Retired jersey numbers from the source DB (display-only). */
   retiredNumbers?: Array<{ number: number; player: string }>
+  /**
+   * #189: the club captain (wears the C). GM-set on the user's team; AI clubs
+   * auto-appoint their highest-leadership veteran. Absent = no captain named yet.
+   */
+  captainId?: PlayerId
+  /**
+   * #189: the alternate captains (wear an A). NHL letter rules: with a captain,
+   * up to 2 alternates; with no captain, up to 3. Order is display order.
+   * Absent/empty = none named.
+   */
+  alternateCaptainIds?: PlayerId[]
 }

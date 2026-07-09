@@ -2319,6 +2319,12 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       {/* ── Page header ── */}
       <ScreenHeader title={d.name}>
         <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {d.captaincy && (
+            <span className="chip" title={d.captaincy === 'C' ? 'Team Captain' : 'Alternate Captain'}
+              style={{ fontWeight: 800, background: 'var(--violet-dim)', color: 'var(--violet-h)', borderColor: 'transparent' }}>
+              {d.captaincy}
+            </span>
+          )}
           <PlayerRoleControl d={d} client={client} onChanged={refetch} />
           {hasPrevNext && (
             <button

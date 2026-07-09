@@ -325,6 +325,22 @@ export class SimClient {
     return this.send({ type: 'setTradeStatus', playerId, status })
   }
 
+  getLeadership(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeadership' })
+  }
+
+  setCaptain(playerId: string | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setCaptain', playerId })
+  }
+
+  toggleAlternate(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleAlternate', playerId })
+  }
+
+  setJerseyNumber(playerId: string, number: number | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setJerseyNumber', playerId, number })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

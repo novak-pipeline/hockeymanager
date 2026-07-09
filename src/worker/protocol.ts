@@ -74,6 +74,7 @@ export type {
   ScoutingView,
   ScoutProfileView,
   SquadView,
+  LeadershipView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -156,6 +157,7 @@ import type {
   ScoutingView,
   ScoutProfileView,
   SquadView,
+  LeadershipView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -233,6 +235,11 @@ export type WorkerRequestBody =
   /** #188: GM sets a player's squad status / trade posture (null clears). */
   | { type: 'setSquadStatus'; playerId: string; status: import('@domain/player').SquadStatus | null }
   | { type: 'setTradeStatus'; playerId: string; status: import('@domain/player').TradeStatus | null }
+  /** #189: captains + jersey numbers for the user's club. */
+  | { type: 'getLeadership' }
+  | { type: 'setCaptain'; playerId: string | null }
+  | { type: 'toggleAlternate'; playerId: string }
+  | { type: 'setJerseyNumber'; playerId: string; number: number | null }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -450,6 +457,7 @@ export type WorkerResponse = { id: number } & (
   /* ── v2 screens ── */
   | { type: 'dashboard'; dashboard: DashboardView }
   | { type: 'squad'; squad: SquadView }
+  | { type: 'leadership'; leadership: LeadershipView; ok?: boolean; message?: string }
   | { type: 'player'; player: PlayerProfileView }
   | { type: 'tactics'; tactics: TacticsView }
   | { type: 'calendar'; calendar: CalendarView }

@@ -87,7 +87,7 @@ const clamp = (v: number, lo: number, hi: number): number =>
  * same scale and blended with loyalty/determination — otherwise falls back to
  * the professionalism + loyalty + determination personality proxy.
  */
-function leadershipScore(p: Player): number {
+export function leadershipScore(p: Player): number {
   const { professionalism, loyalty, determination } = p.personality
   if (p.leadership !== undefined) {
     return (p.leadership / 99) * 40 + (loyalty + determination) / 2
@@ -108,7 +108,7 @@ function captainScore(p: Player): number {
  * exceptional — a Crosby/McDavid-type — to leapfrog the veterans. Prevents a
  * rookie being handed the captaincy the moment he walks in.
  */
-function isCaptainEligible(p: Player): boolean {
+export function isCaptainEligible(p: Player): boolean {
   if (p.position === 'G') return false
   if (p.age >= 24) return true
   const lead = leadershipScore(p)
