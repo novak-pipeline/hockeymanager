@@ -424,6 +424,8 @@ import {
   type FeedView,
   type DevCampView,
   type DevCampInvitesView,
+  type CampInvitesView,
+  type CampInviteRow,
   type DevCampInviteRow,
   type DevCampState,
   type TrainingCampState,
@@ -789,6 +791,10 @@ export class Career {
   /** #182: the GM's explicit dev-camp invite list. Undefined ⇒ use the auto pool;
    *  once the GM edits invites it holds the exact set (add tryout kids, cut some). */
   private devCampRoster: string[] | undefined = undefined
+  /** #182: the GM's explicit training-camp PTO (pro-tryout) invite list. Undefined
+   *  ⇒ the AGM auto-picks; once edited it holds the exact set of unsigned vets the
+   *  GM brings to main camp. Consumed when the camp week is built at preseason. */
+  private campPtoInvites: string[] | undefined = undefined
   /** Dev-camp week progress: null until camp opens; day 1..3 while running. */
   private devCampState: DevCampState | null = null
   /** M3 training camp: cut-day decisions staged at the preseason stage;
@@ -6477,6 +6483,68 @@ export class Career {
     return { ok: true, invited: true }
   }
 
+  /* ─────────────── #182 training-camp PTO invites ─────────────── */
+
+  /** #182: unsigned veterans the GM may bring to main camp on a pro tryout —
+   *  aging depth on the open market (nobody holds their rights). A broader pool
+   *  than the AGM auto-pick so there's a real choice. Deterministic order. */
+  private campPtoEligible(): Player[] {
+    this.stockFreeAgentMarket()
+    const faSet = new Set(this.faPool.map((id) => id as string))
+    const out: Player[] = []
+    for (const id of faSet) {
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p) continue
+      const rights = p.rightsTeamId as string | undefined
+      if (rights !== undefined && rights !== null) continue
+      const ovr = ratedOverall(p)
+      if (p.age >= 28 && ovr >= 62 && ovr <= 82) out.push(p)
+    }
+    return out.sort((a, b) => ratedOverall(b) - ratedOverall(a) || Career.pidNum(a.id as string) - Career.pidNum(b.id as string))
+  }
+
+  /** #182: the AGM's default PTO shortlist (used when the GM hasn't curated one). */
+  private defaultCampPtoInvites(): string[] {
+    const ptoRng = this.rngFor(9604, this.year)
+    return this.campPtoEligible()
+      .filter((p) => ratedOverall(p) >= 66 && ratedOverall(p) <= 79)
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a) + ptoRng.float(-2, 2))
+      .slice(0, 3)
+      .map((p) => p.id as string)
+  }
+
+  /** #182: the training-camp PTO invite editor — who you're bringing on a tryout,
+   *  and the other unsigned vets you could add. Locked once camp is built. */
+  getCampInvites(): CampInvitesView {
+    const locked = this.trainingCamp !== null
+    const invitedIds = new Set(this.campPtoInvites ?? this.defaultCampPtoInvites())
+    const eligible = this.campPtoEligible()
+    const row = (p: Player): CampInviteRow => ({ ...badge(p, this.fogCtx()), overall: ratedOverall(p) })
+    return {
+      locked,
+      invited: [...invitedIds]
+        .map((id) => this.data.players.get(asPlayerId(id)))
+        .filter((p): p is Player => !!p)
+        .map(row),
+      available: eligible.filter((p) => !invitedIds.has(p.id as string)).slice(0, 60).map(row),
+    }
+  }
+
+  /** #182: add or drop a training-camp PTO invite. Seeds the explicit list from
+   *  the AGM shortlist on first edit, then flips membership. Locked once camp is
+   *  built. */
+  toggleCampInvite(playerId: string): { ok: boolean; invited: boolean; message?: string } {
+    if (this.trainingCamp !== null) return { ok: false, invited: true, message: 'Camp is set — the tryout list is locked.' }
+    if (this.campPtoInvites === undefined) this.campPtoInvites = this.defaultCampPtoInvites()
+    const i = this.campPtoInvites.indexOf(playerId)
+    if (i >= 0) { this.campPtoInvites.splice(i, 1); return { ok: true, invited: false } }
+    if (!this.campPtoEligible().some((p) => (p.id as string) === playerId)) {
+      return { ok: false, invited: false, message: 'Only unsigned veteran free agents are eligible for a pro tryout.' }
+    }
+    this.campPtoInvites.push(playerId)
+    return { ok: true, invited: true }
+  }
+
   /** The coach's pick for camp standout: the best week (highest read roll),
    *  drafted players edging ties. Deterministic — the same across every call. */
   private devCampStandout(): { player: Player; reason: string } | null {
@@ -7140,17 +7208,17 @@ export class Career {
             ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
           })
         }
-        // PTOs (professional tryouts): the AGM brings a few unsigned veterans
-        // to camp on tryout deals — depth bodies who must earn a contract.
-        // Stock the market first (idempotent) so there's a deep pool of aging
-        // depth to draw tryouts from, then pick deterministically.
+        // PTOs (professional tryouts): unsigned veterans brought to camp on
+        // tryout deals — depth bodies who must earn a contract. The GM may curate
+        // the list (#182); absent a curated list the AGM auto-picks. Only genuine
+        // still-available FAs make it (a curated invitee since signed drops out).
         this.stockFreeAgentMarket()
-        const ptoRng = this.rngFor(9604, this.year)
-        const invitees = this.faPool
-          .map((id) => this.data.players.get(asPlayerId(id as string)))
-          .filter((p): p is Player => !!p && p.age >= 29 && ratedOverall(p) >= 66 && ratedOverall(p) <= 79)
-          .sort((a, b) => ratedOverall(b) - ratedOverall(a) + ptoRng.float(-2, 2))
-          .slice(0, 3)
+        const faStill = new Set(this.faPool.map((id) => id as string))
+        const inviteIds = (this.campPtoInvites ?? this.defaultCampPtoInvites()).filter((id) => faStill.has(id))
+        const invitees = inviteIds
+          .map((id) => this.data.players.get(asPlayerId(id)))
+          .filter((p): p is Player => !!p)
+        this.campPtoInvites = undefined // consumed — next offseason starts fresh
         for (const p of invitees) {
           const ovr = ratedOverall(p)
           const worthNhl = ovr >= 73
@@ -14164,6 +14232,7 @@ export class Career {
       boardMeetingYear: this.boardMeetingYear,
       devCampPending: this.devCampPending,
       devCampRoster: this.devCampRoster ? [...this.devCampRoster] : undefined,
+      campPtoInvites: this.campPtoInvites ? [...this.campPtoInvites] : undefined,
       devCampState: this.devCampState ? structuredClone(this.devCampState) : null,
       trainingCamp: this.trainingCamp ? structuredClone(this.trainingCamp) : null,
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
@@ -14312,6 +14381,7 @@ export class Career {
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
     career.devCampPending = snapshot.devCampPending ?? false
     career.devCampRoster = snapshot.devCampRoster ? [...snapshot.devCampRoster] : undefined
+    career.campPtoInvites = snapshot.campPtoInvites ? [...snapshot.campPtoInvites] : undefined
     career.devCampState = snapshot.devCampState ? structuredClone(snapshot.devCampState) : null
     career.trainingCamp = snapshot.trainingCamp ? structuredClone(snapshot.trainingCamp) : null
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null

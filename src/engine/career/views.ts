@@ -222,6 +222,21 @@ export interface DevCampInvitesView {
   available: DevCampInviteRow[]
 }
 
+/** #182: one PTO (pro-tryout) candidate for training camp — an unsigned vet. */
+export interface CampInviteRow extends PlayerBadge {
+  /** Rated overall (0–100). */
+  overall: number
+}
+
+/** #182: the training-camp PTO invite editor. Unsigned veterans the GM may bring
+ *  to main camp on a tryout to fight for a contract. */
+export interface CampInvitesView {
+  /** True once camp has been built — the tryout list is locked. */
+  locked: boolean
+  invited: CampInviteRow[]
+  available: CampInviteRow[]
+}
+
 /** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
 export interface FeedView {
   posts: NewsItem[]
@@ -2015,6 +2030,8 @@ export interface CareerSnapshot {
   devCampPending?: boolean
   /** #182: the GM's curated dev-camp invite list (undefined ⇒ auto). Additive. */
   devCampRoster?: string[]
+  /** #182: the GM's curated training-camp PTO invite list (undefined ⇒ AGM auto). Additive. */
+  campPtoInvites?: string[]
   /** Dev-camp week progress (day + scrimmage lines). Optional/additive. */
   devCampState?: DevCampState | null
   /** M3 training-camp cut day (staged decisions). Optional/additive. */

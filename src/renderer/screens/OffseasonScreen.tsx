@@ -1,12 +1,78 @@
-import { useState } from 'react'
-import type { OffseasonView } from '../../worker/protocol'
-import type { FreeAgentRowView, OfferSheetRowView, ResignRowView } from '../../engine/career/views'
+import { useCallback, useEffect, useState } from 'react'
+import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
+import type { FreeAgentRowView, OfferSheetRowView, ResignRowView, CampInviteRow } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
+import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+
+// ─── #182: training-camp PTO invite editor ────────────────────────────────────
+
+/** Bring unsigned veterans to main camp on a pro tryout — they fight for a
+ *  league-minimum deal. Curate the AGM's shortlist before camp opens. */
+function CampInvitesPanel(): JSX.Element | null {
+  const client = useClient()
+  const [view, setView] = useState<CampInvitesView | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    const r = await client.getCampInvites()
+    if (r.type === 'campInvites') setView(r.invites)
+  }, [client])
+  useEffect(() => { void load() }, [load])
+
+  async function toggle(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await client.toggleCampInvite(playerId)
+      if (r.type === 'campInviteResult') {
+        if (!r.ok && r.message) toast(r.message, 'error')
+        setView(r.invites)
+      }
+    } finally { setBusy(false) }
+  }
+
+  if (!view) return null
+  const Row = ({ p, invited }: { p: CampInviteRow; invited: boolean }): JSX.Element => (
+    <div className="row" style={{ alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
+      <PlayerFace faceId={p.faceId} name={p.name} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <PlayerLink playerId={p.playerId} name={p.name} />
+        <span className="muted small" style={{ marginLeft: 6 }}>{p.position} · {p.age} · OVR {p.overall}</span>
+      </div>
+      {!view.locked && (
+        <button className={`btn btn-sm ${invited ? 'btn-ghost' : 'btn-primary'}`} disabled={busy} onClick={() => void toggle(p.playerId)}>
+          {invited ? 'Withdraw' : 'Invite'}
+        </button>
+      )}
+    </div>
+  )
+  return (
+    <Panel title="Training Camp — Pro Tryout Invites (PTO)">
+      {view.locked ? (
+        <Notice kind="info">Camp is set — the tryout list is locked for this year.</Notice>
+      ) : (
+        <div className="muted small" style={{ marginBottom: 8 }}>
+          Unsigned veterans you bring to main camp on a tryout. They must earn a league-minimum deal — the coach files a verdict at the end of camp.
+        </div>
+      )}
+      <div className="field-label" style={{ marginTop: 4 }}>Invited ({view.invited.length})</div>
+      {view.invited.length === 0
+        ? <div className="muted small" style={{ padding: '4px 0' }}>No tryout invites — the AGM will bring a few if you don't.</div>
+        : view.invited.map((p) => <Row key={p.playerId} p={p} invited />)}
+      {!view.locked && view.available.length > 0 && (
+        <>
+          <div className="field-label" style={{ marginTop: 10 }}>Available veterans</div>
+          {view.available.slice(0, 20).map((p) => <Row key={p.playerId} p={p} invited={false} />)}
+        </>
+      )}
+    </Panel>
+  )
+}
 
 // ─── arbitration hearings (Season Rhythm M2) ──────────────────────────────────
 
@@ -551,6 +617,7 @@ export function OffseasonScreen(): JSX.Element {
             <>
               <ArbitrationPanel view={data} onRefetch={refetch} />
               <FreeAgencyPanel view={data} onRefetch={refetch} />
+              <CampInvitesPanel />
             </>
           )}
 

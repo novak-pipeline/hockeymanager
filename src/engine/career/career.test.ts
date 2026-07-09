@@ -2612,3 +2612,36 @@ describe('#186 no-trade-clause waive negotiation', () => {
     expect(evalListed.message ?? '').not.toContain('no-trade clause')
   })
 })
+
+describe('#182 training-camp PTO invites', () => {
+  it('lists eligible veterans and lets the GM curate the tryout list', () => {
+    const data = generateLeague({ seed: 640 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 640, userId)
+
+    const v = career.getCampInvites()
+    expect(v.locked).toBe(false)
+    // The AGM's default shortlist populates the invited set.
+    expect(v.invited.length).toBeGreaterThan(0)
+    expect(v.available.length).toBeGreaterThan(0)
+
+    // Withdraw a default invitee → it moves out of the invited set.
+    const drop = v.invited[0].playerId
+    expect(career.toggleCampInvite(drop).invited).toBe(false)
+    expect(career.getCampInvites().invited.some((r) => r.playerId === drop)).toBe(false)
+
+    // Invite an available vet → it joins the set.
+    const add = career.getCampInvites().available[0].playerId
+    expect(career.toggleCampInvite(add).invited).toBe(true)
+    expect(career.getCampInvites().invited.some((r) => r.playerId === add)).toBe(true)
+  })
+
+  it('rejects inviting an ineligible (rostered) player', () => {
+    const data = generateLeague({ seed: 641 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 641, userId)
+    const rostered = data.teams.get(asTeamId(userId as string))!.roster[0] as string
+    const r = career.toggleCampInvite(rostered)
+    expect(r.ok).toBe(false)
+  })
+})
