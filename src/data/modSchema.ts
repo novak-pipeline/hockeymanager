@@ -100,6 +100,11 @@ export interface ModContract {
   /** Annual salary in dollars (e.g. 5_000_000). */
   salary: number
   years: number
+  /** #185: real trade protection from the source DB. Present ⇒ used verbatim;
+   *  absent ⇒ a realistic veteran-only fallback is synthesised. A no-movement
+   *  clause implies a no-trade clause. */
+  noTradeClause?: boolean
+  noMovementClause?: boolean
 }
 
 export interface ModPlayer {
@@ -1221,14 +1226,30 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
     potentialRaw = synthesisePotential(rng, raw, modPlayer.age)
   }
 
+  // #185: prefer the real clause from the source DB; only synthesise when the
+  // export carries no clause data, and then only for UFA-eligible vets (never an
+  // entry-level kid — the CBA forbids it). A no-move implies a no-trade.
+  const dbHasClause =
+    modPlayer.contract !== undefined &&
+    (modPlayer.contract.noTradeClause !== undefined || modPlayer.contract.noMovementClause !== undefined)
+  const ntc = dbHasClause
+    ? Boolean(modPlayer.contract!.noTradeClause || modPlayer.contract!.noMovementClause)
+    : ovr > 80 && modPlayer.age >= 28 && rng.chance(0.4)
+  const clause: Contract['clause'] = dbHasClause
+    ? (modPlayer.contract!.noMovementClause ? 'full' : modPlayer.contract!.noTradeClause ? 'modified' : 'none')
+    : ntc
+      ? 'modified'
+      : 'none'
+
   let contract: Contract
   if (modPlayer.contract) {
     contract = {
       salary: modPlayer.contract.salary,
       yearsRemaining: modPlayer.contract.years,
       expiryYear: startYear + modPlayer.contract.years,
-      noTradeClause: ovr > 80 && rng.chance(0.4),
-      twoWay: ovr < 55 && rng.chance(0.5)
+      noTradeClause: ntc,
+      twoWay: ovr < 55 && rng.chance(0.5),
+      clause,
     }
   } else {
     const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
@@ -1238,8 +1259,9 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
       salary,
       yearsRemaining: years,
       expiryYear: startYear + years,
-      noTradeClause: ovr > 80 && rng.chance(0.4),
-      twoWay: ovr < 55 && rng.chance(0.5)
+      noTradeClause: ntc,
+      twoWay: ovr < 55 && rng.chance(0.5),
+      clause,
     }
   }
 

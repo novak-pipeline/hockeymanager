@@ -911,6 +911,7 @@ export class Career {
     // objects on each competition; player gp/totals are restored from the
     // snapshot below for loaded careers.
     this.worldSim = initWorldSimState(this.data.league.competitions ?? [])
+    this.normalizeContracts() // #185: strip illegal NTCs (runs for new + loaded)
     this.playerCounter = this.computePlayerCounter()
     if (!restored) {
       for (const teamId of data.league.teams) this.standings.set(teamId, freshStanding(teamId))
@@ -1057,6 +1058,24 @@ export class Career {
 
   private refreshMatchDays(): void {
     this.matchDays = [...new Set(this.data.league.schedule.map((g) => g.day))].sort((a, b) => a - b)
+  }
+
+  /**
+   * #185: no-trade clauses are a veteran perk. A player only earns one once he
+   * has UFA leverage; the CBA outright forbids clauses on an entry-level deal.
+   * Random generation/import used to hand them to anyone rated 80+, so young
+   * studs (an 18-year-old on his ELC) ended up "protected" for no reason. Strip
+   * any clause off a non-UFA player. Runs on every construct — new AND loaded —
+   * so imported real rosters and existing saves are corrected too. Genuine
+   * UFA-eligible vets keep their (ideally DB-sourced) clause untouched.
+   */
+  private normalizeContracts(): void {
+    for (const p of this.data.players.values()) {
+      if (p.contract.noTradeClause && contractStatus(p) !== 'UFA') {
+        p.contract.noTradeClause = false
+        if (p.contract.clause && p.contract.clause !== 'none') p.contract.clause = 'none'
+      }
+    }
   }
 
   private computePlayerCounter(): number {

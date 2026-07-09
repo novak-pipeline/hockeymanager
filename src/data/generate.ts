@@ -161,7 +161,7 @@ function makePersonality(rng: Rng): Personality {
   }
 }
 
-function makeContract(rng: Rng, ovr: number, startYear: number): Contract {
+function makeContract(rng: Rng, ovr: number, startYear: number, age: number): Contract {
   // Rough cap-era salary curve: replacement ~0.8M, stars ~12M.
   const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
   const salary = Math.round(base * 1e6)
@@ -170,7 +170,10 @@ function makeContract(rng: Rng, ovr: number, startYear: number): Contract {
     salary,
     yearsRemaining: years,
     expiryYear: startYear + years,
-    noTradeClause: ovr > 80 && rng.chance(0.4),
+    // Trade protection is a veteran perk: a player only earns an NTC once he has
+    // UFA leverage (28+ here). Entry-level and young RFAs never carry one — the
+    // CBA forbids clauses on an ELC. (#185)
+    noTradeClause: ovr > 80 && age >= 28 && rng.chance(0.4),
     twoWay: ovr < 55 && rng.chance(0.5)
   }
 }
@@ -276,7 +279,7 @@ function makePlayer(
     potential: makePotential(rng, raw, age),
     composites,
     personality: makePersonality(rng),
-    contract: makeContract(rng, ovr, startYear),
+    contract: makeContract(rng, ovr, startYear, age),
     stats: [],
     fatigue: 0,
     morale: rng.range(50, 80),

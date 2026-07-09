@@ -84,6 +84,27 @@ C_HOME_REP, C_CURRENT_REP, C_WORLD_REP = 41, 42, 43
 C_JUNIOR_PREF = 59
 C_NHL_DRAFT_ELIGIBLE, C_NHL_DRAFTED = 29, 30
 
+# #185: trade-protection clause columns aren't at a stable index across export
+# versions (many exports omit them entirely), so we auto-detect them from the
+# field-name header row. None => the export carries no clause data and the game
+# synthesises a realistic veteran-only fallback instead.
+CLAUSE_NTC_COL = None
+CLAUSE_NMC_COL = None
+
+def detect_clause_columns(header):
+    """Scan the field-name header for no-trade / no-movement clause columns."""
+    global CLAUSE_NTC_COL, CLAUSE_NMC_COL
+    for i, name in enumerate(header or ()):
+        n = str(name or "").strip().lower()
+        if CLAUSE_NTC_COL is None and ("no trade" in n or "no-trade" in n or n in ("ntc", "no trade clause")):
+            CLAUSE_NTC_COL = i
+        if CLAUSE_NMC_COL is None and ("no movement" in n or "no-movement" in n or "no move" in n or n in ("nmc", "no movement clause")):
+            CLAUSE_NMC_COL = i
+
+def clause_truthy(v):
+    s = str(v if v is not None else "").strip().lower()
+    return s in ("1", "yes", "true", "y", "t", "on") or s.startswith("yes")
+
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
 C_HEIGHT_CM, C_WEIGHT_KG = 57, 58
@@ -228,7 +249,8 @@ def map_role(role_str, pos):
     return "twoWay"  # "Two-way", "Defensive", "Grinder", "All around", default
 
 def contract_from_row(row):
-    """Build {salary, years} from the EHM wage + contract-expiry columns."""
+    """Build {salary, years[, noTradeClause, noMovementClause]} from the EHM
+    wage + contract-expiry columns, plus any real clause columns found."""
     salary = to_int(row[C_WAGE], 0)
     if salary <= 0:
         return None
@@ -238,7 +260,13 @@ def contract_from_row(row):
     # reaches free agency at the game's opening summer (accurate day-one UFAs
     # for exports that carry them; the post-frenzy Pivot rosters have none).
     years = clamp(exp_year - SEASON_YEAR, 0, 8) if exp_year else 2
-    return {"salary": salary, "years": years}
+    out = {"salary": salary, "years": years}
+    # #185: carry real trade protection from the DB when the export has it.
+    if CLAUSE_NTC_COL is not None:
+        out["noTradeClause"] = clause_truthy(row[CLAUSE_NTC_COL])
+    if CLAUSE_NMC_COL is not None:
+        out["noMovementClause"] = clause_truthy(row[CLAUSE_NMC_COL])
+    return out
 
 def personality_from_row(row):
     """EHM personality columns (1-20) -> our Personality (same 1-20 scale)."""
@@ -885,7 +913,9 @@ def main():
     print(f"neg-PA ceilings: {dict(sorted(NEG_PA_CEILINGS.items(), reverse=True))}")
     wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     ws = wb["Sheet1"]
-    it = ws.iter_rows(values_only=True); next(it); next(it)
+    it = ws.iter_rows(values_only=True); next(it); field_header = next(it)
+    detect_clause_columns(field_header)  # #185: find real NTC/NMC columns if present
+    print(f"clause cols: ntc={CLAUSE_NTC_COL} nmc={CLAUSE_NMC_COL}")
 
     # team -> list of player dicts
     nhl_teams = {nick: [] for nick in NHL}

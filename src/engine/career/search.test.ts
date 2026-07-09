@@ -27,6 +27,34 @@ describe('dev-camp invite editor (#182)', () => {
   })
 })
 
+describe('NTC normalization (#185)', () => {
+  it('strips clauses off non-UFA players on load but keeps a UFA vet\'s', () => {
+    const data = generateLeague({ seed: 616 })
+    const players = [...data.players.values()]
+    // A clearly young (ELC-age) player and a clearly UFA-eligible vet.
+    const kid = players.find((p) => p.age <= 20)!
+    const vet = players.find((p) => p.age >= 29)!
+    kid.contract.noTradeClause = true
+    kid.contract.clause = 'modified'
+    vet.contract.noTradeClause = true
+    // Constructing the career runs normalizeContracts.
+    new Career(data, 616, data.league.teams[0]!)
+    expect(kid.contract.noTradeClause).toBe(false) // stripped — ELCs can't carry one
+    expect(kid.contract.clause).toBe('none')
+    expect(vet.contract.noTradeClause).toBe(true) // a real UFA vet keeps his
+  })
+
+  it('generated rosters never hand an entry-level player a no-trade clause', () => {
+    for (const seed of [616, 7, 42]) {
+      const data = generateLeague({ seed })
+      new Career(data, seed, data.league.teams[0]!) // normalizes
+      for (const p of data.players.values()) {
+        if (p.contract.noTradeClause) expect(p.age).toBeGreaterThanOrEqual(27)
+      }
+    }
+  })
+})
+
 describe('inbox curation — league roster churn (#180)', () => {
   it('drops other-clubs roster moves from the inbox but keeps your own', () => {
     const data = generateLeague({ seed: 55 })
