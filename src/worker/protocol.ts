@@ -101,8 +101,8 @@ export type { DevCampView, TrainingCampView, TrainingCampState } from '@engine/c
 import type { DevCampView, TrainingCampView } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
-export type { FaHubView, FaHubRowView } from '@engine/career/views'
-import type { FaHubView } from '@engine/career/views'
+export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
+import type { FaHubView, RfaBoardView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
 export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
@@ -225,6 +225,8 @@ export type WorkerRequestBody =
   | { type: 'toggleFaShortlist'; playerId: string }
   | { type: 'askFaAgent'; playerId: string }
   | { type: 'submitFaOffer'; playerId: string; salary: number; years: number }
+  | { type: 'getRfaBoard' }
+  | { type: 'submitOfferSheet'; playerId: string; salary: number; years: number }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -496,6 +498,10 @@ export type WorkerResponse = { id: number } & (
   | { type: 'agentRead'; text: string }
   /** Result of tabling a standing offer to a free agent. */
   | { type: 'faOfferResult'; ok: boolean; message: string; faHub: FaHubView }
+  /** Rival RFAs available to offer-sheet. */
+  | { type: 'rfaBoard'; board: RfaBoardView }
+  /** Result of an offer sheet: matched (kept) or landed (yours). */
+  | { type: 'offerSheetResult'; ok: boolean; matched: boolean; message: string; board: RfaBoardView }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */

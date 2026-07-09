@@ -864,3 +864,47 @@ describe('FA standing offers resolve over days (#167)', () => {
     expect(c!.getInbox().items.some((n) => n.headline.includes(target.name))).toBe(true)
   })
 })
+
+describe('RFA offer sheets (#168)', () => {
+  it('the board lists rival RFAs in-window and an offer sheet resolves to match or landed', () => {
+    let c: Career | null = null
+    for (const seed of [616, 7, 42, 99, 313, 55, 88, 2024, 1, 5]) {
+      const data = generateLeague({ seed })
+      const career = new Career(data, seed, data.league.teams[0]!)
+      career.startAtOffseason()
+      let g = 0
+      while (career.getOffseason()?.stage !== 'freeAgency' && g++ < 80) {
+        if (career.getDashboard().draftPending) career.autoDraft()
+        else career.advanceOffseason()
+      }
+      if (career.getOffseason()?.stage === 'freeAgency' && career.getRfaBoard().rows.length > 0) { c = career; break }
+    }
+    expect(c).not.toBeNull()
+    const board = c!.getRfaBoard()
+    expect(board.windowOpen).toBe(true)
+    // Every target is a rival's RFA with a suggested overpay and comp label.
+    for (const t of board.rows) {
+      expect(t.teamId).not.toBe(undefined)
+      expect(t.offerSalary).toBeGreaterThan(t.askSalary)
+      expect(typeof t.compLabel).toBe('string')
+    }
+    const target = board.rows[0]!
+    const res = c!.submitOfferSheet(target.playerId, target.offerSalary, target.offerYears)
+    expect(res.ok).toBe(true)
+    // Whether matched or walked, he's off the offer-sheet board (now signed to terms).
+    expect(c!.getRfaBoard().rows.some((r) => r.playerId === target.playerId)).toBe(false)
+    // Either way it made the inbox.
+    expect(c!.getInbox().items.some((n) => n.headline.includes(target.name))).toBe(true)
+  })
+
+  it('offer sheets are rejected outside the offseason window', () => {
+    const data = generateLeague({ seed: 616 })
+    const c = new Career(data, 616, data.league.teams[0]!)
+    // Regular season — no window.
+    const board = c.getRfaBoard()
+    expect(board.windowOpen).toBe(false)
+    expect(board.rows).toHaveLength(0)
+    const res = c.submitOfferSheet('anyone', 5_000_000, 4)
+    expect(res.ok).toBe(false)
+  })
+})

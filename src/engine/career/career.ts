@@ -443,6 +443,8 @@ import {
   type OffseasonView,
   type NegotiationView,
   type FaHubView,
+  type RfaBoardView,
+  type RfaTargetView,
   type WaiverWireRowView,
   type LeagueWireView,
   type GMProfileView,
@@ -7491,6 +7493,133 @@ export class Career {
     if (salary <= 7_200_000) return [1, 3]
     if (salary <= 9_600_000) return [1, 2, 3]
     return [1, 1, 2, 3]
+  }
+
+  /** Human label for a compensation pick bundle, e.g. [1,3] -> "a 1st + a 3rd". */
+  private compLabel(rounds: number[]): string {
+    if (rounds.length === 0) return 'no picks'
+    const ord = (r: number): string => (r === 1 ? '1st' : r === 2 ? '2nd' : r === 3 ? '3rd' : `${r}th`)
+    return rounds.map((r) => `a ${ord(r)}`).join(' + ')
+  }
+
+  /** #168: rival clubs' restricted free agents you can offer-sheet during the
+   *  offseason. A one-click overpay is suggested per player, with the pick
+   *  compensation you'd owe if his club declines to match. */
+  getRfaBoard(): RfaBoardView {
+    const os = this.offseason
+    const windowOpen = os?.stage === 'resign' || os?.stage === 'freeAgency'
+    const rows: RfaTargetView[] = []
+    if (windowOpen) {
+      for (const tid of this.data.league.teams) {
+        if (tid === this.userTeamId) continue
+        const team = this.data.teams.get(tid)
+        if (!team) continue
+        for (const pid of team.roster) {
+          const p = this.data.players.get(pid)
+          if (!p || contractStatus(p) !== 'RFA' || p.contract.yearsRemaining > 1) continue
+          if (ratedOverall(p) < 66) continue
+          const ask = askTerms(p, this.year)
+          const offerSalary = Math.round(ask.salary * 1.2) // overpay to pry him loose
+          const offerYears = Math.max(ask.years, 4)
+          rows.push({
+            ...badge(p, this.fogCtx()),
+            teamAbbr: team.abbreviation,
+            teamId: tid as string,
+            askSalary: ask.salary,
+            askYears: ask.years,
+            offerSalary,
+            offerYears,
+            compLabel: this.compLabel(this.offerSheetComp(offerSalary)),
+          })
+        }
+      }
+      rows.sort((a, b) => b.offerSalary - a.offerSalary)
+    }
+    return { windowOpen, rows: rows.slice(0, 40) }
+  }
+
+  /** #168: table an offer sheet to a rival's RFA. His club decides on the spot —
+   *  MATCH (they keep him but you drove up his price) or DECLINE (he's yours and
+   *  you surrender pick compensation). A club that can't fit the AAV must let him
+   *  walk. Offseason-only. */
+  submitOfferSheet(playerId: string, salary: number, years: number): { ok: boolean; matched: boolean; message: string } {
+    const os = this.offseason
+    if (!(os?.stage === 'resign' || os?.stage === 'freeAgency')) {
+      return { ok: false, matched: false, message: 'Offer sheets are an offseason move.' }
+    }
+    const id = asPlayerId(playerId)
+    const player = this.data.players.get(id)
+    if (!player) return { ok: false, matched: false, message: 'Unknown player.' }
+    if (contractStatus(player) !== 'RFA') return { ok: false, matched: false, message: `${player.name} isn't a restricted free agent.` }
+    const owner = [...this.data.teams.values()].find(
+      (t) => (t.id as string) !== (this.userTeamId as string) && t.roster.includes(id)
+    )
+    if (!owner) return { ok: false, matched: false, message: 'He is not on a rival roster.' }
+    const capUsedNow = this.userTeam.roster.reduce((s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, matched: false, message: `That offer doesn't fit under your cap.` }
+    }
+    const ask = askTerms(player, this.year)
+    const ovr = ratedOverall(player)
+    const overpay = salary / Math.max(1, ask.salary)
+    const ownerCapUsed = owner.roster.reduce((s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const ownerCanFit = ownerCapUsed - player.contract.salary + salary <= owner.finances.salaryCap
+    const rng = this.rngFor(8024, os.faDay ?? 0, Career.pidNum(playerId))
+    // Valuable players get matched; a steep overpay is likelier to be declined
+    // (they'd rather bank the picks than an albatross); can't-fit clubs must fold.
+    let matchProb = 0.55 + (ovr - 70) * 0.03 - (overpay - 1) * 0.7
+    if (!ownerCanFit) matchProb -= 0.45
+    matchProb = Math.max(0.05, Math.min(0.92, matchProb))
+    let matched = rng.chance(matchProb)
+
+    if (matched) {
+      try {
+        signPlayer({ team: owner, player, salary, years, year: this.year, players: this.data.players })
+        repairLines(owner, this.data.players)
+        this.adjustRelationship(owner.id as string, -3)
+        this.pushNews(
+          'contract',
+          `${owner.abbreviation} match your offer sheet for ${player.name}`,
+          `${owner.name} matched your $${(salary / 1e6).toFixed(2)}M × ${years} offer sheet. ${player.name} stays put — but you made them pay up.`,
+          { playerId, teamId: owner.id as string }
+        )
+        return { ok: true, matched: true, message: `${owner.abbreviation} matched — ${player.name} stays, but you drove his price up.` }
+      } catch {
+        matched = false // couldn't fit it after all — forced to let him walk
+      }
+    }
+
+    // Declined (or couldn't match): he joins you; compensation picks go to them.
+    owner.roster = owner.roster.filter((x) => x !== id)
+    repairLines(owner, this.data.players)
+    try {
+      signPlayer({ team: this.userTeam, player, salary, years, year: this.year, players: this.data.players })
+    } catch (e) {
+      owner.roster.push(id) // roll back the removal
+      repairLines(owner, this.data.players)
+      return { ok: false, matched: false, message: e instanceof Error ? e.message : 'The signing failed.' }
+    }
+    this.lockerArrival(this.userTeamId, id)
+    repairLines(this.userTeam, this.data.players)
+    const rounds = this.offerSheetComp(salary)
+    const compYear = this.year + 1
+    for (const round of rounds) {
+      const own = this.picks.find(
+        (pk) => pk.year === compYear && pk.round === round && (pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)
+      )
+      if (own) own.ownerTeamId = owner.id
+      else this.picks.push({ year: compYear, round, originalTeamId: this.userTeamId, ownerTeamId: owner.id })
+    }
+    this.adjustRelationship(owner.id as string, -8)
+    recordAcquisition(this.chronicle, { playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
+    this.pushNews(
+      'contract',
+      `${player.name} signs your offer sheet!`,
+      `${owner.name} declined to match — ${player.name} is yours at $${(salary / 1e6).toFixed(2)}M × ${years}. ` +
+      `${rounds.length ? `You surrender ${this.compLabel(rounds)} to ${owner.abbreviation}.` : 'No compensation owed.'}`,
+      { playerId, teamId: this.userTeamId as string }
+    )
+    return { ok: true, matched: false, message: `${player.name} is yours!${rounds.length ? ` You owe ${owner.abbreviation} ${this.compLabel(rounds)}.` : ''}` }
   }
 
   /** Rival GMs tender offer sheets to the user's best RFAs during the re-sign

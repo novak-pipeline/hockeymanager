@@ -188,6 +188,12 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().submitFaOffer(req.playerId, req.salary, req.years)
       return { id: req.id, type: 'faOfferResult', ok: r.ok, message: r.message, faHub: must().getFaHub() }
     }
+    case 'getRfaBoard':
+      return { id: req.id, type: 'rfaBoard', board: must().getRfaBoard() }
+    case 'submitOfferSheet': {
+      const r = must().submitOfferSheet(req.playerId, req.salary, req.years)
+      return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, message: r.message, board: must().getRfaBoard() }
+    }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

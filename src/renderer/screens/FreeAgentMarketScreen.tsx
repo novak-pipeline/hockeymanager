@@ -7,10 +7,12 @@
  */
 import { useState } from 'react'
 import type { FinanceView } from '../../worker/protocol'
+import type { RfaBoardView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
+import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
@@ -53,6 +55,10 @@ export function FreeAgentMarketScreen(): JSX.Element {
     () => client.getFinances(),
     (r) => (r.type === 'finances' ? r.finances : null)
   )
+  const { data: rfa, refetch: refetchRfa } = useScreenData<RfaBoardView>(
+    () => client.getRfaBoard(),
+    (r) => (r.type === 'rfaBoard' ? r.board : null)
+  )
 
   const rows = (hub?.rows ?? []).filter((r) => {
     if (posFilter === 'starred' && !r.shortlisted) return false
@@ -75,6 +81,15 @@ export function FreeAgentMarketScreen(): JSX.Element {
     else if (r.type === 'error') toast(r.message, 'error')
   }
 
+  const offerSheet = async (playerId: string, salary: number, years: number): Promise<void> => {
+    const r = await client.submitOfferSheet(playerId, salary, years)
+    if (r.type === 'offerSheetResult') {
+      toast(r.message, r.ok ? 'success' : r.matched ? 'info' : 'error')
+      refetchRfa()
+      refetchHub()
+    } else if (r.type === 'error') toast(r.message, 'error')
+  }
+
   const tableOffer = async (playerId: string, salary: number, years: number): Promise<void> => {
     const r = await client.submitFaOffer(playerId, salary, years)
     if (r.type === 'faOfferResult') { toast(r.message, r.ok ? 'success' : 'error'); refetchHub() }
@@ -91,6 +106,75 @@ export function FreeAgentMarketScreen(): JSX.Element {
       <ScreenStateNotices loading={loading && !hub} error={error} empty={false} emptyText="" />
 
       <CapLine finance={finance ?? null} />
+
+      {rfa?.windowOpen && rfa.rows.length > 0 && (
+        <Panel title={`Restricted free agents — offer-sheet targets (${rfa.rows.length})`}>
+          <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+            These men are signed to rights but unsigned to terms. Tender an offer sheet and their
+            club has one choice: match your number, or let him walk and take your draft picks as
+            compensation. Overpay to make the match hurt.
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 26 }} />
+                  <th>Player</th>
+                  <th>Pos / Age</th>
+                  <th className="num">OVR</th>
+                  <th>Rights</th>
+                  <th>His ask</th>
+                  <th>Your sheet</th>
+                  <th>If they walk</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rfa.rows.map((t) => {
+                  const capTight = t.offerSalary > (finance ? finance.salaryCap - finance.capUsed : 0)
+                  return (
+                    <tr key={t.playerId}>
+                      <td>
+                        <PlayerFace faceId={t.faceId} name={t.name} size={26} />
+                      </td>
+                      <td>
+                        <PlayerLink playerId={t.playerId} name={t.name} />
+                      </td>
+                      <td className="muted small">
+                        {t.position} · {t.age}
+                      </td>
+                      <td className="num">
+                        <OverallStars overall={t.overall} />
+                      </td>
+                      <td className="small">{t.teamAbbr}</td>
+                      <td className="mono small">
+                        {fmtMoney(t.askSalary)} × {t.askYears}
+                      </td>
+                      <td className="mono small" style={{ color: capTight ? 'var(--danger)' : undefined }}>
+                        {fmtMoney(t.offerSalary)} × {t.offerYears}
+                      </td>
+                      <td className="small muted">{t.compLabel}</td>
+                      <td>
+                        <button
+                          className="btn btn-sm"
+                          title={
+                            capTight
+                              ? 'You may not have the cap room to fit this sheet'
+                              : `Tender ${fmtMoney(t.offerSalary)} × ${t.offerYears}`
+                          }
+                          onClick={() => void offerSheet(t.playerId, t.offerSalary, t.offerYears)}
+                        >
+                          Offer sheet
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
 
       {(hub?.rows ?? []).length === 0 ? (
         <Panel title="The open market">

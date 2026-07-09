@@ -300,6 +300,14 @@ export class SimClient {
     return this.send({ type: 'submitFaOffer', playerId, salary, years })
   }
 
+  getRfaBoard(): Promise<WorkerResponse> {
+    return this.send({ type: 'getRfaBoard' })
+  }
+
+  submitOfferSheet(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
+    return this.send({ type: 'submitOfferSheet', playerId, salary, years })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

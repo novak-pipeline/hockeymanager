@@ -1417,6 +1417,26 @@ export interface FaHubView {
   windowOpen?: boolean
 }
 
+/** #168: a rival club's restricted free agent you could offer-sheet. */
+export interface RfaTargetView extends PlayerBadge {
+  teamAbbr: string
+  teamId: string
+  /** His camp's asking AAV and term. */
+  askSalary: number
+  askYears: number
+  /** A one-click offer-sheet suggestion (an overpay to pry him loose). */
+  offerSalary: number
+  offerYears: number
+  /** Draft-pick compensation you'd surrender if his club declines to match. */
+  compLabel: string
+}
+
+export interface RfaBoardView {
+  /** True in the offseason re-sign / free-agency window (when sheets are legal). */
+  windowOpen: boolean
+  rows: RfaTargetView[]
+}
+
 /* ───────────────────── contract negotiation (DEPTH 1) ───────────────────── */
 
 /** One committed round as the UI sees it. */
