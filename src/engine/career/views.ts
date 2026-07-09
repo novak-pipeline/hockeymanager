@@ -2647,6 +2647,25 @@ export interface PracticeView {
   state: TeamPracticeState
   /** AGM-style coaching suggestion for team focus. */
   suggestion: { teamFocus: PracticeFocus; rationale: string }
+  /** #170: the effect preview for the active team focus — the tradeoff made
+   *  visible (which attributes it grows, how well the coach delivers it, and the
+   *  weekly fatigue swing). Optional so old snapshots/view builders stay valid. */
+  plan?: PracticePlanView
+}
+
+/** #170: what a practice focus actually does, for the Training screen. */
+export interface PracticePlanView {
+  focus: PracticeFocus
+  /** Top targeted attributes with their coach-scaled growth boost (as a %). */
+  targeted: Array<{ attr: string; boost: number }>
+  /** Signed fatigue points per practice week (negative = recovery). */
+  fatiguePerWeek: number
+  coachName: string
+  /** Coach's delivery effectiveness as a % (100 = neutral). */
+  coachMult: number
+  coachTier: 'elite' | 'strong' | 'adequate' | 'weak'
+  /** How much slower non-targeted attributes develop (opportunity cost, %). */
+  opportunityCostPct: number
 }
 
 /* ────────────────────────── league leaders view ────────────────────────── */

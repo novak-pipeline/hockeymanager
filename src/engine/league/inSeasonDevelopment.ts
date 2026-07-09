@@ -27,6 +27,7 @@ import {
   type RawAttributes,
 } from '@domain'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
 import type { Rng } from '@engine/shared/rng'
 
 /* ── group helpers (mirror offseason.ts; kept private to this module) ── */
@@ -65,8 +66,16 @@ function seasonBudget(seasonAge: number, gapOverall: number): number {
   return ageW * Math.min(gapOverall, 10) * 0.22
 }
 
-/** Close a small fraction of each attribute's gap to potential (jittered). */
-function microGrowth(ratings: RawAttributes, potential: RawAttributes, rate: number, rng: Rng): void {
+/** Close a small fraction of each attribute's gap to potential (jittered).
+ *  `attributeBias` (#170) reallocates by practice focus — see applyGrowth in
+ *  offseason.ts. Absent → unchanged (no RNG consumed by the multiplier). */
+function microGrowth(
+  ratings: RawAttributes,
+  potential: RawAttributes,
+  rate: number,
+  rng: Rng,
+  attributeBias?: Partial<Record<string, number>>
+): void {
   const cur = groupsOf(ratings)
   const pot = groupsOf(potential)
   const n = Math.min(cur.length, pot.length)
@@ -76,7 +85,8 @@ function microGrowth(ratings: RawAttributes, potential: RawAttributes, rate: num
       if (ceiling === undefined) continue
       const gap = ceiling - cur[g][key]
       if (gap <= 0) continue
-      const r = Math.min(0.4, rate * rng.float(0.7, 1.3))
+      const focusMult = attributeBias ? 1 + (attributeBias[key] ?? -UNTARGETED_FOCUS_DRAG) : 1
+      const r = Math.min(0.4, rate * Math.max(0, focusMult) * rng.float(0.7, 1.3))
       cur[g][key] = Math.max(cur[g][key], Math.min(ceiling, Math.round(cur[g][key] + gap * r)))
     }
   }
@@ -131,6 +141,9 @@ export function tickInSeasonDevelopment(args: {
   expectations?: (id: PlayerId) => number
   /** Optional locker-room / coaching multiplier per player [~0.9–1.15]. */
   devModifier?: (id: PlayerId) => number
+  /** Optional (#170): per-player practice-focus attribute bias — reallocates the
+   *  micro-pass toward the focus's targeted attributes. Undefined → unchanged. */
+  attributeBias?: (id: PlayerId) => Partial<Record<string, number>> | undefined
 }): { developed: number } {
   const { players, developIds, gamesPlayedById, rng } = args
   let developed = 0
@@ -175,7 +188,8 @@ export function tickInSeasonDevelopment(args: {
       const personaFactor = 0.6 + (persona / 20) * 0.6
       const gamesFactor = 0.35 + 0.65 * Math.min(1, gp / 50)
       const rate = 0.035 * personaFactor * gamesFactor * perfMult * devMod
-      microGrowth(p.ratings, p.potential, rate, rng)
+      const bias = args.attributeBias ? args.attributeBias(id) : undefined
+      microGrowth(p.ratings, p.potential, rate, rng, bias)
       p.composites = computeComposites(p.ratings, p.role, p.position)
       // The per-season budget gates future passes once exceeded, so a long
       // season can't over-develop even though a single pass may overshoot.

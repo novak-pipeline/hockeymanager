@@ -86,6 +86,14 @@ export function createInitialPracticeState(): TeamPracticeState {
  * recovery has no positive bias: it trades growth for fatigue reduction.
  * goaltending targets goalie-only attributes; skaters effectively get no bias.
  */
+/**
+ * Opportunity cost of specialising (#170): attributes NOT targeted by the focus
+ * close their gap to potential this much slower during development. A single
+ * source of truth shared by the dev engines (offseason/inSeason) and the UI plan
+ * preview. `balanced` passes no bias, so nothing drags — it's the neutral default.
+ */
+export const UNTARGETED_FOCUS_DRAG = 0.06
+
 const FOCUS_BIAS: Record<PracticeFocus, Record<string, number>> = {
   balanced: {
     // Tiny nudge everywhere — keeps the radar even

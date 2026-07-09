@@ -347,6 +347,8 @@ import {
   toggleScratch,
   setPlayerFocus,
   isScratchedFor,
+  tickPractice,
+  UNTARGETED_FOCUS_DRAG,
   type TeamPracticeState,
   type PracticeFocus,
 } from '@engine/league/practice'
@@ -3597,6 +3599,20 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
+    // the roster (the price of sharper development); a recovery week freshens
+    // legs at the cost of growth. Only the user's club runs a chosen regimen.
+    if (day % 7 === 0) {
+      const roster = this.userTeam.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => p !== undefined)
+      const ticks = tickPractice({ players: roster, state: this.practiceState, rng: this.rngFor(7106, day) })
+      const byId = new Map(roster.map((p) => [p.id as string, p]))
+      for (const t of ticks) {
+        const p = byId.get(t.playerId)
+        if (p) p.fatigue = Math.max(0, Math.min(100, p.fatigue + t.fatigueDelta))
+      }
+    }
     // LW6: anniversary callbacks — the world remembers its own history. At most
     // one per day, exact-day matches only, and only your club's durable moments.
     {
@@ -3684,6 +3700,7 @@ export class Career {
           const base = lr ? developmentModifier(lr, id as string) : 1
           return base * this.mentorshipDevBonus(id as string)
         },
+        attributeBias: (id) => this.practiceAttributeBias(id),
       })
     }
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
@@ -4778,24 +4795,14 @@ export class Career {
             const tid = this.teamOf(id)
             const lr = tid ? this.lockerRooms.get(tid) : undefined
             const lockerMod = lr ? developmentModifier(lr, id as string) : 1
-
-            // Layer practice modifier on top of locker-room modifier for the
-            // user's team. Other teams use only the locker-room modifier.
-            if (tid === this.userTeamId) {
-              const p = this.data.players.get(id)
-              if (p) {
-                const focus = effectiveFocus(this.practiceState, id as string)
-                const { fatigueMod: _fm } = practiceDevModifier(focus, p)
-                // For the dev loop we return lockerMod unchanged (bias is applied
-                // per-attribute below via the practice route); the multiplier here
-                // is just the locker-room factor so we don't double-count.
-              }
-            }
             // Owner-investment perk: a funded development-staff upgrade gives
             // the user's own organisation a modest tailwind this season.
             const perkMod = this.ownerPerk === 'development' && tid === this.userTeamId ? 1.15 : 1
             return lockerMod * this.mentorshipDevBonus(id as string) * perkMod
           },
+          // #170: the practice focus reallocates the summer pass toward its
+          // targeted attributes (scaled by the head coach's dev competence).
+          attributeBias: (id) => this.practiceAttributeBias(id),
         })
         for (const seed of dev.newsSeeds) {
           const p = this.resolve(seed.playerId)
@@ -12734,11 +12741,99 @@ export class Career {
   }
 
   /** EHM Practice screen: current state + auto-suggestion. */
+  /**
+   * #170: how effective the user's head coach is at delivering a given practice
+   * focus for a player of this position — the multiplier applied to the focus's
+   * attribute bias. Prefers the EHM "developing youngsters" attribute, falls back
+   * to the position-appropriate coaching discipline, then to the coach's overall
+   * rating for fictional staff with no per-discipline attributes. A weak bench
+   * boss blunts your focus; an elite developer amplifies it.
+   */
+  private coachDevMult(focus: PracticeFocus, position: Position): number {
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const a = coach?.attributes
+    let raw: number | undefined
+    if (a) {
+      const posAttr =
+        position === 'G' || focus === 'goaltending'
+          ? a.coachingGoaltenders
+          : position === 'D'
+            ? a.coachingDefensemen
+            : a.coachingForwards
+      raw = a.developingYoungsters ?? posAttr
+    }
+    const mult =
+      raw !== undefined
+        ? 0.6 + (raw / 20) * 0.7 // EHM 1–20 → ~0.64..1.30
+        : 0.6 + Math.max(0, Math.min(1, ((coach?.rating ?? 60) - 40) / 50)) * 0.7 // rating 40..90
+    return Math.max(0.55, Math.min(1.35, mult))
+  }
+
+  /**
+   * #170: the per-player practice-focus attribute bias fed into the development
+   * engine. Only the user's own club has a practice regimen; everyone else
+   * develops neutrally (undefined). Balanced focus is the neutral baseline
+   * (undefined too). Recovery returns {} on purpose so every attribute drags —
+   * rest trades growth for freshness. The targeted biases are scaled by the head
+   * coach's development competence.
+   */
+  private practiceAttributeBias(id: PlayerId): Partial<Record<string, number>> | undefined {
+    if (this.teamOf(id) !== this.userTeamId) return undefined
+    const p = this.data.players.get(id)
+    if (!p) return undefined
+    const focus = effectiveFocus(this.practiceState, id as string)
+    if (focus === 'balanced') return undefined // neutral baseline — byte-identical
+    const { attributeBias } = practiceDevModifier(focus, p)
+    // A non-recovery focus returning {} is a position mismatch (e.g. a goalie
+    // under an 'offense' team focus) — leave him neutral rather than dragging him.
+    if (focus !== 'recovery' && Object.keys(attributeBias).length === 0) return undefined
+    const mult = this.coachDevMult(focus, p.position)
+    const scaled: Record<string, number> = {}
+    for (const [k, v] of Object.entries(attributeBias)) scaled[k] = (v as number) * mult
+    return scaled
+  }
+
   getPractice(): PracticeView {
     const roster = this.userTeam.roster.map((id) => this.resolve(id))
     return {
       state: structuredClone(this.practiceState),
       suggestion: suggestFocus(roster),
+      plan: this.buildPracticePlan(),
+    }
+  }
+
+  /**
+   * #170: the effect preview for the active team focus — the tradeoff the GM is
+   * choosing, made visible. Names the top targeted attributes, the head coach's
+   * effectiveness at delivering the focus, and the weekly fatigue swing.
+   */
+  private buildPracticePlan(): PracticeView['plan'] {
+    const focus = this.practiceState.teamFocus
+    // A representative skater and goalie so the preview reflects both benches.
+    const skater = this.userTeam.roster.map((id) => this.resolve(id)).find((p) => p.position !== 'G')
+    const probe = skater ?? this.resolve(this.userTeam.roster[0]!)
+    const { attributeBias, fatigueMod } = practiceDevModifier(focus, probe)
+    const coachMult = this.coachDevMult(focus, probe.position)
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    // Balanced is the neutral baseline (the engine applies no bias for it), so
+    // present it honestly as even development rather than a per-attribute boost.
+    const targeted =
+      focus === 'balanced'
+        ? []
+        : Object.entries(attributeBias)
+            .sort((a, b) => (b[1] as number) - (a[1] as number))
+            .slice(0, 6)
+            .map(([attr, boost]) => ({ attr, boost: Math.round((boost as number) * coachMult * 100) }))
+    const coachTier =
+      coachMult >= 1.15 ? 'elite' : coachMult >= 1.0 ? 'strong' : coachMult >= 0.85 ? 'adequate' : 'weak'
+    return {
+      focus,
+      targeted,
+      fatiguePerWeek: fatigueMod,
+      coachName: coach?.name ?? 'The head coach',
+      coachMult: Math.round(coachMult * 100),
+      coachTier,
+      opportunityCostPct: focus === 'balanced' ? 0 : Math.round(UNTARGETED_FOCUS_DRAG * 100),
     }
   }
 

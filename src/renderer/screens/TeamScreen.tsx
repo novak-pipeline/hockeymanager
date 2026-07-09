@@ -12,6 +12,7 @@ import { overallToStars } from '../../engine/ratings/composites'
 import type {
   AgmReportView,
   ClubInfoView,
+  PracticePlanView,
   PracticeView,
   SquadView,
   StaffView,
@@ -97,6 +98,83 @@ const FOCUS_DESC: Record<PracticeFocus, string> = {
   physical:    'Strength, stamina, checking — higher fatigue.',
   goaltending: 'Reflex, positioning, rebound control — goalies only.',
   recovery:    'Light skate; less growth but fatigue drops instead of rising.',
+}
+
+/** Raw-attribute key → readable label (e.g. "wristShot" → "Wrist Shot"). */
+function attrLabel(key: string): string {
+  const spaced = key.replace(/([A-Z])/g, ' $1').replace(/\bG\b/, '').trim()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+const COACH_TIER_COLOR: Record<PracticePlanView['coachTier'], string> = {
+  elite:    'var(--success, #4caf7d)',
+  strong:   'var(--success, #4caf7d)',
+  adequate: 'var(--amber, #d6a056)',
+  weak:     'var(--danger, #e0575b)',
+}
+
+/** #170: the effect preview — what the active focus actually does to development
+ *  and fatigue, so the choice is a visible tradeoff rather than a blind toggle. */
+function PracticePlanPanel({ plan }: { plan: PracticePlanView }): JSX.Element {
+  const fatigueUp = plan.fatiguePerWeek > 0
+  return (
+    <Panel title="What this focus does">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--sp-3)' }}>
+        {/* Development gains */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Sharpens (per dev pass)</div>
+          {plan.targeted.length === 0 ? (
+            <div className="muted small">
+              {plan.focus === 'recovery'
+                ? 'Nothing — recovery trades development for fresh legs.'
+                : 'Even, balanced development across the board.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {plan.targeted.map((t) => (
+                <span
+                  key={t.attr}
+                  className="chip"
+                  style={{ fontSize: 11, background: 'rgba(76,175,125,0.12)', color: 'var(--success, #4caf7d)' }}
+                >
+                  {attrLabel(t.attr)} +{t.boost}%
+                </span>
+              ))}
+            </div>
+          )}
+          {plan.opportunityCostPct > 0 && (
+            <div className="muted small" style={{ marginTop: 6 }}>
+              Everything else develops ~{plan.opportunityCostPct}% slower — the cost of specialising.
+            </div>
+          )}
+        </div>
+
+        {/* Coach effectiveness */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Coach delivery</div>
+          <div style={{ fontWeight: 700, color: COACH_TIER_COLOR[plan.coachTier], textTransform: 'capitalize' }}>
+            {plan.coachTier} · {plan.coachMult}%
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            {plan.coachName} {plan.coachMult >= 100 ? 'amplifies' : 'blunts'} how well this focus lands.
+          </div>
+        </div>
+
+        {/* Fatigue tradeoff */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Fatigue / week</div>
+          <div style={{ fontWeight: 700, color: fatigueUp ? 'var(--amber, #d6a056)' : 'var(--success, #4caf7d)' }}>
+            {fatigueUp ? '+' : ''}{plan.fatiguePerWeek} {fatigueUp ? '· heavier legs' : '· fresher'}
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            {fatigueUp
+              ? 'Harder practices tire the roster for game nights.'
+              : 'Lighter load keeps the team fresh for the games that count.'}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  )
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -648,6 +726,9 @@ function PracticeTab(): JSX.Element {
           {FOCUS_DESC[currentFocus]}
         </div>
       </Panel>
+
+      {/* #170 Effect preview — the tradeoff, made visible */}
+      {data.plan && <PracticePlanPanel plan={data.plan} />}
 
       {/* Roster dress/scratch */}
       {squad && (

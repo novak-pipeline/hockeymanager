@@ -63,6 +63,7 @@ export type {
   PlayerHonoursView,
   PlayerProfileView,
   PlayoffBracketView,
+  PracticePlanView,
   PracticeView,
   ProfileContractView,
   RadarAxes,

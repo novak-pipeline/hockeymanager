@@ -43,6 +43,7 @@ import {
 import { FIRST_NAMES, LAST_NAMES } from '@data'
 import { computeComposites, overall } from '@engine/ratings/composites'
 import { analystEdge } from '@engine/league/draftRankings'
+import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
 import type { Rng } from '@engine/shared/rng'
 
 /* ────────────────────────── shared helpers ────────────────────────── */
@@ -76,8 +77,20 @@ const FAST_DECLINE = new Set(['speed', 'acceleration', 'agility', 'stamina'])
 /**
  * Close a fraction (`rate`, jittered per attribute) of each attribute's gap to
  * potential. Monotone non-decreasing and hard-capped at potential.
+ *
+ * `attributeBias` (#170) reallocates growth by practice focus: a raw-attribute
+ * key present in the map grows at `rate * (1 + bias)`, everything else at
+ * `rate * (1 - UNTARGETED_DRAG)`. Passing `undefined` (no focus / balanced /
+ * AI teams) leaves the rate untouched — and since the multiplier consumes no
+ * RNG, the result is identical to before, preserving calibration.
  */
-function applyGrowth(ratings: RawAttributes, potential: RawAttributes, rate: number, rng: Rng): void {
+function applyGrowth(
+  ratings: RawAttributes,
+  potential: RawAttributes,
+  rate: number,
+  rng: Rng,
+  attributeBias?: Partial<Record<string, number>>
+): void {
   const curGroups = groupsOf(ratings)
   const potGroups = groupsOf(potential)
   const n = Math.min(curGroups.length, potGroups.length)
@@ -89,7 +102,8 @@ function applyGrowth(ratings: RawAttributes, potential: RawAttributes, rate: num
       if (ceiling === undefined) continue
       const gap = ceiling - cur[key]
       if (gap <= 0) continue
-      const r = Math.min(0.85, rate * rng.float(0.75, 1.25))
+      const focusMult = attributeBias ? 1 + (attributeBias[key] ?? -UNTARGETED_FOCUS_DRAG) : 1
+      const r = Math.min(0.85, rate * Math.max(0, focusMult) * rng.float(0.75, 1.25))
       cur[key] = Math.max(cur[key], Math.min(ceiling, Math.round(cur[key] + gap * r)))
     }
   }
@@ -268,6 +282,10 @@ export function developPlayers(args: {
    *  is active the caller passes <1 so the summer pass only delivers the share
    *  not already gained continuously, keeping annual totals calibrated. Default 1. */
   growthScale?: number
+  /** Optional (#170): per-player practice-focus attribute bias. Returning a map
+   *  reallocates growth toward the targeted raw attributes (others drag); return
+   *  undefined for players with no active focus (byte-identical to before). */
+  attributeBias?: (id: PlayerId) => Partial<Record<string, number>> | undefined
 }): { newsSeeds: Array<{ playerId: PlayerId; kind: 'breakout' | 'decline' | 'confidenceBoost' | 'crisisOfConfidence' }> } {
   const { players, rng } = args
   const gamesPlayed = toGamesLookup(args.gamesPlayedById)
@@ -362,7 +380,8 @@ export function developPlayers(args: {
       const growthScale = args.growthScale ?? 1
       // Persistent per-player arc: busts under-develop, late bloomers over-develop.
       const arc = devArc(p.id as unknown as string)
-      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng)
+      const bias = args.attributeBias ? args.attributeBias(p.id) : undefined
+      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng, bias)
     } else if (seasonAge >= 30) {
       applyDecline(p.ratings, seasonAge, rng)
       // Second pass for vet underperformers (accelerated −50% decline).
