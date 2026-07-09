@@ -224,6 +224,7 @@ export type WorkerRequestBody =
   | { type: 'getFaHub' }
   | { type: 'toggleFaShortlist'; playerId: string }
   | { type: 'askFaAgent'; playerId: string }
+  | { type: 'submitFaOffer'; playerId: string; salary: number; years: number }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -493,6 +494,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'shopResult'; count: number; message: string }
   /** A free agent's agent's read on the market (may deflect). */
   | { type: 'agentRead'; text: string }
+  /** Result of tabling a standing offer to a free agent. */
+  | { type: 'faOfferResult'; ok: boolean; message: string; faHub: FaHubView }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */

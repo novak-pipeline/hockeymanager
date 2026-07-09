@@ -699,6 +699,10 @@ export class Career {
   /** DEPTH 2: free agents the GM is tracking — shortlisted names get loss
    *  mail with a reason when a rival signs them. */
   private faShortlist = new Set<string>()
+  /** #167: standing offers the GM has tabled to free agents. They don't sign
+   *  on the spot — each decides on his own day, weighing your money against the
+   *  rival field. faDay-relative decision day. Offseason FA-window only. */
+  private faPendingOffers: Array<{ playerId: string; salary: number; years: number; decideDay: number }> = []
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -5169,6 +5173,9 @@ export class Career {
       }
       case 'freeAgency': {
         os.faDay++
+        // #167: resolve the GM's standing offers first — his money gets first
+        // look each day before the AI market moves.
+        this.resolveFaOffers()
         // AI clubs work the phones a beat behind the user: released veterans
         // don't all sign within 24 hours, and the GM you play gets the same
         // first-mover window a real front office fights for. (Cadence law —
@@ -5303,6 +5310,7 @@ export class Career {
           for (const c of [...this.arbitrationCases]) this.acceptArbitration(c.playerId)
           for (const c of [...this.arbitrationCases]) this.walkAwayArbitration(c.playerId) // cap-blocked leftovers walk
           this.runWorldFreeAgency()
+          this.faPendingOffers = [] // the window's shut; unresolved offers lapse
           os.stage = 'preseason'
         }
         return true
@@ -7928,6 +7936,95 @@ export class Career {
     }
   }
 
+  /** #167: table a standing offer to a free agent. He does NOT sign on the
+   *  spot — he decides on his own day (a few out), weighing your money against
+   *  the rival field. Free-agency-window only; in-season, open talks to sign now. */
+  submitFaOffer(playerId: string, salary: number, years: number): { ok: boolean; message: string } {
+    const os = this.offseason
+    if (os?.stage !== 'freeAgency') {
+      return { ok: false, message: 'Standing offers are a free-agency thing — open talks to sign him directly.' }
+    }
+    if (!this.faPool.some((f) => (f as string) === playerId)) {
+      return { ok: false, message: 'He is not a free agent.' }
+    }
+    const player = this.resolve(asPlayerId(playerId))
+    const capUsedNow = this.userTeam.roster.reduce(
+      (s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: `That doesn't fit under the cap once your $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap is counted.` }
+    }
+    const rivals = this.faRivalClubs(player).length
+    const rng = this.rngFor(8022, os.faDay, Career.pidNum(playerId))
+    const decideDay = os.faDay + 2 + rng.range(0, 2) // he sleeps on it a few days
+    this.faPendingOffers = this.faPendingOffers.filter((o) => o.playerId !== playerId)
+    this.faPendingOffers.push({ playerId, salary, years, decideDay })
+    const agent = agentFor(player)
+    this.pushNews(
+      'contract',
+      `Offer tabled to ${player.name}`,
+      `You've put $${(salary / 1e6).toFixed(2)}M × ${years} on the table for ${player.name}. ` +
+      `${agent.name} says his client will weigh it${rivals > 0 ? ` against ${rivals} other club${rivals > 1 ? 's' : ''}` : ''} and get back to you.`,
+      { playerId, teamId: this.userTeamId as string }
+    )
+    return { ok: true, message: `Offer tabled — ${player.name}'s camp decides by free-agency day ${decideDay}.` }
+  }
+
+  /** Resolve any standing offers whose decision day has arrived: the player
+   *  signs with you, gets sniped by a rival, or passes for more. Runs each
+   *  free-agency day BEFORE the AI market so your offers get first look. */
+  private resolveFaOffers(): void {
+    const os = this.offseason
+    if (os?.stage !== 'freeAgency') { this.faPendingOffers = []; return }
+    const due = this.faPendingOffers.filter((o) => o.decideDay <= os.faDay)
+    this.faPendingOffers = this.faPendingOffers.filter((o) => o.decideDay > os.faDay)
+    for (const offer of due) {
+      const pid = offer.playerId
+      if (!this.faPool.some((f) => (f as string) === pid)) {
+        const gone = this.data.players.get(asPlayerId(pid))
+        this.pushNews(
+          'contract',
+          `Missed on ${gone?.name ?? 'a target'}`,
+          `While your offer sat on his desk, ${gone?.name ?? 'he'} signed elsewhere. The market doesn't wait.`,
+          gone ? { playerId: pid } : {}
+        )
+        continue
+      }
+      const player = this.resolve(asPlayerId(pid))
+      const ask = askTerms(player, this.year)
+      const rng = this.rngFor(8023, os.faDay, Career.pidNum(pid))
+      const acceptable = offerAcceptable(player, { salary: offer.salary, years: offer.years }, ask, rng)
+      const rivals = this.faRivalClubs(player).length
+      const generosity = offer.salary / Math.max(1, ask.salary)
+      // Even a fair offer can lose to a hot market — unless you paid up.
+      const sniped = acceptable && rng.chance(Math.max(0, Math.min(0.5, rivals * 0.07 - (generosity - 1) * 0.6)))
+      if (acceptable && !sniped) {
+        const capUsedNow = this.userTeam.roster.reduce(
+          (s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+        if (capUsedNow + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
+          this.pushNews('contract', `${player.name} would sign — but the cap won't fit it now`,
+            `${player.name} was ready to take your offer, but your cap sheet no longer fits the deal, so it lapses.`, { playerId: pid })
+          continue
+        }
+        signPlayer({ team: this.userTeam, player, salary: offer.salary, years: offer.years, year: this.year, players: this.data.players })
+        this.faPool = this.faPool.filter((f) => (f as string) !== pid)
+        this.lockerArrival(this.userTeamId, asPlayerId(pid))
+        repairLines(this.userTeam, this.data.players)
+        recordAcquisition(this.chronicle, { playerId: pid, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
+        this.faShortlist.delete(pid)
+        this.pushNews('contract', `${player.name} signs with you!`,
+          `He took your offer — $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years. Welcome aboard.`,
+          { playerId: pid, teamId: this.userTeamId as string })
+      } else {
+        const reason = sniped
+          ? 'a rival matched your money and he preferred their fit'
+          : `he's holding out for more — around $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
+        this.pushNews('contract', `${player.name} passes on your offer`,
+          `${player.name}'s camp came back: ${reason}. He's still on the market — sweeten it or move on.`,
+          { playerId: pid, teamId: this.userTeamId as string })
+      }
+    }
+  }
+
   getFaHub(): FaHubView {
     const os = this.offseason
     const faDay = os?.faDay ?? 0
@@ -7949,8 +8046,10 @@ export class Career {
       const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
       const session = this.negotiations.get(p.id as string)
       const rivals = this.faRivalClubs(p, aiCtx)
+      const pending = this.faPendingOffers.find((o) => o.playerId === (p.id as string))
       return {
         ...badge(p),
+        ...(pending ? { pendingOffer: { salary: pending.salary, years: pending.years, decidesInDays: Math.max(0, pending.decideDay - faDay) } } : {}),
         askSalary: ask.salary,
         askYears: ask.years,
         decidesInDays: Math.max(0, decideDay - faDay),
@@ -7969,6 +8068,7 @@ export class Career {
       rows,
       faDay,
       capSpace: this.userTeam.finances.salaryCap - capUsedNow - this.userDeadCap,
+      windowOpen: os?.stage === 'freeAgency',
     }
   }
 
@@ -13133,6 +13233,7 @@ export class Career {
         ([k, v]) => [k, structuredClone(v)] as [string, NegotiationState]
       ),
       faShortlist: [...this.faShortlist],
+      faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -13289,6 +13390,7 @@ export class Career {
       )
     }
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
+    if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

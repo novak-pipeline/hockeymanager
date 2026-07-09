@@ -75,6 +75,14 @@ export function FreeAgentMarketScreen(): JSX.Element {
     else if (r.type === 'error') toast(r.message, 'error')
   }
 
+  const tableOffer = async (playerId: string, salary: number, years: number): Promise<void> => {
+    const r = await client.submitFaOffer(playerId, salary, years)
+    if (r.type === 'faOfferResult') { toast(r.message, r.ok ? 'success' : 'error'); refetchHub() }
+    else if (r.type === 'error') toast(r.message, 'error')
+  }
+
+  const offseasonFa = hub?.windowOpen ?? false
+
   return (
     <section className="stack">
       <ScreenHeader title="Free Agents">
@@ -187,13 +195,29 @@ export function FreeAgentMarketScreen(): JSX.Element {
                             : <span className="chip" style={{ fontSize: 10 }}>~{fa.decidesInDays}d</span>}
                       </td>
                       <td>
-                        <button
-                          className="btn btn-primary"
-                          style={{ padding: '3px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
-                          onClick={() => nav.navigate('negotiation', { playerId: fa.playerId })}
-                        >
-                          {fa.inTalks ? 'Resume talks →' : 'Open talks →'}
-                        </button>
+                        <div className="stack" style={{ gap: 3, alignItems: 'flex-end' }}>
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '3px 12px', fontSize: 12, whiteSpace: 'nowrap' }}
+                            onClick={() => nav.navigate('negotiation', { playerId: fa.playerId })}
+                          >
+                            {fa.inTalks ? 'Resume talks →' : 'Open talks →'}
+                          </button>
+                          {fa.pendingOffer ? (
+                            <span className="chip chip-violet" style={{ fontSize: 9, whiteSpace: 'nowrap' }} title="You've tabled a standing offer — his camp is deciding">
+                              ⏳ offered {fmtMoney(fa.pendingOffer.salary)}×{fa.pendingOffer.years} · ~{fa.pendingOffer.decidesInDays}d
+                            </span>
+                          ) : offseasonFa ? (
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '2px 10px', fontSize: 10, whiteSpace: 'nowrap' }}
+                              title="Table a standing offer at his ask — he'll weigh it against rivals and get back to you"
+                              onClick={() => void tableOffer(fa.playerId, fa.askSalary, fa.askYears)}
+                            >
+                              Table offer (his ask)
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   )

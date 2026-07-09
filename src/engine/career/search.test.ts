@@ -827,3 +827,40 @@ describe('FA agent reads (DEPTH 2b slice)', () => {
     expect(off.text.toLowerCase()).toContain('not on the open market')
   })
 })
+
+describe('FA standing offers resolve over days (#167)', () => {
+  it('a tabled offer does not instant-sign; it resolves on a later day', () => {
+    let c: Career | null = null
+    for (const seed of [616, 7, 42, 99, 313, 55, 88, 2024]) {
+      const data = generateLeague({ seed })
+      const career = new Career(data, seed, data.league.teams[0]!)
+      career.startAtOffseason()
+      let g = 0
+      while (career.getOffseason()?.stage !== 'freeAgency' && g++ < 80) {
+        if (career.getDashboard().draftPending) career.autoDraft()
+        else career.advanceOffseason()
+      }
+      if (career.getOffseason()?.stage === 'freeAgency' && career.getFaHub().rows.length > 0) { c = career; break }
+    }
+    expect(c).not.toBeNull()
+    const hub = c!.getFaHub()
+    expect(hub.windowOpen).toBe(true)
+    const target = hub.rows[0]!
+    // Overpay so acceptance is near-certain.
+    const res = c!.submitFaOffer(target.playerId, Math.round(target.askSalary * 1.3), target.askYears)
+    expect(res.ok).toBe(true)
+    // NOT signed on the spot — a standing offer is now pending.
+    const rowAfter = c!.getFaHub().rows.find((r) => r.playerId === target.playerId)
+    expect(rowAfter?.pendingOffer).toBeTruthy()
+    // Advance the market until his camp decides.
+    let g = 0
+    let resolved = false
+    while (c!.getOffseason()?.stage === 'freeAgency' && g++ < 10) {
+      c!.advanceOffseason()
+      if (!c!.getFaHub().rows.find((r) => r.playerId === target.playerId)?.pendingOffer) { resolved = true; break }
+    }
+    expect(resolved).toBe(true)
+    // A resolution landed in the inbox (signed with you, or passed/missed).
+    expect(c!.getInbox().items.some((n) => n.headline.includes(target.name))).toBe(true)
+  })
+})

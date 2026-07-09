@@ -184,6 +184,10 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
     case 'askFaAgent':
       return { id: req.id, type: 'agentRead', text: must().askFaAgent(req.playerId).text }
+    case 'submitFaOffer': {
+      const r = must().submitFaOffer(req.playerId, req.salary, req.years)
+      return { id: req.id, type: 'faOfferResult', ok: r.ok, message: r.message, faHub: must().getFaHub() }
+    }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

@@ -296,6 +296,10 @@ export class SimClient {
     return this.send({ type: 'askFaAgent', playerId })
   }
 
+  submitFaOffer(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
+    return this.send({ type: 'submitFaOffer', playerId, salary, years })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

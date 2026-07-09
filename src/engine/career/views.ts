@@ -1404,12 +1404,17 @@ export interface FaHubRowView extends PlayerBadge {
   /** Rival clubs known to be circling (abbreviations) — the competition you're
    *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
   rivals?: string[]
+  /** #167: a standing offer you've tabled him, awaiting his decision. */
+  pendingOffer?: { salary: number; years: number; decidesInDays: number }
 }
 
 export interface FaHubView {
   rows: FaHubRowView[]
   faDay: number
   capSpace: number
+  /** True during the offseason free-agency window, where you can table standing
+   *  offers (they resolve over days). Outside it, sign directly via talks. */
+  windowOpen?: boolean
 }
 
 /* ───────────────────── contract negotiation (DEPTH 1) ───────────────────── */
