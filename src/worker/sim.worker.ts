@@ -182,6 +182,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getFaHub':
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
+    case 'askFaAgent':
+      return { id: req.id, type: 'agentRead', text: must().askFaAgent(req.playerId).text }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

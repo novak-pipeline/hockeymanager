@@ -7852,27 +7852,12 @@ export class Career {
   }
 
   /** The market, triaged: everything a GM filters and decides by. */
-  getFaHub(): FaHubView {
-    const os = this.offseason
-    const faDay = os?.faDay ?? 0
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
-
-    // The honest clock: aiFreeAgencyDay signs rank r on effective day 1+r/3,
-    // and the AI runs 2 days behind the user (the head start).
-    const pool = this.faPool
-      .map((id) => this.resolve(id))
-      .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
-
-    // Precompute rival-club appetite ONCE: each AI club's positional need +
-    // cap room. A club "circles" a FA if it's thin at his group, can fit the
-    // ask, and a deterministic lean lands (bigger names draw more suitors).
-    const rivalTargets: Record<'F' | 'D' | 'G', number> = { F: 13, D: 7, G: 2 }
+  /** Each NHL rival club's positional depth + cap room — the inputs for who
+   *  circles a free agent. league.teams IS the NHL set (AHL/junior/European
+   *  teams live in competitions), so membership is the reliable filter. */
+  private faAiCtx(): Array<{ abbr: string; idNum: number; capRoom: number; counts: Record<'F' | 'D' | 'G', number> }> {
     const grpOf = (p: Player): 'F' | 'D' | 'G' => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
-    // league.teams IS the NHL club set (AHL/junior/European teams live in
-    // competitions, not here) — so membership, not the context-dependent
-    // `tier` field, is the reliable "is an NHL rival" signal.
-    const aiCtx = this.data.league.teams
+    return this.data.league.teams
       .filter((tid) => tid !== this.userTeamId)
       .map((tid) => this.data.teams.get(tid))
       .filter((t): t is NonNullable<typeof t> => !!t)
@@ -7885,23 +7870,77 @@ export class Career {
         }
         return { abbr: t.abbreviation, idNum: Career.pidNum(t.id as string), capRoom, counts }
       })
-    const rivalsFor = (p: Player): string[] => {
-      const g = grpOf(p)
-      const ovr = ratedOverall(p)
-      // Suitor appetite scales with talent (out of 12): a star draws most of the
-      // league, a depth body a handful. Cap room only ORDERS the list (clubs
-      // with room first) — it can't gate, because generated AI payrolls aren't
-      // yet cap-realistic (#176), and interest shouldn't hinge on broken numbers.
-      const appetite = ovr >= 80 ? 7 : ovr >= 74 ? 4 : ovr >= 68 ? 3 : 2
-      return aiCtx
-        .filter((c) => (Career.pidNum(p.id as string) ^ c.idNum) % 12 < appetite)
-        .sort(
-          (a, b) =>
-            (a.counts[g] >= rivalTargets[g] ? 1 : 0) - (b.counts[g] >= rivalTargets[g] ? 1 : 0) ||
-            b.capRoom - a.capRoom
-        )
-        .map((c) => c.abbr)
+  }
+
+  /** The rival clubs circling a free agent (abbreviations). Suitor appetite
+   *  scales with talent — a star draws most of the league, a depth body a
+   *  handful; cap room only orders the list (AI payrolls aren't yet cap-real, #176). */
+  private faRivalClubs(p: Player, aiCtx = this.faAiCtx()): string[] {
+    const rivalTargets: Record<'F' | 'D' | 'G', number> = { F: 13, D: 7, G: 2 }
+    const g: 'F' | 'D' | 'G' = p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
+    const ovr = ratedOverall(p)
+    const appetite = ovr >= 80 ? 7 : ovr >= 74 ? 4 : ovr >= 68 ? 3 : 2 // out of 12
+    return aiCtx
+      .filter((c) => (Career.pidNum(p.id as string) ^ c.idNum) % 12 < appetite)
+      .sort(
+        (a, b) =>
+          (a.counts[g] >= rivalTargets[g] ? 1 : 0) - (b.counts[g] >= rivalTargets[g] ? 1 : 0) ||
+          b.capRoom - a.capRoom
+      )
+      .map((c) => c.abbr)
+  }
+
+  /** Ask a free agent's agent what the market looks like. The agent talks about
+   *  60% of the time (deterministic per player + market day) and plays it close
+   *  the rest — you can't always get a straight answer. Read-only intel. */
+  askFaAgent(playerId: string): { text: string } {
+    if (!this.faPool.some((f) => (f as string) === playerId)) {
+      return { text: "He's not on the open market." }
     }
+    const p = this.resolve(asPlayerId(playerId))
+    const agent = agentFor(p)
+    const faDay = this.offseason?.faDay ?? this.currentDay
+    // Deterministic "will he talk?" — same player + market day = same answer.
+    const rng = this.rngFor(8021, faDay, Career.pidNum(playerId))
+    if (rng.chance(0.4)) {
+      const deflections = [
+        `${agent.name} plays it close: "My client's talking to a few people. I'm not going to tell you who — that's how this works."`,
+        `${agent.name} smiles: "You know I can't get into who else has called. Put your best number on the table and we'll talk."`,
+        `${agent.name} won't bite: "There's interest. Real interest. That's all you're getting from me today."`,
+      ]
+      return { text: rng.pick(deflections) }
+    }
+    const rivals = this.faRivalClubs(p)
+    const { interest } = this.faInterestFor(p)
+    const leverage =
+      interest === 'keen'
+        ? 'Between us, he likes your room — a fair offer gets it done.'
+        : interest === 'warm'
+          ? "He's listening, but the terms have to respect the market."
+          : "I'll be honest, he's leaning elsewhere — you'd have to overpay to turn his head."
+    if (rivals.length === 0) {
+      return { text: `${agent.name}: "Quiet so far — nobody else is really pushing. ${leverage}"` }
+    }
+    const shown = rivals.slice(0, 4).join(', ')
+    const more = rivals.length > 4 ? ` and ${rivals.length - 4} more` : ''
+    return {
+      text: `${agent.name}, off the record: "${rivals.length} club${rivals.length > 1 ? 's have' : ' has'} called — ${shown}${more}. ${leverage}"`,
+    }
+  }
+
+  getFaHub(): FaHubView {
+    const os = this.offseason
+    const faDay = os?.faDay ?? 0
+    const capUsedNow = this.userTeam.roster.reduce(
+      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+
+    // The honest clock: aiFreeAgencyDay signs rank r on effective day 1+r/3,
+    // and the AI runs 2 days behind the user (the head start).
+    const pool = this.faPool
+      .map((id) => this.resolve(id))
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
+
+    const aiCtx = this.faAiCtx()
 
     const rows = pool.map((p, rank) => {
       const ask = askTerms(p, this.year)
@@ -7909,7 +7948,7 @@ export class Career {
       const { interest, note } = this.faInterestFor(p)
       const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
       const session = this.negotiations.get(p.id as string)
-      const rivals = rivalsFor(p)
+      const rivals = this.faRivalClubs(p, aiCtx)
       return {
         ...badge(p),
         askSalary: ask.salary,

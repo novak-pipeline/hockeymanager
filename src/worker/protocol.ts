@@ -223,6 +223,7 @@ export type WorkerRequestBody =
   | { type: 'submitNegotiationOffer'; playerId: string; offer: ContractOffer }
   | { type: 'getFaHub' }
   | { type: 'toggleFaShortlist'; playerId: string }
+  | { type: 'askFaAgent'; playerId: string }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -490,6 +491,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Result of shopping a player: how many offers came in + a summary line. */
   | { type: 'shopResult'; count: number; message: string }
+  /** A free agent's agent's read on the market (may deflect). */
+  | { type: 'agentRead'; text: string }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */

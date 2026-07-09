@@ -69,6 +69,12 @@ export function FreeAgentMarketScreen(): JSX.Element {
     else refetchHub()
   }
 
+  const askAgent = async (playerId: string): Promise<void> => {
+    const r = await client.askFaAgent(playerId)
+    if (r.type === 'agentRead') toast(r.text, 'info')
+    else if (r.type === 'error') toast(r.message, 'error')
+  }
+
   return (
     <section className="stack">
       <ScreenHeader title="Free Agents">
@@ -153,7 +159,16 @@ export function FreeAgentMarketScreen(): JSX.Element {
                         {fmtMoney(fa.askSalary)} × {fa.askYears}yr
                         {capTight && <div style={{ color: 'var(--danger)', fontSize: 10 }}>over your cap</div>}
                       </td>
-                      <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{fa.agentName}</td>
+                      <td style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                        <div className="muted">{fa.agentName}</div>
+                        <button
+                          onClick={() => void askAgent(fa.playerId)}
+                          title="Ask his agent what the market looks like (he won't always say)"
+                          style={{ background: 'none', border: 'none', padding: 0, marginTop: 1, cursor: 'pointer', fontSize: 10, color: 'var(--accent)' }}
+                        >
+                          ask the market →
+                        </button>
+                      </td>
                       <td style={{ fontSize: 11.5, maxWidth: 260 }}>
                         <span style={{ color: im.color, fontWeight: 700 }}>{im.label}</span>
                         <span className="muted" style={{ marginLeft: 6 }} title={fa.wants}>{fa.interestNote}</span>

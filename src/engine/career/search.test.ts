@@ -806,3 +806,24 @@ describe('trade counter-offers (DEPTH 3)', () => {
     expect(forHim2.length).toBe(again.count)
   })
 })
+
+describe('FA agent reads (DEPTH 2b slice)', () => {
+  it('asking an agent returns a deterministic read that either reveals or deflects', () => {
+    const data = generateLeague({ seed: 616 })
+    const c = new Career(data, 616, data.league.teams[0])
+    c.startAtOffseason()
+    for (let i = 0; i < 40; i++) { if (c.getDashboard().phase !== 'offseason') break; c.advanceOffseason() }
+    const hub = c.getFaHub()
+    expect(hub.rows.length).toBeGreaterThan(0)
+    const pid = hub.rows[0]!.playerId
+    const a = c.askFaAgent(pid)
+    const b = c.askFaAgent(pid)
+    expect(a.text.length).toBeGreaterThan(10)
+    expect(a.text).toBe(b.text) // deterministic per player + market day
+    // Either a real read (clubs / quiet) or an honest deflection.
+    expect(/club|Quiet|close|can't|interest/i.test(a.text)).toBe(true)
+    // A player not on the market gets a clear "not available".
+    const off = c.askFaAgent('nope-999')
+    expect(off.text.toLowerCase()).toContain('not on the open market')
+  })
+})

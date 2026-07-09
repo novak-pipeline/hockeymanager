@@ -292,6 +292,10 @@ export class SimClient {
     return this.send({ type: 'toggleFaShortlist', playerId })
   }
 
+  askFaAgent(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askFaAgent', playerId })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }
