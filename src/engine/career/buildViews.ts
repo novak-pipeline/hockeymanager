@@ -364,6 +364,8 @@ export function buildSquadView(
         waiverRequired: requiresWaivers(p),
         gameRatingForm: formString(ratings),
         avgRating: seasonAvgRating(ratings),
+        ...(p.squadStatus ? { squadStatus: p.squadStatus } : {}),
+        ...(p.tradeStatus ? { tradeStatus: p.tradeStatus } : {}),
       }
     })
     .sort(

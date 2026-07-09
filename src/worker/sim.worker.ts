@@ -200,6 +200,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().submitOfferSheet(req.playerId, req.salary, req.years)
       return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, pending: r.pending, message: r.message, board: must().getRfaBoard() }
     }
+    case 'setSquadStatus': {
+      must().setSquadStatus(req.playerId, req.status)
+      return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
+    }
+    case 'setTradeStatus': {
+      must().setTradeStatus(req.playerId, req.status)
+      return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
+    }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

@@ -225,11 +225,41 @@ export interface Player {
   rightsTeamId?: TeamId
 
   /**
+   * #188: the GM's declared role for this player — an EHM-style squad status. It
+   * sets an expectation the club is promising to honour: a "key player" iced and
+   * used like one, a "prospect" given patience. The coach's lineup weights it and
+   * a mismatch (a key man buried, a prospect rushed) nudges morale. GM-set only;
+   * absent = unassigned. Persisted with the player.
+   */
+  squadStatus?: SquadStatus
+  /**
+   * #188: the GM's trade posture for this player — untouchable, available (open
+   * to offers), or actively listed (shopped on the block). Feeds the trade block
+   * and AI interest. Absent = default (not on the block).
+   */
+  tradeStatus?: TradeStatus
+
+  /**
    * Real season-by-season career history imported from the source DB. Newest
    * first. Absent on fictional players. Display-only — the sim never reads it.
    */
   careerHistory?: CareerSeasonRecord[]
 }
+
+/** #188: the GM's declared role for a player (EHM "squad status"). */
+export type SquadStatus =
+  | 'keyPlayer'    // franchise/top — expects star minutes and every-night deployment
+  | 'coreStarter'  // core regular — a nightly top-six / top-four fixture
+  | 'rotation'     // depth — dresses regularly in a smaller role
+  | 'topProspect'  // hot prospect for the future — protected, on an accelerated track
+  | 'prospect'     // young player, still developing — patience expected (AHL is fine)
+  | 'surplus'      // expendable — no promise; free to move on
+
+/** #188: the GM's trade posture for a player. */
+export type TradeStatus =
+  | 'untouchable'  // not for sale at any price
+  | 'available'    // open to the right offer
+  | 'listed'       // actively shopped on the block
 
 /** One historical season row from the source DB (skater + goalie fields). */
 export interface CareerSeasonRecord {

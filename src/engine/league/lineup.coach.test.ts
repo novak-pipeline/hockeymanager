@@ -14,7 +14,7 @@ import { generateLeague } from '@data/generate'
 import { Rng } from '@engine/shared/rng'
 import { overall } from '@engine/ratings/composites'
 import type { StaffMember } from '@engine/league/staff'
-import { coachSetLineup, coachAdjustedScore, coachFormMoraleConditionAdj } from './lineup'
+import { coachSetLineup, coachAdjustedScore, coachFormMoraleConditionAdj, squadStatusAdj } from './lineup'
 import type { Player } from '@domain'
 
 /* ─────────────────────────── helpers ─────────────────────────── */
@@ -329,5 +329,31 @@ describe('coachSetLineup — form / morale / condition', () => {
     // The poor-pivot playmaker plays the wing, not centre.
     expect(wingIds).toContain(playmaker.id as string)
     expect(centreIds).not.toContain(playmaker.id as string)
+  })
+})
+
+describe('squadStatusAdj — #188 GM role directive', () => {
+  const bare = (status?: Player['squadStatus']): Player => ({ squadStatus: status } as unknown as Player)
+
+  it('is exactly zero when unassigned (byte-identical without a status)', () => {
+    expect(squadStatusAdj(bare(undefined))).toBe(0)
+    expect(squadStatusAdj(bare('rotation'))).toBe(0)
+    expect(squadStatusAdj(bare('prospect'))).toBe(0)
+    expect(squadStatusAdj(bare('topProspect'))).toBe(0)
+  })
+
+  it('lifts a declared key player and sinks a declared surplus', () => {
+    expect(squadStatusAdj(bare('keyPlayer'))).toBeGreaterThan(0)
+    expect(squadStatusAdj(bare('coreStarter'))).toBeGreaterThan(0)
+    expect(squadStatusAdj(bare('surplus'))).toBeLessThan(0)
+    expect(squadStatusAdj(bare('keyPlayer'))).toBeGreaterThan(squadStatusAdj(bare('coreStarter')))
+  })
+
+  it('a "key player" directive flows into the coach score', () => {
+    const p = makeRoster(21).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 75, judgment: 80 })
+    const plain = coachAdjustedScore({ ...p, squadStatus: undefined } as Player, coach)
+    const keyed = coachAdjustedScore({ ...p, squadStatus: 'keyPlayer' } as Player, coach)
+    expect(keyed).toBeGreaterThan(plain)
   })
 })

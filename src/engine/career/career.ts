@@ -32,6 +32,8 @@ import {
   type PlayoffsState,
   type Position,
   type ScheduledGame,
+  type SquadStatus,
+  type TradeStatus,
   type SeriesGameResult,
   type Standing,
   type TeamId,
@@ -645,6 +647,15 @@ function freshStanding(teamId: TeamId): Standing {
 // deeper backlog stays readable.
 const NEWS_LIMIT = 600
 const ROUND_ROBINS = 4
+/** #188: readable label for each declared squad status (used in role grievances). */
+const SQUAD_STATUS_LABEL: Record<SquadStatus, string> = {
+  keyPlayer: 'key player',
+  coreStarter: 'core starter',
+  rotation: 'rotation regular',
+  topProspect: 'top prospect',
+  prospect: 'developing prospect',
+  surplus: 'surplus',
+}
 const DRAFT_ROUNDS = 7
 /** Floor for the prospect board; the actual class scales to cover all 7 rounds
  *  of every team (+ a margin of undrafted prospects). See draft-class generation. */
@@ -3653,6 +3664,8 @@ export class Career {
         const p = byId.get(t.playerId)
         if (p) p.fatigue = Math.max(0, Math.min(100, p.fatigue + t.fatigueDelta))
       }
+      // #188: honour (or break) the promises implied by each player's status.
+      this.tickSquadPromises()
     }
     // LW6: anniversary callbacks — the world remembers its own history. At most
     // one per day, exact-day matches only, and only your club's durable moments.
@@ -10077,6 +10090,25 @@ export class Career {
       }
     }
 
+    // #188: GM role/trade-status + leadership read. "Own" = anyone in the org
+    // (NHL roster + AHL affiliate) or a rights-held prospect the club controls —
+    // those are the players the GM can set expectations for.
+    const ownOrg = this.ownOrgIds().has(pid as string)
+    const rightsHeld = playerForLeague?.rightsTeamId === this.userTeamId
+    profile.isOwn = ownOrg || rightsHeld
+    if (playerForLeague) {
+      if (playerForLeague.squadStatus) {
+        profile.squadStatus = playerForLeague.squadStatus
+        profile.squadStatusLabel = SQUAD_STATUS_LABEL[playerForLeague.squadStatus]
+      }
+      if (playerForLeague.tradeStatus) profile.tradeStatus = playerForLeague.tradeStatus
+      // Leadership read for captaincy decisions (own players). Captaincy letters
+      // land with #189; until then this surfaces the raw leadership rating.
+      if (profile.isOwn && playerForLeague.leadership !== undefined) {
+        profile.leadershipRating = playerForLeague.leadership
+      }
+    }
+
     return profile
   }
 
@@ -13102,6 +13134,75 @@ export class Career {
     const scaled: Record<string, number> = {}
     for (const [k, v] of Object.entries(attributeBias)) scaled[k] = (v as number) * mult
     return scaled
+  }
+
+  /** #188: declare a player's squad status (his role/promise). null clears it. */
+  setSquadStatus(playerId: string, status: SquadStatus | null): { ok: boolean } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false }
+    if (status === null) delete p.squadStatus
+    else p.squadStatus = status
+    return { ok: true }
+  }
+
+  /** #188: set a player's trade posture (untouchable / available / listed). */
+  setTradeStatus(playerId: string, status: TradeStatus | null): { ok: boolean } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false }
+    if (status === null) delete p.tradeStatus
+    else p.tradeStatus = status
+    return { ok: true }
+  }
+
+  /**
+   * #188: keep the promises implied by squad status. Once a week, compare each of
+   * your players' declared roles against how the club is actually using them and
+   * nudge morale — a "key player" buried in the AHL or scratched sours; a
+   * "prospect" developing patiently is content. Broken promises to core men can
+   * spill into the room (surfaced as the odd inbox grumble). Gentle by design.
+   */
+  private tickSquadPromises(): void {
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const scratched = new Set(this.practiceState.scratched)
+    for (const id of this.userTeam.roster.concat(ahl?.roster ?? [])) {
+      const p = this.data.players.get(id)
+      if (!p?.squadStatus) continue
+      const onNhl = this.userTeam.roster.includes(id)
+      const isScratched = scratched.has(id as string)
+      let delta = 0
+      let grievance = ''
+      switch (p.squadStatus) {
+        case 'keyPlayer':
+          if (!onNhl) { delta = -4; grievance = 'a franchise player left in the minors' }
+          else if (isScratched) { delta = -3; grievance = 'a key man in the press box' }
+          else delta = 1
+          break
+        case 'coreStarter':
+          if (!onNhl) { delta = -3; grievance = 'a core player buried on the farm' }
+          else if (isScratched) delta = -1.5
+          else delta = 0.5
+          break
+        case 'rotation':
+          if (!onNhl) delta = -1.5
+          break
+        case 'topProspect':
+          delta = onNhl ? 1 : 0.5 // patient track — a look up top is a boost
+          break
+        case 'prospect':
+          delta = 0.5 // developing as promised
+          break
+        case 'surplus':
+          delta = 0
+          break
+      }
+      if (delta !== 0) p.morale = Math.max(0, Math.min(100, p.morale + delta))
+      // A badly-broken promise to a core/key man occasionally reaches your desk.
+      if (grievance && p.morale < 45 && this.rngFor(9611, this.currentDay, Career.pidNum(id as string)).chance(0.15)) {
+        this.pushNews('contract', `${p.name} unhappy with his role`,
+          `Word from the room: ${p.name} feels he's ${grievance}. You told him he was a ${SQUAD_STATUS_LABEL[p.squadStatus]} — live up to it or move him.`,
+          { playerId: id as string, teamId: this.userTeamId as string })
+      }
+    }
   }
 
   getPractice(): PracticeView {

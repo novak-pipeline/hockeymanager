@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
+import type { SquadStatus } from '../../domain/player'
 import { PlayerLink } from '../components/NavContext'
 import { OverallStars } from '../components/Stars'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
@@ -23,6 +24,16 @@ const POS_TABS: { label: string; value: PosFilter }[] = [
   { label: 'Defence', value: 'D' },
   { label: 'Goalies', value: 'G' },
 ]
+
+/** #188: compact squad-status chip styling (GM's declared role). */
+const SQUAD_STATUS_UI: Record<SquadStatus, { short: string; hint: string; bg: string; fg: string }> = {
+  keyPlayer:   { short: 'KEY',  hint: 'Key Player — franchise cornerstone', bg: 'var(--violet-dim)', fg: 'var(--violet-h)' },
+  coreStarter: { short: 'CORE', hint: 'Core Starter — nightly regular',      bg: 'var(--violet-dim)', fg: 'var(--violet-h)' },
+  rotation:    { short: 'DEPTH',hint: 'Rotation — depth role',               bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+  topProspect: { short: 'HOT',  hint: 'Hot Prospect — protected future',      bg: 'var(--bg3)',        fg: 'var(--accent)' },
+  prospect:    { short: 'PROSP',hint: 'Young Prospect — still developing',    bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+  surplus:     { short: 'SURPL',hint: 'Surplus — expendable',                bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+}
 
 function posGroup(pos: string): PosFilter {
   if (pos === 'G') return 'G'
@@ -469,6 +480,18 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                   <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                                     <PlayerLink playerId={row.playerId} name={row.name} />
+                                    {row.squadStatus && (
+                                      <span className="chip" title={SQUAD_STATUS_UI[row.squadStatus].hint}
+                                        style={{ marginLeft: 2, fontSize: 9, background: SQUAD_STATUS_UI[row.squadStatus].bg, color: SQUAD_STATUS_UI[row.squadStatus].fg, borderColor: 'transparent' }}>
+                                        {SQUAD_STATUS_UI[row.squadStatus].short}
+                                      </span>
+                                    )}
+                                    {row.tradeStatus === 'listed' && (
+                                      <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }} title="On the trade block">BLOCK</span>
+                                    )}
+                                    {row.tradeStatus === 'untouchable' && (
+                                      <span className="chip" style={{ marginLeft: 2, fontSize: 9 }} title="Untouchable">🔒</span>
+                                    )}
                                     {row.contract.noTradeClause && (
                                       <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
                                     )}

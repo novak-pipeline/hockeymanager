@@ -11,6 +11,7 @@ import type {
   WorkerResponse,
 } from './protocol'
 import type { TeamTactics } from '@domain'
+import type { SquadStatus, TradeStatus } from '@domain/player'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 
 /**
@@ -314,6 +315,14 @@ export class SimClient {
 
   submitOfferSheet(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
     return this.send({ type: 'submitOfferSheet', playerId, salary, years })
+  }
+
+  setSquadStatus(playerId: string, status: SquadStatus | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setSquadStatus', playerId, status })
+  }
+
+  setTradeStatus(playerId: string, status: TradeStatus | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setTradeStatus', playerId, status })
   }
 
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {

@@ -382,7 +382,20 @@ export function coachAdjustedScore(p: Player, coach: StaffMember): number {
   }
   const noiseBudget = 6 * (1 - coach.judgment / 100)
   const noise = (lineupStableFloat(p.id as string, 42) * 2 - 1) * noiseBudget
-  return trueOvr + specialtyBonus + noise + coachFormMoraleConditionAdj(p, coach)
+  return trueOvr + specialtyBonus + noise + coachFormMoraleConditionAdj(p, coach) + squadStatusAdj(p)
+}
+
+/** #188: the GM's declared squad status is a directive the coach honours when he
+ *  sets the lineup — a "key player" gets dressed and deployed like one even if a
+ *  touch lower-rated on paper; "surplus" slides down. A modest nudge (never an
+ *  override), neutral when unassigned so it stays byte-identical without a status. */
+export function squadStatusAdj(p: Player): number {
+  switch (p.squadStatus) {
+    case 'keyPlayer': return 4
+    case 'coreStarter': return 2
+    case 'surplus': return -3
+    default: return 0
+  }
 }
 
 /**

@@ -510,6 +510,10 @@ export interface SquadRowView extends PlayerBadge {
   gameRatingForm: string
   /** Season average game rating (0 = no games played). */
   avgRating: number
+  /** #188: the GM's declared squad status (key player, core, prospect, …), when set. */
+  squadStatus?: import('@domain/player').SquadStatus
+  /** #188: the GM's trade posture, when set (untouchable / available / listed). */
+  tradeStatus?: import('@domain/player').TradeStatus
 }
 
 export interface SquadView {
@@ -764,6 +768,26 @@ export interface PlayerProfileView extends PlayerBadge {
   /** Optimism band on the ceiling in stars [lo, hi] — wide for unproven youth,
    *  narrowing to a point as he ages/proves out. */
   potentialBand: { lo: number; hi: number }
+  /**
+   * #188: true when this player is on the user's own NHL club/org — gates the
+   * GM-only role/trade-status controls on the profile.
+   */
+  isOwn: boolean
+  /**
+   * #188: the GM's declared squad status (key player, core, prospect, …) and a
+   * plain-English label for it. Absent = unassigned. Only meaningful/settable for
+   * own players.
+   */
+  squadStatus?: import('@domain/player').SquadStatus
+  squadStatusLabel?: string
+  /** #188: the GM's trade posture — untouchable / available / listed. Absent = default. */
+  tradeStatus?: import('@domain/player').TradeStatus
+  /**
+   * #188: leadership read for captaincy decisions — his leadership rating and
+   * whether he currently wears a letter (C / A). Present for own players.
+   */
+  leadershipRating?: number
+  captaincy?: 'C' | 'A' | null
 }
 
 /** A notable retiree recorded in a club's legends registry. */

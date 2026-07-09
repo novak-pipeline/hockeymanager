@@ -230,6 +230,9 @@ export type WorkerRequestBody =
   | { type: 'submitFaOffer'; playerId: string; salary: number; years: number }
   | { type: 'getRfaBoard' }
   | { type: 'submitOfferSheet'; playerId: string; salary: number; years: number }
+  /** #188: GM sets a player's squad status / trade posture (null clears). */
+  | { type: 'setSquadStatus'; playerId: string; status: import('@domain/player').SquadStatus | null }
+  | { type: 'setTradeStatus'; playerId: string; status: import('@domain/player').TradeStatus | null }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }

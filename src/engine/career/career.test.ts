@@ -2460,3 +2460,48 @@ describe('Career — offer sheets', () => {
     }
   })
 })
+
+describe('#188 squad status / trade posture', () => {
+  it('setSquadStatus surfaces on the profile with a label + isOwn, and clears', () => {
+    const data = generateLeague({ seed: 610 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 610, userId)
+    const ownId = data.teams.get(userId)!.roster[0] as string
+
+    expect(career.setSquadStatus(ownId, 'keyPlayer').ok).toBe(true)
+    let prof = career.getPlayer(ownId)
+    expect(prof.isOwn).toBe(true)
+    expect(prof.squadStatus).toBe('keyPlayer')
+    expect(prof.squadStatusLabel).toBeTruthy()
+
+    // Clearing removes it.
+    career.setSquadStatus(ownId, null)
+    prof = career.getPlayer(ownId)
+    expect(prof.squadStatus).toBeUndefined()
+  })
+
+  it('an opponent player reads isOwn=false', () => {
+    const data = generateLeague({ seed: 611 })
+    const userId = data.league.teams[0]
+    const rivalId = data.league.teams[1]
+    const career = new Career(data, 611, userId)
+    const oppId = data.teams.get(rivalId)!.roster[0] as string
+    expect(career.getPlayer(oppId).isOwn).toBe(false)
+  })
+
+  it('squad status + trade posture survive a snapshot round-trip', () => {
+    const data = generateLeague({ seed: 612 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 612, userId)
+    const ownId = data.teams.get(userId)!.roster[0] as string
+
+    career.setSquadStatus(ownId, 'coreStarter')
+    career.setTradeStatus(ownId, 'untouchable')
+
+    const snap = career.exportSnapshot('s188', '2026-06-10T00:00:00.000Z')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
+    const prof = restored.getPlayer(ownId)
+    expect(prof.squadStatus).toBe('coreStarter')
+    expect(prof.tradeStatus).toBe('untouchable')
+  })
+})

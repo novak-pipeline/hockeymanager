@@ -15,6 +15,7 @@
  */
 import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
+import type { SquadStatus, TradeStatus } from '../../domain/player'
 import type {
   SkaterSeasonLine,
   GoalieSeasonLine,
@@ -85,6 +86,69 @@ function ScoutPlayerButton({ playerId, client }: { playerId: string; client: Ret
         </div>
       )}
     </span>
+  )
+}
+
+/* ── #188: GM role/trade-status control (own players only) ──────────────────────
+ * EHM-style squad status: the GM declares how he sees this player (key man, core,
+ * prospect, surplus …) — a promise the coach's lineup honours and morale tracks —
+ * plus a trade posture (untouchable / available / listed). */
+const SQUAD_STATUS_OPTIONS: { value: SquadStatus; label: string; hint: string }[] = [
+  { value: 'keyPlayer',   label: 'Key Player',    hint: 'Franchise cornerstone — star minutes, iced every night' },
+  { value: 'coreStarter', label: 'Core Starter',  hint: 'Nightly top-six / top-four regular' },
+  { value: 'rotation',    label: 'Rotation',      hint: 'Depth — dresses regularly in a smaller role' },
+  { value: 'topProspect', label: 'Hot Prospect',  hint: 'Protected future piece on an accelerated track' },
+  { value: 'prospect',    label: 'Young Prospect',hint: 'Still developing — patience expected (AHL is fine)' },
+  { value: 'surplus',     label: 'Surplus',       hint: 'Expendable — no promise, free to move on' },
+]
+const TRADE_STATUS_OPTIONS: { value: TradeStatus; label: string }[] = [
+  { value: 'untouchable', label: 'Untouchable' },
+  { value: 'available',   label: 'Available' },
+  { value: 'listed',      label: 'On the block' },
+]
+
+function PlayerRoleControl(
+  { d, client, onChanged }: { d: PlayerProfileView; client: ReturnType<typeof useClient>; onChanged: () => void },
+): JSX.Element | null {
+  const [busy, setBusy] = useState(false)
+  if (!d.isOwn) return null
+
+  async function setSquad(v: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const status = v === '' ? null : (v as SquadStatus)
+      const res = await client.setSquadStatus(d.playerId, status)
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast(status ? `Role set: ${SQUAD_STATUS_OPTIONS.find((o) => o.value === status)?.label}` : 'Role cleared', 'success'); onChanged() }
+    } finally { setBusy(false) }
+  }
+  async function setTrade(v: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const status = v === '' ? null : (v as TradeStatus)
+      const res = await client.setTradeStatus(d.playerId, status)
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast(status ? `Trade status: ${TRADE_STATUS_OPTIONS.find((o) => o.value === status)?.label}` : 'Trade status cleared', 'success'); onChanged() }
+    } finally { setBusy(false) }
+  }
+  const selHint = d.squadStatus ? SQUAD_STATUS_OPTIONS.find((o) => o.value === d.squadStatus)?.hint : undefined
+  return (
+    <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+      <label className="muted small" style={{ fontWeight: 700 }}>Role</label>
+      <select className="select" style={{ fontSize: 12 }} value={d.squadStatus ?? ''} disabled={busy}
+        onChange={(e) => void setSquad(e.target.value)} title={selHint}>
+        <option value="">— Unassigned —</option>
+        {SQUAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value} title={o.hint}>{o.label}</option>)}
+      </select>
+      <label className="muted small" style={{ fontWeight: 700, marginLeft: 'var(--sp-2)' }}>Trade</label>
+      <select className="select" style={{ fontSize: 12 }} value={d.tradeStatus ?? ''} disabled={busy}
+        onChange={(e) => void setTrade(e.target.value)}>
+        <option value="">— Default —</option>
+        {TRADE_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
   )
 }
 
@@ -2255,6 +2319,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
       {/* ── Page header ── */}
       <ScreenHeader title={d.name}>
         <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          <PlayerRoleControl d={d} client={client} onChanged={refetch} />
           {hasPrevNext && (
             <button
               className="btn btn-ghost btn-sm"
