@@ -84,7 +84,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
   const offerSheet = async (playerId: string, salary: number, years: number): Promise<void> => {
     const r = await client.submitOfferSheet(playerId, salary, years)
     if (r.type === 'offerSheetResult') {
-      toast(r.message, r.ok ? 'success' : r.matched ? 'info' : 'error')
+      toast(r.message, r.ok ? (r.pending ? 'info' : 'success') : 'error')
       refetchRfa()
       refetchHub()
     } else if (r.type === 'error') toast(r.message, 'error')
@@ -110,9 +110,9 @@ export function FreeAgentMarketScreen(): JSX.Element {
       {rfa?.windowOpen && rfa.rows.length > 0 && (
         <Panel title={`Restricted free agents — offer-sheet targets (${rfa.rows.length})`}>
           <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-            These men are signed to rights but unsigned to terms. Tender an offer sheet and their
-            club has one choice: match your number, or let him walk and take your draft picks as
-            compensation. Overpay to make the match hurt.
+            These men are signed to rights but unsigned to terms. Tender an offer sheet, the player
+            signs it, and his club then has a <b>7-day window</b> to match your number — or let him
+            walk and take your own draft picks as compensation. Overpay to make the match hurt.
           </p>
           <div className="table-wrap">
             <table className="table">
@@ -155,17 +155,27 @@ export function FreeAgentMarketScreen(): JSX.Element {
                       </td>
                       <td className="small muted">{t.compLabel}</td>
                       <td>
-                        <button
-                          className="btn btn-sm"
-                          title={
-                            capTight
-                              ? 'You may not have the cap room to fit this sheet'
-                              : `Tender ${fmtMoney(t.offerSalary)} × ${t.offerYears}`
-                          }
-                          onClick={() => void offerSheet(t.playerId, t.offerSalary, t.offerYears)}
-                        >
-                          Offer sheet
-                        </button>
+                        {t.pending ? (
+                          <span
+                            className="chip"
+                            title={`Tendered ${fmtMoney(t.pending.salary)} × ${t.pending.years} — awaiting ${t.teamAbbr}'s decision`}
+                            style={{ fontSize: 11, borderColor: 'var(--amber, #d6a056)', color: 'var(--amber, #d6a056)' }}
+                          >
+                            ⏳ {t.pending.daysLeft > 0 ? `${t.pending.daysLeft}d to match` : 'deciding…'}
+                          </span>
+                        ) : (
+                          <button
+                            className="btn btn-sm"
+                            title={
+                              capTight
+                                ? 'You may not have the cap room to fit this sheet'
+                                : `Tender ${fmtMoney(t.offerSalary)} × ${t.offerYears} — the club then gets the 7-day match window`
+                            }
+                            onClick={() => void offerSheet(t.playerId, t.offerSalary, t.offerYears)}
+                          >
+                            Offer sheet
+                          </button>
+                        )}
                       </td>
                     </tr>
                   )

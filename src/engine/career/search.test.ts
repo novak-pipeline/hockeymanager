@@ -936,9 +936,19 @@ describe('RFA offer sheets (#168)', () => {
     const target = board.rows[0]!
     const res = c!.submitOfferSheet(target.playerId, target.offerSalary, target.offerYears)
     expect(res.ok).toBe(true)
-    // Whether matched or walked, he's off the offer-sheet board (now signed to terms).
-    expect(c!.getRfaBoard().rows.some((r) => r.playerId === target.playerId)).toBe(false)
-    // Either way it made the inbox.
+    // #183: not resolved on the spot — the owner gets the match window. The sheet
+    // is now PENDING with a countdown, not instantly matched/walked.
+    expect(res.pending).toBe(true)
+    const pendRow = c!.getRfaBoard().rows.find((r) => r.playerId === target.playerId)
+    expect(pendRow?.pending).toBeTruthy()
+    expect(pendRow!.pending!.daysLeft).toBeGreaterThan(0)
+    // Advance the free-agency market until the window elapses and it resolves.
+    let g = 0
+    while (c!.getOffseason()?.stage === 'freeAgency' && g++ < 12) {
+      c!.advanceOffseason()
+      if (!c!.getRfaBoard().rows.find((r) => r.playerId === target.playerId)?.pending) break
+    }
+    // Either way it made the inbox (matched, or he signed the sheet).
     expect(c!.getInbox().items.some((n) => n.headline.includes(target.name))).toBe(true)
   })
 

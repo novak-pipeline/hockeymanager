@@ -198,7 +198,7 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'rfaBoard', board: must().getRfaBoard() }
     case 'submitOfferSheet': {
       const r = must().submitOfferSheet(req.playerId, req.salary, req.years)
-      return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, message: r.message, board: must().getRfaBoard() }
+      return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, pending: r.pending, message: r.message, board: must().getRfaBoard() }
     }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)

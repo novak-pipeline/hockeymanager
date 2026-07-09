@@ -506,7 +506,7 @@ export type WorkerResponse = { id: number } & (
   /** Rival RFAs available to offer-sheet. */
   | { type: 'rfaBoard'; board: RfaBoardView }
   /** Result of an offer sheet: matched (kept) or landed (yours). */
-  | { type: 'offerSheetResult'; ok: boolean; matched: boolean; message: string; board: RfaBoardView }
+  | { type: 'offerSheetResult'; ok: boolean; matched: boolean; pending?: boolean; message: string; board: RfaBoardView }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok'; note?: string }
   /** Result of an auto-applied coach roster: the player names moved each way. */

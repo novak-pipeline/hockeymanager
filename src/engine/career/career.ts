@@ -709,6 +709,10 @@ export class Career {
    *  on the spot — each decides on his own day, weighing your money against the
    *  rival field. faDay-relative decision day. Offseason FA-window only. */
   private faPendingOffers: Array<{ playerId: string; salary: number; years: number; decideDay: number }> = []
+  /** #183: tendered offer sheets awaiting the owner's decision. Real NHL rule:
+   *  once the RFA signs, his club has a 7-day match window to match or let him
+   *  walk for pick compensation. We model that clock in faDays. */
+  private pendingOfferSheets: Array<{ playerId: string; ownerTeamId: string; salary: number; years: number; decideDay: number }> = []
   /** Interview questions asked, per playerId. Answers are recomputed deterministically. */
   private interviews = new Map<string, string[]>()
   /** Scheduled interviews awaiting their calendar date. */
@@ -5215,6 +5219,8 @@ export class Career {
         // #167: resolve the GM's standing offers first — his money gets first
         // look each day before the AI market moves.
         this.resolveFaOffers()
+        // #183: offer sheets whose 7-day match window has elapsed resolve here.
+        this.resolveOfferSheets()
         // AI clubs work the phones a beat behind the user: released veterans
         // don't all sign within 24 hours, and the GM you play gets the same
         // first-mover window a real front office fights for. (Cadence law —
@@ -5349,7 +5355,11 @@ export class Career {
           for (const c of [...this.arbitrationCases]) this.acceptArbitration(c.playerId)
           for (const c of [...this.arbitrationCases]) this.walkAwayArbitration(c.playerId) // cap-blocked leftovers walk
           this.runWorldFreeAgency()
-          this.faPendingOffers = [] // the window's shut; unresolved offers lapse
+          // The window's shut; unresolved standing offers lapse. Any offer sheet
+          // still pending gets its final verdict now rather than vanishing.
+          this.faPendingOffers = []
+          for (const s of [...this.pendingOfferSheets]) this.resolveOneOfferSheet(s)
+          this.pendingOfferSheets = []
           os.stage = 'preseason'
         }
         return true
@@ -7634,7 +7644,10 @@ export class Career {
    *  compensation you'd owe if his club declines to match. */
   getRfaBoard(): RfaBoardView {
     const os = this.offseason
-    const windowOpen = os?.stage === 'resign' || os?.stage === 'freeAgency'
+    // Real NHL: offer sheets can only be tendered once free agency opens (July 1).
+    const windowOpen = os?.stage === 'freeAgency'
+    const faDay = os?.faDay ?? 0
+    const pendingByPid = new Map(this.pendingOfferSheets.map((s) => [s.playerId, s]))
     const rows: RfaTargetView[] = []
     if (windowOpen) {
       for (const tid of this.data.league.teams) {
@@ -7648,6 +7661,7 @@ export class Career {
           const ask = askTerms(p, this.year)
           const offerSalary = Math.round(ask.salary * 1.2) // overpay to pry him loose
           const offerYears = Math.max(ask.years, 4)
+          const pend = pendingByPid.get(pid as string)
           rows.push({
             ...badge(p, this.fogCtx()),
             teamAbbr: team.abbreviation,
@@ -7657,47 +7671,111 @@ export class Career {
             offerSalary,
             offerYears,
             compLabel: this.compLabel(this.offerSheetComp(offerSalary)),
+            ...(pend ? { pending: { salary: pend.salary, years: pend.years, daysLeft: Math.max(0, pend.decideDay - faDay) } } : {}),
           })
         }
       }
-      rows.sort((a, b) => b.offerSalary - a.offerSalary)
+      rows.sort((a, b) => (b.pending ? 1 : 0) - (a.pending ? 1 : 0) || b.offerSalary - a.offerSalary)
     }
     return { windowOpen, rows: rows.slice(0, 40) }
   }
 
-  /** #168: table an offer sheet to a rival's RFA. His club decides on the spot —
-   *  MATCH (they keep him but you drove up his price) or DECLINE (he's yours and
-   *  you surrender pick compensation). A club that can't fit the AAV must let him
-   *  walk. Offseason-only. */
-  submitOfferSheet(playerId: string, salary: number, years: number): { ok: boolean; matched: boolean; message: string } {
+  /** #183: which of your OWN next-year picks the compensation would require. Real
+   *  rule: offer-sheet compensation must be the offering team's own picks — a
+   *  sheet you can't cover is null and void. Returns the missing rounds (empty =
+   *  you own everything needed). */
+  private offerSheetOwnPicksMissing(salary: number): number[] {
+    const rounds = this.offerSheetComp(salary)
+    const compYear = this.year + 1
+    const missing: number[] = []
+    const held = new Map<number, number>() // round -> count of own picks still held
+    for (const pk of this.picks) {
+      if (pk.year === compYear && (pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)) {
+        held.set(pk.round, (held.get(pk.round) ?? 0) + 1)
+      }
+    }
+    for (const r of rounds) {
+      const n = held.get(r) ?? 0
+      if (n <= 0) missing.push(r)
+      else held.set(r, n - 1)
+    }
+    return missing
+  }
+
+  /** #183: tender an offer sheet to a rival's RFA. Unlike the old instant
+   *  resolution, the owner now gets a real match WINDOW (7 days) to decide —
+   *  the sheet sits pending and resolves on a later day (resolveOfferSheets),
+   *  the same async cadence as a real NHL front office. Offer sheets are a July
+   *  (free-agency stage) move. */
+  private static readonly OFFER_SHEET_WINDOW = 5 // faDays ≈ the real 7-day match window, compressed
+  submitOfferSheet(playerId: string, salary: number, years: number): { ok: boolean; matched: boolean; pending: boolean; message: string } {
     const os = this.offseason
-    if (!(os?.stage === 'resign' || os?.stage === 'freeAgency')) {
-      return { ok: false, matched: false, message: 'Offer sheets are an offseason move.' }
+    if (os?.stage !== 'freeAgency') {
+      return { ok: false, matched: false, pending: false, message: 'Offer sheets can only be tendered once free agency opens.' }
     }
     const id = asPlayerId(playerId)
     const player = this.data.players.get(id)
-    if (!player) return { ok: false, matched: false, message: 'Unknown player.' }
-    if (contractStatus(player) !== 'RFA') return { ok: false, matched: false, message: `${player.name} isn't a restricted free agent.` }
+    if (!player) return { ok: false, matched: false, pending: false, message: 'Unknown player.' }
+    if (contractStatus(player) !== 'RFA') return { ok: false, matched: false, pending: false, message: `${player.name} isn't a restricted free agent.` }
+    if (this.pendingOfferSheets.some((s) => s.playerId === playerId)) {
+      return { ok: false, matched: false, pending: false, message: `You already have an offer sheet out for ${player.name}.` }
+    }
     const owner = [...this.data.teams.values()].find(
       (t) => (t.id as string) !== (this.userTeamId as string) && t.roster.includes(id)
     )
-    if (!owner) return { ok: false, matched: false, message: 'He is not on a rival roster.' }
+    if (!owner) return { ok: false, matched: false, pending: false, message: 'He is not on a rival roster.' }
     const capUsedNow = this.userTeam.roster.reduce((s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
-      return { ok: false, matched: false, message: `That offer doesn't fit under your cap.` }
+      return { ok: false, matched: false, pending: false, message: `That offer doesn't fit under your cap.` }
     }
+    // Own-picks-only rule: you must hold the compensation picks yourself.
+    const missing = this.offerSheetOwnPicksMissing(salary)
+    if (missing.length > 0) {
+      return { ok: false, matched: false, pending: false, message: `Void — you no longer own the ${this.compLabel(missing)} needed as compensation.` }
+    }
+    const decideDay = (os.faDay ?? 0) + Career.OFFER_SHEET_WINDOW
+    this.pendingOfferSheets.push({ playerId, ownerTeamId: owner.id as string, salary, years, decideDay })
+    this.pushNews(
+      'contract',
+      `Offer sheet tendered to ${player.name}`,
+      `${player.name} has signed your $${(salary / 1e6).toFixed(2)}M × ${years} offer sheet. ${owner.name} now have the ` +
+      `7-day match window to match it or let him walk for ${this.compLabel(this.offerSheetComp(salary)) || 'no'} compensation. ` +
+      `The clock is ticking.`,
+      { playerId, teamId: owner.id as string }
+    )
+    return { ok: true, matched: false, pending: true, message: `Offer sheet tendered — ${owner.abbreviation} have the match window to decide.` }
+  }
+
+  /** #183: resolve any offer sheets whose match window has elapsed. Called on the
+   *  free-agency tick. The owner matches (keeps him, you drove the price up) or
+   *  declines (he's yours; your own comp picks go to them). Cap-crunched clubs
+   *  are forced to fold — realistic: non-matches cluster on teams that can't fit. */
+  private resolveOfferSheets(): void {
+    const os = this.offseason
+    if (os?.stage !== 'freeAgency') { this.pendingOfferSheets = []; return }
+    const due = this.pendingOfferSheets.filter((s) => s.decideDay <= os.faDay)
+    this.pendingOfferSheets = this.pendingOfferSheets.filter((s) => s.decideDay > os.faDay)
+    for (const sheet of due) this.resolveOneOfferSheet(sheet)
+  }
+
+  private resolveOneOfferSheet(sheet: { playerId: string; ownerTeamId: string; salary: number; years: number }): void {
+    const { playerId, salary, years } = sheet
+    const id = asPlayerId(playerId)
+    const player = this.data.players.get(id)
+    const owner = this.data.teams.get(asTeamId(sheet.ownerTeamId))
+    if (!player || !owner || !owner.roster.includes(id)) return // player moved/signed; sheet moot
     const ask = askTerms(player, this.year)
     const ovr = ratedOverall(player)
     const overpay = salary / Math.max(1, ask.salary)
     const ownerCapUsed = owner.roster.reduce((s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
     const ownerCanFit = ownerCapUsed - player.contract.salary + salary <= owner.finances.salaryCap
-    const rng = this.rngFor(8024, os.faDay ?? 0, Career.pidNum(playerId))
-    // Valuable players get matched; a steep overpay is likelier to be declined
-    // (they'd rather bank the picks than an albatross); can't-fit clubs must fold.
-    let matchProb = 0.55 + (ovr - 70) * 0.03 - (overpay - 1) * 0.7
-    if (!ownerCanFit) matchProb -= 0.45
-    matchProb = Math.max(0.05, Math.min(0.92, matchProb))
-    let matched = rng.chance(matchProb)
+    const rng = this.rngFor(8024, this.offseason?.faDay ?? 0, Career.pidNum(playerId))
+    // Real-life bias: cap-healthy clubs almost always match a good young player;
+    // a steep overpay or a can't-fit cap sheet is what pries him loose.
+    let matchProb = 0.6 + (ovr - 70) * 0.03 - (overpay - 1) * 0.7
+    if (!ownerCanFit) matchProb -= 0.5
+    matchProb = Math.max(0.05, Math.min(0.94, matchProb))
+    let matched = ownerCanFit && rng.chance(matchProb)
 
     if (matched) {
       try {
@@ -7707,24 +7785,28 @@ export class Career {
         this.pushNews(
           'contract',
           `${owner.abbreviation} match your offer sheet for ${player.name}`,
-          `${owner.name} matched your $${(salary / 1e6).toFixed(2)}M × ${years} offer sheet. ${player.name} stays put — but you made them pay up.`,
+          `${owner.name} used the full window and matched your $${(salary / 1e6).toFixed(2)}M × ${years} offer sheet. ` +
+          `${player.name} stays put — and can't be traded for a year — but you made them pay up.`,
           { playerId, teamId: owner.id as string }
         )
-        return { ok: true, matched: true, message: `${owner.abbreviation} matched — ${player.name} stays, but you drove his price up.` }
+        return
       } catch {
         matched = false // couldn't fit it after all — forced to let him walk
       }
     }
 
-    // Declined (or couldn't match): he joins you; compensation picks go to them.
+    // Declined (or couldn't match): he joins you; your OWN comp picks go to them.
     owner.roster = owner.roster.filter((x) => x !== id)
     repairLines(owner, this.data.players)
     try {
       signPlayer({ team: this.userTeam, player, salary, years, year: this.year, players: this.data.players })
-    } catch (e) {
-      owner.roster.push(id) // roll back the removal
+    } catch {
+      owner.roster.push(id) // roll back — cap changed; treat as a match by default
       repairLines(owner, this.data.players)
-      return { ok: false, matched: false, message: e instanceof Error ? e.message : 'The signing failed.' }
+      this.pushNews('contract', `Offer sheet for ${player.name} lapses`,
+        `Your cap sheet shifted while the window ran and the deal no longer fits — ${player.name} stays with ${owner.abbreviation}.`,
+        { playerId, teamId: owner.id as string })
+      return
     }
     this.lockerArrival(this.userTeamId, id)
     repairLines(this.userTeam, this.data.players)
@@ -7746,7 +7828,6 @@ export class Career {
       `${rounds.length ? `You surrender ${this.compLabel(rounds)} to ${owner.abbreviation}.` : 'No compensation owed.'}`,
       { playerId, teamId: this.userTeamId as string }
     )
-    return { ok: true, matched: false, message: `${player.name} is yours!${rounds.length ? ` You owe ${owner.abbreviation} ${this.compLabel(rounds)}.` : ''}` }
   }
 
   /** Rival GMs tender offer sheets to the user's best RFAs during the re-sign
@@ -13586,6 +13667,7 @@ export class Career {
       ),
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
+      pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -13744,6 +13826,7 @@ export class Career {
     }
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
+    if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

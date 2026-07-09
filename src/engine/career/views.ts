@@ -1444,6 +1444,9 @@ export interface RfaTargetView extends PlayerBadge {
   offerYears: number
   /** Draft-pick compensation you'd surrender if his club declines to match. */
   compLabel: string
+  /** #183: present when you've already tendered a sheet awaiting the owner's
+   *  decision — the terms and how many days remain in the match window. */
+  pending?: { salary: number; years: number; daysLeft: number }
 }
 
 export interface RfaBoardView {
