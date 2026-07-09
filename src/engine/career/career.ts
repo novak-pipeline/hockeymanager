@@ -3423,6 +3423,13 @@ export class Career {
 
   private prepareTeamsForDay(): void {
     this.emergencyRecalls()
+    // Keep every club's cap hit in sync with its actual roster. The stored field
+    // otherwise drifts across the offseason (retirements, departures, ELCs,
+    // graduations) and a stale value corrupts cap checks and the finances screen.
+    for (const team of this.data.teams.values()) {
+      if (team.tier === 'ahl' || team.tier === 'world') continue
+      team.finances.capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    }
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Keep every club's lineup logical: a player who filled in for an injury
     // shouldn't keep the slot once a clearly-better regular is healthy again.
@@ -3862,7 +3869,13 @@ export class Career {
     const userPlaysNext = this.data.league.schedule.some(
       (g) => g.day === nextDay && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
     )
-    if (userPlaysNext) {
+    if (userPlaysNext && this.userLineupShortfall()) {
+      // Before blocking, let the coach do his job: auto-recall AHL depth and
+      // repair the lines (the same fix the GM would otherwise apply by hand).
+      // Only hold the sim if a legal lineup is STILL impossible after that —
+      // a genuine roster hole the GM must solve with a signing or trade.
+      this.emergencyRecalls()
+      repairLines(this.userTeam, this.data.players)
       const shortfall = this.userLineupShortfall()
       if (shortfall) throw new Error(shortfall)
     }
@@ -6727,9 +6740,13 @@ export class Career {
           : `${coachName} has seen enough of ${p.name} on his tryout. A fine camp body, but not worth a contract — let him walk.`
         : d.coachPlan === 'nhl'
           ? `${coachName} was impressed — ${p.name} pushed hard at camp (avg ${rating.toFixed(1)}) and has earned an NHL look. He recommends keeping him up.`
-          : rating >= 7
-            ? `${coachName} liked what he saw from ${p.name}, but feels another year of development in the AHL serves him best.`
-            : `${coachName} feels ${p.name} still has work to do and belongs in the AHL to start the year.`
+          : p.age >= 30
+            // A 30+ pro isn't "developing" — if he's on the outs it's a depth
+            // call or the end of the road, never a trip to junior hockey. #181
+            ? `${coachName} feels ${p.name}'s (${p.age}) camp didn't turn heads. He's a depth option at best now — carry him as insurance or move on.`
+            : rating >= 7
+              ? `${coachName} liked what he saw from ${p.name}, but feels another year of development in the AHL serves him best.`
+              : `${coachName} feels ${p.name} still has work to do and belongs in the AHL to start the year.`
       return {
         playerId: d.playerId,
         name: d.name,
@@ -7027,10 +7044,19 @@ export class Career {
    */
   private waiverProtection(p: Player): number {
     if (p.contract.twoWay !== false) return 0 // two-way → free to move
-    if (p.age < 23) return 0 // young one-way deals are usually still waiver-exempt
-    let bonus = 10
-    if (p.contract.salary >= 4_000_000) bonus += 4
-    if (p.age >= 32) bonus += 3
+    if (p.age < 24) return 0 // young one-way deals are usually still waiver-exempt
+    // Established one-way pros aren't stashed in the AHL over a small ability dip.
+    // Experience, cap commitment and what they bring to the room keep them on the
+    // big club unless they're genuinely finished — so their camp/roster score sits
+    // above a technically-cleaner prospect. Grows with age (harder to move, more
+    // to lose) and salary (a core piece, not a tweener). Deliberately large enough
+    // that a productive vet outranks a youngster who's only better on paper. #181
+    let bonus = 16
+    if (p.age >= 28) bonus += 6
+    if (p.age >= 32) bonus += 8
+    if (p.age >= 35) bonus += 6
+    if (p.contract.salary >= 3_000_000) bonus += 6
+    if (p.contract.salary >= 6_000_000) bonus += 6
     return bonus
   }
 
@@ -12239,10 +12265,17 @@ export class Career {
       n.teamId === userTid || (n.playerId !== undefined && userRoster.has(n.playerId))
     const AMBIENT_NOISE =
       /point streak|point drought|heater hits|\bon fire\b|streak snapped|What went wrong|gap widens|struggling to meet|lagging|Trade talk heats up/i
+    // League-wide roster churn that has nothing to do with your club: prospects
+    // turning pro elsewhere, depth guys heading to Europe or signing minor deals
+    // with other teams. It's Feed/ticker colour, not front-office mail. (Anything
+    // involving YOUR team already returns true above and is kept.)
+    const ROSTER_CHURN =
+      /turns pro|makes the NHL out of camp|heads overseas|signs with|clears waivers|is loaned|reassigned to|re-signings around the league/i
     return this.news.filter((n) => {
       if (n.channel === 'feed') return false // feed posts belong to the Feed
       if (involvesUser(n)) return true
       if ((n.category === 'league' || n.category === 'trade') && AMBIENT_NOISE.test(n.headline)) return false
+      if ((n.category === 'contract' || n.category === 'league' || n.category === 'trade') && ROSTER_CHURN.test(n.headline)) return false
       return true
     })
   }

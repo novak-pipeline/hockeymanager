@@ -3,6 +3,27 @@ import { generateLeague } from '@data/generate'
 import { playerValue } from '@engine/league/trades'
 import { Career } from './career'
 
+describe('inbox curation — league roster churn (#180)', () => {
+  it('drops other-clubs roster moves from the inbox but keeps your own', () => {
+    const data = generateLeague({ seed: 55 })
+    const c = new Career(data, 55, data.league.teams[0]) as any
+    const userTid = data.league.teams[0] as string
+    const rivalTid = data.league.teams[1] as string
+    const push = c.pushNews.bind(c)
+    // League-wide churn about other clubs — Feed/ticker colour, not your mail.
+    push('contract', 'Ivan Prospect turns pro', 'He signs his ELC with a rival.', { teamId: rivalTid })
+    push('contract', 'Depth Guy heads overseas to the KHL', 'Off to Russia.', { teamId: rivalTid })
+    push('contract', 'Journeyman signs with WPG', 'A depth deal elsewhere.', { teamId: rivalTid })
+    // Your own signing MUST still reach the inbox.
+    push('contract', 'You sign a free agent', 'Your club adds a body.', { teamId: userTid })
+    const heads = c.getInbox().items.map((n: { headline: string }) => n.headline)
+    expect(heads).not.toContain('Ivan Prospect turns pro')
+    expect(heads).not.toContain('Depth Guy heads overseas to the KHL')
+    expect(heads).not.toContain('Journeyman signs with WPG')
+    expect(heads).toContain('You sign a free agent')
+  })
+})
+
 describe('searchAll (command palette)', () => {
   const data = generateLeague({ seed: 55 })
   const career = new Career(data, 55, data.league.teams[0])

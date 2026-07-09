@@ -117,10 +117,19 @@ function partnerFixture(opts: { capUsed?: number } = {}): {
   partnerTeam: Team
   partnerPlayers: Map<PlayerId, Player>
 } {
+  // When a target cap hit is requested, distribute it across the roster so the
+  // ACTUAL roster salaries sum to it — evaluateProposal reads the live roster,
+  // not the cached capUsed field (which can go stale in a real career).
+  const per = opts.capUsed === undefined ? undefined : Math.floor(opts.capUsed / 15)
+  const salOpt = (): { salary?: number } => (per === undefined ? {} : { salary: per })
   const roster: Player[] = []
-  for (let i = 0; i < 8; i++) roster.push(makePlayer(`pp-f${i}`, 70, { position: i < 3 ? 'C' : 'W' }))
-  for (let i = 0; i < 5; i++) roster.push(makePlayer(`pp-d${i}`, 68, { position: 'D' }))
-  for (let i = 0; i < 2; i++) roster.push(makePlayer(`pp-g${i}`, 70, { position: 'G' }))
+  for (let i = 0; i < 8; i++) roster.push(makePlayer(`pp-f${i}`, 70, { position: i < 3 ? 'C' : 'W', ...salOpt() }))
+  for (let i = 0; i < 5; i++) roster.push(makePlayer(`pp-d${i}`, 68, { position: 'D', ...salOpt() }))
+  for (let i = 0; i < 2; i++) roster.push(makePlayer(`pp-g${i}`, 70, { position: 'G', ...salOpt() }))
+  if (opts.capUsed !== undefined) {
+    const sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+    roster[roster.length - 1]!.contract.salary += opts.capUsed - sum // absorb rounding
+  }
   const partnerTeam = makeTeam('pt', roster, opts.capUsed === undefined ? {} : { capUsed: opts.capUsed })
   return { partnerTeam, partnerPlayers: new Map(roster.map((p) => [p.id, p])) }
 }
@@ -152,6 +161,23 @@ describe('evaluateProposal', () => {
     })
     expect(result.verdict).toBe('reject')
     expect(result.message).toMatch(/cap/i)
+  })
+
+  it('does NOT reject on cap when the deal SHEDS salary for a near-cap partner', () => {
+    // #178: partner at the cap trades OUT an expensive player and takes back a
+    // cheaper one — net cap DROPS, so cap must never be the reason to reject.
+    const { partnerTeam, partnerPlayers } = partnerFixture({ capUsed: 88_000_000 })
+    const pricey = partnerPlayers.get([...partnerPlayers.keys()][0]!)!
+    pricey.contract.salary = 6_000_000 // the player the partner sends out
+    partnerTeam.finances.capUsed = partnerTeam.roster.reduce((s, id) => s + (partnerPlayers.get(id)?.contract.salary ?? 0), 0)
+    const result = evaluateProposal({
+      give: { players: [makePlayer('cheapie', 82, { salary: 1_000_000 })], picks: [] },
+      receive: { players: [pricey], picks: [] },
+      partnerTeam,
+      partnerPlayers,
+      rng: new Rng(1),
+    })
+    expect(result.message ?? '').not.toMatch(/salary cap/i)
   })
 
   it('relationship eases or hardens the ask (neutral default unchanged)', () => {
@@ -698,11 +724,14 @@ describe('evaluateProposal philosophy bias', () => {
   })
 
   it('retained salary reduces cap hit counted against the partner', () => {
+    // Partner is near the cap: distribute ~85M across the roster so the live
+    // roster sum (what evaluateProposal reads) matches the near-cap intent.
+    const per = Math.floor(85_000_000 / 15)
     const roster: Player[] = []
-    for (let i = 0; i < 8; i++) roster.push(makePlayer(`rs-f${i}`, 70, { position: i < 4 ? 'C' : 'W' }))
-    for (let i = 0; i < 5; i++) roster.push(makePlayer(`rs-d${i}`, 68, { position: 'D' }))
-    for (let i = 0; i < 2; i++) roster.push(makePlayer(`rs-g${i}`, 70, { position: 'G' }))
-    // Partner is near the cap
+    for (let i = 0; i < 8; i++) roster.push(makePlayer(`rs-f${i}`, 70, { position: i < 4 ? 'C' : 'W', salary: per }))
+    for (let i = 0; i < 5; i++) roster.push(makePlayer(`rs-d${i}`, 68, { position: 'D', salary: per }))
+    for (let i = 0; i < 2; i++) roster.push(makePlayer(`rs-g${i}`, 70, { position: 'G', salary: per }))
+    roster[roster.length - 1]!.contract.salary += 85_000_000 - roster.reduce((s, p) => s + p.contract.salary, 0)
     const partnerTeam = makeTeam('rs', roster, { capUsed: 85_000_000 })
     partnerTeam.finances.salaryCap = 88_000_000
     const partnerPlayers = new Map(roster.map((p) => [p.id, p]))

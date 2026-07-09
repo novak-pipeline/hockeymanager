@@ -488,9 +488,14 @@ export function evaluateProposal(args: {
   }
 
   // Cap check: retained salary on incoming players reduces the partner's cap hit.
+  // Compute the partner's cap hit from their ACTUAL roster, not the stored
+  // finances.capUsed — that field goes stale across a season (retirements,
+  // departures, ELCs, call-ups) and a stale-high value wrongly rejects deals
+  // that actually shed salary. Matches how applyTrade recomputes cap.
   const incomingSalary = sumSalary(give.players, give.retainedAmounts)
   const outgoingSalary = sumSalary(receive.players)
-  const capAfter = partnerTeam.finances.capUsed + incomingSalary - outgoingSalary
+  const partnerCapUsed = rosterCapUsed(partnerTeam, partnerPlayers)
+  const capAfter = partnerCapUsed + incomingSalary - outgoingSalary
   if (capAfter > partnerTeam.finances.salaryCap) {
     return {
       verdict: 'reject',
