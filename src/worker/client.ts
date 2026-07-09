@@ -329,6 +329,14 @@ export class SimClient {
     return this.send({ type: 'setSquadStatus', playerId, status })
   }
 
+  getRoleBoard(): Promise<WorkerResponse> {
+    return this.send({ type: 'getRoleBoard' })
+  }
+
+  autoAssignSquadRoles(overwrite = false): Promise<WorkerResponse> {
+    return this.send({ type: 'autoAssignSquadRoles', overwrite })
+  }
+
   setTradeStatus(playerId: string, status: TradeStatus | null): Promise<WorkerResponse> {
     return this.send({ type: 'setTradeStatus', playerId, status })
   }

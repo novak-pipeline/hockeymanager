@@ -476,6 +476,8 @@ import {
   type SeasonSummary,
   type SeriesView,
   type SquadView,
+  type RoleBoardView,
+  type RoleBoardRow,
   type LeadershipView,
   type LeadershipRowView,
   type StandingsView,
@@ -13386,6 +13388,81 @@ export class Career {
     if (status === null) delete p.tradeStatus
     else p.tradeStatus = status
     return { ok: true }
+  }
+
+  /**
+   * #188 roles tab: recommend a squad status from a player's ability, age and
+   * where he sits in the org. Young developmentals map to prospect tiers; NHL
+   * regulars to key/core/rotation by ability; older AHL bodies to surplus. Pure.
+   */
+  private suggestSquadStatus(p: Player, onNhl: boolean): SquadStatus {
+    const ovr = ratedOverall(p)
+    const pot = ratedPotential(p)
+    // Young and still developing → a prospect tier (unless he's already an NHL
+    // difference-maker, handled below).
+    if (p.age <= 23 && !(onNhl && ovr >= 80)) {
+      return pot >= 78 ? 'topProspect' : 'prospect'
+    }
+    if (onNhl) {
+      if (ovr >= 83) return 'keyPlayer'
+      if (ovr >= 74) return 'coreStarter'
+      return 'rotation'
+    }
+    // On the farm and past prospect age: a useful tweener stays "rotation", the
+    // rest are surplus depth.
+    return ovr >= 74 ? 'rotation' : 'surplus'
+  }
+
+  /** The user's whole organisation (NHL roster + AHL affiliate) as Player objects,
+   *  each flagged with whether he's on the NHL club. */
+  private orgPlayersWithTier(): Array<{ p: Player; onNhl: boolean }> {
+    const out: Array<{ p: Player; onNhl: boolean }> = []
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p) out.push({ p, onNhl: true })
+    }
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    for (const id of ahl?.roster ?? []) {
+      const p = this.data.players.get(id)
+      if (p) out.push({ p, onNhl: false })
+    }
+    return out
+  }
+
+  /**
+   * #188 roles tab: the bulk squad-role board — every org player with his current
+   * role and the engine's recommendation, so the GM sets roles without
+   * right-clicking each name.
+   */
+  getRoleBoard(): RoleBoardView {
+    const fog = this.fogCtx()
+    const rows: RoleBoardRow[] = this.orgPlayersWithTier().map(({ p, onNhl }) => ({
+      ...badge(p, onNhl ? undefined : fog),
+      onNhl,
+      ...(p.squadStatus ? { squadStatus: p.squadStatus } : {}),
+      suggested: this.suggestSquadStatus(p, onNhl),
+    }))
+    rows.sort((a, b) => Number(b.onNhl) - Number(a.onNhl) || b.overall - a.overall)
+    return {
+      rows,
+      labels: { ...SQUAD_STATUS_LABEL },
+      unassigned: rows.filter((r) => r.squadStatus === undefined).length,
+    }
+  }
+
+  /**
+   * #188 roles tab: auto-assign squad roles from the recommendation. By default
+   * only fills players who have NO role yet (respecting the GM's manual picks);
+   * `overwrite` re-suggests the whole org. Returns how many were set.
+   */
+  autoAssignSquadRoles(overwrite = false): { assigned: number } {
+    let assigned = 0
+    for (const { p, onNhl } of this.orgPlayersWithTier()) {
+      if (!overwrite && p.squadStatus !== undefined) continue
+      p.squadStatus = this.suggestSquadStatus(p, onNhl)
+      assigned++
+    }
+    return { assigned }
   }
 
   /* ─────────────────────── #189 captains + jersey numbers ─────────────────────── */

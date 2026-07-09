@@ -75,6 +75,7 @@ export type {
   ScoutProfileView,
   SquadView,
   LeadershipView,
+  RoleBoardView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -158,6 +159,7 @@ import type {
   ScoutProfileView,
   SquadView,
   LeadershipView,
+  RoleBoardView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -237,6 +239,9 @@ export type WorkerRequestBody =
   /** #188: GM sets a player's squad status / trade posture (null clears). */
   | { type: 'setSquadStatus'; playerId: string; status: import('@domain/player').SquadStatus | null }
   | { type: 'setTradeStatus'; playerId: string; status: import('@domain/player').TradeStatus | null }
+  /** #188 roles tab: bulk role board + auto-assign. */
+  | { type: 'getRoleBoard' }
+  | { type: 'autoAssignSquadRoles'; overwrite?: boolean }
   /** #189: captains + jersey numbers for the user's club. */
   | { type: 'getLeadership' }
   | { type: 'setCaptain'; playerId: string | null }
@@ -463,6 +468,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'dashboard'; dashboard: DashboardView }
   | { type: 'squad'; squad: SquadView }
   | { type: 'leadership'; leadership: LeadershipView; ok?: boolean; message?: string }
+  | { type: 'roleBoard'; roleBoard: RoleBoardView; assigned?: number }
   | { type: 'player'; player: PlayerProfileView }
   /** #186: result of a no-trade-clause waive negotiation + the refreshed player. */
   | { type: 'ntcNegotiation'; player: PlayerProfileView; ok: boolean; message: string

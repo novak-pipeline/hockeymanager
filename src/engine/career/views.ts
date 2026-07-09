@@ -561,6 +561,27 @@ export interface LeadershipRowView {
   jerseyNumber?: number
 }
 
+/** #188/roles-tab: one org player as a role-assignment row. */
+export interface RoleBoardRow extends PlayerBadge {
+  /** True when he's on the NHL roster (vs the AHL affiliate). */
+  onNhl: boolean
+  /** The GM's currently-set squad status, if any. */
+  squadStatus?: import('@domain/player').SquadStatus
+  /** The engine's recommended status from his ability/age/depth — what
+   *  "Auto-assign" would apply. */
+  suggested: import('@domain/player').SquadStatus
+}
+
+/** #188/roles-tab: bulk squad-role board for the user's whole organisation, so
+ *  roles can be set without right-clicking each player. */
+export interface RoleBoardView {
+  rows: RoleBoardRow[]
+  /** Display labels for each squad status (for the dropdowns/legend). */
+  labels: Record<import('@domain/player').SquadStatus, string>
+  /** How many org players still have no role set. */
+  unassigned: number
+}
+
 /** #189: captains + jersey-number management for the user's club. */
 export interface LeadershipView {
   teamName: string

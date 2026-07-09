@@ -2645,3 +2645,39 @@ describe('#182 training-camp PTO invites', () => {
     expect(r.ok).toBe(false)
   })
 })
+
+describe('roles tab — bulk squad-role board', () => {
+  it('lists the whole org with a suggestion, and auto-assign fills every unset role', () => {
+    const data = generateLeague({ seed: 650 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 650, userId)
+
+    const board = career.getRoleBoard()
+    expect(board.rows.length).toBeGreaterThan(0)
+    // NHL players sort before AHL; everyone has a suggestion.
+    expect(board.rows.every((r) => r.suggested !== undefined)).toBe(true)
+    expect(board.unassigned).toBe(board.rows.length) // nothing set yet
+
+    const res = career.autoAssignSquadRoles(false)
+    expect(res.assigned).toBe(board.rows.length)
+    const after = career.getRoleBoard()
+    expect(after.unassigned).toBe(0)
+    expect(after.rows.every((r) => r.squadStatus !== undefined)).toBe(true)
+  })
+
+  it('auto-assign (no overwrite) respects a manually-set role; overwrite re-suggests', () => {
+    const data = generateLeague({ seed: 651 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 651, userId)
+    const first = career.getRoleBoard().rows[0]
+    // Force a role that differs from the suggestion.
+    const forced = first.suggested === 'surplus' ? 'keyPlayer' : 'surplus'
+    career.setSquadStatus(first.playerId, forced)
+
+    career.autoAssignSquadRoles(false) // fills the rest, leaves the manual pick
+    expect(career.getRoleBoard().rows.find((r) => r.playerId === first.playerId)?.squadStatus).toBe(forced)
+
+    career.autoAssignSquadRoles(true) // overwrite → back to the suggestion
+    expect(career.getRoleBoard().rows.find((r) => r.playerId === first.playerId)?.squadStatus).toBe(first.suggested)
+  })
+})

@@ -25,6 +25,7 @@ const SIDEBAR_STOPS = [
   ['Home', 'dashboard'],
   ['Inbox', 'inbox'],
   ['Roster', 'squad'],
+  ['Roster Planner', 'roster-planner'],
   ['Dynamics', 'dynamics'],
   ['Tactics', 'tactics'],
   ['Training', 'training'],
@@ -229,6 +230,15 @@ try {
           await win.waitForTimeout(400)
           await snap(win, 'trades-block')
         } catch { /* tabs not present (deadline passed) — skip */ }
+      }
+      // On the Roster Planner, also photograph the Roles tab (bulk squad-status
+      // board — auto-assigns on first open).
+      if (slug === 'roster-planner') {
+        try {
+          await win.click('button:has-text("Roles")', { timeout: 3000 })
+          await win.waitForTimeout(700)
+          await snap(win, 'roster-planner-roles')
+        } catch { /* tab not present — skip */ }
       }
     } catch {
       console.log(`  ⚠ could not open "${label}" — skipped`)

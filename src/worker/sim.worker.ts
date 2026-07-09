@@ -210,6 +210,12 @@ function handle(req: WorkerRequest): WorkerResponse {
       must().setSquadStatus(req.playerId, req.status)
       return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
     }
+    case 'getRoleBoard':
+      return { id: req.id, type: 'roleBoard', roleBoard: must().getRoleBoard() }
+    case 'autoAssignSquadRoles': {
+      const r = must().autoAssignSquadRoles(req.overwrite ?? false)
+      return { id: req.id, type: 'roleBoard', roleBoard: must().getRoleBoard(), assigned: r.assigned }
+    }
     case 'setTradeStatus': {
       must().setTradeStatus(req.playerId, req.status)
       return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
