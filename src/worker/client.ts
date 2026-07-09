@@ -341,6 +341,14 @@ export class SimClient {
     return this.send({ type: 'setJerseyNumber', playerId, number })
   }
 
+  askAgentWaiveNtc(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askAgentWaiveNtc', playerId })
+  }
+
+  askPlayerTradeList(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askPlayerTradeList', playerId })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }

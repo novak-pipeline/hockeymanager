@@ -8784,6 +8784,22 @@ export class Career {
       players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))),
       picks: this.pickByIds(proposal.receivePickIds),
     }
+    // #186: a give-side no-trade clause only blocks the deal if the player hasn't
+    // waived it (agent sign-off) or agreed to this destination. If he still holds
+    // it, reject early with a nudge to talk to him first.
+    const blockingNtc = give.players.find(
+      (p) => p.contract.noTradeClause && !this.playerWaivesTo(p, partnerId),
+    )
+    if (blockingNtc) {
+      return {
+        verdict: 'reject',
+        message: `${blockingNtc.name} holds a no-trade clause. Talk to his camp about waiving it — or ask him which clubs he'd accept — before shopping him to ${partner.abbreviation}.`,
+        counter: null,
+      }
+    }
+    const waivedNtcIds = new Set(
+      give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
+    )
     const rng = this.rngFor(7006, this.currentDay, this.offerCounter)
     const evaln = evaluateProposal({
       give,
@@ -8791,6 +8807,7 @@ export class Career {
       partnerTeam: partner,
       partnerPlayers: this.data.players,
       rng,
+      waivedNtcIds,
       relationship: this.relationshipWith(partnerId as string),
       // Living World LW3: the partner's stance flows from his GM's persona +
       // the club's live posture, not a static hash.
@@ -9018,8 +9035,11 @@ export class Career {
     const id = asPlayerId(playerId)
     if (!this.userTeam.roster.includes(id)) throw new Error('that player is not on your roster')
     const player = this.resolve(id)
-    if (player.contract.noTradeClause) {
-      return { count: 0, message: `${player.name} holds a no-trade clause — you can't shop him without his say-so.` }
+    // #186: a no-trade clause blocks shopping unless he's granted a full waive.
+    // A partial (acceptable-teams) waive doesn't open the whole market — propose
+    // to those clubs directly.
+    if (player.contract.noTradeClause && !player.ntcWaived) {
+      return { count: 0, message: `${player.name} holds a no-trade clause — get his agent to waive it (or ask which clubs he'd accept) before shopping him.` }
     }
     // Clear stale offers that were shopping THIS player before re-soliciting.
     this.tradeOffers = this.tradeOffers.filter(
@@ -9054,6 +9074,106 @@ export class Career {
       { teamId: this.userTeamId as string }
     )
     return { count: offers.length, message: `${offers.length} offer${offers.length > 1 ? 's' : ''} came in for ${player.name}.` }
+  }
+
+  /* ─────────────────────── #186 no-trade-clause negotiation ─────────────────────── */
+
+  /** #186: may this player be moved to destTeamId given his no-trade clause? */
+  private playerWaivesTo(p: Player, destTeamId: TeamId): boolean {
+    if (!p.contract.noTradeClause) return true
+    if (p.ntcWaived) return true
+    return (p.tradeAcceptTeams ?? []).some((id) => (id as string) === (destTeamId as string))
+  }
+
+  /** Rough club desirability (0–100-ish) for a player weighing a move — roster
+   *  strength + market size. Deterministic. */
+  private clubDesirability(teamId: TeamId): number {
+    const team = this.data.teams.get(teamId)
+    if (!team) return 0
+    const ovrs = team.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p)
+      .map((p) => overall(p.composites, p.position))
+      .sort((a, b) => b - a)
+      .slice(0, 12)
+    const strength = ovrs.length ? ovrs.reduce((s, v) => s + v, 0) / ovrs.length : 50
+    const market = ((team.arenaCapacity ?? 18000) - 16000) / 200 // ~±10
+    return strength + Math.max(-8, Math.min(10, market))
+  }
+
+  /**
+   * #186: the GM asks a player's agent about waiving his no-trade clause outright.
+   * The agent weighs loyalty, how happy the player is, his role, age and form. A
+   * granted waive opens him to any destination; otherwise the agent points you to
+   * asking the player directly for the clubs he'd accept.
+   */
+  askAgentWaiveNtc(playerId: string):
+    { ok: boolean; verdict: 'granted' | 'conditional' | 'refused'; message: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p || !this.userTeam.roster.includes(asPlayerId(playerId))) {
+      return { ok: false, verdict: 'refused', message: 'Not on your roster.' }
+    }
+    if (!p.contract.noTradeClause) {
+      return { ok: false, verdict: 'granted', message: `${p.name} has no no-trade protection to waive.` }
+    }
+    if (p.ntcWaived) {
+      return { ok: true, verdict: 'granted', message: `${p.name} has already agreed to waive his clause.` }
+    }
+    // Willingness 0–1: unhappy / fringe / older players lean yes; loyal, happy
+    // core men lean no.
+    let w = 0.4
+    w += (50 - p.morale) / 100 * 0.6
+    w += p.personality.loyalty <= 8 ? 0.2 : p.personality.loyalty >= 15 ? -0.25 : 0
+    w += p.age >= 34 ? 0.15 : 0
+    w += p.form < -2 ? 0.1 : 0
+    w += p.squadStatus === 'surplus' ? 0.2 : p.squadStatus === 'keyPlayer' ? -0.2 : 0
+    const roll = this.rngFor(7031, this.currentDay, Career.pidNum(playerId)).float(-0.12, 0.12)
+    const score = w + roll
+    if (score >= 0.55) {
+      p.ntcWaived = true
+      this.pushNews('contract', `${p.name} agrees to waive his no-trade clause`,
+        `After a call from his camp, ${p.name}'s agent says he's open to a move — he'll waive the clause for the right situation. You're free to shop him.`,
+        { playerId, teamId: this.userTeamId as string })
+      return { ok: true, verdict: 'granted', message: `${p.name}'s agent will waive the clause — he's open to a move.` }
+    }
+    if (score >= 0.32) {
+      return { ok: true, verdict: 'conditional',
+        message: `${p.name}'s agent won't sign a blanket waiver, but says he'd consider certain clubs. Ask ${p.name} directly which teams he'd accept.` }
+    }
+    return { ok: true, verdict: 'refused',
+      message: `${p.name} intends to honour his no-trade clause. His agent politely shut the door.` }
+  }
+
+  /**
+   * #186: the GM asks the player himself which clubs he'd accept a trade to. He
+   * names a handful of desirable destinations (a partial waive); a deal to any of
+   * them clears his clause. Returns the list (also stored on the player).
+   */
+  askPlayerTradeList(playerId: string):
+    { ok: boolean; teams: Array<{ teamId: string; name: string }>; message: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p || !this.userTeam.roster.includes(asPlayerId(playerId))) {
+      return { ok: false, teams: [], message: 'Not on your roster.' }
+    }
+    if (!p.contract.noTradeClause) {
+      return { ok: false, teams: [], message: `${p.name} has no no-trade clause — he can be dealt anywhere.` }
+    }
+    const rng = this.rngFor(7032, this.currentDay, Career.pidNum(playerId))
+    // How many clubs he'll name: happier/loyal players give a short list; unhappy
+    // ones open the door wider.
+    const base = p.morale < 40 ? 8 : p.morale < 60 ? 6 : 4
+    const count = Math.max(3, Math.min(10, base + rng.range(-1, 1)))
+    const ranked = this.data.league.teams
+      .filter((tid) => (tid as string) !== (this.userTeamId as string))
+      .map((tid) => ({ tid, score: this.clubDesirability(tid) + rng.float(-6, 6) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, count)
+    p.tradeAcceptTeams = ranked.map((r) => r.tid)
+    const teams = ranked.map((r) => ({ teamId: r.tid as string, name: this.data.teams.get(r.tid)?.name ?? (r.tid as string) }))
+    this.pushNews('contract', `${p.name} submits a trade list`,
+      `${p.name} would accept a trade to: ${teams.map((t) => t.name).join(', ')}. A deal to any of them clears his no-trade clause.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true, teams, message: `${p.name} would waive his clause for ${teams.length} clubs.` }
   }
 
   acceptTrade(offerId: string): void {
@@ -10131,6 +10251,17 @@ export class Career {
         profile.squadStatusLabel = SQUAD_STATUS_LABEL[playerForLeague.squadStatus]
       }
       if (playerForLeague.tradeStatus) profile.tradeStatus = playerForLeague.tradeStatus
+      // #186: no-trade-clause + waive state (own players who hold a clause).
+      if (profile.isOwn && playerForLeague.contract.noTradeClause) {
+        profile.hasNtc = true
+        if (playerForLeague.ntcWaived) profile.ntcWaived = true
+        if (playerForLeague.tradeAcceptTeams && playerForLeague.tradeAcceptTeams.length > 0) {
+          profile.tradeAcceptTeams = playerForLeague.tradeAcceptTeams.map((tid) => ({
+            teamId: tid as string,
+            name: this.data.teams.get(tid)?.name ?? (tid as string),
+          }))
+        }
+      }
       // Leadership read for captaincy decisions (own players) + the letter he
       // currently wears (#189).
       if (profile.isOwn) {

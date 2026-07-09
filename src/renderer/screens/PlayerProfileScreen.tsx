@@ -152,6 +152,56 @@ function PlayerRoleControl(
   )
 }
 
+/* ── #186: no-trade-clause waive negotiation (own NTC players) ──────────────────
+ * Ask the agent for a full waiver, or ask the player which clubs he'd accept. */
+function NtcWaivePanel(
+  { d, client, onChanged }: { d: PlayerProfileView; client: ReturnType<typeof useClient>; onChanged: () => void },
+): JSX.Element | null {
+  const [busy, setBusy] = useState(false)
+  if (!d.isOwn || !d.hasNtc) return null
+
+  async function askAgent(): Promise<void> {
+    if (busy) return; setBusy(true)
+    try {
+      const res = await client.askAgentWaiveNtc(d.playerId)
+      if (res.type === 'ntcNegotiation') {
+        toast(res.message, res.verdict === 'granted' ? 'success' : res.verdict === 'refused' ? 'error' : 'info')
+        onChanged()
+      }
+    } finally { setBusy(false) }
+  }
+  async function askPlayer(): Promise<void> {
+    if (busy) return; setBusy(true)
+    try {
+      const res = await client.askPlayerTradeList(d.playerId)
+      if (res.type === 'ntcNegotiation') { toast(res.message, 'info'); onChanged() }
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="panel" style={{ padding: 'var(--sp-3) var(--sp-4)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--sp-3)' }}>
+      <span className="chip chip-warn" style={{ fontSize: 10, fontWeight: 800 }}>NO-TRADE CLAUSE</span>
+      {d.ntcWaived ? (
+        <span className="small" style={{ color: 'var(--success)', fontWeight: 700 }}>
+          ✓ Waived — he'll accept a move to any club.
+        </span>
+      ) : d.tradeAcceptTeams && d.tradeAcceptTeams.length > 0 ? (
+        <span className="small">
+          Would accept: <span style={{ fontWeight: 700 }}>{d.tradeAcceptTeams.map((t) => t.name).join(', ')}</span>
+        </span>
+      ) : (
+        <span className="small muted">He controls his destination. Talk to his camp before shopping him.</span>
+      )}
+      <div className="row" style={{ gap: 'var(--sp-2)', marginLeft: 'auto' }}>
+        {!d.ntcWaived && (
+          <button className="btn btn-sm" disabled={busy} onClick={() => void askAgent()}>Ask agent to waive</button>
+        )}
+        <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void askPlayer()}>Ask for trade list</button>
+      </div>
+    </div>
+  )
+}
+
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
 type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout' | 'opinion'
@@ -2349,6 +2399,9 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
           <button className="btn btn-ghost small" onClick={() => nav.navigate('squad')}>← Squad</button>
         </div>
       </ScreenHeader>
+
+      {/* #186: no-trade-clause waive negotiation (own NTC players) */}
+      <NtcWaivePanel d={d} client={client} onChanged={refetch} />
 
       {/* ── Tabs ── */}
       <div className="tabs">

@@ -468,6 +468,10 @@ export function evaluateProposal(args: {
    *  and deadline proximity (0 = October, 1 = the final hours). Shapes what
    *  THIS club would actually pay for — rentals, futures, urgency. */
   context?: { posture: 'contend' | 'retool' | 'rebuild'; deadlineProximity: number }
+  /** #186: player ids whose no-trade clause has been waived for THIS deal (agent
+   *  sign-off / an acceptable-destination list). Absent → no waivers (identical
+   *  to the original behaviour). */
+  waivedNtcIds?: ReadonlySet<string>
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
 
@@ -478,7 +482,10 @@ export function evaluateProposal(args: {
   const relAdj = ((50 - (args.relationship ?? 50)) / 50) * 0.1 // ±0.10 at the extremes
   let threshold = moodThreshold + relAdj
 
-  const ntc = [...give.players, ...receive.players].find((p) => p.contract.noTradeClause)
+  const waived = args.waivedNtcIds
+  const ntc = [...give.players, ...receive.players].find(
+    (p) => p.contract.noTradeClause && !(waived?.has(p.id as string) ?? false)
+  )
   if (ntc) {
     return {
       verdict: 'reject',

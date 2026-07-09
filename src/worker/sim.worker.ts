@@ -222,6 +222,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().setJerseyNumber(req.playerId, req.number)
       return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
     }
+    case 'askAgentWaiveNtc': {
+      const r = must().askAgentWaiveNtc(req.playerId)
+      return { id: req.id, type: 'ntcNegotiation', player: must().getPlayer(req.playerId), ok: r.ok, message: r.message, verdict: r.verdict }
+    }
+    case 'askPlayerTradeList': {
+      const r = must().askPlayerTradeList(req.playerId)
+      return { id: req.id, type: 'ntcNegotiation', player: must().getPlayer(req.playerId), ok: r.ok, message: r.message, teams: r.teams }
+    }
     case 'toggleFaShortlist': {
       must().toggleFaShortlist(req.playerId)
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }

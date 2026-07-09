@@ -240,6 +240,9 @@ export type WorkerRequestBody =
   | { type: 'setCaptain'; playerId: string | null }
   | { type: 'toggleAlternate'; playerId: string }
   | { type: 'setJerseyNumber'; playerId: string; number: number | null }
+  /** #186: no-trade-clause waive negotiation. */
+  | { type: 'askAgentWaiveNtc'; playerId: string }
+  | { type: 'askPlayerTradeList'; playerId: string }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
@@ -459,6 +462,10 @@ export type WorkerResponse = { id: number } & (
   | { type: 'squad'; squad: SquadView }
   | { type: 'leadership'; leadership: LeadershipView; ok?: boolean; message?: string }
   | { type: 'player'; player: PlayerProfileView }
+  /** #186: result of a no-trade-clause waive negotiation + the refreshed player. */
+  | { type: 'ntcNegotiation'; player: PlayerProfileView; ok: boolean; message: string
+      verdict?: 'granted' | 'conditional' | 'refused'
+      teams?: Array<{ teamId: string; name: string }> }
   | { type: 'tactics'; tactics: TacticsView }
   | { type: 'calendar'; calendar: CalendarView }
   | { type: 'schedule'; schedule: ScheduleView }

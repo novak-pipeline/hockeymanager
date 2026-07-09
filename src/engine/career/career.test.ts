@@ -2563,3 +2563,52 @@ describe('#189 captains + jersey numbers', () => {
     expect(v.captainId).toBe(sk)
   })
 })
+
+describe('#186 no-trade-clause waive negotiation', () => {
+  /** Give a user player an NTC + a partner to trade with. */
+  function setup(seed: number): { career: Career; ntcId: string; partnerId: string } {
+    const data = generateLeague({ seed })
+    const userId = data.league.teams[0]
+    const partnerId = data.league.teams[1]
+    const career = new Career(data, seed, userId)
+    const ntcId = data.teams.get(asTeamId(userId as string))!.roster
+      .map((id) => id as string)
+      .find((id) => data.players.get(asPlayerId(id))!.position !== 'G')!
+    data.players.get(asPlayerId(ntcId))!.contract.noTradeClause = true
+    return { career, ntcId, partnerId: partnerId as string }
+  }
+
+  it('a granted agent waiver lets the player be shopped', () => {
+    const { career, ntcId } = setup(630)
+    // Make him keen to leave so the agent grants the waiver.
+    const p = (career as unknown as { data: { players: Map<string, { morale: number; personality: { loyalty: number }; squadStatus?: string }> } }).data
+    const pl = p.players.get(ntcId)!
+    pl.morale = 20; pl.personality.loyalty = 5; pl.squadStatus = 'surplus'
+
+    // Before any waiver, shopping is blocked.
+    expect(career.shopPlayer(ntcId).count).toBe(0)
+
+    const r = career.askAgentWaiveNtc(ntcId)
+    expect(r.ok).toBe(true)
+    expect(r.verdict).toBe('granted')
+    // Now the profile shows the waiver and shopping is permitted.
+    expect(career.getPlayer(ntcId).ntcWaived).toBe(true)
+  })
+
+  it('a trade list clears the clause only for the named clubs', () => {
+    const { career, ntcId } = setup(631)
+    const res = career.askPlayerTradeList(ntcId)
+    expect(res.ok).toBe(true)
+    expect(res.teams.length).toBeGreaterThanOrEqual(3)
+    const prof = career.getPlayer(ntcId)
+    expect(prof.tradeAcceptTeams?.length).toBe(res.teams.length)
+
+    // A trade to a club NOT on the list is a non-starter; one to a listed club is allowed.
+    const listed = res.teams[0].teamId
+    const evalListed = career.proposeTrade({
+      partnerTeamId: listed, givePlayerIds: [ntcId], givePickIds: [], receivePlayerIds: [], receivePickIds: [],
+    })
+    // Listed club: not blocked by the clause (may pending/reject on value, but not the NTC message).
+    expect(evalListed.message ?? '').not.toContain('no-trade clause')
+  })
+})

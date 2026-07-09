@@ -814,6 +814,15 @@ export interface PlayerProfileView extends PlayerBadge {
   /** #188: the GM's trade posture — untouchable / available / listed. Absent = default. */
   tradeStatus?: import('@domain/player').TradeStatus
   /**
+   * #186: no-trade-clause state for the GM's own player. `hasNtc` when the
+   * contract carries a clause; `ntcWaived` once his agent has signed off on a
+   * move anywhere; `tradeAcceptTeams` the specific clubs he'd accept (a partial
+   * waive). Present only for own players who hold a clause.
+   */
+  hasNtc?: boolean
+  ntcWaived?: boolean
+  tradeAcceptTeams?: Array<{ teamId: string; name: string }>
+  /**
    * #188: leadership read for captaincy decisions — his leadership rating and
    * whether he currently wears a letter (C / A). Present for own players.
    */

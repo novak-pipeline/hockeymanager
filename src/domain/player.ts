@@ -240,6 +240,19 @@ export interface Player {
   tradeStatus?: TradeStatus
 
   /**
+   * #186: this player has agreed to waive his no-trade clause outright — his agent
+   * signed off on a move to any destination. Set by the ask-agent negotiation;
+   * lets the club shop/trade him despite the clause. Absent = clause still binds.
+   */
+  ntcWaived?: boolean
+  /**
+   * #186: the specific clubs this player would accept a trade to (a partial waive
+   * he granted when asked). A trade to a team on this list clears his no-trade
+   * clause even without a full waive. Absent = no list given.
+   */
+  tradeAcceptTeams?: TeamId[]
+
+  /**
    * Real season-by-season career history imported from the source DB. Newest
    * first. Absent on fictional players. Display-only — the sim never reads it.
    */
