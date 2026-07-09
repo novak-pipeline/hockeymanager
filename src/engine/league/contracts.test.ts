@@ -169,24 +169,21 @@ function giveHeadroom(team: Team, players: Map<PlayerId, Player>, extra: number)
 }
 
 describe('signPlayer', () => {
-  it('generated teams may start over the hard cap; capSpace can be negative', () => {
-    // This is real: league generation fills rosters by salary curve without
-    // enforcing the hard cap. The offseason / FA system must tolerate negative
-    // cap space (teams shed contracts during the offseason). This test
-    // documents that contract.ts never silently hides the overage.
+  it('generated teams start under the hard cap with credible payrolls (#176)', () => {
+    // League generation now rescales each roster to a realistic payroll band
+    // (~78–99% of the cap) instead of leaving it at ~40% or blowing past the
+    // ceiling. Every generated club should ice a cap-legal roster.
     const data = gen()
-    // Check all four teams — at least one will be over the cap with seed 7.
-    const overCap = data.league.teams.some((id) => {
+    for (const id of data.league.teams) {
       const t = data.teams.get(id)!
-      return capSpace(t, data.players) < 0
-    })
-    expect(overCap).toBe(true)
-    // capSpace returns the raw value; it is the caller's responsibility to act
-    // on a negative number (e.g. refuse new signings, trigger buyouts).
+      expect(capSpace(t, data.players)).toBeGreaterThanOrEqual(0)
+      // Credible spending: not a skeleton roster far below the floor.
+      expect(t.finances.capUsed).toBeGreaterThan(t.finances.salaryCap * 0.6)
+    }
+    // capSpace still returns the raw value; callers act on it. capUsed remains
+    // the true sum of roster salaries.
     const team = teamAt(data, 0)
-    const space = capSpace(team, data.players)
-    expect(typeof space).toBe('number')
-    // capUsed is the true sum of roster salaries regardless of the cap ceiling.
+    expect(typeof capSpace(team, data.players)).toBe('number')
     expect(capUsedFor(team, data.players)).toBe(team.finances.capUsed)
   })
 
@@ -505,6 +502,9 @@ describe('aiFreeAgencyDay', () => {
         .sort(byOverallDesc)
       releasePlayer({ team, playerId: fwds[fwds.length - 1].id, players: data.players })
       releasePlayer({ team, playerId: fwds[fwds.length - 2].id, players: data.players })
+      // Generated rosters now sit near the cap (#176); this test isolates the
+      // signing-priority logic, so give both clubs room to actually sign the FAs.
+      giveHeadroom(team, data.players, 40_000_000)
     }
     const pool = [88, 82, 76, 70, 64].map((v, i) => {
       const p = mkSkater(`fa${i + 1}`, v, 26)

@@ -2408,9 +2408,13 @@ describe('Career — offer sheets', () => {
   it('rivals tender for your RFAs; match keeps him, declining nets pick compensation', () => {
     const data = generateLeague({ seed: 41 })
     const userId = data.league.teams[0]!
-    // A rival with plenty of cap + roster room so it can tender.
+    // A rival with plenty of cap + roster room so it can tender. Generated
+    // rosters now run near the cap (#176), so lift both the tendering rival's
+    // and the user's ceiling to isolate the offer-sheet mechanics from cap math.
     const rival = data.teams.get(data.league.teams[1]!)!
     rival.roster = rival.roster.slice(0, 10)
+    rival.finances.salaryCap = 300_000_000
+    data.teams.get(userId)!.finances.salaryCap = 300_000_000
     // Two strong, young, expiring RFAs on the user's club.
     const fwds = data.teams.get(userId)!.roster
       .map((id) => data.players.get(id)!)

@@ -175,6 +175,74 @@ function makeContract(rng: Rng, ovr: number, startYear: number): Contract {
   }
 }
 
+/**
+ * #176 Cap credibility. Per-player salaries are drawn independently from an
+ * OVR curve, which leaves generated NHL rosters sitting at only ~40% of the cap
+ * — nothing like the real league, where clubs run 88–99% of a ~$88M ceiling.
+ * That hollowed out the whole economy: trades were frictionless, offer sheets
+ * always fit, free agency never competed for dollars.
+ *
+ * This rescales a finished roster to a realistic payroll band without flattening
+ * it: everyone earns at least the league minimum, the star tier scales up the
+ * most (preserving the top-heavy shape real cap sheets have), and no single hit
+ * blows past ~18% of the cap. Contenders (higher caliber) spend closer to the
+ * ceiling; rebuilders sit lower. Deterministic — driven by the same seeded rng.
+ */
+const NHL_MIN_SALARY = 775_000
+function calibrateRosterCap(roster: Player[], rng: Rng, teamCaliber: number, cap: number): void {
+  if (roster.length === 0) return
+  const maxHit = Math.round(cap * 0.18)
+  // Contenders push toward the ceiling; cellar clubs carry more slack.
+  const caliberN = Math.max(0, Math.min(1, (teamCaliber - 45) / 20))
+  const frac = Math.max(0.78, Math.min(0.99, 0.83 + caliberN * 0.13 + (rng.range(-4, 4) / 100)))
+  const target = cap * frac
+  // Keep each player's market value as the shape; scale the portion above the
+  // minimum so depth stays cheap and stars carry the sheet. Iterate a few times
+  // so the max-hit clamp doesn't leave the roster short of the target.
+  const orig = roster.map((p) => Math.max(NHL_MIN_SALARY, p.contract.salary))
+  const floorSum = NHL_MIN_SALARY * roster.length
+  let k = 1
+  for (let iter = 0; iter < 5; iter++) {
+    let freeCur = 0
+    let clampedSum = 0
+    for (const s of orig) {
+      const scaled = NHL_MIN_SALARY + (s - NHL_MIN_SALARY) * k
+      if (scaled >= maxHit) clampedSum += maxHit - NHL_MIN_SALARY
+      else freeCur += s - NHL_MIN_SALARY
+    }
+    const freeTarget = target - floorSum - clampedSum
+    if (freeCur <= 0) break
+    const nextK = Math.max(0, freeTarget / freeCur)
+    if (Math.abs(nextK - k) < 0.001) { k = nextK; break }
+    k = nextK
+  }
+  roster.forEach((p, i) => {
+    const scaled = NHL_MIN_SALARY + (orig[i]! - NHL_MIN_SALARY) * k
+    const clamped = Math.max(NHL_MIN_SALARY, Math.min(maxHit, scaled))
+    p.contract.salary = Math.round(clamped / 25_000) * 25_000
+  })
+  // CBA floor: a flat, star-less roster can't be lifted by the star-scaling
+  // above (there's no top tier to inflate). Real clubs in that spot overpay
+  // depth to clear the floor — so lift everyone uniformly to ~the floor.
+  const floor = cap * 0.74
+  let sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+  if (sum < floor) {
+    const lift = floor / sum
+    roster.forEach((p) => {
+      const raised = Math.min(maxHit, p.contract.salary * lift)
+      p.contract.salary = Math.round(raised / 25_000) * 25_000
+    })
+    // A second gentle pass in case max-hit clamps left us short again.
+    sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+    if (sum < floor) {
+      const lift2 = floor / sum
+      roster.forEach((p) => {
+        p.contract.salary = Math.round(Math.min(maxHit, p.contract.salary * lift2) / 25_000) * 25_000
+      })
+    }
+  }
+}
+
 function makeName(rng: Rng): string {
   return `${rng.pick(FIRST_NAMES)} ${rng.pick(LAST_NAMES)}`
 }
@@ -607,7 +675,8 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
       finances: { budget: 90e6, salaryCap: 88e6, capUsed: 0, revenue: 0 },
       staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] }
     }
-    // Tally cap used from the generated contracts.
+    // #176: rescale the roster to a realistic payroll band, then tally cap used.
+    calibrateRosterCap(roster, rng, teamCaliber, team.finances.salaryCap)
     team.finances.capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
     teams.set(teamId, team)
   }

@@ -47,4 +47,4 @@ Playable v1 (June 2026). Build order #1–#7 all have first implementations:
 - Save/load: JSON snapshots via Electron IPC (`src/main/saves.ts`, versioned `CareerSnapshot`). SQLite dropped in favor of JSON saves (supply-chain: no native postinstall deps).
 - 261 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
 
-Known tuning debt: generated payrolls can exceed the cap (displayed honestly); PK stat splits are placeholders (plus/minus is now tracked by both sim engines); 3D uses procedural primitives pending Blender glTF assets.
+Known tuning debt: PK stat splits are placeholders (plus/minus is now tracked by both sim engines); 3D uses procedural primitives pending Blender glTF assets. (Cap credibility fixed #176 — generated rosters now run a realistic ~78–99% of the cap with a top-heavy salary shape; no more over-cap or ~40% skeleton payrolls.)

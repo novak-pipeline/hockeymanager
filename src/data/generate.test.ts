@@ -252,3 +252,36 @@ describe('generateLeague', () => {
     expect(() => generateLeague({ seed: 1, teamCount: 2 })).toThrow()
   })
 })
+
+describe('cap-credible payrolls (#176)', () => {
+  it('every generated NHL club ices a cap-legal, credibly-spent roster', () => {
+    for (const seed of [616, 7, 42, 99, 313, 55, 88, 2024]) {
+      const data = generateLeague({ seed })
+      let sumPct = 0, n = 0
+      for (const tid of data.league.teams) {
+        const t = data.teams.get(tid)!
+        const used = t.roster.reduce((s, id) => s + (data.players.get(id)?.contract.salary ?? 0), 0)
+        const pct = used / t.finances.salaryCap
+        sumPct += pct; n++
+        // Under the ceiling, and no skeleton rosters far below the CBA floor.
+        expect(pct).toBeLessThanOrEqual(1.0001)
+        expect(pct).toBeGreaterThan(0.6)
+        // capUsed is kept in sync with the roster.
+        expect(t.finances.capUsed).toBe(used)
+      }
+      // Leaguewide, clubs run near the cap like the real NHL — not at ~40%.
+      expect(sumPct / n).toBeGreaterThan(0.82)
+    }
+  })
+
+  it('preserves a top-heavy salary shape (stars carry the sheet)', () => {
+    const data = generateLeague({ seed: 616 })
+    const t = data.teams.get(data.league.teams[0]!)!
+    const sal = t.roster.map((id) => data.players.get(id)!.contract.salary).sort((a, b) => b - a)
+    // Depth stays cheap (near the league minimum); the top earner dwarfs it.
+    expect(sal[sal.length - 1]).toBeLessThan(1_500_000)
+    expect(sal[0]).toBeGreaterThan(sal[sal.length - 1] * 4)
+    // No single hit blows past the per-player ceiling (~18% of the cap).
+    expect(sal[0]).toBeLessThanOrEqual(Math.round(t.finances.salaryCap * 0.18))
+  })
+})
