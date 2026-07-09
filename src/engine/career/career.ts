@@ -6365,9 +6365,12 @@ export class Career {
     return { invitees, draftedIds }
   }
 
-  /** #182: young players the GM MAY invite to development camp — the auto org
-   *  pool plus unsigned/junior kids in the system he can bring in for a look
-   *  (undrafted tryout invites). Age ≤ 23; deterministic order. */
+  /** #182: young players the GM MAY invite to development camp — only those his
+   *  org holds RIGHTS to (drafted, rights-held, on the NHL/AHL roster) plus
+   *  genuine unsigned free agents nobody controls (a real tryout invite). You
+   *  can't invite another club's prospect or a draft-eligible kid you don't own.
+   *  Age ≤ 23; deterministic order. (#185 fix — the old pool leaked rights-held
+   *  prospects and top draft-eligible players.) */
   private devCampEligible(): Player[] {
     const draftedIds = new Set(
       this.chronicle.events
@@ -6375,21 +6378,21 @@ export class Career {
         .flatMap((e) => e.playerIds)
     )
     const affiliate = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
-    const nhlSet = new Set(this.data.league.teams.map((t) => t as string))
+    const faSet = new Set(this.faPool.map((id) => id as string))
     const pool = new Map<string, Player>()
     for (const [pid, p] of this.data.players) {
       const id = pid as string
       if (p.age > 23) continue
+      const rights = p.rightsTeamId as string | undefined
       const inOrg =
         draftedIds.has(id) ||
-        (p.rightsTeamId as string | undefined) === (this.userTeamId as string) ||
+        rights === (this.userTeamId as string) ||
         this.userTeam.roster.includes(pid) ||
         (affiliate?.roster.includes(pid) ?? false)
-      // Free / junior kids with no NHL club can be brought in on a tryout basis.
-      const tid = this.teamOf(pid)
-      const unattached = !tid || !nhlSet.has(tid as string)
-      const inviteWorthy = ratedPotential(p) >= 60 || draftedIds.has(id)
-      if (inOrg || (unattached && inviteWorthy)) pool.set(id, p)
+      // A real tryout invite is a genuine unsigned free agent whose rights NOBODY
+      // holds — not a draft-eligible prospect or another club's property.
+      const freeTryout = faSet.has(id) && (rights === undefined || rights === null)
+      if (inOrg || freeTryout) pool.set(id, p)
     }
     return [...pool.values()].sort(
       (a, b) => (draftedIds.has(b.id as string) ? 1 : 0) - (draftedIds.has(a.id as string) ? 1 : 0) || ratedPotential(b) - ratedPotential(a)

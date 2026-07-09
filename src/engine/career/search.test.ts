@@ -24,6 +24,20 @@ describe('dev-camp invite editor (#182)', () => {
     // An NHL veteran is NOT eligible for a prospect development camp.
     const vet = [...data.players.values()].find((p) => p.age >= 30)!
     expect(c.toggleDevCampInvite(vet.id as string).ok).toBe(false)
+
+    // #185 fix: you can't invite a prospect whose rights another club holds.
+    const otherTeam = data.league.teams[1] as string
+    const rightsHeld = [...data.players.values()].find((p) => (p.rightsTeamId as string | undefined) === otherTeam)
+    if (rightsHeld) {
+      expect(c.getDevCampInvites().available.some((r: { playerId: string }) => r.playerId === (rightsHeld.id as string))).toBe(false)
+      expect(c.toggleDevCampInvite(rightsHeld.id as string).ok).toBe(false)
+    }
+    // Every "available" name is either your own org or a genuinely rights-free FA.
+    for (const a of c.getDevCampInvites().available) {
+      const p = data.players.get(a.playerId as any)!
+      const rights = p.rightsTeamId as string | undefined
+      expect(rights === undefined || rights === null || rights === (data.league.teams[0] as string)).toBe(true)
+    }
   })
 })
 
