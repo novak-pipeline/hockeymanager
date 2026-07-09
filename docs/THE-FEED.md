@@ -63,6 +63,14 @@ fourth-liner it's news.
 - **Proof harness**: sim full seasons, dump the salience log, review volume/
   coverage/detector balance; hand-built scenario tests (underdog sweep,
   rookie outburst, backup steals the net) must fire.
+- **Live detector library** (`src/engine/story/salience.ts`): expectation gap,
+  streak outlier, breakout skater, goalie heater, and — for season-cadence
+  colour (#177) — the Art Ross scoring race, the Rocket Richard goal race, the
+  Vezina race (all at player checkpoints 30/60/90/105) and the playoff race
+  (4th-vs-5th cutline gap on stretch days 95/108/116). NOTE: the player
+  detectors read the LIVE in-season accumulators (`this.totals`/`this.gp`) —
+  the per-season `p.stats` line isn't written until the rollover archive, so
+  reading it mid-season silently starved every skater/goalie detector.
 
 ## Channels & authors
 

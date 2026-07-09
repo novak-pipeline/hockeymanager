@@ -2176,6 +2176,17 @@ export class Career {
     for (const t of this.data.teams.values()) {
       teams.set(t.id as string, { name: t.name, abbreviation: t.abbreviation })
     }
+    // Team-level facts for the playoff-race detector (cheap — one per club).
+    const teamPoints = new Map<string, number>()
+    const teamConference = new Map<string, string>()
+    const teamGamesLeft = new Map<string, number>()
+    const totalGames = this.matchDays.length
+    for (const s of standings) {
+      teamPoints.set(s.teamId as string, s.points)
+      teamGamesLeft.set(s.teamId as string, Math.max(0, totalGames - s.gamesPlayed))
+      const team = this.data.teams.get(s.teamId)
+      if (team) teamConference.set(s.teamId as string, team.conferenceId)
+    }
     const ctx: SalienceCtx = {
       day,
       year: this.year,
@@ -2185,43 +2196,44 @@ export class Career {
       teams,
       userTeamId: this.userTeamId as string,
       teamsInLeague: this.data.league.teams.length,
+      teamPoints,
+      teamConference,
+      teamGamesLeft,
     }
-    // Player-level readings only on checkpoint days — assembling ~700 stat
-    // lines daily would be waste; the detectors only look on these days.
+    // Player-level readings only on checkpoint days. Read the LIVE accumulators
+    // (this.totals / this.gp) — the per-season p.stats line isn't written until
+    // the season-rollover archive, so mid-season it's empty. (Before this the
+    // skater/goalie detectors never fired at all — they read the empty archive.)
     if (PLAYER_CHECKPOINT_DAYS.includes(day)) {
       const skaters: NonNullable<SalienceCtx['skaters']> = []
       const goalies: NonNullable<SalienceCtx['goalies']> = []
-      for (const tid of this.data.league.teams) {
-        const team = this.data.teams.get(tid)
-        if (!team) continue
-        for (const pid of team.roster) {
-          const p = this.data.players.get(pid)
-          if (!p) continue
-          const cur = p.stats.find((st) => st.season === this.year)
-          if (!cur) continue
-          if (p.position === 'G') {
-            goalies.push({
-              playerId: pid as string,
-              name: p.name,
-              teamId: tid as string,
-              saves: cur.saves,
-              shotsAgainst: cur.shotsAgainst,
-              ratedOverall: ratedOverall(p),
-            })
-          } else {
-            const pts =
-              cur.ev.goals + cur.pp.goals + cur.pk.goals +
-              cur.ev.assists + cur.pp.assists + cur.pk.assists
-            skaters.push({
-              playerId: pid as string,
-              name: p.name,
-              teamId: tid as string,
-              gp: cur.gamesPlayed,
-              points: pts,
-              ratedOverall: ratedOverall(p),
-              age: p.age,
-            })
-          }
+      for (const [pid, t] of this.totals) {
+        const games = this.gp.get(pid) ?? 0
+        if (games <= 0) continue
+        const p = this.data.players.get(pid)
+        if (!p) continue
+        const teamId = this.teamOf(pid)
+        if (!teamId) continue
+        if (p.position === 'G') {
+          goalies.push({
+            playerId: pid as string,
+            name: p.name,
+            teamId: teamId as string,
+            saves: t.saves,
+            shotsAgainst: t.shotsAgainst,
+            ratedOverall: ratedOverall(p),
+          })
+        } else {
+          skaters.push({
+            playerId: pid as string,
+            name: p.name,
+            teamId: teamId as string,
+            gp: games,
+            points: t.goals + t.assists,
+            goals: t.goals,
+            ratedOverall: ratedOverall(p),
+            age: p.age,
+          })
         }
       }
       ctx.skaters = skaters
