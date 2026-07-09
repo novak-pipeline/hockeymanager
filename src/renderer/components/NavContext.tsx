@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import { openPlayerMenu } from './playerMenuStore'
 
 /**
  * Screen routing — a plain state machine, no router lib. App owns the nav
@@ -179,6 +180,7 @@ export function PlayerLink(props: {
       type="button"
       className={props.className ? `player-link ${props.className}` : 'player-link'}
       onClick={() => nav.navigate('player', { playerId: props.playerId })}
+      onContextMenu={(e) => openPlayerMenu(e, props.playerId, props.name)}
     >
       {props.name}
     </button>

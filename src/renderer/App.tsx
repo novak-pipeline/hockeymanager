@@ -6,6 +6,7 @@ import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods
 import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
+import { PlayerActionMenu } from './components/PlayerActionMenu'
 import { resetNameIndex } from './components/Linkify'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
@@ -456,6 +457,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             </div>
           </div>
         )}
+        <PlayerActionMenu />
         </TeamColorsProvider>
       </ActionsContext.Provider>
     </NavContext.Provider>

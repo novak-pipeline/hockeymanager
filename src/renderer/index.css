@@ -1537,3 +1537,7 @@ a:hover { text-decoration: underline; }
   .ticker-run:nth-child(2) { display: none; }
   .ticker-viewport { overflow-x: auto; scrollbar-width: thin; }
 }
+
+/* #187: player action context-menu items */
+.menu-item:hover:not(:disabled) { background: var(--bg3); }
+.menu-item:disabled { opacity: 0.5; cursor: default; }
