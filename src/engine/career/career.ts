@@ -733,6 +733,10 @@ export class Career {
   private offseason: OffseasonState | null = null
   private picks: DraftPick[] = []
   private tradeOffers: StoredTradeOffer[] = []
+  /** #184: trade proposals the AI GM has taken "under advisement" — real GMs
+   *  don't answer serious offers on the spot. Each resolves after a short
+   *  deliberation (accept → execute, or counter), delivered by inbox. */
+  private pendingTrades: Array<{ proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number; daysLeft: number }> = []
   private offerCounter = 0
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
@@ -3615,6 +3619,8 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    // #184: AI GMs answer any trade proposals whose deliberation has elapsed.
+    this.resolvePendingTrades()
     // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
     // the roster (the price of sharper development); a recovery week freshens
     // legs at the cost of growth. Only the user's club runs a chosen regimen.
@@ -4494,6 +4500,9 @@ export class Career {
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
   advanceOffseason(): boolean {
+    // #184: the trade market keeps moving through the summer — any proposal a GM
+    // is sitting on gets its answer as the offseason days tick by.
+    this.resolvePendingTrades()
     // Dev camp is a WEEK (Offseason 2.0): while it runs, each Continue is the
     // next camp day — arrival, the scrimmage, the wrap. Pressing on from the
     // wrap without naming a standout sends the staff and mails the report.
@@ -8729,7 +8738,107 @@ export class Career {
         deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
       },
     })
-    if (evaln.verdict === 'accept') {
+    // #184 fast-no: a clear non-starter (NTC / cap-impossible / lowball with no
+    // counter to be had) bounces back on the spot — real GMs say no to those
+    // instantly.
+    if (evaln.verdict === 'reject' || (evaln.verdict === 'counter' && evaln.counterAskValue <= 0)) {
+      return { verdict: 'reject', message: evaln.message, counter: null }
+    }
+    // Deliberate-yes: a serious offer (would accept, or a workable counter) is
+    // taken UNDER ADVISEMENT — no instant handshake. The GM sleeps on it and the
+    // real answer (completed / counter / fell-through) arrives by inbox after a
+    // day or two, quicker as the deadline nears.
+    const days = this.tradeDeliberationDays(partnerId)
+    this.pendingTrades.push({
+      proposal,
+      verdict: evaln.verdict === 'accept' ? 'accept' : 'counter',
+      counterAskValue: evaln.counterAskValue,
+      daysLeft: days,
+    })
+    const gmName = this.gmPersonaFor(partnerId)?.name ?? `${partner.name}'s GM`
+    this.pushNews(
+      'trade',
+      `${partner.abbreviation} are weighing your offer`,
+      `${gmName} took your proposal under advisement — he'll get back to you in a day or two.`,
+      { teamId: partnerId as string }
+    )
+    return {
+      verdict: 'pending',
+      message: `${gmName} is considering it — expect an answer in about ${days} day${days === 1 ? '' : 's'}.`,
+      counter: null,
+    }
+  }
+
+  /** #184: how long the partner GM sits on a serious offer before answering.
+   *  Deadline urgency compresses it; the quiet offseason drags it out; a friendly
+   *  front office answers a touch quicker. */
+  private tradeDeliberationDays(partnerId: TeamId): number {
+    const proximity = Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45))
+    let d = this.phase === 'offseason' ? 3 : 2
+    if (proximity > 0.7) d = 1 // deadline crunch — decisions in hours
+    if (this.relationshipWith(partnerId as string) >= 65) d = Math.max(1, d - 1)
+    return d
+  }
+
+  /** #184: tick down pending trade proposals; deliver any that are due. Called on
+   *  every day advance (in-season and offseason). */
+  private resolvePendingTrades(): void {
+    if (this.pendingTrades.length === 0) return
+    const carry: typeof this.pendingTrades = []
+    for (const pt of this.pendingTrades) {
+      pt.daysLeft -= 1
+      if (pt.daysLeft > 0) { carry.push(pt); continue }
+      this.deliverPendingTrade(pt)
+    }
+    this.pendingTrades = carry
+  }
+
+  private deliverPendingTrade(pt: { proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number }): void {
+    const partnerId = asTeamId(pt.proposal.partnerTeamId)
+    const partner = this.data.teams.get(partnerId)
+    if (!partner || !this.tradingOpen()) {
+      if (partner) this.pushNews('trade', `Talks with ${partner.abbreviation} lapse`,
+        `The window closed before ${partner.name} came back on your proposal.`, { teamId: partnerId as string })
+      return
+    }
+    // Re-validate the assets are still where they were — rosters may have shifted.
+    const stillHave = pt.proposal.givePlayerIds.every((id) => this.userTeam.roster.includes(asPlayerId(id)))
+    const stillTheirs = pt.proposal.receivePlayerIds.every((id) => partner.roster.includes(asPlayerId(id)))
+    if (!stillHave || !stillTheirs) {
+      this.pushNews('trade', `The deal with ${partner.abbreviation} fell through`,
+        `By the time ${partner.name} came back, the pieces had moved — the proposal is dead.`, { teamId: partnerId as string })
+      return
+    }
+    if (pt.verdict === 'accept') {
+      const done = this.executeUserTrade(pt.proposal)
+      if (!done.ok) {
+        this.pushNews('trade', `The deal with ${partner.abbreviation} fell through`,
+          done.message || `${partner.name} came back ready — but the deal no longer fits under the cap.`, { teamId: partnerId as string })
+      }
+      return
+    }
+    // Counter: name the extra the GM wants and table it as a real, acceptable offer.
+    const give = { players: pt.proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(pt.proposal.givePickIds) }
+    const receive = { players: pt.proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(pt.proposal.receivePickIds) }
+    const counter = this.buildCounterOffer(partnerId, give, receive, pt.counterAskValue)
+    if (counter) {
+      this.tradeOffers.push(counter)
+      this.pushNews('trade', `${partner.abbreviation} counter your offer`, counter.message, { teamId: partnerId as string })
+    } else {
+      this.pushNews('trade', `${partner.abbreviation} pass on your offer`,
+        `${partner.name} slept on it and came back a no — nothing on your side bridged the gap.`, { teamId: partnerId as string })
+    }
+  }
+
+  /** Execute an agreed user trade now (the completed-deal path, extracted so the
+   *  deferred #184 resolution can run it after deliberation). */
+  private executeUserTrade(proposal: TradeProposal): { ok: boolean; message?: string } {
+    const partnerId = asTeamId(proposal.partnerTeamId)
+    const partner = this.data.teams.get(partnerId)
+    if (!partner) return { ok: false }
+    const give = { players: proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.givePickIds) }
+    const receive = { players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.receivePickIds) }
+    try {
       executeTrade({
         teams: this.data.teams,
         players: this.data.players,
@@ -8741,59 +8850,43 @@ export class Career {
         bGivesPicks: receive.picks,
         allPicks: this.picks,
       })
-      repairLines(this.userTeam, this.data.players)
-      repairLines(partner, this.data.players)
-      for (const p of give.players) {
-        this.lockerDeparture(this.userTeamId, p.id)
-        this.lockerArrival(partnerId, p.id)
-      }
-      for (const p of receive.players) {
-        this.lockerDeparture(partnerId, p.id)
-        this.lockerArrival(this.userTeamId, p.id)
-      }
-      this.pushNews(
-        'trade',
-        `Trade completed with ${partner.abbreviation}`,
-        `${give.players.map((p) => p.name).join(', ') || 'Picks'} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
-        { teamId: partnerId as string }
-      )
-      /* ── Wave 4: record transaction ── */
-      const txResult = recordTransaction(this.transactionLedger, {
-        day: this.currentDay,
-        year: this.year,
-        kind: 'trade',
-        teamIds: [this.userTeamId as string, partnerId as string],
-        summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
-      })
-      this.transactionLedger = txResult.ledger
-      this.chronicleTrade({
-        teamAId: this.userTeamId,
-        teamBId: partnerId,
-        aGivesPlayerIds: give.players.map((p) => p.id),
-        aGivesPicks: give.picks,
-        bGivesPlayerIds: receive.players.map((p) => p.id),
-        bGivesPicks: receive.picks,
-      })
-      // A completed deal builds rapport with that front office.
-      this.adjustRelationship(partnerId as string, 6)
-      return { verdict: 'accept', message: evaln.message, counter: null }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : undefined }
     }
-    // DEPTH 3: a near-miss draws a concrete counter — the AI names the extra
-    // asset(s) it wants added and tables it as a real, acceptable offer.
-    if (evaln.verdict === 'counter' && evaln.counterAskValue > 0) {
-      const counter = this.buildCounterOffer(partnerId, give, receive, evaln.counterAskValue)
-      if (counter) {
-        this.tradeOffers.push(counter)
-        return { verdict: 'counter', message: counter.message, counter: this.offerView(counter) }
-      }
-      // Nothing on the user's side bridges the gap — say so honestly.
-      return {
-        verdict: 'reject',
-        message: `${evaln.message} There's nothing else on your side that would close the gap.`,
-        counter: null,
-      }
+    repairLines(this.userTeam, this.data.players)
+    repairLines(partner, this.data.players)
+    for (const p of give.players) {
+      this.lockerDeparture(this.userTeamId, p.id)
+      this.lockerArrival(partnerId, p.id)
     }
-    return { verdict: 'reject', message: evaln.message, counter: null }
+    for (const p of receive.players) {
+      this.lockerDeparture(partnerId, p.id)
+      this.lockerArrival(this.userTeamId, p.id)
+    }
+    this.pushNews(
+      'trade',
+      `Trade completed with ${partner.abbreviation}`,
+      `${give.players.map((p) => p.name).join(', ') || 'Picks'} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
+      { teamId: partnerId as string }
+    )
+    const txResult = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'trade',
+      teamIds: [this.userTeamId as string, partnerId as string],
+      summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
+    })
+    this.transactionLedger = txResult.ledger
+    this.chronicleTrade({
+      teamAId: this.userTeamId,
+      teamBId: partnerId,
+      aGivesPlayerIds: give.players.map((p) => p.id),
+      aGivesPicks: give.picks,
+      bGivesPlayerIds: receive.players.map((p) => p.id),
+      bGivesPicks: receive.picks,
+    })
+    this.adjustRelationship(partnerId as string, 6)
+    return { ok: true }
   }
 
   /** DEPTH 3: turn the partner's residual "wants this much more" into a concrete
@@ -13668,6 +13761,7 @@ export class Career {
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
+      pendingTrades: this.pendingTrades.map((o) => ({ ...o, proposal: { ...o.proposal } })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -13827,6 +13921,7 @@ export class Career {
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))
+    if (snapshot.pendingTrades) career.pendingTrades = snapshot.pendingTrades.map((o: typeof career.pendingTrades[number]) => ({ ...o, proposal: { ...o.proposal } }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }

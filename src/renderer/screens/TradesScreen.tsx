@@ -253,6 +253,39 @@ function EvalPanel(props: {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  if (evaluation.verdict === 'pending') {
+    // #184: the GM took it under advisement — no instant handshake. The real
+    // answer lands in the inbox after a day or two of sim time.
+    return (
+      <Panel>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            background: 'rgba(214,160,86,0.12)',
+            border: '1px solid rgba(214,160,86,0.4)',
+            borderRadius: 6,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ fontSize: 20 }}>⏳</span>
+          <span style={{ color: 'var(--amber, #d6a056)', fontWeight: 700, fontSize: 15 }}>
+            Under advisement
+          </span>
+        </div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 12px' }}>{evaluation.message}</p>
+        <p style={{ color: 'var(--muted)', fontSize: 12, margin: '0 0 12px' }}>
+          Sim forward — his answer (completed, a counter, or a pass) arrives in your inbox.
+        </p>
+        <button className="btn btn-ghost" onClick={props.onDismiss}>
+          Done
+        </button>
+      </Panel>
+    )
+  }
+
   if (evaluation.verdict === 'accept') {
     return (
       <Panel>

@@ -776,8 +776,10 @@ describe('trade counter-offers (DEPTH 3)', () => {
       .map((id) => data.players.get(id)!)
       .filter((p) => p && !p.contract.noTradeClause)
 
-    let counter: ReturnType<Career['proposeTrade']>['counter'] = null
-    let origGiveCount = 0
+    // #184: proposing no longer returns an instant counter — the GM takes it
+    // under advisement ('pending'), and the concrete counter is DELIVERED after
+    // a day or two into the trade centre's incoming offers.
+    let pendingFound = false
     outer: for (const pid of data.league.teams) {
       if (pid === userId) continue
       const partner = data.teams.get(pid)!
@@ -790,29 +792,76 @@ describe('trade counter-offers (DEPTH 3)', () => {
           return v >= rv * 0.82 && v <= rv * 0.98
         })
         if (!give) continue
-        const proposal = {
+        const ev = c.proposeTrade({
           partnerTeamId: pid as string,
           givePlayerIds: [give.id as string],
           givePickIds: [] as string[],
           receivePlayerIds: [R.id as string],
           receivePickIds: [] as string[],
-        }
-        const ev = c.proposeTrade(proposal)
-        if (ev.verdict === 'counter') {
-          counter = ev.counter
-          origGiveCount = 1
-          break outer
-        }
-        // (underpay ⇒ never 'accept', so no state-mutating trade executes here)
+        })
+        if (ev.verdict === 'pending') { pendingFound = true; break outer }
       }
     }
+    expect(pendingFound).toBe(true)
 
-    expect(counter).not.toBeNull()
+    // Advance the summer until the GM's answer lands as a counter offer.
+    let counter: ReturnType<Career['getTrades']>['incoming'][number] | undefined
+    for (let g = 0; g < 6 && !counter; g++) {
+      c.advanceOffseason()
+      counter = c.getTrades().incoming.find((o) => /Add /.test(o.message))
+    }
+    expect(counter).toBeTruthy()
     // The counter asks for MORE than the original one-player offer.
-    expect(counter!.give.players.length + counter!.give.picks.length).toBeGreaterThan(origGiveCount)
-    expect(counter!.message).toMatch(/Add /)
+    expect(counter!.give.players.length + counter!.give.picks.length).toBeGreaterThan(1)
     // And it's a real, acceptable offer: accepting it executes without throwing.
     expect(() => c.acceptTrade(counter!.offerId)).not.toThrow()
+  })
+
+  it('#184: a clear lowball bounces instantly; a fair-plus offer deliberates then completes', () => {
+    const data = generateLeague({ seed: 616 })
+    const userId = data.league.teams[0]!
+    const c = new Career(data, userId, userId)
+    c.startAtOffseason()
+    const userPlayers = data.teams.get(userId)!.roster.map((id) => data.players.get(id)!).filter((p) => p && !p.contract.noTradeClause)
+
+    // Fast-no: a cheap body for their best player — an instant, on-the-spot no.
+    let bounced = false
+    outer: for (const pid of data.league.teams) {
+      if (pid === userId) continue
+      const partner = data.teams.get(pid)!
+      const star = partner.roster.map((id) => data.players.get(id)!).filter(Boolean).sort((a, b) => playerValue(b) - playerValue(a))[0]
+      const cheap = [...userPlayers].sort((a, b) => playerValue(a) - playerValue(b))[0]
+      if (!star || !cheap) continue
+      const ev = c.proposeTrade({ partnerTeamId: pid as string, givePlayerIds: [cheap.id as string], givePickIds: [], receivePlayerIds: [star.id as string], receivePickIds: [] })
+      if (ev.verdict === 'reject') { bounced = true; break outer }
+    }
+    expect(bounced).toBe(true)
+
+    // Deliberate-yes: a clear overpay is taken under advisement, then completes
+    // on a later day (not instantly).
+    let target: { pid: string; give: string; recv: string } | undefined
+    outer2: for (const pid of data.league.teams) {
+      if (pid === userId) continue
+      const partner = data.teams.get(pid)!
+      for (const R of partner.roster.map((id) => data.players.get(id)!).filter(Boolean)) {
+        const rv = playerValue(R)
+        const give = userPlayers.find((p) => playerValue(p) >= rv * 1.4) // steep overpay
+        if (give) { target = { pid: pid as string, give: give.id as string, recv: R.id as string }; break outer2 }
+      }
+    }
+    if (target) {
+      const ev = c.proposeTrade({ partnerTeamId: target.pid, givePlayerIds: [target.give], givePickIds: [], receivePlayerIds: [target.recv], receivePickIds: [] })
+      expect(ev.verdict).toBe('pending')
+      // Not on the roster yet — the deal isn't done on the spot.
+      expect(data.teams.get(userId)!.roster.includes(target.recv as any)).toBe(false)
+      let done = false
+      for (let g = 0; g < 6 && !done; g++) {
+        c.advanceOffseason()
+        if (data.teams.get(userId)!.roster.includes(target.recv as any)) done = true
+      }
+      expect(done).toBe(true)
+      expect(c.getInbox().items.some((n) => n.headline.includes('Trade completed'))).toBe(true)
+    }
   })
 
   it('shopping a player brings back concrete offers from clubs that need him', () => {

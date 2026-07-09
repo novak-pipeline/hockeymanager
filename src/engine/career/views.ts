@@ -1249,7 +1249,10 @@ export interface TradeProposal {
 }
 
 export interface TradeEvaluation {
-  verdict: 'accept' | 'reject' | 'counter'
+  /** #184: 'pending' — the GM took it under advisement; the real answer (accept /
+   *  counter / fell-through) arrives by inbox after a day or two of deliberation.
+   *  Only a clear non-starter (NTC / cap / lowball) still returns 'reject' instantly. */
+  verdict: 'accept' | 'reject' | 'counter' | 'pending'
   /** AI's reasoning, shown to the user. */
   message: string
   /** Present when verdict is 'counter'. */
