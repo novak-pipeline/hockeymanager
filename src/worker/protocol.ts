@@ -98,8 +98,8 @@ export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/
 import type { TeamDynamicsView } from '@engine/career/views'
 export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'
-export type { DevCampView, TrainingCampView, TrainingCampState } from '@engine/career/views'
-import type { DevCampView, TrainingCampView } from '@engine/career/views'
+export type { DevCampView, DevCampInvitesView, TrainingCampView, TrainingCampState } from '@engine/career/views'
+import type { DevCampView, DevCampInvitesView, TrainingCampView } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
 export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
@@ -213,6 +213,8 @@ export type WorkerRequestBody =
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
   | { type: 'getDevCamp' }
+  | { type: 'getDevCampInvites' }
+  | { type: 'toggleDevCampInvite'; playerId: string }
   | { type: 'submitDevCamp'; standoutId?: string }
   | { type: 'skipDevCamp' }
   | { type: 'getTrainingCamp' }
@@ -475,6 +477,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'negotiation'; negotiation: NegotiationView | null; signed?: boolean; message?: string }
   | { type: 'faHub'; faHub: FaHubView }
   | { type: 'devCamp'; devCamp: DevCampView | null }
+  | { type: 'devCampInvites'; invites: DevCampInvitesView }
+  | { type: 'devCampInviteResult'; ok: boolean; invited: boolean; message?: string; invites: DevCampInvitesView }
   | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
   | { type: 'medical'; medical: MedicalView }
   | { type: 'development'; development: DevelopmentCenterView }

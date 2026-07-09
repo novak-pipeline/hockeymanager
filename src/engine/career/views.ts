@@ -207,6 +207,21 @@ export interface DevCampView {
   coachStandout?: { playerId: string; name: string; reason: string }
 }
 
+/** #182: a prospect on the dev-camp invite editor. */
+export interface DevCampInviteRow extends PlayerBadge {
+  potential: number
+  /** Already in the organisation (vs an external tryout invite). */
+  org: boolean
+}
+
+/** #182: the dev-camp invite editor — who's coming, and who else you could bring. */
+export interface DevCampInvitesView {
+  /** True once camp is underway — invites are locked. */
+  locked: boolean
+  invited: DevCampInviteRow[]
+  available: DevCampInviteRow[]
+}
+
 /** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
 export interface FeedView {
   posts: NewsItem[]
@@ -1928,6 +1943,8 @@ export interface CareerSnapshot {
   boardMeetingYear?: number | null
   /** M3 dev camp soft gate. Optional/additive. */
   devCampPending?: boolean
+  /** #182: the GM's curated dev-camp invite list (undefined ⇒ auto). Additive. */
+  devCampRoster?: string[]
   /** Dev-camp week progress (day + scrimmage lines). Optional/additive. */
   devCampState?: DevCampState | null
   /** M3 training-camp cut day (staged decisions). Optional/additive. */

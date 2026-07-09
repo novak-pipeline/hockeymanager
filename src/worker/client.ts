@@ -248,6 +248,14 @@ export class SimClient {
     return this.send({ type: 'getDevCamp' })
   }
 
+  getDevCampInvites(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDevCampInvites' })
+  }
+
+  toggleDevCampInvite(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleDevCampInvite', playerId })
+  }
+
   submitDevCamp(standoutId?: string): Promise<WorkerResponse> {
     return this.send({ type: 'submitDevCamp', ...(standoutId !== undefined ? { standoutId } : {}) })
   }

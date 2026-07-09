@@ -419,6 +419,8 @@ import {
   type TeamDynamicsView,
   type FeedView,
   type DevCampView,
+  type DevCampInvitesView,
+  type DevCampInviteRow,
   type DevCampState,
   type TrainingCampState,
   type TrainingCampView,
@@ -761,6 +763,9 @@ export class Career {
   /** M3 dev camp: soft gate — the first Continue after the draft (or at a new
    *  summer-start career) walks you onto the rink. */
   private devCampPending = false
+  /** #182: the GM's explicit dev-camp invite list. Undefined ⇒ use the auto pool;
+   *  once the GM edits invites it holds the exact set (add tryout kids, cut some). */
+  private devCampRoster: string[] | undefined = undefined
   /** Dev-camp week progress: null until camp opens; day 1..3 while running. */
   private devCampState: DevCampState | null = null
   /** M3 training camp: cut-day decisions staged at the preseason stage;
@@ -6302,6 +6307,14 @@ export class Career {
         (affiliate?.roster.includes(pid) ?? false)
       if (inOrg) orgYoung.set(id, p)
     }
+    // #182: once the GM has curated the invite list, honour it exactly (drafted
+    // ids still recognised for the read). Otherwise use the auto pool.
+    if (this.devCampRoster !== undefined) {
+      const invitees = this.devCampRoster
+        .map((id) => this.data.players.get(asPlayerId(id)))
+        .filter((p): p is Player => !!p)
+      return { invitees, draftedIds }
+    }
     const invitees = [...orgYoung.values()]
       .sort((a, b) => {
         const da = draftedIds.has(a.id as string) ? 1 : 0
@@ -6312,6 +6325,73 @@ export class Career {
       // every drafted/rights-held/young signed player in the org gets a look.
       .slice(0, 60)
     return { invitees, draftedIds }
+  }
+
+  /** #182: young players the GM MAY invite to development camp — the auto org
+   *  pool plus unsigned/junior kids in the system he can bring in for a look
+   *  (undrafted tryout invites). Age ≤ 23; deterministic order. */
+  private devCampEligible(): Player[] {
+    const draftedIds = new Set(
+      this.chronicle.events
+        .filter((e) => e.kind === 'draftPick' && e.year === this.year && e.teamIds[0] === (this.userTeamId as string))
+        .flatMap((e) => e.playerIds)
+    )
+    const affiliate = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const nhlSet = new Set(this.data.league.teams.map((t) => t as string))
+    const pool = new Map<string, Player>()
+    for (const [pid, p] of this.data.players) {
+      const id = pid as string
+      if (p.age > 23) continue
+      const inOrg =
+        draftedIds.has(id) ||
+        (p.rightsTeamId as string | undefined) === (this.userTeamId as string) ||
+        this.userTeam.roster.includes(pid) ||
+        (affiliate?.roster.includes(pid) ?? false)
+      // Free / junior kids with no NHL club can be brought in on a tryout basis.
+      const tid = this.teamOf(pid)
+      const unattached = !tid || !nhlSet.has(tid as string)
+      const inviteWorthy = ratedPotential(p) >= 60 || draftedIds.has(id)
+      if (inOrg || (unattached && inviteWorthy)) pool.set(id, p)
+    }
+    return [...pool.values()].sort(
+      (a, b) => (draftedIds.has(b.id as string) ? 1 : 0) - (draftedIds.has(a.id as string) ? 1 : 0) || ratedPotential(b) - ratedPotential(a)
+    )
+  }
+
+  /** #182: the invite editor — who's in, and who else you could bring in. */
+  getDevCampInvites(): DevCampInvitesView {
+    const invited = new Set(this.devCampInvitees().invitees.map((p) => p.id as string))
+    const eligible = this.devCampEligible()
+    const badgeOf = (p: Player): DevCampInviteRow => ({
+      ...badge(p, this.fogCtx()),
+      potential: ratedPotential(p),
+      org: this.userTeam.roster.includes(p.id) || (this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId)?.roster.includes(p.id) ?? false : false) || (p.rightsTeamId as string | undefined) === (this.userTeamId as string),
+    })
+    return {
+      locked: this.devCampState !== null, // camp already underway — invites are set
+      invited: [...invited].map((id) => this.data.players.get(asPlayerId(id))).filter((p): p is Player => !!p).map(badgeOf),
+      available: eligible.filter((p) => !invited.has(p.id as string)).slice(0, 80).map(badgeOf),
+    }
+  }
+
+  /** #182: add or remove a dev-camp invite. Seeds the explicit list from the
+   *  auto pool on first edit, then flips the player's membership. */
+  toggleDevCampInvite(playerId: string): { ok: boolean; invited: boolean; message?: string } {
+    if (this.devCampState !== null) return { ok: false, invited: true, message: 'Camp is already underway — invites are locked.' }
+    if (this.devCampRoster === undefined) {
+      this.devCampRoster = this.devCampInvitees().invitees.map((p) => p.id as string)
+    }
+    const i = this.devCampRoster.indexOf(playerId)
+    if (i >= 0) {
+      this.devCampRoster.splice(i, 1)
+      return { ok: true, invited: false }
+    }
+    // Only allow inviting an eligible young player.
+    if (!this.devCampEligible().some((p) => (p.id as string) === playerId)) {
+      return { ok: false, invited: false, message: 'Only prospects and young tryout invites are eligible for development camp.' }
+    }
+    this.devCampRoster.push(playerId)
+    return { ok: true, invited: true }
   }
 
   /** The coach's pick for camp standout: the best week (highest read roll),
@@ -6488,6 +6568,7 @@ export class Career {
     if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
     this.devCampPending = false
     this.devCampState = null
+    this.devCampRoster = undefined // next summer's camp starts from the auto pool
     this.pushDevCampReport()
     return { ok: true }
   }
@@ -6498,6 +6579,7 @@ export class Career {
     if (!this.devCampPending) return
     this.devCampPending = false
     this.devCampState = null
+    this.devCampRoster = undefined // next summer's camp starts from the auto pool
     this.pushDevCampReport()
   }
 
@@ -13475,6 +13557,7 @@ export class Career {
       gmPersonas: structuredClone(this.gmPersonas),
       boardMeetingYear: this.boardMeetingYear,
       devCampPending: this.devCampPending,
+      devCampRoster: this.devCampRoster ? [...this.devCampRoster] : undefined,
       devCampState: this.devCampState ? structuredClone(this.devCampState) : null,
       trainingCamp: this.trainingCamp ? structuredClone(this.trainingCamp) : null,
       lastSeasonMeta: this.lastSeasonMeta ? { ...this.lastSeasonMeta } : null,
@@ -13620,6 +13703,7 @@ export class Career {
     // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
     career.devCampPending = snapshot.devCampPending ?? false
+    career.devCampRoster = snapshot.devCampRoster ? [...snapshot.devCampRoster] : undefined
     career.devCampState = snapshot.devCampState ? structuredClone(snapshot.devCampState) : null
     career.trainingCamp = snapshot.trainingCamp ? structuredClone(snapshot.trainingCamp) : null
     career.lastSeasonMeta = snapshot.lastSeasonMeta ? { ...snapshot.lastSeasonMeta } : null

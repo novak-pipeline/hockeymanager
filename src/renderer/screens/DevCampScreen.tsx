@@ -7,7 +7,7 @@
  * Artwork slot: assets/scenes/dev-camp-rink.png (CSS fallback otherwise).
  */
 import { useEffect, useState } from 'react'
-import type { WorkerResponse } from '../../worker/protocol'
+import type { WorkerResponse, DevCampInvitesView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerFace } from '../components/PlayerFace'
@@ -15,6 +15,7 @@ import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
+import type { SimClient } from '../../worker/client'
 
 type DevCampView = Extract<WorkerResponse, { type: 'devCamp' }>['devCamp']
 
@@ -29,6 +30,7 @@ export function DevCampScreen(): JSX.Element {
   const nav = useNav()
   const actions = useShellActions()
   const [busy, setBusy] = useState(false)
+  const [editingInvites, setEditingInvites] = useState(false)
   const { data: camp, loading } = useScreenData<DevCampView>(
     () => client.getDevCamp(),
     (r) => (r.type === 'devCamp' ? r.devCamp : null)
@@ -101,9 +103,14 @@ export function DevCampScreen(): JSX.Element {
           )}
         </div>
 
+        {/* #182 invite editor — on arrival day the GM curates who skates */}
+        {camp.day === 1 && editingInvites && (
+          <DevCampInviteEditor client={client} onClose={() => setEditingInvites(false)} />
+        )}
+
         {/* the invitees — sorted by grade, densest tier first, so the pool
             reads as tiers rather than an undifferentiated scroll */}
-        {(() => {
+        {!(camp.day === 1 && editingInvites) && (() => {
           const rank: Record<string, number> = { A: 0, B: 1, C: 2 }
           const pts = (p: DevCampView['invitees'][number]) => (p.line ? p.line.g * 2 + p.line.a : -1)
           const sorted = [...camp.invitees].sort(
@@ -176,8 +183,13 @@ export function DevCampScreen(): JSX.Element {
         })()}
 
         <div className="row" style={{ gap: 'var(--sp-3)' }}>
+          {camp.day === 1 && (
+            <button className="btn btn-ghost" onClick={() => setEditingInvites((v) => !v)}>
+              {editingInvites ? 'Done with invites' : 'Manage invites'}
+            </button>
+          )}
           {camp.day < 3 ? (
-            <button className="btn btn-primary" disabled={actions.busy} onClick={actions.continueGame}>
+            <button className="btn btn-primary" disabled={actions.busy || (camp.day === 1 && editingInvites)} onClick={actions.continueGame}>
               {camp.day === 1 ? 'Run the scrimmage ▶' : 'Hear the final reads ▶'}
             </button>
           ) : (
@@ -195,5 +207,81 @@ export function DevCampScreen(): JSX.Element {
         </div>
       </Backdrop>
     </section>
+  )
+}
+
+/** #182: the dev-camp invite editor — the staff's auto list, with the GM free to
+ *  cut names and add prospects or young tryout invites from the system. */
+function DevCampInviteEditor({ client, onClose }: { client: SimClient; onClose: () => void }): JSX.Element {
+  const [invites, setInvites] = useState<DevCampInvitesView | null>(null)
+  const [search, setSearch] = useState('')
+
+  async function load(): Promise<void> {
+    const r = await client.getDevCampInvites()
+    if (r.type === 'devCampInvites') setInvites(r.invites)
+  }
+  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function toggle(playerId: string): Promise<void> {
+    const r = await client.toggleDevCampInvite(playerId)
+    if (r.type === 'devCampInviteResult') {
+      setInvites(r.invites)
+      if (!r.ok && r.message) toast(r.message, 'error')
+    } else if (r.type === 'error') toast(r.message, 'error')
+  }
+
+  const panel: React.CSSProperties = {
+    background: 'rgba(8,10,15,0.9)', backdropFilter: 'blur(6px)',
+    border: '1px solid rgba(255,255,255,0.14)', borderRadius: 8, padding: 12,
+  }
+  const listBox: React.CSSProperties = { maxHeight: '40vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }
+  const avail = (invites?.available ?? []).filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <div style={{ maxWidth: 880, marginBottom: 'var(--sp-4)' }}>
+      <div className="row-between" style={{ marginBottom: 8, alignItems: 'center' }}>
+        <span style={{ fontWeight: 700 }}>Camp invites — the staff picked {invites?.invited.length ?? 0}; add or cut as you like</span>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>Done</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        {/* Invited */}
+        <div style={panel}>
+          <div className="muted small" style={{ marginBottom: 6 }}>Invited ({invites?.invited.length ?? 0})</div>
+          <div style={listBox}>
+            {(invites?.invited ?? []).map((p) => (
+              <div key={p.playerId} className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <PlayerFace faceId={p.faceId} name={p.name} size={22} />
+                <span style={{ flex: 1, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <PlayerLink playerId={p.playerId} name={p.name} /> <span className="muted" style={{ fontSize: 10 }}>{p.position}·{p.age}</span>
+                  {!p.org && <span className="chip" style={{ fontSize: 8, marginLeft: 4 }}>TRYOUT</span>}
+                </span>
+                <button className="btn btn-sm" title="Cut from camp" onClick={() => void toggle(p.playerId)}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Available */}
+        <div style={panel}>
+          <div className="row-between" style={{ marginBottom: 6, alignItems: 'center' }}>
+            <span className="muted small">Available prospects &amp; tryouts</span>
+            <input className="input" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)}
+              style={{ width: 130, padding: '3px 8px', fontSize: 11 }} />
+          </div>
+          <div style={listBox}>
+            {avail.map((p) => (
+              <div key={p.playerId} className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <PlayerFace faceId={p.faceId} name={p.name} size={22} />
+                <span style={{ flex: 1, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <PlayerLink playerId={p.playerId} name={p.name} /> <span className="muted" style={{ fontSize: 10 }}>{p.position}·{p.age}</span>
+                  {!p.org && <span className="chip" style={{ fontSize: 8, marginLeft: 4 }}>TRYOUT</span>}
+                </span>
+                <button className="btn btn-sm btn-primary" title="Invite to camp" onClick={() => void toggle(p.playerId)}>+</button>
+              </div>
+            ))}
+            {avail.length === 0 && <span className="muted small">No more eligible young players to invite.</span>}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

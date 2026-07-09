@@ -101,6 +101,14 @@ try {
     await win.click('button:has-text("Continue")', { timeout: 5000 })
     await win.waitForSelector('text=Development Camp', { timeout: 8000 })
     await snap(win, 'devcamp-arrival')
+    // #182 invite editor — open it on arrival day and photograph the two lists.
+    try {
+      await win.click('button:has-text("Manage invites")', { timeout: 4000 })
+      await win.waitForTimeout(500)
+      await snap(win, 'devcamp-invites')
+      await win.click('button:has-text("Done with invites")', { timeout: 4000 })
+      await win.waitForTimeout(300)
+    } catch { /* editor not reachable — fine */ }
     await win.click('button:has-text("Run the scrimmage")', { timeout: 5000 })
     await win.waitForTimeout(700)
     await snap(win, 'devcamp-scrimmage')

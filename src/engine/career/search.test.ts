@@ -3,6 +3,30 @@ import { generateLeague } from '@data/generate'
 import { playerValue } from '@engine/league/trades'
 import { Career } from './career'
 
+describe('dev-camp invite editor (#182)', () => {
+  it('lets the GM cut an invitee and add an eligible young player', () => {
+    const data = generateLeague({ seed: 55 })
+    const c = new Career(data, 55, data.league.teams[0]) as any
+    const board = c.getDevCampInvites()
+    // The staff auto-invite the org's young players; there should be a pool.
+    expect(board.invited.length).toBeGreaterThan(0)
+    // Cut the first invitee → he leaves the invited list.
+    const cut = board.invited[0].playerId
+    const r1 = c.toggleDevCampInvite(cut)
+    expect(r1.ok).toBe(true)
+    expect(r1.invited).toBe(false)
+    expect(c.getDevCampInvites().invited.some((p: { playerId: string }) => p.playerId === cut)).toBe(false)
+    // Re-invite him → back on the list.
+    const r2 = c.toggleDevCampInvite(cut)
+    expect(r2.ok).toBe(true)
+    expect(r2.invited).toBe(true)
+    expect(c.getDevCampInvites().invited.some((p: { playerId: string }) => p.playerId === cut)).toBe(true)
+    // An NHL veteran is NOT eligible for a prospect development camp.
+    const vet = [...data.players.values()].find((p) => p.age >= 30)!
+    expect(c.toggleDevCampInvite(vet.id as string).ok).toBe(false)
+  })
+})
+
 describe('inbox curation — league roster churn (#180)', () => {
   it('drops other-clubs roster moves from the inbox but keeps your own', () => {
     const data = generateLeague({ seed: 55 })

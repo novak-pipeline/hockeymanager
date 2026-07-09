@@ -152,6 +152,12 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
     case 'getDevCamp':
       return { id: req.id, type: 'devCamp', devCamp: must().getDevCamp() }
+    case 'getDevCampInvites':
+      return { id: req.id, type: 'devCampInvites', invites: must().getDevCampInvites() }
+    case 'toggleDevCampInvite': {
+      const r = must().toggleDevCampInvite(req.playerId)
+      return { id: req.id, type: 'devCampInviteResult', ok: r.ok, invited: r.invited, message: r.message, invites: must().getDevCampInvites() }
+    }
     case 'submitDevCamp': {
       const res = must().submitDevCamp(req.standoutId)
       if (!res.ok) throw new Error(res.message ?? 'Could not resolve development camp.')
