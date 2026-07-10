@@ -446,6 +446,7 @@ function SkaterHistoryRow({ s }: { s: SkaterSeasonLine }): JSX.Element {
       <td className="num">{s.penaltyMinutes}</td>
       <td className="num">{fmtToi(s.toiPerGame)}</td>
       <td className="num">{s.ppGoals}+{s.ppAssists}</td>
+      <td className="num">{(s.shGoals ?? 0)}+{(s.shAssists ?? 0)}</td>
       <td className="num">{s.avgRating !== undefined ? s.avgRating.toFixed(2) : ''}</td>
     </>
   )
@@ -1783,7 +1784,8 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   <th className="num">±</th>
                   <th className="num">PIM</th>
                   <th className="num">TOI/g</th>
-                  <th className="num">PP</th>
+                  <th className="num" title="Power-play goals + assists">PP</th>
+                  <th className="num" title="Shorthanded goals + assists">SH</th>
                   <th className="num">AVR</th>
                 </>
               )}

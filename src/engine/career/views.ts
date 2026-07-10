@@ -342,6 +342,10 @@ export interface SkaterSeasonLine {
   toiPerGame: number
   ppGoals: number
   ppAssists: number
+  /** #175: shorthanded goals/assists (the PK's scoring side). Optional/additive —
+   *  absent on imported pre-career seasons and old saves; treated as 0. */
+  shGoals?: number
+  shAssists?: number
   /** Season average match rating (Avr). Absent for imported pre-career seasons. */
   avgRating?: number
 }
@@ -1255,6 +1259,8 @@ export interface LeagueSkaterStatRow {
   ppGoals: number
   ppAssists: number
   ppPoints: number
+  /** #175: shorthanded points (goals + assists). Optional/additive. */
+  shPoints?: number
   hits: number
   blocks: number
   takeaways: number
@@ -2028,6 +2034,9 @@ export interface CareerSnapshot {
     goalieLosses: Array<[string, number]>
     ppGoals: Array<[string, number]>
     ppAssists: Array<[string, number]>
+    /** #175: shorthanded splits — optional so pre-#175 saves load (absent → empty). */
+    shGoals?: Array<[string, number]>
+    shAssists?: Array<[string, number]>
   }
   /**
    * Scouting fog-of-war state (added after v1 froze; optional so older saves

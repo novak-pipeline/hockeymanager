@@ -2646,6 +2646,29 @@ describe('#182 training-camp PTO invites', () => {
   })
 })
 
+describe('#175 shorthanded stat splits', () => {
+  it('credits shorthanded goals to PK scorers over a full season (real PK splits)', () => {
+    const data = generateLeague({ seed: 71 })
+    const career = new Career(data, 71, data.league.teams[0])
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+
+    let sh = 0
+    let pp = 0
+    for (const tid of data.league.teams) {
+      for (const r of career.getTeamPlayerStats(tid as string).skaters) {
+        if (!r.skater) continue
+        sh += r.skater.shGoals ?? 0
+        pp += r.skater.ppGoals
+      }
+    }
+    // PP goals were always credited; SH goals were dropped before #175.
+    expect(pp).toBeGreaterThan(0)
+    expect(sh).toBeGreaterThan(0)
+    // Shorthanded goals are far rarer than power-play goals.
+    expect(pp).toBeGreaterThan(sh)
+  })
+})
+
 describe('roles tab — bulk squad-role board', () => {
   it('lists the whole org with a suggestion, and auto-assign fills every unset role', () => {
     const data = generateLeague({ seed: 650 })

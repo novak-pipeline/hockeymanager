@@ -103,6 +103,10 @@ export interface ViewCtx {
   goalieLosses: Map<PlayerId, number>
   ppGoals: Map<PlayerId, number>
   ppAssists: Map<PlayerId, number>
+  /** #175: shorthanded goals/assists (optional so existing ctx builders/tests
+   *  that don't supply them keep compiling; absent → 0). */
+  shGoals?: Map<PlayerId, number>
+  shAssists?: Map<PlayerId, number>
   /** League-wide standings, best first (already tiebreak-sorted). */
   standingsSorted: Standing[]
 }
@@ -196,6 +200,8 @@ function skaterLine(ctx: ViewCtx, id: PlayerId): SkaterSeasonLine {
     toiPerGame: games > 0 ? Math.round((t?.toi ?? 0) / games) : 0,
     ppGoals: ctx.ppGoals.get(id) ?? 0,
     ppAssists: ctx.ppAssists.get(id) ?? 0,
+    shGoals: ctx.shGoals?.get(id) ?? 0,
+    shAssists: ctx.shAssists?.get(id) ?? 0,
   }
 }
 
@@ -751,6 +757,8 @@ export function buildPlayerProfile(
                   : 0,
               ppGoals: s.pp.goals,
               ppAssists: s.pp.assists,
+              shGoals: s.pk.goals,
+              shAssists: s.pk.assists,
               ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             },
       goalie:

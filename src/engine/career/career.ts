@@ -702,6 +702,10 @@ export class Career {
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
   private readonly ppAssists = new Map<PlayerId, number>()
+  /** #175: shorthanded goals/assists — the PK's scoring side, credited from the
+   *  event stream's `strength:'sh'` goals (previously dropped). */
+  private readonly shGoals = new Map<PlayerId, number>()
+  private readonly shAssists = new Map<PlayerId, number>()
   private news: NewsItem[] = []
   private newsCounter = 0
   /** Player→GM concerns (open + recently resolved). Story-first core. */
@@ -1441,6 +1445,8 @@ export class Career {
       goalieLosses: this.goalieLosses,
       ppGoals: this.ppGoals,
       ppAssists: this.ppAssists,
+      shGoals: this.shGoals,
+      shAssists: this.shAssists,
       standingsSorted: sortStandings([...this.standings.values()]),
     }
   }
@@ -3296,6 +3302,9 @@ export class Career {
       if (ev.strength === 'pp') {
         this.ppGoals.set(ev.scorer, (this.ppGoals.get(ev.scorer) ?? 0) + 1)
         for (const a of ev.assists) this.ppAssists.set(a, (this.ppAssists.get(a) ?? 0) + 1)
+      } else if (ev.strength === 'sh') {
+        this.shGoals.set(ev.scorer, (this.shGoals.get(ev.scorer) ?? 0) + 1)
+        for (const a of ev.assists) this.shAssists.set(a, (this.shAssists.get(a) ?? 0) + 1)
       }
     }
     const homeWon = res.homeGoals > res.awayGoals
@@ -5766,19 +5775,23 @@ export class Career {
       const teamId = this.teamOf(pid)
       const ppG = this.ppGoals.get(pid) ?? 0
       const ppA = this.ppAssists.get(pid) ?? 0
+      const shG = this.shGoals.get(pid) ?? 0
+      const shA = this.shAssists.get(pid) ?? 0
       const ratingAcc = this.seasonRatingTotals.get(pid as string)
       p.stats.push({
         season: this.year,
         teamId: (teamId as string) ?? 'FA',
         gamesPlayed: games,
         ev: {
-          goals: Math.max(0, t.goals - ppG),
-          assists: Math.max(0, t.assists - ppA),
+          // Even-strength = everything that wasn't on the PP or shorthanded.
+          goals: Math.max(0, t.goals - ppG - shG),
+          assists: Math.max(0, t.assists - ppA - shA),
           shots: t.shots,
           timeOnIce: t.toi,
         },
         pp: { goals: ppG, assists: ppA, shots: 0, timeOnIce: 0 },
-        pk: { goals: 0, assists: 0, shots: 0, timeOnIce: 0 },
+        // #175: shorthanded points ARE the PK's scoring output (was a placeholder 0).
+        pk: { goals: shG, assists: shA, shots: 0, timeOnIce: 0 },
         plusMinus: t.plusMinus,
         penaltyMinutes: t.penaltyMinutes,
         saves: t.saves,
@@ -5862,6 +5875,8 @@ export class Career {
     this.goalieLosses.clear()
     this.ppGoals.clear()
     this.ppAssists.clear()
+    this.shGoals.clear()
+    this.shAssists.clear()
     this.tradeOffers = []
     this.lastBoxScore = null
     this.resignStatus.clear()
@@ -12674,6 +12689,7 @@ export class Career {
             shootingPct: s.shots > 0 ? s.goals / s.shots : 0,
             atoi: s.toiPerGame, ppGoals: s.ppGoals, ppAssists: s.ppAssists,
             ppPoints: s.ppGoals + s.ppAssists,
+            shPoints: (s.shGoals ?? 0) + (s.shAssists ?? 0),
             hits: tot?.hits ?? 0, blocks: tot?.blockedShots ?? 0,
             takeaways: tot?.takeaways ?? 0, giveaways: tot?.giveaways ?? 0,
             avgRating: avgRatingOf(r.playerId),
@@ -14317,6 +14333,8 @@ export class Career {
         goalieLosses: serializeMap(this.goalieLosses as unknown as Map<string, number>),
         ppGoals: serializeMap(this.ppGoals as unknown as Map<string, number>),
         ppAssists: serializeMap(this.ppAssists as unknown as Map<string, number>),
+        shGoals: serializeMap(this.shGoals as unknown as Map<string, number>),
+        shAssists: serializeMap(this.shAssists as unknown as Map<string, number>),
       },
       scouting: {
         knowledge: [...this.scouting.knowledge],
@@ -14452,6 +14470,9 @@ export class Career {
       }
       for (const [k, v] of snapshot.extraStats.ppGoals) career.ppGoals.set(asPlayerId(k), v)
       for (const [k, v] of snapshot.extraStats.ppAssists) career.ppAssists.set(asPlayerId(k), v)
+      // #175: shorthanded splits (absent on pre-#175 saves — start empty).
+      for (const [k, v] of snapshot.extraStats.shGoals ?? []) career.shGoals.set(asPlayerId(k), v)
+      for (const [k, v] of snapshot.extraStats.shAssists ?? []) career.shAssists.set(asPlayerId(k), v)
     }
     // Restore scouting state, or create fresh if old save lacks it.
     if (snapshot.scouting) {
