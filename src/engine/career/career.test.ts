@@ -2499,6 +2499,36 @@ describe('Career — offer sheets', () => {
   })
 })
 
+describe('#48/P5 World Juniors — user prospects marked', () => {
+  it('flags WJ all-stars that belong to the user org, consistently with rights/roster', () => {
+    const data = generateLeague({ seed: 51 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 51, userId)
+    const view = career.getInternational()
+    const wj = view.worldJuniors
+    if (!wj) return // thin pool on this seed — nothing to assert
+
+    // Reproduce "org control": rostered, on the affiliate, or rights held.
+    const org = new Set<string>()
+    const team = data.teams.get(userId)!
+    for (const id of team.roster) org.add(id as string)
+    const affId = team.affiliateId
+    if (affId) for (const id of (data.teams.get(affId)?.roster ?? [])) org.add(id as string)
+    for (const p of data.players.values()) {
+      if ((p.rightsTeamId as string | undefined) === (userId as string)) org.add(p.id as string)
+    }
+
+    // isYours must be set iff the standout is org-controlled.
+    for (const s of wj.allStars) {
+      expect(Boolean(s.isYours)).toBe(org.has(s.playerId))
+    }
+    // The `yours` subset is exactly the flagged all-stars.
+    const flagged = wj.allStars.filter((s) => s.isYours)
+    expect((wj.yours ?? []).length).toBe(flagged.length)
+    for (const s of wj.yours ?? []) expect(s.isYours).toBe(true)
+  })
+})
+
 describe('#157 LTIR — cap relief for a long-term injury', () => {
   it('places a long-term-injured player on LTIR, relieves his cap hit, and clears on activate', () => {
     const data = generateLeague({ seed: 77 })

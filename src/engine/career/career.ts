@@ -12565,12 +12565,25 @@ export class Career {
       rng: this.rngFor(8020, this.year),
       teamAbbrOf: (id) => teamOfPlayer.get(id as string)?.abbr ?? 'FA',
     })
+    // #48/P5: mark the all-tournament standouts your org controls (rights held or
+    // on a farm roster) — the story hook that makes the WJC yours to follow.
+    const yourOrgIds = new Set<string>()
+    for (const pid of this.userTeam.roster) yourOrgIds.add(pid as string)
+    const affId = this.userTeam.affiliateId
+    if (affId) for (const pid of (this.data.teams.get(affId as TeamId)?.roster ?? [])) yourOrgIds.add(pid as string)
+    for (const p of this.data.players.values()) {
+      if ((p.rightsTeamId as string | undefined) === (this.userTeamId as string)) yourOrgIds.add(p.id as string)
+    }
+    const markedAllStars = wj.allStars.map((s) =>
+      yourOrgIds.has(s.playerId) ? { ...s, isYours: true } : s)
+    const yours = markedAllStars.filter((s) => s.isYours)
     const worldJuniors = wj.contested === 0 ? null : {
       gold: wj.gold,
       silver: wj.silver,
       bronze: wj.bronze,
       standings: wj.standings,
-      allStars: wj.allStars,
+      allStars: markedAllStars,
+      ...(yours.length > 0 ? { yours } : {}),
     }
     return { nations, worldJuniors }
   }

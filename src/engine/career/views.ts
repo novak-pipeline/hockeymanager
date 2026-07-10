@@ -1156,6 +1156,9 @@ export interface WorldJuniorsStandoutView {
   teamAbbr: string
   position: string
   stars: number
+  /** #48/P5: this standout is one of YOUR org's prospects (rights held / on a
+   *  farm roster) — the story hook that makes the tournament yours to follow. */
+  isYours?: boolean
 }
 
 export interface WorldJuniorsView {
@@ -1165,6 +1168,9 @@ export interface WorldJuniorsView {
   /** Projected final placings (rank order), with pool strength. */
   standings: Array<{ nation: string; rating: number; finish: number }>
   allStars: WorldJuniorsStandoutView[]
+  /** #48/P5: your org's own prospects on the all-tournament team (subset of
+   *  allStars, for the "your prospects on show" callout). */
+  yours?: WorldJuniorsStandoutView[]
 }
 
 export interface InternationalView {

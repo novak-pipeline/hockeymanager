@@ -285,6 +285,18 @@ try {
     console.log('  ⚠ feed subtab not reachable — skipped')
   }
 
+  // The World → International tab (#48/P5 — World Juniors panel when a
+  // nationality-bearing DB is loaded; empty-state on the fictional default).
+  try {
+    await win.click('text="World"', { timeout: 4000 })
+    await win.waitForTimeout(300)
+    await win.click('button:has-text("International")', { timeout: 4000 })
+    await win.waitForTimeout(500)
+    await snap(win, 'world-international')
+  } catch {
+    console.log('  ⚠ world international not reachable — skipped')
+  }
+
   // The Media Circuit subtab under GM Career (#90 — pundit relationships).
   try {
     await win.click('text="GM Career"', { timeout: 4000 })
