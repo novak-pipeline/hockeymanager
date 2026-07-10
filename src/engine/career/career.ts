@@ -1651,6 +1651,28 @@ export class Career {
     return Number((id.match(/\d+/) ?? ['0'])[0])
   }
 
+  /** LW6 (#140): append the persistent all-time head-to-head record to rivalry
+   *  news so the beat cites a specific fact. No-op when the pairing has no
+   *  recorded history yet (returns the seeds unchanged). */
+  private groundRivalryNews(
+    seeds: Array<{ category: NewsCategory; headline: string; body: string; playerId?: string; teamId?: string }>,
+    teamAId: string,
+    teamBId: string,
+  ): typeof seeds {
+    const h2h = chronicleHeadToHead(this.chronicle, teamAId, teamBId)
+    if (!h2h) return seeds
+    const total = h2h.wins + h2h.losses
+    if (total < 3) return seeds // too little history to be worth citing
+    const abbrA = this.data.teams.get(teamAId as TeamId)?.abbreviation ?? teamAId
+    const abbrB = this.data.teams.get(teamBId as TeamId)?.abbreviation ?? teamBId
+    const seriesPart =
+      h2h.seriesWins + h2h.seriesLosses > 0
+        ? ` They've met ${h2h.seriesWins + h2h.seriesLosses} time${h2h.seriesWins + h2h.seriesLosses === 1 ? '' : 's'} in the playoffs (${abbrA} ${h2h.seriesWins}–${h2h.seriesLosses}).`
+        : ''
+    const line = ` All-time, the series stands ${abbrA} ${h2h.wins}–${h2h.losses} ${abbrB}.${seriesPart}`
+    return seeds.map((s) => ({ ...s, body: s.body + line }))
+  }
+
   /** Compute the user team's projected strength rank (1 = best) among all teams. */
   private userStrengthRank(): number {
     const descriptors = this.teamDescriptors()
@@ -3477,7 +3499,11 @@ export class Career {
       year: this.year,
       rng: this.rngFor(7200, game.day, game.id.length),
     })
-    if (rivalResult.newsSeeds.length > 0) this.pushSeeds(rivalResult.newsSeeds)
+    if (rivalResult.newsSeeds.length > 0) {
+      // LW6 (#140): ground the rivalry beat in the persistent all-time series so
+      // the story cites a specific fact, not just "they don't like each other".
+      this.pushSeeds(this.groundRivalryNews(rivalResult.newsSeeds, res.homeTeamId as string, res.awayTeamId as string))
+    }
 
     /* ── Wave 4: user-game rivalry morale swing ── */
     if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
@@ -4544,7 +4570,9 @@ export class Career {
           year: this.year,
           rng: this.rngFor(7201, day, g.gameNumber),
         })
-        if (rivalResult.newsSeeds.length > 0) this.pushSeeds(rivalResult.newsSeeds)
+        if (rivalResult.newsSeeds.length > 0) {
+          this.pushSeeds(this.groundRivalryNews(rivalResult.newsSeeds, g.homeTeamId as string, g.awayTeamId as string))
+        }
       }
       if (isUser) {
         this.recordUserResultNews(day, res)

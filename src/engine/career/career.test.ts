@@ -5,6 +5,7 @@ import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
 import { generateDraftClass } from '@engine/league/offseason'
 import { computeComposites } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
+import { recordMeeting as chronRecordMeeting, type ChronicleState } from '@engine/story/chronicle'
 import { Career, buildTeamList } from './career'
 
 describe('buildTeamList', () => {
@@ -2496,6 +2497,35 @@ describe('Career — offer sheets', () => {
     expect(res.message).not.toMatch(/no longer own/i)
     expect(res.ok).toBe(true)
     expect(res.pending).toBe(true)
+  })
+})
+
+describe('#140 LW6 — rivalry news cites the all-time head-to-head', () => {
+  it('grounds a rivalry beat with the persistent series once there is history', () => {
+    const data = generateLeague({ seed: 33 })
+    const aId = data.league.teams[0]! as string
+    const bId = data.league.teams[1]! as string
+    const cId = data.league.teams[2]! as string
+    const career = new Career(data, 33, data.league.teams[0]!)
+    const internals = career as unknown as {
+      chronicle: ChronicleState
+      groundRivalryNews: (
+        seeds: Array<{ category: string; headline: string; body: string }>,
+        a: string, b: string,
+      ) => Array<{ body: string }>
+    }
+    // Four A-vs-B meetings build the all-time record.
+    for (let i = 0; i < 4; i++) {
+      chronRecordMeeting(internals.chronicle, {
+        homeTeamId: aId, awayTeamId: bId, homeGoals: 3, awayGoals: 2, overtime: false, year: 2025,
+      })
+    }
+    const seeds = [{ category: 'league', headline: 'Rivalry night', body: 'Tempers flared.' }]
+    const grounded = internals.groundRivalryNews(seeds, aId, bId)
+    expect(grounded[0]!.body).toContain('All-time, the series stands')
+    // A pairing with no recorded history is left unchanged.
+    const untouched = internals.groundRivalryNews(seeds, aId, cId)
+    expect(untouched[0]!.body).toBe('Tempers flared.')
   })
 })
 
