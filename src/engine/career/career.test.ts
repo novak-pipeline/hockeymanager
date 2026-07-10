@@ -2459,6 +2459,44 @@ describe('Career — offer sheets', () => {
       expect(onARival).toBe(true)
     }
   })
+
+  it('a top-tier offer sheet (two 1sts) is NOT void — the firsts span consecutive drafts', () => {
+    const data = generateLeague({ seed: 84 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 84, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+    career.autoDraft()
+    career.advanceOffseason() // draft → resign
+    for (let i = 0; i < 8 && career.getOffseason()!.stage !== 'freeAgency'; i++) {
+      career.advanceOffseason()
+    }
+    expect(career.getOffseason()!.stage).toBe('freeAgency')
+
+    // Enormous cap headroom so we isolate the pick-ownership rule from cap math.
+    data.teams.get(userId)!.finances.salaryCap = 500_000_000
+
+    const board = career.getRfaBoard()
+    expect(board.windowOpen).toBe(true)
+    const target = board.rows.find((r) => !r.pending)
+    if (!target) return // no eligible rival RFA on this seed — nothing to assert
+
+    // The user owns their own next-two first-rounders by default (nothing traded).
+    const internals = career as unknown as { picks: Array<{ year: number; round: number; originalTeamId: string; ownerTeamId: string }>; year: number }
+    const ownFirsts = internals.picks.filter(
+      (p) => p.round === 1 && p.originalTeamId === (userId as string) && p.ownerTeamId === (userId as string)
+    )
+    expect(ownFirsts.length).toBeGreaterThanOrEqual(2)
+
+    // A $10.5M sheet lands in the top tier (two 1sts + a 2nd + a 3rd). Before the
+    // fix this was permanently "Void — you no longer own a 1st" because it looked
+    // for BOTH firsts in the same draft year. It must now tender cleanly.
+    const res = career.submitOfferSheet(target.playerId, 10_500_000, 7)
+    expect(res.message).not.toMatch(/no longer own/i)
+    expect(res.ok).toBe(true)
+    expect(res.pending).toBe(true)
+  })
 })
 
 describe('#188 squad status / trade posture', () => {

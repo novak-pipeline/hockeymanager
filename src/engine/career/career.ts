@@ -7944,24 +7944,41 @@ export class Career {
     return { windowOpen, rows: rows.slice(0, 40) }
   }
 
-  /** #183: which of your OWN next-year picks the compensation would require. Real
-   *  rule: offer-sheet compensation must be the offering team's own picks — a
-   *  sheet you can't cover is null and void. Returns the missing rounds (empty =
-   *  you own everything needed). */
+  /** #183: resolve a compensation round-bundle into concrete draft-pick slots.
+   *  Multiple picks of the SAME round come from CONSECUTIVE future drafts — you
+   *  can only own one of your own first-rounders per draft, so "two 1sts" means
+   *  your 1st next year AND the year after (the real NHL rule). e.g. [1,1,2,3] ->
+   *  {y+1,1st} {y+2,1st} {y+1,2nd} {y+1,3rd}. */
+  private offerSheetCompSlots(salary: number): Array<{ year: number; round: number }> {
+    const seenPerRound = new Map<number, number>()
+    const slots: Array<{ year: number; round: number }> = []
+    for (const r of this.offerSheetComp(salary)) {
+      const k = seenPerRound.get(r) ?? 0
+      seenPerRound.set(r, k + 1)
+      slots.push({ year: this.year + 1 + k, round: r })
+    }
+    return slots
+  }
+
+  /** #183: which of the compensation picks you don't OWN. Real rule: offer-sheet
+   *  compensation must be the offering team's own picks, one per consecutive draft
+   *  for repeated rounds — a sheet you can't cover is null and void. Returns the
+   *  missing rounds (empty = you own everything needed). */
   private offerSheetOwnPicksMissing(salary: number): number[] {
-    const rounds = this.offerSheetComp(salary)
-    const compYear = this.year + 1
-    const missing: number[] = []
-    const held = new Map<number, number>() // round -> count of own picks still held
+    const slots = this.offerSheetCompSlots(salary)
+    const held = new Map<string, number>() // "year:round" -> count of own picks still held
     for (const pk of this.picks) {
-      if (pk.year === compYear && (pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)) {
-        held.set(pk.round, (held.get(pk.round) ?? 0) + 1)
+      if ((pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)) {
+        const key = `${pk.year}:${pk.round}`
+        held.set(key, (held.get(key) ?? 0) + 1)
       }
     }
-    for (const r of rounds) {
-      const n = held.get(r) ?? 0
-      if (n <= 0) missing.push(r)
-      else held.set(r, n - 1)
+    const missing: number[] = []
+    for (const slot of slots) {
+      const key = `${slot.year}:${slot.round}`
+      const n = held.get(key) ?? 0
+      if (n <= 0) missing.push(slot.round)
+      else held.set(key, n - 1)
     }
     return missing
   }
@@ -7995,7 +8012,7 @@ export class Career {
     // Own-picks-only rule: you must hold the compensation picks yourself.
     const missing = this.offerSheetOwnPicksMissing(salary)
     if (missing.length > 0) {
-      return { ok: false, matched: false, pending: false, message: `Void — you no longer own the ${this.compLabel(missing)} needed as compensation.` }
+      return { ok: false, matched: false, pending: false, message: `Void — you no longer own ${this.compLabel(missing)} to hand over as compensation.` }
     }
     const decideDay = (os.faDay ?? 0) + Career.OFFER_SHEET_WINDOW
     this.pendingOfferSheets.push({ playerId, ownerTeamId: owner.id as string, salary, years, decideDay })
@@ -8074,14 +8091,14 @@ export class Career {
     }
     this.lockerArrival(this.userTeamId, id)
     repairLines(this.userTeam, this.data.players)
-    const rounds = this.offerSheetComp(salary)
-    const compYear = this.year + 1
-    for (const round of rounds) {
+    const slots = this.offerSheetCompSlots(salary)
+    const rounds = slots.map((s) => s.round)
+    for (const slot of slots) {
       const own = this.picks.find(
-        (pk) => pk.year === compYear && pk.round === round && (pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)
+        (pk) => pk.year === slot.year && pk.round === slot.round && (pk.originalTeamId as string) === (this.userTeamId as string) && (pk.ownerTeamId as string) === (this.userTeamId as string)
       )
       if (own) own.ownerTeamId = owner.id
-      else this.picks.push({ year: compYear, round, originalTeamId: this.userTeamId, ownerTeamId: owner.id })
+      else this.picks.push({ year: slot.year, round: slot.round, originalTeamId: this.userTeamId, ownerTeamId: owner.id })
     }
     this.adjustRelationship(owner.id as string, -8)
     recordAcquisition(this.chronicle, { playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
@@ -8174,17 +8191,17 @@ export class Career {
       }
     }
     signPlayer({ team: suitor, player, salary: sheet.salary, years: sheet.years, year: this.year, players: this.data.players })
-    // Compensation: the rival's picks (their slot) for the next draft go to you.
-    const compYear = this.year + 1
-    const rounds = this.offerSheetComp(sheet.salary)
-    for (const round of rounds) {
-      this.picks.push({ year: compYear, round, originalTeamId: suitor.id, ownerTeamId: this.userTeamId })
+    // Compensation: the rival's own picks come to you — one per consecutive draft
+    // for repeated rounds (a club has only one of its own 1st per year).
+    const slots = this.offerSheetCompSlots(sheet.salary)
+    for (const slot of slots) {
+      this.picks.push({ year: slot.year, round: slot.round, originalTeamId: suitor.id, ownerTeamId: this.userTeamId })
     }
     this.resignStatus.delete(asPlayerId(playerId))
     this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
     // Letting a rival poach your RFA sours the relationship with that front office.
     this.adjustRelationship(suitor.id as string, -12)
-    const compStr = rounds.length ? rounds.map((r) => `R${r}`).join(' + ') + ` (${compYear})` : 'no compensation (below threshold)'
+    const compStr = slots.length ? slots.map((s) => `R${s.round} (${s.year})`).join(' + ') : 'no compensation (below threshold)'
     this.pushNews('contract', `${player.name} leaves on an offer sheet`, `${player.name} signs with ${suitor.name}. Compensation: ${compStr}.`, { playerId, teamId: suitor.id as string })
     return { ok: true, message: `${player.name} walks; you receive ${compStr}.` }
   }
