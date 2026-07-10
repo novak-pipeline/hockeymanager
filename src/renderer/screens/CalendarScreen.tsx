@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { CalendarEntry, CalendarView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
-import { useNav } from '../components/NavContext'
+import { useNav, type ScreenId } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -332,15 +332,45 @@ function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
   }
 }
 
+/** #146: map a calendar key-date to an icon + (where useful) a screen to jump to.
+ *  Targets are always-available screens so a beat marker never dead-ends. */
+function keyDateMeta(label: string): { icon: string; screen?: ScreenId } {
+  if (label.startsWith('Interview')) return { icon: '🎤' }
+  switch (label) {
+    case 'Free Agency Opens': return { icon: '💰', screen: 'faMarket' }
+    case 'Trade Deadline': return { icon: '🔁', screen: 'trades' }
+    case 'Entry Draft': return { icon: '🎫', screen: 'scoutingDraft' }
+    case 'Scouting Combine': return { icon: '🔍', screen: 'scoutingDraft' }
+    case 'Playoffs Begin': return { icon: '🏆', screen: 'standings' }
+    case 'Regular Season Ends': return { icon: '🏁', screen: 'standings' }
+    case 'Holiday Roster Freeze': return { icon: '❄️', screen: 'squad' }
+    case 'All-Star Break': return { icon: '⭐' }
+    case 'Season Begins': return { icon: '🏒' }
+    case 'Training Camp Opens': return { icon: '🏒', screen: 'practice' }
+    case 'Development Camp': return { icon: '🏒' }
+    case 'Cut Day': return { icon: '✂️', screen: 'squad' }
+    default: return { icon: '📌' }
+  }
+}
+
 function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
   const nav = useNav()
   if (entry.kind === 'keydate') {
+    const meta = keyDateMeta(entry.label)
+    const clickable = meta.screen !== undefined
     return (
       <span
         className="chip chip-violet"
-        style={{ fontSize: 11, padding: '2px 6px', width: '100%', boxSizing: 'border-box' }}
+        onClick={clickable ? () => nav.navigate(meta.screen!) : undefined}
+        title={clickable ? `${entry.label} — open` : entry.label}
+        style={{
+          fontSize: 11, padding: '2px 6px', width: '100%', boxSizing: 'border-box',
+          cursor: clickable ? 'pointer' : 'default',
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}
       >
-        {entry.label}
+        <span aria-hidden style={{ fontSize: 10 }}>{meta.icon}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.label}</span>
       </span>
     )
   }
