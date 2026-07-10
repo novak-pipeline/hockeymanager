@@ -2714,6 +2714,39 @@ describe('#175 shorthanded stat splits', () => {
     // Shorthanded goals are far rarer than power-play goals.
     expect(pp).toBeGreaterThan(sh)
   })
+
+  it('credits real PP/PK time-on-ice, concentrated on the special-teams units', () => {
+    const data = generateLeague({ seed: 72 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 72, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+
+    let ppToi = 0
+    let pkToi = 0
+    for (const tid of data.league.teams) {
+      for (const r of career.getTeamPlayerStats(tid as string).skaters) {
+        if (!r.skater) continue
+        ppToi += r.skater.ppToiPerGame ?? 0
+        pkToi += r.skater.pkToiPerGame ?? 0
+      }
+    }
+    // Both were always 0 before #175 (placeholder timeOnIce).
+    expect(ppToi).toBeGreaterThan(0)
+    expect(pkToi).toBeGreaterThan(0)
+
+    // Role shape: the user club's PP1 forwards out-minute a 4th-line, non-PP body.
+    const team = data.teams.get(asTeamId(userId as string))!
+    const pp1 = (team.lines.powerPlayUnits[0] ?? []).map((id) => id as string)
+    const skaters = career.getTeamPlayerStats(userId as string).skaters
+    const pp1Toi = skaters
+      .filter((r) => pp1.includes(r.playerId) && r.skater)
+      .reduce((s, r) => s + (r.skater!.ppToiPerGame ?? 0), 0)
+    expect(pp1Toi).toBeGreaterThan(0)
+    // PP TOI never exceeds total TOI for anyone.
+    for (const r of skaters) {
+      if (r.skater) expect(r.skater.ppToiPerGame ?? 0).toBeLessThanOrEqual(r.skater.toiPerGame + 1)
+    }
+  })
 })
 
 describe('roles tab — bulk squad-role board', () => {

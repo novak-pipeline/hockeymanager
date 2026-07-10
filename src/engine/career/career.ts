@@ -5798,11 +5798,13 @@ export class Career {
           goals: Math.max(0, t.goals - ppG - shG),
           assists: Math.max(0, t.assists - ppA - shA),
           shots: t.shots,
-          timeOnIce: t.toi,
+          // #175: even-strength TOI is the total minus the special-teams split.
+          timeOnIce: Math.max(0, t.toi - (t.ppToi ?? 0) - (t.pkToi ?? 0)),
         },
-        pp: { goals: ppG, assists: ppA, shots: 0, timeOnIce: 0 },
-        // #175: shorthanded points ARE the PK's scoring output (was a placeholder 0).
-        pk: { goals: shG, assists: shA, shots: 0, timeOnIce: 0 },
+        pp: { goals: ppG, assists: ppA, shots: 0, timeOnIce: Math.round(t.ppToi ?? 0) },
+        // #175: shorthanded points ARE the PK's scoring output (was a placeholder 0);
+        // pk.timeOnIce is now the real penalty-kill ice time.
+        pk: { goals: shG, assists: shA, shots: 0, timeOnIce: Math.round(t.pkToi ?? 0) },
         plusMinus: t.plusMinus,
         penaltyMinutes: t.penaltyMinutes,
         saves: t.saves,
@@ -12734,6 +12736,7 @@ export class Career {
             atoi: s.toiPerGame, ppGoals: s.ppGoals, ppAssists: s.ppAssists,
             ppPoints: s.ppGoals + s.ppAssists,
             shPoints: (s.shGoals ?? 0) + (s.shAssists ?? 0),
+            ppToiPerGame: s.ppToiPerGame ?? 0, pkToiPerGame: s.pkToiPerGame ?? 0,
             hits: tot?.hits ?? 0, blocks: tot?.blockedShots ?? 0,
             takeaways: tot?.takeaways ?? 0, giveaways: tot?.giveaways ?? 0,
             avgRating: avgRatingOf(r.playerId),

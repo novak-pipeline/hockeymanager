@@ -202,6 +202,8 @@ function skaterLine(ctx: ViewCtx, id: PlayerId): SkaterSeasonLine {
     ppAssists: ctx.ppAssists.get(id) ?? 0,
     shGoals: ctx.shGoals?.get(id) ?? 0,
     shAssists: ctx.shAssists?.get(id) ?? 0,
+    ppToiPerGame: games > 0 ? Math.round((t?.ppToi ?? 0) / games) : 0,
+    pkToiPerGame: games > 0 ? Math.round((t?.pkToi ?? 0) / games) : 0,
   }
 }
 
@@ -759,6 +761,8 @@ export function buildPlayerProfile(
               ppAssists: s.pp.assists,
               shGoals: s.pk.goals,
               shAssists: s.pk.assists,
+              ppToiPerGame: s.gamesPlayed > 0 ? Math.round(s.pp.timeOnIce / s.gamesPlayed) : 0,
+              pkToiPerGame: s.gamesPlayed > 0 ? Math.round(s.pk.timeOnIce / s.gamesPlayed) : 0,
               ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             },
       goalie:

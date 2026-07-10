@@ -514,6 +514,50 @@ function simEmptyNetPhase(
   }
 }
 
+/**
+ * #175: the quick sim doesn't skate literal special-teams shifts, so estimate
+ * each player's PP/PK time-on-ice from the game's penalty volume and his unit
+ * membership — so the background league produces credible, role-shaped special-
+ * teams minutes (PP1 scorers, PK grinders) rather than zeros. ppToi + pkToi is
+ * capped at his total toi. Purely additive: touches only the ppToi/pkToi fields.
+ */
+function estimateSpecialTeamsToi(ctx: Ctx, sims: TeamSim[]): void {
+  // A power play runs ~2:00 but ends early on a goal — call it ~100s of live PP.
+  const PP_SECONDS = 100
+  // How PP/PK minutes concentrate on the first unit vs the second.
+  const PP_UNIT_SHARE = [0.68, 0.34]
+  const PK_UNIT_SHARE = [0.62, 0.42]
+
+  const penaltiesTakenBy = (sim: TeamSim): number => {
+    let pim = 0
+    for (const id of sim.team.roster) pim += ctx.stats.get(id)?.penaltyMinutes ?? 0
+    return pim / 2 // minors only
+  }
+  const penByTeam = sims.map(penaltiesTakenBy)
+
+  sims.forEach((sim, i) => {
+    const oppPenalties = penByTeam[1 - i] ?? 0 // this club's POWER plays = opp's penalties
+    const ownPenalties = penByTeam[i] ?? 0 // this club's PENALTY kills
+    const ppSecTeam = oppPenalties * PP_SECONDS
+    const pkSecTeam = ownPenalties * PP_SECONDS
+    const add = (units: PlayerId[][], sharePer: number[], key: 'ppToi' | 'pkToi', teamSec: number): void => {
+      units.forEach((unit, u) => {
+        const share = sharePer[u] ?? 0
+        for (const pid of unit) {
+          const s = ctx.stats.get(pid)
+          if (!s) continue
+          const want = teamSec * share
+          // Never let special-teams minutes exceed the player's actual ice time.
+          const budget = Math.max(0, s.toi - (s.ppToi ?? 0) - (s.pkToi ?? 0))
+          s[key] = (s[key] ?? 0) + Math.min(want, budget)
+        }
+      })
+    }
+    add(sim.team.lines.powerPlayUnits, PP_UNIT_SHARE, 'ppToi', ppSecTeam)
+    add(sim.team.lines.penaltyKillUnits, PK_UNIT_SHARE, 'pkToi', pkSecTeam)
+  })
+}
+
 export function quickSimGame(
   home: Team,
   away: Team,
@@ -570,6 +614,9 @@ export function quickSimGame(
       : REGULATION_PERIODS + (decidedBy === 'shootout' ? 1 : 0)
 
   ctx.stream.push({ t: 0, period: finalPeriod, type: 'gameEnd' })
+
+  // #175: estimate special-teams ice time from penalties + unit membership.
+  estimateSpecialTeamsToi(ctx, [homeSim, awaySim])
 
   return {
     homeTeamId: home.id,

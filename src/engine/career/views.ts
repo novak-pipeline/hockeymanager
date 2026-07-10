@@ -346,6 +346,10 @@ export interface SkaterSeasonLine {
    *  absent on imported pre-career seasons and old saves; treated as 0. */
   shGoals?: number
   shAssists?: number
+  /** #175: average power-play / penalty-kill time on ice per game (seconds).
+   *  Optional/additive; absent on imported seasons and old saves. */
+  ppToiPerGame?: number
+  pkToiPerGame?: number
   /** Season average match rating (Avr). Absent for imported pre-career seasons. */
   avgRating?: number
 }
@@ -1261,6 +1265,9 @@ export interface LeagueSkaterStatRow {
   ppPoints: number
   /** #175: shorthanded points (goals + assists). Optional/additive. */
   shPoints?: number
+  /** #175: PP / PK time on ice per game (seconds). Optional/additive. */
+  ppToiPerGame?: number
+  pkToiPerGame?: number
   hits: number
   blocks: number
   takeaways: number

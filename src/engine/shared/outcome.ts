@@ -18,6 +18,14 @@ export interface GamePlayerStat {
   penaltyMinutes: number
   /** Time on ice, seconds. */
   toi: number
+  /**
+   * #175: special-teams time on ice, seconds — the portion of `toi` spent on the
+   * power play / penalty kill. The full sim tracks these literally per shift; the
+   * quick sim estimates them from special-teams volume + unit membership.
+   * Optional (absent on pre-#175 stats → treat as 0). ppToi + pkToi ≤ toi.
+   */
+  ppToi?: number
+  pkToi?: number
   // Goalie-only; 0 for skaters.
   saves: number
   shotsAgainst: number
@@ -68,6 +76,8 @@ export function emptyStat(playerId: PlayerId): GamePlayerStat {
     shots: 0,
     penaltyMinutes: 0,
     toi: 0,
+    ppToi: 0,
+    pkToi: 0,
     saves: 0,
     shotsAgainst: 0,
     goalsAgainst: 0,
@@ -97,6 +107,8 @@ export function mergePlayerStats(
     t.shots += s.shots
     t.penaltyMinutes += s.penaltyMinutes
     t.toi += s.toi
+    if (s.ppToi !== undefined) t.ppToi = (t.ppToi ?? 0) + s.ppToi
+    if (s.pkToi !== undefined) t.pkToi = (t.pkToi ?? 0) + s.pkToi
     t.saves += s.saves
     t.shotsAgainst += s.shotsAgainst
     t.goalsAgainst += s.goalsAgainst

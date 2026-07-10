@@ -642,13 +642,22 @@ function simPeriod(
     return { kind: 'ev', count: clamp(5 + extra, 3, 6) }
   }
 
-  /** Credit time-on-ice for the shift just completed. */
+  /** Credit time-on-ice for the shift just completed. #175: also split each
+   *  skater's ice time into pp/pk buckets from the strength state he was deployed
+   *  at (deployKey is set at deploy() and reflects the shift now ending, since a
+   *  strength change credits BEFORE redeploying). */
   const creditShift = (upTo: number): void => {
     const dur = upTo - lastShift
-    for (const r of home.unit.skaters) stat(ctx, r.player.id).toi += dur
-    stat(ctx, home.unit.goalie.player.id).toi += dur
-    for (const r of away.unit.skaters) stat(ctx, r.player.id).toi += dur
-    stat(ctx, away.unit.goalie.player.id).toi += dur
+    for (const team of [home, away]) {
+      const kind = team.deployKey.split(':')[0] // 'ev' | 'pp' | 'pk' | 'ot'
+      for (const r of team.unit.skaters) {
+        const s = stat(ctx, r.player.id)
+        s.toi += dur
+        if (kind === 'pp') s.ppToi = (s.ppToi ?? 0) + dur
+        else if (kind === 'pk') s.pkToi = (s.pkToi ?? 0) + dur
+      }
+      stat(ctx, team.unit.goalie.player.id).toi += dur
+    }
     lastShift = upTo
   }
 
