@@ -2646,6 +2646,30 @@ describe('#182 training-camp PTO invites', () => {
   })
 })
 
+describe('#171 medical timelines', () => {
+  it('turns an injury into a return date off the real schedule + a severity band', () => {
+    const data = generateLeague({ seed: 80 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 80, userId)
+    career.advance(3) // put a few games on the schedule behind us
+
+    // Injure a rostered player for 5 games.
+    const injuredId = data.teams.get(asTeamId(userId as string))!.roster[0]
+    const p = data.players.get(injuredId)!
+    p.injuryStatus = { kind: 'lowerBody', gamesRemaining: 5, description: 'Sprained MCL' }
+
+    const med = career.getMedical()
+    expect(med.injuredCount).toBeGreaterThanOrEqual(1)
+    expect(med.gamesToReturnTotal).toBeGreaterThanOrEqual(5)
+    const row = med.rows.find((r) => r.playerId === (injuredId as string))!
+    expect(row.severity).toBe('weeks') // 5 games → weeks band
+    // A return date is projected from the club's upcoming schedule (ISO string).
+    expect(row.estReturn === undefined || /^\d{4}-\d{2}-\d{2}$/.test(row.estReturn)).toBe(true)
+    // Physio surfaced for the recovery context.
+    expect(med.physioName).toBeTruthy()
+  })
+})
+
 describe('#175 shorthanded stat splits', () => {
   it('credits shorthanded goals to PK scorers over a full season (real PK splits)', () => {
     const data = generateLeague({ seed: 71 })

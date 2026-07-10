@@ -11257,11 +11257,24 @@ export class Career {
     return view
   }
 
+  /** #171: the user club's future game days, soonest first (for injury timelines). */
+  private userUpcomingGameDays(): number[] {
+    const uid = this.userTeamId as string
+    return this.data.league.schedule
+      .filter((g) => (g.homeTeamId as string) === uid || (g.awayTeamId as string) === uid)
+      .map((g) => g.day)
+      .filter((d) => d >= this.currentDay)
+      .sort((a, b) => a - b)
+  }
+
   /** Medical Center: condition / fatigue / injury / injury-risk for the user roster. */
   getMedical(): MedicalView {
     const team = this.data.teams.get(this.userTeamId)
     const rows: MedicalRow[] = []
     let injuredCount = 0
+    let gamesToReturnTotal = 0
+    // #171: map "games remaining" → an estimated return DATE off the real schedule.
+    const futureDays = this.userUpcomingGameDays()
     for (const id of team?.roster ?? []) {
       const p = this.data.players.get(id)
       if (!p) continue
@@ -11273,6 +11286,15 @@ export class Career {
       if (injured) injuredCount++
       const risk = injured ? 100 : Math.round(Math.max(0, Math.min(100, proneness * 0.55 + fatigue * 0.45)))
       const riskLabel: MedicalRow['riskLabel'] = risk >= 60 ? 'High' : risk >= 33 ? 'Increased' : 'Low'
+      let timeline: { estReturn?: string; severity?: MedicalRow['severity'] } = {}
+      if (p.injuryStatus) {
+        const gr = p.injuryStatus.gamesRemaining
+        gamesToReturnTotal += gr
+        // He sits out `gr` games and returns for the next one — futureDays[gr].
+        const returnDay = futureDays[gr]
+        const severity: MedicalRow['severity'] = gr <= 2 ? 'day-to-day' : gr <= 8 ? 'weeks' : 'long-term'
+        timeline = { severity, ...(returnDay !== undefined ? { estReturn: dayToDateISO(this.year, returnDay) } : {}) }
+      }
       const row: MedicalRow = {
         playerId: id as unknown as string,
         name: p.name,
@@ -11281,6 +11303,7 @@ export class Career {
         fatigue,
         riskLabel,
         risk,
+        ...timeline,
         ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining, injuryKind: p.injuryStatus.kind } : {}),
       }
@@ -11288,7 +11311,16 @@ export class Career {
     }
     // Most at-risk / injured first.
     rows.sort((a, b) => b.risk - a.risk)
-    return { teamName: team?.name ?? 'Team', injuredCount, rows }
+    // #171: the head physio (best-rated) — the staff behind the recoveries.
+    const physio = [...this.getTeamStaff(this.userTeamId as string).physios]
+      .sort((a, b) => (b.physiotherapy ?? b.rating) - (a.physiotherapy ?? a.rating))[0]
+    return {
+      teamName: team?.name ?? 'Team',
+      injuredCount,
+      gamesToReturnTotal,
+      ...(physio ? { physioName: physio.name, physioRating: physio.physiotherapy ?? physio.rating } : {}),
+      rows,
+    }
   }
 
   /** Development Center: the org's young / high-upside players (NHL + AHL). */

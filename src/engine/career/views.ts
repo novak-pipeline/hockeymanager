@@ -2478,6 +2478,12 @@ export interface MedicalRow {
   injuryGamesRemaining?: number
   /** Injury body region, for the medical body diagram. */
   injuryKind?: 'upperBody' | 'lowerBody' | 'concussion' | 'illness'
+  /** #171: estimated return date (ISO) — the date of the next club game he can
+   *  play after sitting out his remaining games. Absent if not injured or no
+   *  scheduled game far enough out. */
+  estReturn?: string
+  /** #171: severity band from the timeline. */
+  severity?: 'day-to-day' | 'weeks' | 'long-term'
   /** Injury-risk band + 0–100 score. */
   riskLabel: 'Low' | 'Increased' | 'High'
   risk: number
@@ -2487,6 +2493,11 @@ export interface MedicalRow {
 export interface MedicalView {
   teamName: string
   injuredCount: number
+  /** #171: total club games still to be missed across all current injuries. */
+  gamesToReturnTotal: number
+  /** #171: head physio (name + 0–100 quality) — better staff shorten recoveries. */
+  physioName?: string
+  physioRating?: number
   rows: MedicalRow[]
 }
 

@@ -22,6 +22,21 @@ function condColor(c: number): string {
   return 'var(--danger)'
 }
 
+/** #171: severity chip colours. */
+function severityBg(s: NonNullable<MedicalRow['severity']>): string {
+  return s === 'day-to-day' ? 'var(--amber-dim, rgba(245,158,11,0.18))' : s === 'weeks' ? 'rgba(239,68,68,0.16)' : 'rgba(239,68,68,0.28)'
+}
+function severityFg(s: NonNullable<MedicalRow['severity']>): string {
+  return s === 'day-to-day' ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+}
+
+/** ISO date → "12 Nov". */
+function fmtDate(iso: string): string {
+  const [, m, d] = iso.split('-').map(Number)
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${d} ${months[(m ?? 1) - 1]}`
+}
+
 type Region = 'head' | 'upper' | 'lower' | 'illness' | null
 
 function regionOf(kind: MedicalRow['injuryKind']): Region {
@@ -88,11 +103,18 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
           <PlayerLink playerId={r.playerId} name={r.name} />
           <span className="muted small">· {r.position}</span>
         </div>
-        <div style={{ color: HURT, fontWeight: 700, fontSize: 13 }}>
-          {r.injuryDescription ?? 'Injured'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: HURT, fontWeight: 700, fontSize: 13 }}>{r.injuryDescription ?? 'Injured'}</span>
+          {r.severity && (
+            <span className="chip" style={{ fontSize: 9, fontWeight: 700, background: severityBg(r.severity), color: severityFg(r.severity), borderColor: 'transparent' }}>
+              {r.severity === 'day-to-day' ? 'DAY-TO-DAY' : r.severity === 'weeks' ? 'WEEKS' : 'LONG-TERM'}
+            </span>
+          )}
         </div>
         <div className="small muted" style={{ marginTop: 2 }}>
-          {r.injuryGamesRemaining ?? '?'} games remaining{weeks ? ` · ~${weeks} wk${weeks === 1 ? '' : 's'}` : ''}
+          {r.estReturn
+            ? <>Est. return <strong style={{ color: 'var(--text)' }}>{fmtDate(r.estReturn)}</strong> · {r.injuryGamesRemaining ?? '?'} game{r.injuryGamesRemaining === 1 ? '' : 's'} out</>
+            : <>{r.injuryGamesRemaining ?? '?'} games remaining{weeks ? ` · ~${weeks} wk${weeks === 1 ? '' : 's'}` : ''}</>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
           <span className="meter" style={{ flex: 1, height: 6, maxWidth: 120 }}>
@@ -126,6 +148,28 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
           {d.injuredCount} injured · {d.rows.filter((r) => r.riskLabel === 'High').length} high-risk
         </span>
       </ScreenHeader>
+
+      {/* #171: physio + injury-bill summary strip */}
+      <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+        {d.physioName !== undefined && (
+          <div className="panel" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div>
+              <div className="field-label">Head Physio</div>
+              <div style={{ fontWeight: 700 }}>{d.physioName}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div className="field-label">Rating</div>
+              <div style={{ fontWeight: 800, color: d.physioRating != null && d.physioRating >= 65 ? 'var(--success)' : d.physioRating != null && d.physioRating >= 45 ? 'var(--amber, #f59e0b)' : 'var(--danger)' }}>
+                {d.physioRating ?? '–'}
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="panel" style={{ padding: '8px 14px' }}>
+          <div className="field-label">Injury bill</div>
+          <div style={{ fontWeight: 700 }}>{d.injuredCount} out · {d.gamesToReturnTotal} club-game{d.gamesToReturnTotal === 1 ? '' : 's'} to be missed</div>
+        </div>
+      </div>
 
       <Panel title="Treatment Room">
         {injured.length === 0 ? (
