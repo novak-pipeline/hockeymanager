@@ -36,6 +36,9 @@ export interface DevelopmentRow {
   /** Short development note (next step / outlook). */
   note: string
   faceId?: number
+  /** #174: the prospect's individual development focus (a GM directive that
+   *  biases his growth). Absent = under the club/team default. */
+  focus?: import('@engine/league/practice').PracticeFocus
 }
 
 /** One recommended roster move from the "ask the coach to set the roster" advice. */

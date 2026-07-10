@@ -2646,6 +2646,36 @@ describe('#182 training-camp PTO invites', () => {
   })
 })
 
+describe('#174 dev center — individual development focus', () => {
+  it('sets + surfaces a per-prospect development focus (works for AHL prospects too)', () => {
+    const data = generateLeague({ seed: 101 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 101, userId)
+
+    const dev = career.getDevelopment()
+    expect(dev.rows.length).toBeGreaterThan(0)
+    // Prefer an AHL prospect (the case the broadened bias unlocks); fall back to any.
+    const target = dev.rows.find((r) => r.location === 'AHL') ?? dev.rows[0]!
+    expect(target.focus).toBeUndefined() // no plan by default
+
+    career.setPlayerFocusDrill(target.playerId, 'skating')
+    const after = career.getDevelopment().rows.find((r) => r.playerId === target.playerId)
+    expect(after?.focus).toBe('skating')
+
+    // Clearing removes the plan.
+    career.setPlayerFocusDrill(target.playerId, null)
+    expect(career.getDevelopment().rows.find((r) => r.playerId === target.playerId)?.focus).toBeUndefined()
+  })
+
+  it('auto-set recommends a focus for the whole young cohort', () => {
+    const data = generateLeague({ seed: 102 })
+    const career = new Career(data, 102, data.league.teams[0])
+    const res = career.recommendPlayerFocuses()
+    expect(res.ok).toBe(true)
+    expect(res.count).toBeGreaterThan(0)
+  })
+})
+
 describe('#173 finances — revenue cadence + ticket pricing', () => {
   it('gate revenue scales with fan interest, and the pricing lever trades attendance for per-seat take', () => {
     const data = generateLeague({ seed: 90 })

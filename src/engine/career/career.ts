@@ -11402,7 +11402,7 @@ export class Career {
       systemElsewhere.push({ player: p, clubAbbrev, ...(leagueAbbr ? { leagueAbbr } : {}) })
     }
 
-    return buildDevelopmentCenter({
+    const view = buildDevelopmentCenter({
       teamName: team?.name ?? 'Team',
       roster,
       affiliate,
@@ -11410,6 +11410,13 @@ export class Career {
       rosterAdvice: { callUps, sendDowns },
       systemElsewhere,
     })
+    // #174: surface each prospect's individual development focus so the Dev Center
+    // can set it right where you evaluate him.
+    const focusOf = new Map(this.practiceState.perPlayerFocus)
+    const annotate = (r: DevelopmentRow): void => { const f = focusOf.get(r.playerId); if (f) r.focus = f }
+    view.rows.forEach(annotate)
+    view.systemElsewhere.forEach(annotate)
+    return view
   }
 
   /**
@@ -13460,10 +13467,14 @@ export class Career {
    * coach's development competence.
    */
   private practiceAttributeBias(id: PlayerId): Partial<Record<string, number>> | undefined {
-    if (this.teamOf(id) !== this.userTeamId) return undefined
     const p = this.data.players.get(id)
     if (!p) return undefined
-    const focus = effectiveFocus(this.practiceState, id as string)
+    // #174: an explicit individual development plan follows the prospect wherever
+    // he plays (AHL / junior), so a Dev-Center focus actually shapes his growth.
+    // The TEAM practice regimen still only touches the NHL club.
+    const explicit = this.practiceState.perPlayerFocus.find(([pid]) => pid === (id as string))?.[1]
+    if (!explicit && this.teamOf(id) !== this.userTeamId) return undefined
+    const focus = explicit ?? effectiveFocus(this.practiceState, id as string)
     if (focus === 'balanced') return undefined // neutral baseline — byte-identical
     const { attributeBias } = practiceDevModifier(focus, p)
     // A non-recovery focus returning {} is a position mismatch (e.g. a goalie

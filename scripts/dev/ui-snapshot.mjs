@@ -31,6 +31,7 @@ const SIDEBAR_STOPS = [
   ['Training', 'training'],
   ['Data Hub', 'datahub'],
   ['Medical Center', 'medical'],
+  ['Dev. Center', 'dev-center'],
   ['Schedule', 'calendar'],
   ['Competitions', 'league'],
   ['Scouting', 'scouting'],
