@@ -2663,6 +2663,14 @@ describe('roles tab — bulk squad-role board', () => {
     const after = career.getRoleBoard()
     expect(after.unassigned).toBe(0)
     expect(after.rows.every((r) => r.squadStatus !== undefined)).toBe(true)
+
+    // Roster-relative: a realistic spread, not everyone at one tier.
+    const roles = new Set(after.rows.map((r) => r.squadStatus))
+    expect(roles.size).toBeGreaterThanOrEqual(3)
+    // The NHL club has a core (top-6 F / top-4 D / starter) and depth below it.
+    const nhl = after.rows.filter((r) => r.onNhl)
+    expect(nhl.some((r) => r.squadStatus === 'coreStarter' || r.squadStatus === 'keyPlayer')).toBe(true)
+    expect(nhl.some((r) => r.squadStatus === 'rotation')).toBe(true)
   })
 
   it('auto-assign (no overwrite) respects a manually-set role; overwrite re-suggests', () => {

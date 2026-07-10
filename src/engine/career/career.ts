@@ -13391,26 +13391,47 @@ export class Career {
   }
 
   /**
-   * #188 roles tab: recommend a squad status from a player's ability, age and
-   * where he sits in the org. Young developmentals map to prospect tiers; NHL
-   * regulars to key/core/rotation by ability; older AHL bodies to surplus. Pure.
+   * #188 roles tab: recommend a squad status for every org player — RELATIVE to
+   * the roster's depth chart, so the club always has a realistic spread (a couple
+   * of key men, a core, and depth) rather than everyone clustering at one tier by
+   * absolute overall. NHL forwards are ranked within the group (top-6 = core,
+   * the best 1–2 = key), D within the top-4, and the starter is core; young
+   * players off the top group map to prospect tiers; older farm bodies to surplus.
+   * Pure.
    */
-  private suggestSquadStatus(p: Player, onNhl: boolean): SquadStatus {
-    const ovr = ratedOverall(p)
-    const pot = ratedPotential(p)
-    // Young and still developing → a prospect tier (unless he's already an NHL
-    // difference-maker, handled below).
-    if (p.age <= 23 && !(onNhl && ovr >= 80)) {
-      return pot >= 78 ? 'topProspect' : 'prospect'
+  private orgRoleSuggestions(): Map<string, SquadStatus> {
+    // Rank the NHL roster within each position group by ability.
+    const nhl = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p)
+    const groupOf = (p: Player): 'F' | 'D' | 'G' => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
+    const rank = new Map<string, number>()
+    for (const g of ['F', 'D', 'G'] as const) {
+      nhl.filter((p) => groupOf(p) === g)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a) || Career.pidNum(a.id as string) - Career.pidNum(b.id as string))
+        .forEach((p, i) => rank.set(p.id as string, i))
     }
-    if (onNhl) {
-      if (ovr >= 83) return 'keyPlayer'
-      if (ovr >= 74) return 'coreStarter'
-      return 'rotation'
+    const classify = (p: Player, onNhl: boolean): SquadStatus => {
+      const ovr = ratedOverall(p)
+      const pot = ratedPotential(p)
+      const young = p.age <= 23
+      const g = groupOf(p)
+      if (onNhl) {
+        const r = rank.get(p.id as string) ?? 99
+        const isKey = ovr >= 85 || (g !== 'G' && r <= 1 && ovr >= 78)
+        const isCore = g === 'F' ? r < 6 : g === 'D' ? r < 4 : r < 1
+        if (isKey) return young && ovr < 80 ? 'coreStarter' : 'keyPlayer'
+        if (isCore) return 'coreStarter'
+        // On the NHL roster but outside the regular top group.
+        return young ? (pot >= 78 ? 'topProspect' : 'prospect') : 'rotation'
+      }
+      // Farm: young players develop; older bodies are depth or surplus.
+      if (young) return pot >= 78 ? 'topProspect' : 'prospect'
+      return ovr >= 72 ? 'rotation' : 'surplus'
     }
-    // On the farm and past prospect age: a useful tweener stays "rotation", the
-    // rest are surplus depth.
-    return ovr >= 74 ? 'rotation' : 'surplus'
+    const out = new Map<string, SquadStatus>()
+    for (const { p, onNhl } of this.orgPlayersWithTier()) out.set(p.id as string, classify(p, onNhl))
+    return out
   }
 
   /** The user's whole organisation (NHL roster + AHL affiliate) as Player objects,
@@ -13436,11 +13457,12 @@ export class Career {
    */
   getRoleBoard(): RoleBoardView {
     const fog = this.fogCtx()
+    const suggestions = this.orgRoleSuggestions()
     const rows: RoleBoardRow[] = this.orgPlayersWithTier().map(({ p, onNhl }) => ({
       ...badge(p, onNhl ? undefined : fog),
       onNhl,
       ...(p.squadStatus ? { squadStatus: p.squadStatus } : {}),
-      suggested: this.suggestSquadStatus(p, onNhl),
+      suggested: suggestions.get(p.id as string) ?? 'rotation',
     }))
     rows.sort((a, b) => Number(b.onNhl) - Number(a.onNhl) || b.overall - a.overall)
     return {
@@ -13456,10 +13478,11 @@ export class Career {
    * `overwrite` re-suggests the whole org. Returns how many were set.
    */
   autoAssignSquadRoles(overwrite = false): { assigned: number } {
+    const suggestions = this.orgRoleSuggestions()
     let assigned = 0
-    for (const { p, onNhl } of this.orgPlayersWithTier()) {
+    for (const { p } of this.orgPlayersWithTier()) {
       if (!overwrite && p.squadStatus !== undefined) continue
-      p.squadStatus = this.suggestSquadStatus(p, onNhl)
+      p.squadStatus = suggestions.get(p.id as string) ?? 'rotation'
       assigned++
     }
     return { assigned }
