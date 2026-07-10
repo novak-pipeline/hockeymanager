@@ -1542,8 +1542,16 @@ export interface FaHubRowView extends PlayerBadge {
   /** Rival clubs known to be circling (abbreviations) — the competition you're
    *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
   rivals?: string[]
-  /** #167: a standing offer you've tabled him, awaiting his decision. */
-  pendingOffer?: { salary: number; years: number; decidesInDays: number }
+  /** #167/#164: a standing offer you've tabled him, awaiting his decision, with
+   *  an honest read on where it sits vs the rival field. */
+  pendingOffer?: {
+    salary: number
+    years: number
+    decidesInDays: number
+    /** 'leading' = clear front-runner · 'competitive' = fair but sniper-able · 'trailing' = below his ask. */
+    standing: 'leading' | 'competitive' | 'trailing'
+    standingNote: string
+  }
 }
 
 export interface FaHubView {

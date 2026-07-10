@@ -7,7 +7,7 @@
  */
 import { useState } from 'react'
 import type { FinanceView } from '../../worker/protocol'
-import type { RfaBoardView } from '../../engine/career/views'
+import type { RfaBoardView, FaHubView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
@@ -38,6 +38,66 @@ function CapLine({ finance }: { finance: FinanceView | null }): JSX.Element | nu
         <div style={{ width: `${pct}%`, height: '100%', background: over ? 'var(--danger)' : 'rgb(var(--accent-rgb, 108,92,231))' }} />
       </div>
     </div>
+  )
+}
+
+const STANDING_META: Record<'leading' | 'competitive' | 'trailing', { label: string; color: string }> = {
+  leading: { label: 'Leading', color: 'var(--success, #4caf7d)' },
+  competitive: { label: 'Contested', color: 'var(--amber, #d6a056)' },
+  trailing: { label: 'Trailing', color: 'var(--danger, #e0575b)' },
+}
+
+/** #164: the GM's outstanding standing offers, with a leading/contested/trailing
+ *  read on where each sits vs the rival field. Only shown when offers are live. */
+function StandingOffersPanel({ hub }: { hub: FaHubView | null }): JSX.Element | null {
+  const offers = (hub?.rows ?? []).filter((r) => r.pendingOffer)
+  if (offers.length === 0) return null
+  return (
+    <Panel title={`Your standing offers (${offers.length})`}>
+      <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+        Offers you've tabled, awaiting each camp's decision. The read is honest — how your money
+        stacks up against the field, not a fabricated rival bid.
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Your offer</th>
+              <th>His ask</th>
+              <th>Standing</th>
+              <th>Decides</th>
+              <th>Read</th>
+            </tr>
+          </thead>
+          <tbody>
+            {offers.map((r) => {
+              const po = r.pendingOffer!
+              const meta = STANDING_META[po.standing]
+              return (
+                <tr key={r.playerId}>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <PlayerFace faceId={r.faceId} name={r.name} size={24} />
+                      <PlayerLink playerId={r.playerId} name={r.name} />
+                    </span>
+                  </td>
+                  <td className="mono small">{fmtMoney(po.salary)} × {po.years}</td>
+                  <td className="mono small muted">{fmtMoney(r.askSalary)} × {r.askYears}</td>
+                  <td>
+                    <span className="chip" style={{ fontSize: 10, color: meta.color, borderColor: meta.color }}>
+                      {meta.label}
+                    </span>
+                  </td>
+                  <td className="small muted">{po.decidesInDays > 0 ? `~${po.decidesInDays}d` : 'today'}</td>
+                  <td className="small muted" style={{ maxWidth: 320 }}>{po.standingNote}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   )
 }
 
@@ -106,6 +166,8 @@ export function FreeAgentMarketScreen(): JSX.Element {
       <ScreenStateNotices loading={loading && !hub} error={error} empty={false} emptyText="" />
 
       <CapLine finance={finance ?? null} />
+
+      <StandingOffersPanel hub={hub} />
 
       {rfa?.windowOpen && rfa.rows.length > 0 && (
         <Panel title={`Restricted free agents — offer-sheet targets (${rfa.rows.length})`}>
@@ -298,8 +360,12 @@ export function FreeAgentMarketScreen(): JSX.Element {
                             {fa.inTalks ? 'Resume talks →' : 'Open talks →'}
                           </button>
                           {fa.pendingOffer ? (
-                            <span className="chip chip-violet" style={{ fontSize: 9, whiteSpace: 'nowrap' }} title="You've tabled a standing offer — his camp is deciding">
-                              ⏳ offered {fmtMoney(fa.pendingOffer.salary)}×{fa.pendingOffer.years} · ~{fa.pendingOffer.decidesInDays}d
+                            <span
+                              className="chip"
+                              style={{ fontSize: 9, whiteSpace: 'nowrap', color: STANDING_META[fa.pendingOffer.standing].color, borderColor: STANDING_META[fa.pendingOffer.standing].color }}
+                              title={fa.pendingOffer.standingNote}
+                            >
+                              ⏳ {STANDING_META[fa.pendingOffer.standing].label} · {fmtMoney(fa.pendingOffer.salary)}×{fa.pendingOffer.years} · ~{fa.pendingOffer.decidesInDays}d
                             </span>
                           ) : offseasonFa ? (
                             <button

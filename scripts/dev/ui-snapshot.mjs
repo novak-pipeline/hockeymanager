@@ -144,6 +144,13 @@ try {
     await win.click('text="Free Agents"', { timeout: 4000 })
     await win.waitForTimeout(600)
     await snap(win, 'fa-market')
+    // #164: table a standing offer at his ask, then photograph the standing-offers
+    // board (leading/contested/trailing read) at the top of the screen.
+    try {
+      await win.click('button:has-text("Table offer (his ask)")', { timeout: 4000 })
+      await win.waitForTimeout(700)
+      await snap(win, 'fa-standing-offers')
+    } catch { /* no tableable row (market thin) — skip */ }
     await win.click('button:has-text("Open talks")', { timeout: 5000 })
     await win.waitForSelector('text=Contract talks', { timeout: 8000 })
     await snap(win, 'negotiation-open')

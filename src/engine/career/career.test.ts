@@ -2499,6 +2499,40 @@ describe('Career — offer sheets', () => {
   })
 })
 
+describe('#164 FA standing offers — leading/contested/trailing read', () => {
+  it('a big overpay standing offer reads as leading; the board surfaces it', () => {
+    const data = generateLeague({ seed: 91 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 91, userId)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft
+    career.autoDraft()
+    career.advanceOffseason() // draft → resign
+    for (let i = 0; i < 8 && career.getOffseason()!.stage !== 'freeAgency'; i++) {
+      career.advanceOffseason()
+    }
+    expect(career.getOffseason()!.stage).toBe('freeAgency')
+
+    // Enormous cap headroom so the offer fits regardless of roster salary.
+    data.teams.get(userId)!.finances.salaryCap = 600_000_000
+
+    const hub = career.getFaHub()
+    const target = hub.rows.find((r) => !r.pendingOffer)
+    if (!target) return // empty market on this seed — nothing to assert
+
+    // A 40% overpay clears his ask by a mile → he should read as leading.
+    const res = career.submitFaOffer(target.playerId, Math.round(target.askSalary * 1.4), Math.max(3, target.askYears))
+    expect(res.ok).toBe(true)
+
+    const after = career.getFaHub()
+    const row = after.rows.find((r) => r.playerId === target.playerId)
+    expect(row?.pendingOffer).toBeTruthy()
+    expect(row!.pendingOffer!.standing).toBe('leading')
+    expect(row!.pendingOffer!.standingNote.length).toBeGreaterThan(10)
+  })
+})
+
 describe('#188 squad status / trade posture', () => {
   it('setSquadStatus surfaces on the profile with a label + isOwn, and clears', () => {
     const data = generateLeague({ seed: 610 })

@@ -8643,6 +8643,40 @@ export class Career {
     }
   }
 
+  /** #164: where a standing offer sits vs the field — mirrors the same factors
+   *  resolveFaOffers weighs (his ask, your generosity, the rival count). Honest,
+   *  not fabricated rival bids: 'leading' = clear front-runner, 'competitive' =
+   *  fair money a hot market could still snipe, 'trailing' = below his ask. */
+  private faOfferStanding(
+    player: Player,
+    offer: { salary: number; years: number },
+    ask: { salary: number; years: number },
+    rivalCount: number,
+  ): { standing: 'leading' | 'competitive' | 'trailing'; note: string } {
+    const generosity = offer.salary / Math.max(1, ask.salary)
+    const snipeRisk = Math.max(0, Math.min(0.5, rivalCount * 0.07 - (generosity - 1) * 0.6))
+    if (generosity < 0.95) {
+      return {
+        standing: 'trailing',
+        note: rivalCount > 0
+          ? `Below his ask, with ${rivalCount} rival${rivalCount > 1 ? 's' : ''} circling — he'll likely hold out for more.`
+          : `Below his ask — he may wait for a stronger number.`,
+      }
+    }
+    if (snipeRisk >= 0.25) {
+      return {
+        standing: 'competitive',
+        note: `Fair money, but ${rivalCount} club${rivalCount > 1 ? 's are' : ' is'} pushing — a rival could still match and win the fit.`,
+      }
+    }
+    return {
+      standing: 'leading',
+      note: rivalCount > 0
+        ? `You're out in front — strong money against a ${rivalCount}-club field.`
+        : `You're the clear front-runner; nobody else is really pushing.`,
+    }
+  }
+
   getFaHub(): FaHubView {
     const os = this.offseason
     const faDay = os?.faDay ?? 0
@@ -8665,9 +8699,12 @@ export class Career {
       const session = this.negotiations.get(p.id as string)
       const rivals = this.faRivalClubs(p, aiCtx)
       const pending = this.faPendingOffers.find((o) => o.playerId === (p.id as string))
+      const pendingStanding = pending ? this.faOfferStanding(p, pending, ask, rivals.length) : undefined
       return {
         ...badge(p),
-        ...(pending ? { pendingOffer: { salary: pending.salary, years: pending.years, decidesInDays: Math.max(0, pending.decideDay - faDay) } } : {}),
+        ...(pending && pendingStanding
+          ? { pendingOffer: { salary: pending.salary, years: pending.years, decidesInDays: Math.max(0, pending.decideDay - faDay), standing: pendingStanding.standing, standingNote: pendingStanding.note } }
+          : {}),
         askSalary: ask.salary,
         askYears: ask.years,
         decidesInDays: Math.max(0, decideDay - faDay),
