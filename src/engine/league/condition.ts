@@ -176,6 +176,9 @@ export function tickRecovery(args: {
       p.injuryStatus.gamesRemaining -= 1
       if (p.injuryStatus.gamesRemaining <= 0) {
         p.injuryStatus = null
+        // #157: a player coming off a long-term injury automatically comes off
+        // LTIR — his cap hit counts again (the club must be compliant on return).
+        if (p.ltir) p.ltir = false
         healed.push(p.id)
       }
     }

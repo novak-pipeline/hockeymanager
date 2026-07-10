@@ -82,6 +82,10 @@ export interface Player {
   fatigue: number
   morale: number
   injuryStatus: Injury | null
+  /** #157 (CBA): placed on Long-Term Injured Reserve. While true AND injured, his
+   *  cap hit is relieved from the club's cap so a replacement can be signed over
+   *  the ceiling. Optional — absent on everyone by default; auto-clears on return. */
+  ltir?: boolean
   /** Hot/cold streak modifier — the drama lever. */
   form: number
   /**

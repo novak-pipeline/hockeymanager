@@ -248,6 +248,8 @@ export type WorkerRequestBody =
   | { type: 'autoAssignSquadRoles'; overwrite?: boolean }
   /** #171 load management: toggle a healthy player's rest directive. */
   | { type: 'restPlayer'; playerId: string }
+  | { type: 'placeOnLtir'; playerId: string }
+  | { type: 'activateFromLtir'; playerId: string }
   /** #189: captains + jersey numbers for the user's club. */
   | { type: 'getLeadership' }
   | { type: 'getMediaCircuit' }

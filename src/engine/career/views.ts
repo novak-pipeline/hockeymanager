@@ -1794,6 +1794,9 @@ export interface FinanceView {
   capSpace: number
   /** Buyout dead-cap charge counted against this club's cap (M2). Optional/additive. */
   deadCap?: number
+  /** #157: LTIR cap relief currently in effect — lowers capUsed while a long-term
+   *  injured player is on IR. Absent (0) when nobody is on LTIR. */
+  ltirRelief?: number
   /** League salary floor (minimum payroll). */
   salaryFloor?: number
   /** True when this club's payroll sits below the floor. */
@@ -2524,6 +2527,12 @@ export interface MedicalRow {
   /** Injury-risk band + 0–100 score. */
   riskLabel: 'Low' | 'Increased' | 'High'
   risk: number
+  /** #157: currently on Long-Term Injured Reserve (cap hit relieved). */
+  ltir?: boolean
+  /** #157: eligible to be placed on LTIR right now (long-term injury, not yet on IR). */
+  ltirEligible?: boolean
+  /** #157: his cap hit — the relief amount if placed on LTIR. Present when injured. */
+  capHit?: number
 }
 
 /** Response to 'getMedical' — the user club's medical/risk picture. */
@@ -2535,6 +2544,8 @@ export interface MedicalView {
   /** #171: head physio (name + 0–100 quality) — better staff shorten recoveries. */
   physioName?: string
   physioRating?: number
+  /** #157: total LTIR cap relief in effect (0 when nobody is on LTIR). */
+  ltirRelief?: number
   rows: MedicalRow[]
 }
 

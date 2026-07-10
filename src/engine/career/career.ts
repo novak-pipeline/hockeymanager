@@ -681,6 +681,9 @@ const DRAFT_ROUNDS = 7
  *  of every team (+ a margin of undrafted prospects). See draft-class generation. */
 const DRAFT_CLASS_SIZE = 64
 const PICK_YEARS_AHEAD = 3
+/** #157: minimum games-remaining on an injury to qualify for Long-Term IR
+ *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
+const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = 8
 const ROSTER_HARD_CAP = 26
 /** Rolling per-game ratings window (last N games stored). */
@@ -6315,8 +6318,7 @@ export class Career {
     if (!c) return { ok: false, message: 'No arbitration case for that player.' }
     const p = this.data.players.get(asPlayerId(playerId))
     if (!p) return { ok: false, message: 'Player not found.' }
-    const capUsed = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsed = this.userCapUsed()
     if (capUsed + this.userDeadCap + c.salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'The award does not fit under your cap — clear space or walk away.' }
     }
@@ -7250,8 +7252,7 @@ export class Career {
     const player = this.data.players.get(id)
     if (!player) return { ok: false, message: 'unknown player' }
     const salary = 750_000
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'no cap room for even a minimum deal' }
     }
@@ -7750,7 +7751,7 @@ export class Career {
   getWaiverWire(): WaiverWireRowView[] {
     const user = this.data.teams.get(this.userTeamId)
     if (!user) return []
-    const capUsed = user.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    const capUsed = this.userCapUsed()
     const capSpace = user.finances.salaryCap - capUsed
     return this.waiverWire.map((w) => {
       const p = this.resolve(asPlayerId(w.playerId))
@@ -7788,7 +7789,7 @@ export class Career {
     if (user.roster.length >= ROSTER_HARD_CAP) {
       return { ok: false, reason: 'Your roster is full (26 players). Make room before claiming.' }
     }
-    const capUsed = user.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    const capUsed = this.userCapUsed()
     if (capUsed + p.contract.salary > user.finances.salaryCap) {
       return { ok: false, reason: 'Claiming him would put you over the salary cap.' }
     }
@@ -8005,7 +8006,7 @@ export class Career {
       (t) => (t.id as string) !== (this.userTeamId as string) && t.roster.includes(id)
     )
     if (!owner) return { ok: false, matched: false, pending: false, message: 'He is not on a rival roster.' }
-    const capUsedNow = this.userTeam.roster.reduce((s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
       return { ok: false, matched: false, pending: false, message: `That offer doesn't fit under your cap.` }
     }
@@ -8267,8 +8268,7 @@ export class Career {
     const player = this.resolve(id)
     // Dead cap from buyouts is real: the signing must fit under ceiling MINUS
     // the dead charge, or the buyout was free money.
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
       return {
         signed: false,
@@ -8450,8 +8450,7 @@ export class Career {
       if (g === grp) secure++
     }
     const holeAtPosition = secure < targets[grp]!
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     const capFits = capUsedNow + this.userDeadCap + ask.salary <= this.userTeam.finances.salaryCap
     const contender = (expectedRankOf(this.expectationsState, this.userTeamId as string) ?? 16) <= 8
     const w = priorityWeights(p)
@@ -8566,8 +8565,7 @@ export class Career {
       return { ok: false, message: 'He is not a free agent.' }
     }
     const player = this.resolve(asPlayerId(playerId))
-    const capUsedNow = this.userTeam.roster.reduce(
-      (s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: `That doesn't fit under the cap once your $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap is counted.` }
     }
@@ -8616,8 +8614,7 @@ export class Career {
       // Even a fair offer can lose to a hot market — unless you paid up.
       const sniped = acceptable && rng.chance(Math.max(0, Math.min(0.5, rivals * 0.07 - (generosity - 1) * 0.6)))
       if (acceptable && !sniped) {
-        const capUsedNow = this.userTeam.roster.reduce(
-          (s, rid) => s + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+        const capUsedNow = this.userCapUsed()
         if (capUsedNow + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
           this.pushNews('contract', `${player.name} would sign — but the cap won't fit it now`,
             `${player.name} was ready to take your offer, but your cap sheet no longer fits the deal, so it lapses.`, { playerId: pid })
@@ -8680,8 +8677,7 @@ export class Career {
   getFaHub(): FaHubView {
     const os = this.offseason
     const faDay = os?.faDay ?? 0
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
 
     // The honest clock: aiFreeAgencyDay signs rank r on effective day 1+r/3,
     // and the AI runs 2 days behind the user (the head start).
@@ -8772,8 +8768,7 @@ export class Career {
     const agent = agentFor(player)
     const comps = findComparables(player, this.comparablePool())
     const hints = priorityHints(player)
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     const temperature =
       state.patience > 65 ? 'warm' : state.patience > 40 ? 'guarded' : state.patience > 15 ? 'testy' : 'hostile'
     return {
@@ -8871,8 +8866,7 @@ export class Career {
 
     // Cap sanity BEFORE the round: an offer you cannot execute is not an offer.
     const player = this.resolve(asPlayerId(playerId))
-    const capUsedNow = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsedNow = this.userCapUsed()
     const replacing = kind === 'resign' ? player.contract.salary : 0
     if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
       return {
@@ -9665,8 +9659,7 @@ export class Career {
     const ranks = this.strengthRanks()
     const myPosture = this.clubPostureFor(this.userTeamId, ranks)
     const buying = myPosture.posture === 'contend'
-    const capUsed = this.userTeam.roster.reduce(
-      (sum, rid) => sum + (this.data.players.get(rid)?.contract.salary ?? 0), 0)
+    const capUsed = this.userCapUsed()
     const space = this.userTeam.finances.salaryCap - capUsed - this.userDeadCap
     const weakest = this.rosterCounts(this.userTeam)
     const need = weakest.d <= 6 ? 'the blue line' : weakest.g < 2 ? 'the crease' : 'scoring depth'
@@ -11427,6 +11420,61 @@ export class Career {
       .sort((a, b) => a - b)
   }
 
+  /** #157: total cap relief the user's club is getting from players on LTIR —
+   *  the sum of the cap hits of rostered players who are on LTIR AND still hurt. */
+  private userLtirRelief(): number {
+    let relief = 0
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p?.ltir && p.injuryStatus) relief += p.contract.salary
+    }
+    return relief
+  }
+
+  /** The user's cap hit AFTER LTIR relief — the number every user-facing cap
+   *  gate and cap-space display should use. */
+  private userCapUsed(): number {
+    const gross = this.userTeam.roster.reduce(
+      (s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    return gross - this.userLtirRelief()
+  }
+
+  /** #157: is this rostered player eligible to be placed on LTIR right now? */
+  private ltirEligible(p: Player): boolean {
+    return !p.ltir && p.injuryStatus !== null && p.injuryStatus.gamesRemaining >= LTIR_MIN_GAMES
+  }
+
+  /** #157: place a long-term-injured player on LTIR, freeing his cap hit so a
+   *  replacement can be signed over the ceiling until he returns. */
+  placeOnLtir(playerId: string): { ok: boolean; message: string } {
+    const id = asPlayerId(playerId)
+    if (!this.userTeam.roster.includes(id)) return { ok: false, message: 'He is not on your roster.' }
+    const p = this.data.players.get(id)
+    if (!p) return { ok: false, message: 'Unknown player.' }
+    if (p.ltir) return { ok: false, message: `${p.name} is already on LTIR.` }
+    if (!p.injuryStatus || p.injuryStatus.gamesRemaining < LTIR_MIN_GAMES) {
+      return { ok: false, message: `LTIR needs a long-term injury (${LTIR_MIN_GAMES}+ games out). ${p.name} doesn't qualify.` }
+    }
+    p.ltir = true
+    this.pushNews('contract', `${p.name} placed on LTIR`,
+      `${p.name} goes on Long-Term Injured Reserve. His $${(p.contract.salary / 1e6).toFixed(2)}M cap hit is relieved while he's out — you can now sign a replacement over the ceiling. He comes off LTIR automatically when he's fit.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true, message: `${p.name} on LTIR — $${(p.contract.salary / 1e6).toFixed(2)}M in cap relief.` }
+  }
+
+  /** #157: take a player off LTIR early (his cap hit counts again immediately). */
+  activateFromLtir(playerId: string): { ok: boolean; message: string } {
+    const id = asPlayerId(playerId)
+    const p = this.data.players.get(id)
+    if (!p) return { ok: false, message: 'Unknown player.' }
+    if (!p.ltir) return { ok: false, message: `${p.name} isn't on LTIR.` }
+    p.ltir = false
+    this.pushNews('contract', `${p.name} activated off LTIR`,
+      `${p.name} is back on the active cap sheet — his $${(p.contract.salary / 1e6).toFixed(2)}M hit counts again.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true, message: `${p.name} activated — cap relief removed.` }
+  }
+
   /** Medical Center: condition / fatigue / injury / injury-risk for the user roster. */
   getMedical(): MedicalView {
     const team = this.data.teams.get(this.userTeamId)
@@ -11467,6 +11515,10 @@ export class Career {
         ...(p.resting ? { resting: true } : {}),
         ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining, injuryKind: p.injuryStatus.kind } : {}),
+        // #157: LTIR status + eligibility + cap hit (for the relief lever).
+        ...(p.ltir ? { ltir: true } : {}),
+        ...(this.ltirEligible(p) ? { ltirEligible: true } : {}),
+        ...(p.injuryStatus ? { capHit: p.contract.salary } : {}),
       }
       rows.push(row)
     }
@@ -11480,6 +11532,8 @@ export class Career {
       injuredCount,
       gamesToReturnTotal,
       ...(physio ? { physioName: physio.name, physioRating: physio.physiotherapy ?? physio.rating } : {}),
+      // #157: total LTIR cap relief currently in effect.
+      ltirRelief: this.userLtirRelief(),
       rows,
     }
   }
@@ -13011,6 +13065,14 @@ export class Career {
       // Buyout dead cap is real money against the ceiling — show it and count it.
       view.deadCap = this.userDeadCap
       view.capUsed += this.userDeadCap
+      view.capSpace = Math.max(0, view.salaryCap - view.capUsed)
+    }
+    // #157: LTIR relief lowers the cap hit (but not cash payroll) — show it and
+    // widen cap space so the GM can see the room a long-term injury bought him.
+    const ltirRelief = this.userLtirRelief()
+    if (ltirRelief > 0) {
+      view.ltirRelief = ltirRelief
+      view.capUsed = Math.max(0, view.capUsed - ltirRelief)
       view.capSpace = Math.max(0, view.salaryCap - view.capUsed)
     }
     // #173: revenue cadence — gate + merchandise now respond to how the season is

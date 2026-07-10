@@ -2499,6 +2499,51 @@ describe('Career — offer sheets', () => {
   })
 })
 
+describe('#157 LTIR — cap relief for a long-term injury', () => {
+  it('places a long-term-injured player on LTIR, relieves his cap hit, and clears on activate', () => {
+    const data = generateLeague({ seed: 77 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 77, userId)
+    const team = data.teams.get(userId)!
+    const victim = team.roster.map((id) => data.players.get(id)!).find((p) => p.position !== 'G')!
+    // A long-term injury (15 games out qualifies; the min is 10).
+    victim.injuryStatus = { kind: 'lowerBody', gamesRemaining: 15, description: 'Knee sprain' }
+
+    const finBefore = career.getFinances()
+    const r = career.placeOnLtir(victim.id as string)
+    expect(r.ok).toBe(true)
+
+    const finAfter = career.getFinances()
+    // Relief equals his cap hit; cap space widens by exactly that much.
+    expect(finAfter.ltirRelief).toBe(victim.contract.salary)
+    expect(finBefore.capUsed - finAfter.capUsed).toBe(victim.contract.salary)
+    expect(finAfter.capSpace - finBefore.capSpace).toBe(victim.contract.salary)
+
+    // The medical view surfaces the relief + the ON-LTIR flag.
+    const med = career.getMedical()
+    expect(med.ltirRelief).toBe(victim.contract.salary)
+    expect(med.rows.find((x) => x.playerId === (victim.id as string))?.ltir).toBe(true)
+
+    // Activating him off LTIR removes the relief.
+    const a = career.activateFromLtir(victim.id as string)
+    expect(a.ok).toBe(true)
+    expect(career.getFinances().ltirRelief ?? 0).toBe(0)
+  })
+
+  it('rejects LTIR for a short-term (day-to-day) injury', () => {
+    const data = generateLeague({ seed: 78 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 78, userId)
+    const team = data.teams.get(userId)!
+    const p = team.roster.map((id) => data.players.get(id)!).find((x) => x.position !== 'G')!
+    p.injuryStatus = { kind: 'upperBody', gamesRemaining: 2, description: 'Bruise' }
+    expect(career.placeOnLtir(p.id as string).ok).toBe(false)
+    // A healthy player also can't go on LTIR.
+    const healthy = team.roster.map((id) => data.players.get(id)!).find((x) => x.injuryStatus === null)!
+    expect(career.placeOnLtir(healthy.id as string).ok).toBe(false)
+  })
+})
+
 describe('#164 FA standing offers — leading/contested/trailing read', () => {
   it('a big overpay standing offer reads as leading; the board surfaces it', () => {
     const data = generateLeague({ seed: 91 })

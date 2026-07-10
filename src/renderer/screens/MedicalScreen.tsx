@@ -86,7 +86,14 @@ function BodyDiagram(props: { region: Region; size?: number }): JSX.Element {
   )
 }
 
-function InjuryCard(props: { row: MedicalRow }): JSX.Element {
+const fmtM = (v: number): string => `$${(v / 1e6).toFixed(2)}M`
+
+function InjuryCard(props: {
+  row: MedicalRow
+  busy: boolean
+  onPlaceLtir: (id: string) => void
+  onActivateLtir: (id: string) => void
+}): JSX.Element {
   const r = props.row
   const region = regionOf(r.injuryKind)
   const weeks = r.injuryGamesRemaining !== undefined ? Math.max(1, Math.round(r.injuryGamesRemaining / 3)) : null
@@ -124,6 +131,30 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
           </span>
           <span className="small muted">{r.condition}% fit</span>
         </div>
+        {/* #157: LTIR lever — place a long-term injury on IR for cap relief. */}
+        {(r.ltir || r.ltirEligible) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            {r.ltir ? (
+              <>
+                <span className="chip" style={{ fontSize: 9, fontWeight: 700, color: 'var(--cyan, #38bdf8)', borderColor: 'var(--cyan, #38bdf8)' }}>
+                  ON LTIR{r.capHit ? ` · ${fmtM(r.capHit)} relief` : ''}
+                </span>
+                <button className="btn btn-xs" disabled={props.busy} onClick={() => props.onActivateLtir(r.playerId)}>
+                  Activate
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-xs"
+                disabled={props.busy}
+                title={`Free his ${r.capHit ? fmtM(r.capHit) : 'cap'} hit while he's out so you can sign a replacement over the ceiling`}
+                onClick={() => props.onPlaceLtir(r.playerId)}
+              >
+                Place on LTIR{r.capHit ? ` (+${fmtM(r.capHit)})` : ''}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -143,6 +174,31 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
     setBusy(true)
     try {
       const res = await client.restPlayer(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function placeLtir(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.placeOnLtir(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        else if (res.message) toast(res.message, 'success')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function activateLtir(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.activateFromLtir(playerId)
       if (res.type === 'medical') {
         if (res.ok === false && res.message) toast(res.message, 'error')
         refetch()
@@ -184,6 +240,12 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
           <div className="field-label">Injury bill</div>
           <div style={{ fontWeight: 700 }}>{d.injuredCount} out · {d.gamesToReturnTotal} club-game{d.gamesToReturnTotal === 1 ? '' : 's'} to be missed</div>
         </div>
+        {d.ltirRelief !== undefined && d.ltirRelief > 0 && (
+          <div className="panel" style={{ padding: '8px 14px' }}>
+            <div className="field-label">LTIR relief</div>
+            <div style={{ fontWeight: 800, color: 'var(--cyan, #38bdf8)' }}>{fmtM(d.ltirRelief)} freed</div>
+          </div>
+        )}
       </div>
 
       <Panel title="Treatment Room">
@@ -199,7 +261,9 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
               gap: 'var(--sp-3)',
             }}
           >
-            {injured.map((r) => <InjuryCard key={r.playerId} row={r} />)}
+            {injured.map((r) => (
+              <InjuryCard key={r.playerId} row={r} busy={busy} onPlaceLtir={placeLtir} onActivateLtir={activateLtir} />
+            ))}
           </div>
         )}
       </Panel>

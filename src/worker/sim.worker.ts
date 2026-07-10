@@ -258,6 +258,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().restPlayer(req.playerId)
       return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
     }
+    case 'placeOnLtir': {
+      const r = must().placeOnLtir(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
+    case 'activateFromLtir': {
+      const r = must().activateFromLtir(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
     case 'getDevelopment':
       return { id: req.id, type: 'development', development: must().getDevelopment() }
     case 'getSquadPlanner':

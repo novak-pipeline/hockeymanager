@@ -386,6 +386,15 @@ export class SimClient {
     return this.send({ type: 'restPlayer', playerId })
   }
 
+  /** #157: place a long-term-injured player on LTIR (cap relief) / activate off it. */
+  placeOnLtir(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'placeOnLtir', playerId })
+  }
+
+  activateFromLtir(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'activateFromLtir', playerId })
+  }
+
   getDevelopment(): Promise<WorkerResponse> {
     return this.send({ type: 'getDevelopment' })
   }
