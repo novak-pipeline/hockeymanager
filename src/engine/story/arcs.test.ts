@@ -923,3 +923,38 @@ describe('headline quality', () => {
     }
   })
 })
+
+describe('games-played milestones (#48 story slice)', () => {
+  it('fires a career-games milestone news beat when a veteran crosses 500 games', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const { newsSeeds } = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 40,
+        playerLines: [playerLine('p1', 't1', { points: 1 })],
+        playerName: () => 'Ironman',
+        careerTotals: () => ({ goals: 120, points: 300, gamesPlayed: 500 }),
+      }),
+      rng,
+    })
+    const seed = newsSeeds.find((s) => s.category === 'milestone' && /career games/.test(s.headline))
+    expect(seed).toBeTruthy()
+    expect(seed!.headline).toContain('500')
+  })
+
+  it('does NOT fire a games milestone at a non-marquee count (e.g. 300 games)', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const { newsSeeds } = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 40,
+        playerLines: [playerLine('p2', 't1', { points: 1 })],
+        careerTotals: () => ({ goals: 60, points: 150, gamesPlayed: 300 }),
+      }),
+      rng,
+    })
+    expect(newsSeeds.some((s) => /career games/.test(s.headline))).toBe(false)
+  })
+})

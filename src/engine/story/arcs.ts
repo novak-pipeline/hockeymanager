@@ -713,14 +713,21 @@ function detectBreakoutBust(
 
 /* ─────────────────────────── detector: milestone watch ─────────────────────────── */
 
-/** Milestone numbers we watch for (goals, points, games). */
+/** Milestone numbers we watch for (goals, points). */
 const MILESTONE_NUMBERS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 50, 150, 250, 350]
+/** Games-played is a coarser, marquee-only ladder (ironman markers) — a 100th
+ *  game isn't news, but a 500th / 1000th is. */
+const GAMES_MILESTONES = [500, 1000, 1500]
 const MILESTONE_APPROACH_WINDOW = 10
 
-function nearestMilestone(current: number): number | null {
-  for (const m of MILESTONE_NUMBERS.sort((a, b) => a - b)) {
-    if (current < m && m - current <= MILESTONE_APPROACH_WINDOW) return m
-    if (current >= m && current - m < MILESTONE_APPROACH_WINDOW) return m
+function nearestMilestone(
+  current: number,
+  numbers: number[] = MILESTONE_NUMBERS,
+  window = MILESTONE_APPROACH_WINDOW,
+): number | null {
+  for (const m of [...numbers].sort((a, b) => a - b)) {
+    if (current < m && m - current <= window) return m
+    if (current >= m && current - m < window) return m
   }
   return null
 }
@@ -746,10 +753,13 @@ function detectMilestone(
     const goalMilestone = nearestMilestone(ct.goals)
     // Points milestone.
     const pointsMilestone = nearestMilestone(ct.points)
+    // Games-played milestone (ironman markers) — coarser ladder.
+    const gamesMilestone = nearestMilestone(ct.gamesPlayed, GAMES_MILESTONES)
 
     for (const [stat, milestone, currentVal] of [
       ['goals', goalMilestone, ct.goals],
       ['points', pointsMilestone, ct.points],
+      ['games', gamesMilestone, ct.gamesPlayed],
     ] as Array<[string, number | null, number]>) {
       if (!milestone) continue
 
