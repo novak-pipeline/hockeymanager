@@ -213,6 +213,8 @@ export type WorkerRequestBody =
   | { type: 'getTrades' }
   | { type: 'getDraft' }
   | { type: 'getFinances' }
+  /** #173: set the club's ticket-pricing lever. */
+  | { type: 'setTicketPricing'; tier: 'value' | 'standard' | 'premium' }
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }

@@ -7,7 +7,7 @@ import { useClient, useScreenData } from '../hooks/useSim'
 /** Cap bar header, payroll table by salary desc, expiring contracts panel. */
 export function FinancesScreen(): JSX.Element {
   const client = useClient()
-  const { data, loading, error } = useScreenData<FinanceView>(
+  const { data, loading, error, refetch } = useScreenData<FinanceView>(
     () => client.getFinances(),
     (r) => (r.type === 'finances' ? r.finances : null)
   )
@@ -69,16 +69,28 @@ export function FinancesScreen(): JSX.Element {
           </div>
         </Panel>
       )}
-      {data && <FinancesBody data={data} />}
+      {data && <FinancesBody data={data} onRefetch={refetch} />}
     </section>
   )
 }
 
 /* ── internal ── */
 
-function FinancesBody(props: { data: FinanceView }): JSX.Element {
+const PRICE_TIERS: Array<{ id: 'value' | 'standard' | 'premium'; label: string; hint: string }> = [
+  { id: 'value', label: 'Value', hint: 'Cheaper seats — fills the barn and grows the fanbase, less per seat' },
+  { id: 'standard', label: 'Standard', hint: 'Market-rate pricing' },
+  { id: 'premium', label: 'Premium', hint: 'Higher per seat — more gate now, but goodwill erodes over time' },
+]
+
+function FinancesBody(props: { data: FinanceView; onRefetch: () => void }): JSX.Element {
   const d = props.data
+  const client = useClient()
   const sorted = [...d.payroll].sort((a, b) => b.salary - a.salary)
+
+  async function setPricing(tier: 'value' | 'standard' | 'premium'): Promise<void> {
+    const res = await client.setTicketPricing(tier)
+    if (res.type === 'finances') props.onRefetch()
+  }
 
   return (
     <div className="stack">
@@ -118,6 +130,40 @@ function FinancesBody(props: { data: FinanceView }): JSX.Element {
                 <span className="muted">Estimated total</span>
                 <strong>{fmtMoney(d.revenue.estimatedRevenue)}</strong>
               </div>
+              {d.revenue.operatingResult !== undefined && (
+                <div className="row-between small" style={{ marginTop: 4 }}>
+                  <span className="muted">Operating result (vs payroll)</span>
+                  <strong style={{ color: d.revenue.operatingResult >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {d.revenue.operatingResult >= 0 ? '+' : ''}{fmtMoney(d.revenue.operatingResult)}
+                  </strong>
+                </div>
+              )}
+              {d.revenue.attendancePct !== undefined && (
+                <div className="small muted" style={{ marginTop: 6 }}>
+                  Gate + merch move with the building: <strong style={{ color: 'var(--text)' }}>{d.revenue.attendancePct}%</strong> attendance
+                  {d.revenue.fanInterestLabel ? ` · ${d.revenue.fanInterestLabel} fanbase` : ''}. Broadcast + sponsorship are fixed contracts.
+                </div>
+              )}
+              {d.revenue.ticketPricing && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                  <div className="field-label" style={{ marginBottom: 6 }}>Ticket pricing</div>
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                    {PRICE_TIERS.map((t) => (
+                      <button
+                        key={t.id}
+                        className={`btn btn-sm ${d.revenue!.ticketPricing === t.id ? 'btn-primary' : 'btn-ghost'}`}
+                        title={t.hint}
+                        onClick={() => void setPricing(t.id)}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="small muted" style={{ marginTop: 6 }}>
+                    {PRICE_TIERS.find((t) => t.id === d.revenue!.ticketPricing)?.hint}
+                  </div>
+                </div>
+              )}
             </Panel>
           )}
         </div>

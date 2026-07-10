@@ -113,6 +113,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getFinances':
       return { id: req.id, type: 'finances', finances: must().getFinances() }
+    case 'setTicketPricing': {
+      must().setTicketPricing(req.tier)
+      return { id: req.id, type: 'finances', finances: must().getFinances() }
+    }
     case 'getInbox':
       return { id: req.id, type: 'inbox', inbox: must().getInbox() }
     case 'getPlayoffs':

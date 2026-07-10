@@ -1798,6 +1798,15 @@ export interface FinanceView {
     marketSizeLabel: string
     estimatedRevenue: number
     lines: Array<{ source: string; amount: number }>
+    /** #173: live cadence — gate + merch now scale with fan interest (a winning,
+     *  popular club fills the building) and the GM's ticket-pricing lever. */
+    fanInterest?: number
+    fanInterestLabel?: string
+    /** Estimated attendance as a % of capacity (0–100+). */
+    attendancePct?: number
+    ticketPricing?: 'value' | 'standard' | 'premium'
+    /** Season operating result estimate = revenue − payroll. */
+    operatingResult?: number
   }
 }
 
@@ -2029,6 +2038,8 @@ export interface CareerSnapshot {
   clubDirection?: 'compete' | 'retool' | 'rebuild'
   /** Fan engagement (0–100). Additive; absent → 60. */
   fanInterest?: number
+  /** #173: ticket-pricing lever. Additive; absent → 'standard'. */
+  ticketPricing?: 'value' | 'standard' | 'premium'
   /** Captured baseline owner budget for fan-scaling. Additive; absent → 0 (recapture). */
   baseBudget?: number
   history: SeasonSummary[]

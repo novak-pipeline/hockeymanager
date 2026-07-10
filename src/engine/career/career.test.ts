@@ -2646,6 +2646,42 @@ describe('#182 training-camp PTO invites', () => {
   })
 })
 
+describe('#173 finances — revenue cadence + ticket pricing', () => {
+  it('gate revenue scales with fan interest, and the pricing lever trades attendance for per-seat take', () => {
+    const data = generateLeague({ seed: 90 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 90, userId)
+
+    const fin = career.getFinances()
+    expect(fin.revenue).toBeDefined()
+    expect(fin.revenue!.fanInterest).toBeGreaterThan(0)
+    expect(fin.revenue!.attendancePct).toBeGreaterThan(0)
+    expect(fin.revenue!.ticketPricing).toBe('standard')
+    const stdGate = fin.revenue!.lines.find((l) => l.source === 'Gate receipts')!.amount
+
+    // Premium pricing lifts the per-seat take (gate up); value lowers it.
+    career.setTicketPricing('premium')
+    const premGate = career.getFinances().revenue!.lines.find((l) => l.source === 'Gate receipts')!.amount
+    expect(premGate).toBeGreaterThan(stdGate)
+    career.setTicketPricing('value')
+    const valGate = career.getFinances().revenue!.lines.find((l) => l.source === 'Gate receipts')!.amount
+    expect(valGate).toBeLessThan(stdGate)
+
+    // Broadcast is a fixed contract — pricing doesn't touch it.
+    const bStd = fin.revenue!.lines.find((l) => l.source === 'Broadcast')!.amount
+    const bVal = career.getFinances().revenue!.lines.find((l) => l.source === 'Broadcast')!.amount
+    expect(bVal).toBe(bStd)
+  })
+
+  it('ticket pricing survives a snapshot round-trip', () => {
+    const data = generateLeague({ seed: 91 })
+    const career = new Career(data, 91, data.league.teams[0])
+    career.setTicketPricing('value')
+    const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(career.exportSnapshot('p173', '2026-06-10T00:00:00.000Z'))))
+    expect(restored.getFinances().revenue!.ticketPricing).toBe('value')
+  })
+})
+
 describe('#171 medical timelines', () => {
   it('turns an injury into a return date off the real schedule + a severity band', () => {
     const data = generateLeague({ seed: 80 })

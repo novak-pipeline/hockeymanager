@@ -925,6 +925,10 @@ export class Career {
    *  losing — and feeds the owner's budget, so a long tank quietly shrinks your war
    *  chest. Serialized additively; defaults to 60. */
   private fanInterest = 60
+  /** #173: the GM's ticket-pricing lever. `value` fills the building and grows the
+   *  fanbase but earns less per seat; `premium` earns more per seat but nudges
+   *  fans away over time. Serialized additively; defaults to 'standard'. */
+  private ticketPricing: 'value' | 'standard' | 'premium' = 'standard'
   /** The club's baseline owner budget, captured once so fan interest scales it
    *  each season without compounding drift. 0 = not yet captured. */
   private baseBudget = 0
@@ -4786,13 +4790,16 @@ export class Career {
           }
 
           // ── Fanbase: the season's result moves the needle on fan engagement. ──
+          // #173: ticket pricing nudges it too — value pricing grows the base a
+          // touch each year, premium pricing quietly costs you goodwill.
+          const pricingDrift = this.ticketPricing === 'value' ? 2 : this.ticketPricing === 'premium' ? -2 : 0
           const fanDelta = fanInterestDelta({
             finalRank: userFinalRank,
             n: this.data.league.teams.length,
             madePlayoffs,
             wonCup,
             rebuilding: this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true,
-          })
+          }) + pricingDrift
           if (fanDelta !== 0) {
             const before = this.fanInterest
             this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + fanDelta))
@@ -12859,7 +12866,40 @@ export class Career {
       view.capUsed += this.userDeadCap
       view.capSpace = Math.max(0, view.salaryCap - view.capUsed)
     }
+    // #173: revenue cadence — gate + merchandise now respond to how the season is
+    // going. A winning, popular club fills the building; the GM's ticket-pricing
+    // lever trades attendance for per-seat take. Broadcast + sponsorship are
+    // contract/market-driven and stay put.
+    if (view.revenue) {
+      const fi = this.fanInterest
+      // Attendance: ~72% of the barn at rock-bottom interest, ~104% (sellouts +
+      // standing room) when the whole town's engaged.
+      const attendance = 0.72 + (fi / 100) * 0.32
+      const priceMult = this.ticketPricing === 'premium' ? 1.16 : this.ticketPricing === 'value' ? 0.88 : 1
+      const scaleGate = attendance * priceMult
+      const rebuild = (source: string, amount: number): number => Math.round(amount * scaleGate)
+      let est = 0
+      view.revenue.lines = view.revenue.lines.map((l) => {
+        // Gate + merch move with the building; broadcast + sponsorship are fixed.
+        const amt = l.source === 'Gate receipts' || l.source === 'Merchandise' ? rebuild(l.source, l.amount) : l.amount
+        est += amt
+        return { source: l.source, amount: amt }
+      })
+      view.revenue.estimatedRevenue = est
+      view.revenue.fanInterest = Math.round(fi)
+      view.revenue.fanInterestLabel = fanInterestLabel(fi)
+      view.revenue.attendancePct = Math.round(attendance * priceMult * 100)
+      view.revenue.ticketPricing = this.ticketPricing
+      const payroll = this.userTeam.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      view.revenue.operatingResult = est - payroll
+    }
     return view
+  }
+
+  /** #173: set the club's ticket-pricing strategy — a live revenue/fanbase lever. */
+  setTicketPricing(tier: 'value' | 'standard' | 'premium'): { ok: boolean } {
+    this.ticketPricing = tier
+    return { ok: true }
   }
 
   /** The curated inbox: your team's business + genuine headlines, minus the
@@ -14390,6 +14430,7 @@ export class Career {
       mentorships: [...this.mentorships.entries()],
       clubDirection: this.clubDirection,
       fanInterest: this.fanInterest,
+      ticketPricing: this.ticketPricing,
       baseBudget: this.baseBudget,
       history: [...this.history],
       extraStats: {
@@ -14525,6 +14566,7 @@ export class Career {
     career.mentorships = new Map(snapshot.mentorships ?? [])
     career.clubDirection = snapshot.clubDirection ?? 'compete'
     career.fanInterest = snapshot.fanInterest ?? 60
+    career.ticketPricing = snapshot.ticketPricing ?? 'standard'
     career.baseBudget = snapshot.baseBudget ?? 0
     career.history = [...snapshot.history]
     if (snapshot.extraStats) {

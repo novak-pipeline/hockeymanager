@@ -183,6 +183,10 @@ export class SimClient {
     return this.send({ type: 'getFinances' })
   }
 
+  setTicketPricing(tier: 'value' | 'standard' | 'premium'): Promise<WorkerResponse> {
+    return this.send({ type: 'setTicketPricing', tier })
+  }
+
   getInbox(): Promise<WorkerResponse> {
     return this.send({ type: 'getInbox' })
   }
