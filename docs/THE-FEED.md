@@ -136,3 +136,33 @@ already gates the sim, and between-picks time hides generation latency).
   optional channel/authorId/facts fields rather than a parallel store.
 - Deterministic where seen by tests: template text + engagement numbers seeded;
   LLM output is cosmetic overlay persisted in the save, never asserted on.
+
+## Feed C — local AI writer (#149): the Steam-ready decision
+
+The writer is **pluggable and dependency-free** (`src/engine/story/feedWriter.ts`):
+every post already carries `text` (deterministic template = the FLOOR) and
+`facts: PostFacts`. `buildFeedPrompt(post, author)` turns the facts + template
+draft into an ironclad-grounded prompt; `localModelFeedWriter(infer)` rewrites
+it in prose (the CEILING) and **falls back to the template** on empty/garbage/
+error; `selectFeedWriter(config)` is **off by default**. The runtime is injected
+as `infer(prompt) => Promise<string>`, so the engine + tests never import a
+native module.
+
+**Ship-on-Steam architecture (chosen):**
+- **Runtime:** `node-llama-cpp` via its **prebuilt binaries** (no on-user
+  compilation). electron-builder bundles the per-platform binary into the app, so
+  a Steam customer never runs npm. Reconciles with the supply-chain rule
+  ([[feedback_npm-supply-chain]]) by pinning the exact version and treating the
+  binary as a vetted BUILD-TIME artifact, not an unpinned postinstall on the
+  player's machine.
+- **Model:** **Qwen2.5-1.5B-Instruct, Apache-2.0** (commercially redistributable
+  — required for a paid release), GGUF Q4_K_M (~1 GB), CPU-friendly.
+- **Delivery:** **download-on-demand** into `userData` (pinned URL + SHA-256),
+  gitignored; the base game download stays small, only opted-in players pull the
+  weights. Off by default; dev-flagged until polished (matches [[feedback_no-byo-key]]).
+
+**Remaining native step (needs user greenlight — the one thing not done here):**
+1. `npm i -E node-llama-cpp` (with `--ignore-scripts` guidance / prebuilt path).
+2. A main-process adapter that loads the GGUF and exposes `infer(prompt)` →
+   `selectFeedWriter({ localEnabled, infer })`. ~30 lines; no changes to
+   feedWriter.ts. Then the ceiling lights up.
