@@ -39,6 +39,7 @@ import {
   styleMatch,
   teamStyleFit,
 } from '@engine/league/archetypes'
+import { deploymentProfile } from '@engine/league/deployment'
 import type {
   ArchetypeInfo,
   AttributeGroupView,
@@ -893,6 +894,10 @@ export function buildPlayerProfile(
       )
     : undefined
 
+  // #73: deployment read — how to USE this skater. Own players always; opponents
+  // only once reliably scouted. Goalies return undefined (starter/tandem elsewhere).
+  const deployment = archetypeKnown ? deploymentProfile(p) : undefined
+
   // Mindset (optional; only built when mindsetCtx provided, or when no fog = own player)
   let mindset: import('@engine/career/playerMindset').MindsetView | undefined
   if (mindsetCtx) {
@@ -946,6 +951,7 @@ export function buildPlayerProfile(
     ...(mindset !== undefined ? { mindset } : {}),
     ...(personalityType !== undefined ? { personalityType } : {}),
     ...(scoutVerdict !== undefined ? { scoutVerdict } : {}),
+    ...(deployment !== undefined ? { deployment } : {}),
   }
 }
 

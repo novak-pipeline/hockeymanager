@@ -814,6 +814,13 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   scoutVerdict?: import('@engine/career/scoutVerdict').ScoutVerdict
   /**
+   * #73: EHM-style deployment read — how the coach should USE this skater
+   * (role-suitability stars per bucket + a usage note), distinct from his innate
+   * archetype. Present for own players / reliably scouted skaters; absent for
+   * goalies and low-knowledge opponents.
+   */
+  deployment?: import('@engine/league/deployment').DeploymentProfile
+  /**
    * Interview section: answered Q&A (deterministic from traits) + the questions
    * the GM hasn't asked yet. Present whenever the player can be interviewed.
    */

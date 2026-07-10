@@ -1201,6 +1201,20 @@ function TabProfile({
             )}
           </Panel>
 
+          {d.deployment && (
+            <Panel title="Deployment">
+              <div className="stack" style={{ gap: 5 }}>
+                {d.deployment.suitability.map((s) => (
+                  <div key={s.key} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <span className="small muted">{s.label}</span>
+                    <StarRating stars={s.stars} size={12} />
+                  </div>
+                ))}
+              </div>
+              <div className="small" style={{ marginTop: 8, lineHeight: 1.4 }}>{d.deployment.usageNote}</div>
+            </Panel>
+          )}
+
           <Panel title="Status">
             <div className="pp-vitals">
               <div className="pp-vital">

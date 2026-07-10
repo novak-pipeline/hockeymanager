@@ -246,6 +246,27 @@ try {
     }
   }
 
+  // A player profile — opens the first roster player (captures the Deployment
+  // panel, #73). Roster is a sidebar stop already photographed above.
+  try {
+    await win.click('text="Roster"', { timeout: 4000 })
+    await win.waitForTimeout(300)
+    await win.click('.player-link >> nth=0', { timeout: 4000 })
+    await win.waitForTimeout(600)
+    await snap(win, 'player-profile')
+    // Scroll every scrollable container down so the Deployment panel (#73),
+    // which sits lower in the left column, comes into frame.
+    await win.evaluate(() => {
+      for (const el of document.querySelectorAll('*')) {
+        if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = 900
+      }
+    })
+    await win.waitForTimeout(250)
+    await win.screenshot({ path: join(outDir, 'player-profile-deployment.png') })
+  } catch {
+    console.log('  ⚠ player profile not reachable — skipped')
+  }
+
   // The Feed subtab, if visible.
   try {
     await win.click('text="Inbox"', { timeout: 4000 })
