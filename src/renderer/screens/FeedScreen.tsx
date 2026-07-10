@@ -6,8 +6,9 @@
  * checking, not a firehose. Channel filters split the public feed from the
  * GM wire. Follows/curation land in Phase B; the writer in Phase C.
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { FeedView } from '../../worker/protocol'
+import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { TeamCrest } from '../components/Crest'
 import { Linkify } from '../components/Linkify'
 import { useNav } from '../components/NavContext'
@@ -74,6 +75,40 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
 }): JSX.Element {
   const posts = feed.posts.filter((p) => filter === 'all' || p.channel === filter)
   const following = feed.following ?? []
+
+  // #149: opt-in local-model rewrite pump. When the GM enabled the local writer
+  // and the model is downloaded, rewrite each post's body into prose in the
+  // background; falls back to the template body until (or unless) that lands.
+  const [rewrites, setRewrites] = useState<Record<string, { text: string; source: string }>>({})
+  const doneRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const bridge = feedModelBridge()
+    if (!bridge || !getFeedWriterEnabled()) return
+    let cancelled = false
+    void (async () => {
+      const s = await bridge.status().catch(() => null)
+      if (!s?.ready || cancelled) return
+      // Build the prompt + writer on the renderer side (it has @engine); the
+      // main process is a pure inference runtime. The writer sanitises + falls
+      // back to the template body on any failure.
+      const { localModelFeedWriter } = await import('@engine/story/feedWriter')
+      const writer = localModelFeedWriter(async (prompt) => {
+        const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxWords * 2 })
+        return r.ok ? r.text : ''
+      })
+      for (const p of posts) {
+        if (doneRef.current.has(p.id)) continue
+        doneRef.current.add(p.id)
+        const post = { authorId: p.authorId ?? 'wire', channel: (p.channel ?? 'feed') as 'feed' | 'wire', text: p.body, facts: { kind: p.category, numbers: {} } }
+        const author = (p.authorId ? feed.authors[p.authorId] : undefined) ?? { id: 'wire', name: 'League Wire', handle: 'TheWire', kind: 'wire' as const, outlet: 'league sources' }
+        const r = await writer.write(post, author).catch(() => null)
+        if (r && !cancelled && r.source === 'model') setRewrites((prev) => ({ ...prev, [p.id]: r }))
+      }
+    })()
+    return () => { cancelled = true }
+    // Stable key: only re-run when the set of visible posts actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts.map((p) => p.id).join(',')])
 
   const whoToFollow = (
     <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -147,7 +182,12 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
                 )}
                 <span className="muted small">· Day {p.day}</span>
               </div>
-              <div style={{ fontSize: 14, lineHeight: 1.5, margin: '4px 0 6px' }}><Linkify text={p.body} /></div>
+              <div style={{ fontSize: 14, lineHeight: 1.5, margin: '4px 0 6px' }}>
+                <Linkify text={rewrites[p.id]?.text ?? p.body} />
+                {rewrites[p.id]?.source === 'model' && (
+                  <span className="muted" style={{ fontSize: 9, marginLeft: 4 }} title="Rewritten by your local AI writer">✨</span>
+                )}
+              </div>
               <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
                 {p.engagement && (
                   <>

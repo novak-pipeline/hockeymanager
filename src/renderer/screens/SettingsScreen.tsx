@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Panel, ScreenHeader } from '../components/ui'
 import { getPressSettings, setPressSettings } from '../lib/press'
+import { feedModelBridge, getFeedWriterEnabled, setFeedWriterEnabled, type FeedModelStatus } from '../lib/feedModel'
 import { useUiStore } from '../components/store'
 import { THEME_OPTIONS } from '../components/themes'
 
@@ -232,7 +233,72 @@ export function SettingsScreen(): JSX.Element {
           )}
         </div>
       </Panel>
+
+      <FeedModelPanel />
     </section>
+  )
+}
+
+/** #149: opt-in local AI Feed writer — download the model + toggle it on. Fully
+ *  offline once downloaded; the template writer is always the fallback. */
+function FeedModelPanel(): JSX.Element | null {
+  const bridge = feedModelBridge()
+  const [status, setStatus] = useState<FeedModelStatus | null>(null)
+  const [enabled, setEnabled] = useState(getFeedWriterEnabled())
+  const [pct, setPct] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    if (!bridge) return
+    void bridge.status().then(setStatus).catch(() => {})
+    const off = bridge.onProgress((p) => setPct(p))
+    return off
+  }, [bridge])
+
+  if (!bridge) return null // main-process runtime not present (e.g. web build)
+
+  async function doDownload(): Promise<void> {
+    if (busy || !bridge) return
+    setBusy(true); setMsg('')
+    try {
+      const r = await bridge.download()
+      const s = await bridge.status()
+      setStatus(s)
+      setMsg(r.ok ? 'Model ready.' : `Download failed: ${r.message ?? 'unknown'}`)
+    } finally { setBusy(false) }
+  }
+
+  const ready = status?.ready ?? false
+  const sizeMb = status?.approxSizeMb ?? 1000
+
+  return (
+    <Panel title="Local AI Feed writer (beta)">
+      <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
+        Rewrites the Feed's posts into natural prose using a small model that runs
+        entirely on your machine — no account, no internet after the one-time
+        download (~{Math.round(sizeMb)} MB). The template writer stays the fallback.
+      </div>
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+          <span className="chip" style={{ color: ready ? 'var(--green)' : 'var(--amber)', borderColor: ready ? 'var(--green)' : 'var(--amber)' }}>
+            {ready ? 'Model downloaded' : busy ? `Downloading… ${pct}%` : 'Not downloaded'}
+          </span>
+          {!ready && (
+            <button className="btn btn-sm" disabled={busy} onClick={() => void doDownload()}>
+              {busy ? `Downloading… ${pct}%` : `Download model (~${Math.round(sizeMb)} MB)`}
+            </button>
+          )}
+        </div>
+        <ToggleRow
+          label="Use the local writer"
+          note={ready ? 'On: Feed posts are rewritten by the local model.' : 'Download the model first to enable.'}
+          value={enabled && ready}
+          onChange={(v) => { if (!ready) return; setEnabled(v); setFeedWriterEnabled(v) }}
+        />
+        {msg && <div className="muted small">{msg}</div>}
+      </div>
+    </Panel>
   )
 }
 

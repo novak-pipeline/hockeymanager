@@ -6,7 +6,12 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: { index: resolve('src/main/index.ts') }
+        input: { index: resolve('src/main/index.ts') },
+        // node-llama-cpp is a native, optional dependency loaded lazily at
+        // runtime (#149). Keep it (and its per-platform binary subpackages)
+        // external so Rollup doesn't try to bundle a native .node / a platform
+        // package that isn't installed on this OS.
+        external: ['node-llama-cpp', /^@node-llama-cpp\//]
       }
     }
   },

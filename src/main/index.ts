@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { registerSaveIpc } from './saves'
 import { registerPressIpc } from './press'
 import { registerModIpc } from './mods'
+import { registerFeedModelIpc } from './feedModel'
 
 const isDev = !app.isPackaged
 
@@ -35,6 +36,7 @@ app.whenReady().then(() => {
   registerSaveIpc(ipcMain)
   registerPressIpc(ipcMain)
   registerModIpc(ipcMain)
+  registerFeedModelIpc(ipcMain)
   createWindow()
 
   app.on('activate', () => {

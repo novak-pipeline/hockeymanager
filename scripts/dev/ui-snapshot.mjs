@@ -297,6 +297,18 @@ try {
     console.log('  ⚠ world international not reachable — skipped')
   }
 
+  // Settings — captures the local-AI-Feed-writer panel (#149, opt-in state).
+  try {
+    await win.click('button[aria-label="Settings"]', { timeout: 4000 })
+    await win.waitForTimeout(400)
+    await win.evaluate(() => { for (const el of document.querySelectorAll('*')) if (el.scrollHeight > el.clientHeight + 40) el.scrollTop = 1400 })
+    await win.waitForTimeout(200)
+    await win.screenshot({ path: join(outDir, 'settings-feed-writer.png') })
+    await snap(win, 'settings')
+  } catch {
+    console.log('  ⚠ settings not reachable — skipped')
+  }
+
   // The Media Circuit subtab under GM Career (#90 — pundit relationships).
   try {
     await win.click('text="GM Career"', { timeout: 4000 })
