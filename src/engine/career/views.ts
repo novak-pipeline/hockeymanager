@@ -2162,6 +2162,8 @@ export interface CareerSnapshot {
     pressCounter: number
     pressJob: import('@engine/story/factSheet').PressJob | null
     pressConference: import('@engine/story/factSheet').PressConferenceState | null
+    /** #90: the GM's persistent pundit relationships (optional — old saves seed neutral). */
+    pundits?: import('@engine/story/pundits').PunditState
   }
   /**
    * Staff (head coach + AGM) for the user's team.
@@ -3196,4 +3198,32 @@ export interface TeamDataHubView {
   allTeams: TeamAnalyticsRow[]
   /** All goalies across the league (for goalie rank context). */
   allGoalies: GoalieAnalyticsRow[]
+}
+
+/* ────────────────────────── media circuit (#90) ────────────────────────── */
+
+/** The GM's standing with one named pundit, for the Media Circuit screen. */
+export interface MediaCircuitRowView {
+  personaId: 'beat' | 'national' | 'homer'
+  name: string
+  outlet: string
+  /** -100 (feud) … +100 (ally). */
+  rapport: number
+  standing: 'Ally' | 'Friendly' | 'Neutral' | 'Critic' | 'Feud'
+  /** One-line human read on the relationship. */
+  read: string
+  /** Number of press exchanges with this pundit. */
+  interactions: number
+  /** Short verb for the most recent exchange (e.g. "came out swinging"). */
+  lastExchange?: string
+}
+
+/** The GM's press relationships plus who leads for/against him. */
+export interface MediaCircuitView {
+  teamName: string
+  rows: MediaCircuitRowView[]
+  /** Strongest ally's display name, when any pundit is friendly or better. */
+  allyName?: string
+  /** Chief critic's display name, when any pundit is a critic or worse. */
+  criticName?: string
 }

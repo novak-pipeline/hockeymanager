@@ -349,6 +349,11 @@ export class SimClient {
     return this.send({ type: 'getLeadership' })
   }
 
+  /** #90: the GM's media-circuit standing with each named pundit. */
+  getMediaCircuit(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMediaCircuit' })
+  }
+
   setCaptain(playerId: string | null): Promise<WorkerResponse> {
     return this.send({ type: 'setCaptain', playerId })
   }

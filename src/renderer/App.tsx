@@ -37,6 +37,7 @@ import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
 import { CommandPalette } from './components/CommandPalette'
 import { WarRoomScreen } from './screens/WarRoomScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
+import { MediaCircuitScreen } from './screens/MediaCircuitScreen'
 import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
@@ -605,6 +606,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <WarRoomScreen />
     case 'gmCareer':
       return <GMCareerScreen />
+    case 'mediaCircuit':
+      return <MediaCircuitScreen />
     case 'mentorship':
       return <MentorshipScreen />
     case 'lockerRoom':

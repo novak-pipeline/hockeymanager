@@ -189,6 +189,16 @@ import {
 } from '@engine/story/factSheet'
 import { renderFallback } from '@engine/story/pressFallback'
 import {
+  seedPundits,
+  normalizePundits,
+  applyPunditAnswer,
+  punditStanding,
+  punditRead,
+  toneVerb,
+  mediaStandingSummary,
+  type PunditState,
+} from '@engine/story/pundits'
+import {
   checkAwardsStage,
   checkDraftStage,
   checkPlayoffEntry,
@@ -494,6 +504,8 @@ import {
   type TeamPlayerStatsView,
   type StaffView,
   type StaffRowView,
+  type MediaCircuitView,
+  type MediaCircuitRowView,
 } from './views'
 import type { ScoutingState, ScoutTarget, ScoutFocus, ScoutRecommendation } from '@domain/scouting'
 
@@ -844,6 +856,9 @@ export class Career {
   private pressJob: PressJob | null = null
   /** Pending press-conference question awaiting the user's answer. */
   private pressConference: PressConferenceState | null = null
+  /** #90: the GM's persistent standing with each named pundit. Serialized in the
+   *  snapshot; old saves lazily seed neutral relationships on load. */
+  private punditState: PunditState = seedPundits()
   private pressCounter = 0
   /** Season-long schedule of recurring media reports (Task #39). */
   private pressScheduleState: PressScheduleState = initialPressScheduleState()
@@ -3109,12 +3124,17 @@ export class Career {
 
   /** Queue (replace) a pending press-conference question for the user. */
   private queuePressConference(question: string, context: string): void {
+    // Attribute the question to a specific pundit — the answer builds or sours a
+    // lasting relationship with THAT person (see answerPressConference / #90).
+    const personaId =
+      Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]!
     this.pressConference = {
       id: `pc${this.pressCounter++}`,
       question,
       context,
       day: this.currentDay,
       year: this.year,
+      personaId,
     }
   }
 
@@ -3194,16 +3214,82 @@ export class Career {
       deflecting: 'an evasive',
       praise: 'a complimentary',
     }
+
+    // #90: the exchange lands with the specific pundit who asked, shifting a
+    // lasting relationship. Older pending pressers with no persona default to the
+    // beat reporter.
+    const personaId = pc.personaId ?? 'beat'
+    const persona = PRESS_PERSONA_NAMES[personaId]
+    const shift = applyPunditAnswer(this.punditState, personaId, tone, this.currentDay)
+
     this.pushNews(
       'league',
       `GM faces the press`,
-      `Asked: "${pc.question}"\n\nIn ${toneLabel[tone]} exchange, the ${this.userTeam.name} GM said: "${quote}"`,
+      `Asked by ${persona.name} (${persona.outlet}): "${pc.question}"\n\n` +
+        `In ${toneLabel[tone]} exchange, the ${this.userTeam.name} GM said: "${quote}"`,
       {
         teamId: this.userTeamId as string,
-        press: { byline: 'Press room pool report', kind: 'presser' },
+        press: { byline: `${persona.name} — ${persona.outlet}`, kind: 'presser' },
       }
     )
-    this.appendSaga(`Y${this.year} D${this.currentDay}: GM presser (${tone}): "${quote.slice(0, 80)}".`)
+
+    // When the answer tips the relationship across a standing boundary, surface a
+    // short beat so the player feels the consequence. Only for the meaningful
+    // moves (into an alliance or into open hostility).
+    if (shift.crossedBoundary) {
+      if (shift.standingAfter === 'Ally' || shift.standingAfter === 'Feud') {
+        const warming = shift.standingAfter === 'Ally'
+        this.pushNews(
+          'league',
+          warming ? `${persona.name} is now an ally` : `${persona.name} turns on the GM`,
+          warming
+            ? `${persona.name} of ${persona.outlet} has become a reliable friend of the ${this.userTeam.name} front office — ` +
+                `his columns will now give the GM the benefit of the doubt.`
+            : `${persona.name} of ${persona.outlet} has soured completely on the ${this.userTeam.name} GM — ` +
+                `expect every misstep to become a headline.`,
+          { teamId: this.userTeamId as string }
+        )
+        // The homer is the fanbase's voice on the radio: a full break with him
+        // nudges fan engagement, an alliance lifts it. Small and clamped.
+        if (personaId === 'homer') {
+          const before = this.fanInterest
+          this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + (warming ? 3 : -3)))
+          void before
+        }
+      }
+    }
+
+    this.appendSaga(
+      `Y${this.year} D${this.currentDay}: GM presser (${tone}) with ${persona.name} — ` +
+        `now ${punditStanding(shift.rapportAfter).toLowerCase()}.`
+    )
+  }
+
+  /**
+   * #90: the Media Circuit — the GM's standing with each named pundit, plus the
+   * strongest ally / chief critic. Read-only; drives the Media Circuit screen.
+   */
+  getMediaCircuit(): MediaCircuitView {
+    const summary = mediaStandingSummary(this.punditState)
+    const rows: MediaCircuitRowView[] = this.punditState.pundits.map((rel) => {
+      const meta = PRESS_PERSONA_NAMES[rel.personaId]
+      return {
+        personaId: rel.personaId,
+        name: meta.name,
+        outlet: meta.outlet,
+        rapport: rel.rapport,
+        standing: punditStanding(rel.rapport),
+        read: punditRead(rel),
+        interactions: rel.interactions,
+        lastExchange: rel.lastTone ? toneVerb(rel.lastTone) : undefined,
+      }
+    })
+    return {
+      teamName: this.userTeam.name,
+      rows,
+      allyName: summary.ally ? PRESS_PERSONA_NAMES[summary.ally].name : undefined,
+      criticName: summary.critic ? PRESS_PERSONA_NAMES[summary.critic].name : undefined,
+    }
   }
 
   /* ────────────────────────── outcome bookkeeping ────────────────────────── */
@@ -14520,6 +14606,7 @@ export class Career {
         pressCounter: this.pressCounter,
         pressJob: this.pressJob ? structuredClone(this.pressJob) : null,
         pressConference: this.pressConference ? structuredClone(this.pressConference) : null,
+        pundits: structuredClone(this.punditState),
       },
       staff: this.staff ? structuredClone(this.staff) : undefined,
       teamStaff: this.teamStaffMap.size > 0
@@ -14710,6 +14797,9 @@ export class Career {
       career.pressConference = snapshot.pressState.pressConference
         ? structuredClone(snapshot.pressState.pressConference)
         : null
+      // #90: pundit relationships — old saves seed neutral, and normalize
+      // backfills any persona a stored state is missing.
+      career.punditState = normalizePundits(snapshot.pressState.pundits)
     }
 
     // Restore plumbing module state (all optional for backward compat).

@@ -20,6 +20,7 @@ export type ScreenId =
   | 'seasonReview'
   | 'warRoom'
   | 'gmCareer'
+  | 'mediaCircuit'
   | 'staffMeeting'
   // News section
   | 'inbox'

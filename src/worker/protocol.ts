@@ -75,6 +75,7 @@ export type {
   ScoutProfileView,
   SquadView,
   LeadershipView,
+  MediaCircuitView,
   RoleBoardView,
   CompetitionsView,
   InternationalView,
@@ -159,6 +160,7 @@ import type {
   ScoutProfileView,
   SquadView,
   LeadershipView,
+  MediaCircuitView,
   RoleBoardView,
   CompetitionsView,
   InternationalView,
@@ -248,6 +250,7 @@ export type WorkerRequestBody =
   | { type: 'restPlayer'; playerId: string }
   /** #189: captains + jersey numbers for the user's club. */
   | { type: 'getLeadership' }
+  | { type: 'getMediaCircuit' }
   | { type: 'setCaptain'; playerId: string | null }
   | { type: 'toggleAlternate'; playerId: string }
   | { type: 'setJerseyNumber'; playerId: string; number: number | null }
@@ -472,6 +475,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'dashboard'; dashboard: DashboardView }
   | { type: 'squad'; squad: SquadView }
   | { type: 'leadership'; leadership: LeadershipView; ok?: boolean; message?: string }
+  | { type: 'mediaCircuit'; mediaCircuit: MediaCircuitView }
   | { type: 'roleBoard'; roleBoard: RoleBoardView; assigned?: number }
   | { type: 'player'; player: PlayerProfileView }
   /** #186: result of a no-trade-clause waive negotiation + the refreshed player. */

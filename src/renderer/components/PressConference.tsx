@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { PressConferenceState, PressTone } from '@engine/story/factSheet'
+import { PRESS_PERSONA_NAMES } from '@engine/story/factSheet'
 import { useClient } from '../hooks/useSim'
 import { bumpRefresh } from './store'
 import { getPressSettings } from '../lib/press'
@@ -141,7 +142,11 @@ export function PressConference(): JSX.Element | null {
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--violet-h)', textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Press Conference
             </div>
-            <div className="muted small">{presser.context}</div>
+            <div className="muted small">
+              {presser.personaId
+                ? `${PRESS_PERSONA_NAMES[presser.personaId].name} · ${PRESS_PERSONA_NAMES[presser.personaId].outlet} — ${presser.context}`
+                : presser.context}
+            </div>
           </div>
         </div>
 

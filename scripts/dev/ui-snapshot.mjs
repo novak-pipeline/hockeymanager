@@ -257,6 +257,17 @@ try {
     console.log('  ⚠ feed subtab not reachable — skipped')
   }
 
+  // The Media Circuit subtab under GM Career (#90 — pundit relationships).
+  try {
+    await win.click('text="GM Career"', { timeout: 4000 })
+    await win.waitForTimeout(300)
+    await win.click('button:has-text("Media")', { timeout: 4000 })
+    await win.waitForTimeout(500)
+    await snap(win, 'media-circuit')
+  } catch {
+    console.log('  ⚠ media circuit not reachable — skipped')
+  }
+
 } finally {
   writeFileSync(join(outDir, 'console-errors.txt'), consoleErrors.join('\n') || '(none)')
   console.log(`\n${shot} screenshots → ${outDir}`)

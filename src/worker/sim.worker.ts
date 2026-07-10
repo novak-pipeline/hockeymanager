@@ -226,6 +226,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getLeadership':
       return { id: req.id, type: 'leadership', leadership: must().getLeadership() }
+    case 'getMediaCircuit':
+      return { id: req.id, type: 'mediaCircuit', mediaCircuit: must().getMediaCircuit() }
     case 'setCaptain': {
       const r = must().setCaptain(req.playerId)
       return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
