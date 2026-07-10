@@ -2772,16 +2772,26 @@ describe('#175 shorthanded stat splits', () => {
 
     // Role shape: the user club's PP1 forwards out-minute a 4th-line, non-PP body.
     const team = data.teams.get(asTeamId(userId as string))!
-    const pp1 = (team.lines.powerPlayUnits[0] ?? []).map((id) => id as string)
+    const pp1 = new Set((team.lines.powerPlayUnits[0] ?? []).map((id) => id as string))
     const skaters = career.getTeamPlayerStats(userId as string).skaters
     const pp1Toi = skaters
-      .filter((r) => pp1.includes(r.playerId) && r.skater)
+      .filter((r) => pp1.has(r.playerId) && r.skater)
       .reduce((s, r) => s + (r.skater!.ppToiPerGame ?? 0), 0)
     expect(pp1Toi).toBeGreaterThan(0)
     // PP TOI never exceeds total TOI for anyone.
     for (const r of skaters) {
       if (r.skater) expect(r.skater.ppToiPerGame ?? 0).toBeLessThanOrEqual(r.skater.toiPerGame + 1)
     }
+
+    // Causal link (the whole point): PP1 is actually deployed on the power play,
+    // so its players collect the club's power-play goals rather than random lines.
+    const clubPpGoals = skaters.reduce((s, r) => s + (r.skater?.ppGoals ?? 0), 0)
+    const pp1PpGoals = skaters
+      .filter((r) => pp1.has(r.playerId))
+      .reduce((s, r) => s + (r.skater?.ppGoals ?? 0), 0)
+    expect(clubPpGoals).toBeGreaterThan(0)
+    // The 5-man PP1 should own the lion's share of the club's PP goals.
+    expect(pp1PpGoals / clubPpGoals).toBeGreaterThan(0.5)
   })
 })
 

@@ -64,6 +64,9 @@ export type QuickSimResult = GameOutcome
 /** Forward-line usage weights (top lines play more). */
 const FWD_LINE_WEIGHTS = [0.3, 0.27, 0.24, 0.19]
 const DEF_PAIR_WEIGHTS = [0.38, 0.34, 0.28]
+// #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
+const PP_UNIT_WEIGHTS = [0.7, 0.3]
+const PK_UNIT_WEIGHTS = [0.62, 0.38]
 
 interface OnIce {
   skaters: Player[]
@@ -111,13 +114,33 @@ class TeamSim {
     this.resolve = resolve
   }
 
-  pickOnIce(rng: Rng): OnIce {
+  /** #175: deploy the unit that matches the strength state — the real PP/PK units
+   *  during special teams (so PP1 gets the power-play chances → the power-play
+   *  goals, as in the full sim), the even-strength lines otherwise. */
+  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev'): OnIce {
     const lines = this.team.lines
+    const goalie = this.resolve(lines.goalies[0])
+    if (situation === 'pp' && lines.powerPlayUnits.length > 0) {
+      const unit = lines.powerPlayUnits[weightedIndex(rng, lines.powerPlayUnits.map((_, i) => PP_UNIT_WEIGHTS[i] ?? 0.15))]
+      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+    }
+    if (situation === 'pk' && lines.penaltyKillUnits.length > 0) {
+      const unit = lines.penaltyKillUnits[weightedIndex(rng, lines.penaltyKillUnits.map((_, i) => PK_UNIT_WEIGHTS[i] ?? 0.15))]
+      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+    }
     const fwd = lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
     const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
     const skaters = [...fwd, ...pair].map(this.resolve)
-    const goalie = this.resolve(lines.goalies[0])
     return { skaters, goalie }
+  }
+
+  /** #175: this team's strength state at game-clock `t` (relative to its opponent). */
+  situationVs(opp: TeamSim, t: number): 'ev' | 'pp' | 'pk' {
+    const meSH = this.shorthanded(t)
+    const oppSH = opp.shorthanded(t)
+    if (oppSH && !meSH) return 'pp'
+    if (meSH && !oppSH) return 'pk'
+    return 'ev'
   }
 
   /** Active penalties at game-clock t (expired ones pruned). */
@@ -342,8 +365,14 @@ function simShift(
   }
 }
 
-function creditToi(ctx: Ctx, onIce: OnIce, seconds: number): void {
-  for (const p of onIce.skaters) stat(ctx, p.id).toi += seconds
+function creditToi(ctx: Ctx, onIce: OnIce, seconds: number, situation: 'ev' | 'pp' | 'pk' = 'ev'): void {
+  for (const p of onIce.skaters) {
+    const s = stat(ctx, p.id)
+    s.toi += seconds
+    // #175: literal special-teams ice time — the unit that's actually deployed.
+    if (situation === 'pp') s.ppToi = (s.ppToi ?? 0) + seconds
+    else if (situation === 'pk') s.pkToi = (s.pkToi ?? 0) + seconds
+  }
   stat(ctx, onIce.goalie.id).toi += seconds
 }
 
@@ -382,10 +411,14 @@ function simPeriod(
   const homeAttacksPositive = period % 2 === 1
 
   for (let t = 0; t < lengthSeconds; t += SHIFT_SECONDS) {
-    const homeUnit = home.pickOnIce(ctx.rng)
-    const awayUnit = away.pickOnIce(ctx.rng)
-    creditToi(ctx, homeUnit, SHIFT_SECONDS)
-    creditToi(ctx, awayUnit, SHIFT_SECONDS)
+    // #175: deploy the unit that fits the strength state, so PP1 takes the
+    // power-play shifts (and thus the power-play goals), PK1 the kills.
+    const homeSit = home.situationVs(away, t)
+    const awaySit = away.situationVs(home, t)
+    const homeUnit = home.pickOnIce(ctx.rng, homeSit)
+    const awayUnit = away.pickOnIce(ctx.rng, awaySit)
+    creditToi(ctx, homeUnit, SHIFT_SECONDS, homeSit)
+    creditToi(ctx, awayUnit, SHIFT_SECONDS, awaySit)
 
     const beforeH = home.goals
     const beforeA = away.goals
@@ -514,50 +547,6 @@ function simEmptyNetPhase(
   }
 }
 
-/**
- * #175: the quick sim doesn't skate literal special-teams shifts, so estimate
- * each player's PP/PK time-on-ice from the game's penalty volume and his unit
- * membership — so the background league produces credible, role-shaped special-
- * teams minutes (PP1 scorers, PK grinders) rather than zeros. ppToi + pkToi is
- * capped at his total toi. Purely additive: touches only the ppToi/pkToi fields.
- */
-function estimateSpecialTeamsToi(ctx: Ctx, sims: TeamSim[]): void {
-  // A power play runs ~2:00 but ends early on a goal — call it ~100s of live PP.
-  const PP_SECONDS = 100
-  // How PP/PK minutes concentrate on the first unit vs the second.
-  const PP_UNIT_SHARE = [0.68, 0.34]
-  const PK_UNIT_SHARE = [0.62, 0.42]
-
-  const penaltiesTakenBy = (sim: TeamSim): number => {
-    let pim = 0
-    for (const id of sim.team.roster) pim += ctx.stats.get(id)?.penaltyMinutes ?? 0
-    return pim / 2 // minors only
-  }
-  const penByTeam = sims.map(penaltiesTakenBy)
-
-  sims.forEach((sim, i) => {
-    const oppPenalties = penByTeam[1 - i] ?? 0 // this club's POWER plays = opp's penalties
-    const ownPenalties = penByTeam[i] ?? 0 // this club's PENALTY kills
-    const ppSecTeam = oppPenalties * PP_SECONDS
-    const pkSecTeam = ownPenalties * PP_SECONDS
-    const add = (units: PlayerId[][], sharePer: number[], key: 'ppToi' | 'pkToi', teamSec: number): void => {
-      units.forEach((unit, u) => {
-        const share = sharePer[u] ?? 0
-        for (const pid of unit) {
-          const s = ctx.stats.get(pid)
-          if (!s) continue
-          const want = teamSec * share
-          // Never let special-teams minutes exceed the player's actual ice time.
-          const budget = Math.max(0, s.toi - (s.ppToi ?? 0) - (s.pkToi ?? 0))
-          s[key] = (s[key] ?? 0) + Math.min(want, budget)
-        }
-      })
-    }
-    add(sim.team.lines.powerPlayUnits, PP_UNIT_SHARE, 'ppToi', ppSecTeam)
-    add(sim.team.lines.penaltyKillUnits, PK_UNIT_SHARE, 'pkToi', pkSecTeam)
-  })
-}
-
 export function quickSimGame(
   home: Team,
   away: Team,
@@ -614,9 +603,6 @@ export function quickSimGame(
       : REGULATION_PERIODS + (decidedBy === 'shootout' ? 1 : 0)
 
   ctx.stream.push({ t: 0, period: finalPeriod, type: 'gameEnd' })
-
-  // #175: estimate special-teams ice time from penalties + unit membership.
-  estimateSpecialTeamsToi(ctx, [homeSim, awaySim])
 
   return {
     homeTeamId: home.id,
