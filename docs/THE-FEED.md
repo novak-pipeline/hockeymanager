@@ -166,3 +166,17 @@ native module.
 2. A main-process adapter that loads the GGUF and exposes `infer(prompt)` →
    `selectFeedWriter({ localEnabled, infer })`. ~30 lines; no changes to
    feedWriter.ts. Then the ceiling lights up.
+
+### Update: on by default (ships out of the box)
+
+The local writer is **ON BY DEFAULT** (opt-OUT, not opt-in) — it's the intended
+shipped experience. Safe because it always falls back to the template writer
+when the model is absent, so default-on never breaks the Feed.
+
+Model resolution (`src/main/feedModel.ts` `modelPath()`): prefer a **BUNDLED**
+copy at `process.resourcesPath/models/<file>`, else a user-**downloaded** copy in
+`userData/models/`. For the real out-of-the-box Steam build, ship the GGUF as a
+packaging asset (electron-builder `extraResources: [{ from: 'resources/models',
+to: 'models' }]`, weights gitignored) — then first launch finds it, the writer is
+already on, no download, no internet. In dev (unbundled) the Settings panel shows
+a Download button and the Feed falls back to templates until it's fetched.

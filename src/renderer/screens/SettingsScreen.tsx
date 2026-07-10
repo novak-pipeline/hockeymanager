@@ -270,31 +270,35 @@ function FeedModelPanel(): JSX.Element | null {
   }
 
   const ready = status?.ready ?? false
+  const bundled = status?.bundled ?? false
   const sizeMb = status?.approxSizeMb ?? 1000
 
+  const statusText = bundled ? 'Included with the app' : ready ? 'Model ready' : busy ? `Downloading… ${pct}%` : 'Not installed'
+  const statusColor = ready ? 'var(--green)' : 'var(--amber)'
+
   return (
-    <Panel title="Local AI Feed writer (beta)">
+    <Panel title="Local AI Feed writer">
       <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
-        Rewrites the Feed's posts into natural prose using a small model that runs
-        entirely on your machine — no account, no internet after the one-time
-        download (~{Math.round(sizeMb)} MB). The template writer stays the fallback.
+        On by default — the Feed's posts are rewritten into natural prose by a small model
+        that runs entirely on your machine (no account, no internet). The template writer
+        is always the fallback, so the Feed works even when the model isn't installed.
       </div>
       <div className="stack" style={{ gap: 'var(--sp-3)' }}>
         <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
-          <span className="chip" style={{ color: ready ? 'var(--green)' : 'var(--amber)', borderColor: ready ? 'var(--green)' : 'var(--amber)' }}>
-            {ready ? 'Model downloaded' : busy ? `Downloading… ${pct}%` : 'Not downloaded'}
-          </span>
-          {!ready && (
+          <span className="chip" style={{ color: statusColor, borderColor: statusColor }}>{statusText}</span>
+          {!ready && !bundled && (
             <button className="btn btn-sm" disabled={busy} onClick={() => void doDownload()}>
               {busy ? `Downloading… ${pct}%` : `Download model (~${Math.round(sizeMb)} MB)`}
             </button>
           )}
         </div>
         <ToggleRow
-          label="Use the local writer"
-          note={ready ? 'On: Feed posts are rewritten by the local model.' : 'Download the model first to enable.'}
-          value={enabled && ready}
-          onChange={(v) => { if (!ready) return; setEnabled(v); setFeedWriterEnabled(v) }}
+          label="Rewrite Feed posts with the local model"
+          note={enabled
+            ? (ready ? 'On — posts are being rewritten locally.' : 'On — activates automatically once the model is installed.')
+            : 'Off — the Feed uses the deterministic template writer.'}
+          value={enabled}
+          onChange={(v) => { setEnabled(v); setFeedWriterEnabled(v) }}
         />
         {msg && <div className="muted small">{msg}</div>}
       </div>

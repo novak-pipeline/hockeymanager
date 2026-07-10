@@ -36,12 +36,20 @@ const MODEL = {
   sha256: '' as string,
 }
 
+/** Where a downloaded model is written (user-writable). */
 function modelDir(): string {
   const { app } = require('electron') as typeof import('electron')
   const { join } = require('node:path') as typeof import('node:path')
   return join(app.getPath('userData'), 'models')
 }
-function modelPath(): string {
+/** Where a BUNDLED model ships (read-only, packaged via electron-builder
+ *  extraResources: `resources/models/<file>`). Present in a Steam build so the
+ *  writer works out of the box with no download. */
+function bundledModelPath(): string {
+  const { join } = require('node:path') as typeof import('node:path')
+  return join(process.resourcesPath ?? '', 'models', MODEL.file)
+}
+function downloadedModelPath(): string {
   const { join } = require('node:path') as typeof import('node:path')
   return join(modelDir(), MODEL.file)
 }
@@ -51,9 +59,21 @@ function fileSize(p: string): number {
   try { return statSync(p).size } catch { return -1 }
 }
 
+/** The model to load: prefer the bundled copy (shipped), else the downloaded
+ *  one. Empty string when neither is present. */
+function modelPath(): string {
+  if (fileSize(bundledModelPath()) >= MODEL.minBytes) return bundledModelPath()
+  if (fileSize(downloadedModelPath()) >= MODEL.minBytes) return downloadedModelPath()
+  return ''
+}
+
 /** Model is present and big enough to be the real weights. */
 function modelReady(): boolean {
-  return fileSize(modelPath()) >= MODEL.minBytes
+  return modelPath() !== ''
+}
+/** Whether a bundled model shipped with the app (no download needed). */
+function modelBundled(): boolean {
+  return fileSize(bundledModelPath()) >= MODEL.minBytes
 }
 
 /* ────────────────────────── download ────────────────────────── */
@@ -150,6 +170,8 @@ async function infer(prompt: RawPrompt): Promise<string> {
 export function registerFeedModelIpc(ipcMain: IpcMain): void {
   ipcMain.handle('feedModel:status', () => ({
     ready: modelReady(),
+    /** True when the model shipped with the app — no download needed. */
+    bundled: modelBundled(),
     state: modelReady() ? 'ready' : downloadState,
     pct: downloadPct,
     error: downloadError,
