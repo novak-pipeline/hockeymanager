@@ -2484,6 +2484,8 @@ export interface MedicalRow {
   estReturn?: string
   /** #171: severity band from the timeline. */
   severity?: 'day-to-day' | 'weeks' | 'long-term'
+  /** #171: GM has this healthy player on load-management rest. */
+  resting?: boolean
   /** Injury-risk band + 0–100 score. */
   riskLabel: 'Low' | 'Increased' | 'High'
   risk: number

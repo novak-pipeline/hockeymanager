@@ -4,11 +4,13 @@
  * games remaining and an estimated return. A risk-assessment table for the full
  * roster sits below. Read-only.
  */
+import { useState } from 'react'
 import type { MedicalView, MedicalRow } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { toast } from '../components/store'
 
 function riskColor(label: MedicalRow['riskLabel']): string {
   if (label === 'High') return 'var(--danger)'
@@ -130,10 +132,23 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
 export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
   void props.teamId
-  const { data, loading, error } = useScreenData<MedicalView>(
+  const { data, loading, error, refetch } = useScreenData<MedicalView>(
     () => client.getMedical(),
     (r) => (r.type === 'medical' ? r.medical : null)
   )
+  const [busy, setBusy] = useState(false)
+
+  async function toggleRest(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.restPlayer(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading medical centre…</Notice>
@@ -199,6 +214,7 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
                 <th>Condition</th>
                 <th>Status</th>
                 <th>Injury Risk</th>
+                <th>Manage</th>
               </tr>
             </thead>
             <tbody>
@@ -222,13 +238,29 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
                   <td className="small">
                     {r.injuryDescription
                       ? <span style={{ color: 'var(--danger)' }}>{r.injuryDescription} ({r.injuryGamesRemaining}g)</span>
-                      : <span className="muted">Fit</span>}
+                      : r.resting
+                        ? <span style={{ color: 'var(--accent, var(--violet-h))', fontWeight: 700 }}>Resting</span>
+                        : <span className="muted">Fit</span>}
                   </td>
                   <td style={{ color: riskColor(r.riskLabel), fontWeight: 700, fontSize: 13 }}>{r.riskLabel}</td>
+                  <td>
+                    {r.injuryDescription
+                      ? <span className="muted small">—</span>
+                      : (
+                        <button
+                          className={`btn btn-xs ${r.resting ? 'btn-primary' : 'btn-ghost'}`}
+                          disabled={busy}
+                          title={r.resting ? 'Return to the lineup' : 'Rest to recover condition (held out of the lineup)'}
+                          onClick={() => void toggleRest(r.playerId)}
+                        >
+                          {r.resting ? 'Recall' : 'Rest'}
+                        </button>
+                      )}
+                  </td>
                 </tr>
               ))}
               {d.rows.length === 0 && (
-                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players.</td></tr>
+                <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players.</td></tr>
               )}
             </tbody>
           </table>

@@ -332,6 +332,23 @@ describe('coachSetLineup — form / morale / condition', () => {
   })
 })
 
+describe('#171 rest directive — resting players are not dressed', () => {
+  it('a resting healthy player is left out of the lineup (like an injury)', () => {
+    const roster = makeRoster(14)
+    const top = roster
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))[0]!
+    const rested = roster.map((p) => (p.id === top.id ? ({ ...p, resting: true } as Player) : p))
+    const result = coachSetLineup({ roster: rested, coach: makeCoach({ rating: 85, judgment: 85 }), rng: new Rng(1) })
+    const dressed = new Set([...result.lines.forwards.flat(), ...result.lines.defensePairs.flat()].map(String))
+    expect(dressed.has(top.id as string)).toBe(false)
+    // Clearing the rest restores him to the dressed group.
+    const back = coachSetLineup({ roster, coach: makeCoach({ rating: 85, judgment: 85 }), rng: new Rng(1) })
+    const dressedBack = new Set([...back.lines.forwards.flat(), ...back.lines.defensePairs.flat()].map(String))
+    expect(dressedBack.has(top.id as string)).toBe(true)
+  })
+})
+
 describe('squadStatusAdj — #188 GM role directive', () => {
   const bare = (status?: Player['squadStatus']): Player => ({ squadStatus: status } as unknown as Player)
 

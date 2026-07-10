@@ -242,6 +242,8 @@ export type WorkerRequestBody =
   /** #188 roles tab: bulk role board + auto-assign. */
   | { type: 'getRoleBoard' }
   | { type: 'autoAssignSquadRoles'; overwrite?: boolean }
+  /** #171 load management: toggle a healthy player's rest directive. */
+  | { type: 'restPlayer'; playerId: string }
   /** #189: captains + jersey numbers for the user's club. */
   | { type: 'getLeadership' }
   | { type: 'setCaptain'; playerId: string | null }
@@ -508,7 +510,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'campInvites'; invites: CampInvitesView }
   | { type: 'campInviteResult'; ok: boolean; invited: boolean; message?: string; invites: CampInvitesView }
   | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
-  | { type: 'medical'; medical: MedicalView }
+  | { type: 'medical'; medical: MedicalView; ok?: boolean; message?: string }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
   | { type: 'leagueComparison'; comparison: LeagueComparisonView }

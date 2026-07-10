@@ -2668,6 +2668,29 @@ describe('#171 medical timelines', () => {
     // Physio surfaced for the recovery context.
     expect(med.physioName).toBeTruthy()
   })
+
+  it('load management: rest toggles + surfaces; injured players can\'t be rested', () => {
+    const data = generateLeague({ seed: 81 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 81, userId)
+    const roster = data.teams.get(asTeamId(userId as string))!.roster.map((id) => id as string)
+    const skater = roster.find((id) => data.players.get(asPlayerId(id))!.position !== 'G')!
+
+    const r = career.restPlayer(skater)
+    expect(r.ok).toBe(true)
+    expect(r.resting).toBe(true)
+    expect(data.players.get(asPlayerId(skater))!.resting).toBe(true)
+    expect(career.getMedical().rows.find((x) => x.playerId === skater)?.resting).toBe(true)
+
+    // Toggle off — the flag is cleared entirely.
+    expect(career.restPlayer(skater).resting).toBe(false)
+    expect(data.players.get(asPlayerId(skater))!.resting).toBeUndefined()
+
+    // An injured player can't be put on load management (already out).
+    const injuredId = roster.find((id) => id !== skater && data.players.get(asPlayerId(id))!.position !== 'G')!
+    data.players.get(asPlayerId(injuredId))!.injuryStatus = { kind: 'upperBody', gamesRemaining: 3, description: 'Shoulder' }
+    expect(career.restPlayer(injuredId).ok).toBe(false)
+  })
 })
 
 describe('#175 shorthanded stat splits', () => {

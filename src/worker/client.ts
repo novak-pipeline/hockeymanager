@@ -373,6 +373,10 @@ export class SimClient {
     return this.send({ type: 'getMedical' })
   }
 
+  restPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'restPlayer', playerId })
+  }
+
   getDevelopment(): Promise<WorkerResponse> {
     return this.send({ type: 'getDevelopment' })
   }

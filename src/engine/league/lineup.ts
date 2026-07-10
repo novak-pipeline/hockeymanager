@@ -432,7 +432,9 @@ export function coachSetLineup(args: {
   const coachScore = (p: Player): number => coachAdjustedScore(p, coach)
 
   /* ── 2. Split by position and filter healthy ── */
-  const healthy = roster.filter((p) => p.injuryStatus === null)
+  // #171: a GM load-management rest is treated like unavailability — the coach
+  // won't dress a resting player (he sits and his condition recovers).
+  const healthy = roster.filter((p) => p.injuryStatus === null && !p.resting)
   const goalies = healthy.filter((p) => p.position === 'G')
   const defensemen = healthy.filter((p) => p.position === 'D')
   const forwards = healthy.filter((p) => p.position === 'C' || p.position === 'W')

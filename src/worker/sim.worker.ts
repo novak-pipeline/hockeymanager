@@ -248,6 +248,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
+    case 'restPlayer': {
+      const r = must().restPlayer(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
     case 'getDevelopment':
       return { id: req.id, type: 'development', development: must().getDevelopment() }
     case 'getSquadPlanner':

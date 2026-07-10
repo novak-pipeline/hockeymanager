@@ -240,6 +240,13 @@ export interface Player {
   tradeStatus?: TradeStatus
 
   /**
+   * #171: GM load-management directive — hold this healthy player out of the
+   * lineup to recover his condition. The coach's auto-lineup skips a resting
+   * player; it auto-clears once he's fresh again. Absent = available.
+   */
+  resting?: boolean
+
+  /**
    * #186: this player has agreed to waive his no-trade clause outright — his agent
    * signed off on a move to any destination. Set by the ask-agent negotiation;
    * lets the club shop/trade him despite the clause. Absent = clause still binds.

@@ -3695,6 +3695,17 @@ export class Career {
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    // #171: load management — a rested player who's back to full freshness comes
+    // off the shelf automatically, with a note to the GM's desk.
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p?.resting && p.fatigue <= 8) {
+        p.resting = false
+        this.pushNews('injury', `${p.name} rested and ready`,
+          `${p.name} has been given his legs back after a spell of load management — he's fresh and available for selection.`,
+          { playerId: id as string, teamId: this.userTeamId as string })
+      }
+    }
     // #184: AI GMs answer any trade proposals whose deliberation has elapsed.
     this.resolvePendingTrades()
     // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
@@ -11304,6 +11315,7 @@ export class Career {
         riskLabel,
         risk,
         ...timeline,
+        ...(p.resting ? { resting: true } : {}),
         ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
         ...(p.injuryStatus ? { injuryDescription: p.injuryStatus.description, injuryGamesRemaining: p.injuryStatus.gamesRemaining, injuryKind: p.injuryStatus.kind } : {}),
       }
@@ -13436,6 +13448,23 @@ export class Career {
     if (status === null) delete p.tradeStatus
     else p.tradeStatus = status
     return { ok: true }
+  }
+
+  /**
+   * #171 load management: toggle a healthy player's rest directive. A resting
+   * player is held out of the coach's lineup so his condition recovers; he
+   * auto-returns once fresh. Can't rest an injured player (already out) or one
+   * off the user's NHL roster.
+   */
+  restPlayer(playerId: string): { ok: boolean; resting: boolean; message?: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p || !this.userTeam.roster.includes(asPlayerId(playerId))) {
+      return { ok: false, resting: false, message: 'Not on your NHL roster.' }
+    }
+    if (p.injuryStatus) return { ok: false, resting: false, message: `${p.name} is already injured.` }
+    p.resting = !p.resting
+    if (!p.resting) delete p.resting
+    return { ok: true, resting: p.resting === true }
   }
 
   /**
