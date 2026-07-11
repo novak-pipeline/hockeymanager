@@ -9,6 +9,8 @@ import { dayToDateISO } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
+import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
 
 /** Category metadata: icon, accent color, label, and FM-style "from" sender. */
 const CATEGORY_META: Record<
@@ -494,6 +496,32 @@ function ConcernCard({
   const [busy, setBusy] = useState(false)
   const serious = concern.severity === 'serious'
 
+  // ── Freeform reply (local AI). The model only CLASSIFIES your words into one
+  // of the same options the buttons offer; the deterministic engine resolves it.
+  // Gated on the local writer being enabled + the model actually being ready.
+  const [canType, setCanType] = useState(false)
+  const [typing, setTyping] = useState(false)
+  const [gmText, setGmText] = useState('')
+  const [reading, setReading] = useState(false)
+  const [readAs, setReadAs] = useState<IntentOption | null>(null)
+
+  useEffect(() => {
+    let live = true
+    if (!getFeedWriterEnabled()) return
+    const bridge = feedModelBridge()
+    if (!bridge) return
+    void bridge.status().then((s) => {
+      if (live) setCanType(Boolean(s.ready))
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Options carry only {id,label} in the view; in this engine the option id IS
+  // the tone (promise/supportive/firm/dismissive), so we reuse it as the tone.
+  const intentOptions: IntentOption[] = concern.options.map((o) => ({ id: o.id, label: o.label, tone: o.id }))
+
   async function respond(optionId: string): Promise<void> {
     if (busy) return
     setBusy(true)
@@ -504,6 +532,29 @@ function ConcernCard({
       toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')
       onDone()
     }
+  }
+
+  /** Send the freeform reply to the model, classify it, and show how it read. */
+  async function readReply(): Promise<void> {
+    const text = gmText.trim()
+    if (!text || reading) return
+    const bridge = feedModelBridge()
+    if (!bridge) return
+    setReading(true)
+    setReadAs(null)
+    const prompt = buildIntentPrompt({
+      playerMessage: concern.message,
+      gmReply: text,
+      options: intentOptions,
+    })
+    const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxTokens })
+    setReading(false)
+    const choice = r.ok ? parseIntentChoice(r.text, intentOptions) : null
+    if (!choice) {
+      toast('Could not read that clearly — pick a response below, or rephrase.', 'info')
+      return
+    }
+    setReadAs(choice)
   }
 
   return (
@@ -536,7 +587,69 @@ function ConcernCard({
                 {o.label}
               </button>
             ))}
+            {canType && !typing && (
+              <button
+                className="btn btn-sm btn-ghost"
+                disabled={busy}
+                onClick={() => setTyping(true)}
+                title="Reply in your own words — the local AI reads which response you mean."
+              >
+                ✍️ Reply in your own words
+              </button>
+            )}
           </div>
+
+          {canType && typing && (
+            <div className="stack" style={{ gap: 6, marginTop: 4 }}>
+              <textarea
+                className="input"
+                rows={2}
+                value={gmText}
+                placeholder="Say it your way — “You’ll be on the top line by December, you have my word.”"
+                disabled={busy || reading}
+                onChange={(e) => {
+                  setGmText(e.target.value)
+                  setReadAs(null)
+                }}
+                style={{ resize: 'vertical', fontSize: 13, lineHeight: 1.5 }}
+              />
+              {readAs ? (
+                <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    Read as: <strong style={{ color: 'var(--text)' }}>{readAs.label}</strong>
+                    {readAs.id === 'promise' ? ' — this goes in the book.' : ''}
+                  </span>
+                  <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void respond(readAs.id)}>
+                    Say it
+                  </button>
+                  <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setReadAs(null)}>
+                    Rethink
+                  </button>
+                </div>
+              ) : (
+                <div className="row" style={{ gap: 'var(--sp-2)' }}>
+                  <button
+                    className="btn btn-sm"
+                    disabled={busy || reading || !gmText.trim()}
+                    onClick={() => void readReply()}
+                  >
+                    {reading ? 'Reading…' : 'Read my reply'}
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    disabled={busy || reading}
+                    onClick={() => {
+                      setTyping(false)
+                      setGmText('')
+                      setReadAs(null)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
