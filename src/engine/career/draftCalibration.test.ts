@@ -117,6 +117,24 @@ describe('draft calibration simulation', () => {
     // prospects develop into higher-ability players. (Correlating true PA with
     // raw GAIN is misleading: gain ∝ headroom = PA−CA, so a high-PA player who's
     // already close to his ceiling gains little.)
+    // Keep the USER org intact for the multi-season sim — this test measures the
+    // WORLD's draft/development, not roster management, so we stop the user club
+    // from depleting below a legal lineup (the advanceDay guard). Lock contracts
+    // (nobody walks), zero injury-proneness (nobody sits), and keep everyone young
+    // (nobody retires) across NHL + affiliate.
+    const userTid = (data.league.teams[10] ?? data.league.teams[0]!)
+    const userNhl = data.teams.get(userTid)!
+    const userAhl = userNhl.affiliateId ? data.teams.get(userNhl.affiliateId) : undefined
+    for (const roster of [userNhl.roster, userAhl?.roster ?? []]) {
+      for (const id of roster) {
+        const p = data.players.get(id)
+        if (!p) continue
+        p.injuryProneness = 0
+        p.age = Math.min(p.age, 24)
+        p.contract = { ...p.contract, yearsRemaining: 12, expiryYear: career.year + 12 }
+      }
+    }
+
     const startYear = career.year
     let guard = 0
     while (career.year < startYear + 3 && guard++ < 12000) {
