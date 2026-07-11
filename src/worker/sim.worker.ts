@@ -276,6 +276,16 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'playoffOdds', odds: must().getPlayoffOdds() }
     case 'getStaffMeetingSummary':
       return { id: req.id, type: 'staffMeetingSummary', summary: must().getStaffMeetingSummary() }
+    case 'getStaffMeeting':
+      return { id: req.id, type: 'staffMeeting', staffMeeting: must().getStaffMeeting() }
+    case 'submitStaffMeeting': {
+      const res = must().submitStaffMeeting(req.choices)
+      return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
+    }
+    case 'delegateStaffMeeting': {
+      const res = must().delegateStaffMeeting()
+      return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
+    }
     case 'getCoachMarket':
       return { id: req.id, type: 'coachMarket', market: must().getCoachMarket() }
     case 'fireCoach': {

@@ -35,7 +35,7 @@ export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
 import type { ChronicleState } from '@engine/story/chronicle'
 import type { GmPersona } from '@engine/league/gmPersona'
-import type { SeasonReviewFacts } from '@engine/career/boardMeeting'
+import type { SeasonReviewFacts, MeetingSpeaker } from '@engine/career/boardMeeting'
 import type {
   AwardRecord,
   LegendRecord,
@@ -444,6 +444,8 @@ export interface DashboardView {
   /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
    *  past it sends the AGM in your place — a soft gate, not a hard one. */
   boardMeetingPending?: boolean
+  /** A convened bi-weekly staff meeting is waiting (blocking gate). Optional/additive. */
+  staffMeetingDue?: boolean
   /** Offseason: human stage label for headers ('Free agency — day 3'). Optional/additive. */
   offseasonStageLabel?: string
   /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
@@ -1649,6 +1651,33 @@ export interface NegotiationView {
   pausedNote?: string
 }
 
+/* ── Convened staff meeting (bi-weekly war-room). Action stays engine-side; the
+ *    view carries only what the screen renders. Optional/additive. ── */
+export interface StaffMeetingOptionView {
+  id: string
+  label: string
+  /** The receipt preview — what accepting commits you to. */
+  detail: string
+}
+export interface StaffMeetingProposalView {
+  id: string
+  /** Who is pitching. */
+  speaker: MeetingSpeaker
+  title: string
+  /** The pitch, incl. the "why". */
+  intro: string[]
+  options: StaffMeetingOptionView[]
+  /** Option the AGM applies if you delegate. */
+  defaultOptionId: string
+}
+export interface StaffMeetingView {
+  day: number
+  year: number
+  /** Head coach's opening line. */
+  opening: string
+  proposals: StaffMeetingProposalView[]
+}
+
 export interface OfferSheetRowView extends PlayerBadge {
   /** Rival club that tendered the sheet. */
   fromTeamAbbr: string
@@ -2151,6 +2180,8 @@ export interface CareerSnapshot {
   negotiations?: Array<[string, NegotiationState]>
   /** Persistent GM↔contract-agent rapport (keyed by agent name). Optional/additive. */
   agentRapport?: AgentRapportState
+  /** A pending convened staff meeting (JSON-safe scene). Optional/additive. */
+  staffMeetingScene?: unknown
   /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
   faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */

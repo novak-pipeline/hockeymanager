@@ -415,6 +415,18 @@ export class SimClient {
     return this.send({ type: 'getStaffMeetingSummary' })
   }
 
+  getStaffMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'getStaffMeeting' })
+  }
+
+  submitStaffMeeting(choices: Record<string, string>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitStaffMeeting', choices })
+  }
+
+  delegateStaffMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'delegateStaffMeeting' })
+  }
+
   getCoachMarket(): Promise<WorkerResponse> {
     return this.send({ type: 'getCoachMarket' })
   }

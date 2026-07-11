@@ -153,8 +153,17 @@ import {
   type BoardMeetingFacts,
   type BoardMeetingScene,
   type MeetingEffects,
+  type MeetingSpeaker,
   type SeasonReviewFacts,
 } from './boardMeeting'
+import {
+  buildStaffMeetingScene,
+  delegatedChoices,
+  type StaffAction,
+  type StaffCast,
+  type StaffFinding,
+  type StaffMeetingScene,
+} from './staffMeetingScene'
 import {
   archiveSeason,
   emptyRecords,
@@ -464,6 +473,7 @@ import {
   type LeagueComparisonView,
   type LeagueComparisonCard,
   type StaffMeetingSummaryView,
+  type StaffMeetingView,
   type CoachMarketView,
   type CoachMarketEntry,
   type PlayoffOddsView,
@@ -878,6 +888,9 @@ export class Career {
    *  Serialized in the snapshot; old saves lazily seed an empty state on load.
    *  Neutral/absent ⇒ zero effect on negotiations. */
   private agentRapport: AgentRapportState = seedAgentRapport()
+  /** The convened bi-weekly staff meeting awaiting the GM (blocking, with a
+   *  delegate-to-AGM escape). Null when none is pending. JSON-safe → serialized. */
+  private staffMeetingScene: StaffMeetingScene | null = null
   private pressCounter = 0
   /** Season-long schedule of recurring media reports (Task #39). */
   private pressScheduleState: PressScheduleState = initialPressScheduleState()
@@ -4084,6 +4097,10 @@ export class Career {
     // Season Rhythm M1: simming past the preseason board meeting sends the AGM
     // in your place (safe defaults, a news item, and the meeting is gone).
     if (this.boardMeetingYear !== null) this.autoResolveBoardMeeting()
+    // Same for a pending staff meeting simmed past (non-gated auto-sim): the AGM
+    // applies the safe defaults. (A meeting created THIS pass is created below,
+    // after this guard, so it survives to be shown by the App gate next Continue.)
+    if (this.staffMeetingScene !== null) this.autoDelegateStaffMeeting()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     // Deadline day pauses the sim like draft day: the FIRST continue that would
     // cross the deadline is held — one last chance to work the phones — and the
@@ -4194,14 +4211,24 @@ export class Career {
     if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
-    // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
-    if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
-      this.pushNews(
-        'league',
-        'Staff meeting: time to review how we play',
-        'Two weeks on, your coaching staff are ready to sit down. Review the head coach’s system and roster fit, push for tactical changes, and flag any players whose form or morale needs addressing.',
-        { teamId: this.userTeamId as string }
-      )
+    // ── recurring staff meeting: convene the war-room roughly every two weeks ──
+    // The coaching staff read the live roster and table proposals the GM acts on
+    // (a real line move, a rest, a call-up, a tactical shift). Blocking, with a
+    // delegate-to-AGM escape. Only convenes when there's something worth raising.
+    if (
+      this.staffMeetingScene === null &&
+      Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)
+    ) {
+      const findings = this.buildStaffFindings()
+      if (findings.length > 0) {
+        this.staffMeetingScene = buildStaffMeetingScene({
+          findings,
+          cast: this.staffCast(),
+          day: nextDay,
+          year: this.year,
+          record: this.userRecordTriple(),
+        })
+      }
     }
     // ────────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
@@ -10183,6 +10210,7 @@ export class Career {
       continueLabel,
       draftPending: this.draftPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
+      staffMeetingDue: this.staffMeetingScene !== null && this.phase === 'regularSeason',
       devCampPending: this.devCampPending && this.phase === 'offseason',
       ...(this.phase === 'offseason' && this.offseason
         ? {
@@ -10862,6 +10890,244 @@ export class Career {
       fitAdvice: sm.advice,
       flagged: flagged.slice(0, 8),
     }
+  }
+
+  /* ────────────────────── convened bi-weekly staff meeting ────────────────────── */
+
+  /** The user team's W-L-OTL for the meeting's opening line. */
+  private userRecordTriple(): { w: number; l: number; otl: number } {
+    const s = this.standings.get(this.userTeamId)
+    return { w: s?.wins ?? 0, l: s?.losses ?? 0, otl: s?.overtimeLosses ?? 0 }
+  }
+
+  /** The staff voices for the meeting, from real hired staff (fallback names). */
+  private staffCast(): StaffCast {
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const sp = (m: StaffMember | undefined, id: string, title: string): MeetingSpeaker => ({
+      id,
+      name: m?.name ?? title,
+      title,
+      ...(m?.faceId !== undefined ? { faceId: m.faceId } : {}),
+    })
+    return {
+      headCoach: sp(ts.headCoach, 'hc', 'Head Coach'),
+      asstCoach: sp(ts.assistantCoaches[0], 'ac', 'Assistant Coach'),
+      physio: sp(ts.physios[0], 'py', 'Head Physio'),
+      asstGM: sp(ts.assistantGM, 'agm', 'Assistant GM'),
+    }
+  }
+
+  /** Read the live roster and produce the observations worth raising. Ordered by
+   *  the scene builder; deduped so a player isn't flagged twice. */
+  private buildStaffFindings(): StaffFinding[] {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return []
+    const roster = team.roster.map((id) => this.resolve(id))
+    const used = new Set<string>()
+    const findings: StaffFinding[] = []
+
+    const lineIdxOf = new Map<string, number>()
+    team.lines?.forwards.forEach((line, idx) => {
+      for (const id of line) lineIdxOf.set(id as string, idx)
+    })
+
+    // Injury risk (healthy but fragile/worn) — the physio's first concern.
+    for (const p of roster) {
+      if (p.injuryStatus !== null) continue
+      const fatigue = Math.max(0, Math.min(100, p.fatigue))
+      const risk = Math.round(Math.max(0, Math.min(100, (p.injuryProneness ?? 30) * 0.55 + fatigue * 0.45)))
+      if (risk >= 62 && !used.has(p.id as string)) {
+        used.add(p.id as string)
+        findings.push({ kind: 'injuryRisk', playerId: p.id as string, name: p.name, risk, ltirEligible: this.ltirEligible(p) })
+      }
+    }
+    // Worn down (condition) — distinct from injury risk.
+    for (const p of roster) {
+      if (p.injuryStatus !== null || used.has(p.id as string)) continue
+      const condition = Math.round(100 - Math.max(0, Math.min(100, p.fatigue)))
+      if (condition < 32) {
+        used.add(p.id as string)
+        findings.push({ kind: 'fatigued', playerId: p.id as string, name: p.name, condition })
+      }
+    }
+    // Cold top-six forward — the assistant coach wants a line change.
+    for (const p of roster) {
+      if (p.injuryStatus !== null || used.has(p.id as string)) continue
+      if (p.position !== 'C' && p.position !== 'W') continue
+      const idx = lineIdxOf.get(p.id as string)
+      if (idx === undefined || idx > 1) continue // top six only
+      if (p.form <= -3) {
+        used.add(p.id as string)
+        findings.push({ kind: 'coldTopSix', playerId: p.id as string, name: p.name, lineIdx: idx, form: p.form })
+      }
+    }
+    // Prospect ready — the AGM pushes for a call-up.
+    const prospect = this.readyProspectFinding(team, used)
+    if (prospect) findings.push(prospect)
+    // Tactical misfit — the head coach wants to adjust to the personnel.
+    const fit = Math.round(styleMatch(roster, team.tactics).fit)
+    if (fit < 55) findings.push({ kind: 'tacticMisfit', coachFit: fit, direction: 'fitRoster' })
+
+    return findings
+  }
+
+  /** Best AHL skater clearly better than the weakest NHL regular — a call-up case. */
+  private readyProspectFinding(team: Team, used: Set<string>): StaffFinding | null {
+    const ahlId = team.affiliateId
+    if (!ahlId) return null
+    const ahl = this.data.teams.get(ahlId)
+    if (!ahl) return null
+    const nhlSkaters = team.roster.map((id) => this.resolve(id)).filter((p) => p.position !== 'G')
+    if (nhlSkaters.length < 12) return null
+    let weakest = nhlSkaters[0]!
+    for (const p of nhlSkaters) if (ratedOverall(p) < ratedOverall(weakest)) weakest = p
+    const bar = ratedOverall(weakest)
+    let best: Player | null = null
+    for (const id of ahl.roster) {
+      const p = this.data.players.get(id)
+      if (!p || p.position === 'G' || used.has(p.id as string)) continue
+      if (best === null || ratedOverall(p) > ratedOverall(best)) best = p
+    }
+    if (best && ratedOverall(best) >= bar + 3) {
+      used.add(best.id as string)
+      return { kind: 'prospectReady', playerId: best.id as string, name: best.name, overall: Math.round(ratedOverall(best)), weakestName: weakest.name }
+    }
+    return null
+  }
+
+  /** The pending staff meeting as a render-ready view (or null if none). */
+  getStaffMeeting(): StaffMeetingView | null {
+    const scene = this.staffMeetingScene
+    if (!scene) return null
+    const speakerById = new Map(scene.cast.map((c) => [c.id, c]))
+    return {
+      day: scene.day,
+      year: scene.year,
+      opening: scene.opening.map((l) => l.text).join(' '),
+      proposals: scene.proposals.map((p) => ({
+        id: p.id,
+        speaker: speakerById.get(p.speakerId) ?? { id: p.speakerId, name: 'Staff', title: '' },
+        title: p.title,
+        intro: p.intro.map((l) => l.text),
+        options: p.options.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
+        defaultOptionId: p.defaultOptionId,
+      })),
+    }
+  }
+
+  /** Resolve the meeting with the GM's picks; each accepted option mutates the sim. */
+  submitStaffMeeting(choices: Record<string, string>): { applied: string[]; summary: string } {
+    const scene = this.staffMeetingScene
+    if (!scene) return { applied: [], summary: 'No staff meeting is in session.' }
+    const applied = this.applyStaffChoices(scene, choices)
+    this.staffMeetingScene = null
+    this.pushNews(
+      'league',
+      'Staff meeting wrapped',
+      applied.length ? applied.join(' ') : 'You heard the staff out and left things as they are.',
+      { teamId: this.userTeamId as string }
+    )
+    return {
+      applied,
+      summary: applied.length
+        ? `${applied.length} decision${applied.length === 1 ? '' : 's'} actioned.`
+        : 'No changes made.',
+    }
+  }
+
+  /** Hand the meeting to the AGM — each item resolves to its safe default. */
+  delegateStaffMeeting(): { applied: string[]; summary: string } {
+    const scene = this.staffMeetingScene
+    if (!scene) return { applied: [], summary: 'No staff meeting is in session.' }
+    const applied = this.applyStaffChoices(scene, delegatedChoices(scene))
+    this.staffMeetingScene = null
+    this.pushNews(
+      'league',
+      'You left it to the staff',
+      applied.length ? `Your AGM ran the meeting: ${applied.join(' ')}` : 'Your AGM ran the meeting; nothing needed doing.',
+      { teamId: this.userTeamId as string }
+    )
+    return { applied, summary: `Delegated — ${applied.length} decision${applied.length === 1 ? '' : 's'} handled by staff.` }
+  }
+
+  /** Auto-resolve a pending meeting with safe defaults (non-gated auto-sim past it). */
+  private autoDelegateStaffMeeting(): void {
+    const scene = this.staffMeetingScene
+    if (!scene) return
+    this.applyStaffChoices(scene, delegatedChoices(scene))
+    this.staffMeetingScene = null
+  }
+
+  private applyStaffChoices(scene: StaffMeetingScene, choices: Record<string, string>): string[] {
+    const receipts: string[] = []
+    for (const p of scene.proposals) {
+      const optId = choices[p.id] ?? p.defaultOptionId
+      const opt = p.options.find((o) => o.id === optId)
+      if (!opt) continue
+      const r = this.applyStaffAction(opt.action)
+      if (r) receipts.push(r)
+    }
+    return receipts
+  }
+
+  /** Dispatch a single accepted proposal to the real mutation API. */
+  private applyStaffAction(action: StaffAction): string | null {
+    const nameOf = (id: string): string => this.data.players.get(asPlayerId(id))?.name ?? 'A player'
+    switch (action.type) {
+      case 'none':
+        return null
+      case 'rest': {
+        const r = this.restPlayer(action.playerId)
+        return r.ok && r.resting ? `${nameOf(action.playerId)} is being rested.` : null
+      }
+      case 'scratch': {
+        this.toggleScratchPlayer(action.playerId)
+        return `${nameOf(action.playerId)} is a healthy scratch.`
+      }
+      case 'ltir': {
+        const r = this.placeOnLtir(action.playerId)
+        return r.ok ? `${nameOf(action.playerId)} placed on LTIR.` : null
+      }
+      case 'callUp': {
+        const r = this.callUp(action.playerId)
+        return r.ok ? `${nameOf(action.playerId)} recalled to the NHL.` : null
+      }
+      case 'tactic': {
+        const r = this.suggestToCoach(action.direction)
+        return r.accepted ? 'The system was adjusted toward the roster.' : 'The coach pushed back on the tactical change.'
+      }
+      case 'moveLine': {
+        const moved = this.moveForwardToLine(action.playerId, action.toLine)
+        const where = action.toLine === 2 ? 'third' : action.toLine === 3 ? 'fourth' : action.toLine === 1 ? 'second' : 'top'
+        return moved ? `${nameOf(action.playerId)} moved to the ${where} line.` : null
+      }
+    }
+  }
+
+  /** Move a forward to another line, swapping same-slot to keep C/W positioning. */
+  private moveForwardToLine(playerId: string, toLine: number): boolean {
+    const cur = this.userTeam.lines
+    if (!cur || cur.forwards.length <= toLine) return false
+    let from = -1
+    let slot = -1
+    cur.forwards.forEach((line, li) => {
+      line.forEach((id, si) => {
+        if ((id as string) === playerId) { from = li; slot = si }
+      })
+    })
+    if (from < 0 || from === toLine) return false
+    const upd: LinesUpdate = {
+      forwards: cur.forwards.map((l) => [l[0] as string, l[1] as string, l[2] as string]),
+      defensePairs: cur.defensePairs.map((p) => [p[0] as string, p[1] as string]),
+      goalies: [cur.goalies[0] as string, cur.goalies[1] as string],
+      powerPlayUnits: cur.powerPlayUnits.map((u) => u.map((id) => id as string)),
+      penaltyKillUnits: cur.penaltyKillUnits.map((u) => u.map((id) => id as string)),
+    }
+    const tmp = upd.forwards[toLine]![slot]!
+    upd.forwards[toLine]![slot] = upd.forwards[from]![slot]!
+    upd.forwards[from]![slot] = tmp
+    this.setLines(upd)
+    return true
   }
 
   /* ────────────────────── coach hiring market ────────────────────── */
@@ -14776,6 +15042,7 @@ export class Career {
         ([k, v]) => [k, structuredClone(v)] as [string, NegotiationState]
       ),
       agentRapport: structuredClone(this.agentRapport),
+      ...(this.staffMeetingScene ? { staffMeetingScene: structuredClone(this.staffMeetingScene) } : {}),
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
@@ -14943,6 +15210,7 @@ export class Career {
       )
     }
     career.agentRapport = normalizeAgentRapport(snapshot.agentRapport)
+    if (snapshot.staffMeetingScene) career.staffMeetingScene = snapshot.staffMeetingScene as StaffMeetingScene
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))

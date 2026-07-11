@@ -22,6 +22,7 @@ export type ScreenId =
   | 'gmCareer'
   | 'mediaCircuit'
   | 'staffMeeting'
+  | 'staffBriefing'
   // News section
   | 'inbox'
   // Team section

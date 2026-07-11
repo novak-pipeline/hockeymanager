@@ -34,6 +34,7 @@ import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
+import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
 import { CommandPalette } from './components/CommandPalette'
 import { WarRoomScreen } from './screens/WarRoomScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
@@ -298,6 +299,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('seasonReview')
           return
         }
+        // Bi-weekly staff meeting: the coaches convene with live-roster proposals.
+        // Skipping (delegate) hands the meeting to the AGM (engine-safe defaults).
+        if (dashboard?.staffMeetingDue && nav.screen !== 'staffBriefing') {
+          navigate('staffBriefing')
+          return
+        }
         void run(() => client.continueGame())
       },
       advanceDays: (days: number) => {
@@ -316,7 +323,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, nav.screen, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -602,6 +609,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardMeetingScreen />
     case 'seasonReview':
       return <BoardMeetingScreen variant="review" />
+    case 'staffBriefing':
+      return <StaffBriefingScreen />
     case 'warRoom':
       return <WarRoomScreen />
     case 'gmCareer':
