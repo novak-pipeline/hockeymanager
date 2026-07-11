@@ -221,16 +221,20 @@ export function openNegotiation(args: {
   kind: NegotiationKind
   /** >1 when rivals are bidding (raises the floor), <1 in a dead market. */
   marketHeat?: number
+  /** Persistent GM↔agent rapport, −1…+1 (0 = neutral/none). A trusted agent
+   *  opens a touch lower and more patiently; a burned one opens harder. */
+  rapportTilt?: number
 }): NegotiationState {
-  const { player, year, kind, marketHeat = 1 } = args
+  const { player, year, kind, marketHeat = 1, rapportTilt = 0 } = args
   const base = askTerms(player, year)
   const w = priorityWeights(player)
   const agent = agentFor(player)
 
   // Re-sign talks open a touch warmer than open-market ones (hometown
-  // continuity); heat from rival bidding raises any ask.
+  // continuity); heat from rival bidding raises any ask. Rapport shaves (or
+  // adds) up to 5% on the open — 0 at neutral, so this is inert without history.
   const kindMult = kind === 'resign' || kind === 'extension' ? 0.97 : 1.0
-  const salary = Math.round((base.salary * kindMult * marketHeat) / 25_000) * 25_000
+  const salary = Math.round((base.salary * kindMult * marketHeat * (1 - rapportTilt * 0.05)) / 25_000) * 25_000
 
   const ask: ContractOffer = {
     salary,
@@ -245,7 +249,8 @@ export function openNegotiation(args: {
     year,
     ask,
     openingAsk: { ...ask },
-    patience: Math.round(55 + agent.patient * 40),
+    // Rapport buys up to ±18 opening patience (0 at neutral).
+    patience: Math.max(10, Math.min(100, Math.round(55 + agent.patient * 40 + rapportTilt * 18))),
     rounds: [],
     status: 'open',
     revealedHints: [],
@@ -309,6 +314,9 @@ export interface RoundContext {
   /** Rival interest, 0–1 — raises confidence in FA talks. */
   marketHeat?: number
   teamName?: string
+  /** Persistent GM↔agent rapport, −1…+1 (0 = neutral/none). A trusted agent
+   *  burns less patience on a lowball and concedes a touch faster. */
+  rapportTilt?: number
 }
 
 const fmtM = (n: number): string => `$${(n / 1e6).toFixed(2)}M`
@@ -325,6 +333,7 @@ export function evaluateRound(
   ctx: RoundContext
 ): { round: NegotiationRound; status: NegotiationStatus; ask: ContractOffer; patience: number; revealedHints: number[] } {
   const agent = agentFor(player)
+  const tilt = ctx.rapportTilt ?? 0
   const value = offerValue(player, offer, state.ask)
   const threshold = acceptThreshold(player, state.kind, ctx.rng)
   const lines: string[] = []
@@ -347,7 +356,8 @@ export function evaluateRound(
   /* lowball — burn patience, maybe end talks ── */
   const lowballBar = 0.82
   if (value < lowballBar) {
-    const burn = Math.round(22 + agent.combative * 14 - agent.patient * 8 + ctx.rng.float(0, 6))
+    // A trusted agent burns a touch less patience on a lowball; a burned one more.
+    const burn = Math.max(4, Math.round(22 + agent.combative * 14 - agent.patient * 8 + ctx.rng.float(0, 6) - tilt * 8))
     const patience = Math.max(0, state.patience - burn)
     const insulted = value < 0.7
 
@@ -388,7 +398,7 @@ export function evaluateRound(
   // Concession: collaborative agents move ~40% toward the offer, hard-liners
   // ~15%; a hot market stiffens the ask.
   const heat = ctx.marketHeat ?? 0
-  const concede = Math.max(0.08, (0.4 - agent.combative * 0.25) * (1 - heat * 0.5))
+  const concede = Math.max(0.08, (0.4 - agent.combative * 0.25) * (1 - heat * 0.5) * (1 + tilt * 0.35))
   const ask: ContractOffer = {
     ...state.ask,
     salary: Math.round((state.ask.salary - (state.ask.salary - offer.salary) * concede) / 25_000) * 25_000,

@@ -38,6 +38,15 @@ const TEMP_META: Record<NegotiationView['temperature'], { label: string; color: 
   hostile: { label: 'Hostile — one bad number from done', color: 'var(--danger, #e05555)' },
 }
 
+/** Colour for the persistent GM↔agent standing badge. */
+const STANDING_COLOR: Record<string, string> = {
+  Trusted: 'var(--success, #4caf7d)',
+  Cordial: '#6fae5f',
+  Neutral: 'var(--muted)',
+  Wary: '#e08a3c',
+  Burned: 'var(--danger, #e05555)',
+}
+
 const VERDICT_CHIP: Record<string, { label: string; color: string }> = {
   accept: { label: 'DEAL', color: 'var(--success, #4caf7d)' },
   close: { label: 'COUNTERED', color: 'var(--accent2, #d8b34c)' },
@@ -187,6 +196,25 @@ export function NegotiationScreen(): JSX.Element {
               <div className="muted" style={{ fontSize: 12 }}>
                 {view.player.position} · {view.player.age} · currently {view.currentSalary > 0 ? `${fmtMoney(view.currentSalary)}` : 'unsigned'} · rep&apos;d by <b>{view.agentName}</b> <span style={{ fontStyle: 'italic' }}>({view.agentStyle})</span>
               </div>
+              {view.agentStanding && (view.agentStanding !== 'Neutral' || (view.agentDeals ?? 0) > 0) && (
+                <div style={{ fontSize: 11.5, marginTop: 4, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.5,
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      border: `1px solid ${STANDING_COLOR[view.agentStanding]}`,
+                      color: STANDING_COLOR[view.agentStanding],
+                    }}
+                  >
+                    {view.agentStanding}
+                  </span>
+                  {view.agentRapportNote && <span className="muted">{view.agentRapportNote}</span>}
+                </div>
+              )}
             </div>
           </div>
           <button className="btn btn-ghost" onClick={() => nav.goBack()}>← Leave the room</button>

@@ -50,6 +50,8 @@ export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/
 import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
 export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
 import type { NegotiationState } from '@engine/league/negotiation'
+import type { AgentRapportState } from '@engine/league/agentRapport'
+export type { AgentRapportState } from '@engine/league/agentRapport'
 export type {
   AgentPersona,
   ClauseLevel,
@@ -1615,6 +1617,12 @@ export interface NegotiationView {
   agentName: string
   /** One-line persona read ("a hard-line anchor, talks to the press"). */
   agentStyle: string
+  /** Persistent GM↔agent standing (agents recur across a career). Optional/additive. */
+  agentStanding?: 'Trusted' | 'Cordial' | 'Neutral' | 'Wary' | 'Burned'
+  /** One-line read of your history with this agent. Optional/additive. */
+  agentRapportNote?: string
+  /** How many of this agent's clients you've signed. Optional/additive. */
+  agentDeals?: number
   /** The agent's current position. */
   askSalary: number
   askYears: number
@@ -2141,6 +2149,8 @@ export interface CareerSnapshot {
   followedFeedAuthors?: string[]
   /** DEPTH 1: open/paused contract negotiation sessions by playerId. Optional/additive. */
   negotiations?: Array<[string, NegotiationState]>
+  /** Persistent GM↔contract-agent rapport (keyed by agent name). Optional/additive. */
+  agentRapport?: AgentRapportState
   /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
   faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */

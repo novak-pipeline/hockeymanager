@@ -276,6 +276,16 @@ import {
   type NegotiationState,
 } from '@engine/league/negotiation'
 import {
+  seedAgentRapport,
+  normalizeAgentRapport,
+  relationOf,
+  standingOf,
+  rapportTilt,
+  agentRapportNote,
+  applyDealOutcome,
+  type AgentRapportState,
+} from '@engine/league/agentRapport'
+import {
   buildTeamProfile,
   evaluateProposal,
   executeTrade,
@@ -864,6 +874,10 @@ export class Career {
   /** #90: the GM's persistent standing with each named pundit. Serialized in the
    *  snapshot; old saves lazily seed neutral relationships on load. */
   private punditState: PunditState = seedPundits()
+  /** The GM's persistent standing with each contract agent (keyed by agent name).
+   *  Serialized in the snapshot; old saves lazily seed an empty state on load.
+   *  Neutral/absent ⇒ zero effect on negotiations. */
+  private agentRapport: AgentRapportState = seedAgentRapport()
   private pressCounter = 0
   /** Season-long schedule of recurring media reports (Task #39). */
   private pressScheduleState: PressScheduleState = initialPressScheduleState()
@@ -8807,6 +8821,7 @@ export class Career {
     const capUsedNow = this.userCapUsed()
     const temperature =
       state.patience > 65 ? 'warm' : state.patience > 40 ? 'guarded' : state.patience > 15 ? 'testy' : 'hostile'
+    const agentRel = relationOf(this.agentRapport, agent.name)
     return {
       player: badge(player),
       kind: state.kind,
@@ -8815,6 +8830,9 @@ export class Career {
       currentSalary: player.contract.salary,
       agentName: agent.name,
       agentStyle: agent.style,
+      agentStanding: standingOf(agentRel.rapport),
+      agentRapportNote: agentRapportNote(agentRel),
+      agentDeals: agentRel.deals,
       askSalary: state.ask.salary,
       askYears: state.ask.years,
       askBonusPct: state.ask.signingBonusPct,
@@ -8857,6 +8875,7 @@ export class Career {
       year: this.year,
       kind,
       marketHeat: 1 + heat * 0.08,
+      rapportTilt: rapportTilt(this.agentRapport, agentFor(player).name),
     })
     // A camp burned earlier this summer (paused/walked re-sign talks) opens colder.
     if (existing && (existing.status === 'paused' || existing.status === 'walked')) {
@@ -8914,11 +8933,13 @@ export class Career {
 
     const rng = this.rngFor(8020, state.rounds.length, Career.pidNum(playerId))
     const comps = findComparables(player, this.comparablePool())
+    const agentName = agentFor(player).name
     const result = evaluateRound(state, player, offer, {
       rng,
       comparables: comps,
       marketHeat: kind === 'freeAgent' ? this.marketHeatFor(player) : 0,
       teamName: this.userTeam.name,
+      rapportTilt: rapportTilt(this.agentRapport, agentName),
     })
     state.rounds.push(result.round)
     state.ask = result.ask
@@ -8945,6 +8966,14 @@ export class Career {
     }
 
     if (result.status === 'signed') {
+      // Getting a deal done builds trust with the agent (a fair deal more than a
+      // lowball); this rapport shapes future negotiations with all his clients.
+      applyDealOutcome(
+        this.agentRapport,
+        agentName,
+        { kind: 'signed', askSalary: state.openingAsk.salary, finalSalary: offer.salary },
+        this.year
+      )
       this.commitNegotiatedContract(player, offer, kind)
       return {
         view: this.buildNegotiationView(state),
@@ -8953,6 +8982,7 @@ export class Career {
       }
     }
     if (result.status === 'walked') {
+      applyDealOutcome(this.agentRapport, agentName, { kind: 'walked' }, this.year)
       if (kind === 'resign') this.resignStatus.set(asPlayerId(playerId), 'walked')
       return {
         view: this.buildNegotiationView(state),
@@ -8961,6 +8991,7 @@ export class Career {
       }
     }
     if (result.status === 'paused') {
+      applyDealOutcome(this.agentRapport, agentName, { kind: 'paused' }, this.year)
       return {
         view: this.buildNegotiationView(state),
         signed: false,
@@ -14744,6 +14775,7 @@ export class Career {
       negotiations: [...this.negotiations.entries()].map(
         ([k, v]) => [k, structuredClone(v)] as [string, NegotiationState]
       ),
+      agentRapport: structuredClone(this.agentRapport),
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
@@ -14910,6 +14942,7 @@ export class Career {
         snapshot.negotiations.map(([k, v]) => [k, structuredClone(v)])
       )
     }
+    career.agentRapport = normalizeAgentRapport(snapshot.agentRapport)
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))
