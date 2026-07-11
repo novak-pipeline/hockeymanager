@@ -368,3 +368,65 @@ export function applyInteractionResponse(args: {
   if (news) result.news = news
   return result
 }
+
+/* ─────────────────────── reaction descriptor (RP voice) ─────────────────────── */
+
+/** How the player took the answer — derived ONLY from the engine's resolution. */
+export type ReactionDirection =
+  | 'escalating' // dismissed → hardened into a trade demand
+  | 'pleased' //     clearly happier
+  | 'reassured' //   heard, a bit more settled
+  | 'neutral' //     took it flatly
+  | 'unsettled' //   not thrilled but accepted it
+  | 'angry' //       clearly unhappy
+
+/**
+ * A JSON-safe summary of a *resolved* interaction, for the personality layer to
+ * voice the player's spoken reply. It carries the direction the ENGINE already
+ * decided plus personality context; the model turns it into one line of dialogue
+ * and never changes the underlying morale/escalation. `outcome` is the
+ * deterministic prose shown when no model is available.
+ */
+export interface ReactionSpec {
+  playerName: string
+  firstName: string
+  kind: InteractionKind
+  tone: ResponseTone
+  direction: ReactionDirection
+  professionalism: number // 1–20
+  temperament: number // 1–20
+  ambition: number // 1–20
+  outcome: string
+}
+
+/** Build the reaction descriptor from the already-resolved response. Pure. */
+export function reactionSpec(args: {
+  interaction: PlayerInteraction
+  option: InteractionOption
+  player: Player
+  result: InteractionResult
+}): ReactionSpec {
+  const { player, option, interaction, result } = args
+  const direction: ReactionDirection = result.escalateToTrade
+    ? 'escalating'
+    : result.moraleDelta >= 8
+      ? 'pleased'
+      : result.moraleDelta > 0
+        ? 'reassured'
+        : result.moraleDelta === 0
+          ? 'neutral'
+          : result.moraleDelta > -8
+            ? 'unsettled'
+            : 'angry'
+  return {
+    playerName: player.name,
+    firstName: player.name.split(' ')[0] ?? player.name,
+    kind: interaction.kind,
+    tone: option.tone,
+    direction,
+    professionalism: player.personality.professionalism,
+    temperament: player.personality.temperament,
+    ambition: player.personality.ambition,
+    outcome: result.outcome,
+  }
+}

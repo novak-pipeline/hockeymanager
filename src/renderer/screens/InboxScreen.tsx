@@ -11,6 +11,7 @@ import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
+import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
 
 /** Category metadata: icon, accent color, label, and FM-style "from" sender. */
 const CATEGORY_META: Record<
@@ -504,6 +505,8 @@ function ConcernCard({
   const [gmText, setGmText] = useState('')
   const [reading, setReading] = useState(false)
   const [readAs, setReadAs] = useState<IntentOption | null>(null)
+  // The player's in-character spoken reply, authored after the engine resolves.
+  const [voiced, setVoiced] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -526,12 +529,29 @@ function ConcernCard({
     if (busy) return
     setBusy(true)
     const res = await client.respondToInteraction(concern.id, optionId)
-    setBusy(false)
-    if (res.type === 'error') toast(res.message ?? 'Could not respond.', 'error')
-    else {
-      toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')
-      onDone()
+    if (res.type === 'error') {
+      setBusy(false)
+      toast(res.message ?? 'Could not respond.', 'error')
+      return
     }
+    // The engine has already resolved (morale/escalation decided). When the model
+    // is available, voice the player's spoken reply in-character; the line is pure
+    // presentation over the deterministic result and never alters it.
+    const reaction = res.type === 'ok' ? res.reaction : undefined
+    if (canType && reaction) {
+      const bridge = feedModelBridge()
+      if (bridge) {
+        const p = buildReactionPrompt(reaction)
+        const r = await bridge.infer({ system: p.system, user: p.user, maxTokens: p.maxTokens })
+        const line = r.ok ? sanitizeReactionLine(r.text, reaction.playerName) : ''
+        setBusy(false)
+        setVoiced(line || reaction.outcome) // fall back to the engine's prose
+        return
+      }
+    }
+    setBusy(false)
+    toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')
+    onDone()
   }
 
   /** Send the freeform reply to the model, classify it, and show how it read. */
@@ -555,6 +575,27 @@ function ConcernCard({
       return
     }
     setReadAs(choice)
+  }
+
+  // Resolved: show the player's in-character spoken reply and let the GM close it.
+  if (voiced !== null) {
+    return (
+      <div
+        className="panel"
+        style={{ borderLeft: '3px solid var(--success, #4caf7d)', padding: 'var(--sp-3) var(--sp-4)' }}
+      >
+        <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+          <PlayerFace faceId={concern.faceId} name={concern.playerName} size={44} />
+          <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
+            <PlayerLink playerId={concern.playerId} name={concern.playerName} />
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic' }}>“{voiced}”</div>
+            <div className="row" style={{ marginTop: 2 }}>
+              <button className="btn btn-sm" onClick={onDone}>Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

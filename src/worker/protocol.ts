@@ -105,6 +105,8 @@ export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView
 import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
+export type { ReactionSpec } from '@engine/league/interactions'
+import type { ReactionSpec } from '@engine/league/interactions'
 export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
 import type { FaHubView, RfaBoardView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
@@ -546,7 +548,7 @@ export type WorkerResponse = { id: number } & (
   /** Result of an offer sheet: matched (kept) or landed (yours). */
   | { type: 'offerSheetResult'; ok: boolean; matched: boolean; pending?: boolean; message: string; board: RfaBoardView }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
-  | { type: 'ok'; note?: string }
+  | { type: 'ok'; note?: string; reaction?: ReactionSpec }
   /** Result of an auto-applied coach roster: the player names moved each way. */
   | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
   | { type: 'save'; snapshot: CareerSnapshot }

@@ -88,12 +88,20 @@ job* layered on top. None invents sim state.
 - **Trade pitch phrasing.** "Would you move him for a first and a prospect?" →
   parse to the structured trade the AI GM evaluates via `evaluateProposal`.
 
-### CHOOSE IN CHARACTER (engine offers options, persona picks)
-- **Player replies with a *voice*.** The engine already computes the morale delta
-  and whether a concern escalates. The model, given the player's personality
-  (professionalism/temperament/ambition + locker-room standing), picks *which
-  engine-authored reaction line* he gives and its register — the mechanical
-  outcome is still the engine's.
+### CHOOSE IN CHARACTER / AUTHOR (engine decides, persona voices)
+- **Player replies with a *voice*. — SHIPPED (slice 3).** After the GM answers a
+  concern, the engine resolves everything (morale delta, room ripple, whether it
+  escalates to a trade demand) and returns a JSON-safe `ReactionSpec` (direction
+  + personality traits + the deterministic `outcome` prose). The model authors
+  ONE line of the player's spoken reply in that mood and personality; it never
+  touches the delta, so two players with identical deltas can sound completely
+  different while the sim stays byte-identical. Falls back to `outcome` when the
+  model is off/errored.
+  - `reactionSpec()` in `interactions.ts` (engine decides direction);
+    `src/engine/story/reactionVoice.ts` (`buildReactionPrompt`,
+    `sanitizeReactionLine`, pure/tested). The reaction rides back additively on
+    the existing `respondToInteraction` `ok` response; the InboxScreen concern
+    card shows the voiced reply, then Close.
 - **AI-GM negotiation persona.** `LW2` gives each AI GM traits. When the trade engine
   returns "counter" with a validated counter-offer, the model chooses the *wording
   and posture* (hardball vs. collegial) from that GM's persona. The counter itself

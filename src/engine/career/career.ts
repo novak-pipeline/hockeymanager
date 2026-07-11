@@ -225,9 +225,11 @@ import {
   applyInteractionResponse,
   maybeRaiseInteraction,
   promiseFromResponse,
+  reactionSpec,
   INTERACTION_COOLDOWN_DAYS,
   type PlayerInteraction,
   type PlayerPromise,
+  type ReactionSpec,
 } from '@engine/league/interactions'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
@@ -2220,7 +2222,10 @@ export class Career {
   }
 
   /** GM responds to an open concern; applies morale/room effects deterministically. */
-  respondToInteraction(interactionId: string, optionId: string): { ok: boolean; message?: string } {
+  respondToInteraction(
+    interactionId: string,
+    optionId: string
+  ): { ok: boolean; message?: string; reaction?: ReactionSpec } {
     const interaction = this.interactions.find((i) => i.id === interactionId)
     if (!interaction) return { ok: false, message: 'That conversation is no longer available.' }
     if (interaction.status !== 'open') return { ok: false, message: 'You have already responded.' }
@@ -2231,6 +2236,9 @@ export class Career {
     if (!player) return { ok: false, message: 'Player not found.' }
 
     const result = applyInteractionResponse({ interaction, option, player })
+    // A JSON-safe descriptor of the resolution so the renderer can voice the
+    // player's spoken reply (the model never alters the delta below).
+    const reaction = reactionSpec({ interaction, option, player, result })
 
     // Apply morale to the player.
     player.morale = Math.max(0, Math.min(100, player.morale + result.moraleDelta))
@@ -2277,7 +2285,7 @@ export class Career {
       )
     }
 
-    return { ok: true, message: interaction.outcome ?? 'Message delivered.' }
+    return { ok: true, message: interaction.outcome ?? 'Message delivered.', reaction }
   }
 
   /* ────────────────────── the salience engine (THE-FEED.md) ────────────────────── */
