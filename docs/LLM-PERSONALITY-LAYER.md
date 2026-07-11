@@ -72,9 +72,17 @@ Each item names the *engine decision that stays authoritative* and the *model
 job* layered on top. None invents sim state.
 
 ### PARSE (freeform in → structured intent)
-- **Contract negotiation in your own words.** Type "I'll go five years but the AAV
-  stays under 7" → parse to the structured offer the negotiation engine
-  (`DEPTH 1`) already accepts. Engine evaluates; model never sets the number.
+- **Contract negotiation in your own words. — SHIPPED (slice 2).** Type "five
+  years, AAV around 6.5, modified no-trade" in the negotiation room → the model
+  emits strict JSON, `parseOffer` clamps every field to the engine-legal range
+  (salary floor/cap ceiling, 1–8 years, bonus ∈ {0,10,20,30}, valid clause), and
+  the parsed numbers load into the SAME builder the GM confirms by tabling the
+  offer. The DEPTH-1 engine (`evaluateRound`) decides accept/counter unchanged;
+  the model never sets a number the engine trusts without the GM's confirm.
+  - Pure/tested: `src/engine/story/offerParse.ts` (`buildOfferPrompt`,
+    `parseOffer`, `describeOffer`). UI: `NegotiationScreen.tsx` "Draft from my
+    words". Top parse risk (dollars-vs-millions, "7" vs "$7M") is handled by
+    `normalizeSalary` + hard clamp + the visible confirm form.
 - **Press conference free-answers.** Type your answer to a pundit's question →
   parse to the existing tone bucket the press engine scores. (Today it's buttons.)
 - **Trade pitch phrasing.** "Would you move him for a first and a prospect?" →

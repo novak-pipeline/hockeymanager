@@ -18,6 +18,10 @@ import { Notice } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient } from '../hooks/useSim'
 import { bumpRefresh, toast } from '../components/store'
+import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
+import { buildOfferPrompt, parseOffer, describeOffer } from '../../engine/story/offerParse'
+
+const LEAGUE_MIN_SALARY = 750_000
 
 const CARD: React.CSSProperties = {
   background: 'rgba(10,12,18,0.88)',
@@ -56,6 +60,55 @@ export function NegotiationScreen(): JSX.Element {
   const [years, setYears] = useState(3)
   const [bonusPct, setBonusPct] = useState(0)
   const [clause, setClause] = useState<'none' | 'modified' | 'full'>('none')
+
+  // Freeform "draft an offer in your own words" (local AI). The model only fills
+  // the builder below; the engine evaluates and the GM confirms by tabling it.
+  const [canDraft, setCanDraft] = useState(false)
+  const [draftText, setDraftText] = useState('')
+  const [drafting, setDrafting] = useState(false)
+  const [draftEcho, setDraftEcho] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    if (!getFeedWriterEnabled()) return
+    const bridge = feedModelBridge()
+    if (!bridge) return
+    void bridge.status().then((s) => {
+      if (live) setCanDraft(Boolean(s.ready))
+    })
+    return () => { live = false }
+  }, [])
+
+  async function draftFromWords(): Promise<void> {
+    const text = draftText.trim()
+    if (!text || drafting || !view) return
+    const bridge = feedModelBridge()
+    if (!bridge) return
+    setDrafting(true)
+    setDraftEcho(null)
+    const prompt = buildOfferPrompt({
+      freeform: text,
+      askSalary: view.askSalary,
+      askYears: view.askYears,
+      playerName: view.player.name,
+    })
+    const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxTokens })
+    setDrafting(false)
+    // Ceiling = cap room, plus the salary being replaced when re-signing your own.
+    const maxSalary = view.capSpace + (view.kind === 'resign' ? view.currentSalary : 0)
+    const offer = r.ok
+      ? parseOffer(r.text, { minSalary: LEAGUE_MIN_SALARY, maxSalary, minYears: 1, maxYears: 8 })
+      : null
+    if (!offer) {
+      toast('Could not read those terms — set them below, or rephrase.', 'info')
+      return
+    }
+    setSalary(offer.salary)
+    setYears(offer.years)
+    setBonusPct(offer.signingBonusPct)
+    setClause(offer.clause)
+    setDraftEcho(describeOffer(offer))
+  }
 
   const seedBuilder = useCallback((v: NegotiationView, keepUserNumbers: boolean) => {
     if (!keepUserNumbers) {
@@ -203,6 +256,25 @@ export function NegotiationScreen(): JSX.Element {
               <div style={{ ...CARD }}>
                 <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 8 }}>Your offer</div>
                 <div className="stack" style={{ gap: 8 }}>
+                  {canDraft && (
+                    <div className="stack" style={{ gap: 4, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                      <input
+                        className="input"
+                        value={draftText}
+                        placeholder="Say your terms — “five years, AAV around 6.5, modified no-trade”"
+                        disabled={drafting}
+                        onChange={(e) => { setDraftText(e.target.value); setDraftEcho(null) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void draftFromWords() }}
+                        style={{ padding: '5px 8px', fontSize: 12.5 }}
+                      />
+                      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button className="btn btn-sm" disabled={drafting || !draftText.trim()} onClick={() => void draftFromWords()}>
+                          {drafting ? 'Drafting…' : '✍️ Draft from my words'}
+                        </button>
+                        {draftEcho && <span className="muted" style={{ fontSize: 11.5 }}>Parsed: <b>{draftEcho}</b> — review &amp; table below.</span>}
+                      </div>
+                    </div>
+                  )}
                   <label className="row-between" style={{ fontSize: 12.5, gap: 8 }}>
                     <span>Salary (AAV)</span>
                     <input
