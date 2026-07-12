@@ -259,6 +259,15 @@ export class Announcer {
   }
 
   /**
+   * Attach a loaded Kokoro engine WITHOUT switching to it or persisting a choice.
+   * The Announcer still speaks through whatever engine the user selected — so this
+   * just makes the neural path available if their preference is already 'kokoro'.
+   */
+  attachKokoro(engine: VoiceEngine): void {
+    this.kokoroEngine = engine
+  }
+
+  /**
    * Switch the active voice engine.
    * When switching to 'kokoro', you must supply a pre-loaded VoiceEngine
    * (from loadKokoro()) — this method does NOT trigger a download.

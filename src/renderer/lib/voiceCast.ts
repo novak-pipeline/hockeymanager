@@ -69,11 +69,57 @@ function hash(s: string): number {
   return h >>> 0
 }
 
+/* ── attribute-matched pools ──
+ * Kokoro-82M only ships English in American + British accents, so we can match a
+ * person's GENDER and a British-Isles-vs-North-American ACCENT split, and pick a
+ * TIMBRE by age/build — but we cannot literally give e.g. a Swede a Swedish
+ * accent. Within each pool, a stable name hash keeps a person's voice fixed. */
+const AM_YOUNG = ['am_liam', 'am_puck', 'am_echo']
+const AM_DEEP = ['am_fenrir', 'am_onyx', 'am_eric', 'am_santa']
+const AM_MID = ['am_michael', 'am_adam']
+const AF_POOL = ['af_heart', 'af_bella', 'af_nicole', 'af_sarah', 'af_nova', 'af_kore', 'af_river']
+const BM_POOL = ['bm_george', 'bm_lewis', 'bm_daniel', 'bm_fable']
+const BF_POOL = ['bf_emma', 'bf_alice', 'bf_isabella', 'bf_lily']
+
+/** Traits used to fit a voice to the actual person behind the role. */
+export interface VoiceTraits {
+  gender?: 'M' | 'F'
+  /** Nationality string (e.g. "Canada", "Sweden", "England"). */
+  nationality?: string
+  age?: number
+  /** Deeper, grittier delivery (older vet / enforcer / defenceman). */
+  gruff?: boolean
+}
+
+const BRITISH_ISLES = /\b(england|great britain|united kingdom|uk|britain|scotland|wales|ireland|northern ireland|irish|scottish|welsh|british|english)\b/i
+
+function pick<T>(pool: T[], seed: string): T {
+  return pool[hash(seed) % pool.length]!
+}
+
+/** Pick a voice that fits a specific person's gender/accent/age. */
+function personVoice(traits: VoiceTraits, seed: string): string {
+  const british = traits.nationality ? BRITISH_ISLES.test(traits.nationality) : false
+  if (traits.gender === 'F') return pick(british ? BF_POOL : AF_POOL, seed)
+  if (british) return pick(BM_POOL, seed)
+  // American male — the NHL default — split by timbre.
+  if (traits.gruff || (traits.age ?? 0) >= 33) return pick(AM_DEEP, seed)
+  if ((traits.age ?? 99) <= 22) return pick(AM_YOUNG, seed)
+  return pick([...AM_MID, ...AM_DEEP, ...AM_YOUNG], seed)
+}
+
+/** Broadcast narrator roles keep their signature voice regardless of person. */
+const BROADCAST = new Set<VoiceRole>(['pbp', 'color'])
+
 /**
- * Resolve the voice for a role, optionally varied by a stable character name so
- * individuals sound distinct. Deterministic — the same name always maps the same.
+ * Resolve the voice for a role. When `traits` are given (a real person behind the
+ * role), the voice is matched to their gender/accent/age; otherwise it varies by
+ * a stable name seed, or falls back to the role's signature voice. Deterministic.
  */
-export function voiceFor(role: VoiceRole, seedName?: string): string {
+export function voiceFor(role: VoiceRole, seedName?: string, traits?: VoiceTraits): string {
+  if (traits && !BROADCAST.has(role)) {
+    return personVoice(traits, seedName ?? role)
+  }
   if (seedName && VARIED_ROLES.has(role)) {
     return CHARACTER_POOL[hash(seedName) % CHARACTER_POOL.length]!
   }

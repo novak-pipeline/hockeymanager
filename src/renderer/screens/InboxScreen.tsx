@@ -12,6 +12,7 @@ import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
 import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
+import { speakAs } from '../lib/speak'
 
 /** Category metadata: icon, accent color, label, and FM-style "from" sender. */
 const CATEGORY_META: Record<
@@ -545,7 +546,10 @@ function ConcernCard({
         const r = await bridge.infer({ system: p.system, user: p.user, maxTokens: p.maxTokens })
         const line = r.ok ? sanitizeReactionLine(r.text, reaction.playerName) : ''
         setBusy(false)
-        setVoiced(line || reaction.outcome) // fall back to the engine's prose
+        const reply = line || reaction.outcome // fall back to the engine's prose
+        setVoiced(reply)
+        // The player answers back aloud, in his own cast voice.
+        speakAs('player', reply, { seed: reaction.playerName })
         return
       }
     }
@@ -589,8 +593,13 @@ function ConcernCard({
           <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
             <PlayerLink playerId={concern.playerId} name={concern.playerName} />
             <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic' }}>“{voiced}”</div>
-            <div className="row" style={{ marginTop: 2 }}>
+            <div className="row" style={{ marginTop: 2, gap: 'var(--sp-2)' }}>
               <button className="btn btn-sm" onClick={onDone}>Close</button>
+              <button
+                className="btn btn-sm btn-ghost"
+                title="Hear it again"
+                onClick={() => voiced && speakAs('player', voiced, { seed: concern.playerName })}
+              >🔊</button>
             </div>
           </div>
         </div>

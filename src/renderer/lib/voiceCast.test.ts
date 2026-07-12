@@ -36,3 +36,32 @@ describe('voiceFor', () => {
     expect(voices.size).toBeGreaterThan(1)
   })
 })
+
+describe('voiceFor with attribute matching', () => {
+  it('a female owner gets a female voice; a male gets a male voice', () => {
+    expect(voiceFor('owner', 'Jane Doe', { gender: 'F' })).toMatch(/^[ab]f_/)
+    expect(voiceFor('owner', 'John Doe', { gender: 'M' })).toMatch(/^[ab]m_/)
+  })
+
+  it('a British-Isles nationality gets a British voice; North American gets American', () => {
+    expect(voiceFor('player', 'Liam Reid', { gender: 'M', nationality: 'England' })).toMatch(/^bm_/)
+    expect(voiceFor('player', 'Connor Smith', { gender: 'M', nationality: 'Canada' })).toMatch(/^am_/)
+    expect(voiceFor('player', 'Erik Karlsson', { gender: 'M', nationality: 'Sweden' })).toMatch(/^am_/)
+  })
+
+  it('an older/gruff player gets a deeper voice than a young one', () => {
+    const oldVet = voiceFor('player', 'Old Vet', { gender: 'M', nationality: 'Canada', age: 37 })
+    const rookie = voiceFor('player', 'Kid Rookie', { gender: 'M', nationality: 'Canada', age: 19 })
+    expect(['am_fenrir', 'am_onyx', 'am_eric', 'am_santa']).toContain(oldVet)
+    expect(['am_liam', 'am_puck', 'am_echo']).toContain(rookie)
+  })
+
+  it('is deterministic — same person always maps to the same voice', () => {
+    const t = { gender: 'M' as const, nationality: 'Finland', age: 27 }
+    expect(voiceFor('player', 'Mikko Rantanen', t)).toBe(voiceFor('player', 'Mikko Rantanen', t))
+  })
+
+  it('broadcast roles keep their signature voice even with traits', () => {
+    expect(voiceFor('pbp', 'Whoever', { gender: 'F', nationality: 'Canada' })).toBe(voiceFor('pbp'))
+  })
+})

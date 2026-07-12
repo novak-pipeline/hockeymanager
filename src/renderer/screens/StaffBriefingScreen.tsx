@@ -16,6 +16,17 @@ import { Notice } from '../components/ui'
 import { useNav } from '../components/NavContext'
 import { useClient } from '../hooks/useSim'
 import { bumpRefresh, toast } from '../components/store'
+import { speakAs, cancelSpeech } from '../lib/speak'
+import type { VoiceRole } from '../lib/voiceCast'
+
+/** Map a staff title to the voice role that should speak for them. */
+function roleForTitle(title: string): VoiceRole {
+  const t = title.toLowerCase()
+  if (t.includes('physio') || t.includes('medical')) return 'physio'
+  if (t.includes('assistant gm') || t.includes('general manager') || t.includes('agm')) return 'agm'
+  if (t.includes('scout')) return 'scout'
+  return 'coach'
+}
 
 export function StaffBriefingScreen(): JSX.Element {
   const client = useClient()
@@ -38,6 +49,9 @@ export function StaffBriefingScreen(): JSX.Element {
     })
     return () => { alive = false }
   }, [client])
+
+  // Stop any in-progress speech when leaving the room.
+  useEffect(() => () => cancelSpeech(), [])
 
   async function resolve(kind: 'submit' | 'delegate'): Promise<void> {
     if (busy) return
@@ -73,7 +87,14 @@ export function StaffBriefingScreen(): JSX.Element {
             Staff Meeting
           </div>
           <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 800 }}>The coaches’ room</h2>
-          <div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{view.opening}</div>
+          <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+            <div className="muted" style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>{view.opening}</div>
+            <button
+              className="btn btn-sm btn-ghost"
+              title="Hear it"
+              onClick={() => speakAs('coach', view.opening, { importance: 2 })}
+            >🔊</button>
+          </div>
         </div>
 
         {view.proposals.map((p) => (
@@ -81,9 +102,14 @@ export function StaffBriefingScreen(): JSX.Element {
             <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
               <PlayerFace faceId={p.speaker.faceId} name={p.speaker.name} size={44} />
               <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
-                <div>
+                <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
                   <span style={{ fontWeight: 700 }}>{p.speaker.name}</span>
-                  <span className="muted" style={{ fontSize: 11.5 }}> · {p.speaker.title}</span>
+                  <span className="muted" style={{ fontSize: 11.5, flex: 1 }}> · {p.speaker.title}</span>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    title="Hear the pitch"
+                    onClick={() => speakAs(roleForTitle(p.speaker.title), p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}
+                  >🔊</button>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</div>
                 {p.intro.map((line, i) => (
