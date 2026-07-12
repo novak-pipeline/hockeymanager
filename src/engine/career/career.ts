@@ -712,7 +712,12 @@ const PICK_YEARS_AHEAD = 3
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = 8
-const ROSTER_HARD_CAP = 26
+/** Active NHL roster ceiling. Real NHL: 23 in-season (20 dressed + up to 3
+ *  healthy scratches); the rest of the org plays in the AHL. */
+const ROSTER_HARD_CAP = 23
+/** Max Standard Player Contracts an organization may hold at once (NHL + AHL +
+ *  signed junior prospects). The real NHL's 50-contract reserve-list limit. */
+const ORG_CONTRACT_LIMIT = 50
 /** Rolling per-game ratings window (last N games stored). */
 const RATINGS_WINDOW = 10
 /** Calendar days between recurring staff-meeting prompts. */
@@ -7548,16 +7553,27 @@ export class Career {
       if (skipTeamId && tid === skipTeamId) continue
       const team = this.data.teams.get(tid)
       if (!team || team.tier === 'ahl' || team.tier === 'world') continue
-      if (team.roster.length >= ROSTER_HARD_CAP) continue
       const capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
       if (capUsed + p.contract.salary > team.finances.salaryCap) continue
-      // Claim if he'd be a regular (or close) on this club — bad teams, with the
-      // lowest bars and the highest priority, scoop up useful vets first.
-      if (ovr >= this.orgNhlBar(team, grp) - 2) {
-        team.roster.push(p.id)
-        repairLines(team, this.data.players)
-        return team
+      // Claim only if he'd be a regular (or close) on this club — bad teams, with
+      // the lowest bars and the highest priority, scoop up useful vets first.
+      if (ovr < this.orgNhlBar(team, grp) - 2) continue
+      // A club at the 23-man limit can still claim, but must conform: send its
+      // weakest skater down to the AHL to open a spot (real "claim then conform").
+      if (team.roster.length >= ROSTER_HARD_CAP) {
+        const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+        if (!ahl) continue // nowhere to demote → can't make room, pass
+        const weakest = [...team.roster]
+          .map((id) => this.data.players.get(id))
+          .filter((pl): pl is Player => !!pl && pl.position !== 'G')
+          .sort((a, b) => ratedOverall(a) - ratedOverall(b))[0]
+        if (!weakest) continue
+        team.roster = team.roster.filter((id) => (id as string) !== (weakest.id as string))
+        ahl.roster.push(weakest.id)
       }
+      team.roster.push(p.id)
+      repairLines(team, this.data.players)
+      return team
     }
     return null
   }
@@ -8366,6 +8382,25 @@ export class Career {
     }
   }
 
+  /** Standard Player Contracts an organization currently holds — NHL roster +
+   *  AHL affiliate + any signed prospects whose rights it holds (juniors, etc.).
+   *  The real NHL caps this at 50 (ORG_CONTRACT_LIMIT). */
+  private orgContractCount(teamId: TeamId): number {
+    const team = this.data.teams.get(teamId)
+    if (!team) return 0
+    const ids = new Set<string>()
+    for (const pid of team.roster) ids.add(pid as string)
+    if (team.affiliateId) {
+      for (const pid of this.data.teams.get(team.affiliateId)?.roster ?? []) ids.add(pid as string)
+    }
+    for (const p of this.data.players.values()) {
+      if ((p.rightsTeamId as string | undefined) === (teamId as string) && p.contract.yearsRemaining > 0) {
+        ids.add(p.id as string)
+      }
+    }
+    return ids.size
+  }
+
   signFreeAgent(playerId: string, salary: number, years: number): { signed: boolean; message: string } {
     // The market is open year-round; the roster only freezes in the playoffs.
     if (this.phase === 'playoffs') throw new Error('the roster is frozen during the playoffs')
@@ -8375,6 +8410,14 @@ export class Career {
       throw new Error('player is not a free agent')
     }
     const player = this.resolve(id)
+    // 50-contract reserve list: a NEW contract can't push the org past the limit.
+    // (Re-signing your own player doesn't add one — that path isn't gated.)
+    if (this.orgContractCount(this.userTeamId) >= ORG_CONTRACT_LIMIT) {
+      return {
+        signed: false,
+        message: `Your organization is at the ${ORG_CONTRACT_LIMIT}-contract limit. Move or release a contract before you can sign another player.`,
+      }
+    }
     // Dead cap from buyouts is real: the signing must fit under ceiling MINUS
     // the dead charge, or the buyout was free money.
     const capUsedNow = this.userCapUsed()
