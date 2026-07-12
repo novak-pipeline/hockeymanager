@@ -234,7 +234,11 @@ export function buildTeamProfile(
   return {
     philosophy: philosophy ?? teamPhilosophy(team.id),
     needs,
-    capSpace: team.finances.salaryCap - team.finances.capUsed,
+    // Recompute from the live roster — finances.capUsed goes stale across a
+    // season (retirements, ELCs, call-ups) and a stale-high value makes a club
+    // look capped-out and wrongly refuse deals that actually fit. Matches the
+    // evaluator (evaluateTradeProposal) and executeTrade.
+    capSpace: team.finances.salaryCap - rosterCapUsed(team, players),
   }
 }
 
