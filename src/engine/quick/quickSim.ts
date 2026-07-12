@@ -550,6 +550,56 @@ function simEmptyNetPhase(
   }
 }
 
+/** Real NHL per-team-per-game physical-play volume (calibration targets). The
+ *  quick sim doesn't track these tick-by-tick like the full sim, so it hands out
+ *  a game's worth at the end, weighted by the relevant attribute. */
+const PHYS_PER_GAME = { hits: 22.8, blockedShots: 17.5, takeaways: 6.1, giveaways: 7.8 }
+
+/** Largest-remainder apportionment: hand out `total` whole units across weighted
+ *  buckets so the parts sum to exactly `total`. Deterministic (no RNG). */
+function distributeCount(weights: number[], total: number): number[] {
+  if (total <= 0 || weights.length === 0) return weights.map(() => 0)
+  const sum = weights.reduce((a, b) => a + b, 0) || 1
+  const raw = weights.map((w) => (w / sum) * total)
+  const base = raw.map((r) => Math.floor(r))
+  const left = total - base.reduce((a, b) => a + b, 0)
+  const order = raw.map((r, i) => ({ i, frac: r - Math.floor(r) })).sort((a, b) => b.frac - a.frac)
+  for (let k = 0; k < left && k < order.length; k++) base[order[k]!.i]++
+  return base
+}
+
+/**
+ * Hand each team a realistic game's worth of hits / blocks / takeaways /
+ * giveaways, split across the skaters who played and weighted by the matching
+ * composite (checkers hit, D block, disruptors take pucks away, puck-movers
+ * cough it up). Without this the whole background league reads 0 in these
+ * columns. Runs AFTER the game is decided, so it never affects the result.
+ */
+function distributePhysicalStats(
+  sim: TeamSim,
+  resolve: (id: PlayerId) => Player,
+  stats: Map<PlayerId, GamePlayerStat>,
+  rng: Rng,
+): void {
+  const skaters = sim.team.roster
+    .map((id) => ({ id, p: resolve(id) }))
+    .filter(({ id, p }) => p.position !== 'G' && (stats.get(id)?.toi ?? 0) > 0)
+  if (skaters.length === 0) return
+  const vary = (target: number): number => Math.max(0, Math.round(target * rng.float(0.72, 1.28)))
+  const apply = (
+    total: number,
+    weight: (c: CompositeRatings) => number,
+    add: (s: GamePlayerStat, n: number) => void,
+  ): void => {
+    const counts = distributeCount(skaters.map(({ p }) => Math.max(0.2, weight(p.composites))), total)
+    skaters.forEach(({ id }, i) => { const s = stats.get(id); if (s) add(s, counts[i]!) })
+  }
+  apply(vary(PHYS_PER_GAME.hits), (c) => c.hitting, (s, n) => { s.hits += n })
+  apply(vary(PHYS_PER_GAME.blockedShots), (c) => c.blocking, (s, n) => { s.blockedShots += n })
+  apply(vary(PHYS_PER_GAME.takeaways), (c) => c.takeaway, (s, n) => { s.takeaways += n })
+  apply(vary(PHYS_PER_GAME.giveaways), (c) => c.playmaking, (s, n) => { s.giveaways += n })
+}
+
 /**
  * Pick the goalie starting this game — a real tandem, not the #1 every night.
  * The backup gets a realistic share (~a third for a 1a/1b, tapering toward ~1
@@ -636,6 +686,10 @@ export function quickSimGame(
       : REGULATION_PERIODS + (decidedBy === 'shootout' ? 1 : 0)
 
   ctx.stream.push({ t: 0, period: finalPeriod, type: 'gameEnd' })
+
+  // Physical-play box score (hits/blocks/takeaways/giveaways) for both teams.
+  distributePhysicalStats(homeSim, resolve, ctx.stats, ctx.rng)
+  distributePhysicalStats(awaySim, resolve, ctx.stats, ctx.rng)
 
   return {
     homeTeamId: home.id,

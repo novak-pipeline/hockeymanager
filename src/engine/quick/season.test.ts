@@ -48,6 +48,35 @@ describe('quickSimGame', () => {
     expect(starterStarts).toBeGreaterThan(backupStarts)
   })
 
+  it('tallies physical stats (hits/blocks/takeaways/giveaways), not all zeros', () => {
+    const { teams, players } = generateLeague({ seed: 11 })
+    const ids = [...teams.keys()]
+    const resolve = (id: any) => players.get(id)!
+    const home = teams.get(ids[0])!
+    // Aggregate one team's box score over a handful of games.
+    let hits = 0, blocks = 0, takes = 0, gives = 0, games = 0
+    let dBlocks = 0, dCount = 0, fBlocks = 0, fCount = 0
+    for (let s = 0; s < 8; s++) {
+      const r = quickSimGame(home, teams.get(ids[1 + (s % (ids.length - 1))])!, resolve, { seed: 500 + s })
+      games++
+      for (const id of home.roster) {
+        const st = r.playerStats.get(id)
+        if (!st || (st.toi ?? 0) <= 0) continue
+        hits += st.hits; blocks += st.blockedShots; takes += st.takeaways; gives += st.giveaways
+        const isD = resolve(id).position === 'D'
+        if (isD) { dBlocks += st.blockedShots; dCount++ } else { fBlocks += st.blockedShots; fCount++ }
+      }
+    }
+    // Real NHL per-team-per-game bands: hits ~23, blocks ~17, takeaways ~6, giveaways ~8.
+    expect(hits / games).toBeGreaterThan(10)
+    expect(hits / games).toBeLessThan(40)
+    expect(blocks / games).toBeGreaterThan(8)
+    expect(takes / games).toBeGreaterThan(2)
+    expect(gives / games).toBeGreaterThan(2)
+    // Defencemen block more than forwards (per player).
+    expect(dBlocks / Math.max(1, dCount)).toBeGreaterThan(fBlocks / Math.max(1, fCount))
+  })
+
   it('rides the starter in the playoffs (no rotation)', () => {
     const { teams, players } = generateLeague({ seed: 7 })
     const ids = [...teams.keys()]
