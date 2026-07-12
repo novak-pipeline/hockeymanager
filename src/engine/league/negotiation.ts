@@ -207,6 +207,15 @@ export interface NegotiationState {
   pausedUntil?: number
 }
 
+/**
+ * How much a free agent's asking price softens the longer he goes unsigned in the
+ * open-market window. Day 0 = full ask; it slides ~2%/day down to a floor of 82%,
+ * so a GM can wait out a player who's overpricing himself. Neutral (1.0) at day 0.
+ */
+export function faAskDecay(faDaysUnsigned: number): number {
+  return Math.max(0.82, 1 - Math.max(0, faDaysUnsigned) * 0.02)
+}
+
 /** Clause expectations scale with stature: stars want full protection. */
 function expectedClause(player: Player): ClauseLevel {
   const ovr = ratedOverall(player)

@@ -275,6 +275,7 @@ import {
 import {
   agentFor,
   evaluateRound,
+  faAskDecay,
   findComparables,
   openNegotiation,
   openingLines,
@@ -8898,11 +8899,14 @@ export class Career {
 
     const player = this.resolve(asPlayerId(playerId))
     const heat = kind === 'freeAgent' ? this.marketHeatFor(player) : 0
+    // A free agent still on the market softens his ask the longer he waits, so a
+    // GM can hold out on a player who is overpricing himself. Only in the FA window.
+    const faDecay = kind === 'freeAgent' ? faAskDecay(this.offseason?.faDay ?? 0) : 1
     const state = openNegotiation({
       player,
       year: this.year,
       kind,
-      marketHeat: 1 + heat * 0.08,
+      marketHeat: (1 + heat * 0.08) * faDecay,
       rapportTilt: rapportTilt(this.agentRapport, agentFor(player).name),
     })
     // A camp burned earlier this summer (paused/walked re-sign talks) opens colder.

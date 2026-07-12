@@ -13,6 +13,7 @@ import {
   agentFor,
   defaultOffer,
   evaluateRound,
+  faAskDecay,
   findComparables,
   offerValue,
   openNegotiation,
@@ -290,5 +291,15 @@ describe('findComparables', () => {
     ]
     const comps = findComparables(p, pool)
     expect(comps.map((c) => c.name)).toEqual(['Close Rich', 'Close Cheap'])
+  })
+})
+
+describe('faAskDecay', () => {
+  it('is neutral on day 0 and softens the ask the longer a FA waits, to an 82% floor', () => {
+    expect(faAskDecay(0)).toBe(1)
+    expect(faAskDecay(5)).toBeCloseTo(0.9, 5)
+    expect(faAskDecay(9)).toBeCloseTo(0.82, 5)
+    expect(faAskDecay(30)).toBe(0.82) // floored
+    expect(faAskDecay(-3)).toBe(1) // guards negative
   })
 })
