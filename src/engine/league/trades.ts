@@ -1089,10 +1089,14 @@ export function solicitOffersForPlayer(args: {
 export interface AiAiTradeResult {
   sellerTeamId: TeamId
   buyerTeamId: TeamId
-  /** Players the SELLER gives up. */
+  /** Players the SELLER gives up (NHL roster). */
   playerIds: PlayerId[]
   /** Picks the BUYER gives up. */
   picks: DraftPick[]
+  /** Prospects the BUYER gives up as part of the return — an AHL affiliate
+   *  player or a rights-held junior. They move into the SELLER's system (his AHL,
+   *  or rights). Empty for a pure picks-for-rental deal. */
+  prospectIds: PlayerId[]
   summary: string
 }
 
@@ -1191,15 +1195,65 @@ export function generateAiAiTrade(args: {
       chosen.push(c.pick)
       total += c.value
     }
-    if (chosen.length === 0 || total < vetValue * 0.3 || total > vetValue * 0.8) continue
-    const pickLabels = chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`).join(' and ')
+    // Real returns aren't only picks — a rental often fetches "a pick and a
+    // prospect". Roughly half the time, if the buyer has a tradeable prospect
+    // (an AHL affiliate player or a rights-held junior) that keeps the combined
+    // return inside the value band, throw it in.
+    const prospects = buyerProspects(buyer, teams, players).sort((a, b) => playerValue(b) - playerValue(a))
+    let prospect: Player | null = null
+    if (prospects.length > 0 && rng.chance(0.5)) {
+      for (const pr of rng.shuffle(prospects)) {
+        if (total + playerValue(pr) <= vetValue * 0.85) { prospect = pr; break }
+      }
+    }
+    const returnTotal = total + (prospect ? playerValue(prospect) : 0)
+    // A prospect can carry the deal, so the picks floor relaxes when one's in it.
+    const floor = prospect ? vetValue * 0.25 : vetValue * 0.3
+    if ((chosen.length === 0 && !prospect) || returnTotal < floor || returnTotal > vetValue * 0.85) continue
+    const parts = [
+      ...chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`),
+      ...(prospect ? [`${prospect.position} ${prospect.name}`] : []),
+    ]
     return {
       sellerTeamId: seller.team.id,
       buyerTeamId: buyer.id,
       playerIds: [seller.vet.id],
       picks: chosen,
-      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${pickLabels}.`,
+      prospectIds: prospect ? [prospect.id] : [],
+      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${parts.join(' and ')}.`,
     }
   }
   return null
+}
+
+/**
+ * A club's tradeable prospects — young players in its AHL affiliate plus the
+ * juniors whose rights it holds. Healthy, no NTC, with real trade value. These
+ * are what a buyer packages alongside picks in a "pick and a prospect" return.
+ */
+function buyerProspects(
+  buyer: Team,
+  teams: Map<TeamId, Team>,
+  players: Map<PlayerId, Player>,
+): Player[] {
+  const out: Player[] = []
+  const seen = new Set<string>()
+  const consider = (p: Player | undefined): void => {
+    if (!p || seen.has(p.id as string)) return
+    if (p.age > 24 || p.position === 'G') return
+    if (p.injuryStatus !== null || p.contract.noTradeClause) return
+    if (playerValue(p) < 8) return
+    seen.add(p.id as string)
+    out.push(p)
+  }
+  const affiliate = buyer.affiliateId ? teams.get(buyer.affiliateId) : undefined
+  for (const id of affiliate?.roster ?? []) consider(players.get(id))
+  // Rights-held juniors: drafted, held by the buyer, not on his NHL/AHL roster.
+  const onRoster = new Set<string>([...buyer.roster, ...(affiliate?.roster ?? [])].map((id) => id as string))
+  for (const p of players.values()) {
+    if ((p.rightsTeamId as string | undefined) === (buyer.id as string) && !onRoster.has(p.id as string)) {
+      consider(p)
+    }
+  }
+  return out
 }

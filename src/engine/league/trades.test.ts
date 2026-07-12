@@ -903,6 +903,34 @@ describe('generateAiAiTrade (LW3)', () => {
     expect(deal!.playerIds).toEqual([vetId])
   })
 
+  it('a buyer can package a prospect (AHL/rights) into the return, not just picks', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    // Give a contender (t3) an AHL affiliate holding a genuine young prospect.
+    const prospect = makePlayer('prospect-x', 64, { position: 'C', age: 20, potential: 82 })
+    players.set(prospect.id, prospect)
+    const ahl = makeTeam('t3-ahl', [prospect])
+    ahl.tier = 'ahl'
+    teams.set(ahl.id, ahl)
+    teams.get(asTeamId('t3'))!.affiliateId = ahl.id
+    expect(playerValue(prospect)).toBeGreaterThanOrEqual(8) // qualifies as a trade chip
+
+    let sawProspect = false
+    for (let day = 1; day <= 400 && !sawProspect; day++) {
+      const d = generateAiAiTrade({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(55, day)), postureOf,
+      })
+      if (d && d.prospectIds.length > 0) {
+        sawProspect = true
+        expect(d.prospectIds).toEqual([prospect.id])
+        expect(d.buyerTeamId).toBe(asTeamId('t3'))
+        expect(d.playerIds).toEqual([vetId]) // the rental still goes the other way
+        expect(d.summary).toContain(prospect.name)
+      }
+    }
+    expect(sawProspect).toBe(true)
+  })
+
   it('fires more often near the deadline than early in the season', () => {
     const deadlineDay = 200
     const countDeals = (days: number[]): number => {

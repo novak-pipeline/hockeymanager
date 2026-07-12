@@ -4070,6 +4070,12 @@ export class Career {
           bGivesPicks: aiDeal.picks,
           allPicks: this.picks,
         })
+        // Prospects (AHL / rights) the buyer sends back move into the SELLER's
+        // system: out of the buyer's affiliate (or off his rights), into the
+        // seller's affiliate, with rights following the player.
+        for (const pid of aiDeal.prospectIds) {
+          this.moveProspectBetweenOrgs(pid, aiDeal.buyerTeamId, aiDeal.sellerTeamId)
+        }
         repairLines(this.data.teams.get(aiDeal.sellerTeamId)!, this.data.players)
         repairLines(this.data.teams.get(aiDeal.buyerTeamId)!, this.data.players)
         const txResult = recordTransaction(this.transactionLedger, {
@@ -8395,6 +8401,32 @@ export class Career {
       signed: false,
       message: `Not enough. He is asking around $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}.`,
     }
+  }
+
+  /**
+   * Move a prospect (AHL player or rights-held junior) from one org to another
+   * as part of a trade. An AHL affiliate player relocates to the acquiring org's
+   * affiliate; a junior whose rights were held just has his rights re-assigned
+   * (he keeps playing where he is). Rights always follow the player.
+   */
+  private moveProspectBetweenOrgs(pid: PlayerId, fromTeamId: TeamId, toTeamId: TeamId): void {
+    const p = this.data.players.get(pid)
+    if (!p) return
+    const from = this.data.teams.get(fromTeamId)
+    const to = this.data.teams.get(toTeamId)
+    const fromAhl = from?.affiliateId ? this.data.teams.get(from.affiliateId) : undefined
+    const wasOnFromAhl = fromAhl?.roster.some((id) => (id as string) === (pid as string)) ?? false
+    // Pull him off the buyer's NHL + AHL rosters if he sits on either.
+    if (from) from.roster = from.roster.filter((id) => (id as string) !== (pid as string))
+    if (fromAhl) fromAhl.roster = fromAhl.roster.filter((id) => (id as string) !== (pid as string))
+    // An affiliate player relocates to the acquiring org's affiliate (or NHL if
+    // it somehow has none); a rights-only junior keeps his junior club.
+    if (wasOnFromAhl) {
+      const toAhl = to?.affiliateId ? this.data.teams.get(to.affiliateId) : undefined
+      if (toAhl) toAhl.roster.push(pid)
+      else if (to) to.roster.push(pid)
+    }
+    p.rightsTeamId = toTeamId
   }
 
   /** Standard Player Contracts an organization currently holds — NHL roster +
