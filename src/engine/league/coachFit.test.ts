@@ -36,7 +36,9 @@ describe('coach-fit affects the sim', () => {
   it('a high-fit team out-scores the same team with a poor fit over many games', () => {
     let highGoals = 0
     let lowGoals = 0
-    const N = 60
+    // A large sample: the coach-fit edge is only ~1.5% on shot conversion, so it
+    // needs enough games to clear the per-game noise floor.
+    const N = 240
     for (let i = 0; i < N; i++) {
       const { home, away, resolve } = teamsFor(100 + i)
       // Same matchup + seed; only the home team's coach-fit differs.

@@ -644,8 +644,13 @@ export function quickSimGame(
 
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
     simPeriod(ctx, homeSim, awaySim, period, PERIOD_SECONDS, false)
-    // Occasional late empty-net goals in regulation one-goal games.
-    simEmptyNetPhase(ctx, homeSim, awaySim, period, (period - 1) * PERIOD_SECONDS)
+    // Pulling the goalie for a 6th attacker only happens in the dying minutes of
+    // the THIRD — a team down one doesn't empty its net at the first or second
+    // intermission. So the empty-net phase runs after the final regulation
+    // period only.
+    if (period === REGULATION_PERIODS) {
+      simEmptyNetPhase(ctx, homeSim, awaySim, period, (period - 1) * PERIOD_SECONDS)
+    }
   }
 
   let decidedBy: QuickSimResult['decidedBy'] = 'regulation'
