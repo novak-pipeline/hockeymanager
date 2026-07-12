@@ -723,6 +723,10 @@ export class Career {
 
   private currentDay = 0
   private phase: CareerPhase = 'regularSeason'
+  /** The current phase — for harnesses/telemetry. Read-only. */
+  get seasonPhase(): CareerPhase {
+    return this.phase
+  }
   private readonly standings = new Map<TeamId, Standing>()
   private readonly totals = new Map<PlayerId, GamePlayerStat>()
   private readonly gp = new Map<PlayerId, number>()
