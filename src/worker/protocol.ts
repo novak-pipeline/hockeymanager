@@ -85,7 +85,8 @@ export type {
   TacticsView,
   TeamAnalyticsRow,
   TentpoleView,
-  TradeBalanceView,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -174,7 +175,8 @@ import type {
   StatsView,
   TacticsView,
   TentpoleView,
-  TradeBalanceView,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -298,7 +300,8 @@ export type WorkerRequestBody =
   | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
-  | { type: 'tradeBalance'; proposal: TradeProposal }
+  | { type: 'assessTrade'; proposal: TradeProposal }
+  | { type: 'gaugeTradeInterest'; proposal: TradeProposal }
   | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
@@ -547,8 +550,10 @@ export type WorkerResponse = { id: number } & (
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
-  /** Live value read on a draft package (no commitment; drives the balance bar). */
-  | { type: 'tradeBalanceResult'; balance: TradeBalanceView }
+  /** Your assistant GM's live read as you build a package (advice, not an answer). */
+  | { type: 'tradeAssessment'; assessment: TradeAssessmentView }
+  /** The partner GM's NON-BINDING interest read (gauge interest before proposing). */
+  | { type: 'tradeInterestRead'; read: TradeInterestView }
   /** Result of shopping a player: how many offers came in + a summary line. */
   | { type: 'shopResult'; count: number; message: string }
   /** A free agent's agent's read on the market (may deflect). */

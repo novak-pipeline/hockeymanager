@@ -303,6 +303,7 @@ import {
   generateAiAiTrade,
   pickValue,
   playerValue,
+  rosterCapUsed,
   solicitOffersForPlayer,
   type StoredTradeOffer,
 } from '@engine/league/trades'
@@ -517,7 +518,8 @@ import {
   type StatsView,
   type TacticsView,
   type TentpoleView,
-  type TradeBalanceView,
+  type TradeAssessmentView,
+  type TradeInterestView,
   type TradeEvaluation,
   type TradeOfferView,
   type TradeProposal,
@@ -9115,37 +9117,118 @@ export class Career {
   }
 
   /**
-   * Live "who wins this deal" read for the proposal builder. Uses the SAME
-   * `playerValue`/`pickValue` the AI GM weighs, so the balance bar the user sees
-   * agrees with the verdict he'll get — no client-side re-derivation that could
-   * drift from the engine. Pure/deterministic: no RNG, no acceptance threshold,
-   * no endowment/mood/context (those are the GM's *negotiating* posture, not the
-   * raw asset value). An empty side reads 0.
+   * Your OWN assistant GM's live read as you build a package (EHM-style). Advice
+   * from your side of the table — is this good value for us, plus practical flags
+   * (a mover with an unwaived NTC, a deal we can't cap-fit). Uses the same
+   * `playerValue`/`pickValue` the sim weighs. Deterministic; no RNG. This is your
+   * staff talking, NOT the other club's answer.
    */
-  tradeBalance(proposal: TradeProposal): TradeBalanceView {
+  assessTrade(proposal: TradeProposal): TradeAssessmentView {
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const agmName = staff.agm?.name ?? 'Assistant GM'
     const year = this.year
+    const givePlayers = proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id)))
+    const receivePlayers = proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id)))
     const giveValue =
-      proposal.givePlayerIds.reduce((s, id) => s + playerValue(this.resolve(asPlayerId(id))), 0) +
+      givePlayers.reduce((s, p) => s + playerValue(p), 0) +
       this.pickByIds(proposal.givePickIds).reduce((s, p) => s + pickValue(p, { year }), 0)
     const receiveValue =
-      proposal.receivePlayerIds.reduce((s, id) => s + playerValue(this.resolve(asPlayerId(id))), 0) +
+      receivePlayers.reduce((s, p) => s + playerValue(p), 0) +
       this.pickByIds(proposal.receivePickIds).reduce((s, p) => s + pickValue(p, { year }), 0)
 
-    const partnerName =
-      this.data.teams.get(asTeamId(proposal.partnerTeamId))?.name ?? 'the other club'
-    // Tilt from the raw ratio, with a fair band so tiny gaps don't read as lopsided.
-    const total = giveValue + receiveValue
-    let tilt: TradeBalanceView['tilt'] = 'fair'
-    let note = 'Pick assets on both sides to weigh the deal.'
-    if (total > 0) {
-      const diff = receiveValue - giveValue // >0 means the user comes out ahead
-      const rel = diff / Math.max(giveValue, receiveValue, 1)
-      if (rel > 0.12) { tilt = 'you'; note = rel > 0.3 ? 'This deal leans heavily your way.' : 'This deal tilts in your favour.' }
-      else if (rel < -0.12) { tilt = 'them'; note = rel < -0.3 ? `Heavily favours ${partnerName}.` : `Tilts toward ${partnerName}.` }
-      else { tilt = 'fair'; note = 'A roughly even exchange on paper.' }
+    if (giveValue <= 0 || receiveValue <= 0) {
+      return { agmName, tone: 'empty', line: 'Put players or picks on both sides and I’ll give you my read.' }
     }
-    const r1 = (n: number): number => Math.round(n * 10) / 10
-    return { giveValue: r1(giveValue), receiveValue: r1(receiveValue), tilt, note }
+
+    // Practical flag: a player we’re moving still holds his no-trade clause.
+    const heldNtc = givePlayers.find(
+      (p) => p.contract.noTradeClause && !this.playerWaivesTo(p, asTeamId(proposal.partnerTeamId)),
+    )
+    if (heldNtc) {
+      return {
+        agmName, tone: 'blocked',
+        line: `Before we go further — ${heldNtc.name} has a no-trade clause. He’d have to sign off, or you ask his camp which clubs he’d accept.`,
+      }
+    }
+
+    // Practical flag: can WE fit the money coming back?
+    const incoming = receivePlayers.reduce((s, p) => s + p.contract.salary, 0)
+    const outgoing = givePlayers.reduce((s, p) => s + p.contract.salary, 0)
+    const capAfter = rosterCapUsed(this.userTeam, this.data.players) + incoming - outgoing
+    if (capAfter > this.userTeam.finances.salaryCap) {
+      const over = capAfter - this.userTeam.finances.salaryCap
+      return {
+        agmName, tone: 'blocked',
+        line: `The hockey’s one thing, but this puts us about $${(over / 1e6).toFixed(1)}M over the cap. We’d have to shed salary first.`,
+      }
+    }
+
+    const rel = (receiveValue - giveValue) / Math.max(giveValue, receiveValue)
+    if (rel > 0.30) return { agmName, tone: 'love', line: 'If they say yes to this, we’re fleecing them. I’d send it before they think twice.' }
+    if (rel > 0.12) return { agmName, tone: 'good', line: 'Good value on our end. I like this one.' }
+    if (rel >= -0.12) return { agmName, tone: 'fair', line: 'Fair hockey trade — it comes down to whether he fits our room.' }
+    if (rel >= -0.30) return { agmName, tone: 'caution', line: 'We’d be paying a premium here. Defensible if you really want him, but don’t expect a bargain.' }
+    return { agmName, tone: 'lopsided', line: 'That’s a steep overpay, boss. I’d pull back before we regret it.' }
+  }
+
+  /**
+   * NON-BINDING interest read from the partner GM when you "gauge interest"
+   * before officially proposing (EHM-style). Runs the same `evaluateProposal`
+   * the club would use, but on a STABLE gauge RNG (seeded from the package, not
+   * the live offer counter) so it doesn’t consume proposal randomness or change
+   * a later real offer — and it does NOT push a pending trade. A warm read is a
+   * read, not a handshake; the actual offer still gets slept on.
+   */
+  gaugeTradeInterest(proposal: TradeProposal): TradeInterestView {
+    const partnerId = asTeamId(proposal.partnerTeamId)
+    const partner = this.data.teams.get(partnerId)
+    const gmName = this.gmPersonaFor(partnerId)?.name ?? `${partner?.name ?? 'The club'}’s GM`
+    if (!partner) return { gmName, lean: 'cool', line: 'We can’t reach that front office right now.' }
+    if (!this.tradingOpen()) return { gmName, lean: 'cool', line: 'The trade market is closed — come find me when it reopens.' }
+
+    const give = {
+      players: proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))),
+      picks: this.pickByIds(proposal.givePickIds),
+    }
+    const receive = {
+      players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))),
+      picks: this.pickByIds(proposal.receivePickIds),
+    }
+    if (give.players.length + give.picks.length === 0 || receive.players.length + receive.picks.length === 0) {
+      return { gmName, lean: 'cool', line: 'There’s nothing here for me to react to yet — put something on both sides.' }
+    }
+    const waivedNtcIds = new Set(
+      give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
+    )
+    // Stable gauge RNG: derived from the package so repeated gauges match and it
+    // never touches the live proposal counter.
+    const charSum = (s: string): number => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h }
+    const stableKey = [...proposal.givePlayerIds, ...proposal.givePickIds, ...proposal.receivePlayerIds, ...proposal.receivePickIds]
+      .reduce((h, s) => (h * 31 + charSum(s)) | 0, 7)
+    const rng = this.rngFor(7010, this.currentDay, stableKey)
+    const evaln = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds,
+      relationship: this.relationshipWith(partnerId as string),
+      philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
+      context: {
+        posture: this.clubPostureFor(partnerId).posture,
+        deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
+      },
+    })
+
+    // Map the verdict to a NON-BINDING interest phrasing. Even "accept" reads as
+    // "worth a serious look", never a promise.
+    if (evaln.verdict === 'reject' && evaln.counterAskValue <= 0) {
+      // Hard dealbreaker (NTC / cap / roster-gutting) — surface the concrete reason.
+      return { gmName, lean: 'blocked', line: `${gmName}: "${evaln.message}"` }
+    }
+    if (evaln.verdict === 'accept') {
+      return { gmName, lean: 'warm', line: `${gmName}: "This definitely deserves a look — put it in front of me and I’ll give it real thought."` }
+    }
+    if (evaln.verdict === 'counter') {
+      return { gmName, lean: 'tepid', line: `${gmName}: "There might be something here, but you’d have to sweeten it — send it and I’ll tell you what I’d need."` }
+    }
+    return { gmName, lean: 'cool', line: `${gmName}: "We’re not close on this one. It’d take a lot more coming back before I’d bite."` }
   }
 
   proposeTrade(proposal: TradeProposal): TradeEvaluation {

@@ -3,7 +3,8 @@ import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/pro
 import type {
   PickAssetView,
   PlayerBadge,
-  TradeBalanceView,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeOfferView,
   TradePartnerView,
   TradeRumorView,
@@ -517,29 +518,47 @@ function ProposeTab(props: {
   const [busy, setBusy] = useState(false)
   const [evalResult, setEvalResult] = useState<TradeEvaluation | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [balance, setBalance] = useState<TradeBalanceView | null>(null)
+  // Your own assistant GM's live take (advice) + the partner GM's non-binding
+  // "gauge interest" read (only after you ask). Both cleared as the deal changes.
+  const [assessment, setAssessment] = useState<TradeAssessmentView | null>(null)
+  const [interest, setInterest] = useState<TradeInterestView | null>(null)
+  const [gauging, setGauging] = useState(false)
 
-  // Live "who wins this deal" read: whenever the package changes, ask the engine
-  // for the SAME asset valuation the AI GM uses. Debounced so rapid clicking
-  // doesn't spam the worker, and dropped once a proposal is on the table.
+  const proposalPayload = (): {
+    partnerTeamId: string; givePlayerIds: string[]; givePickIds: string[]
+    receivePlayerIds: string[]; receivePickIds: string[]
+  } => ({
+    partnerTeamId: partnerId,
+    givePlayerIds: [...myPlayerIds],
+    givePickIds: [...myPickIds],
+    receivePlayerIds: [...theirPlayerIds],
+    receivePickIds: [...theirPickIds],
+  })
+
+  // Live assistant-GM read as you build. The partner's interest is stale the
+  // moment the package changes, so drop it here — you re-gauge deliberately.
   useEffect(() => {
+    setInterest(null)
     if (evalResult) return
     const anySide = myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0
-    if (!partnerId || !anySide) { setBalance(null); return }
+    if (!partnerId || !anySide) { setAssessment(null); return }
     let cancelled = false
     const t = setTimeout(async () => {
-      const r = await client.tradeBalance({
-        partnerTeamId: partnerId,
-        givePlayerIds: [...myPlayerIds],
-        givePickIds: [...myPickIds],
-        receivePlayerIds: [...theirPlayerIds],
-        receivePickIds: [...theirPickIds],
-      })
-      if (!cancelled && r.type === 'tradeBalanceResult') setBalance(r.balance)
+      const r = await client.assessTrade(proposalPayload())
+      if (!cancelled && r.type === 'tradeAssessment') setAssessment(r.assessment)
     }, 180)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partnerId, myPlayerIds, myPickIds, theirPlayerIds, theirPickIds, evalResult])
+
+  async function handleGauge() {
+    if (!partnerId) return
+    setGauging(true)
+    const r = await client.gaugeTradeInterest(proposalPayload())
+    setGauging(false)
+    if (r.type === 'tradeInterestRead') setInterest(r.read)
+    else if (r.type === 'error') setErr(r.message)
+  }
 
   function toggleSet<T>(set: Set<T>, val: T): Set<T> {
     const next = new Set(set)
@@ -555,6 +574,8 @@ function ProposeTab(props: {
     setTheirPickIds(new Set())
     setEvalResult(null)
     setErr(null)
+    setAssessment(null)
+    setInterest(null)
   }
 
   async function handlePropose() {
@@ -853,9 +874,15 @@ function ProposeTab(props: {
         </div>
       )}
 
-      {/* live value read — the same asset valuation the AI GM weighs */}
-      {partner && !evalResult && balance && (
-        <TradeBalanceBar balance={balance} partnerAbbr={partner.teamAbbr} />
+      {/* your assistant GM's live read + gauge the other club's interest */}
+      {partner && !evalResult && (assessment || interest) && (
+        <TradeDeskPanel
+          assessment={assessment}
+          interest={interest}
+          gauging={gauging}
+          canGauge={hasSelections && myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0}
+          onGauge={handleGauge}
+        />
       )}
 
       {/* evaluation result */}
@@ -882,62 +909,95 @@ function ProposeTab(props: {
       {err && <Notice kind="warn">{err}</Notice>}
 
       {!evalResult && (
-        <div>
+        <div className="stack" style={{ gap: 4 }}>
           <button
             className="btn btn-primary"
             disabled={busy || !hasSelections || !partnerId}
             onClick={handlePropose}
           >
-            {busy ? 'Sending…' : 'Propose trade'}
+            {busy ? 'Sending…' : 'Send official offer'}
           </button>
+          {hasSelections && (
+            <span className="muted" style={{ fontSize: 11 }}>
+              They'll take a day or two to weigh it — expect an acceptance, a counter, or a pass by inbox.
+            </span>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-// ─── trade balance bar ────────────────────────────────────────────────────────
+// ─── the trade desk (assistant-GM read + gauge interest) ───────────────────────
+
+const ASSESS_TONE: Record<TradeAssessmentView['tone'], string> = {
+  love: 'var(--success)', good: 'var(--success)', fair: 'var(--muted)',
+  caution: 'var(--amber, #f59e0b)', lopsided: 'var(--danger)', blocked: 'var(--danger)', empty: 'var(--muted)',
+}
+const INTEREST_TONE: Record<TradeInterestView['lean'], { color: string; label: string }> = {
+  warm: { color: 'var(--success)', label: 'Interested' },
+  tepid: { color: 'var(--amber, #f59e0b)', label: 'Wants more' },
+  cool: { color: 'var(--muted)', label: 'Lukewarm' },
+  blocked: { color: 'var(--danger)', label: 'Dealbreaker' },
+}
 
 /**
- * "Who wins this deal" bar. The split reflects the engine's own asset valuation
- * (playerValue + pickValue), so what's shown agrees with the AI GM's verdict.
- * Left = value you send, right = value you get back.
+ * EHM-style trade desk. Your assistant GM gives a live read as you build; a
+ * "Gauge interest" button pulls the OTHER club's non-binding reaction before you
+ * commit. A warm reaction is not a yes — a real offer still gets slept on.
  */
-function TradeBalanceBar(props: { balance: TradeBalanceView; partnerAbbr: string }): JSX.Element {
-  const { balance } = props
-  const total = balance.giveValue + balance.receiveValue
-  const receivePct = total > 0 ? Math.round((balance.receiveValue / total) * 100) : 50
-  const tiltColor =
-    balance.tilt === 'you' ? 'var(--success)' : balance.tilt === 'them' ? 'var(--danger)' : 'var(--muted)'
-  const verdictLabel =
-    balance.tilt === 'you' ? 'In your favour' : balance.tilt === 'them' ? `Favours ${props.partnerAbbr}` : 'Even'
+function TradeDeskPanel(props: {
+  assessment: TradeAssessmentView | null
+  interest: TradeInterestView | null
+  gauging: boolean
+  canGauge: boolean
+  onGauge: () => void
+}): JSX.Element {
+  const { assessment, interest } = props
   return (
-    <Panel title="Trade balance">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, fontSize: 12 }}>
-        <span style={{ color: 'var(--muted)' }}>
-          You send <strong style={{ color: 'var(--text)' }}>{balance.giveValue.toFixed(1)}</strong>
-        </span>
-        <span className="chip" style={{ fontSize: 11, fontWeight: 700, color: tiltColor, borderColor: tiltColor }}>
-          {verdictLabel}
-        </span>
-        <span style={{ color: 'var(--muted)' }}>
-          <strong style={{ color: 'var(--text)' }}>{balance.receiveValue.toFixed(1)}</strong> you get
-        </span>
-      </div>
-      {/* split bar: green (your return) vs grey (what you're paying) */}
-      <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', background: 'var(--bg0)', border: '1px solid var(--line)' }}>
-        <div
-          title={`Value you give up: ${balance.giveValue.toFixed(1)}`}
-          style={{ width: `${100 - receivePct}%`, background: 'var(--line)', transition: 'width 160ms ease' }}
-        />
-        <div
-          title={`Value you receive: ${balance.receiveValue.toFixed(1)}`}
-          style={{ width: `${receivePct}%`, background: tiltColor, opacity: 0.85, transition: 'width 160ms ease' }}
-        />
-      </div>
-      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-        {balance.note} <span style={{ opacity: 0.7 }}>Raw asset value only — the GM's stance, cap and needs still decide the answer.</span>
-      </p>
+    <Panel title="The trade desk">
+      {assessment && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10 }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>🗒️</span>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{assessment.agmName} · your read</div>
+            <div style={{ fontSize: 13, color: ASSESS_TONE[assessment.tone], fontWeight: 500 }}>{assessment.line}</div>
+          </div>
+        </div>
+      )}
+
+      {interest ? (
+        <div style={{
+          borderTop: '1px solid var(--line)', paddingTop: 10, display: 'flex', gap: 10, alignItems: 'flex-start',
+        }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>📞</span>
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 2 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>you gauged their interest</span>
+              <span className="chip" style={{ fontSize: 10, fontWeight: 700, color: INTEREST_TONE[interest.lean].color, borderColor: INTEREST_TONE[interest.lean].color }}>
+                {INTEREST_TONE[interest.lean].label}
+              </span>
+            </div>
+            <div style={{ fontSize: 13 }}>{interest.line}</div>
+            {interest.lean !== 'blocked' && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>
+                Just a read — nothing's official until you send it, and they'll take a day or two to answer for real.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!props.canGauge || props.gauging}
+          onClick={props.onGauge}
+          style={{ fontSize: 12, width: '100%', borderTop: assessment ? '1px solid var(--line)' : undefined }}
+          title="Ask the other club how they feel about this package — without officially offering it"
+        >
+          {props.gauging ? 'Calling around…' : '📞 Gauge their interest'}
+        </button>
+      )}
     </Panel>
   )
 }

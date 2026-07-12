@@ -2790,50 +2790,70 @@ describe('#186 no-trade-clause waive negotiation', () => {
   })
 })
 
-describe('trade balance read (proposal-builder value bar)', () => {
-  it('scores both sides and tilts toward the club receiving more value', () => {
+describe('trade desk (assistant-GM read + gauge interest)', () => {
+  it('assistant GM warns on a steep overpay and blesses a fleece', () => {
     const data = generateLeague({ seed: 909 })
     const userId = data.league.teams[2]
     const career = new Career(data, 909, userId)
     career.advance(6)
 
-    const trades = career.getTrades()
-    const partner = trades.partners[0]
+    const partner = career.getTrades().partners[0]
     const myBest = [...career.getTrades().myPlayers].sort((a, b) => b.overall - a.overall)[0]
+    const myWorst = [...career.getTrades().myPlayers].sort((a, b) => a.overall - b.overall)[0]
+    const theirBest = [...partner.players].sort((a, b) => b.overall - a.overall)[0]
     const theirWorst = [...partner.players].sort((a, b) => a.overall - b.overall)[0]
-    expect(myBest).toBeTruthy()
-    expect(theirWorst).toBeTruthy()
 
-    // Giving my best for their worst should tilt AGAINST me (I overpay).
-    const lopsided = career.tradeBalance({
-      partnerTeamId: partner.teamId,
-      givePlayerIds: [myBest.playerId],
-      givePickIds: [],
-      receivePlayerIds: [theirWorst.playerId],
-      receivePickIds: [],
+    // Overpay: my best for their worst → caution/lopsided.
+    const overpay = career.assessTrade({
+      partnerTeamId: partner.teamId, givePlayerIds: [myBest.playerId], givePickIds: [],
+      receivePlayerIds: [theirWorst.playerId], receivePickIds: [],
     })
-    expect(lopsided.giveValue).toBeGreaterThan(0)
-    expect(lopsided.receiveValue).toBeGreaterThan(0)
-    // The valuation is symmetric with the same player on both sides → exactly even.
-    const mirror = career.tradeBalance({
-      partnerTeamId: partner.teamId,
-      givePlayerIds: [myBest.playerId],
-      givePickIds: [],
-      receivePlayerIds: [myBest.playerId],
-      receivePickIds: [],
-    })
-    expect(mirror.giveValue).toBeCloseTo(mirror.receiveValue, 5)
-    expect(mirror.tilt).toBe('fair')
+    expect(['caution', 'lopsided']).toContain(overpay.tone)
+    expect(overpay.agmName.length).toBeGreaterThan(0)
 
-    // Deterministic: same package → same read.
-    const again = career.tradeBalance({
-      partnerTeamId: partner.teamId,
-      givePlayerIds: [myBest.playerId],
-      givePickIds: [],
-      receivePlayerIds: [theirWorst.playerId],
-      receivePickIds: [],
+    // Fleece: my worst for their best. On pure value the AGM must NOT call this
+    // an overpay — though it may legitimately flag a cap problem (taking on a
+    // star while shedding scraps can bust the cap), which is a separate concern.
+    const fleece = career.assessTrade({
+      partnerTeamId: partner.teamId, givePlayerIds: [myWorst.playerId], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
     })
-    expect(again).toEqual(lopsided)
+    expect(['caution', 'lopsided']).not.toContain(fleece.tone)
+
+    // Empty side → the AGM asks for a package, not a crash.
+    const empty = career.assessTrade({
+      partnerTeamId: partner.teamId, givePlayerIds: [], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
+    })
+    expect(empty.tone).toBe('empty')
+  })
+
+  it('gauging interest is NON-binding and never pushes a pending trade', () => {
+    const data = generateLeague({ seed: 909 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 909, userId)
+    career.advance(6)
+
+    const partner = career.getTrades().partners[0]
+    const myWorst = [...career.getTrades().myPlayers].sort((a, b) => a.overall - b.overall)[0]
+    const theirBest = [...partner.players].sort((a, b) => b.overall - a.overall)[0]
+
+    const proposal = {
+      partnerTeamId: partner.teamId, givePlayerIds: [myWorst.playerId], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
+    }
+    const read = career.gaugeTradeInterest(proposal)
+    expect(['warm', 'tepid', 'cool', 'blocked']).toContain(read.lean)
+    expect(read.line.length).toBeGreaterThan(0)
+
+    // A lowball (their best for my worst) should NOT read as warm.
+    expect(read.lean).not.toBe('warm')
+
+    // Stable: gauging twice with the same package gives the same read, and it
+    // leaves no pending trade behind (it's purely a preview).
+    const again = career.gaugeTradeInterest(proposal)
+    expect(again).toEqual(read)
+    expect(career.getInbox().items.some((n) => /weighing your offer/i.test(n.headline))).toBe(false)
   })
 })
 

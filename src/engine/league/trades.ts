@@ -719,7 +719,7 @@ function movePlayers(from: Team, to: Team, ids: PlayerId[], players: Map<PlayerI
 }
 
 /** Roster ids missing from the player map contribute nothing to the cap. */
-const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number =>
+export const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number =>
   team.roster.reduce((s, id) => s + (players.get(id)?.contract.salary ?? 0), 0)
 
 /**
