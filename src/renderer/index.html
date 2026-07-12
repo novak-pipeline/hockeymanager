@@ -9,6 +9,10 @@
       user's explicit request. Those need:
         - connect-src to Hugging Face (model weights) + jsDelivr (WASM binaries)
         - 'wasm-unsafe-eval' to run the ONNX WebAssembly
+      IMPORTANT: huggingface.co 302-redirects LFS weights to a CDN subdomain
+      (cdn-lfs*.huggingface.co / *.hf.co / cas-bridge.xethub.hf.co), so BOTH
+      *.huggingface.co and *.hf.co must be allowed or the model bytes are blocked
+      (the API JSON loads from huggingface.co but the actual weights never arrive).
       No remote SCRIPTS are ever loaded (script-src stays 'self'); only data
       (model/wasm) is fetched cross-origin. The Anthropic press calls go through
       the main process, not the renderer, so api.anthropic.com is intentionally
@@ -16,7 +20,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' blob: data: https://huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' blob: data: https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
     />
     <title>Hockey Manager</title>
   </head>

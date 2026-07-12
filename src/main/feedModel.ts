@@ -100,7 +100,11 @@ async function downloadModel(onPct: (pct: number) => void): Promise<{ ok: boolea
   if (downloadState === 'downloading') return { ok: false, message: 'already downloading' }
   const { promises: fs, createWriteStream, mkdirSync } = require('node:fs') as typeof import('node:fs')
   downloadState = 'downloading'; downloadPct = 0; downloadError = ''
-  const dest = modelPath()
+  // Download ALWAYS targets the user-writable models dir. `modelPath()` is the
+  // path to LOAD from and is '' until a good file exists — using it here made the
+  // temp file '.part' in the cwd and renamed it to '' (ENOENT). The bundled copy,
+  // when present, short-circuits earlier via modelReady().
+  const dest = downloadedModelPath()
   const tmp = `${dest}.part`
   try {
     mkdirSync(modelDir(), { recursive: true })

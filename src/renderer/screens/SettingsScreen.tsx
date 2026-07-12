@@ -256,17 +256,19 @@ function VoicePanel(): JSX.Element {
   const [quality, setQuality] = useState<VoiceQuality>(readVoiceQuality())
   const [state, setState] = useState<KokoroLoadState>(kokoroState())
   const [pct, setPct] = useState(0)
+  const [errMsg, setErrMsg] = useState('')
 
   async function download(): Promise<void> {
     if (state === 'downloading' || state === 'ready') return
-    setState('downloading')
+    setState('downloading'); setErrMsg(''); setPct(0)
     try {
       await loadKokoro((info) => {
         const p = info as { progress?: number; status?: string }
         if (typeof p.progress === 'number') setPct(Math.round(p.progress))
       })
       setState('ready')
-    } catch {
+    } catch (err) {
+      setErrMsg((err as Error)?.message ?? 'unknown error')
       setState('failed')
     }
   }
@@ -318,7 +320,7 @@ function VoicePanel(): JSX.Element {
         ) : state === 'downloading' ? (
           <span className="chip" style={{ fontSize: 11 }}>Downloading… {pct}%</span>
         ) : state === 'failed' ? (
-          <span className="chip chip-danger" style={{ fontSize: 11 }}>Download failed</span>
+          <button className="btn btn-sm btn-primary" onClick={() => void download()}>↻ Retry download</button>
         ) : (
           <button className="btn btn-sm btn-primary" onClick={() => void download()}>Download neural voices</button>
         )}
@@ -330,6 +332,11 @@ function VoicePanel(): JSX.Element {
           </>
         )}
       </div>
+      {state === 'failed' && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 8, color: 'var(--danger)' }}>
+          Couldn’t fetch the voice model{errMsg ? `: ${errMsg}` : ''}. Check your internet connection and try again — the weights come from Hugging Face on first use.
+        </div>
+      )}
     </Panel>
   )
 }
