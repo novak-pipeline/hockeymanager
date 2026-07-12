@@ -65,6 +65,7 @@ export interface StaffMeetingScene {
 /** A digested observation the career layer produces from the live roster. */
 export type StaffFinding =
   | { kind: 'coldTopSix'; playerId: string; name: string; lineIdx: number; form: number }
+  | { kind: 'hotDepth'; playerId: string; name: string; lineIdx: number; form: number }
   | { kind: 'injuryRisk'; playerId: string; name: string; risk: number; ltirEligible: boolean }
   | { kind: 'fatigued'; playerId: string; name: string; condition: number }
   | { kind: 'prospectReady'; playerId: string; name: string; overall: number; weakestName?: string }
@@ -90,12 +91,14 @@ function severity(f: StaffFinding): number {
       return 60 - f.form
     case 'prospectReady':
       return 50 + f.overall / 4
+    case 'hotDepth':
+      return 45 + f.form
     case 'tacticMisfit':
       return 40 + (65 - f.coachFit)
   }
 }
 
-const MAX_PROPOSALS = 5
+const MAX_PROPOSALS = 6
 
 /**
  * Compose the scene. Findings are ordered by severity and capped so the meeting
@@ -193,6 +196,23 @@ function proposalFor(f: StaffFinding, cast: StaffCast, idx: number): StaffPropos
           { id: 'push', label: 'Ride him', detail: 'No change; he plays through it', action: { type: 'none' } },
         ],
         defaultOptionId: 'push',
+      }
+    case 'hotDepth':
+      return {
+        id,
+        speakerId: cast.asstCoach.id,
+        title: `${f.name} is heating up`,
+        intro: [
+          {
+            speakerId: cast.asstCoach.id,
+            text: `${f.name} has been our best forward on the ${lineName(f.lineIdx)} — he's earned a longer look with better linemates. I'd bump him up.`,
+          },
+        ],
+        options: [
+          { id: 'promote', label: 'Promote him to the second line', detail: `Move ${f.name} up to the 2nd line`, action: { type: 'moveLine', playerId: f.playerId, toLine: 1 } },
+          { id: 'keep', label: 'Keep him where he is', detail: 'No change; let the run continue in his role', action: { type: 'none' } },
+        ],
+        defaultOptionId: 'keep',
       }
     case 'prospectReady':
       return {

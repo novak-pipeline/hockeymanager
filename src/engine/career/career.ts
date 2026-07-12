@@ -10940,7 +10940,7 @@ export class Career {
       if (p.injuryStatus !== null) continue
       const fatigue = Math.max(0, Math.min(100, p.fatigue))
       const risk = Math.round(Math.max(0, Math.min(100, (p.injuryProneness ?? 30) * 0.55 + fatigue * 0.45)))
-      if (risk >= 62 && !used.has(p.id as string)) {
+      if (risk >= 55 && !used.has(p.id as string)) {
         used.add(p.id as string)
         findings.push({ kind: 'injuryRisk', playerId: p.id as string, name: p.name, risk, ltirEligible: this.ltirEligible(p) })
       }
@@ -10949,7 +10949,7 @@ export class Career {
     for (const p of roster) {
       if (p.injuryStatus !== null || used.has(p.id as string)) continue
       const condition = Math.round(100 - Math.max(0, Math.min(100, p.fatigue)))
-      if (condition < 32) {
+      if (condition < 40) {
         used.add(p.id as string)
         findings.push({ kind: 'fatigued', playerId: p.id as string, name: p.name, condition })
       }
@@ -10960,9 +10960,20 @@ export class Career {
       if (p.position !== 'C' && p.position !== 'W') continue
       const idx = lineIdxOf.get(p.id as string)
       if (idx === undefined || idx > 1) continue // top six only
-      if (p.form <= -3) {
+      if (p.form <= -2) {
         used.add(p.id as string)
         findings.push({ kind: 'coldTopSix', playerId: p.id as string, name: p.name, lineIdx: idx, form: p.form })
+      }
+    }
+    // Hot depth forward — earned a look on a scoring line.
+    for (const p of roster) {
+      if (p.injuryStatus !== null || used.has(p.id as string)) continue
+      if (p.position !== 'C' && p.position !== 'W') continue
+      const idx = lineIdxOf.get(p.id as string)
+      if (idx === undefined || idx < 2) continue // depth lines only (3rd/4th)
+      if (p.form >= 3) {
+        used.add(p.id as string)
+        findings.push({ kind: 'hotDepth', playerId: p.id as string, name: p.name, lineIdx: idx, form: p.form })
       }
     }
     // Prospect ready — the AGM pushes for a call-up.
@@ -12724,7 +12735,17 @@ export class Career {
               ]
             })(),
           }
-        : { todayISO: dayToDateISO(this.year, this.currentDay) }),
+        : {
+            todayISO: dayToDateISO(this.year, this.currentDay),
+            // Mark the recurring bi-weekly staff meetings so the GM sees them coming.
+            extraKeyDates: (() => {
+              const out: Array<{ dateISO: string; label: string }> = []
+              for (let d = STAFF_MEETING_INTERVAL; d <= lastMatchDay; d += STAFF_MEETING_INTERVAL) {
+                out.push({ dateISO: dayToDateISO(this.year, d), label: 'Staff Meeting' })
+              }
+              return out
+            })(),
+          }),
     }
     return buildCalendarView(ctx)
   }

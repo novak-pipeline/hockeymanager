@@ -50,19 +50,27 @@ describe('buildStaffMeetingScene', () => {
     expect(ltirOpt.action).toEqual({ type: 'ltir', playerId: 'p2' })
   })
 
-  it('orders by severity (injury risk over a cold scorer over a tactic misfit) and caps at 5', () => {
+  it('orders by severity (injury risk first) and caps at 6', () => {
     const many: StaffFinding[] = [
       { kind: 'tacticMisfit', coachFit: 40, direction: 'fitRoster' },
-      { kind: 'coldTopSix', playerId: 'a', name: 'A', lineIdx: 1, form: 25 },
+      { kind: 'coldTopSix', playerId: 'a', name: 'A', lineIdx: 1, form: -5 },
       { kind: 'injuryRisk', playerId: 'b', name: 'B', risk: 90, ltirEligible: false },
       { kind: 'fatigued', playerId: 'c', name: 'C', condition: 30 },
       { kind: 'prospectReady', playerId: 'd', name: 'D', overall: 70 },
-      { kind: 'coldTopSix', playerId: 'e', name: 'E', lineIdx: 0, form: 10 },
-      { kind: 'coldTopSix', playerId: 'f', name: 'F', lineIdx: 0, form: 12 },
+      { kind: 'hotDepth', playerId: 'g', name: 'G', lineIdx: 2, form: 6 },
+      { kind: 'coldTopSix', playerId: 'e', name: 'E', lineIdx: 0, form: -8 },
+      { kind: 'coldTopSix', playerId: 'f', name: 'F', lineIdx: 0, form: -6 },
     ]
     const s = scene(many)
-    expect(s.proposals).toHaveLength(5) // capped
+    expect(s.proposals).toHaveLength(6) // capped
     expect(s.proposals[0]!.title).toBe('B is an injury risk') // highest severity first
+  })
+
+  it('a hot depth forward gets a promotion proposal (move up to the 2nd line)', () => {
+    const s = scene([{ kind: 'hotDepth', playerId: 'h', name: 'Halonen', lineIdx: 2, form: 5 }])
+    expect(s.proposals[0]!.title).toBe('Halonen is heating up')
+    const opt = s.proposals[0]!.options.find((o) => o.id === 'promote')!
+    expect(opt.action).toEqual({ type: 'moveLine', playerId: 'h', toLine: 1 })
   })
 
   it('empty findings → no proposals (career layer then skips convening)', () => {
