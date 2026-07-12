@@ -26,10 +26,13 @@ const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > 
 
 /* ────────────────────────── injuries ────────────────────────── */
 
-/** ~1.5% per skater per game at league-average durability and usage. */
-const SKATER_INJURY_CHANCE = 0.015
+/** ~2.4% per skater per game at league-average durability and usage — tuned so
+ *  a team loses roughly 150–220 man-games a season (the real NHL band is
+ *  ~250–350, but our injuries never overlap a healthy scratch the way real ones
+ *  do, so a slightly lower event rate lands the right on-ice impact). */
+const SKATER_INJURY_CHANCE = 0.024
 /** Goalies absorb far less contact; lower base, full-game TOI reference. */
-const GOALIE_INJURY_CHANCE = 0.005
+const GOALIE_INJURY_CHANCE = 0.008
 const SKATER_TOI_REF_SECONDS = 17 * 60
 const GOALIE_TOI_REF_SECONDS = 60 * 60
 
@@ -83,8 +86,8 @@ function rollKind(rng: Rng): InjuryKind {
  * Concussions draw from a longer-tailed scale (multi-week absences happen).
  */
 function rollGamesOut(rng: Rng, kind: InjuryKind): number {
-  const scale = kind === 'concussion' ? 4.5 : 2.2
-  const cap = kind === 'concussion' ? 40 : 25
+  const scale = kind === 'concussion' ? 6 : 3.8
+  const cap = kind === 'concussion' ? 45 : 30
   const games = 1 + Math.floor(-Math.log(1 - rng.next()) * scale)
   return Math.min(cap, games)
 }
@@ -100,11 +103,14 @@ function injuryChance(player: Player, toi: number): number {
   const balanceFactor = 1 + (50 - player.ratings.physical.balance) / 125
   const aggressionFactor = 1 + (player.ratings.mental.aggression - 50) / 150
   const toiFactor = clamp(0.5 + 0.5 * (toi / ref), 0.25, 2)
+  // Age: older bodies break down more (a 36-year-old ≈ 1.2× a prime skater),
+  // and the youngest are a touch more resilient. Neutral through the prime years.
+  const ageFactor = player.age >= 30 ? 1 + (player.age - 30) * 0.035 : player.age <= 22 ? 0.9 : 1
   // Per-player durability from the source DB (1–99, 50 = league average). A
   // glass player (high proneness) gets hurt more; an iron man less. Absent on
   // fictional players → 1.0× (unchanged).
   const proneFactor = player.injuryProneness !== undefined ? clamp(player.injuryProneness / 50, 0.2, 2.5) : 1
-  return clamp(base * balanceFactor * aggressionFactor * toiFactor * proneFactor, 0, 0.25)
+  return clamp(base * balanceFactor * aggressionFactor * toiFactor * ageFactor * proneFactor, 0, 0.25)
 }
 
 export interface InjuryRoll {

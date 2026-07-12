@@ -25,6 +25,44 @@ describe('quickSimGame', () => {
     }
   })
 
+  it('rotates goalies: the backup gets a realistic share of starts, not zero', () => {
+    const { teams, players } = generateLeague({ seed: 7 })
+    const ids = [...teams.keys()]
+    const resolve = (id: any) => players.get(id)!
+    const home = teams.get(ids[0])!
+    const [starterId, backupId] = home.lines.goalies
+    let starterStarts = 0
+    let backupStarts = 0
+    // 82 "games" for the home club (different opponents/seeds), counting who
+    // actually faced shots each night.
+    for (let s = 0; s < 82; s++) {
+      const away = teams.get(ids[1 + (s % (ids.length - 1))])!
+      const r = quickSimGame(home, away, resolve, { seed: 1000 + s })
+      if ((r.playerStats.get(starterId)?.shotsAgainst ?? 0) > 0) starterStarts++
+      else if ((r.playerStats.get(backupId)?.shotsAgainst ?? 0) > 0) backupStarts++
+    }
+    // Real NHL: a backup starts roughly 15–30 of 82. Assert he's genuinely used
+    // and the starter still carries the load (no 82-0 split, no 41-41 split).
+    expect(backupStarts).toBeGreaterThanOrEqual(8)
+    expect(backupStarts).toBeLessThanOrEqual(38)
+    expect(starterStarts).toBeGreaterThan(backupStarts)
+  })
+
+  it('rides the starter in the playoffs (no rotation)', () => {
+    const { teams, players } = generateLeague({ seed: 7 })
+    const ids = [...teams.keys()]
+    const resolve = (id: any) => players.get(id)!
+    const home = teams.get(ids[0])!
+    const backupId = home.lines.goalies[1]
+    let backupStarts = 0
+    for (let s = 0; s < 30; s++) {
+      const away = teams.get(ids[1])!
+      const r = quickSimGame(home, away, resolve, { seed: 2000 + s, rules: 'playoff' })
+      if ((r.playerStats.get(backupId)?.shotsAgainst ?? 0) > 0) backupStarts++
+    }
+    expect(backupStarts).toBe(0)
+  })
+
   it('emits a coherent sparse stream (goals match the box score)', () => {
     const { teams, players } = generateLeague({ seed: 8 })
     const ids = [...teams.keys()]

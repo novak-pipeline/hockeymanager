@@ -108,6 +108,9 @@ class TeamSim {
   readonly resolve: (id: PlayerId) => Player
   goals = 0
   penaltyBoxUntil: number[] = [] // game-clock expiry times of active minors
+  /** The goalie starting THIS game (rotation, set by the caller). Falls back to
+   *  the depth-chart starter when unset. */
+  startingGoalie: PlayerId | null = null
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -119,7 +122,7 @@ class TeamSim {
    *  goals, as in the full sim), the even-strength lines otherwise. */
   pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev'): OnIce {
     const lines = this.team.lines
-    const goalie = this.resolve(lines.goalies[0])
+    const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
     if (situation === 'pp' && lines.powerPlayUnits.length > 0) {
       const unit = lines.powerPlayUnits[weightedIndex(rng, lines.powerPlayUnits.map((_, i) => PP_UNIT_WEIGHTS[i] ?? 0.15))]
       if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
@@ -441,7 +444,7 @@ function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
     return avg(shooters, (c) => c.scoring) / ctx.leagueAvg
   }
   const goalieSkill = (t: TeamSim): number => {
-    const g = t.resolve(t.team.lines.goalies[0])
+    const g = t.resolve(t.startingGoalie ?? t.team.lines.goalies[0])
     return g.composites.goaltending / ctx.leagueAvg
   }
   let h = 0
@@ -547,6 +550,31 @@ function simEmptyNetPhase(
   }
 }
 
+/**
+ * Pick the goalie starting this game — a real tandem, not the #1 every night.
+ * The backup gets a realistic share (~a third for a 1a/1b, tapering toward ~1
+ * in 8 behind a workhorse starter), scaled by the goaltending gap. In the
+ * playoffs the starter rides (backups only appear on a blowout hook, which the
+ * sim doesn't model here), so no rotation. Deterministic via its own RNG so it
+ * never perturbs the game's shot-by-shot stream.
+ */
+function chooseStartingGoalie(
+  team: Team,
+  resolve: (id: PlayerId) => Player,
+  leagueAvg: number,
+  rng: Rng,
+  rules: GameRules,
+): PlayerId {
+  const gs = team.lines.goalies
+  if (gs.length < 2 || (gs[0] as string) === (gs[1] as string)) return gs[0]
+  if (rules === 'playoff') return gs[0]
+  const starter = resolve(gs[0])
+  const backup = resolve(gs[1])
+  const relGap = (starter.composites.goaltending - backup.composites.goaltending) / Math.max(1, leagueAvg)
+  const backupShare = Math.max(0.12, Math.min(0.40, 0.34 - relGap * 1.5))
+  return rng.chance(backupShare) ? gs[1] : gs[0]
+}
+
 export function quickSimGame(
   home: Team,
   away: Team,
@@ -558,6 +586,11 @@ export function quickSimGame(
   const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
+  // Goalie rotation on a SEPARATE deterministic RNG so the game's shot stream is
+  // unchanged — only which netminder is behind it rotates game to game.
+  const gRng = new Rng((opts.seed ^ 0x60a11e5) >>> 0)
+  homeSim.startingGoalie = chooseStartingGoalie(home, resolve, ctx.leagueAvg, gRng, rules)
+  awaySim.startingGoalie = chooseStartingGoalie(away, resolve, ctx.leagueAvg, gRng, rules)
 
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
     simPeriod(ctx, homeSim, awaySim, period, PERIOD_SECONDS, false)

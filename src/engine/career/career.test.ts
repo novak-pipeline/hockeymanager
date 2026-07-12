@@ -670,11 +670,24 @@ describe('Career — story layer', () => {
     let curatedSeeds = 0
     for (const seed of [1, 2, 3, 7, 42]) {
       const data = generateLeague({ seed })
+      const userTid = data.league.teams[7] as string
       const career = new Career(data, seed, data.league.teams[7])
       let guard = 0
       while (!career.getTentpoles().deadlinePassed && guard++ < 220) career.advanceDay()
       expect(career.getTentpoles().deadlinePassed).toBe(true)
-      const spam = career.getInbox().items.filter((n) => /Trade talk heats up/.test(n.headline))
+      // Ambient chatter about OTHER clubs must be curated out. A rumour about the
+      // user's OWN player legitimately stays (it's front-office business) — that
+      // includes a player the user has since ACQUIRED (his rumour still tags his
+      // old club), so we exclude any item touching the user's team or roster.
+      const userRoster = new Set(
+        (data.teams.get(data.league.teams[7])?.roster ?? []).map((id) => id as string),
+      )
+      const spam = career.getInbox().items.filter(
+        (n) =>
+          /Trade talk heats up/.test(n.headline) &&
+          n.teamId !== userTid &&
+          !(n.playerId !== undefined && userRoster.has(n.playerId)),
+      )
       if (spam.length === 0) curatedSeeds++
     }
     expect(curatedSeeds).toBe(5)

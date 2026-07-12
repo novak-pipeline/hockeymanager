@@ -214,8 +214,12 @@ function checkCareerHistory(data: ReturnType<typeof generateLeague>, flag: (s: s
 function checkNoCrossTierTrades(news: NewsItem[], nhlNames: Set<string>, flag: (s: string) => void): void {
   for (const n of news) {
     if (n.category !== 'trade') continue
+    // Only COMPLETED trades matter here — a "Trade offer from …" is a proposal,
+    // and its flavor text can legitimately mention a junior prospect the club
+    // holds rights to without any cross-tier player actually changing hands.
+    if (!/^Trade:/i.test(n.headline)) continue
     const text = `${n.headline} ${n.body}`
-    if (/\bU20\b|\bU18\b|junior|AHL/i.test(text)) {
+    if (/\bU20\b|\bU18\b|\bAHL\b/i.test(text)) {
       flag(`cross-tier trade news: "${n.headline}"`)
     }
   }
