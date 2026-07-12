@@ -4036,19 +4036,29 @@ export class Career {
           { teamId: o.partnerTeamId as string }
         )
       }
-      // The league lives without you: AI clubs deal with each other — rentals
-      // flow from rebuilders to contenders, ramping toward the deadline.
-      const aiDeal = generateAiAiTrade({
-        day,
-        deadlineDay: this.deadlineDay,
-        userTeamId: this.userTeamId,
-        teams: this.data.teams,
-        players: this.data.players,
-        picks: this.picks,
-        rng: this.rngFor(7012, day),
-        postureOf,
-      })
-      if (aiDeal) {
+      // The league lives without you: AI clubs deal with each other, and the
+      // volume ramps toward the deadline into a real flurry (multiple deals can
+      // land in a single day). Each attempt re-reads the updated rosters, so a
+      // vet isn't traded twice and the market thins as pieces move.
+      const dl = this.deadlineDay - day
+      const aiTradeAttempts = dl === 0 ? 12 : dl >= 0 && dl <= 5 ? 7 : dl >= 0 && dl <= 20 ? 4 : 2
+      for (let attempt = 0; attempt < aiTradeAttempts; attempt++) {
+        const aiDeal = generateAiAiTrade({
+          day,
+          deadlineDay: this.deadlineDay,
+          userTeamId: this.userTeamId,
+          teams: this.data.teams,
+          players: this.data.players,
+          picks: this.picks,
+          rng: this.rngFor(7012, day, attempt),
+          postureOf,
+        })
+        if (!aiDeal) continue
+        // Value of the piece changing hands — gates whether this reaches your inbox.
+        const movedValue = Math.max(
+          0,
+          ...aiDeal.playerIds.map((id) => playerValue(this.resolve(asPlayerId(id as string)))),
+        )
         executeTrade({
           teams: this.data.teams,
           players: this.data.players,
@@ -4078,14 +4088,19 @@ export class Career {
           bGivesPlayerIds: [],
           bGivesPicks: aiDeal.picks,
         })
-        const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
-        const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
-        this.pushNews(
-          'trade',
-          `Trade: ${aiDeal.summary.split('.')[0]}`,
-          `${aiDeal.summary} ${buyerGm.name} adds a piece for the run; ${sellerGm.name} keeps stockpiling futures.`,
-          { teamId: aiDeal.buyerTeamId as string }
-        )
+        // Every deal is on the transactions ledger + ticker; only NOTABLE ones
+        // (a genuine roster piece changing hands) reach your inbox, so the
+        // deadline hums without burying your mail in depth-for-a-7th swaps.
+        if (movedValue >= 35) {
+          const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
+          const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
+          this.pushNews(
+            'trade',
+            `Trade: ${aiDeal.summary.split('.')[0]}`,
+            `${aiDeal.summary} ${buyerGm.name} adds a piece for the run; ${sellerGm.name} banks the return.`,
+            { teamId: aiDeal.buyerTeamId as string }
+          )
+        }
       }
     }
     this.currentDay = day

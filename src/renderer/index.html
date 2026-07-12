@@ -4,23 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
-      CSP: locked to 'self' except for the optional enhanced-voice feature,
-      which downloads the Kokoro neural-TTS model + ONNX WASM runtime at the
-      user's explicit request. Those need:
-        - connect-src to Hugging Face (model weights) + jsDelivr (WASM binaries)
-        - 'wasm-unsafe-eval' to run the ONNX WebAssembly
-      IMPORTANT: huggingface.co 302-redirects LFS weights to a CDN subdomain
-      (cdn-lfs*.huggingface.co / *.hf.co / cas-bridge.xethub.hf.co), so BOTH
-      *.huggingface.co and *.hf.co must be allowed or the model bytes are blocked
-      (the API JSON loads from huggingface.co but the actual weights never arrive).
-      No remote SCRIPTS are ever loaded (script-src stays 'self'); only data
-      (model/wasm) is fetched cross-origin. The Anthropic press calls go through
-      the main process, not the renderer, so api.anthropic.com is intentionally
-      NOT in connect-src here.
+      CSP: locked to 'self' except for the optional enhanced-voice feature, which
+      pulls the Kokoro neural-TTS model + the ONNX WASM runtime the first time the
+      user turns it on. Those need:
+        - connect-src to Hugging Face (model weights) + jsDelivr (wasm binaries).
+          huggingface.co 302-redirects LFS weights to a CDN subdomain
+          (cdn-lfs*.huggingface.co / *.hf.co / cas-bridge.xethub.hf.co), so BOTH
+          *.huggingface.co and *.hf.co must be allowed or the bytes never arrive.
+        - script-src + worker-src to jsDelivr: transformers.js loads the ONNX
+          runtime (ort-wasm-*.jsep.mjs) as a DYNAMIC MODULE IMPORT and spins up a
+          threaded worker from it — those are governed by script-src/worker-src,
+          NOT connect-src, so opening only connect-src left the runtime blocked.
+        - 'wasm-unsafe-eval' to run the ONNX WebAssembly.
+      The Anthropic press calls go through the main process, not the renderer, so
+      api.anthropic.com is intentionally NOT in connect-src here.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' blob: data: https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' blob: data: https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
     />
     <title>Hockey Manager</title>
   </head>

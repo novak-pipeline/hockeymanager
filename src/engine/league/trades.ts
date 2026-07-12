@@ -1116,30 +1116,34 @@ export function generateAiAiTrade(args: {
   const { day, userTeamId, teams, players, picks, rng, postureOf } = args
 
   const daysLeft = args.deadlineDay !== undefined ? args.deadlineDay - day : undefined
-  let chance = 1 / 12
+  let chance = 1 / 9
   if (daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 20) {
-    chance = (1 / 12) * (1 + 2 * (1 - daysLeft / 20))
+    chance = (1 / 9) * (1 + 2.5 * (1 - daysLeft / 20))
   }
   if (!rng.chance(chance)) return null
 
-  const ai = [...teams.values()].filter((t) => t.id !== userTeamId)
+  // NHL clubs only — the AHL/junior/world tiers never trade with the NHL here.
+  const ai = [...teams.values()].filter(
+    (t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world',
+  )
 
-  // Sellers: rebuilding clubs with a healthy, movable veteran and roster depth
-  // to spare. The vet must be on an expiring/short deal — a classic rental.
+  // Sellers: clubs NOT in a win-now push (rebuild or retool) with a healthy,
+  // movable veteran and roster depth to spare. The vet is on a short deal — an
+  // expiring rental or a 1–2-year piece a retooling club is happy to move.
   const sellers = ai
-    .filter((t) => postureOf(t.id) === 'rebuild' && t.roster.length >= 20)
+    .filter((t) => (postureOf(t.id) === 'rebuild' || postureOf(t.id) === 'retool') && t.roster.length >= 20)
     .map((t) => {
       const vets = t.roster
         .map((id) => players.get(id))
         .filter(
           (p): p is Player =>
             p !== undefined &&
-            p.age >= 27 &&
-            p.contract.yearsRemaining <= 1 &&
+            p.age >= 26 &&
+            p.contract.yearsRemaining <= 2 &&
             !p.contract.noTradeClause &&
             p.injuryStatus === null &&
             p.position !== 'G' &&
-            playerValue(p) >= 15
+            playerValue(p) >= 12
         )
         .sort((a, b) => playerValue(b) - playerValue(a) || (a.id < b.id ? -1 : 1))
       return { team: t, vet: vets[0] }
@@ -1150,15 +1154,16 @@ export function generateAiAiTrade(args: {
   const seller = rng.pick(sellers)
   const vetValue = playerValue(seller.vet)
 
-  // Buyers: contenders (≠ seller) that can absorb the salary, have roster room,
-  // and own draft capital worth roughly the vet.
+  // Buyers: clubs adding for a push (contenders, or retoolers rounding out a
+  // roster) that can absorb the salary, have roster room, and own draft capital
+  // worth roughly the vet.
   const ranks = strengthRanks(teams, players)
   const currentYear = picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
   const buyers = ai
     .filter(
       (t) =>
         t.id !== seller.team.id &&
-        postureOf(t.id) === 'contend' &&
+        (postureOf(t.id) === 'contend' || postureOf(t.id) === 'retool') &&
         t.roster.length < 23 &&
         t.finances.capUsed + seller.vet.contract.salary <= t.finances.salaryCap
     )

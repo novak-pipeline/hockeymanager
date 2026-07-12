@@ -886,6 +886,42 @@ describe('generateAiAiTrade (LW3)', () => {
       expect(generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf: allContend })).toBeNull()
     }
   })
+
+  it('a RETOOL club can move a 1–2-year piece too (not just pure rentals)', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    // Give the movable piece a second year and make its club a retooler.
+    const vet = players.get(vetId)!
+    vet.contract = { ...vet.contract, yearsRemaining: 2 }
+    const posture = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+      (tid as string) === 't2' ? 'retool' : (tid as string) === 'u1' ? 'rebuild' : 'contend'
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 200 && !deal; day++) {
+      deal = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf: posture })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.sellerTeamId).toBe(asTeamId('t2'))
+    expect(deal!.playerIds).toEqual([vetId])
+  })
+
+  it('fires more often near the deadline than early in the season', () => {
+    const deadlineDay = 200
+    const countDeals = (days: number[]): number => {
+      const { teams, players, picks, userTeamId } = aiAiFixture()
+      let n = 0
+      for (const day of days) {
+        const d = generateAiAiTrade({
+          day, deadlineDay, userTeamId, teams, players, picks,
+          rng: new Rng(deriveSeed(99, day)), postureOf,
+        })
+        if (d) n++
+      }
+      return n
+    }
+    // 15 far-from-deadline days vs 15 right before it, same seeds.
+    const early = countDeals(Array.from({ length: 15 }, (_, i) => i + 1))       // days 1..15 (185 out)
+    const late = countDeals(Array.from({ length: 15 }, (_, i) => 186 + i))       // days 186..200 (≤14 out)
+    expect(late).toBeGreaterThan(early)
+  })
 })
 
 describe('evaluateProposal — persona philosophy override (LW3)', () => {
