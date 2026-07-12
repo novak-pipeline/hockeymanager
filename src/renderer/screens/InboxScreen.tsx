@@ -624,7 +624,7 @@ function ConcernCard({
               {serious ? 'Serious' : 'Wants a word'}
             </span>
           </div>
-          <div style={{ fontSize: 13, lineHeight: 1.5 }}>{concern.message}</div>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}><Linkify text={concern.message} /></div>
           <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 2 }}>
             {concern.options.map((o) => (
               <button
