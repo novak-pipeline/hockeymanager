@@ -26,10 +26,10 @@ describe('buildWeightedSchedule', () => {
     return { total, home, away }
   }
 
-  it('gives every team ~82 games (84 with default 4/3/2 weighting)', () => {
+  it('gives every team exactly 82 games (real NHL: 26 div + 24 conf + 32 inter)', () => {
     for (const t of teams) {
       const { total } = countsFor(t.id as string)
-      expect(total).toBe(84)
+      expect(total).toBe(82)
     }
   })
 
@@ -40,16 +40,19 @@ describe('buildWeightedSchedule', () => {
     }
   })
 
-  it('weights division > conference > inter-conference meetings', () => {
-    const a = teams[0]! // conf0-div0
+  it('weights division > conference > inter-conference, with a 4/3 division split', () => {
+    const a = teams[0]! // conf0-div0, index 0 within its division
     const meet = (other: ScheduleTeam): number =>
       games.filter((g) =>
         (g.homeTeamId === a.id && g.awayTeamId === other.id) ||
         (g.awayTeamId === a.id && g.homeTeamId === other.id)).length
-    const divRival = teams.find((t) => t.id !== a.id && t.divisionId === a.divisionId)!
+    const divRivals = teams.filter((t) => t.id !== a.id && t.divisionId === a.divisionId)
+    // Real NHL: some division rivals 4×, some 3× (to land on 82). Team[0]'s
+    // cycle-neighbours (division index 1 and 7) get 3; the middle rivals get 4.
+    const meetCounts = divRivals.map(meet).sort()
+    expect(meetCounts).toEqual([3, 3, 4, 4, 4, 4, 4]) // 2 threes + 5 fours = 26
     const confRival = teams.find((t) => t.conferenceId === a.conferenceId && t.divisionId !== a.divisionId)!
     const interRival = teams.find((t) => t.conferenceId !== a.conferenceId)!
-    expect(meet(divRival)).toBe(4)
     expect(meet(confRival)).toBe(3)
     expect(meet(interRival)).toBe(2)
   })

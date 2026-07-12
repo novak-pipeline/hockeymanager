@@ -34,6 +34,9 @@ export interface Standing {
   wins: number
   losses: number
   overtimeLosses: number
+  /** Regulation + overtime wins (ROW) — wins NOT decided by a shootout. The real
+   *  NHL's first meaningful tiebreaker after points. */
+  regulationOtWins: number
   points: number
   goalsFor: number
   goalsAgainst: number

@@ -410,10 +410,12 @@ export interface WeightedScheduleOptions {
 
 /**
  * Realistic NHL-style weighted schedule: teams play division rivals most often,
- * same-conference clubs next, and the other conference least — ≈82 games with the
- * default 4/3/2 weighting (e.g. a 2×2×8 league → 28+24+32 = 84 per team). Each
- * pairing's meetings are spread evenly across the calendar; home/away is balanced
- * per pair (odd counts alternate the extra home game so team totals stay even).
+ * same-conference clubs next, and the other conference least. With the default
+ * 4/3/2 weighting and the division-neighbour thinning below, a standard 2-conf ×
+ * 4-div-of-8 league lands on exactly 82 per team (26 division + 24 same-conf +
+ * 32 inter-conf), matching the real NHL. Each pairing's meetings are spread
+ * evenly across the calendar; home/away is balanced per pair (odd counts
+ * alternate the extra home game so team totals stay even).
  *
  * Deterministic — no Rng. Falls back gracefully for any conference/division shape.
  */
@@ -439,12 +441,36 @@ export function buildWeightedSchedule(
   // meetings don't all target the same handful of days. Without it every "first
   // meeting" piles near one day and the schedule clusters mid-season, leaving
   // October sparse; the phase fans the targets evenly across the whole window.
+  // Division rivalry sub-weighting: real NHL plays SOME division rivals 4× and
+  // some 3× so the total lands on 82, not 84 (a flat 4× on 7 rivals = 28 div
+  // games → 84). We reduce a cyclic subset of each division's pairs by one
+  // meeting: order the division's teams and give each team exactly its two
+  // cycle-neighbours 3 meetings, the rest 4 (8-team div → 5×4 + 2×3 = 26 div
+  // games; +24 same-conf +32 inter = 82). Deterministic; degrades gracefully
+  // for non-standard division sizes.
+  const divMembers = new Map<string, ScheduleTeam[]>()
+  for (const t of teams) {
+    const k = String(t.divisionId)
+    if (!divMembers.has(k)) divMembers.set(k, [])
+    divMembers.get(k)!.push(t)
+  }
+  const divIndex = new Map<string, number>()
+  for (const [, members] of divMembers) members.forEach((m, i) => divIndex.set(m.id as string, i))
+  const isDivisionNeighbour = (a: ScheduleTeam, b: ScheduleTeam): boolean => {
+    const members = divMembers.get(String(a.divisionId))
+    if (!members || members.length <= 3) return false // too small to thin out
+    const n = members.length
+    const ia = divIndex.get(a.id as string)!, ib = divIndex.get(b.id as string)!
+    const d = Math.abs(ia - ib)
+    return d === 1 || d === n - 1
+  }
+
   let pairingIdx = 0
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       const a = teams[i]!, b = teams[j]!
       const meetings =
-        a.divisionId === b.divisionId ? divM
+        a.divisionId === b.divisionId ? (isDivisionNeighbour(a, b) ? divM - 1 : divM)
         : a.conferenceId === b.conferenceId ? confM
         : interM
       if (meetings <= 0) continue
@@ -575,6 +601,7 @@ export const freshStanding = (teamId: TeamId): Standing => ({
   wins: 0,
   losses: 0,
   overtimeLosses: 0,
+  regulationOtWins: 0,
   points: 0,
   goalsFor: 0,
   goalsAgainst: 0

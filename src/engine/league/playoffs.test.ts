@@ -441,3 +441,58 @@ describe('seedBracket — 16-team NHL field (large league)', () => {
     expect(s.championTeamId).toBe(T(1))
   })
 })
+
+describe('seedBracket — real NHL divisional format (top 3 per div + 2 wildcards)', () => {
+  // East = Atlantic (t1..t8) + Metro (t9..t16); West = Central (t17..t24) + Pacific (t25..t32).
+  const E16 = { name: 'East', teamIds: Array.from({ length: 16 }, (_, i) => T(i + 1)) }
+  const W16 = { name: 'West', teamIds: Array.from({ length: 16 }, (_, i) => T(i + 17)) }
+  const teamDivision = new Map<TeamId, string>()
+  for (let i = 1; i <= 8; i++) teamDivision.set(T(i), 'ATL')
+  for (let i = 9; i <= 16; i++) teamDivision.set(T(i), 'MET')
+  for (let i = 17; i <= 24; i++) teamDivision.set(T(i), 'CEN')
+  for (let i = 25; i <= 32; i++) teamDivision.set(T(i), 'PAC')
+  // East order interleaves Atlantic/Metro by rank: t1(ATL1) t9(MET1) t2 t10 t3 t11 t4 ...
+  const ORDER32: TeamId[] = []
+  for (let i = 0; i < 8; i++) { ORDER32.push(T(i + 1)); ORDER32.push(T(i + 9)) }
+  for (let i = 0; i < 8; i++) { ORDER32.push(T(i + 17)); ORDER32.push(T(i + 25)) }
+
+  it('seeds division winners + wildcards into the A1vWC2 / A2vA3 / B1vWC1 / B2vB3 bracket', () => {
+    const s = seedBracket({ year: 2026, conferences: [E16, W16], standingsOrder: ORDER32, teamDivision })
+    // East: A(tlantic)1=t1 A2=t2 A3=t3; B=M(etro)1=t9 B2=t10 B3=t11; wildcards = next
+    // best in conference = t4 (WC1) and t12 (WC2).
+    const east = s.rounds[0].series.slice(0, 4).map((x) => [x.highSeedTeamId, x.lowSeedTeamId])
+    expect(east).toEqual([
+      [T(1), T(12)], // A1 hosts the lower wildcard
+      [T(2), T(3)],  // A2 vs A3 (2 vs 3 in the Atlantic)
+      [T(9), T(4)],  // B1 hosts the higher wildcard
+      [T(10), T(11)],// B2 vs B3 (2 vs 3 in the Metro)
+    ])
+    // t5..t8 (Atlantic) and t13..t16 (Metro) miss the cut — 8 per conference qualify.
+    const eastTeams = new Set(east.flat().map((t) => t as string))
+    expect(eastTeams.has('t05')).toBe(false)
+    expect(eastTeams.has('t13')).toBe(false)
+  })
+
+  it('lets a strong non-division-winner in as a wildcard over a weak team from the other division', () => {
+    // Make Atlantic dominant: its 4th and 5th (t4, t5) outrank every Metro team but
+    // the winner. Both wildcards then come from the Atlantic — legal in the NHL.
+    const order: TeamId[] = [
+      T(1), T(2), T(3), T(4), T(5), // Atlantic top 5
+      T(9),                          // Metro winner
+      T(6), T(7), T(8),              // rest of Atlantic
+      T(10), T(11), T(12), T(13), T(14), T(15), T(16), // rest of Metro
+    ]
+    // Fill the West half so the field is valid.
+    for (let i = 17; i <= 32; i++) order.push(T(i))
+    const s = seedBracket({ year: 2026, conferences: [E16, W16], standingsOrder: order, teamDivision })
+    const east = s.rounds[0].series.slice(0, 4)
+    const qualified = new Set(east.flatMap((x) => [x.highSeedTeamId as string, x.lowSeedTeamId as string]))
+    // Atlantic's 4th and 5th (t4, t5) are the two wildcards; Metro 2nd/3rd (t10, t11) still get in.
+    expect(qualified.has('t04')).toBe(true)
+    expect(qualified.has('t05')).toBe(true)
+    expect(qualified.has('t10')).toBe(true)
+    expect(qualified.has('t11')).toBe(true)
+    // Metro's 4th (t12) is squeezed out.
+    expect(qualified.has('t12')).toBe(false)
+  })
+})

@@ -27,6 +27,7 @@ function freshStanding(teamId: TeamId): Standing {
     wins: 0,
     losses: 0,
     overtimeLosses: 0,
+    regulationOtWins: 0,
     points: 0,
     goalsFor: 0,
     goalsAgainst: 0
@@ -48,9 +49,13 @@ function applyResult(
 
   const homeWon = res.homeGoals > res.awayGoals
   const extra = res.decidedBy !== 'regulation'
+  // ROW = a win in regulation or overtime, but NOT a shootout. (Shootout wins
+  // still count toward `wins`/points; they just don't help the ROW tiebreak.)
+  const rowWin = res.decidedBy !== 'shootout'
   if (homeWon) {
     home.wins++
     home.points += WIN_POINTS
+    if (rowWin) home.regulationOtWins++
     if (extra) {
       away.overtimeLosses++
       away.points += OTL_POINTS
@@ -60,6 +65,7 @@ function applyResult(
   } else {
     away.wins++
     away.points += WIN_POINTS
+    if (rowWin) away.regulationOtWins++
     if (extra) {
       home.overtimeLosses++
       home.points += OTL_POINTS
@@ -69,10 +75,12 @@ function applyResult(
   }
 }
 
-/** NHL tiebreak: points, then wins, then goal differential. */
+/** NHL tiebreak: points, then ROW (regulation+OT wins), then total wins, then
+ *  goal differential. */
 export function sortStandings(standings: Standing[]): Standing[] {
   return [...standings].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points
+    if (b.regulationOtWins !== a.regulationOtWins) return b.regulationOtWins - a.regulationOtWins
     if (b.wins !== a.wins) return b.wins - a.wins
     return b.goalsFor - b.goalsAgainst - (a.goalsFor - a.goalsAgainst)
   })

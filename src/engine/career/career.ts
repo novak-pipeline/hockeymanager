@@ -681,6 +681,7 @@ function freshStanding(teamId: TeamId): Standing {
     wins: 0,
     losses: 0,
     overtimeLosses: 0,
+    regulationOtWins: 0,
     points: 0,
     goalsFor: 0,
     goalsAgainst: 0,
@@ -4555,7 +4556,14 @@ export class Career {
         (tid) => this.data.teams.get(tid)!.conferenceId === c.id
       ),
     }))
-    this.playoffs = seedBracket({ year: this.year, conferences, standingsOrder: order })
+    // Division of each NHL team → enables the real NHL divisional playoff format
+    // (top 3 per division + 2 wildcards) when the league has divisions.
+    const teamDivision = new Map<TeamId, string>()
+    for (const tid of this.data.league.teams) {
+      const div = this.data.teams.get(tid)?.divisionId
+      if (div) teamDivision.set(tid, div)
+    }
+    this.playoffs = seedBracket({ year: this.year, conferences, standingsOrder: order, teamDivision })
     this.phase = 'playoffs'
     // Fire playoff preview report (once per season).
     for (const kind of checkPlayoffEntry(this.pressScheduleState)) {
@@ -6030,6 +6038,21 @@ export class Career {
 
     const newYear = this.year + 1
     this.data.league.season.year = newYear
+
+    // Cap escalation: the NHL ceiling climbs ~4–5% a year with revenue. A cap
+    // frozen at its opening value forever is deeply un-NHL — salaries inflate
+    // (ELCs expire, RFAs get raises) while the ceiling stays put, and within a
+    // few seasons the whole league is jammed against a wall it should have
+    // grown past. Bump every NHL club's ceiling in lockstep (it's league-wide),
+    // rounded to the nearest $100k. Surfaces naturally on the Finances screen.
+    {
+      const CAP_GROWTH = 1.045
+      for (const teamId of this.data.league.teams) {
+        const t = this.data.teams.get(teamId)
+        if (!t) continue
+        t.finances.salaryCap = Math.round((t.finances.salaryCap * CAP_GROWTH) / 100_000) * 100_000
+      }
+    }
     // Rebuild next season's schedule, preserving the weighted NHL format when the
     // league has a conference/division structure (else flat round-robins).
     const schedTeams = this.data.league.teams
@@ -12126,6 +12149,7 @@ export class Career {
     const gamesPlayed = new Map<TeamId, number>()
     const gamesRemaining = new Map<TeamId, number>()
     const confOf = new Map<TeamId, string>()
+    const divOf = new Map<TeamId, string>()
     for (const t of teamIds) {
       const team = this.data.teams.get(t)
       strength.set(t, teamStrengthRating((team?.roster ?? []).map((id) => this.resolve(id))))
@@ -12134,6 +12158,7 @@ export class Career {
       gamesPlayed.set(t, st?.gamesPlayed ?? 0)
       gamesRemaining.set(t, 0)
       confOf.set(t, team?.conferenceId ?? '')
+      divOf.set(t, team?.divisionId ?? '')
     }
 
     const remaining = this.data.league.schedule.filter((g) => g.day > this.currentDay)
@@ -12148,6 +12173,29 @@ export class Career {
     // league now shows real odds instead of a near-zero top-4 chance.
     const minConfSize = Math.min(...confs.map((c) => teamIds.filter((t) => confOf.get(t) === c).length))
     const QUAL = minConfSize >= 12 ? 8 : 4
+    // Mirror seedBracket: when the field is 8 and each conference splits into ≥2
+    // divisions, qualify the NHL way (top 3 per division + 2 wildcards) so the
+    // odds screen agrees with the bracket a mid-division team actually faces.
+    const useDivisional =
+      QUAL === 8 &&
+      confs.every((c) => new Set(teamIds.filter((t) => confOf.get(t) === c).map((t) => divOf.get(t))).size >= 2)
+    /** Teams from one conference that make the playoffs under the current `pts`. */
+    const qualifiersInConf = (members: TeamId[]): TeamId[] => {
+      if (!useDivisional) return members.slice(0, QUAL)
+      const byDiv = new Map<string, TeamId[]>()
+      for (const t of members) {
+        const d = divOf.get(t) ?? ''
+        if (!byDiv.has(d)) byDiv.set(d, [])
+        byDiv.get(d)!.push(t)
+      }
+      const seeded = new Set<TeamId>()
+      for (const d of byDiv.values()) for (const t of d.slice(0, 3)) seeded.add(t) // top 3 per division
+      for (const t of members) { // 2 wildcards = next best in the conference
+        if (seeded.size >= 8) break
+        if (!seeded.has(t)) seeded.add(t)
+      }
+      return [...seeded]
+    }
     const sig = (x: number): number => 1 / (1 + Math.exp(-x))
     const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
 
@@ -12175,8 +12223,8 @@ export class Career {
         members.sort((a, b) =>
           (pts.get(b)! - pts.get(a)!) || (strength.get(b)! - strength.get(a)!) || (a < b ? -1 : 1)
         )
-        for (let i = 0; i < QUAL && i < members.length; i++) {
-          playoffCount.set(members[i]!, playoffCount.get(members[i]!)! + 1)
+        for (const t of qualifiersInConf(members)) {
+          playoffCount.set(t, playoffCount.get(t)! + 1)
         }
       }
     }
@@ -15277,7 +15325,9 @@ export class Career {
     career.phase = snapshot.phase
     career.currentDay = snapshot.currentDay
     for (const [k, v] of snapshot.standings) {
-      career.standings.set(asTeamId(k), v as Standing)
+      // Backfill any newly-added Standing fields (e.g. regulationOtWins) so a
+      // save from before they existed doesn't leave them undefined (→ NaN sorts).
+      career.standings.set(asTeamId(k), { ...freshStanding(asTeamId(k)), ...(v as Standing) })
     }
     for (const [k, v] of snapshot.playerTotals) {
       career.totals.set(asPlayerId(k), v as GamePlayerStat)

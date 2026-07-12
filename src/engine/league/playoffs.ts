@@ -76,6 +76,47 @@ export interface SeedBracketArgs {
   conferences: Array<{ name: string; teamIds: TeamId[] }>
   /** League-wide regular-season order, best first, already tie-broken. */
   standingsOrder: TeamId[]
+  /** Each team's division id. When present AND a conference splits into exactly
+   *  two divisions with an 8-team field, the real NHL divisional format is used
+   *  (top 3 per division + 2 wildcards, bracketed A1-v-WC2 / A2-v-A3 / B1-v-WC1 /
+   *  B2-v-B3). Absent → the legacy top-N-by-points seeding (back-compat). */
+  teamDivision?: ReadonlyMap<TeamId, string>
+}
+
+/**
+ * The `qual` qualifiers for one conference, in the array positions the generic
+ * `seedOrder` bracket expects. For the NHL divisional format (qual 8, two
+ * divisions) that is `[A1,B1,B2,A2,A3,B3,WC1,WC2]`, which the bracket pairs as
+ * A1-v-WC2 / A2-v-A3 / B1-v-WC1 / B2-v-B3 and advances each division up its own
+ * side to the conference final. Falls back to plain top-`qual`-by-points when
+ * divisions are absent or the shape isn't a clean two-division split.
+ */
+function seedConference(
+  confOrder: TeamId[],
+  qual: number,
+  teamDivision: ReadonlyMap<TeamId, string> | undefined,
+): TeamId[] {
+  if (qual !== 8 || !teamDivision) return confOrder.slice(0, qual)
+  // Group the conference's teams by division, preserving standings order.
+  const divs = new Map<string, TeamId[]>()
+  for (const id of confOrder) {
+    const d = teamDivision.get(id) ?? '?'
+    if (!divs.has(d)) divs.set(d, [])
+    divs.get(d)!.push(id)
+  }
+  const divList = [...divs.values()]
+  // Only the clean two-division shape gets the divisional bracket; anything else
+  // (one division, three+, or a division with < 3 teams) keeps top-8 seeding.
+  if (divList.length !== 2 || divList.some((d) => d.length < 3)) return confOrder.slice(0, 8)
+  // `divs` insertion order is by first appearance in the best-first standings, so
+  // divList[0]'s winner is the conference's #1 seed (division "A").
+  const [A1, A2, A3] = divList[0]!
+  const [B1, B2, B3] = divList[1]!
+  const inField = new Set<TeamId>([A1, A2, A3, B1, B2, B3])
+  const wilds = confOrder.filter((id) => !inField.has(id)).slice(0, 2)
+  if (wilds.length < 2) return confOrder.slice(0, 8)
+  const [WC1, WC2] = wilds
+  return [A1!, B1!, B2!, A2!, A3!, B3!, WC1!, WC2!]
 }
 
 /** One playable game, as handed to the career layer to simulate. */
@@ -108,16 +149,18 @@ export function seedBracket(args: SeedBracketArgs): PlayoffsState {
   const order = seedOrder(qual)
 
   const blocks = args.conferences.map((conference, ci) => {
-    const qualifiers = perConf[ci]
-    if (qualifiers.length < qual) {
+    const confOrder = perConf[ci]
+    if (confOrder.length < qual) {
       throw new Error(
-        `conference ${conference.name} places ${qualifiers.length} teams in the standings, ` +
+        `conference ${conference.name} places ${confOrder.length} teams in the standings, ` +
           `needs at least ${qual}`
       )
     }
+    // Divisional NHL seeding when division data is available; else top-N points.
+    const seeds = seedConference(confOrder, qual, args.teamDivision)
     return {
-      seeds: qualifiers.slice(0, qual),
-      topRank: args.standingsOrder.indexOf(qualifiers[0])
+      seeds,
+      topRank: args.standingsOrder.indexOf(seeds[0])
     }
   })
   blocks.sort((a, b) => a.topRank - b.topRank)
