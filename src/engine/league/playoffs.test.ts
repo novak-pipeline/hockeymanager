@@ -406,3 +406,38 @@ describe('serialization', () => {
     ])
   })
 })
+
+describe('seedBracket — 16-team NHL field (large league)', () => {
+  const E16 = { name: 'East', teamIds: Array.from({ length: 16 }, (_, i) => T(i + 1)) }
+  const W16 = { name: 'West', teamIds: Array.from({ length: 16 }, (_, i) => T(i + 17)) }
+  // Interleaved league order so t1 is best overall and each conference seeds 1..16.
+  const ORDER32: TeamId[] = []
+  for (let i = 0; i < 16; i++) { ORDER32.push(T(i + 1)); ORDER32.push(T(i + 17)) }
+
+  function bracket16(): PlayoffsState {
+    return seedBracket({ year: 2026, conferences: [E16, W16], standingsOrder: ORDER32 })
+  }
+
+  it('qualifies 8 per conference (16-team field) over 4 rounds with NHL pairings', () => {
+    const s = bracket16()
+    expect(s.rounds.map((r) => r.name)).toEqual([
+      'First Round', 'Conference Semifinals', 'Conference Finals', 'League Final'
+    ])
+    expect(s.rounds[0].series).toHaveLength(8) // 8 qualifiers/conf = 4 series/conf × 2
+    // East openers in standard bracket order: 1v8, 4v5, 2v7, 3v6.
+    expect(s.rounds[0].series.slice(0, 4).map((x) => [x.highSeedTeamId, x.lowSeedTeamId])).toEqual([
+      [T(1), T(8)], [T(4), T(5)], [T(2), T(7)], [T(3), T(6)]
+    ])
+  })
+
+  it('crowns the overall top seed when the better seed always advances', () => {
+    const s = bracket16()
+    let guard = 0
+    while (s.championTeamId === null && guard++ < 100) {
+      for (const series of currentSeries(s)) {
+        if (series.status !== 'finished') winSeries(s, series.id, series.highSeedTeamId)
+      }
+    }
+    expect(s.championTeamId).toBe(T(1))
+  })
+})

@@ -2725,6 +2725,8 @@ export interface PlayoffOddsView {
   /** Number of season simulations run. */
   simulations: number
   userTeamId: string
+  /** Playoff qualifiers per conference (the cut line): 8 (big league) or 4. */
+  qualifiers?: number
   /** All teams, best projected points first. */
   rows: PlayoffOddsRow[]
 }

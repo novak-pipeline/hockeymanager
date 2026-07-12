@@ -15,6 +15,7 @@ export function PlayoffOddsCard({ view }: { view: PlayoffOddsView }): JSX.Elemen
   const user = view.rows.find((r) => r.isUser)
   // The user's conference, by projected points, with the top-4 playoff cut line.
   const conf = user ? view.rows.filter((r) => r.conference === user.conference) : []
+  const cut = view.qualifiers ?? 4 // playoff cut line (top N per conference)
 
   return (
     <div className="list">
@@ -28,11 +29,11 @@ export function PlayoffOddsCard({ view }: { view: PlayoffOddsView }): JSX.Elemen
         </div>
       )}
       <div className="muted small" style={{ marginBottom: 4, opacity: 0.7 }}>
-        {user?.conference} — top 4 make it ({view.simulations} sims)
+        {user?.conference} — top {cut} make it ({view.simulations} sims)
       </div>
       {conf.map((r, i) => (
         <div key={r.teamId}>
-          {i === 4 && <div style={{ borderTop: '1px dashed var(--danger)', opacity: 0.5, margin: '3px 0' }} />}
+          {i === cut && <div style={{ borderTop: '1px dashed var(--danger)', opacity: 0.5, margin: '3px 0' }} />}
           <div
             className="row-between small"
             style={{ alignItems: 'center', gap: 8, fontWeight: r.isUser ? 700 : 400, color: r.isUser ? 'var(--violet-h)' : undefined }}

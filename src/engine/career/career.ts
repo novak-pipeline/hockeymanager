@@ -11993,7 +11993,6 @@ export class Career {
       return { available: false, simulations: 0, userTeamId: userId, rows: [] }
     }
     const N = 600
-    const QUAL = 4 // matches QUALIFIERS_PER_CONFERENCE in seedBracket
     const teamIds = [...this.data.league.teams]
 
     const strength = new Map<TeamId, number>()
@@ -12018,6 +12017,11 @@ export class Career {
     }
 
     const confs = [...new Set(teamIds.map((t) => confOf.get(t)!))]
+    // Qualifiers per conference — matches seedBracket: 8 for a large league
+    // (32-team → 16-team playoff), else 4. This is why a mid-pack team in a big
+    // league now shows real odds instead of a near-zero top-4 chance.
+    const minConfSize = Math.min(...confs.map((c) => teamIds.filter((t) => confOf.get(t) === c).length))
+    const QUAL = minConfSize >= 12 ? 8 : 4
     const sig = (x: number): number => 1 / (1 + Math.exp(-x))
     const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
 
@@ -12068,7 +12072,7 @@ export class Career {
       }
     })
     rows.sort((a, b) => b.projectedPoints - a.projectedPoints || b.playoffPct - a.playoffPct)
-    return { available: true, simulations: N, userTeamId: userId, rows }
+    return { available: true, simulations: N, userTeamId: userId, qualifiers: QUAL, rows }
   }
 
   /** Squad Planner: experience matrix + depth/age/contract report for the user club. */
