@@ -2579,6 +2579,7 @@ export class Career {
       userTeamId: this.userTeamId as string,
       year: this.year,
       rng: this.rngFor(7106),
+      nhlTeamIds: new Set(this.data.league.teams.map((id) => id as string)),
     })
     this.lastDeadlineRecap = res.trades
     this.pushSeeds(res.newsSeeds)
@@ -10115,7 +10116,10 @@ export class Career {
     const continueLabel = (() => {
       if (this.phase === 'regularSeason') {
         const next = this.matchDays.find((d) => d > this.currentDay)
-        return next !== undefined ? `Continue — sim day ${next}` : 'Continue to playoffs'
+        if (next === undefined) return 'Continue to playoffs'
+        const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        const [, m, d] = dayToDateISO(this.year, next).split('-')
+        return `Continue to ${MONTHS[parseInt(m ?? '1', 10) - 1]} ${parseInt(d ?? '1', 10)}`
       }
       if (this.phase === 'playoffs') return 'Continue — next playoff games'
       const stage = this.offseason?.stage ?? 'awards'
@@ -11411,10 +11415,29 @@ export class Career {
       rng: new Rng(deriveSeed(this.seed, 9340, this.year, day)),
     })
     if (!req) return
+    // Name the specific player the owner means, so it isn't an anonymous "a
+    // beloved veteran". Pick an expiring, long-in-the-tooth fan favourite.
+    if (req.kind === 'extendFanFavourite') {
+      const vet = this.fanFavouriteVeteran()
+      if (vet) {
+        const last = vet.name.split(' ').pop() ?? vet.name
+        req.body = `${vet.name} — a beloved veteran — is up for a new deal, and the owner does not want to read the backlash if he walks: "${last} stays, figure it out." Keeping him is good PR; letting him go is a fight with the boss.`
+      }
+    }
     this.ownerRequest = req
     this.pushNews('league', req.title, `${req.body}\n\nHead to Club Vision to respond to the owner.`, {
       teamId: this.userTeamId as string,
     })
+  }
+
+  /** An expiring, long-serving veteran the owner would fight to keep. */
+  private fanFavouriteVeteran(): Player | undefined {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return undefined
+    return team.roster
+      .map((id) => this.resolve(id))
+      .filter((p) => p.age >= 30 && p.contract.yearsRemaining <= 1 && ratedOverall(p) >= 68)
+      .sort((a, b) => b.age + ratedOverall(b) - (a.age + ratedOverall(a)))[0]
   }
 
   /** The pending owner directive, if any. */
