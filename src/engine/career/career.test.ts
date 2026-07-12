@@ -563,11 +563,11 @@ describe('Career — story layer', () => {
     expect(draft).not.toBeNull()
     expect(tp.lottery!.orderAbbrs).toContain(draft!.board[0].teamAbbr)
 
-    // Records archived for season 1.
+    // Records archived for season 1 (on top of the seeded franchise pre-history).
     const hist = career.getHistory()
-    expect(hist.seasons).toHaveLength(1)
-    expect(hist.seasons[0].year).toBe(firstYear)
-    expect(hist.seasons[0].championName).not.toBeNull()
+    const played = hist.seasons.find((s) => s.year === firstYear)
+    expect(played).toBeDefined()
+    expect(played!.championName).not.toBeNull()
     expect(hist.awards.length).toBeGreaterThan(0)
     expect(hist.singleSeason.points.length).toBeGreaterThan(0)
 
@@ -578,7 +578,9 @@ describe('Career — story layer', () => {
     while (career.year === firstYear && guard++ < 60) career.step()
     expect(career.year).toBe(firstYear + 1)
     const hist2 = career.getHistory()
-    expect(hist2.seasons).toHaveLength(1)
+    // No new season has finished yet, so the archive count is unchanged from
+    // right after season 1 (seeded pre-history + season 1).
+    expect(hist2.seasons.length).toBe(hist.seasons.length)
     expect(hist2.awards.length).toBe(hist.awards.length)
 
     // New season: fresh expectations, reset tentpoles.
@@ -630,7 +632,10 @@ describe('Career — story layer', () => {
     expect(snap2.lockerRooms).toEqual(snap.lockerRooms)
     expect(snap2.arcs).toEqual(snap.arcs)
     expect(restored.getTentpoles().combine).not.toBeNull()
-    expect(restored.getHistory().seasons).toHaveLength(1)
+    // Seeded pre-history (15 seasons) + the one just played, preserved across the
+    // round-trip.
+    expect(restored.getHistory().seasons.length).toBeGreaterThan(1)
+    expect(restored.getHistory().seasons).toEqual(snap.records!.seasons)
   })
 
   it('old saves without story fields load cleanly with fresh fallbacks', () => {

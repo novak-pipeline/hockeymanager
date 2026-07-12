@@ -170,9 +170,11 @@ import {
   inductHallOfFame,
   recordWatch,
   registerRetirements,
+  seedRecordsHistory,
   type RecordsState,
   type SeasonLine,
 } from '@engine/story/records'
+import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 import {
   buildPreseasonOdds,
   checkExpectations,
@@ -1023,7 +1025,22 @@ export class Career {
         draftProspectIds: this.allDraftProspectIds(),
       })
       this.arcsState = createInitialArcsState()
-      this.recordsState = emptyRecords()
+      // Seed a plausible franchise past so the record book + banner rafters
+      // aren't empty on day one (P1 story history). Deterministic per seed.
+      {
+        const histRng = new Rng(deriveSeed(seed, 9500))
+        const makeName = (): string =>
+          `${FIRST_NAMES[Math.floor(histRng.next() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(histRng.next() * LAST_NAMES.length)]}`
+        this.recordsState = seedRecordsHistory({
+          teams: this.data.league.teams.map((id) => {
+            const t = this.data.teams.get(id)!
+            return { id: id as string, abbreviation: t.abbreviation, name: t.name }
+          }),
+          currentYear: this.year,
+          rand: () => histRng.next(),
+          makeName,
+        })
+      }
       this.tentpoles = createInitialTentpolesState()
       this.initLockerRooms()
       this.pushNews(

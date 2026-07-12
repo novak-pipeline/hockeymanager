@@ -5,9 +5,49 @@ import {
   inductHallOfFame,
   recordWatch,
   registerRetirements,
+  seedRecordsHistory,
   type RecordsState,
   type SeasonLine,
 } from './records'
+
+describe('seedRecordsHistory', () => {
+  const teams = Array.from({ length: 16 }, (_, i) => ({
+    id: `t${i}`, abbreviation: `T${i}`, name: `Team ${i}`,
+  }))
+  const mkRand = (seed: number) => {
+    let s = seed >>> 0
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0xffffffff }
+  }
+  const seed = (s: number) =>
+    seedRecordsHistory({ teams, currentYear: 2030, yearsBack: 15, rand: mkRand(s), makeName: () => `Player ${Math.floor(mkRand(s)() * 1e6)}` })
+
+  it('fabricates a plausible past: champions, legends, and leaderboards', () => {
+    const h = seed(42)
+    expect(h.seasons).toHaveLength(15)
+    // Every seeded season sits BEFORE the career start and names a champion.
+    for (const s of h.seasons) {
+      expect(s.year).toBeLessThan(2030)
+      expect(s.championName).not.toBeNull()
+      expect(s.leaders.points!.value).toBeGreaterThan(80)
+    }
+    expect(h.retiredLegends.length).toBeGreaterThan(8)
+    expect(h.retiredLegends.some((l) => l.hallOfFame)).toBe(true)
+    // All-time boards are populated and sorted high-to-low.
+    expect(h.career.points.length).toBeGreaterThan(0)
+    expect(h.career.points[0].value).toBeGreaterThanOrEqual(h.career.points[h.career.points.length - 1].value)
+    expect(h.singleSeason.points.length).toBeGreaterThan(0)
+  })
+
+  it('is deterministic for a given seed', () => {
+    expect(seed(7)).toEqual(seed(7))
+  })
+
+  it('returns empty history for an empty league', () => {
+    const h = seedRecordsHistory({ teams: [], currentYear: 2030, rand: mkRand(1), makeName: () => 'X' })
+    expect(h.seasons).toHaveLength(0)
+    expect(h.retiredLegends).toHaveLength(0)
+  })
+})
 
 /* ────────────────────────── helpers ────────────────────────── */
 

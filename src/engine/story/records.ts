@@ -111,6 +111,123 @@ export function emptyRecords(): RecordsState {
   }
 }
 
+/* ────────────────────────── seeded pre-history ────────────────────────── */
+
+export interface SeedTeamRef {
+  id: string
+  abbreviation: string
+  name: string
+}
+
+export interface SeedHistoryArgs {
+  teams: SeedTeamRef[]
+  /** The season the career begins on; history fills the years before it. */
+  currentYear: number
+  /** How many past seasons to fabricate (default 15). */
+  yearsBack?: number
+  /** Deterministic RNG source: returns a float in [0,1). */
+  rand: () => number
+  /** Deterministic full-name maker (built by the caller from its name pools). */
+  makeName: () => string
+}
+
+/** Deterministic integer in [lo, hi]. */
+function randInt(rand: () => number, lo: number, hi: number): number {
+  return lo + Math.floor(rand() * (hi - lo + 1))
+}
+function pick<T>(rand: () => number, arr: readonly T[]): T {
+  return arr[Math.min(arr.length - 1, Math.floor(rand() * arr.length))]!
+}
+
+/**
+ * Give a brand-new career a plausible PAST so the record book and banner
+ * rafters aren't empty on day one — franchises with championship pedigree,
+ * retired legends in the Hall of Fame, and all-time single-season / career
+ * leaderboards. Pure + deterministic (seeded RNG). Fictional-but-grounded: it
+ * invents names and numbers in realistic NHL bands; it never claims to be the
+ * real league's actual history.
+ */
+export function seedRecordsHistory(args: SeedHistoryArgs): RecordsState {
+  const { teams, currentYear, rand, makeName } = args
+  const yearsBack = args.yearsBack ?? 15
+  const state = emptyRecords()
+  if (teams.length === 0) return state
+
+  // A few franchises carry dynasty pedigree — they win more often, like the
+  // real league's cap-era heavyweights.
+  const dynastyCount = Math.max(1, Math.round(teams.length * 0.18))
+  const dynasties = [...teams].sort(() => rand() - 0.5).slice(0, dynastyCount)
+  const championPool = [...dynasties, ...dynasties, ...teams] // dynasties weighted ~3x
+
+  const seasonLeaderNames: Array<{ name: string; team: SeedTeamRef; year: number; pts: number; g: number }> = []
+
+  for (let y = currentYear - yearsBack; y < currentYear; y++) {
+    const champ = pick(rand, championPool)
+    const pres = rand() < 0.45 ? champ : pick(rand, teams) // often the same club
+    const scorerTeam = pick(rand, teams)
+    const goalTeam = pick(rand, teams)
+    const winTeam = pick(rand, teams)
+    const pts = randInt(rand, 95, 135)
+    const g = randInt(rand, 40, 66)
+    const scorer = makeName()
+    seasonLeaderNames.push({ name: scorer, team: scorerTeam, year: y, pts, g })
+    state.seasons.push({
+      year: y,
+      championTeamId: champ.id,
+      championName: champ.name,
+      presidentsTeamName: pres.name,
+      userTeamRank: 0, // no user before the career began
+      leaders: {
+        points: { value: pts, playerId: `hist-${y}-p`, playerName: scorer, teamAbbr: scorerTeam.abbreviation, year: y },
+        goals: { value: g, playerId: `hist-${y}-g`, playerName: makeName(), teamAbbr: goalTeam.abbreviation, year: y },
+        wins: { value: randInt(rand, 38, 54), playerId: `hist-${y}-w`, playerName: makeName(), teamAbbr: winTeam.abbreviation, year: y },
+      },
+    })
+    // A Hart-style MVP each year.
+    state.awards.push({
+      year: y, award: 'Most Valuable Player', playerId: `hist-${y}-mvp`,
+      playerName: scorer, teamAbbr: scorerTeam.abbreviation, value: `${pts} PTS`,
+    })
+  }
+
+  // Retired legends spread across the eras — the best make the Hall of Fame.
+  const legendCount = Math.max(8, Math.round(teams.length * 1.1))
+  for (let i = 0; i < legendCount; i++) {
+    const name = makeName()
+    const retiredYear = randInt(rand, currentYear - yearsBack - 6, currentYear - 1)
+    const games = randInt(rand, 620, 1500)
+    const ppg = 0.55 + rand() * 0.75 // 0.55–1.30 pts/game
+    const careerPoints = Math.round(games * ppg)
+    const careerGoals = Math.round(careerPoints * (0.34 + rand() * 0.12))
+    state.retiredLegends.push({
+      playerId: `legend-${i}`,
+      name,
+      retiredYear,
+      careerPoints,
+      careerGoals,
+      careerGames: games,
+      hallOfFame: careerPoints >= 950, // the true greats
+    })
+  }
+
+  // Build all-time leaderboards from the seeded material.
+  const abbrOf = (): string => pick(rand, teams).abbreviation
+  const careerEntries = state.retiredLegends.map((l) => ({
+    playerId: l.playerId, playerName: l.name, teamAbbr: abbrOf(), year: l.retiredYear,
+  }))
+  const top = <T extends { value: number }>(xs: T[], n = 8): T[] =>
+    [...xs].sort((a, b) => b.value - a.value).slice(0, n)
+  state.career.points = top(state.retiredLegends.map((l, i) => ({ ...careerEntries[i]!, value: l.careerPoints })))
+  state.career.goals = top(state.retiredLegends.map((l, i) => ({ ...careerEntries[i]!, value: l.careerGoals })))
+  state.career.assists = top(state.retiredLegends.map((l, i) => ({ ...careerEntries[i]!, value: l.careerPoints - l.careerGoals })))
+  state.career.gamesPlayed = top(state.retiredLegends.map((l, i) => ({ ...careerEntries[i]!, value: l.careerGames })))
+  state.singleSeason.points = top(seasonLeaderNames.map((s) => ({ value: s.pts, playerId: `ss-${s.year}-p`, playerName: s.name, teamAbbr: s.team.abbreviation, year: s.year })))
+  state.singleSeason.goals = top(seasonLeaderNames.map((s) => ({ value: s.g, playerId: `ss-${s.year}-g`, playerName: s.name, teamAbbr: s.team.abbreviation, year: s.year })))
+  state.singleSeason.assists = top(seasonLeaderNames.map((s) => ({ value: Math.round(s.pts - s.g), playerId: `ss-${s.year}-a`, playerName: s.name, teamAbbr: s.team.abbreviation, year: s.year })))
+  state.singleSeason.wins = top(state.seasons.map((sn) => ({ ...(sn.leaders.wins ?? { value: 0, playerId: '', playerName: '', teamAbbr: '', year: sn.year }) })))
+  return state
+}
+
 /* ────────────────────────── news seed ────────────────────────── */
 
 /** Minimal shape returned to the career layer; career.ts stamps the real id/day/year. */
