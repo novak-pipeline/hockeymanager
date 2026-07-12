@@ -39,6 +39,29 @@ interface KokoroTTSLike {
 
 export type KokoroLoadState = 'unloaded' | 'downloading' | 'ready' | 'failed'
 
+// ── Fidelity setting ────────────────────────────────────────────────────────
+export type VoiceQuality = 'standard' | 'high' | 'ultra'
+const LS_QUALITY = 'hockeyVoiceQuality'
+const QUALITY_DTYPE: Record<VoiceQuality, 'q8' | 'fp16' | 'fp32'> = {
+  standard: 'q8',
+  high: 'fp16',
+  ultra: 'fp32',
+}
+
+export function readVoiceQuality(): VoiceQuality {
+  try {
+    const v = localStorage.getItem(LS_QUALITY)
+    if (v === 'standard' || v === 'high' || v === 'ultra') return v
+  } catch { /* ignore */ }
+  return 'high'
+}
+export function setVoiceQuality(q: VoiceQuality): void {
+  try { localStorage.setItem(LS_QUALITY, q) } catch { /* ignore */ }
+}
+function readVoiceDtype(): 'q8' | 'fp16' | 'fp32' {
+  return QUALITY_DTYPE[readVoiceQuality()]
+}
+
 let _state: KokoroLoadState = 'unloaded'
 let _engine: KokoroVoiceEngine | null = null
 let _loadPromise: Promise<VoiceEngine> | null = null
@@ -95,7 +118,11 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
   type LoadOpts = NonNullable<Parameters<typeof KokoroTTS.from_pretrained>[1]>
   type ProgressCb = NonNullable<LoadOpts['progress_callback']>
 
-  const baseOpts = { dtype: 'q8' as const }
+  // Fidelity is user-selectable: standard=q8 (~86MB), high=fp16 (~160MB),
+  // ultra=fp32 (~330MB, best quality). Default high. Chosen before download so
+  // the right weights are fetched.
+  const dtype = readVoiceDtype()
+  const baseOpts = { dtype }
   const progressOpts: Pick<LoadOpts, 'progress_callback'> = onProgress
     ? { progress_callback: onProgress as ProgressCb }
     : {}
@@ -123,10 +150,31 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
 // ── KokoroVoiceEngine ──────────────────────────────────────────────────────
 
 /**
- * Voice to use for sports commentary.
+ * Fallback voice when a line carries no explicit cast voice.
  * 'am_michael' is a male en-US voice with a grounded delivery.
  */
 const SPORTS_VOICE = 'am_michael'
+
+/** Small LRU cache of synthesised clips (raw PCM) keyed by voice+text, so stock
+ *  phrases (goal calls, repeated meeting lines) don't pay synthesis twice. */
+const CACHE_MAX = 64
+const _clipCache = new Map<string, RawAudioLike>()
+function cacheGet(key: string): RawAudioLike | undefined {
+  const hit = _clipCache.get(key)
+  if (hit) {
+    // Refresh recency.
+    _clipCache.delete(key)
+    _clipCache.set(key, hit)
+  }
+  return hit
+}
+function cacheSet(key: string, val: RawAudioLike): void {
+  _clipCache.set(key, val)
+  if (_clipCache.size > CACHE_MAX) {
+    const oldest = _clipCache.keys().next().value
+    if (oldest !== undefined) _clipCache.delete(oldest)
+  }
+}
 
 class KokoroVoiceEngine implements VoiceEngine {
   readonly name = 'kokoro'
@@ -177,10 +225,13 @@ class KokoroVoiceEngine implements VoiceEngine {
   private async _play(line: SpeakLine): Promise<void> {
     this._busy = true
     try {
-      const raw = await this._tts.generate(line.speech, {
-        voice: SPORTS_VOICE,
-        speed: 1.08,
-      })
+      const voice = line.voice ?? SPORTS_VOICE
+      const key = `${voice}|${line.speech}`
+      let raw = cacheGet(key)
+      if (!raw) {
+        raw = await this._tts.generate(line.speech, { voice, speed: 1.08 })
+        cacheSet(key, raw)
+      }
 
       const ctx = this._audioCtx()
       if (ctx.state === 'suspended') {

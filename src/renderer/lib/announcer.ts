@@ -33,6 +33,9 @@ export interface SpeakLine {
   text: string
   speech: string
   importance: 1 | 2 | 3
+  /** Optional Kokoro voice id for per-character casting (see voiceCast.ts). The
+   *  system Web-Speech engine ignores this; Kokoro reads it. */
+  voice?: string
 }
 
 // ── VoiceEngine interface ───────────────────────────────────────────────────

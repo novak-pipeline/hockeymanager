@@ -8,6 +8,16 @@ import { getPressSettings, setPressSettings } from '../lib/press'
 import { feedModelBridge, getFeedWriterEnabled, setFeedWriterEnabled, type FeedModelStatus } from '../lib/feedModel'
 import { useUiStore } from '../components/store'
 import { THEME_OPTIONS } from '../components/themes'
+import {
+  loadKokoro,
+  kokoroState,
+  getKokoroEngine,
+  readVoiceQuality,
+  setVoiceQuality,
+  type KokoroLoadState,
+  type VoiceQuality,
+} from '../lib/kokoroVoice'
+import { voiceFor } from '../lib/voiceCast'
 
 type KeyStatus = 'unknown' | 'present' | 'absent' | 'saving' | 'testing'
 
@@ -235,7 +245,92 @@ export function SettingsScreen(): JSX.Element {
       </Panel>
 
       <FeedModelPanel />
+      <VoicePanel />
     </section>
+  )
+}
+
+/** Voice: fidelity selector + enhanced (Kokoro neural) download + a per-role test.
+ *  Max-local, fully offline once downloaded; the system voice is the fallback. */
+function VoicePanel(): JSX.Element {
+  const [quality, setQuality] = useState<VoiceQuality>(readVoiceQuality())
+  const [state, setState] = useState<KokoroLoadState>(kokoroState())
+  const [pct, setPct] = useState(0)
+
+  async function download(): Promise<void> {
+    if (state === 'downloading' || state === 'ready') return
+    setState('downloading')
+    try {
+      await loadKokoro((info) => {
+        const p = info as { progress?: number; status?: string }
+        if (typeof p.progress === 'number') setPct(Math.round(p.progress))
+      })
+      setState('ready')
+    } catch {
+      setState('failed')
+    }
+  }
+
+  function test(role: 'pbp' | 'coach' | 'physio'): void {
+    const eng = getKokoroEngine()
+    const lines: Record<string, string> = {
+      pbp: 'He shoots — and scores! What a finish top corner!',
+      coach: "I want us harder on the forecheck tonight. No easy exits.",
+      physio: "He's day to day. I'd rest him and not risk it.",
+    }
+    if (eng) eng.speak({ text: lines[role]!, speech: lines[role]!, importance: 2, voice: voiceFor(role) })
+  }
+
+  const QUAL: Array<{ v: VoiceQuality; label: string; note: string }> = [
+    { v: 'standard', label: 'Standard', note: '~86 MB · fastest' },
+    { v: 'high', label: 'High', note: '~160 MB · recommended' },
+    { v: 'ultra', label: 'Ultra', note: '~330 MB · best fidelity' },
+  ]
+
+  return (
+    <Panel title="AI Voices">
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        Neural voices for commentary, staff meetings, and calls — cast per character. Fully
+        local and offline once downloaded; the system voice is the fallback.
+      </div>
+      <div className="stack" style={{ gap: 6, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>Fidelity</div>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {QUAL.map((q) => (
+            <button
+              key={q.v}
+              className={`btn btn-sm${quality === q.v ? ' btn-primary' : ''}`}
+              onClick={() => { setVoiceQuality(q.v); setQuality(q.v) }}
+              title={q.note}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <div className="muted" style={{ fontSize: 11 }}>
+          {QUAL.find((q) => q.v === quality)?.note}
+          {state === 'ready' ? ' · change takes effect after re-downloading the model.' : ''}
+        </div>
+      </div>
+      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {state === 'ready' ? (
+          <span className="chip chip-accent" style={{ fontSize: 11 }}>Neural voices ready</span>
+        ) : state === 'downloading' ? (
+          <span className="chip" style={{ fontSize: 11 }}>Downloading… {pct}%</span>
+        ) : state === 'failed' ? (
+          <span className="chip chip-danger" style={{ fontSize: 11 }}>Download failed</span>
+        ) : (
+          <button className="btn btn-sm btn-primary" onClick={() => void download()}>Download neural voices</button>
+        )}
+        {state === 'ready' && (
+          <>
+            <button className="btn btn-sm btn-ghost" onClick={() => test('pbp')}>▶ Commentator</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => test('coach')}>▶ Coach</button>
+            <button className="btn btn-sm btn-ghost" onClick={() => test('physio')}>▶ Physio</button>
+          </>
+        )}
+      </div>
+    </Panel>
   )
 }
 
