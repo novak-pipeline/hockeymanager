@@ -517,6 +517,7 @@ import {
   type StatsView,
   type TacticsView,
   type TentpoleView,
+  type TradeBalanceView,
   type TradeEvaluation,
   type TradeOfferView,
   type TradeProposal,
@@ -9111,6 +9112,40 @@ export class Career {
       if (!pick) throw new Error(`unknown pick ${id}`)
       return pick
     })
+  }
+
+  /**
+   * Live "who wins this deal" read for the proposal builder. Uses the SAME
+   * `playerValue`/`pickValue` the AI GM weighs, so the balance bar the user sees
+   * agrees with the verdict he'll get — no client-side re-derivation that could
+   * drift from the engine. Pure/deterministic: no RNG, no acceptance threshold,
+   * no endowment/mood/context (those are the GM's *negotiating* posture, not the
+   * raw asset value). An empty side reads 0.
+   */
+  tradeBalance(proposal: TradeProposal): TradeBalanceView {
+    const year = this.year
+    const giveValue =
+      proposal.givePlayerIds.reduce((s, id) => s + playerValue(this.resolve(asPlayerId(id))), 0) +
+      this.pickByIds(proposal.givePickIds).reduce((s, p) => s + pickValue(p, { year }), 0)
+    const receiveValue =
+      proposal.receivePlayerIds.reduce((s, id) => s + playerValue(this.resolve(asPlayerId(id))), 0) +
+      this.pickByIds(proposal.receivePickIds).reduce((s, p) => s + pickValue(p, { year }), 0)
+
+    const partnerName =
+      this.data.teams.get(asTeamId(proposal.partnerTeamId))?.name ?? 'the other club'
+    // Tilt from the raw ratio, with a fair band so tiny gaps don't read as lopsided.
+    const total = giveValue + receiveValue
+    let tilt: TradeBalanceView['tilt'] = 'fair'
+    let note = 'Pick assets on both sides to weigh the deal.'
+    if (total > 0) {
+      const diff = receiveValue - giveValue // >0 means the user comes out ahead
+      const rel = diff / Math.max(giveValue, receiveValue, 1)
+      if (rel > 0.12) { tilt = 'you'; note = rel > 0.3 ? 'This deal leans heavily your way.' : 'This deal tilts in your favour.' }
+      else if (rel < -0.12) { tilt = 'them'; note = rel < -0.3 ? `Heavily favours ${partnerName}.` : `Tilts toward ${partnerName}.` }
+      else { tilt = 'fair'; note = 'A roughly even exchange on paper.' }
+    }
+    const r1 = (n: number): number => Math.round(n * 10) / 10
+    return { giveValue: r1(giveValue), receiveValue: r1(receiveValue), tilt, note }
   }
 
   proposeTrade(proposal: TradeProposal): TradeEvaluation {

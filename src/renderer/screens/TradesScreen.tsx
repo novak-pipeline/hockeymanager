@@ -3,6 +3,7 @@ import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/pro
 import type {
   PickAssetView,
   PlayerBadge,
+  TradeBalanceView,
   TradeOfferView,
   TradePartnerView,
   TradeRumorView,
@@ -516,6 +517,29 @@ function ProposeTab(props: {
   const [busy, setBusy] = useState(false)
   const [evalResult, setEvalResult] = useState<TradeEvaluation | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [balance, setBalance] = useState<TradeBalanceView | null>(null)
+
+  // Live "who wins this deal" read: whenever the package changes, ask the engine
+  // for the SAME asset valuation the AI GM uses. Debounced so rapid clicking
+  // doesn't spam the worker, and dropped once a proposal is on the table.
+  useEffect(() => {
+    if (evalResult) return
+    const anySide = myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0
+    if (!partnerId || !anySide) { setBalance(null); return }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      const r = await client.tradeBalance({
+        partnerTeamId: partnerId,
+        givePlayerIds: [...myPlayerIds],
+        givePickIds: [...myPickIds],
+        receivePlayerIds: [...theirPlayerIds],
+        receivePickIds: [...theirPickIds],
+      })
+      if (!cancelled && r.type === 'tradeBalanceResult') setBalance(r.balance)
+    }, 180)
+    return () => { cancelled = true; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerId, myPlayerIds, myPickIds, theirPlayerIds, theirPickIds, evalResult])
 
   function toggleSet<T>(set: Set<T>, val: T): Set<T> {
     const next = new Set(set)
@@ -829,6 +853,11 @@ function ProposeTab(props: {
         </div>
       )}
 
+      {/* live value read — the same asset valuation the AI GM weighs */}
+      {partner && !evalResult && balance && (
+        <TradeBalanceBar balance={balance} partnerAbbr={partner.teamAbbr} />
+      )}
+
       {/* evaluation result */}
       {evalResult && (
         <EvalPanel
@@ -864,6 +893,52 @@ function ProposeTab(props: {
         </div>
       )}
     </div>
+  )
+}
+
+// ─── trade balance bar ────────────────────────────────────────────────────────
+
+/**
+ * "Who wins this deal" bar. The split reflects the engine's own asset valuation
+ * (playerValue + pickValue), so what's shown agrees with the AI GM's verdict.
+ * Left = value you send, right = value you get back.
+ */
+function TradeBalanceBar(props: { balance: TradeBalanceView; partnerAbbr: string }): JSX.Element {
+  const { balance } = props
+  const total = balance.giveValue + balance.receiveValue
+  const receivePct = total > 0 ? Math.round((balance.receiveValue / total) * 100) : 50
+  const tiltColor =
+    balance.tilt === 'you' ? 'var(--success)' : balance.tilt === 'them' ? 'var(--danger)' : 'var(--muted)'
+  const verdictLabel =
+    balance.tilt === 'you' ? 'In your favour' : balance.tilt === 'them' ? `Favours ${props.partnerAbbr}` : 'Even'
+  return (
+    <Panel title="Trade balance">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, fontSize: 12 }}>
+        <span style={{ color: 'var(--muted)' }}>
+          You send <strong style={{ color: 'var(--text)' }}>{balance.giveValue.toFixed(1)}</strong>
+        </span>
+        <span className="chip" style={{ fontSize: 11, fontWeight: 700, color: tiltColor, borderColor: tiltColor }}>
+          {verdictLabel}
+        </span>
+        <span style={{ color: 'var(--muted)' }}>
+          <strong style={{ color: 'var(--text)' }}>{balance.receiveValue.toFixed(1)}</strong> you get
+        </span>
+      </div>
+      {/* split bar: green (your return) vs grey (what you're paying) */}
+      <div style={{ display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', background: 'var(--bg0)', border: '1px solid var(--line)' }}>
+        <div
+          title={`Value you give up: ${balance.giveValue.toFixed(1)}`}
+          style={{ width: `${100 - receivePct}%`, background: 'var(--line)', transition: 'width 160ms ease' }}
+        />
+        <div
+          title={`Value you receive: ${balance.receiveValue.toFixed(1)}`}
+          style={{ width: `${receivePct}%`, background: tiltColor, opacity: 0.85, transition: 'width 160ms ease' }}
+        />
+      </div>
+      <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+        {balance.note} <span style={{ opacity: 0.7 }}>Raw asset value only — the GM's stance, cap and needs still decide the answer.</span>
+      </p>
+    </Panel>
   )
 }
 

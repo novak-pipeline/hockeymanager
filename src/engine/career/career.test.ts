@@ -2790,6 +2790,53 @@ describe('#186 no-trade-clause waive negotiation', () => {
   })
 })
 
+describe('trade balance read (proposal-builder value bar)', () => {
+  it('scores both sides and tilts toward the club receiving more value', () => {
+    const data = generateLeague({ seed: 909 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 909, userId)
+    career.advance(6)
+
+    const trades = career.getTrades()
+    const partner = trades.partners[0]
+    const myBest = [...career.getTrades().myPlayers].sort((a, b) => b.overall - a.overall)[0]
+    const theirWorst = [...partner.players].sort((a, b) => a.overall - b.overall)[0]
+    expect(myBest).toBeTruthy()
+    expect(theirWorst).toBeTruthy()
+
+    // Giving my best for their worst should tilt AGAINST me (I overpay).
+    const lopsided = career.tradeBalance({
+      partnerTeamId: partner.teamId,
+      givePlayerIds: [myBest.playerId],
+      givePickIds: [],
+      receivePlayerIds: [theirWorst.playerId],
+      receivePickIds: [],
+    })
+    expect(lopsided.giveValue).toBeGreaterThan(0)
+    expect(lopsided.receiveValue).toBeGreaterThan(0)
+    // The valuation is symmetric with the same player on both sides → exactly even.
+    const mirror = career.tradeBalance({
+      partnerTeamId: partner.teamId,
+      givePlayerIds: [myBest.playerId],
+      givePickIds: [],
+      receivePlayerIds: [myBest.playerId],
+      receivePickIds: [],
+    })
+    expect(mirror.giveValue).toBeCloseTo(mirror.receiveValue, 5)
+    expect(mirror.tilt).toBe('fair')
+
+    // Deterministic: same package → same read.
+    const again = career.tradeBalance({
+      partnerTeamId: partner.teamId,
+      givePlayerIds: [myBest.playerId],
+      givePickIds: [],
+      receivePlayerIds: [theirWorst.playerId],
+      receivePickIds: [],
+    })
+    expect(again).toEqual(lopsided)
+  })
+})
+
 describe('#182 training-camp PTO invites', () => {
   it('lists eligible veterans and lets the GM curate the tryout list', () => {
     const data = generateLeague({ seed: 640 })

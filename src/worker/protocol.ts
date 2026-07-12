@@ -85,6 +85,7 @@ export type {
   TacticsView,
   TeamAnalyticsRow,
   TentpoleView,
+  TradeBalanceView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -173,6 +174,7 @@ import type {
   StatsView,
   TacticsView,
   TentpoleView,
+  TradeBalanceView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -296,6 +298,7 @@ export type WorkerRequestBody =
   | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
+  | { type: 'tradeBalance'; proposal: TradeProposal }
   | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
@@ -544,6 +547,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
+  /** Live value read on a draft package (no commitment; drives the balance bar). */
+  | { type: 'tradeBalanceResult'; balance: TradeBalanceView }
   /** Result of shopping a player: how many offers came in + a summary line. */
   | { type: 'shopResult'; count: number; message: string }
   /** A free agent's agent's read on the market (may deflect). */

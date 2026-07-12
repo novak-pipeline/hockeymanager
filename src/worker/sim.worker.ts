@@ -336,6 +336,8 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'proposeTrade':
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
+    case 'tradeBalance':
+      return { id: req.id, type: 'tradeBalanceResult', balance: must().tradeBalance(req.proposal) }
     case 'shopPlayer': {
       const r = must().shopPlayer(req.playerId)
       return { id: req.id, type: 'shopResult', count: r.count, message: r.message }

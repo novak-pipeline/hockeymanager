@@ -591,7 +591,9 @@ export function evaluateProposal(args: {
       // Cap relief bonus: if the player's salary is retained by the other side,
       // the partner benefits from reduced cap hit.
       const retained = give.retainedAmounts?.get(p.id as string) ?? 0
-      const partnerCapAfterPlayer = partnerTeam.finances.capUsed + (p.contract.salary - retained) - outgoingSalary
+      // Fresh roster cap (partnerCapUsed), not the stale finances.capUsed — same
+      // reason the hard cap check above was switched off the stored field.
+      const partnerCapAfterPlayer = partnerCapUsed + (p.contract.salary - retained) - outgoingSalary
       const relief = retentionValueBonus(retained, partnerTeam.finances.salaryCap - partnerCapAfterPlayer)
       return s + base * bias + relief
     }, 0) +

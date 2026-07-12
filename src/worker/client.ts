@@ -467,6 +467,10 @@ export class SimClient {
     return this.send({ type: 'proposeTrade', proposal })
   }
 
+  tradeBalance(proposal: TradeProposal): Promise<WorkerResponse> {
+    return this.send({ type: 'tradeBalance', proposal })
+  }
+
   shopPlayer(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'shopPlayer', playerId })
   }

@@ -1389,6 +1389,20 @@ export interface TradeEvaluation {
   counter: TradeOfferView | null
 }
 
+/** Live "who wins this deal" read for the proposal builder — the SAME asset
+ *  valuation the AI GM uses to accept/reject, surfaced so the user can gauge a
+ *  package before sending it. Pure/deterministic; no RNG, no threshold. */
+export interface TradeBalanceView {
+  /** Total trade value the user is SENDING (partner receives). Engine units. */
+  giveValue: number
+  /** Total trade value the user is RECEIVING (partner gives up). Engine units. */
+  receiveValue: number
+  /** Which way the raw value leans, before any GM mood/endowment/context. */
+  tilt: 'you' | 'fair' | 'them'
+  /** Plain-English summary ("This deal leans heavily your way."). */
+  note: string
+}
+
 export interface TradePartnerView {
   teamId: string
   teamName: string
