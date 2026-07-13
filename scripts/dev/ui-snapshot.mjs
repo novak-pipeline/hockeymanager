@@ -50,10 +50,14 @@ async function advanceOnce(win) {
     'button:has-text("Continue")',
     'button:has-text("Delegate")',
     'button:has-text("Send the staff")',
-    'button:has-text("To game")',
+    'button:has-text("Break camp")',      // training-camp wrap
+    'button:has-text("opening night")',   // camp → season
+    'button:has-text("coach picks")',     // cut-day: let the coach set the 23
+    'button:has-text("Head into")',       // board meeting → season
     'button:has-text("Proceed")',
     'button:has-text("Skip")',
     'button:has-text("Dismiss")',
+    'button:has-text("Sim day")',         // topbar: always advances one day
   ]) {
     try { await win.click(sel, { timeout: 1200 }); return true } catch { /* try next */ }
   }
@@ -256,12 +260,16 @@ try {
   try {
     let last = -1
     let stalls = 0
-    for (let i = 0; i < 140; i++) {
+    let started = false // preseason legitimately has gp=0 for days — only treat a
+                        // no-progress streak as a wedge AFTER the season has begun.
+    for (let i = 0; i < 200; i++) {
       const gp = await gamesPlayed(win)
       if (gp >= 40) break
-      if (gp === last) { stalls += 1 } else { stalls = 0; last = gp }
-      if (stalls >= 8) break // wedged on a gate we can't clear — stop trying
-      if (!(await advanceOnce(win))) break
+      if (gp > 0) started = true
+      if (started) { if (gp === last) stalls += 1; else stalls = 0 }
+      last = gp
+      if (started && stalls >= 8) break // wedged mid-season — stop trying
+      if (!(await advanceOnce(win))) { await win.waitForTimeout(400); if (!(await advanceOnce(win))) break }
       await win.waitForTimeout(280)
     }
     await snap(win, 'midseason-dashboard')
