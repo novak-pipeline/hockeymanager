@@ -198,6 +198,26 @@ describe('developPlayers', () => {
     expect(Object.values(p.ratings.mental).every((v) => v === 70)).toBe(true)
   })
 
+  it('ages goalies on a later curve: a 31-year-old goalie holds while a skater slips', () => {
+    const goalie = testPlayer({ id: 'g', age: 31, current: 70, potential: 70, position: 'G' })
+    const skater = testPlayer({ id: 's', age: 31, current: 70, potential: 70, position: 'C' })
+    dev(new Map([[goalie.id, goalie]]), 5)
+    dev(new Map([[skater.id, skater]]), 5)
+    // Skater is into decline at 31; his skating erodes.
+    expect(skater.ratings.physical.speed).toBeLessThan(70)
+    // Goalie is still in his prime plateau — nothing has slipped.
+    expect(goalie.ratings.physical.speed).toBe(70)
+    if (goalie.ratings.goalie) {
+      expect(Object.values(goalie.ratings.goalie).every((v) => v === 70)).toBe(true)
+    }
+  })
+
+  it('eventually declines goalies too, once they hit their mid-30s', () => {
+    const goalie = testPlayer({ id: 'g35', age: 35, current: 70, potential: 70, position: 'G' })
+    dev(new Map([[goalie.id, goalie]]), 5)
+    expect(goalie.ratings.physical.speed).toBeLessThan(70)
+  })
+
   it('declines steeper after 33', () => {
     const fastDrop = (age: number, seed: number): number => {
       const p = testPlayer({ id: 'x', age, current: 70, potential: 70 })

@@ -371,21 +371,30 @@ export function developPlayers(args: {
     // updated target — a breakout opens new room, a bust shuts it down.
     p.ceilingTrend = driftYouthCeiling(p, seasonAge, perfRatio, hadSample, rng)
 
-    if (seasonAge < 26) {
+    // Goalies develop and age on a later curve than skaters: they keep growing
+    // into their late 20s, hold a long prime, and don't start slipping until
+    // their mid-30s. Skaters peak ~24–27 and decline from 30.
+    const isGoalie = p.position === 'G'
+    const peakAge = isGoalie ? 28 : 26
+    const declineAge = isGoalie ? 33 : 30
+    if (seasonAge < peakAge) {
       const persona =
         (p.personality.ambition + p.personality.professionalism + p.personality.determination) / 3
       const personaFactor = 0.5 + (persona / 20) * 0.8
       const gamesFactor = 0.6 + 0.4 * Math.min(1, gamesPlayed(p.id) / 60)
-      const baseRate = 0.12 + 0.03 * (26 - seasonAge)
+      const baseRate = 0.12 + 0.03 * (peakAge - seasonAge)
       const growthScale = args.growthScale ?? 1
       // Persistent per-player arc: busts under-develop, late bloomers over-develop.
       const arc = devArc(p.id as unknown as string)
       const bias = args.attributeBias ? args.attributeBias(p.id) : undefined
       applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng, bias)
-    } else if (seasonAge >= 30) {
-      applyDecline(p.ratings, seasonAge, rng)
+    } else if (seasonAge >= declineAge) {
+      // Goalie decline is also gentler — treat the curve as if they were a few
+      // years younger so a 36-year-old netminder slips like a 33-year-old skater.
+      const declineAgeEff = isGoalie ? seasonAge - 3 : seasonAge
+      applyDecline(p.ratings, declineAgeEff, rng)
       // Second pass for vet underperformers (accelerated −50% decline).
-      if (declineExtraPass) applyDecline(p.ratings, seasonAge, rng)
+      if (declineExtraPass) applyDecline(p.ratings, declineAgeEff, rng)
     }
 
     p.composites = computeComposites(p.ratings, p.role, p.position)
