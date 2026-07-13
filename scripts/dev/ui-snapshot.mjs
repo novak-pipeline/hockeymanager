@@ -42,6 +42,34 @@ const SIDEBAR_STOPS = [
 const consoleErrors = []
 let shot = 0
 
+/** Advance the game by one step, tolerating whichever gate is up (a plain
+ *  Continue, a staff/board meeting that must be delegated, a deadline hold, …).
+ *  Returns true if something was clicked. */
+async function advanceOnce(win) {
+  for (const sel of [
+    'button:has-text("Continue")',
+    'button:has-text("Delegate")',
+    'button:has-text("Send the staff")',
+    'button:has-text("To game")',
+    'button:has-text("Proceed")',
+    'button:has-text("Skip")',
+    'button:has-text("Dismiss")',
+  ]) {
+    try { await win.click(sel, { timeout: 1200 }); return true } catch { /* try next */ }
+  }
+  return false
+}
+
+/** Read the user club's games-played from the topbar record ("12-8-3 · …"). */
+async function gamesPlayed(win) {
+  return win
+    .evaluate(() => {
+      const m = document.body.innerText.match(/\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b/)
+      return m ? Number(m[1]) + Number(m[2]) + Number(m[3]) : 0
+    })
+    .catch(() => 0)
+}
+
 async function snap(win, slug) {
   shot += 1
   // Clicking topbar controls can leave scroll containers shifted at narrow
@@ -219,6 +247,27 @@ try {
     }
   } catch (e) {
     console.log(`  ⚠ training camp not reachable — skipped (${e.message?.split('\n')[0]})`)
+  }
+
+  // ── sim ~40 regular-season match days so the management screens carry a rich
+  //    MID-SEASON state (real standings, stats, injuries, story arcs). This is
+  //    where UI/logic bugs actually surface — the day-1 opening-night state is
+  //    mostly empty. ──
+  try {
+    let last = -1
+    let stalls = 0
+    for (let i = 0; i < 140; i++) {
+      const gp = await gamesPlayed(win)
+      if (gp >= 40) break
+      if (gp === last) { stalls += 1 } else { stalls = 0; last = gp }
+      if (stalls >= 8) break // wedged on a gate we can't clear — stop trying
+      if (!(await advanceOnce(win))) break
+      await win.waitForTimeout(280)
+    }
+    await snap(win, 'midseason-dashboard')
+    console.log(`  ▶ mid-season reached at ~${await gamesPlayed(win)} GP`)
+  } catch (e) {
+    console.log(`  ⚠ mid-season advance incomplete — ${e.message?.split('\n')[0]}`)
   }
 
   // ── walk the sidebar ──
