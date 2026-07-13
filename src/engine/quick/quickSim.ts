@@ -531,7 +531,9 @@ function simEmptyNetPhase(
     for (const a of assists) stat(ctx, a.id).assists++
     for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus += 1
     for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
-    stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
+    // The trailing net is empty and the leading goalie is at the far end — no
+    // goalie faces this shot, so no goalie stat is credited (crediting the leading
+    // goalie a shot-against here inflated his volume and broke saves+GA=SA).
     ctx.stream.push({
       t: tEN,
       period,

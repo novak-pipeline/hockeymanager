@@ -2010,6 +2010,117 @@ export class Career {
   }
 
   /** Award winners with display values, for the records archive. */
+  /**
+   * Canonical end-of-season individual award winners, computed once from the live
+   * season accumulators (this.totals / this.gp) so the permanent archive and the
+   * offseason display can never drift apart. Six trophies modelled on the NHL:
+   *
+   *   Hart (MVP)     — most valuable: points weighted by team success, so it isn't
+   *                    mechanically the raw scoring leader; a dominant workhorse
+   *                    goalie can win in a down year for the forwards.
+   *   Art Ross       — the actual scoring title (points leader among skaters).
+   *   Rocket Richard — most goals (labelled "Top Goal Scorer").
+   *   Best Playmaker — most assists (flavour; not a real NHL trophy).
+   *   Norris         — best defenceman (points among D at a starter's workload).
+   *   Calder         — rookie of the year (a genuine first-year player).
+   *   Vezina         — best save % among true starters, not a hot-backup sample.
+   *
+   * Workload floors are relative to the league's own busiest player that season,
+   * so they self-calibrate to a 60- or 82-game schedule without hard-coding either.
+   */
+  private seasonAwardWinners(): Array<{ award: string; playerId: PlayerId; value: string }> {
+    const winners: Array<{ award: string; playerId: PlayerId; value: string }> = []
+    const gpOf = (id: PlayerId): number => this.gp.get(id) ?? 0
+    const pts = (t: GamePlayerStat): number => t.goals + t.assists
+    const svPct = (t: GamePlayerStat): number => t.saves / Math.max(1, t.shotsAgainst)
+
+    // Busiest skater / goalie this season → self-calibrating workload floors.
+    let maxSkaterGp = 1
+    let maxGoalieGp = 1
+    for (const [id] of this.totals) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      if (p.position === 'G') maxGoalieGp = Math.max(maxGoalieGp, gpOf(id))
+      else maxSkaterGp = Math.max(maxSkaterGp, gpOf(id))
+    }
+    // League-average goalie save rate (starters only) → the Hart goalie metric.
+    let svSaves = 0
+    let svShots = 0
+    for (const [id, t] of this.totals) {
+      const p = this.data.players.get(id)
+      if (p?.position === 'G' && gpOf(id) >= 0.5 * maxGoalieGp) {
+        svSaves += t.saves
+        svShots += t.shotsAgainst
+      }
+    }
+    const leagueSv = svShots > 0 ? svSaves / svShots : 0.9
+    // Team-success factor for the Hart (0.8 poorest club … 1.2 best in the league).
+    let maxTeamPts = 1
+    for (const s of this.standings.values()) maxTeamPts = Math.max(maxTeamPts, s.points)
+    const teamFactor = (id: PlayerId): number => {
+      const tid = this.teamOf(id)
+      const p = tid ? this.standings.get(tid)?.points ?? 0 : 0
+      return 0.8 + 0.4 * (p / maxTeamPts)
+    }
+    // Rookie: a genuine first-year pro (no archived season) young enough to qualify.
+    const isRookieSeason = (p: Player): boolean => p.stats.length === 0 && p.age <= 24
+
+    const pick = (
+      award: string,
+      score: (t: GamePlayerStat, p: Player, id: PlayerId) => number,
+      fmt: (t: GamePlayerStat, p: Player) => string
+    ): void => {
+      let bestId: PlayerId | null = null
+      let bestVal = -Infinity
+      for (const [id, t] of this.totals) {
+        const p = this.data.players.get(id)
+        if (!p) continue
+        const v = score(t, p, id)
+        if (v > bestVal) {
+          bestVal = v
+          bestId = id
+        }
+      }
+      if (bestId && bestVal > -Infinity) {
+        winners.push({ award, playerId: bestId, value: fmt(this.totals.get(bestId)!, this.resolve(bestId)) })
+      }
+    }
+
+    // Hart — value, not raw points: a skater gets points × team-success; a starter
+    // goalie is scored on save rate above league average × the volume he faced, so
+    // the trophy occasionally lands with a goalie the way the real Hart does.
+    pick(
+      'Most Valuable Player',
+      (t, p, id) => {
+        if (p.position === 'G') {
+          if (gpOf(id) < 0.6 * maxGoalieGp) return -Infinity
+          return (svPct(t) - leagueSv) * t.shotsAgainst * 3.0 * teamFactor(id)
+        }
+        return pts(t) * teamFactor(id)
+      },
+      (t, p) => (p.position === 'G' ? `.${Math.round(svPct(t) * 1000)} SV%` : `${pts(t)} PTS`)
+    )
+    pick('Art Ross Trophy', (t, p) => (p.position === 'G' ? -Infinity : pts(t)), (t) => `${pts(t)} PTS`)
+    pick('Top Goal Scorer', (t, p) => (p.position === 'G' ? -Infinity : t.goals), (t) => `${t.goals} G`)
+    pick('Best Playmaker', (t, p) => (p.position === 'G' ? -Infinity : t.assists), (t) => `${t.assists} A`)
+    pick(
+      'Best Defenseman',
+      (t, p, id) => (p.position === 'D' && gpOf(id) >= 0.5 * maxSkaterGp ? pts(t) : -Infinity),
+      (t) => `${pts(t)} PTS`
+    )
+    pick(
+      'Rookie of the Year',
+      (t, p, id) => (isRookieSeason(p) && gpOf(id) >= 0.3 * maxSkaterGp ? pts(t) : -Infinity),
+      (t) => `${pts(t)} PTS`
+    )
+    pick(
+      'Best Goaltender',
+      (t, p, id) => (p.position === 'G' && gpOf(id) >= 0.6 * maxGoalieGp ? svPct(t) : -Infinity),
+      (t) => `.${Math.round(svPct(t) * 1000)}`
+    )
+    return winners
+  }
+
   private awardsForArchive(): Array<{
     award: string
     playerId: string
@@ -2017,49 +2128,17 @@ export class Career {
     teamAbbr: string
     value: string
   }> {
-    const out: Array<{ award: string; playerId: string; name: string; teamAbbr: string; value: string }> = []
     const abbrOf = (id: PlayerId): string => {
       const t = this.teamOf(id)
       return t ? this.data.teams.get(t)!.abbreviation : 'FA'
     }
-    const top = (
-      award: string,
-      score: (t: GamePlayerStat) => number,
-      filter: (p: Player) => boolean,
-      fmt: (v: number) => string
-    ): void => {
-      let bestId: PlayerId | null = null
-      let bestVal = -Infinity
-      for (const [id, t] of this.totals) {
-        const p = this.data.players.get(id)
-        if (!p || !filter(p)) continue
-        const v = score(t)
-        if (v > bestVal) {
-          bestVal = v
-          bestId = id
-        }
-      }
-      if (bestId && bestVal > -Infinity) {
-        const p = this.resolve(bestId)
-        out.push({
-          award,
-          playerId: bestId as string,
-          name: p.name,
-          teamAbbr: abbrOf(bestId),
-          value: fmt(bestVal),
-        })
-      }
-    }
-    top('Most Valuable Player', (t) => t.goals + t.assists, (p) => p.position !== 'G', (v) => `${v} PTS`)
-    top('Top Goal Scorer', (t) => t.goals, (p) => p.position !== 'G', (v) => `${v} G`)
-    top('Best Playmaker', (t) => t.assists, (p) => p.position !== 'G', (v) => `${v} A`)
-    top(
-      'Best Goaltender',
-      (t) => (t.shotsAgainst >= 300 ? t.saves / Math.max(1, t.shotsAgainst) : -1),
-      (p) => p.position === 'G',
-      (v) => (v < 0 ? '—' : `.${Math.round(v * 1000)}`)
-    )
-    return out
+    return this.seasonAwardWinners().map((w) => ({
+      award: w.award,
+      playerId: w.playerId as string,
+      name: this.resolve(w.playerId).name,
+      teamAbbr: abbrOf(w.playerId),
+      value: w.value,
+    }))
   }
 
   /**
@@ -3171,7 +3250,7 @@ export class Career {
 
     // Award front-runners from league leaders.
     const awardFrontrunners = base.leagueLeaders.map((l) => ({
-      awardName: l.stat === 'points' ? 'Hart Trophy' : l.stat === 'goals' ? 'Rocket Richard' : l.stat === 'assists' ? 'Assists leader' : 'Leading scorer',
+      awardName: l.stat === 'points' ? 'Art Ross' : l.stat === 'goals' ? 'Rocket Richard' : l.stat === 'assists' ? 'Assists leader' : 'Leading scorer',
       leaderName: l.name,
       leaderTeamAbbr: l.teamAbbr,
       statLine: `${l.value} ${l.stat}`,
@@ -14334,40 +14413,14 @@ export class Career {
   }
 
   private computeAwards(): Array<{ award: string; winner: ReturnType<typeof badge> & { teamAbbr: string } }> {
-    const out: Array<{ award: string; winner: ReturnType<typeof badge> & { teamAbbr: string } }> = []
     const abbrOf = (id: PlayerId): string => {
       const t = this.teamOf(id)
       return t ? this.data.teams.get(t)!.abbreviation : 'FA'
     }
-    const top = (
-      award: string,
-      score: (t: GamePlayerStat, id: PlayerId) => number,
-      filter: (p: Player) => boolean
-    ): void => {
-      let bestId: PlayerId | null = null
-      let bestVal = -Infinity
-      for (const [id, t] of this.totals) {
-        const p = this.data.players.get(id)
-        if (!p || !filter(p)) continue
-        const v = score(t, id)
-        if (v > bestVal) {
-          bestVal = v
-          bestId = id
-        }
-      }
-      if (bestId) {
-        out.push({ award, winner: { ...badge(this.resolve(bestId)), teamAbbr: abbrOf(bestId) } })
-      }
-    }
-    top('Most Valuable Player', (t) => t.goals + t.assists, (p) => p.position !== 'G')
-    top('Top Goal Scorer', (t) => t.goals, (p) => p.position !== 'G')
-    top('Best Playmaker', (t) => t.assists, (p) => p.position !== 'G')
-    top(
-      'Best Goaltender',
-      (t) => (t.shotsAgainst >= 300 ? t.saves / Math.max(1, t.shotsAgainst) : -1),
-      (p) => p.position === 'G'
-    )
-    return out
+    return this.seasonAwardWinners().map((w) => ({
+      award: w.award,
+      winner: { ...badge(this.resolve(w.playerId)), teamAbbr: abbrOf(w.playerId) },
+    }))
   }
 
   getPlayoffs(): PlayoffBracketView | null {

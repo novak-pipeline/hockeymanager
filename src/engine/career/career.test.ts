@@ -597,6 +597,39 @@ describe('Career — story layer', () => {
     expect(snap.tentpoles!.combine).toBeNull()
   })
 
+  it('season awards include a Norris (D), Calder (rookie) and Art Ross beside the Hart/Vezina', () => {
+    const data = generateLeague({ seed: 71 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 71, userId)
+    const firstYear = career.year
+
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft (archives the season's trophies)
+
+    const seasonAwards = career.getHistory().awards.filter((a) => a.year === firstYear)
+    const names = new Set(seasonAwards.map((a) => a.award))
+    for (const award of [
+      'Most Valuable Player',
+      'Art Ross Trophy',
+      'Top Goal Scorer',
+      'Best Defenseman',
+      'Rookie of the Year',
+      'Best Goaltender',
+    ]) {
+      expect(names).toContain(award)
+    }
+    const posOf = (award: string): string | undefined => {
+      const w = seasonAwards.find((a) => a.award === award)
+      return w ? data.players.get(asPlayerId(w.playerId))?.position : undefined
+    }
+    // The defenceman trophy goes to a defenceman; the goalie trophy to a goalie.
+    expect(posOf('Best Defenseman')).toBe('D')
+    expect(posOf('Best Goaltender')).toBe('G')
+    // The scoring title is a skater award — a goalie can never win it.
+    expect(posOf('Art Ross Trophy')).not.toBe('G')
+  })
+
   it('snapshot round-trip preserves all five story states mid-season', () => {
     const data = generateLeague({ seed: 95 })
     const userId = data.league.teams[4]
