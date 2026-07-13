@@ -612,6 +612,90 @@ describe('aiFreeAgencyDay', () => {
   })
 })
 
+describe('aiFreeAgencyDay posture (LW3)', () => {
+  const openTwoForwards = (data: LeagueData, team: Team): void => {
+    const fwds = rosterPlayers(data, team)
+      .filter((p) => p.position !== 'D' && p.position !== 'G')
+      .sort(byOverallDesc)
+    releasePlayer({ team, playerId: fwds[fwds.length - 1].id, players: data.players })
+    releasePlayer({ team, playerId: fwds[fwds.length - 2].id, players: data.players })
+    giveHeadroom(team, data.players, 40_000_000)
+  }
+
+  it('a rebuilding club passes on an aging, pricey UFA — a contender lands him', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const rebuild = teamAt(data, 1)
+    const contend = teamAt(data, 2)
+    openTwoForwards(data, rebuild)
+    openTwoForwards(data, contend)
+    const vet = mkSkater('vetfa', 85, 32) // ~$9M ask, 3–5y term
+    data.players.set(vet.id, vet)
+
+    const { signings } = aiFreeAgencyDay({
+      teams: data.teams,
+      players: data.players,
+      freeAgentIds: [vet.id],
+      userTeamId,
+      year: 2026,
+      rng: new Rng(5),
+      faDay: 1,
+      postureOf: (tid) =>
+        tid === rebuild.id ? 'rebuild' : tid === contend.id ? 'contend' : 'retool',
+    })
+
+    expect(signings).toHaveLength(1)
+    expect(signings[0].teamId).toBe(contend.id)
+    expect(rebuild.roster).not.toContain(vet.id)
+  })
+
+  it('a rebuilding club still takes a cheap short-term stopgap', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const rebuild = teamAt(data, 1)
+    openTwoForwards(data, rebuild)
+    const stopgap = mkSkater('cheapfa', 52, 34) // sub-$1M ask, 1-year term
+    data.players.set(stopgap.id, stopgap)
+
+    const { signings } = aiFreeAgencyDay({
+      teams: data.teams,
+      players: data.players,
+      freeAgentIds: [stopgap.id],
+      userTeamId,
+      year: 2026,
+      rng: new Rng(5),
+      faDay: 1,
+      postureOf: () => 'rebuild',
+    })
+
+    expect(signings).toHaveLength(1)
+    expect(signings[0].teamId).toBe(rebuild.id)
+  })
+
+  it('is neutral when postureOf is absent (behaviour unchanged)', () => {
+    const build = (): { data: LeagueData; userTeamId: TeamId; pid: PlayerId } => {
+      const data = gen(13)
+      const userTeamId = data.league.teams[0]
+      openTwoForwards(data, teamAt(data, 1))
+      openTwoForwards(data, teamAt(data, 2))
+      const p = mkSkater('x', 80, 30)
+      data.players.set(p.id, p)
+      return { data, userTeamId, pid: p.id }
+    }
+    const a = build()
+    const b = build()
+    const noPosture = aiFreeAgencyDay({
+      teams: a.data.teams, players: a.data.players, freeAgentIds: [a.pid],
+      userTeamId: a.userTeamId, year: 2026, rng: new Rng(7), faDay: 1,
+    })
+    const retoolAll = aiFreeAgencyDay({
+      teams: b.data.teams, players: b.data.players, freeAgentIds: [b.pid],
+      userTeamId: b.userTeamId, year: 2026, rng: new Rng(7), faDay: 1, postureOf: () => 'retool',
+    })
+    expect(JSON.stringify(noPosture.signings)).toBe(JSON.stringify(retoolAll.signings))
+  })
+})
+
 describe('initialPicks', () => {
   it('gives every club its own picks for 3 drafts, 2 rounds by default', () => {
     const teamIds = [asTeamId('t0'), asTeamId('t1')]

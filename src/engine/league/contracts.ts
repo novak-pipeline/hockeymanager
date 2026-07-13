@@ -364,7 +364,15 @@ export function aiResignDay(args: {
  * salary and has a roster spot. Lingering free agents discount their ask 5%
  * per day they've gone unsigned (floor 70%). Unsigned players stay in the pool
  * and re-test on later days; the caller removes signed ids from its pool.
+ *
+ * Posture (optional, LW3): a club's competitive window shapes who it chases. A
+ * rebuilding team builds through youth — it won't hand a 30-something UFA
+ * multi-year term, and it stays out of the top of the market; it'll still take a
+ * cheap short-term stopgap. A contender leans in: high-impact UFAs get a scoring
+ * nudge so the best names actually land with clubs trying to win now. Absent
+ * `postureOf`, every club is treated as 'retool' and behaviour is unchanged.
  */
+const REBUILD_MAX_UFA_AAV = 5_500_000 // rebuilders don't shop the top of the market
 export function aiFreeAgencyDay(args: {
   teams: Map<TeamId, Team>
   players: Map<PlayerId, Player>
@@ -373,8 +381,10 @@ export function aiFreeAgencyDay(args: {
   year: number
   rng: Rng
   faDay: number
+  postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
 }): { signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> } {
   const { teams, players, freeAgentIds, userTeamId, year, rng, faDay } = args
+  const postureOf = args.postureOf ?? ((): 'retool' => 'retool')
   const signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> = []
 
   const rostered = new Set<PlayerId>()
@@ -401,6 +411,7 @@ export function aiFreeAgencyDay(args: {
     const discount = Math.max(0.7, 1 - 0.05 * (faDay - decisionDay))
     const salary = Math.max(LEAGUE_MIN_SALARY, roundTo25k(ask.salary * discount))
     const group = groupOf(player)
+    const ovr = playerOverall(player)
 
     let best: Team | null = null
     let bestScore = -Infinity
@@ -410,7 +421,18 @@ export function aiFreeAgencyDay(args: {
       if (deficit <= 0) continue
       const space = capSpace(team, players)
       if (space < salary) continue
-      const score = deficit * 1e9 + space + rng.float(0, 1e6)
+      const posture = postureOf(team.id)
+      if (posture === 'rebuild') {
+        // A rebuilding club builds through youth: no multi-year money to an
+        // aging vet, and no shopping at the top of the market. Cheap, short
+        // stopgaps only.
+        if (player.age >= 30 && ask.years >= 2) continue
+        if (salary >= REBUILD_MAX_UFA_AAV) continue
+      }
+      // Contenders chase the difference-makers — a nudge so the best available
+      // gravitates to a club actually pushing for now.
+      const contendPull = posture === 'contend' && ovr >= 78 ? 5e8 : 0
+      const score = deficit * 1e9 + contendPull + space + rng.float(0, 1e6)
       if (score > bestScore) {
         bestScore = score
         best = team
