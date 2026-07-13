@@ -14951,7 +14951,7 @@ export class Career {
         goals: t.goals,
         assists: t.assists,
         points: t.goals + t.assists,
-        plusMinus: 0,
+        plusMinus: t.plusMinus,
         savePct: sa > 0 ? t.saves / sa : 0,
         toi: t.toi,
         goalsAgainst: t.goalsAgainst,

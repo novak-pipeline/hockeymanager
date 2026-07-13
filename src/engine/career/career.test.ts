@@ -3030,6 +3030,19 @@ describe('#171 medical timelines', () => {
 })
 
 describe('#175 shorthanded stat splits', () => {
+  it('surfaces real plus/minus in the league leaders (not all zero)', () => {
+    const data = generateLeague({ seed: 71 })
+    const career = new Career(data, 71, data.league.teams[0])
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    const pm = career.getLeagueLeaders().plusMinus
+    expect(pm.length).toBeGreaterThan(0)
+    // The top plus/minus over a full season is a real, positive number — the
+    // leaderboard used to hardcode every player to 0.
+    expect(pm[0]!.value).toBeGreaterThan(0)
+    // And there's a genuine spread (leader and trailer differ).
+    expect(pm[0]!.value).not.toBe(pm[pm.length - 1]!.value)
+  })
+
   it('credits shorthanded goals to PK scorers over a full season (real PK splits)', () => {
     const data = generateLeague({ seed: 71 })
     const career = new Career(data, 71, data.league.teams[0])
