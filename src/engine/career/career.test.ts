@@ -3037,6 +3037,10 @@ describe('#175 shorthanded stat splits', () => {
     while (career.getDashboard().phase === 'regularSeason') career.step()
     for (const tid of data.league.teams) {
       expect(data.teams.get(tid)!.roster.length).toBeLessThanOrEqual(23)
+      // Mid-season call-ups get numbered too (recalls run every match day).
+      for (const id of data.teams.get(tid)!.roster) {
+        expect(typeof data.players.get(id)?.jerseyNumber).toBe('number')
+      }
     }
   })
 

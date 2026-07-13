@@ -3909,6 +3909,9 @@ export class Career {
         ahl.roster.push(send.id)
       }
     }
+    // Number any mid-season arrivals (recalls, trade/waiver adds) who lack a
+    // jersey — construction/rollover only cover the roster at those moments.
+    this.ensureJerseyNumbers()
   }
 
   /** If the user's club cannot ice a legal lineup (12 healthy F / 6 D / 2 G)
