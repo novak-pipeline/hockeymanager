@@ -46,18 +46,24 @@ let shot = 0
  *  Continue, a staff/board meeting that must be delegated, a deadline hold, …).
  *  Returns true if something was clicked. */
 async function advanceOnce(win) {
+  // Gate-screen resolvers FIRST — the dashboard "Continue" only *routes into* a
+  // gate (camp, board meeting), so if we're already on a gate screen we must click
+  // its own button. Then the generic advance. Exact labels from the renderer.
   for (const sel of [
-    'button:has-text("Continue")',
-    'button:has-text("Delegate")',
+    'button:has-text("set the roster")',      // cut day: coach sets the 23
+    'button:has-text("Break camp")',
+    'button:has-text("To opening night")',
+    'button:has-text("opening night")',
+    'button:has-text("Send the AGM")',        // preseason board meeting: delegate
+    'button:has-text("Run the scrimmage")',   // dev-camp beats
+    'button:has-text("Hear the final reads")',
     'button:has-text("Send the staff")',
-    'button:has-text("Break camp")',      // training-camp wrap
-    'button:has-text("opening night")',   // camp → season
-    'button:has-text("coach picks")',     // cut-day: let the coach set the 23
-    'button:has-text("Head into")',       // board meeting → season
+    'button:has-text("Delegate")',
+    'button:has-text("Continue")',            // dashboard advance / route into a gate
+    'button:has-text("Sim day")',             // topbar fallback
     'button:has-text("Proceed")',
     'button:has-text("Skip")',
     'button:has-text("Dismiss")',
-    'button:has-text("Sim day")',         // topbar: always advances one day
   ]) {
     try { await win.click(sel, { timeout: 1200 }); return true } catch { /* try next */ }
   }
