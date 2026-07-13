@@ -162,6 +162,9 @@ function devNote(p: Player, location: 'NHL' | 'AHL' | 'Junior', upside: number, 
   if (upside >= 2) return 'Big upside remaining; trending up with NHL minutes.'
   if (upside >= 1) return 'Still rounding into form; room to grow.'
   if (tier === 'Star' || tier === 'Key') return 'Nearing his ceiling — a cornerstone piece.'
+  // "Finished product" only fits a player old enough to have actually peaked — a
+  // young man with little headroom is a limited-upside depth piece, not finished.
+  if (p.age <= 22) return 'Limited projected upside — a depth piece for now.'
   return 'Largely a finished product at this stage.'
 }
 
