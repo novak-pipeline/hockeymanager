@@ -46,6 +46,9 @@ export interface SituationStats {
 export interface SeasonStats {
   season: number
   teamId: string
+  /** Which tier this line was played in. Absent = NHL (backward-compatible with
+   *  existing saves and imported histories). An AHL season records its own line. */
+  league?: 'nhl' | 'ahl'
   gamesPlayed: number
   ev: SituationStats
   pp: SituationStats

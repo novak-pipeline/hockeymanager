@@ -704,6 +704,8 @@ export interface PlayerProfileView extends PlayerBadge {
      *  affiliate, or any competition) — makes the row clickable. Absent for
      *  defunct/unmatched historical clubs. */
     teamId?: string
+    /** Present on farm (AHL) season lines so the table can tag them. Absent = NHL. */
+    league?: 'ahl'
     skater: SkaterSeasonLine | null
     goalie: GoalieSeasonLine | null
   }>

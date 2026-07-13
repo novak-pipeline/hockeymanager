@@ -206,6 +206,18 @@ function NtcWaivePanel(
 
 type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout' | 'opinion'
 
+/** Small chip appended to a farm (AHL) season row in the stats table. */
+const ahlTagStyle: React.CSSProperties = {
+  marginLeft: 4,
+  fontSize: 9,
+  fontWeight: 600,
+  opacity: 0.75,
+  border: '1px solid var(--border)',
+  borderRadius: 3,
+  padding: '0 3px',
+  verticalAlign: 'middle',
+}
+
 const TABS: { id: TabId; label: string }[] = [
   { id: 'profile',     label: 'Profile' },
   { id: 'positions',   label: 'Positions & Roles' },
@@ -1440,7 +1452,7 @@ function SeasonStatsTable({ seasons, isGoalie }: { seasons: PlayerProfileView['s
               const g = s.goalie
               return (
                 <tr key={i}>
-                  <td>{yr}</td><td className="muted">{s.teamAbbr}</td>
+                  <td>{yr}</td><td className="muted">{s.teamAbbr}{s.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
                   <td className="num">{g?.gamesPlayed ?? '—'}</td><td className="num">{g?.wins ?? '—'}</td><td className="num">{g?.losses ?? '—'}</td>
                   <td className="num">{g ? `.${Math.round(g.savePct * 1000)}` : '—'}</td>
                   <td className="num">{g ? g.goalsAgainstAverage.toFixed(2) : '—'}</td><td className="num">{g?.shutouts ?? '—'}</td>
@@ -1450,7 +1462,7 @@ function SeasonStatsTable({ seasons, isGoalie }: { seasons: PlayerProfileView['s
             const sk = s.skater
             return (
               <tr key={i}>
-                <td>{yr}</td><td className="muted">{s.teamAbbr}</td>
+                <td>{yr}</td><td className="muted">{s.teamAbbr}{s.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
                 <td className="num">{sk?.gamesPlayed ?? '—'}</td><td className="num">{sk?.goals ?? '—'}</td><td className="num">{sk?.assists ?? '—'}</td>
                 <td className="num"><strong>{sk?.points ?? '—'}</strong></td>
                 <td className="num">{sk ? (sk.plusMinus > 0 ? `+${sk.plusMinus}` : sk.plusMinus) : '—'}</td>
@@ -1809,7 +1821,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
             {d.seasons.map((season, i) => (
               <tr key={season.year} style={i === 0 ? { fontWeight: 600 } : undefined}>
                 <td>{season.year}–{String(season.year + 1).slice(2)}</td>
-                <td className="muted"><TeamLink teamId={season.teamId} name={season.teamAbbr} /></td>
+                <td className="muted"><TeamLink teamId={season.teamId} name={season.teamAbbr} />{season.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
                 {season.goalie
                   ? <GoalieHistoryRow g={season.goalie} />
                   : season.skater

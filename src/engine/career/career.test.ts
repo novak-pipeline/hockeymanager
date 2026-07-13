@@ -3044,6 +3044,41 @@ describe('#175 shorthanded stat splits', () => {
     expect(pp).toBeGreaterThan(sh)
   })
 
+  it('archives AHL production as its own season line (farm history is recorded)', () => {
+    const data = generateLeague({ seed: 2031 })
+    const userTid = data.league.teams[0]!
+    const career = new Career(data, 2031, userTid)
+    // Keep the user org viable through the season so the lineup guard never throws.
+    {
+      const userNhl = data.teams.get(userTid)!
+      const userAhl = userNhl.affiliateId ? data.teams.get(userNhl.affiliateId) : undefined
+      for (const roster of [userNhl.roster, userAhl?.roster ?? []]) {
+        for (const id of roster) {
+          const p = data.players.get(id)
+          if (!p) continue
+          p.injuryProneness = 0
+          p.age = Math.min(p.age, 24)
+          p.contract = { ...p.contract, yearsRemaining: 12, expiryYear: career.year + 12 }
+        }
+      }
+    }
+    const startYear = career.year
+    let guard = 0
+    // Sim through the season, playoffs and offseason until the year rolls over,
+    // which is when archiveSeasonStats() runs.
+    while (career.year === startYear && guard++ < 40000) {
+      if (career.draftPending()) { career.autoDraft(); continue }
+      career.step()
+    }
+    expect(career.year).toBe(startYear + 1)
+    // Some player who spent the season on the farm now carries an AHL season line.
+    const ahlLines = [...data.players.values()].flatMap((p) =>
+      p.stats.filter((s) => s.league === 'ahl' && s.season === startYear),
+    )
+    expect(ahlLines.length).toBeGreaterThan(0)
+    expect(ahlLines.every((s) => s.gamesPlayed > 0)).toBe(true)
+  })
+
   it('credits real PP/PK time-on-ice, concentrated on the special-teams units', () => {
     const data = generateLeague({ seed: 72 })
     const userId = data.league.teams[0]

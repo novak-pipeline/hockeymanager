@@ -742,6 +742,7 @@ export function buildPlayerProfile(
       year: s.season,
       teamAbbr: ctx.teams.get(s.teamId as TeamId)?.abbreviation ?? s.teamId,
       ...(ctx.teams.has(s.teamId as TeamId) ? { teamId: s.teamId as string } : {}),
+      ...(s.league === 'ahl' ? { league: 'ahl' as const } : {}),
       skater:
         p.position === 'G'
           ? null

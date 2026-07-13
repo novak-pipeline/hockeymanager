@@ -1921,6 +1921,7 @@ export class Career {
     const p = this.data.players.get(pid)
     if (p) {
       for (const s of p.stats) {
+        if (s.league === 'ahl') continue // NHL career totals only — the farm line is separate
         goals += s.ev.goals + s.pp.goals + s.pk.goals
         assists += s.ev.assists + s.pp.assists + s.pk.assists
         gamesPlayed += s.gamesPlayed
@@ -5239,6 +5240,7 @@ export class Career {
             const tradedTimes = events.filter((e) => e.kind === 'trade').length
             let gp = 0, g = 0, a = 0, so = 0
             for (const s of p.stats) {
+              if (s.league === 'ahl') continue // the send-off tallies his NHL career
               gp += s.gamesPlayed
               g += s.ev.goals + s.pp.goals + s.pk.goals
               a += s.ev.assists + s.pp.assists + s.pk.assists
@@ -6071,6 +6073,32 @@ export class Career {
         goalsAgainst: t.goalsAgainst,
         shutouts: 0,
         ...(ratingAcc && ratingAcc.n > 0 ? { avgRating: Math.round((ratingAcc.sum / ratingAcc.n) * 100) / 100 } : {}),
+      })
+    }
+    // Farm production is history too: a prospect who spent the year in the AHL
+    // gets his own season line (league:'ahl'), so his development shows up on his
+    // career page instead of a blank year. PP/PK aren't split at the farm level,
+    // so everything lands in the even-strength bucket.
+    for (const [pid, t] of this.ahlTotals) {
+      const games = this.ahlGp.get(pid) ?? 0
+      if (games <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const teamId = this.teamOf(pid)
+      p.stats.push({
+        season: this.year,
+        teamId: (teamId as string) ?? 'FA',
+        league: 'ahl',
+        gamesPlayed: games,
+        ev: { goals: t.goals, assists: t.assists, shots: t.shots, timeOnIce: Math.round(t.toi) },
+        pp: { goals: 0, assists: 0, shots: 0, timeOnIce: 0 },
+        pk: { goals: 0, assists: 0, shots: 0, timeOnIce: 0 },
+        plusMinus: t.plusMinus,
+        penaltyMinutes: t.penaltyMinutes,
+        saves: t.saves,
+        shotsAgainst: t.shotsAgainst,
+        goalsAgainst: t.goalsAgainst,
+        shutouts: 0,
       })
     }
   }
