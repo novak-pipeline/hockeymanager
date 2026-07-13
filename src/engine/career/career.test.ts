@@ -264,6 +264,13 @@ describe('Career — regular season', () => {
     expect(career.getStandings().overall).toHaveLength(16)
     expect(career.getStats().points.length).toBeGreaterThan(0)
     expect(career.getFinances().payroll.length).toBeGreaterThan(20)
+    // League-average payroll is an NHL-only figure — including the AHL/world tiers
+    // would drag it well below the salary floor (a real "$34M avg vs $65M floor" bug).
+    {
+      const fin = career.getFinances()
+      expect(fin.leagueAvgPayroll).toBeGreaterThan(fin.salaryFloor)
+      expect(fin.leagueAvgPayroll).toBeLessThanOrEqual(fin.salaryCap)
+    }
     expect(career.getTrades().partners).toHaveLength(15)
     expect(career.getInbox().items.length).toBeGreaterThan(0)
     expect(career.getLastBoxScore()).not.toBeNull()

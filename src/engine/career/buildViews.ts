@@ -1155,8 +1155,13 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
   const roster = team.roster.map((id) => ctx.players.get(id)!).filter(Boolean)
   const payroll = roster.map(payrollRow).sort((a, b) => b.salary - a.salary)
   const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
+  // League-average payroll is an NHL-only figure — the AHL/world tiers pay a
+  // fraction of NHL wages and would drag the average below the salary floor.
   let leagueTotal = 0
+  let leagueTeamCount = 0
   for (const t of ctx.teams.values()) {
+    if (t.tier === 'ahl' || t.tier === 'world') continue
+    leagueTeamCount += 1
     for (const id of t.roster) leagueTotal += ctx.players.get(id)?.contract.salary ?? 0
   }
   // Salary by position group.
@@ -1214,7 +1219,7 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     budget: team.finances.budget,
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),
-    leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, ctx.teams.size)),
+    leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, leagueTeamCount)),
     byPosition,
     commitments,
     revenue,
