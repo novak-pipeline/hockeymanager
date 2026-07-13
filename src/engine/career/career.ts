@@ -715,6 +715,13 @@ const PICK_YEARS_AHEAD = 3
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = 8
+/** Inclusive integer range [a..b] — used for jersey-number preference pools. */
+function range(a: number, b: number): number[] {
+  const out: number[] = []
+  for (let n = a; n <= b; n++) out.push(n)
+  return out
+}
+
 /** Active NHL roster ceiling. Real NHL: 23 in-season (20 dressed + up to 3
  *  healthy scratches); the rest of the org plays in the AHL. */
 const ROSTER_HARD_CAP = 23
@@ -1146,12 +1153,21 @@ export class Career {
       for (const id of team.roster) {
         const p = this.data.players.get(id)
         if (!p || p.jerseyNumber !== undefined) continue
-        // Preferred number from a stable hash of the id (1–98), then next free.
+        // Stable hash of the id → a preferred number, biased by position so the
+        // numbers read like real hockey (goalies in the 30s/1/60s+; skaters take
+        // the 2–29 and 40–98 range). Falls through to the next free number.
         let h = 2166136261
         for (let i = 0; i < (id as string).length; i++) { h ^= (id as string).charCodeAt(i); h = Math.imul(h, 16777619) }
-        let num = ((h >>> 0) % 98) + 1
+        const hv = h >>> 0
+        const pool = p.position === 'G'
+          ? [...range(30, 39), 1, 35, ...range(60, 79), ...range(40, 49)]
+          : [...range(2, 29), ...range(40, 98)]
+        let num = pool[hv % pool.length]!
         let guard = 0
-        while (used.has(num) && guard++ < 99) num = (num % 98) + 1
+        // Walk the pool from the preferred slot until a free number turns up;
+        // if the whole preferred pool is taken, fall back to any free 1–98.
+        while (used.has(num) && guard < pool.length) { guard++; num = pool[(hv + guard) % pool.length]! }
+        for (let n = 1; used.has(num) && n <= 98; n++) if (!used.has(n)) num = n
         p.jerseyNumber = num
         used.add(num)
       }

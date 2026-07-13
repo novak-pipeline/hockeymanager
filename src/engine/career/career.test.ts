@@ -3055,6 +3055,14 @@ describe('#175 shorthanded stat splits', () => {
       expect(nums.every((n) => typeof n === 'number' && n >= 1 && n <= 98)).toBe(true)
       // …and no two teammates share one.
       expect(new Set(nums).size).toBe(nums.length)
+      // Goalies wear goalie numbers (the 30s/1/40s/60s+), not a random 2 or 15.
+      for (const id of team.roster) {
+        const pl = data.players.get(id)
+        if (pl?.position !== 'G') continue
+        const n = pl.jerseyNumber!
+        const goalieish = n === 1 || (n >= 30 && n <= 49) || (n >= 60 && n <= 79)
+        expect(goalieish).toBe(true)
+      }
     }
   })
 
