@@ -3030,6 +3030,16 @@ describe('#171 medical timelines', () => {
 })
 
 describe('#175 shorthanded stat splits', () => {
+  it('keeps NHL rosters at or under the 23-man cap through a full season', () => {
+    const data = generateLeague({ seed: 71 })
+    const career = new Career(data, 71, data.league.teams[0])
+    // Injury recalls used to ratchet rosters past 23 and never trim back.
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    for (const tid of data.league.teams) {
+      expect(data.teams.get(tid)!.roster.length).toBeLessThanOrEqual(23)
+    }
+  })
+
   it('assigns every rostered player a club-unique jersey number', () => {
     const data = generateLeague({ seed: 5 })
     const userTid = data.league.teams[0]!

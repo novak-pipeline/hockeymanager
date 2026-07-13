@@ -3891,6 +3891,23 @@ export class Career {
           nhl.roster.push(cand.id)
         }
       }
+
+      // ── conform back to the 23-man limit ──────────────────────────────────
+      // Injury recalls that were never sent back down ratchet the roster over the
+      // cap. Trim the lowest-rated HEALTHY, WAIVER-EXEMPT extras (the young call-ups
+      // that inflated it — no waiver exposure) back to AHL, so long as the NHL club
+      // keeps its healthy minimums. Waiver-requiring vets are left for the GM.
+      while (nhl.roster.length > 23) {
+        const demotable = nhl.roster
+          .map((id) => this.data.players.get(id))
+          .filter((p): p is Player => !!p && p.injuryStatus === null && !this.requiresWaivers(p))
+          .filter((p) => healthyCount(nhl.roster, grpOf(p)) > NEED[grpOf(p)])
+          .sort((a, b) => ratedOverall(a) - ratedOverall(b) || (a.id < b.id ? -1 : 1))
+        const send = demotable[0]
+        if (!send) break // only waiver-requiring/needed bodies remain — GM must act
+        nhl.roster = nhl.roster.filter((id) => id !== send.id)
+        ahl.roster.push(send.id)
+      }
     }
   }
 
