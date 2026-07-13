@@ -1691,7 +1691,8 @@ export function buildAhlStandingsView(ctx: AhlViewCtx): AhlStandingsView {
  */
 export function buildAhlSquadView(
   ctx: AhlViewCtx,
-  ahlGp: Map<PlayerId, number>
+  ahlGp: Map<PlayerId, number>,
+  ahlTotals?: Map<PlayerId, import('@engine/shared/outcome').GamePlayerStat>,
 ): AhlSquadView {
   if (!ctx.userAhlTeamId) {
     return { teamName: 'No Affiliate', teamId: '', rows: [], rosterCount: 0, hasAffiliate: false }
@@ -1706,30 +1707,35 @@ export function buildAhlSquadView(
       const p = ctx.players.get(id)
       if (!p) return null
       const gp = ahlGp.get(id) ?? 0
+      // Farm production from the accumulated AHL totals (goals/assists/…), so the
+      // Statistics view shows real numbers instead of a row of zeros. PP/PK aren't
+      // split at the farm level — everything is even-strength here.
+      const t = ahlTotals?.get(id)
       const skaterLine: SkaterSeasonLine | null = p.position !== 'G'
         ? {
             gamesPlayed: gp,
-            goals: 0,
-            assists: 0,
-            points: 0,
-            plusMinus: 0,
-            penaltyMinutes: 0,
-            shots: 0,
-            toiPerGame: 0,
+            goals: t?.goals ?? 0,
+            assists: t?.assists ?? 0,
+            points: (t?.goals ?? 0) + (t?.assists ?? 0),
+            plusMinus: t?.plusMinus ?? 0,
+            penaltyMinutes: t?.penaltyMinutes ?? 0,
+            shots: t?.shots ?? 0,
+            toiPerGame: t && gp > 0 ? Math.round(t.toi / gp) : 0,
             ppGoals: 0,
             ppAssists: 0,
           }
         : null
+      const gaGp = t ? gp : 0
       const goalieLine = p.position === 'G'
         ? {
             gamesPlayed: gp,
             wins: 0,
             losses: 0,
-            savePct: 0,
-            goalsAgainstAverage: 0,
+            savePct: t && t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : 0,
+            goalsAgainstAverage: gaGp > 0 ? (t!.goalsAgainst / gaGp) : 0,
             shutouts: 0,
-            saves: 0,
-            shotsAgainst: 0,
+            saves: t?.saves ?? 0,
+            shotsAgainst: t?.shotsAgainst ?? 0,
           }
         : null
       const b = badge(p)

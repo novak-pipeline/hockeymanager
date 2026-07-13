@@ -1172,7 +1172,7 @@ export class Career {
 
   /** User's AHL affiliate roster view model. */
   getAhlSquadView(): AhlSquadView {
-    return buildAhlSquadView(this.ahlViewCtx(), this.ahlGp)
+    return buildAhlSquadView(this.ahlViewCtx(), this.ahlGp, this.ahlTotals)
   }
 
   private get deadlineDay(): number {
