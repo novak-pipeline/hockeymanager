@@ -6104,10 +6104,18 @@ export class Career {
       if (games <= 0) continue
       const p = this.data.players.get(pid)
       if (!p) continue
-      const teamId = this.teamOf(pid)
+      // Record the AHL line under the FARM club, not whatever roster he's on now.
+      // A called-up prospect sits on the NHL team at rollover; his AHL line still
+      // belongs to that club's affiliate (and mustn't collide with his NHL line).
+      const cur = this.teamOf(pid)
+      let ahlTeamId = cur
+      if (cur) {
+        const curTeam = this.data.teams.get(cur)
+        if (curTeam && curTeam.tier !== 'ahl' && curTeam.affiliateId) ahlTeamId = curTeam.affiliateId
+      }
       p.stats.push({
         season: this.year,
-        teamId: (teamId as string) ?? 'FA',
+        teamId: (ahlTeamId as string) ?? 'FA',
         league: 'ahl',
         gamesPlayed: games,
         ev: { goals: t.goals, assists: t.assists, shots: t.shots, timeOnIce: Math.round(t.toi) },

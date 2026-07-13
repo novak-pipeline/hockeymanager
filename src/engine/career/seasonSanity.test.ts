@@ -200,11 +200,13 @@ function checkCareerHistory(data: ReturnType<typeof generateLeague>, flag: (s: s
   if (vets.length >= 5 && withMulti === 0) {
     flag('career history: no established veteran has >1 season line (history not accumulating)')
   }
-  // Duplicate season+team lines would indicate double-writing.
+  // Duplicate season+team+league lines would indicate double-writing. (A player
+  // can legitimately have BOTH an NHL and an AHL line in the same season if he was
+  // called up and sent down — those are distinct by league.)
   for (const p of data.players.values()) {
     const keys = new Set<string>()
     for (const s of p.stats) {
-      const k = `${s.season}|${s.teamId}`
+      const k = `${s.season}|${s.teamId}|${s.league ?? 'nhl'}`
       if (keys.has(k)) { flag(`history: ${p.name} has a duplicate ${s.season} line for the same team`); break }
       keys.add(k)
     }
