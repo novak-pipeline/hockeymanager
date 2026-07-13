@@ -206,7 +206,7 @@ export function seedRecordsHistory(args: SeedHistoryArgs): RecordsState {
       careerPoints,
       careerGoals,
       careerGames: games,
-      hallOfFame: careerPoints >= 950, // the true greats
+      hallOfFame: careerPoints >= HOF_POINTS_THRESHOLD, // the true greats
     })
   }
 
@@ -263,7 +263,11 @@ export interface SeasonLine {
 
 const TOP_N = 10
 const SAVE_PCT_MIN_SHOTS = 600
+/** Bar to be remembered as a retired legend (appears on the Legends screen). */
 const LEGEND_POINTS_THRESHOLD = 400
+/** Higher bar to actually be enshrined in the Hall of Fame. Only the elite of
+ *  the notable retirees get a plaque; record-holders qualify regardless. */
+const HOF_POINTS_THRESHOLD = 900
 const HOF_WAIT_SEASONS = 3
 
 function insertSorted(
@@ -752,9 +756,8 @@ export function inductHallOfFame(state: RecordsState, year: number): NewsSeed[] 
     if (legend.hallOfFame) continue
     if (legend.retiredYear !== inductionClass) continue
 
-    legend.hallOfFame = true
-
-    // Build retrospective body
+    // Build the retrospective (also used to decide eligibility — a record-holder
+    // is enshrined even below the raw points bar).
     const awardsForPlayer = state.awards.filter((a) => a.playerId === legend.playerId)
     const recordsHeld: string[] = []
 
@@ -766,6 +769,13 @@ export function inductHallOfFame(state: RecordsState, year: number): NewsSeed[] 
       recordsHeld.push(`single-season points record (${state.singleSeason.points[0].value})`)
     if (state.singleSeason.goals[0]?.playerId === legend.playerId)
       recordsHeld.push(`single-season goals record (${state.singleSeason.goals[0].value})`)
+
+    // Only the ELITE get a plaque — a notable career alone (400+ pts) makes the
+    // Legends screen, but the Hall needs a truly great résumé or a record.
+    const hofWorthy = legend.careerPoints >= HOF_POINTS_THRESHOLD || recordsHeld.length > 0
+    if (!hofWorthy) continue
+
+    legend.hallOfFame = true
 
     const awardPart =
       awardsForPlayer.length > 0

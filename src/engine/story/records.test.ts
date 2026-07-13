@@ -625,7 +625,7 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     // No induction in 2011 or 2012
@@ -643,7 +643,7 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     inductHallOfFame(state, 2013)
@@ -666,14 +666,14 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 220, careerAssists: 310, careerPoints: 530, careerGames: 980 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 420, careerAssists: 610, careerPoints: 1030, careerGames: 1180 }],
       year: 2010,
     })
     const seeds = inductHallOfFame(state, 2013)
     const body = seeds[0]!.body
-    expect(body).toMatch(/980 GP/)
-    expect(body).toMatch(/220 G/)
-    expect(body).toMatch(/530 PTS/)
+    expect(body).toMatch(/1180 GP/)
+    expect(body).toMatch(/420 G/)
+    expect(body).toMatch(/1030 PTS/)
     expect(body).toMatch(/2010/)  // retired year
   })
 
@@ -682,7 +682,7 @@ describe('inductHallOfFame', () => {
     state.awards.push({ year: 2008, award: 'MVP', playerId: 'p1', playerName: 'Legend', teamAbbr: 'TST', value: '100 PTS' })
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     const seeds = inductHallOfFame(state, 2013)
@@ -702,13 +702,37 @@ describe('inductHallOfFame', () => {
     expect(seeds[0]!.body).toMatch(/career points leader/)
   })
 
+  it('does NOT enshrine a merely-notable retiree — only the elite make the Hall', () => {
+    const state = emptyRecords()
+    registerRetirements({
+      state,
+      // A solid career (makes the Legends screen) but well below the HoF bar.
+      retirees: [{ playerId: 'p1', name: 'Solid Pro', careerGoals: 210, careerAssists: 260, careerPoints: 470, careerGames: 940 }],
+      year: 2010,
+    })
+    expect(state.retiredLegends).toHaveLength(1) // remembered as a legend...
+    expect(inductHallOfFame(state, 2013)).toHaveLength(0) // ...but not enshrined
+    expect(state.retiredLegends[0]!.hallOfFame).toBe(false)
+  })
+
+  it('enshrines a below-bar career if it holds an all-time record', () => {
+    const state = emptyRecords()
+    state.career.points.push({ value: 500, playerId: 'p1', playerName: 'Record Holder', teamAbbr: 'TST', year: 2008 })
+    registerRetirements({
+      state,
+      retirees: [{ playerId: 'p1', name: 'Record Holder', careerGoals: 210, careerAssists: 290, careerPoints: 500, careerGames: 900 }],
+      year: 2010,
+    })
+    expect(inductHallOfFame(state, 2013)).toHaveLength(1)
+  })
+
   it('handles multiple legends retiring in the same year', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
       retirees: [
-        { playerId: 'p1', name: 'Legend1', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 },
-        { playerId: 'p2', name: 'Legend2', careerGoals: 180, careerAssists: 250, careerPoints: 430, careerGames: 950 },
+        { playerId: 'p1', name: 'Legend1', careerGoals: 470, careerAssists: 560, careerPoints: 1030, careerGames: 1250 },
+        { playerId: 'p2', name: 'Legend2', careerGoals: 430, careerAssists: 590, careerPoints: 1020, careerGames: 1280 },
       ],
       year: 2010,
     })
