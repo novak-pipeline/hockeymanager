@@ -65,9 +65,12 @@ const LEAGUE_AVG = 50
 /** Quick-sim returns the shared box-score contract. */
 export type QuickSimResult = GameOutcome
 
-/** Forward-line usage weights (top lines play more). */
-const FWD_LINE_WEIGHTS = [0.3, 0.27, 0.24, 0.19]
-const DEF_PAIR_WEIGHTS = [0.38, 0.34, 0.28]
+// Forward-line / D-pair even-strength usage weights. The top line plays roughly
+// twice the minutes of the fourth (real NHL: ~19-21 min vs ~9-11), and the top
+// pair ~1.7x the third. Special-teams deployment (PP1/PK1) widens the total
+// spread further on top of these even-strength shares.
+const FWD_LINE_WEIGHTS = [0.34, 0.28, 0.22, 0.16]
+const DEF_PAIR_WEIGHTS = [0.42, 0.34, 0.24]
 // #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
 const PP_UNIT_WEIGHTS = [0.7, 0.3]
 const PK_UNIT_WEIGHTS = [0.62, 0.38]

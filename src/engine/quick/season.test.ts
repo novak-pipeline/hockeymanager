@@ -29,21 +29,25 @@ describe('quickSimGame', () => {
     // Regular-season OT is a wide-open 3-on-3 that ends far more games than it
     // sends to a shootout. Over a broad sample of tied-after-regulation games,
     // a clear majority should be decided in overtime.
-    const { teams, players } = generateLeague({ seed: 4 })
-    const ids = [...teams.keys()]
-    const resolve = (id: any) => players.get(id)!
     let ot = 0
     let so = 0
-    for (let i = 0; i < ids.length; i++) {
-      for (let j = 0; j < ids.length; j++) {
-        if (i === j) continue
-        const r = quickSimGame(teams.get(ids[i])!, teams.get(ids[j])!, resolve, { seed: 1000 * i + j })
-        if (r.decidedBy === 'overtime') ot++
-        else if (r.decidedBy === 'shootout') so++
+    // Sample across several league draws so the OT/shootout split is stable, not
+    // a one-seed coin flip.
+    for (const seed of [3, 4, 5, 6]) {
+      const { teams, players } = generateLeague({ seed })
+      const ids = [...teams.keys()]
+      const resolve = (id: any) => players.get(id)!
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = 0; j < ids.length; j++) {
+          if (i === j) continue
+          const r = quickSimGame(teams.get(ids[i])!, teams.get(ids[j])!, resolve, { seed: 1000 * i + j })
+          if (r.decidedBy === 'overtime') ot++
+          else if (r.decidedBy === 'shootout') so++
+        }
       }
     }
     const tied = ot + so
-    expect(tied).toBeGreaterThan(10) // sanity: some games actually reached OT
+    expect(tied).toBeGreaterThan(50) // sanity: plenty of games reached OT
     expect(ot).toBeGreaterThan(so) // a majority end in 3-on-3, not the shootout
   })
 
@@ -78,7 +82,7 @@ describe('quickSimGame', () => {
     // Aggregate one team's box score over a handful of games.
     let hits = 0, blocks = 0, takes = 0, gives = 0, games = 0
     let dBlocks = 0, dCount = 0, fBlocks = 0, fCount = 0
-    for (let s = 0; s < 8; s++) {
+    for (let s = 0; s < 30; s++) {
       const r = quickSimGame(home, teams.get(ids[1 + (s % (ids.length - 1))])!, resolve, { seed: 500 + s })
       games++
       for (const id of home.roster) {
@@ -97,6 +101,27 @@ describe('quickSimGame', () => {
     expect(gives / games).toBeGreaterThan(2)
     // Defencemen block more than forwards (per player).
     expect(dBlocks / Math.max(1, dCount)).toBeGreaterThan(fBlocks / Math.max(1, fCount))
+  })
+
+  it('spreads ice time realistically: the top line plays close to 2x the fourth', () => {
+    const { teams, players } = generateLeague({ seed: 3 })
+    const ids = [...teams.keys()]
+    const resolve = (id: any) => players.get(id)!
+    const home = teams.get(ids[0])!
+    const line1 = home.lines.forwards[0]
+    const line4 = home.lines.forwards[3]
+    let toi1 = 0
+    let toi4 = 0
+    for (let s = 0; s < 20; s++) {
+      const r = quickSimGame(home, teams.get(ids[1 + (s % (ids.length - 1))])!, resolve, { seed: 700 + s })
+      for (const id of line1) toi1 += r.playerStats.get(id)?.toi ?? 0
+      for (const id of line4) toi4 += r.playerStats.get(id)?.toi ?? 0
+    }
+    const ratio = toi1 / Math.max(1, toi4)
+    // Real NHL top-line vs fourth-line minutes run ~1.8-2.3x. (EV weights give
+    // ~2.1x; special teams push it a touch higher.)
+    expect(ratio).toBeGreaterThan(1.7)
+    expect(ratio).toBeLessThan(2.6)
   })
 
   it('rides the starter in the playoffs (no rotation)', () => {
