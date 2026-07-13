@@ -444,6 +444,21 @@ function retirementProbability(age: number, ovr: number): number {
   return Math.min(0.995, Math.max(floor, adjusted))
 }
 
+// A sub-replacement pro (below this overall) can drift out of the league in his
+// late 20s / early 30s — the classic AHL/ECHL tweener who never sticks and stops
+// getting NHL looks. Genuine roster players (60+) never wash out this way.
+const WASHOUT_OVR_CEIL = 55
+const WASHOUT_MIN_AGE = 28
+const WASHOUT_MAX_AGE = 32
+
+/** Annual chance a fringe 28–32 player leaves pro hockey (goes to Europe, retires,
+ *  falls off the map). Rises the weaker he is and the older he gets. */
+function washoutProbability(age: number, ovr: number): number {
+  if (ovr >= WASHOUT_OVR_CEIL) return 0
+  const p = 0.04 + (WASHOUT_OVR_CEIL - ovr) * 0.01 + (age - WASHOUT_MIN_AGE) * 0.015
+  return Math.min(0.35, p)
+}
+
 /**
  * Roll retirements for everyone 33+. Retirees are removed from their team's
  * roster array but stay in the players map so history screens keep working —
@@ -464,13 +479,25 @@ export function processRetirements(args: {
   }
 
   const retired: PlayerId[] = []
-  for (const p of players.values()) {
-    if (p.age < 33) continue
-    if (p.contract.yearsRemaining >= 2 && p.age < 38) continue
-    if (!rng.chance(retirementProbability(p.age, overall(p.composites, p.position)))) continue
+  const retire = (p: Player): void => {
     retired.push(p.id)
     const team = teamOf.get(p.id)
     if (team) team.roster = team.roster.filter((id) => id !== p.id)
+  }
+  for (const p of players.values()) {
+    const ovr = overall(p.composites, p.position)
+    if (p.age >= 33) {
+      // Age-driven retirement curve.
+      if (p.contract.yearsRemaining >= 2 && p.age < 38) continue
+      if (!rng.chance(retirementProbability(p.age, ovr))) continue
+      retire(p)
+    } else if (p.age >= WASHOUT_MIN_AGE && p.age <= WASHOUT_MAX_AGE) {
+      // Fringe washout: marginal pros drift out before the usual retirement age.
+      // A live 2-year deal keeps them around (someone's paying them to play).
+      if (p.contract.yearsRemaining >= 2) continue
+      if (!rng.chance(washoutProbability(p.age, ovr))) continue
+      retire(p)
+    }
   }
   return { retired }
 }

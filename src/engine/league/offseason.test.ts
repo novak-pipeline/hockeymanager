@@ -636,10 +636,25 @@ describe('processRetirements', () => {
   })
 
   it('never retires under-33s or players signed 2+ years before 38', () => {
+    // A replacement-level (60) 32-year-old is above the washout band — he stays.
     expect(retirementFreq(32, 100)).toBe(0)
     expect(retirementFreq(35, 100, { yearsRemaining: 3 })).toBe(0)
     // 38+ can walk away from a live contract.
     expect(retirementFreq(38, 150, { yearsRemaining: 3 })).toBeGreaterThan(0.2)
+  })
+
+  it('washes fringe 28-32 players out of the league (sub-replacement tweeners)', () => {
+    // A clearly sub-replacement (OVR ~45) player in his early 30s drifts out even
+    // before the usual retirement age — but not every year.
+    const fringe = retirementFreq(31, 400, { current: 45 })
+    expect(fringe).toBeGreaterThan(0.05)
+    expect(fringe).toBeLessThan(0.4)
+    // A genuine roster player of the same age never washes out this way.
+    expect(retirementFreq(31, 200, { current: 68 })).toBe(0)
+    // Fringe kids (under 28) are still developing — they don't wash out yet.
+    expect(retirementFreq(26, 200, { current: 45 })).toBe(0)
+    // A live multi-year deal keeps a fringe player around.
+    expect(retirementFreq(31, 200, { current: 45, yearsRemaining: 3 })).toBe(0)
   })
 
   it('removes retirees from the roster but keeps them in the players map', () => {
