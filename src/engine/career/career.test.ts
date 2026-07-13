@@ -3130,3 +3130,24 @@ describe('roles tab — bulk squad-role board', () => {
     expect(career.getRoleBoard().rows.find((r) => r.playerId === first.playerId)?.squadStatus).toBe(first.suggested)
   })
 })
+
+describe('franchise history (banner rafters)', () => {
+  it('seeds a championship pedigree per club from day one', () => {
+    const data = generateLeague({ seed: 321 })
+    const userId = data.league.teams[4]
+    const career = new Career(data, 321, userId)
+    const hist = career.getHistory()
+    // Every seeded season crowned a champion, so titles across clubs sum to the
+    // number of archived seasons.
+    const totalTitles = hist.franchises.reduce((s, f) => s + f.championships, 0)
+    expect(totalTitles).toBe(hist.seasons.length)
+    expect(hist.franchises.length).toBe(data.league.teams.length)
+    // Sorted most-titles-first, and the user's club is flagged exactly once.
+    expect(hist.franchises[0].championships).toBeGreaterThanOrEqual(hist.franchises[hist.franchises.length - 1].championships)
+    expect(hist.franchises.filter((f) => f.isUser)).toHaveLength(1)
+    // A club with titles lists its banner years, newest first.
+    const champ = hist.franchises.find((f) => f.championships > 0)!
+    expect(champ.championYears.length).toBe(champ.championships)
+    expect(champ.championYears[0]).toBeGreaterThanOrEqual(champ.championYears[champ.championYears.length - 1])
+  })
+})

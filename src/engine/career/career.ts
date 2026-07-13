@@ -14879,7 +14879,35 @@ export class Career {
       seasons: [...r.seasons],
       awards: [...r.awards],
       legends: [...r.retiredLegends],
+      franchises: this.buildFranchiseHistory(),
     }
+  }
+
+  /** Per-club championship pedigree drawn from the season archive (seeded past +
+   *  every season simmed since), most titles first. */
+  private buildFranchiseHistory(): import('./views').FranchiseHistoryView[] {
+    const yearsByTeam = new Map<string, number[]>()
+    for (const s of this.recordsState.seasons) {
+      if (!s.championTeamId) continue
+      const arr = yearsByTeam.get(s.championTeamId) ?? []
+      arr.push(s.year)
+      yearsByTeam.set(s.championTeamId, arr)
+    }
+    const userTid = this.userTeamId as string
+    return this.data.league.teams
+      .map((tid) => {
+        const team = this.data.teams.get(tid)!
+        const years = (yearsByTeam.get(tid as string) ?? []).sort((a, b) => b - a)
+        return {
+          teamId: tid as string,
+          name: team.name,
+          abbreviation: team.abbreviation,
+          championships: years.length,
+          championYears: years,
+          isUser: (tid as string) === userTid,
+        }
+      })
+      .sort((a, b) => b.championships - a.championships || (a.name < b.name ? -1 : 1))
   }
 
   getLockerRoom(): LockerRoomView {

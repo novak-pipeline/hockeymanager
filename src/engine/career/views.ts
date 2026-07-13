@@ -2558,6 +2558,19 @@ export interface HistoryView {
   awards: AwardRecord[]
   /** Retired greats; hallOfFame=true once inducted. */
   legends: LegendRecord[]
+  /** Per-franchise championship pedigree (banner rafters), most titles first. */
+  franchises: FranchiseHistoryView[]
+}
+
+/** One NHL club's all-time championship record for the History screen. */
+export interface FranchiseHistoryView {
+  teamId: string
+  name: string
+  abbreviation: string
+  championships: number
+  /** Years the banner was raised, newest first. */
+  championYears: number[]
+  isUser: boolean
 }
 
 export interface RelationshipView {
