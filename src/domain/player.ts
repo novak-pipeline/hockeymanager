@@ -25,6 +25,10 @@ export interface Contract {
   clause?: 'none' | 'modified' | 'full'
   /** Percent of salary structured as signing bonus. Optional/additive. */
   signingBonusPct?: number
+  /** Annual cap hit a FORMER team retains on this contract after a
+   *  retained-salary trade — the rostering team only counts salary minus this.
+   *  Optional/additive; absent = nothing retained. (#157) */
+  retainedByOthers?: number
 }
 
 export type InjuryKind = 'upperBody' | 'lowerBody' | 'concussion' | 'illness'

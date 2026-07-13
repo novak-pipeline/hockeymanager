@@ -718,9 +718,18 @@ function movePlayers(from: Team, to: Team, ids: PlayerId[], players: Map<PlayerI
   }
 }
 
-/** Roster ids missing from the player map contribute nothing to the cap. */
-export const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number =>
-  team.roster.reduce((s, id) => s + (players.get(id)?.contract.salary ?? 0), 0)
+/** Roster ids missing from the player map contribute nothing to the cap. Each
+ *  rostered player counts his hit minus any salary a former club retained on him;
+ *  salary this club retained on players it traded away is added on top (#157). */
+export const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number => {
+  let sum = 0
+  for (const id of team.roster) {
+    const p = players.get(id)
+    if (p) sum += p.contract.salary - (p.contract.retainedByOthers ?? 0)
+  }
+  for (const slot of team.finances.retained ?? []) sum += slot.amount
+  return sum
+}
 
 /**
  * Apply an agreed trade: move players between roster arrays, flip pick
@@ -1097,6 +1106,9 @@ export interface AiAiTradeResult {
    *  player or a rights-held junior. They move into the SELLER's system (his AHL,
    *  or rights). Empty for a pure picks-for-rental deal. */
   prospectIds: PlayerId[]
+  /** Salary the SELLER retains to make the deal fit under the buyer's cap (#157).
+   *  Absent/0 = no retention. The seller keeps paying this until the deal expires. */
+  retainedAmount?: number
   summary: string
 }
 
@@ -1163,16 +1175,29 @@ export function generateAiAiTrade(args: {
   // worth roughly the vet.
   const ranks = strengthRanks(teams, players)
   const currentYear = picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
+  const vetSalary = seller.vet.contract.salary
+  // The seller can retain salary to make a cap-tight buyer fit — but only if he
+  // has a free retention slot (NHL rule: max 3 retained contracts per club).
+  const sellerHasRetentionSlot = (seller.team.finances.retained?.length ?? 0) < MAX_RETAIN_SLOTS
   const buyers = ai
     .filter(
       (t) =>
         t.id !== seller.team.id &&
         (postureOf(t.id) === 'contend' || postureOf(t.id) === 'retool') &&
-        t.roster.length < 23 &&
-        t.finances.capUsed + seller.vet.contract.salary <= t.finances.salaryCap
+        t.roster.length < 23,
     )
-    .sort((a, b) => (a.id < b.id ? -1 : 1))
-  for (const buyer of rng.shuffle(buyers)) {
+    .map((t) => {
+      const room = t.finances.salaryCap - rosterCapUsed(t, players)
+      if (vetSalary <= room) return { team: t, retained: 0 }
+      // Doesn't fit outright — see if retaining (up to 50%) makes it work.
+      if (!sellerHasRetentionSlot) return null
+      const needed = vetSalary - room
+      if (needed > vetSalary * MAX_RETAIN_PCT) return null // can't retain enough to fit
+      return { team: t, retained: Math.ceil(needed) }
+    })
+    .filter((x): x is { team: Team; retained: number } => x !== null)
+    .sort((a, b) => (a.team.id < b.team.id ? -1 : 1))
+  for (const { team: buyer, retained } of rng.shuffle(buyers)) {
     const owned = picks
       .filter((p) => p.ownerTeamId === buyer.id)
       .map((pick) => {
@@ -1214,13 +1239,17 @@ export function generateAiAiTrade(args: {
       ...chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`),
       ...(prospect ? [`${prospect.position} ${prospect.name}`] : []),
     ]
+    const retentionNote = retained > 0
+      ? ` ${seller.team.abbreviation} retain $${(retained / 1e6).toFixed(2)}M.`
+      : ''
     return {
       sellerTeamId: seller.team.id,
       buyerTeamId: buyer.id,
       playerIds: [seller.vet.id],
       picks: chosen,
       prospectIds: prospect ? [prospect.id] : [],
-      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${parts.join(' and ')}.`,
+      ...(retained > 0 ? { retainedAmount: retained } : {}),
+      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${parts.join(' and ')}.${retentionNote}`,
     }
   }
   return null

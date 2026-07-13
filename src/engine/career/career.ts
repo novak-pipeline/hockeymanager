@@ -267,6 +267,7 @@ import {
   aiFreeAgencyDay,
   aiResignDay,
   askTerms,
+  capUsedFor,
   contractStatus,
   initialPicks,
   offerAcceptable,
@@ -3718,7 +3719,7 @@ export class Career {
     // graduations) and a stale value corrupts cap checks and the finances screen.
     for (const team of this.data.teams.values()) {
       if (team.tier === 'ahl' || team.tier === 'world') continue
-      team.finances.capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      team.finances.capUsed = capUsedFor(team, this.data.players)
     }
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Keep every club's lineup logical: a player who filled in for an injury
@@ -4102,6 +4103,25 @@ export class Career {
           bGivesPicks: aiDeal.picks,
           allPicks: this.picks,
         })
+        // Retained salary (#157): the seller keeps paying part of the vet's hit so
+        // the cap-tight buyer fits. The player carries `retainedByOthers` (so his
+        // new club counts only the balance), and the seller books a retention slot
+        // that draws against its cap until the contract expires.
+        if (aiDeal.retainedAmount && aiDeal.retainedAmount > 0) {
+          const vetId = asPlayerId(aiDeal.playerIds[0] as string)
+          const vet = this.data.players.get(vetId)
+          const seller = this.data.teams.get(aiDeal.sellerTeamId)
+          const buyer = this.data.teams.get(aiDeal.buyerTeamId)
+          if (vet && seller && buyer) {
+            vet.contract.retainedByOthers = aiDeal.retainedAmount
+            seller.finances.retained = [
+              ...(seller.finances.retained ?? []),
+              { playerId: vetId as string, amount: aiDeal.retainedAmount, expiryYear: vet.contract.expiryYear },
+            ]
+            seller.finances.capUsed = rosterCapUsed(seller, this.data.players)
+            buyer.finances.capUsed = rosterCapUsed(buyer, this.data.players)
+          }
+        }
         // Prospects (AHL / rights) the buyer sends back move into the SELLER's
         // system: out of the buyer's affiliate (or off his rights), into the
         // seller's affiliate, with rights following the player.
@@ -6136,6 +6156,19 @@ export class Career {
     const newYear = this.year + 1
     this.data.league.season.year = newYear
 
+    // Retained-salary slots (#157) come off the books when the contract expires.
+    // Drop any that have run their course and clear the player's retention tag.
+    for (const team of this.data.teams.values()) {
+      if (!team.finances.retained?.length) continue
+      const expired = team.finances.retained.filter((s) => s.expiryYear <= newYear)
+      if (expired.length === 0) continue
+      for (const slot of expired) {
+        const p = this.data.players.get(asPlayerId(slot.playerId))
+        if (p && p.contract.retainedByOthers) delete p.contract.retainedByOthers
+      }
+      team.finances.retained = team.finances.retained.filter((s) => s.expiryYear > newYear)
+    }
+
     // Cap escalation: the NHL ceiling climbs ~4–5% a year with revenue. A cap
     // frozen at its opening value forever is deeply un-NHL — salaries inflate
     // (ELCs expire, RFAs get raises) while the ceiling stays put, and within a
@@ -7663,7 +7696,7 @@ export class Career {
       if (skipTeamId && tid === skipTeamId) continue
       const team = this.data.teams.get(tid)
       if (!team || team.tier === 'ahl' || team.tier === 'world') continue
-      const capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      const capUsed = capUsedFor(team, this.data.players)
       if (capUsed + p.contract.salary > team.finances.salaryCap) continue
       // Claim only if he'd be a regular (or close) on this club — bad teams, with
       // the lowest bars and the highest priority, scoop up useful vets first.
@@ -8370,7 +8403,7 @@ export class Career {
       // A rival with the cap room to carry the deal (a full roster just clears a
       // spot for him — handled on decline).
       const suitor = rivals.find((t) => {
-        const capUsed = t.roster.reduce((s, x) => s + (this.data.players.get(x)?.contract.salary ?? 0), 0)
+        const capUsed = capUsedFor(t, this.data.players)
         return capUsed + salary <= t.finances.salaryCap
       })
       if (!suitor) continue
@@ -10503,7 +10536,7 @@ export class Career {
       .slice(0, 3)
 
     const roster = team.roster.map((id) => this.resolve(id))
-    const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
+    const capUsed = capUsedFor(team, this.data.players)
     const champ = this.playoffs?.championTeamId
       ? this.data.teams.get(this.playoffs.championTeamId)!.name
       : null
@@ -11868,7 +11901,7 @@ export class Career {
       const team = this.data.teams.get(tid)
       if (!team || team.tier === 'ahl' || team.tier === 'world') continue
       if (team.roster.length >= ROSTER_HARD_CAP) continue
-      const capUsed = team.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+      const capUsed = capUsedFor(team, this.data.players)
       if (capUsed + askSalary > team.finances.salaryCap) continue
       return team
     }
@@ -12164,9 +12197,9 @@ export class Career {
   /** The user's cap hit AFTER LTIR relief — the number every user-facing cap
    *  gate and cap-space display should use. */
   private userCapUsed(): number {
-    const gross = this.userTeam.roster.reduce(
-      (s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
-    return gross - this.userLtirRelief()
+    // capUsedFor already nets out any salary a former club retained on a player
+    // the user now rosters, and adds salary the user retained on players he moved.
+    return capUsedFor(this.userTeam, this.data.players) - this.userLtirRelief()
   }
 
   /** #157: is this rostered player eligible to be placed on LTIR right now? */
@@ -14166,7 +14199,7 @@ export class Career {
     }
     const team = this.userTeam
     const roster = team.roster.map((id) => this.resolve(id))
-    const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0) + this.userDeadCap
+    const capUsed = capUsedFor(team, this.data.players) + this.userDeadCap
     const awards =
       os.stage === 'awards' || os.stage === 'draft' ? this.computeAwards() : null
     return {

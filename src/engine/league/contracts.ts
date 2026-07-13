@@ -105,13 +105,17 @@ export function contractStatus(player: Player): 'ELC' | 'RFA' | 'UFA' {
  *  reach free agency, but quality young players are retained. */
 const RFA_WALKAWAY_OVERALL = 45
 
-/** Sum of rostered salaries; the live truth `finances.capUsed` caches. */
+/** Sum of rostered salaries; the live truth `finances.capUsed` caches. Each
+ *  rostered player counts his cap hit MINUS any salary a former club retained on
+ *  him; retained-salary this club owes on players it traded away is added on
+ *  top (#157). */
 export function capUsedFor(team: Team, players: Map<PlayerId, Player>): number {
   let sum = 0
   for (const id of team.roster) {
     const p = players.get(id)
-    if (p) sum += p.contract.salary
+    if (p) sum += p.contract.salary - (p.contract.retainedByOthers ?? 0)
   }
+  for (const slot of team.finances.retained ?? []) sum += slot.amount
   return sum
 }
 

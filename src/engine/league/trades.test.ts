@@ -24,6 +24,7 @@ import {
   pickValue,
   playerValue,
   retentionCapSplit,
+  rosterCapUsed,
   teamPhilosophy,
   type StoredTradeOffer
 } from './trades'
@@ -864,6 +865,41 @@ describe('generateAiAiTrade (LW3)', () => {
     expect(pickTotal).toBeGreaterThanOrEqual(vetValue * 0.25)
     expect(pickTotal).toBeLessThanOrEqual(vetValue * 0.85)
     expect(deal!.summary).toContain('T2')
+  })
+
+  it('retained salary is cap-neutral across the league (buyer + retainer = full hit)', () => {
+    const sf = makePlayer('sf', 60, { salary: 1_000_000 })
+    const bf = makePlayer('bf', 62, { salary: 1_000_000 })
+    // The traded vet, now on the buyer at $6M with $2.5M retained by the seller.
+    const vet = makePlayer('vet-ret', 75, { salary: 6_000_000 })
+    vet.contract.retainedByOthers = 2_500_000
+    const seller = makeTeam('sell', [sf])
+    const buyer = makeTeam('buy', [bf, vet])
+    seller.finances.retained = [{ playerId: vet.id as string, amount: 2_500_000, expiryYear: 2028 }]
+    const all = new Map<PlayerId, Player>([[sf.id, sf], [bf.id, bf], [vet.id, vet]])
+    // Buyer counts the vet at 6M - 2.5M = 3.5M; the seller carries the 2.5M slot.
+    expect(rosterCapUsed(buyer, all)).toBe(1_000_000 + 3_500_000)
+    expect(rosterCapUsed(seller, all)).toBe(1_000_000 + 2_500_000)
+    // League-wide the vet still costs exactly his $6M.
+    expect((vet.contract.salary - 2_500_000) + 2_500_000).toBe(vet.contract.salary)
+  })
+
+  it('retains salary to make a cap-tight buyer fit', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    // Squeeze both contenders so the $4M rental does NOT fit outright, but does
+    // with retention (leave ~$2.5M of room → needs $1.5M retained, under 50%).
+    for (const tid of ['t3', 't4']) {
+      const t = teams.get(asTeamId(tid))!
+      t.finances.salaryCap = rosterCapUsed(t, players) + 2_500_000
+    }
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 300 && !(deal && deal.retainedAmount); day++) {
+      deal = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(77, day)), postureOf })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.retainedAmount).toBeGreaterThan(0)
+    expect(deal!.retainedAmount).toBeLessThanOrEqual(4_000_000 * 0.5)
+    expect(deal!.summary).toMatch(/retain/i)
   })
 
   it('never involves the user club and is deterministic per seed', () => {

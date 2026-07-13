@@ -16,11 +16,24 @@ export interface Lines {
   penaltyKillUnits: PlayerId[][]
 }
 
+/** A salary a team keeps paying on a player it traded away (retained-salary
+ *  deal). Counts against the retaining team's cap until the contract expires. */
+export interface RetainedSlot {
+  playerId: string
+  /** Annual cap hit retained. */
+  amount: number
+  /** Season the retention comes off the books (mirrors the player's contract). */
+  expiryYear: number
+}
+
 export interface Finances {
   budget: number
   salaryCap: number
   capUsed: number
   revenue: number
+  /** Salaries this club retained on players it traded away (#157). Optional/
+   *  additive — absent means none. Adds to the club's cap until each expires. */
+  retained?: RetainedSlot[]
 }
 
 export interface Staff {
