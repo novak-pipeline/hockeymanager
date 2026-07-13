@@ -1126,6 +1126,36 @@ export class Career {
     if (!restored) {
       this.assignRosters()
     }
+    // Every real hockey player wears a number — generated players start without one,
+    // so back-fill unique numbers per club (imported DBs keep whatever they shipped).
+    this.ensureJerseyNumbers()
+  }
+
+  /** Give every rostered player who lacks a jersey number a club-unique one. Only
+   *  fills gaps (a player who already has a number — e.g. from an imported DB or a
+   *  previous assignment — keeps it), so it's idempotent and save-safe. A stable
+   *  per-player preference spreads the numbers out instead of a 1,2,3… run. */
+  private ensureJerseyNumbers(): void {
+    for (const team of this.data.teams.values()) {
+      if (team.tier === 'ahl' || team.tier === 'world') continue
+      const used = new Set<number>()
+      for (const id of team.roster) {
+        const n = this.data.players.get(id)?.jerseyNumber
+        if (n !== undefined) used.add(n)
+      }
+      for (const id of team.roster) {
+        const p = this.data.players.get(id)
+        if (!p || p.jerseyNumber !== undefined) continue
+        // Preferred number from a stable hash of the id (1–98), then next free.
+        let h = 2166136261
+        for (let i = 0; i < (id as string).length; i++) { h ^= (id as string).charCodeAt(i); h = Math.imul(h, 16777619) }
+        let num = ((h >>> 0) % 98) + 1
+        let guard = 0
+        while (used.has(num) && guard++ < 99) num = (num % 98) + 1
+        p.jerseyNumber = num
+        used.add(num)
+      }
+    }
   }
 
   /* ────────────────────────── small accessors ────────────────────────── */
@@ -6268,6 +6298,8 @@ export class Career {
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Re-balance rosters across NHL/AHL pairs for the new season.
     this.assignRosters()
+    // Number this year's new arrivals (draft picks, signings) who lack a jersey.
+    this.ensureJerseyNumbers()
     // Re-derive each team's system from its head coach for the new roster.
     this.applyCoachSystems()
 

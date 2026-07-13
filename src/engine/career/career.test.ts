@@ -3030,6 +3030,20 @@ describe('#171 medical timelines', () => {
 })
 
 describe('#175 shorthanded stat splits', () => {
+  it('assigns every rostered player a club-unique jersey number', () => {
+    const data = generateLeague({ seed: 5 })
+    const userTid = data.league.teams[0]!
+    new Career(data, 5, userTid)
+    for (const tid of data.league.teams) {
+      const team = data.teams.get(tid)!
+      const nums = team.roster.map((id) => data.players.get(id)?.jerseyNumber)
+      // Every NHL rostered player has a number…
+      expect(nums.every((n) => typeof n === 'number' && n >= 1 && n <= 98)).toBe(true)
+      // …and no two teammates share one.
+      expect(new Set(nums).size).toBe(nums.length)
+    }
+  })
+
   it('surfaces real plus/minus in the league leaders (not all zero)', () => {
     const data = generateLeague({ seed: 71 })
     const career = new Career(data, 71, data.league.teams[0])
