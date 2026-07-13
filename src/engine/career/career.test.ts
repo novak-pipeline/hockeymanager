@@ -2344,8 +2344,9 @@ describe('Career — GM career', () => {
     }
     p.composites = computeComposites(p.ratings, p.role, p.position)
     // Cap headroom + a clear overpay → the rival-interest term clamps to zero.
+    // (7 years = the UFA term ceiling; only his own club could offer an 8th.)
     data.teams.get(userId)!.finances.salaryCap = 400_000_000
-    const r = career.signFreeAgent(faId, 20_000_000, 8)
+    const r = career.signFreeAgent(faId, 20_000_000, 7)
     expect(r.signed).toBe(true)
     expect(data.teams.get(userId)!.roster.includes(asPlayerId(faId))).toBe(true)
   })
@@ -3149,5 +3150,28 @@ describe('franchise history (banner rafters)', () => {
     const champ = hist.franchises.find((f) => f.championships > 0)!
     expect(champ.championYears.length).toBe(champ.championships)
     expect(champ.championYears[0]).toBeGreaterThanOrEqual(champ.championYears[champ.championYears.length - 1])
+  })
+})
+
+describe('contract term ceilings (CBA)', () => {
+  it('caps a free-agent deal at 7 years but lets a club re-sign its own for 8', () => {
+    const data = generateLeague({ seed: 808 })
+    const userId = data.league.teams[3]
+    const career = new Career(data, 808, userId)
+    // A UFA on the market: a healthy 30-year-old with plenty of pro seasons.
+    const fa = [...data.players.values()].find(
+      (p) => !data.teams.get(userId)!.roster.includes(p.id) && p.age >= 29 && p.position !== 'G',
+    )!
+    fa.age = 30
+    fa.stats = [{ season: career.year - 1 } as never] // some pro record → not ELC
+    ;(career as unknown as { faPool: unknown[] }).faPool.push(fa.id)
+    data.teams.get(userId)!.finances.salaryCap = 400_000_000
+    // 8 years to an outside UFA is illegal — rejected specifically on the term.
+    const r8 = career.signFreeAgent(fa.id as string, 3_000_000, 8)
+    expect(r8.signed).toBe(false)
+    expect(r8.message).toMatch(/7 years/)
+    // 7 years is a legal term: any rejection now is on value/market, not the cap.
+    const r7 = career.signFreeAgent(fa.id as string, 3_000_000, 7)
+    expect(r7.message ?? '').not.toMatch(/1–7 years|1-7 years/)
   })
 })

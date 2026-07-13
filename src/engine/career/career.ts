@@ -720,6 +720,14 @@ const ROSTER_HARD_CAP = 23
 /** Max Standard Player Contracts an organization may hold at once (NHL + AHL +
  *  signed junior prospects). The real NHL's 50-contract reserve-list limit. */
 const ORG_CONTRACT_LIMIT = 50
+/** CBA contract-length ceilings: a club can offer its OWN player one more year
+ *  than an outside team can offer a UFA (8 vs 7). */
+const MAX_TERM_RESIGN = 8
+const MAX_TERM_UFA = 7
+/** Entry-level contract ceilings: base salary is capped (~$950K) and the term
+ *  runs at most 3 years. Bonuses (not modeled here) top it up in the real CBA. */
+const ELC_MAX_SALARY = 950_000
+const ELC_MAX_TERM = 3
 /** Rolling per-game ratings window (last N games stored). */
 const RATINGS_WINDOW = 10
 /** Calendar days between recurring staff-meeting prompts. */
@@ -8379,6 +8387,13 @@ export class Career {
     if (status === 'walked') return { signed: false, message: 'He has decided to test free agency.' }
     if (status === undefined) throw new Error('player is not in your re-sign list')
     const player = this.resolve(id)
+    // CBA term ceiling: a club may re-sign its OWN player to 8 years (one more
+    // than an outside club could offer).
+    if (!Number.isInteger(years) || years < 1 || years > MAX_TERM_RESIGN) {
+      return { signed: false, message: `A contract runs 1–${MAX_TERM_RESIGN} years when you re-sign your own player.` }
+    }
+    const elcReject = this.elcTermRejection(player, salary, years)
+    if (elcReject) return elcReject
     const ask = askTerms(player, this.year)
     const rng = this.rngFor(8006, Number((playerId.match(/\d+/) ?? ['0'])[0]))
     if (offerAcceptable(player, { salary, years }, ask, rng)) {
@@ -8446,6 +8461,24 @@ export class Career {
     p.rightsTeamId = toTeamId
   }
 
+  /** Entry-level ceiling check shared by the sign/re-sign paths: an ELC-eligible
+   *  player can't be given more than the ELC base salary or 3 years. Returns a
+   *  rejection when the offer breaks the CBA, else null. */
+  private elcTermRejection(
+    player: Player,
+    salary: number,
+    years: number,
+  ): { signed: false; message: string } | null {
+    if (contractStatus(player) !== 'ELC') return null
+    if (salary > ELC_MAX_SALARY) {
+      return { signed: false, message: `Entry-level contracts are capped at $${(ELC_MAX_SALARY / 1e6).toFixed(2)}M base salary.` }
+    }
+    if (years > ELC_MAX_TERM) {
+      return { signed: false, message: `An entry-level contract runs at most ${ELC_MAX_TERM} years.` }
+    }
+    return null
+  }
+
   /** Standard Player Contracts an organization currently holds — NHL roster +
    *  AHL affiliate + any signed prospects whose rights it holds (juniors, etc.).
    *  The real NHL caps this at 50 (ORG_CONTRACT_LIMIT). */
@@ -8482,6 +8515,16 @@ export class Career {
         message: `Your organization is at the ${ORG_CONTRACT_LIMIT}-contract limit. Move or release a contract before you can sign another player.`,
       }
     }
+    // CBA term ceiling: an outside UFA can be signed for at most 7 years (only
+    // his own club could have gone to 8).
+    if (!Number.isInteger(years) || years < 1 || years > MAX_TERM_UFA) {
+      return {
+        signed: false,
+        message: `A free-agent deal runs 1–${MAX_TERM_UFA} years — only a player's own club can offer the ${MAX_TERM_RESIGN}th year.`,
+      }
+    }
+    const elcReject = this.elcTermRejection(this.resolve(id), salary, years)
+    if (elcReject) return elcReject
     // Dead cap from buyouts is real: the signing must fit under ceiling MINUS
     // the dead charge, or the buyout was free money.
     const capUsedNow = this.userCapUsed()
