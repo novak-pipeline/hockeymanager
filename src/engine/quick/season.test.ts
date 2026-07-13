@@ -25,6 +25,28 @@ describe('quickSimGame', () => {
     }
   })
 
+  it('resolves most overtimes in 3-on-3, not the shootout (open-ice OT)', () => {
+    // Regular-season OT is a wide-open 3-on-3 that ends far more games than it
+    // sends to a shootout. Over a broad sample of tied-after-regulation games,
+    // a clear majority should be decided in overtime.
+    const { teams, players } = generateLeague({ seed: 4 })
+    const ids = [...teams.keys()]
+    const resolve = (id: any) => players.get(id)!
+    let ot = 0
+    let so = 0
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = 0; j < ids.length; j++) {
+        if (i === j) continue
+        const r = quickSimGame(teams.get(ids[i])!, teams.get(ids[j])!, resolve, { seed: 1000 * i + j })
+        if (r.decidedBy === 'overtime') ot++
+        else if (r.decidedBy === 'shootout') so++
+      }
+    }
+    const tied = ot + so
+    expect(tied).toBeGreaterThan(10) // sanity: some games actually reached OT
+    expect(ot).toBeGreaterThan(so) // a majority end in 3-on-3, not the shootout
+  })
+
   it('rotates goalies: the backup gets a realistic share of starts, not zero', () => {
     const { teams, players } = generateLeague({ seed: 7 })
     const ids = [...teams.keys()]

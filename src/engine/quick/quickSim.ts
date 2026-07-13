@@ -33,6 +33,10 @@ const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
 const SHIFT_SECONDS = 40
 const OT_SECONDS = 300
+// Open-ice shot-volume boost during 3-on-3 overtime (regular season). Combined
+// with a shot-quality bump, this lands roughly a majority of OT-reaching games
+// on an overtime winner rather than a shootout — the modern NHL split.
+const THREE_ON_THREE_SHOT_MULT = 1.25
 
 // League-average targets the coefficients aim at (calibration will refine).
 const SHOTS_PER_TEAM_PER_GAME = 30
@@ -239,7 +243,8 @@ function simShift(
   def: OnIce,
   period: number,
   t: number,
-  attackingPositive: boolean
+  attackingPositive: boolean,
+  threeOnThree = false
 ): void {
   const { rng } = ctx
 
@@ -264,8 +269,13 @@ function simShift(
   // not generate runaway shot volume. NHL top lines sit ~1.25, so a 1.4 ceiling
   // is invisible there but tames weak-league outliers.
   const offMult = Math.min(1.4, offense / lgAvg)
+  // 3-on-3 overtime is wide-open: acres of ice, constant odd-man rushes. Chances
+  // come faster and from more dangerous spots, which is why so many OTs end well
+  // before the shootout. Model that as an open-ice boost on both shot volume and
+  // shot quality (only when actually skating 3v3 — regular-season OT).
+  const openIceMult = threeOnThree ? THREE_ON_THREE_SHOT_MULT : 1
   const rate =
-    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult
+    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult * openIceMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -273,7 +283,7 @@ function simShift(
     const tShot = t + rng.float(0, SHIFT_SECONDS)
     const danger = Math.max(
       0,
-      Math.min(1, rng.normal(0.45 + (offense - defense) / 200, 0.2))
+      Math.min(1, rng.normal(0.45 + (offense - defense) / 200 + (threeOnThree ? 0.12 : 0), 0.2))
     )
     const from = shotPosition(rng, attackingPositive, danger)
     ctx.stream.push({
@@ -404,7 +414,8 @@ function simPeriod(
   away: TeamSim,
   period: number,
   lengthSeconds: number,
-  suddenDeath: boolean
+  suddenDeath: boolean,
+  threeOnThree = false
 ): boolean {
   const hOn = home.pickOnIce(ctx.rng)
   const aOn = away.pickOnIce(ctx.rng)
@@ -425,11 +436,11 @@ function simPeriod(
 
     const beforeH = home.goals
     const beforeA = away.goals
-    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive)
+    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, threeOnThree)
     // Sudden death ends on the FIRST goal — check between the two teams' shifts
     // so a single step can never let both score and leave the game tied.
     if (suddenDeath && home.goals > beforeH) return true
-    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive)
+    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, threeOnThree)
     if (suddenDeath && away.goals > beforeA) return true
   }
   ctx.stream.push({ t: lengthSeconds, period, type: 'periodEnd' })
@@ -669,8 +680,8 @@ export function quickSimGame(
         period++
       }
     } else {
-      // Regular season: 5-minute 3-on-3, then shootout.
-      const otEnded = simPeriod(ctx, homeSim, awaySim, REGULATION_PERIODS + 1, OT_SECONDS, true)
+      // Regular season: 5-minute 3-on-3 (open-ice scoring), then shootout.
+      const otEnded = simPeriod(ctx, homeSim, awaySim, REGULATION_PERIODS + 1, OT_SECONDS, true, true)
       if (otEnded) {
         decidedBy = 'overtime'
       } else {
