@@ -601,7 +601,7 @@ function detectBreakoutBust(
           seeds.push({
             category: 'league',
             headline: `${name}'s breakout season continues`,
-            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expectedSeason)}. After ${arc.beats.length} beats of this arc, the breakout looks real.`,
+            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expectedSeason)}. This is no early-season fluke — the breakout looks real.`,
             playerId: pid,
             teamId: arc.actors.teamIds[0],
           })

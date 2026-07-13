@@ -2289,7 +2289,7 @@ export class Career {
     const lr = this.lockerRooms.get(teamId)
     if (!lr) return
     const rng = this.rngFor(7107, this.currentDay, Career.pidNum(playerId as string))
-    const out = onPlayerDeparted(lr, playerId as string, rng)
+    const out = onPlayerDeparted(lr, playerId as string, rng, this.data.players.get(playerId)?.name)
     if (teamId === this.userTeamId) {
       this.pushSeeds(out.newsSeeds.map((s) => ({ ...s, teamId: teamId as string })))
     }
