@@ -212,6 +212,44 @@ describe('signPlayer', () => {
     expect(team.finances.capUsed).toBe(capUsedFor(team, data.players))
   })
 
+  it('grants a no-trade clause to an established star on a real deal', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 8_000_000)
+    const star = mkSkater('ntc-star', 88, 30)
+    data.players.set(star.id, star)
+    signPlayer({ team, player: star, salary: 6_000_000, years: 5, year: 2026, players: data.players })
+    expect(star.contract.noTradeClause).toBe(true)
+  })
+
+  it('does not grant a no-trade clause to a young player or a cheap/short deal', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 12_000_000)
+    // Young player, even on a rich deal.
+    const kid = mkSkater('ntc-kid', 85, 23)
+    data.players.set(kid.id, kid)
+    signPlayer({ team, player: kid, salary: 6_000_000, years: 5, year: 2026, players: data.players })
+    expect(kid.contract.noTradeClause).toBe(false)
+    // Eligible vet, but a cheap short bridge — no clause.
+    const vet = mkSkater('ntc-cheapvet', 78, 31)
+    data.players.set(vet.id, vet)
+    signPlayer({ team, player: vet, salary: 2_000_000, years: 2, year: 2026, players: data.players })
+    expect(vet.contract.noTradeClause).toBe(false)
+  })
+
+  it('lets an eligible vet keep an existing no-trade clause when he re-signs', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 8_000_000)
+    const vet = mkSkater('ntc-keep', 84, 32)
+    vet.contract.noTradeClause = true
+    data.players.set(vet.id, vet)
+    // Modest 2-year extension — would not earn a clause fresh, but he keeps his.
+    signPlayer({ team, player: vet, salary: 3_000_000, years: 2, year: 2026, players: data.players })
+    expect(vet.contract.noTradeClause).toBe(true)
+  })
+
   it('marks sub-1.1M contracts as two-way', () => {
     const data = gen()
     const team = teamAt(data, 0)

@@ -34,6 +34,9 @@ import { deriveSeed, Rng } from '@engine/shared/rng'
 const LEAGUE_MIN_SALARY = 750_000
 /** Contracts below this are two-way deals (minor-league assignable). */
 const TWO_WAY_THRESHOLD = 1_100_000
+// No-trade protection is only earned on a real top-of-roster commitment.
+const NTC_MIN_SALARY = 4_500_000
+const NTC_MIN_YEARS = 3
 /** Hard roster ceiling enforced by signPlayer. */
 const MAX_ROSTER_SIZE = 26
 /** Salary floor — the minimum payroll a club is expected to ice (~74% of the
@@ -208,11 +211,18 @@ export function signPlayer(args: {
     )
   }
 
+  // No-trade protection follows real practice: only a UFA-eligible player (age
+  // ≥27 or 7+ pro seasons) on a substantial multi-year deal earns an NTC — and a
+  // player who already holds one keeps it when he re-signs while still eligible.
+  // Young players and cheap/short deals never carry one.
+  const ntcEligible = player.age >= 27 || player.stats.length >= 7
+  const ntcWorthy = ntcEligible && salary >= NTC_MIN_SALARY && years >= NTC_MIN_YEARS
+  const keepsExisting = ntcEligible && player.contract.noTradeClause
   player.contract = {
     salary,
     yearsRemaining: years,
     expiryYear: year + years,
-    noTradeClause: false,
+    noTradeClause: ntcWorthy || keepsExisting,
     twoWay: salary < TWO_WAY_THRESHOLD
   }
   if (!onRoster) team.roster.push(player.id)
