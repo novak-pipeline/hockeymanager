@@ -156,7 +156,7 @@ describe('buyout window (M2)', () => {
     expect(res.message).toMatch(/offseason/i)
   })
 
-  it('in-window: player walks, dead cap charged at a third of remaining money, clears at rollover', () => {
+  it('in-window: player walks, dead cap = CBA cost (2/3 of remaining) spread over 2x the term', () => {
     const d = generateLeague({ seed: 78 })
     const c = new Career(d, 78, d.league.teams[0])
     // Sim to the offseason resign stage.
@@ -175,13 +175,20 @@ describe('buyout window (M2)', () => {
       .filter((p) => p.contract.yearsRemaining >= 2 && p.contract.twoWay === false)
       .sort((a, b) => b.contract.salary - a.contract.salary)[0]
     expect(victim).toBeDefined()
-    const expectedCharge = Math.round((victim!.contract.salary * victim!.contract.yearsRemaining) / 3)
+    const years = victim!.contract.yearsRemaining
+    const remaining = victim!.contract.salary * years
+    const factor = victim!.age >= 26 ? 2 / 3 : 1 / 3
+    const spreadYears = years * 2
+    const expectedPerYear = Math.round((remaining * factor) / spreadYears)
     const res = c.buyoutContract(victim!.id as string)
     expect(res.ok).toBe(true)
-    expect(res.charge).toBe(expectedCharge)
+    // The returned charge is the per-season dead-cap slice.
+    expect(res.charge).toBe(expectedPerYear)
     expect(team.roster.includes(victim!.id)).toBe(false)
     const snap = c.exportSnapshot('b', '2026-07-02T00:00:00.000Z')
-    expect(snap.userDeadCap).toBe(expectedCharge)
+    // Upcoming season carries one slice; the full tail spans 2x the term.
+    expect(snap.userDeadCap).toBe(expectedPerYear)
+    expect(snap.deadCapSchedule?.length).toBe(spreadYears)
     // He reaches free agency when the market opens (or immediately if open).
     expect((snap.buyoutFas ?? []).includes(victim!.id as string) || c.getDashboard().phase === 'offseason').toBe(true)
   })

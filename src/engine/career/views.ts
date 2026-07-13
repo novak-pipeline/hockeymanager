@@ -2184,6 +2184,8 @@ export interface CareerSnapshot {
   deadlineHoldDone?: boolean
   /** Buyout dead-cap charge on next season's books (M2). Optional/additive. */
   userDeadCap?: number
+  /** Full buyout dead-cap tail (2× term): season → dead-cap slice. Optional/additive. */
+  deadCapSchedule?: Array<{ year: number; amount: number }>
   /** Players bought out mid-resign-stage, pending the FA pool. Optional/additive. */
   buyoutFas?: string[]
   /** [teamId, LockerRoomState][] — one per club. */

@@ -873,8 +873,14 @@ export class Career {
   private ownerPerk: string | null = null
   /** Staged End-of-Season Review facts (M4); null once attended or lapsed. */
   private reviewFacts: SeasonReviewFacts | null = null
-  /** Dead-cap charge from buyouts, counted against next season's cap (M2). */
+  /** Dead-cap charge from buyouts counted against the currently-managed season's
+   *  cap. Derived from `deadCapSchedule` — the slice for the season being built
+   *  (offseason) or played (regular season). */
   private userDeadCap = 0
+  /** Full buyout dead-cap tail: one entry per season a buyout charge applies to.
+   *  A buyout spreads over TWICE the contract's remaining years (real CBA), so a
+   *  4-year contract bought out leaves 8 seasons of dead cap. */
+  private deadCapSchedule: Array<{ year: number; amount: number }> = []
   /** Players bought out during the resign stage — they join the FA pool when
    *  free agency opens (the transition rebuilds faPool from expiries). */
   private buyoutFas: PlayerId[] = []
@@ -4819,6 +4825,18 @@ export class Career {
   private enterOffseason(): void {
     this.phase = 'offseason'
     this.offseason = { year: this.year, stage: 'awards', draft: null, faDay: 0 }
+    // The summer's spending is managed against NEXT season's cap — advance the
+    // buyout dead-cap tail to that season's slice (0 once a buyout runs its course).
+    const priorDeadCap = this.userDeadCap
+    this.refreshDeadCap(this.year + 1)
+    if (priorDeadCap > 0 && this.userDeadCap === 0) {
+      this.pushNews(
+        'contract',
+        'Buyout charges come off the books',
+        `The last of the buyout dead cap has cleared. The ledger is clean heading into free agency.`,
+        { teamId: this.userTeamId as string }
+      )
+    }
     // Fire awards night report on entering the offseason (once per season).
     for (const kind of checkAwardsStage(this.pressScheduleState)) {
       this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
@@ -6280,16 +6298,10 @@ export class Career {
       // Only the settled history of the past year matters; drop older entries.
       this.playerPromises = this.playerPromises.filter((pr) => pr.year >= this.year)
 
-      // Buyout dead cap is a one-season penance — the books clear.
-      if (this.userDeadCap > 0) {
-        this.pushNews(
-          'contract',
-          'Buyout charges come off the books',
-          `The dead cap from last summer's buyouts ($${(this.userDeadCap / 1e6).toFixed(2)}M) has cleared. The ledger is clean.`,
-          { teamId: this.userTeamId as string }
-        )
-        this.userDeadCap = 0
-      }
+      // Buyout dead cap follows the CBA tail: the slice for the season now
+      // beginning stays on the books; past-season slices drop off. (The tail
+      // is advanced season-to-season, not wiped after a single year.)
+      this.refreshDeadCap(newYear)
     }
     decayIntensity(this.rivalriesState, newYear)
     // Reset special-teams for the new season.
@@ -6410,11 +6422,22 @@ export class Career {
     for (const n of this.news) if (set.has(n.id)) n.read = true
   }
 
+  /** Recompute `userDeadCap` as the buyout tail slice for a given season, and
+   *  drop slices for seasons already in the past. Called whenever the season the
+   *  GM is managing changes (offseason opens for the next year; a new season
+   *  begins). */
+  private refreshDeadCap(managedYear: number): void {
+    this.deadCapSchedule = this.deadCapSchedule.filter((e) => e.year >= managedYear)
+    this.userDeadCap = this.deadCapSchedule
+      .filter((e) => e.year === managedYear)
+      .reduce((sum, e) => sum + e.amount, 0)
+  }
+
   /** Season Rhythm M2: the buyout window. During the offseason (re-sign and
-   *  free-agency stages) a club can eat a bad contract: the player becomes a
-   *  free agent and ONE-THIRD of his remaining money sticks to next season's
-   *  cap as a dead charge (simplified from the NHL's 2/3-over-2x-years rule —
-   *  one painful season instead of a long tail). */
+   *  free-agency stages) a club can eat a bad contract. Following the real CBA:
+   *  the cost is 2/3 of the remaining money (1/3 if the player is under 26),
+   *  spread as dead cap over TWICE the contract's remaining years. He becomes an
+   *  unrestricted free agent immediately. */
   buyoutContract(playerId: string): { ok: boolean; message: string; charge?: number } {
     const os = this.offseason
     if (this.phase !== 'offseason' || !os || (os.stage !== 'resign' && os.stage !== 'freeAgency')) {
@@ -6429,7 +6452,17 @@ export class Career {
       return { ok: false, message: 'His contract is already expiring — let him walk for free instead.' }
     }
     const remaining = p.contract.salary * p.contract.yearsRemaining
-    const charge = Math.round(remaining / 3)
+    const years = p.contract.yearsRemaining
+    // Real CBA: 2/3 of the remaining money (1/3 if he's under 26), spread over
+    // twice the remaining years.
+    const factor = p.age >= 26 ? 2 / 3 : 1 / 3
+    const spreadYears = years * 2
+    const perYear = Math.round((remaining * factor) / spreadYears)
+    // The tail lands on the seasons still to come: the upcoming season first.
+    const firstYear = this.year + 1
+    for (let i = 0; i < spreadYears; i++) {
+      this.deadCapSchedule.push({ year: firstYear + i, amount: perYear })
+    }
     // The player walks: off the roster, contract terminated, into free agency.
     releaseFromTeam({ team: this.userTeam, playerId: pid, players: this.data.players })
     this.lockerDeparture(this.userTeamId, pid)
@@ -6437,12 +6470,15 @@ export class Career {
     p.contract.yearsRemaining = 0
     if (os.stage === 'freeAgency') this.faPool.push(pid)
     else this.buyoutFas.push(pid)
-    this.userDeadCap += charge
+    // The immediate season's slice is what constrains this summer's spending.
+    this.refreshDeadCap(firstYear)
+    const charge = perYear
     this.pushNews(
       'contract',
       `${p.name} bought out`,
       `The club has bought out the remainder of ${p.name}'s contract. He becomes an unrestricted free agent; ` +
-      `$${(charge / 1e6).toFixed(2)}M in dead cap stays on next season's books. Expensive freedom — but freedom.`,
+      `$${(perYear / 1e6).toFixed(2)}M in dead cap sticks to the books for each of the next ${spreadYears} seasons ` +
+      `(two-thirds of what he was owed, stretched over twice the term). Expensive freedom — but freedom.`,
       { playerId }
     )
     chronicleEvent(this.chronicle, {
@@ -15423,6 +15459,7 @@ export class Career {
       deadlineHold: this.deadlineHold,
       deadlineHoldDone: this.deadlineHoldDone,
       userDeadCap: this.userDeadCap,
+      deadCapSchedule: this.deadCapSchedule.map((e) => ({ ...e })),
       buyoutFas: this.buyoutFas.map((id) => id as string),
       arbitrationCases: this.arbitrationCases.map((c) => ({ ...c })),
       boxScoreHistory: structuredClone(this.boxScoreHistory),
@@ -15581,6 +15618,7 @@ export class Career {
     career.deadlineHold = snapshot.deadlineHold ?? false
     career.deadlineHoldDone = snapshot.deadlineHoldDone ?? false
     career.userDeadCap = snapshot.userDeadCap ?? 0
+    career.deadCapSchedule = (snapshot.deadCapSchedule ?? []).map((e) => ({ ...e }))
     career.buyoutFas = (snapshot.buyoutFas ?? []).map((id) => asPlayerId(id))
     career.arbitrationCases = (snapshot.arbitrationCases ?? []).map((c) => ({ ...c }))
     career.boxScoreHistory = snapshot.boxScoreHistory ? structuredClone(snapshot.boxScoreHistory) : []
