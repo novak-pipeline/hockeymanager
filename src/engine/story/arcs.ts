@@ -567,6 +567,9 @@ function detectBreakoutBust(
 
     const expected = inputs.expectedPoints(pid)
     if (expected === undefined) continue
+    // expectedPoints is PER GAME; pace is a full-season projection, so scale the
+    // expectation to a season total before comparing or displaying the two.
+    const expectedSeason = expected * inputs.seasonLength
     const pace = totals.gamesPlayed > 0
       ? (totals.points / totals.gamesPlayed) * inputs.seasonLength
       : 0
@@ -574,7 +577,7 @@ function detectBreakoutBust(
     const name = inputs.playerName(pid)
 
     if (arc.kind === 'breakoutSeason') {
-      if (pace < expected * 1.2) {
+      if (pace < expectedSeason * 1.2) {
         // Pace has regressed to normal — resolve.
         const summary = `Production pace normalized — breakout slowed`
         addBeat(arc, inputs.day, inputs.year, summary)
@@ -589,7 +592,7 @@ function detectBreakoutBust(
       } else {
         const prevTension = arc.tension
         setTension(arc, Math.min(95, arc.tension + 5))
-        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expected)})`
+        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expectedSeason)})`
         addBeat(arc, inputs.day, inputs.year, summary)
         if (
           (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
@@ -598,7 +601,7 @@ function detectBreakoutBust(
           seeds.push({
             category: 'league',
             headline: `${name}'s breakout season continues`,
-            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expected)}. After ${arc.beats.length} beats of this arc, the breakout looks real.`,
+            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expectedSeason)}. After ${arc.beats.length} beats of this arc, the breakout looks real.`,
             playerId: pid,
             teamId: arc.actors.teamIds[0],
           })
@@ -606,7 +609,7 @@ function detectBreakoutBust(
       }
     } else {
       // bustWatch
-      if (pace > expected * 0.75) {
+      if (pace > expectedSeason * 0.75) {
         const summary = `Production recovering — bust watch lifted`
         addBeat(arc, inputs.day, inputs.year, summary)
         arc.status = 'resolved'
@@ -620,7 +623,7 @@ function detectBreakoutBust(
       } else {
         const prevTension = arc.tension
         setTension(arc, Math.min(95, arc.tension + 5))
-        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expected)})`
+        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expectedSeason)})`
         addBeat(arc, inputs.day, inputs.year, summary)
         if (
           (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
@@ -629,7 +632,7 @@ function detectBreakoutBust(
           seeds.push({
             category: 'league',
             headline: `${name} falling far short of expectations`,
-            body: `${name} is on pace for only ${Math.round(pace)} points, versus an expectation of ${Math.round(expected)}. The story is getting harder to ignore.`,
+            body: `${name} is on pace for only ${Math.round(pace)} points, versus an expectation of ${Math.round(expectedSeason)}. The story is getting harder to ignore.`,
             playerId: pid,
             ...(arc.actors.teamIds[0] !== undefined ? { teamId: arc.actors.teamIds[0] } : {}),
           })
@@ -647,13 +650,15 @@ function detectBreakoutBust(
 
     const expected = inputs.expectedPoints?.(pid)
     if (expected === undefined || expected <= 0) continue
+    // expectedPoints is PER GAME; scale to a season total to meet the pace.
+    const expectedSeason = expected * inputs.seasonLength
     const pace = (totals.points / totals.gamesPlayed) * inputs.seasonLength
     const name = inputs.playerName(pid)
     const pl = inputs.playerLines.find(p => p.playerId === pid)
     // pl is always found since pid comes from playerLines; teamId is always string.
     const teamId: string | undefined = pl?.teamId
 
-    if (pace >= expected * BREAKOUT_PACE_MULTIPLIER) {
+    if (pace >= expectedSeason * BREAKOUT_PACE_MULTIPLIER) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -666,7 +671,7 @@ function detectBreakoutBust(
           {
             day: inputs.day,
             year: inputs.year,
-            summary: `On pace for ${Math.round(pace)} points — ${Math.round((pace / expected - 1) * 100)}% above expectations`,
+            summary: `On pace for ${Math.round(pace)} points — ${Math.round((pace / expectedSeason - 1) * 100)}% above expectations`,
           },
         ],
         status: 'building',
@@ -675,11 +680,11 @@ function detectBreakoutBust(
       seeds.push({
         category: 'league',
         headline: `Breakout season: ${name} defying expectations`,
-        body: `${name} is on pace for ${Math.round(pace)} points, ${Math.round((pace / expected - 1) * 100)}% above preseason projections. Is this the real thing?`,
+        body: `${name} is on pace for ${Math.round(pace)} points, ${Math.round((pace / expectedSeason - 1) * 100)}% above preseason projections. Is this the real thing?`,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
       })
-    } else if (pace <= expected * BUST_PACE_MULTIPLIER) {
+    } else if (pace <= expectedSeason * BUST_PACE_MULTIPLIER) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -692,7 +697,7 @@ function detectBreakoutBust(
           {
             day: inputs.day,
             year: inputs.year,
-            summary: `On pace for only ${Math.round(pace)} points — ${Math.round((1 - pace / expected) * 100)}% below expectations`,
+            summary: `On pace for only ${Math.round(pace)} points — ${Math.round((1 - pace / expectedSeason) * 100)}% below expectations`,
           },
         ],
         status: 'building',
@@ -701,7 +706,7 @@ function detectBreakoutBust(
       seeds.push({
         category: 'league',
         headline: `${name} off to a costly slow start`,
-        body: `${name} is on pace for only ${Math.round(pace)} points, far below the expected ${Math.round(expected)}. Questions are mounting.`,
+        body: `${name} is on pace for only ${Math.round(pace)} points, far below the expected ${Math.round(expectedSeason)}. Questions are mounting.`,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
       })

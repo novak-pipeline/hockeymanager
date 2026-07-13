@@ -379,7 +379,8 @@ describe('breakoutSeason detector', () => {
           id === 'p1'
             ? { goals: 10, assists: 15, points: 25, gamesPlayed: 20 }
             : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
-        expectedPoints: (id) => (id === 'p1' ? 40 : undefined), // pace = 25/20*82 ≈ 102 vs expected 40
+        // expectedPoints is PER GAME (as the career supplies it): 0.5/g ≈ 41/season.
+        expectedPoints: (id) => (id === 'p1' ? 0.5 : undefined), // pace = 25/20*82 ≈ 102 vs expected ≈41
       }),
       rng,
     })
@@ -399,7 +400,8 @@ describe('breakoutSeason detector', () => {
           id === 'p1'
             ? { goals: 1, assists: 2, points: 3, gamesPlayed: 20 }
             : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
-        expectedPoints: (id) => (id === 'p1' ? 60 : undefined), // pace = 3/20*82 ≈ 12 vs expected 60
+        // Per game: 0.73/g ≈ 60/season.
+        expectedPoints: (id) => (id === 'p1' ? 0.73 : undefined), // pace = 3/20*82 ≈ 12 vs expected ≈60
       }),
       rng,
     })
@@ -416,7 +418,30 @@ describe('breakoutSeason detector', () => {
         day: 5,
         playerLines: [playerLine('p1', 't1', { points: 3 })],
         seasonTotals: () => ({ goals: 5, assists: 5, points: 10, gamesPlayed: 5 }),
-        expectedPoints: () => 40,
+        expectedPoints: () => 0.5,
+      }),
+      rng,
+    })
+    expect(state.arcs.filter(a => a.kind === 'breakoutSeason' || a.kind === 'bustWatch')).toHaveLength(0)
+  })
+
+  it('does NOT flag a player producing right at his (per-game) expectation', () => {
+    // Regression: expectedPoints is per-GAME. A 0.5/g player producing ~0.5/g is
+    // ordinary — not a breakout. (The old code compared a per-season pace to the
+    // per-game number, so essentially every scorer tripped a false breakout.)
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 20,
+        playerLines: [playerLine('p1', 't1', { points: 1 })],
+        // 10 points in 20 games = 0.5/g → ~41/season, exactly the expectation.
+        seasonTotals: (id) =>
+          id === 'p1'
+            ? { goals: 4, assists: 6, points: 10, gamesPlayed: 20 }
+            : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
+        expectedPoints: (id) => (id === 'p1' ? 0.5 : undefined),
       }),
       rng,
     })
