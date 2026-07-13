@@ -628,6 +628,11 @@ describe('Career — story layer', () => {
     expect(posOf('Best Goaltender')).toBe('G')
     // The scoring title is a skater award — a goalie can never win it.
     expect(posOf('Art Ross Trophy')).not.toBe('G')
+
+    // The winners are ANNOUNCED as news (the payoff), not just archived silently:
+    // the Calder in particular had no announcement channel before.
+    const headlines = career.getInbox().items.map((n) => n.headline)
+    expect(headlines.some((h) => h.includes('Calder'))).toBe(true)
   })
 
   it('snapshot round-trip preserves all five story states mid-season', () => {

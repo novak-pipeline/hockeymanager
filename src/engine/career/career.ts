@@ -2142,6 +2142,63 @@ export class Career {
   }
 
   /**
+   * Season-end payoff: announce each individual trophy winner by name so the
+   * season-long award races (rookie/scoring/goalie …) actually RESOLVE in the
+   * feed. Before this the winners existed only as a silent badge + the offseason
+   * awards screen, so a race the feed hyped all year just stopped. Fired once, on
+   * entering the offseason, while this.totals still holds the season's stats.
+   */
+  private announceSeasonAwards(): void {
+    const winners = this.seasonAwardWinners()
+    if (winners.length === 0) return
+    const byAward = new Map(winners.map((w) => [w.award, w]))
+    const line = (award: string): string => {
+      const w = byAward.get(award)
+      if (!w) return ''
+      const tid = this.teamOf(w.playerId)
+      const abbr = tid ? this.data.teams.get(tid)!.abbreviation : 'FA'
+      return `${this.resolve(w.playerId).name} (${abbr}, ${w.value})`
+    }
+    const roundup: Array<[string, string]> = [
+      ['Hart Trophy (MVP)', 'Most Valuable Player'],
+      ['Art Ross (scoring)', 'Art Ross Trophy'],
+      ['Rocket Richard (goals)', 'Top Goal Scorer'],
+      ['Norris (top D)', 'Best Defenseman'],
+      ['Calder (rookie)', 'Rookie of the Year'],
+      ['Vezina (goalie)', 'Best Goaltender'],
+    ]
+    const bodyParts = roundup
+      .map(([label, award]) => (line(award) ? `${label}: ${line(award)}` : ''))
+      .filter(Boolean)
+    const hart = byAward.get('Most Valuable Player')
+    this.pushNews(
+      'award',
+      hart
+        ? `${this.year} awards: ${this.resolve(hart.playerId).name} takes MVP honours`
+        : `${this.year} league awards announced`,
+      `The votes are in. ${bodyParts.join(' · ')}.`,
+      hart ? { playerId: hart.playerId as string } : {}
+    )
+    // Dedicated items for the Calder and Norris — the two races that had no
+    // announcement channel at all before, so those threads finally pay off.
+    const spotlight: Array<[string, string, string]> = [
+      ['Rookie of the Year', 'Calder Trophy (Rookie of the Year)', 'top rookie'],
+      ['Best Defenseman', 'Norris Trophy (Best Defenceman)', 'top defenceman'],
+    ]
+    for (const [award, trophy, role] of spotlight) {
+      const w = byAward.get(award)
+      if (!w) continue
+      const p = this.resolve(w.playerId)
+      this.pushNews(
+        'award',
+        `${p.name} wins the ${trophy}`,
+        `${p.name} is voted the league's ${role} for ${this.year} (${w.value}).`,
+        { playerId: w.playerId as string }
+      )
+    }
+  }
+
+  /**
    * Sim resolver seam: condition (fatigue/morale/form via effectiveResolve)
    * composes with locker-room chemistry AND line synergy. effectiveResolve
    * already produces per-game cached condition-scaled copies; this wraps it and
@@ -3699,6 +3756,8 @@ export class Career {
       state: this.rivalriesState,
       teamA: res.homeTeamId as string,
       teamB: res.awayTeamId as string,
+      nameA: this.data.teams.get(res.homeTeamId)?.abbreviation,
+      nameB: this.data.teams.get(res.awayTeamId)?.abbreviation,
       goalsA: res.homeGoals,
       goalsB: res.awayGoals,
       penaltyMinutesA: homePim,
@@ -4851,6 +4910,8 @@ export class Career {
           state: this.rivalriesState,
           teamA: g.homeTeamId as string,
           teamB: g.awayTeamId as string,
+          nameA: this.data.teams.get(g.homeTeamId)?.abbreviation,
+          nameB: this.data.teams.get(g.awayTeamId)?.abbreviation,
           goalsA: res.homeGoals,
           goalsB: res.awayGoals,
           penaltyMinutesA: homePim,
@@ -5007,6 +5068,9 @@ export class Career {
     for (const kind of checkAwardsStage(this.pressScheduleState)) {
       this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
     }
+    // Announce the actual trophy winners by name — the payoff for the season's
+    // award races. Runs while this.totals still holds the season's stats.
+    this.announceSeasonAwards()
   }
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
