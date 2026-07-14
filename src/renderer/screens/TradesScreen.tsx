@@ -138,6 +138,8 @@ function OfferCard(props: {
   offer: TradeOfferView
   currentDay: number
   onAction: () => void
+  /** Open the builder pre-loaded with this deal to send a counter back. */
+  onCounter: (offer: TradeOfferView) => void
 }): JSX.Element {
   const { offer } = props
   const client = useClient()
@@ -232,6 +234,14 @@ function OfferCard(props: {
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-primary" disabled={busy} onClick={doAccept}>
           Accept
+        </button>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={() => props.onCounter(offer)}
+          title="Open the builder pre-loaded with this deal so you can tweak it and send it back"
+        >
+          Counter
         </button>
         <button className="btn btn-danger" disabled={busy} onClick={doReject}>
           Decline
@@ -499,21 +509,45 @@ function PartnerDropdown(props: {
 
 // ─── propose tab ──────────────────────────────────────────────────────────────
 
+/** A counter's starting point: the partner + the players from the offer being
+ *  countered. `nonce` forces a re-seed if another counter comes in mid-edit. */
+interface TradeSeed {
+  partnerId: string
+  myPlayerIds: string[]
+  theirPlayerIds: string[]
+  nonce: number
+}
+
 function ProposeTab(props: {
   data: TradesView
   onRefetch: () => void
   currentDay: number
+  /** When countering an incoming offer, the builder opens pre-loaded with that
+   *  deal's players and partner so the GM can tweak it and send it back. */
+  seed?: TradeSeed | null
 }): JSX.Element {
   const client = useClient()
   const { data } = props
 
-  const [partnerId, setPartnerId] = useState(data.partners[0]?.teamId ?? '')
+  const [partnerId, setPartnerId] = useState(props.seed?.partnerId ?? data.partners[0]?.teamId ?? '')
   const partner: TradePartnerView | undefined = data.partners.find((p) => p.teamId === partnerId)
 
-  const [myPlayerIds, setMyPlayerIds] = useState<Set<string>>(new Set())
+  const [myPlayerIds, setMyPlayerIds] = useState<Set<string>>(new Set(props.seed?.myPlayerIds ?? []))
   const [myPickIds, setMyPickIds] = useState<Set<string>>(new Set())
-  const [theirPlayerIds, setTheirPlayerIds] = useState<Set<string>>(new Set())
+  const [theirPlayerIds, setTheirPlayerIds] = useState<Set<string>>(new Set(props.seed?.theirPlayerIds ?? []))
   const [theirPickIds, setTheirPickIds] = useState<Set<string>>(new Set())
+
+  // Re-seed when a NEW counter arrives while the builder is already mounted.
+  const seedNonce = props.seed?.nonce
+  useEffect(() => {
+    if (!props.seed) return
+    setPartnerId(props.seed.partnerId)
+    setMyPlayerIds(new Set(props.seed.myPlayerIds))
+    setTheirPlayerIds(new Set(props.seed.theirPlayerIds))
+    setMyPickIds(new Set())
+    setTheirPickIds(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedNonce])
 
   const [busy, setBusy] = useState(false)
   const [evalResult, setEvalResult] = useState<TradeEvaluation | null>(null)
@@ -1281,6 +1315,20 @@ export function TradesScreen(): JSX.Element {
   )
 
   const [tab, setTab] = useState<Tab>('offers')
+  const [seed, setSeed] = useState<TradeSeed | null>(null)
+
+  /** Counter an incoming offer: preload the builder with its players + partner,
+   *  switch to the build tab, and clear the original offer off the desk. */
+  function counterOffer(offer: TradeOfferView): void {
+    setSeed({
+      partnerId: offer.receive.teamId,
+      myPlayerIds: offer.give.players.map((p) => p.playerId),
+      theirPlayerIds: offer.receive.players.map((p) => p.playerId),
+      nonce: Date.now(),
+    })
+    setTab('build')
+    void client.rejectTrade(offer.offerId).then(refetch)
+  }
 
   // infer currentDay from expiry info — use 0 as fallback
   const currentDay = 0
@@ -1335,7 +1383,7 @@ export function TradesScreen(): JSX.Element {
                 </Notice>
               ) : (
                 data.incoming.map((offer) => (
-                  <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} />
+                  <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} onCounter={counterOffer} />
                 ))
               )}
             </div>
@@ -1343,7 +1391,7 @@ export function TradesScreen(): JSX.Element {
 
           {tab === 'build' && (
             data.tradingOpen
-              ? <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} />
+              ? <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} seed={seed} />
               : <Notice kind="warn">The trade deadline has passed — no new deals until the offseason.</Notice>
           )}
 
