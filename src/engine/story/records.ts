@@ -257,6 +257,8 @@ export interface SeasonLine {
   savePct: number
   /** Total shots faced; used for savePct qualification. */
   shotsAgainst: number
+  /** Goalie shutouts this season; 0 for skaters (optional — old callers omit). */
+  shutouts?: number
 }
 
 /* ────────────────────────── internal helpers ────────────────────────── */
@@ -452,7 +454,7 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
 
   /* ── single-season boards ── */
 
-  type StatKey = 'goals' | 'assists' | 'points' | 'wins' | 'savePct'
+  type StatKey = 'goals' | 'assists' | 'points' | 'wins' | 'savePct' | 'shutouts'
 
   for (const line of seasonLines) {
     const isGoalie = line.position === 'G'
@@ -460,6 +462,7 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
     const safeStats: Array<{ key: StatKey; value: number }> = isGoalie
       ? [
           { key: 'wins', value: line.goalieWins },
+          { key: 'shutouts', value: line.shutouts ?? 0 },
           ...(line.shotsAgainst >= SAVE_PCT_MIN_SHOTS
             ? [{ key: 'savePct' as StatKey, value: line.savePct }]
             : []),
@@ -481,7 +484,8 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
     for (const { key, value } of safeStats) {
       if (value <= 0 && key !== 'savePct') continue
 
-      const board = state.singleSeason[key]
+      // Default for the optional shutouts board (absent on pre-shutouts saves).
+      const board = state.singleSeason[key] ?? []
       const e: RecordEntry = { ...entry, value }
       const isAllTime = board.length === 0 || value > board[0]!.value
 
@@ -591,7 +595,7 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
 
   const pace = (current: number) => (current / teamGamesPlayed) * totalSeasonGames
 
-  type StatKey = 'goals' | 'assists' | 'points' | 'wins' | 'savePct'
+  type StatKey = 'goals' | 'assists' | 'points' | 'wins' | 'savePct' | 'shutouts'
 
   const statExtractors: Array<{
     key: StatKey
@@ -619,6 +623,11 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
       filter: (l) => l.position === 'G',
     },
     {
+      key: 'shutouts',
+      extract: (l) => l.shutouts ?? 0,
+      filter: (l) => l.position === 'G',
+    },
+    {
       key: 'savePct',
       extract: (l) =>
         l.shotsAgainst >= (SAVE_PCT_MIN_SHOTS * teamGamesPlayed) / totalSeasonGames
@@ -629,7 +638,7 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
   ]
 
   for (const { key, extract, filter } of statExtractors) {
-    const board = state.singleSeason[key]
+    const board = state.singleSeason[key] ?? []
     if (board.length < 3) continue
     const top3Record = board[2]! // third-best is the threshold to beat
 

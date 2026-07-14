@@ -770,6 +770,9 @@ export class Career {
   private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map(), leagueAvg: new Map() }
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
+  /** Per-season shutouts, credited to the winning goalie who allowed 0 goals
+   *  (one per game). Accumulated per game like goalieWins; cleared at rollover. */
+  private readonly shutouts = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
   private readonly ppAssists = new Map<PlayerId, number>()
   /** #175: shorthanded goals/assists — the PK's scoring side, credited from the
@@ -2005,6 +2008,7 @@ export class Career {
         goalieWins: this.goalieWins.get(pid) ?? 0,
         savePct: t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : 0,
         shotsAgainst: t.shotsAgainst,
+        shutouts: this.shutouts.get(pid) ?? 0,
       })
     }
     return lines
@@ -3719,6 +3723,15 @@ export class Career {
       if (!best) return
       const map = won ? this.goalieWins : this.goalieLosses
       map.set(best.id, (map.get(best.id) ?? 0) + 1)
+      // Shutout: the winning goalie allowed no goals (NHL convention — one per
+      // game, credited to the winner). Empty-net goals go for his team, not
+      // against him, so a clean-sheet win is a genuine shutout.
+      if (won) {
+        const bs = res.playerStats.get(best.id)
+        if (bs && bs.goalsAgainst === 0) {
+          this.shutouts.set(best.id, (this.shutouts.get(best.id) ?? 0) + 1)
+        }
+      }
     }
     credit(res.homeTeamId, homeWon)
     credit(res.awayTeamId, !homeWon)
@@ -6323,7 +6336,7 @@ export class Career {
         saves: t.saves,
         shotsAgainst: t.shotsAgainst,
         goalsAgainst: t.goalsAgainst,
-        shutouts: 0,
+        shutouts: this.shutouts.get(pid) ?? 0,
         ...(ratingAcc && ratingAcc.n > 0 ? { avgRating: Math.round((ratingAcc.sum / ratingAcc.n) * 100) / 100 } : {}),
       })
     }
@@ -6461,6 +6474,7 @@ export class Career {
     this.gp.clear()
     this.goalieWins.clear()
     this.goalieLosses.clear()
+    this.shutouts.clear()
     this.ppGoals.clear()
     this.ppAssists.clear()
     this.shGoals.clear()
@@ -15236,6 +15250,7 @@ export class Career {
         points: [...r.singleSeason.points],
         wins: [...r.singleSeason.wins],
         savePct: [...r.singleSeason.savePct],
+        shutouts: [...(r.singleSeason.shutouts ?? [])],
       },
       career: {
         goals: [...r.career.goals],
@@ -15719,6 +15734,7 @@ export class Career {
       extraStats: {
         goalieWins: serializeMap(this.goalieWins as unknown as Map<string, number>),
         goalieLosses: serializeMap(this.goalieLosses as unknown as Map<string, number>),
+        shutouts: serializeMap(this.shutouts as unknown as Map<string, number>),
         ppGoals: serializeMap(this.ppGoals as unknown as Map<string, number>),
         ppAssists: serializeMap(this.ppAssists as unknown as Map<string, number>),
         shGoals: serializeMap(this.shGoals as unknown as Map<string, number>),
@@ -15868,6 +15884,8 @@ export class Career {
       // #175: shorthanded splits (absent on pre-#175 saves — start empty).
       for (const [k, v] of snapshot.extraStats.shGoals ?? []) career.shGoals.set(asPlayerId(k), v)
       for (const [k, v] of snapshot.extraStats.shAssists ?? []) career.shAssists.set(asPlayerId(k), v)
+      // Shutouts (absent on older saves — start empty).
+      for (const [k, v] of snapshot.extraStats.shutouts ?? []) career.shutouts.set(asPlayerId(k), v)
     }
     // Restore scouting state, or create fresh if old save lacks it.
     if (snapshot.scouting) {

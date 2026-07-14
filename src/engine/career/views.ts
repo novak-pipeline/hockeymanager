@@ -2142,6 +2142,8 @@ export interface CareerSnapshot {
     /** #175: shorthanded splits — optional so pre-#175 saves load (absent → empty). */
     shGoals?: Array<[string, number]>
     shAssists?: Array<[string, number]>
+    /** Per-season goalie shutouts — optional so older saves load (absent → empty). */
+    shutouts?: Array<[string, number]>
   }
   /**
    * Scouting fog-of-war state (added after v1 froze; optional so older saves
@@ -2548,6 +2550,8 @@ export interface HistoryView {
     points: RecordEntry[]
     wins: RecordEntry[]
     savePct: RecordEntry[]
+    /** Optional so older view consumers ignore it; absent → treat as empty. */
+    shutouts?: RecordEntry[]
   }
   /** Top-10 career boards. */
   career: {

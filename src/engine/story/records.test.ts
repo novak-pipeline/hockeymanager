@@ -84,6 +84,7 @@ function goalieLine(
     goalieWins: overrides.goalieWins ?? 0,
     savePct: overrides.savePct ?? 0.900,
     shotsAgainst: overrides.shotsAgainst ?? 1800,
+    shutouts: overrides.shutouts ?? 0,
   }
 }
 
@@ -193,6 +194,20 @@ describe('archiveSeason — single-season boards', () => {
     ])
     expect(state.singleSeason.wins[0]!.value).toBe(44)
     expect(state.singleSeason.wins[1]!.value).toBe(38)
+  })
+
+  it('records goalie shutouts on the shutouts board (goalies only, zero omitted)', () => {
+    const state = emptyRecords()
+    archiveWith(state, 2001, [
+      goalieLine({ playerId: 'g1', name: 'Goalie1', shutouts: 9 }),
+      goalieLine({ playerId: 'g2', name: 'Goalie2', shutouts: 6 }),
+      goalieLine({ playerId: 'g3', name: 'Goalie3', shutouts: 0 }), // 0 → not recorded
+      skaterLine({ playerId: 'p1', name: 'Skater', goals: 50 }),
+    ])
+    const board = state.singleSeason.shutouts ?? []
+    expect(board[0]!.value).toBe(9)
+    expect(board[1]!.value).toBe(6)
+    expect(board.every((e) => e.playerId === 'g1' || e.playerId === 'g2')).toBe(true)
   })
 
   it('skaters do not appear on goalie boards and vice versa', () => {

@@ -120,6 +120,7 @@ function RecordsTab(props: { data: HistoryView }): JSX.Element {
     { label: 'Assists (Single Season)', stat: 'assists', entries: data.singleSeason.assists },
     { label: 'Points (Single Season)',  stat: 'points',  entries: data.singleSeason.points },
     { label: 'Wins (Single Season)',    stat: 'wins',    entries: data.singleSeason.wins },
+    { label: 'Shutouts (Single Season)', stat: 'shutouts', entries: data.singleSeason.shutouts ?? [] },
     { label: 'Save % (Single Season)',  stat: 'savePct', entries: data.singleSeason.savePct },
   ]
 
