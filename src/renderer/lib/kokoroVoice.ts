@@ -113,6 +113,27 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
   const kokoro = await import('kokoro-js')
   const { KokoroTTS } = kokoro
 
+  // Harden onnxruntime-web for Electron BEFORE any model loads. The default
+  // multithreaded WASM backend needs SharedArrayBuffer + cross-origin isolation,
+  // which Electron's file:// renderer does NOT provide — onnxruntime then aborts
+  // WASM instantiation and takes the whole renderer process down (an
+  // uncatchable crash, not a JS exception). Forcing a single-threaded, no-proxy
+  // backend keeps it entirely on the main thread and never touches a Worker or
+  // SharedArrayBuffer. Best-effort + guarded: never let config throw abort load.
+  try {
+    const { env } = (await import('@huggingface/transformers')) as {
+      env?: { backends?: { onnx?: { wasm?: { numThreads?: number; proxy?: boolean; simd?: boolean } } }; allowLocalModels?: boolean }
+    }
+    const wasm = env?.backends?.onnx?.wasm
+    if (wasm) {
+      wasm.numThreads = 1 // no SharedArrayBuffer requirement
+      wasm.proxy = false // no Worker (Worker script URL resolution fails under file://)
+    }
+    if (env && 'allowLocalModels' in env) env.allowLocalModels = false // don't probe file:// paths
+  } catch {
+    /* config is best-effort; if the shape changed, fall through and try anyway */
+  }
+
   // progress_callback is optional; with exactOptionalPropertyTypes we must
   // not pass `undefined` for optional keys — spread it in only when present.
   type LoadOpts = NonNullable<Parameters<typeof KokoroTTS.from_pretrained>[1]>

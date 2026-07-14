@@ -292,8 +292,9 @@ function VoicePanel(): JSX.Element {
   return (
     <Panel title="AI Voices">
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-        Neural voices for commentary, staff meetings, and calls — cast per character. Fully
-        local and offline once downloaded; the system voice is the fallback.
+        Neural voices for commentary, staff meetings, and calls — cast per character. They
+        download themselves the first time a voice is needed (no button to hunt for) and run
+        fully local and offline after that; the system voice covers the gap until then.
       </div>
       <div className="stack" style={{ gap: 6, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 600 }}>Fidelity</div>
@@ -322,7 +323,7 @@ function VoicePanel(): JSX.Element {
         ) : state === 'failed' ? (
           <button className="btn btn-sm btn-primary" onClick={() => void download()}>↻ Retry download</button>
         ) : (
-          <button className="btn btn-sm btn-primary" onClick={() => void download()}>Download neural voices</button>
+          <button className="btn btn-sm btn-primary" onClick={() => void download()}>Download now</button>
         )}
         {state === 'ready' && (
           <>
