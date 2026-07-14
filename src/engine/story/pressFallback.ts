@@ -109,10 +109,11 @@ function topArcBlurb(sheet: PressFactSheet): string | null {
 function moraleBlurb(sheet: PressFactSheet): string {
   const m = Math.round(sheet.lockerRoom.roomMorale)
   const cap = sheet.lockerRoom.captainName
-  if (m >= 80) return cap ? `The room is running hot — morale sits at ${m}/100 under the steady hand of captain ${cap}.` : `Room morale is at ${m}/100, as high as it's been all season.`
-  if (m >= 60) return cap ? `${cap} is keeping the ship steady; morale registers at ${m}/100.` : `Morale is a serviceable ${m}/100 — not inspired, but not broken.`
-  if (m >= 40) return cap ? `Captain ${cap} has some work to do: room morale is a below-average ${m}/100.` : `The room reads flat at ${m}/100.`
-  return cap ? `The dressing room is in a difficult place. Morale: ${m}/100. A lot rides on ${cap}'s leadership right now.` : `The dressing room is in a difficult place. Morale has fallen to ${m}/100.`
+  // Prose only — a beat writer describes the mood, he doesn't read out a 0–100 number.
+  if (m >= 80) return cap ? `The room is running hot, spirits sky-high under the steady hand of captain ${cap}.` : `The room's as loose and confident as it's been all season.`
+  if (m >= 60) return cap ? `${cap} has the room in a good place — spirits are up and the group is pulling together.` : `The mood in the room is upbeat — not euphoric, but a group that believes.`
+  if (m >= 40) return cap ? `${cap} has some work to do: the room feels a little flat right now.` : `The room reads flat — the energy just isn't there.`
+  return cap ? `The dressing room is in a difficult place, and a lot rides on ${cap}'s leadership right now.` : `The dressing room is in a difficult place — the mood has sunk about as low as it goes.`
 }
 
 function leaderBlurb(sheet: PressFactSheet): string | null {
@@ -134,8 +135,8 @@ function mentorBlurb(sheet: PressFactSheet): string | null {
 function rumorBlurb(sheet: PressFactSheet): string | null {
   const r = sheet.rumors[0]
   if (!r) return null
-  const heat = r.heat >= 75 ? 'red-hot' : r.heat >= 50 ? 'warm' : 'simmering'
-  return `The rumor mill keeps spinning around ${r.playerName} (${r.teamAbbr}) — trade chatter is ${heat} at ${Math.round(r.heat)}/100.`
+  const heat = r.heat >= 75 ? 'has reached a fever pitch' : r.heat >= 50 ? 'is heating up' : 'is quietly simmering'
+  return `The rumor mill keeps spinning around ${r.playerName} (${r.teamAbbr}) — the trade chatter ${heat}.`
 }
 
 function upNextBlurb(sheet: PressFactSheet): string | null {

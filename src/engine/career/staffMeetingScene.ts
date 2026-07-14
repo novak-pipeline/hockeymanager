@@ -239,7 +239,7 @@ function proposalFor(f: StaffFinding, cast: StaffCast, idx: number): StaffPropos
         intro: [
           {
             speakerId: cast.headCoach.id,
-            text: `We're getting caved in — the system and the personnel aren't talking (fit ${Math.round(f.coachFit)}/100). I'd adjust how we play to what we've got.`,
+            text: `We're getting caved in out there — the system and the personnel just aren't talking. I'd adjust how we play to suit what we've got.`,
           },
         ],
         options: [

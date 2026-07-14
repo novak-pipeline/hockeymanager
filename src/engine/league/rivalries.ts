@@ -340,11 +340,12 @@ export function registerGame(args: RegisterGameArgs): RegisterGameResult {
         const winnerLine = winnerTeam
           ? ` ${winnerTeam} took this one, adding fuel to the fire.`
           : ' The game ended level, settling nothing.'
+        const tenor = threshold >= FLASH_THRESHOLD_2 ? 'boiled over into genuine bad blood' : 'grown into a real, simmering rivalry'
         newsSeeds.push({
           category: 'league',
           headline: `${dispA} vs ${dispB}: a ${label} rivalry ignites`,
           body:
-            `The ${dispA}–${dispB} rivalry has reached intensity ${r.intensity}/100, ` +
+            `The ${dispA}–${dispB} rivalry has ${tenor}, ` +
             `driven by ${r.reasons.join(', ')}.${winnerLine}`,
           teamId: teamA,
         })
