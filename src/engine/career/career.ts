@@ -2907,7 +2907,10 @@ export class Career {
           assists: s.assists,
           points,
           isForward: p.position !== 'D',
-          isRookie: p.age <= 22 && p.stats.length === 0,
+          // Rookie definition matches the Calder pick in seasonAwardWinners
+          // (first-year pro, age ≤ 24) so the race the feed hypes and the trophy
+          // it eventually hands out agree on who's eligible.
+          isRookie: p.age <= 24 && p.stats.length === 0,
           consecutivePointGames: this.pointStreaks.get(id) ?? 0,
           scorelessStreak: this.scorelessStreaks.get(id) ?? 0,
         })
