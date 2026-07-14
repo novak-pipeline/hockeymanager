@@ -14,7 +14,7 @@
  * useScreenData, tracks a "seen" set in localStorage so a call rings once, and
  * voices through speakAs.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InboxView, OwnerRequestView } from '../../worker/protocol'
 import type { StaffView, TradesView } from '@engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -30,6 +30,46 @@ function hashStr(s: string): string {
   let h = 5381
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
   return h.toString(36)
+}
+
+/** A gentle two-note "brring" via WebAudio — no asset, deliberately soft and
+ *  short (a few rings, then silence) so it signals without nagging. Returns a
+ *  stop function to call on answer / dismiss / unmount. */
+function playPhoneRing(): () => void {
+  let ctx: AudioContext | null = null
+  const timers: number[] = []
+  let stopped = false
+  try {
+    const AC = window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return () => {}
+    ctx = new AC()
+    void ctx.resume?.()
+  } catch { return () => {} }
+  const c = ctx
+  const ringOnce = (): void => {
+    if (stopped || c.state === 'closed') return
+    const at = c.currentTime + 0.01
+    for (const [t, freq] of [[0, 660], [0.16, 520]] as const) {
+      const osc = c.createOscillator()
+      const gain = c.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const start = at + t
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(0.1, start + 0.02) // soft peak
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22)
+      osc.connect(gain).connect(c.destination)
+      osc.start(start)
+      osc.stop(start + 0.25)
+    }
+  }
+  for (let i = 0; i < 3; i++) timers.push(window.setTimeout(ringOnce, i * 1700))
+  return () => {
+    stopped = true
+    for (const id of timers) clearTimeout(id)
+    try { void c.close() } catch { /* ignore */ }
+  }
 }
 
 function seenSet(): Set<string> {
@@ -141,6 +181,14 @@ export function PhoneCallOverlay(): JSX.Element | null {
     return null
   }, [inbox, ownerReq, staff, trades, dismissedId])
 
+  // Ring a gentle tone when a new call arrives; stop the moment it's answered.
+  const ringStopRef = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    ringStopRef.current?.()
+    ringStopRef.current = call && !answered ? playPhoneRing() : null
+    return () => { ringStopRef.current?.(); ringStopRef.current = null }
+  }, [call?.id, answered])
+
   if (!call) return null
 
   const answer = (): void => {
@@ -196,12 +244,12 @@ export function PhoneCallOverlay(): JSX.Element | null {
 
 const OVERLAY: React.CSSProperties = { position: 'fixed', right: 20, bottom: 20, zIndex: 900 }
 const CARD: React.CSSProperties = {
-  width: 260,
-  background: 'var(--panel, #12151d)',
-  border: '1px solid rgba(255,255,255,0.16)',
-  borderRadius: 14,
-  padding: 16,
-  boxShadow: '0 14px 44px rgba(0,0,0,0.55)',
+  width: 280,
+  background: 'linear-gradient(180deg, var(--panel, #161a24) 0%, var(--bg1, #0f121a) 100%)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 18,
+  padding: '18px 16px',
+  boxShadow: '0 18px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
 }
 
 const RING_CSS = `
