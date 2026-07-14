@@ -9984,6 +9984,7 @@ export class Career {
       bGivesPlayerIds: receive.players.map((p) => p.id),
       bGivesPicks: receive.picks,
     })
+    this.tradeWriteup(receive.players.map((p) => p.id), give.players.map((p) => p.id), partnerId)
     this.adjustRelationship(partnerId as string, 6)
     return { ok: true }
   }
@@ -10270,6 +10271,7 @@ export class Career {
       bGivesPlayerIds: offer.userReceivesPlayerIds,
       bGivesPicks: offer.userReceivesPicks,
     })
+    this.tradeWriteup(offer.userReceivesPlayerIds, offer.userGivesPlayerIds, offer.partnerTeamId)
   }
 
   rejectTrade(offerId: string): void {
@@ -10675,6 +10677,61 @@ export class Career {
         via: 'trade', fromTeamId: args.teamBId as string, eventId: ev.id,
       })
     }
+  }
+
+  /**
+   * A proper press column on a trade the user just made — the kind of deal that
+   * earns a write-up, not a one-line transaction blurb. Only fires when a real
+   * piece changes hands (someone rating ≥76) so routine depth swaps don't spam
+   * the news. Grounded and opinionated per the house voice; no rating numbers in
+   * the prose. Call AFTER the assets have moved.
+   */
+  private tradeWriteup(incomingIds: PlayerId[], outgoingIds: PlayerId[], partnerId: TeamId): void {
+    const resolve = (ids: PlayerId[]): Player[] =>
+      ids.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+    const incoming = resolve(incomingIds)
+    const outgoing = resolve(outgoingIds)
+    const byOvr = (ps: Player[]): Player[] => [...ps].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    const headliner = byOvr([...incoming, ...outgoing])[0]
+    if (!headliner || ratedOverall(headliner) < 76) return // routine deal — no column
+    const partner = this.data.teams.get(partnerId)
+    if (!partner) return
+
+    const inBest = byOvr(incoming)[0]
+    const outBest = byOvr(outgoing)[0]
+    const us = this.userTeam
+    const caliber = (p: Player): string => {
+      const ov = ratedOverall(p)
+      const g = p.position === 'G'
+      if (ov >= 86) return g ? 'a franchise goaltender' : 'a bona fide star'
+      if (ov >= 81) return g ? 'a proven starter' : p.position === 'D' ? 'a top-pairing defenceman' : 'a top-six forward'
+      if (ov >= 76) return g ? 'a capable NHL starter' : p.position === 'D' ? 'a top-four defenceman' : 'a middle-six regular'
+      return 'a depth piece'
+    }
+    const outNames = outgoing.map((p) => p.name).join(', ')
+
+    const headline = inBest
+      ? `${us.name} land ${inBest.name}`
+      : `${us.name} ship ${outBest?.name ?? 'a veteran'} to ${partner.abbreviation}`
+
+    // Rougher, has a take, uneven rhythm — the house voice, not a wire blurb.
+    const lead = inBest && (!outBest || ratedOverall(inBest) >= ratedOverall(outBest))
+      ? `${us.abbreviation} got their guy. ${inBest.name} — ${caliber(inBest)} — walks straight into the top of the lineup.`
+      : outBest
+        ? `${us.abbreviation} cashed in ${outBest.name}. ${caliber(outBest)}, and you can see the plan behind moving him.`
+        : `${us.abbreviation} reshuffled the deck.`
+    const cost = outNames ? ` The price going the other way: ${outNames}.` : ` It cost them draft capital.`
+    const kicker = ` Good deal? ${partner.abbreviation} think they won it too. That's usually how the interesting ones look.`
+    const body = `${lead}${cost}${kicker}`
+
+    const persona =
+      PRESS_PERSONA_NAMES[Career.PRESS_PERSONA_ROTATION[this.pressCounter++ % Career.PRESS_PERSONA_ROTATION.length]]
+    this.pushNews('trade', headline, body, {
+      teamId: partnerId as string,
+      ...(inBest ? { playerId: inBest.id as string } : {}),
+      press: { byline: `${persona.name} — ${persona.outlet}`, kind: 'tradeColumn' },
+      salience: 85,
+    })
   }
 
   /* ────────────────────────── view builders ────────────────────────── */
