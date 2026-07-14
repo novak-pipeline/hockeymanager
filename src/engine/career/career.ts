@@ -4472,10 +4472,19 @@ export class Career {
         if (movedValue >= 35) {
           const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
           const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
+          // Deterministic framing variety so deadline day doesn't read like one
+          // template on repeat — same house voice, different angle each time.
+          const takes = [
+            `${buyerGm.name} adds a piece for the run; ${sellerGm.name} banks the return.`,
+            `A win-now club and a seller found each other. ${buyerGm.name} pays up; ${sellerGm.name} restocks.`,
+            `${sellerGm.name} cashed in. Whether ${buyerGm.name} got value is the question the standings will answer.`,
+            `${buyerGm.name} went and got their guy. ${sellerGm.name} took the futures and moved on.`,
+          ]
+          const pick = (Career.pidNum(aiDeal.sellerTeamId as string) + Career.pidNum(aiDeal.buyerTeamId as string) + day) % takes.length
           this.pushNews(
             'trade',
             `Trade: ${aiDeal.summary.split('.')[0]}`,
-            `${aiDeal.summary} ${buyerGm.name} adds a piece for the run; ${sellerGm.name} banks the return.`,
+            `${aiDeal.summary} ${takes[pick]}`,
             { teamId: aiDeal.buyerTeamId as string }
           )
         }
