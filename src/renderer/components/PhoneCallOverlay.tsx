@@ -3,11 +3,12 @@
  *
  * When something serious needs the GM's ear, the phone rings in the corner. You
  * answer and the caller SPEAKS it in their own voice; you can take it into the
- * room (deep-links to where you respond) or hang up. Two callers ring today:
- *   • the club OWNER, when he has a directive (a rare, high-stakes call — it
- *     outranks routine business), and
+ * room (deep-links to where you respond) or hang up. Callers ring in priority
+ * order:
+ *   • the club OWNER, when he has a directive (rare, top stakes);
+ *   • a rival GM with a BLOCKBUSTER trade offer (a deal touching a ≥78-OVR
+ *     piece — routine offers stay in the Trades tab, only these ring); and
  *   • a PLAYER with a serious concern.
- * Built to generalise further to incoming GM trade-offer calls.
  *
  * Self-contained and renderer-only: reads the inbox / owner desk / staff via
  * useScreenData, tracks a "seen" set in localStorage so a call rings once, and
@@ -15,7 +16,7 @@
  */
 import { useMemo, useState } from 'react'
 import type { InboxView, OwnerRequestView } from '../../worker/protocol'
-import type { StaffView } from '@engine/career/views'
+import type { StaffView, TradesView } from '@engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
@@ -74,6 +75,10 @@ export function PhoneCallOverlay(): JSX.Element | null {
     () => client.getTeamStaff(),
     (r) => (r.type === 'teamStaff' ? r.staff : null),
   )
+  const { data: trades } = useScreenData<TradesView>(
+    () => client.getTrades(),
+    (r) => (r.type === 'trades' ? r.trades : null),
+  )
   const [answered, setAnswered] = useState(false)
   const [dismissedId, setDismissedId] = useState<string | null>(null)
 
@@ -95,6 +100,29 @@ export function PhoneCallOverlay(): JSX.Element | null {
         }
       }
     }
+    // A rival GM on the line with a BLOCKBUSTER — an offer whose deal touches a
+    // genuine piece (≥78 OVR on either side). Routine offers stay in the Trades
+    // tab; only the phone-blowing-up ones ring. Highest business stakes after the
+    // owner.
+    const blockbuster = (trades?.incoming ?? []).find((o) => {
+      const id = `trade:${o.offerId}`
+      if (seen.has(id) || id === dismissedId) return false
+      return [...o.receive.players, ...o.give.players].some((p) => p.overall >= 78)
+    })
+    if (blockbuster) {
+      const headliner = [...blockbuster.receive.players, ...blockbuster.give.players]
+        .sort((a, b) => b.overall - a.overall)[0]
+      return {
+        id: `trade:${blockbuster.offerId}`,
+        callerName: `${blockbuster.receive.teamName} — front office`,
+        callerRole: headliner ? `Trade offer · ${headliner.name}` : 'Trade offer',
+        faceId: undefined,
+        voice: 'gm',
+        message: blockbuster.message,
+        actionLabel: 'See the offer →',
+        actionTarget: 'trades',
+      }
+    }
     const concern = (inbox?.interactions ?? []).find(
       (c) => c.severity === 'serious' && !seen.has(c.id) && c.id !== dismissedId,
     )
@@ -111,7 +139,7 @@ export function PhoneCallOverlay(): JSX.Element | null {
       }
     }
     return null
-  }, [inbox, ownerReq, staff, dismissedId])
+  }, [inbox, ownerReq, staff, trades, dismissedId])
 
   if (!call) return null
 
