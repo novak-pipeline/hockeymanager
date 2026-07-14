@@ -78,6 +78,7 @@ export type ScreenId =
   | 'feed'
   | 'devCamp'
   | 'trainingCamp'
+  | 'leadership'
   | 'settings'
   // Legacy aliases kept for backward compat (redirect to new equivalents)
   | 'schedule'
@@ -108,6 +109,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'teamPlanner':
     case 'devCamp':
     case 'trainingCamp':
+    case 'leadership':
       return 'team'
     case 'leagueOverview':
     case 'standings':

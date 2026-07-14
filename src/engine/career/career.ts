@@ -6010,6 +6010,11 @@ export class Career {
         return true
       }
       case 'preseason': {
+        // Leadership gate: the season shouldn't open until the GM has named a
+        // captain. This is enforced in the RENDERER (the captainsPending dash
+        // flag blocks Continue and routes to the Leadership screen) rather than
+        // by halting the engine here — a headless advance (tests, quick-sim)
+        // must still be able to roll a season without UI interaction.
         // Graduate rights-held junior/college prospects who have turned pro
         // (aged out of junior) into their org's farm BEFORE the farm sort runs,
         // so a club actually reaps its draft picks instead of leaving them to
@@ -6290,6 +6295,24 @@ export class Career {
    *  blocked and the UI should route the GM into the Draft screen. */
   draftPending(): boolean {
     return this.offseason?.stage === 'draft' && !this.draftComplete()
+  }
+
+  /** The preseason leadership gate: you must name a captain before the season
+   *  opens (sweater numbers are auto-assigned but editable, and alternates are
+   *  optional, so naming the C is the one required call). Fails OPEN when there's
+   *  no eligible skater or the captain is already set + still rostered, so it can
+   *  never soft-lock and never nags a club whose C hasn't changed. */
+  private captainsSetupComplete(): boolean {
+    const roster = this.userTeam.roster
+    const eligible = roster.filter((id) => this.data.players.get(id)?.position !== 'G')
+    if (eligible.length === 0) return true // fail open — nothing to captain
+    const cap = this.userTeam.captainId
+    return cap !== undefined && roster.includes(cap)
+  }
+
+  /** True while the season can't open because the user hasn't named a captain. */
+  captainsPending(): boolean {
+    return this.offseason?.stage === 'preseason' && !this.captainsSetupComplete()
   }
 
   /** Drop a post-draft recap into the inbox: your haul, with the best value
@@ -10883,7 +10906,7 @@ export class Career {
         draft: this.draftPending() ? 'Go to the entry draft' : 'Continue — open free agency',
         resign: 'Continue — open free agency',
         freeAgency: `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
-        preseason: 'Continue — start the new season',
+        preseason: this.captainsPending() ? 'Name your captain to start the season' : 'Continue — start the new season',
       }
       return labels[stage]
     })()
@@ -10968,6 +10991,7 @@ export class Career {
       date: this.phase === 'offseason' ? this.offseasonDateISO() : dayToDateISO(this.year, Math.max(1, this.currentDay)),
       continueLabel,
       draftPending: this.draftPending(),
+      captainsPending: this.captainsPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       staffMeetingDue: this.staffMeetingScene !== null && this.phase === 'regularSeason',
       devCampPending: this.devCampPending && this.phase === 'offseason',

@@ -28,6 +28,7 @@ import { CalendarScreen } from './screens/CalendarScreen'
 import { FeedScreen } from './screens/FeedScreen'
 import { DevCampScreen } from './screens/DevCampScreen'
 import { TrainingCampScreen } from './screens/TrainingCampScreen'
+import { LeadershipScreen } from './screens/LeadershipScreen'
 import { NegotiationScreen } from './screens/NegotiationScreen'
 import { FreeAgentMarketScreen } from './screens/FreeAgentMarketScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
@@ -276,6 +277,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('draft')
           return
         }
+        // Preseason: the season can't open until the GM names a captain. Block
+        // Continue outright while it's unset — routing to the Leadership screen
+        // if you're not already there. (Enforced here, not in the engine, so a
+        // headless advance can still roll a season.)
+        if (dashboard?.captainsPending) {
+          if (nav.screen !== 'leadership') navigate('leadership')
+          else toast('Name a captain to open the season — pick the C on this screen.')
+          return
+        }
         // Cut day: camp's verdicts await before opening night. Continuing from
         // the camp screen itself lets the coach apply his plan.
         if (dashboard?.campPending && nav.screen !== 'trainingCamp') {
@@ -324,7 +334,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, nav.screen, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -599,6 +609,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <DevCampScreen />
     case 'trainingCamp':
       return <TrainingCampScreen />
+    case 'leadership':
+      return <LeadershipScreen />
     case 'negotiation':
       return <NegotiationScreen />
     case 'faMarket':

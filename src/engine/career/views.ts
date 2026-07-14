@@ -441,6 +441,9 @@ export interface DashboardView {
   /** True on draft day: the offseason is parked on an unfinished entry draft.
    *  The UI must route the GM into the Draft screen — Continue can't sim past it. */
   draftPending?: boolean
+  /** True in the preseason until the GM names a captain — the season can't open
+   *  first. The UI routes to the Leadership screen; a hard gate like the draft. */
+  captainsPending?: boolean
   /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
    *  past it sends the AGM in your place — a soft gate, not a hard one. */
   boardMeetingPending?: boolean
