@@ -507,6 +507,20 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not release scout' }
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     }
+    case 'shortlistProspect':
+      must().shortlistProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'unshortlistProspect':
+      must().unshortlistProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'dismissProspect':
+      must().dismissProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'rescoutProspect': {
+      const res = must().rescoutProspect(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: 'No scout available to send.' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
 
     /* ── story layer ── */
     case 'getHistory':

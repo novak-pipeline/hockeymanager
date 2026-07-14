@@ -13,6 +13,7 @@ import type {
 } from '../../engine/career/views'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
 import { fmtMoney } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { WorldMap, type WorldMapNation } from '../components/WorldMap'
@@ -581,79 +582,147 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
   )
 }
 
-function ScoutingCentreTab({ finds, rosterNeeds }: { finds: ScoutFindView[]; rosterNeeds: string[] }): JSX.Element {
+type TriageAction = 'shortlist' | 'unshortlist' | 'pass' | 'rescout'
+
+/** The full single-prospect report shown at the top of the triage flow. */
+function ReportCard({ find }: { find: ScoutFindView }): JSX.Element {
+  const f = find
+  const color = REC_COLOR[f.grade]
+  return (
+    <div className="panel" style={{ background: 'var(--bg2)', padding: 'var(--sp-4)', display: 'flex', gap: 'var(--sp-4)' }}>
+      <PlayerFace faceId={f.faceId} name={f.name} size={72} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {f.nationality && <FlagIcon nationality={f.nationality} size={16} />}
+              <PlayerLink playerId={f.playerId} name={f.name} />
+            </div>
+            <div className="muted small" style={{ marginTop: 2 }}>
+              {f.age} · {f.position} · {f.teamAbbr}
+              {f.draftLabel && <> · <span style={{ color: 'var(--accent2, #e0b341)' }}>{f.draftLabel}</span></>}
+              {f.fitsNeed && <> · <span style={{ color: 'var(--success)' }}>fills a need</span></>}
+            </div>
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 30, color, lineHeight: 1 }}>{f.grade}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-5)', margin: '10px 0' }}>
+          <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(f.currentStars) || '–'}</div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(f.potentialStars) || '–'}</div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>KNOWLEDGE</div><div style={{ fontWeight: 700 }}>{f.knowledge}%</div></div>
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>{f.reason}</div>
+        <div className="muted small" style={{ marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 6 }}>
+          Flagged by {f.scoutName} · {f.foundDate}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * FM-style Scouting Centre: triage one report at a time — Track it, Pass, or send
+ * a scout back for another look — rather than a wall of cards. Tracked prospects
+ * collect on the Shortlist below.
+ */
+function ScoutingCentreTab({ finds, rosterNeeds, onTriage }: {
+  finds: ScoutFindView[]
+  rosterNeeds: string[]
+  onTriage: (action: TriageAction, playerId: string) => void | Promise<void>
+}): JSX.Element {
+  const nav = useNav()
   const [posFilter, setPosFilter] = useState<'ALL' | 'F' | 'D' | 'G'>('ALL')
-  const [gradeFilter, setGradeFilter] = useState<'ALL' | 'A+' | 'A' | 'B'>('ALL')
-  const [needsOnly, setNeedsOnly] = useState(false)
-  const [draftOnly, setDraftOnly] = useState(false)
+  const [idx, setIdx] = useState(0)
 
   const isPos = (pos: string, f: 'F' | 'D' | 'G'): boolean => {
     const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
     return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
   }
-  const shown = finds
+  const shortlist = finds.filter((f) => f.shortlisted)
+  const queue = finds
+    .filter((f) => !f.shortlisted)
     .filter((f) => posFilter === 'ALL' || isPos(f.position, posFilter))
-    .filter((f) => gradeFilter === 'ALL' || f.grade === gradeFilter)
-    .filter((f) => !needsOnly || f.fitsNeed)
-    .filter((f) => !draftOnly || f.draftEligible)
 
-  // Summary: how many finds, how many fill a need, and the grade breakdown — a
-  // scannable headline so the Centre reads as a board's shortlist, not a wall of cards.
-  const gradeCount = (g: string): number => finds.filter((f) => f.grade === g).length
-  const needCount = finds.filter((f) => f.fitsNeed).length
+  const clampedIdx = Math.min(idx, Math.max(0, queue.length - 1))
+  const current = queue[clampedIdx]
+
+  const act = (action: TriageAction, pid: string): void => {
+    void onTriage(action, pid)
+    // Track/Pass remove the card from the queue, so the same index shows the next
+    // one; a re-scout keeps him in the queue, so step forward to move on.
+    if (action === 'rescout') setIdx((i) => i + 1)
+  }
 
   return (
-    <Panel title={`Scouting Centre`}>
-      {finds.length === 0 ? (
-        <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
-          <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
-          Your scouts haven't surfaced anyone yet. Point them at youth leagues and the
-          draft class under <b>Recruitment Focus</b> — as they get to know prospects,
-          their finds will appear here (and land in your inbox).
-        </div>
-      ) : (
-        <>
-          {/* Headline summary */}
-          <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
-            <div><div style={{ fontSize: 20, fontWeight: 800 }}>{finds.length}</div><div className="muted small">prospects flagged</div></div>
-            <div><div style={{ fontSize: 20, fontWeight: 800, color: 'var(--success)' }}>{needCount}</div><div className="muted small">fill a roster need</div></div>
-            <div className="row" style={{ gap: 6 }}>
-              {(['A+', 'A', 'B'] as const).map((g) => gradeCount(g) > 0 && (
-                <span key={g} className="chip" style={{ fontSize: 11, color: REC_COLOR[g], border: `1px solid ${REC_COLOR[g]}` }}>{gradeCount(g)} {g}</span>
-              ))}
-            </div>
+    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+      <Panel title="Scouting Centre">
+        {rosterNeeds.length > 0 && (
+          <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
+            Your roster is thin at <b style={{ color: 'var(--success)' }}>{rosterNeeds.join(', ')}</b> — need-fillers float to the top of the queue.
+          </p>
+        )}
+        {finds.length === 0 ? (
+          <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
+            Your scouts haven't surfaced anyone yet. Point them at youth leagues and the
+            draft class under <b>Recruitment Focus</b> — their finds arrive here (and in
+            a weekly digest in your inbox).
           </div>
-          {rosterNeeds.length > 0 && (
-            <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-              Your roster is thin at <b style={{ color: 'var(--success)' }}>{rosterNeeds.join(', ')}</b> — need-fillers are flagged and floated to the top.
-            </p>
-          )}
-          {/* Filters */}
-          <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
-            <div className="row" style={{ gap: 4 }}>
-              {(['ALL', 'F', 'D', 'G'] as const).map((f) => (
-                <button key={f} className={`chip${posFilter === f ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setPosFilter(f)}>{f}</button>
-              ))}
-            </div>
-            <div className="row" style={{ gap: 4 }}>
-              {(['ALL', 'A+', 'A', 'B'] as const).map((g) => (
-                <button key={g} className={`chip${gradeFilter === g ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setGradeFilter(g)}>{g === 'ALL' ? 'All grades' : g}</button>
-              ))}
-            </div>
-            <button className={`chip${needsOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setNeedsOnly((v) => !v)}>Fills a need</button>
-            <button className={`chip${draftOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setDraftOnly((v) => !v)}>Draft eligibles</button>
-            <span className="muted small" style={{ marginLeft: 'auto' }}>{shown.length} shown</span>
+        ) : !current ? (
+          <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+            You're all caught up — every flagged prospect has been triaged. New finds
+            will appear here as your scouts get to know them.
           </div>
-          {shown.length === 0 ? (
-            <p className="muted small" style={{ padding: '12px 0' }}>No finds match these filters.</p>
-          ) : (
-            <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-              {shown.map((f) => <FindCard key={f.playerId} find={f} />)}
+        ) : (
+          <>
+            {/* Progress + position filter */}
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
+              <span className="muted small">Report <b>{clampedIdx + 1}</b> of <b>{queue.length}</b> awaiting your call</span>
+              <div className="row" style={{ gap: 4 }}>
+                {(['ALL', 'F', 'D', 'G'] as const).map((p) => (
+                  <button key={p} className={`chip${posFilter === p ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => { setPosFilter(p); setIdx(0) }}>{p}</button>
+                ))}
+              </div>
             </div>
-          )}
-        </>
-      )}
-    </Panel>
+
+            <ReportCard find={current} />
+
+            {/* Triage actions */}
+            <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
+              <button className="btn btn-primary" onClick={() => act('shortlist', current.playerId)}>★ Track him</button>
+              <button className="btn" onClick={() => act('rescout', current.playerId)} title="Send your best-fit scout back for a deeper read">🔍 Take another look</button>
+              <button className="btn btn-ghost" onClick={() => setIdx((i) => i + 1)}>Skip →</button>
+              <button className="btn btn-ghost" style={{ color: 'var(--danger, #d8584f)' }} onClick={() => act('pass', current.playerId)}>Pass</button>
+              <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => nav.navigate('player', { playerId: current.playerId })}>Full profile →</button>
+            </div>
+          </>
+        )}
+      </Panel>
+
+      {/* Shortlist — the prospects you chose to track */}
+      <Panel title={`Shortlist${shortlist.length ? ` (${shortlist.length})` : ''}`}>
+        {shortlist.length === 0 ? (
+          <p className="muted small" style={{ margin: 0 }}>
+            Nobody tracked yet. Hit <b>★ Track him</b> on a report to pin a prospect here.
+          </p>
+        ) : (
+          <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
+            {shortlist.map((f) => (
+              <div key={f.playerId} style={{ position: 'relative' }}>
+                <FindCard find={f} />
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ position: 'absolute', top: 6, right: 6, padding: '0 6px' }}
+                  title="Un-track"
+                  onClick={() => onTriage('unshortlist', f.playerId)}
+                >✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
   )
 }
 
@@ -1021,7 +1090,24 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
 
       {data && tab === 'overview' && <OverviewTab data={data} />}
 
-      {data && tab === 'centre' && <ScoutingCentreTab finds={data.recommendations} rosterNeeds={data.rosterNeeds} />}
+      {data && tab === 'centre' && (
+        <ScoutingCentreTab
+          finds={data.recommendations}
+          rosterNeeds={data.rosterNeeds}
+          onTriage={async (action, playerId) => {
+            const res = await (
+              action === 'shortlist' ? client.shortlistProspect(playerId)
+              : action === 'unshortlist' ? client.unshortlistProspect(playerId)
+              : action === 'pass' ? client.dismissProspect(playerId)
+              : client.rescoutProspect(playerId)
+            )
+            if (res.type === 'error') { toast(res.message, 'error') } else {
+              if (action === 'rescout') toast('Sent a scout back for a closer look.', 'success')
+              bumpRefresh(); refetch()
+            }
+          }}
+        />
+      )}
 
       {data && tab === 'players' && (
         <ScoutedTable rows={data.scoutedPlayers} scouts={data.scouts} onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }} />

@@ -2401,6 +2401,8 @@ export interface ScoutFindView {
   draftEligible: boolean
   /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
   draftLabel?: string
+  /** True when the GM has tracked him — he sits on the shortlist, not the queue. */
+  shortlisted?: boolean
 }
 
 /** A scope option for the assignment dropdowns. */

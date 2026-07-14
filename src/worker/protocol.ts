@@ -364,6 +364,11 @@ export type WorkerRequestBody =
   | { type: 'autoAssignScouts' }
   | { type: 'hireScout'; candidateId: string }
   | { type: 'fireScout'; scoutId: string }
+  /** Scouting Centre triage (FM-style): track / un-track / pass / re-scout a find. */
+  | { type: 'shortlistProspect'; playerId: string }
+  | { type: 'unshortlistProspect'; playerId: string }
+  | { type: 'dismissProspect'; playerId: string }
+  | { type: 'rescoutProspect'; playerId: string }
   /** Global search for the command palette (players + teams by name). */
   | { type: 'searchAll'; query: string }
   /** [id, name] index of every player, for linkifying names in prose. */

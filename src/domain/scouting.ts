@@ -100,4 +100,11 @@ export interface ScoutingState {
    *  Drives "only scouts who saw him file an opinion" + each scout's own scouted
    *  list (not the team-wide knowledge aggregate). Absent on old saves. */
   scoutHistory?: Array<[string, string[]]>
+  /** FM-style triage of the Scouting Centre: prospects the GM chose to TRACK.
+   *  They stay pinned on the shortlist rather than lost in the queue. Absent on
+   *  old saves. */
+  shortlist?: string[]
+  /** Prospects the GM PASSED on — hidden from the recommendation queue so a
+   *  triaged player doesn't keep re-surfacing. Absent on old saves. */
+  dismissed?: string[]
 }

@@ -1490,6 +1490,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   // Scouting Centre — the surfaced finds (fills over the career).
   const teamAbbrOf = new Map<string, string>()
   for (const [, team] of teams) for (const id of team.roster) teamAbbrOf.set(id as string, team.abbreviation)
+  const shortlistSet = new Set(scouting.shortlist ?? [])
   const recommendations: import('./views').ScoutFindView[] = []
   for (const r of scouting.recommendations ?? []) {
     const p = players.get(r.playerId as PlayerId)
@@ -1510,6 +1511,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       foundDate: r.foundDate,
       fitsNeed: needGroups.has(groupOf(p.position)),
       draftEligible: draftProspectIds.has(r.playerId),
+      ...(shortlistSet.has(r.playerId) ? { shortlisted: true } : {}),
       ...(ctx.draftRankById?.[r.playerId] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[r.playerId]) } : {}),
     })
   }

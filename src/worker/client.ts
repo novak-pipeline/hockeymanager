@@ -679,6 +679,19 @@ export class SimClient {
     return this.send({ type: 'fireScout', scoutId })
   }
 
+  shortlistProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'shortlistProspect', playerId })
+  }
+  unshortlistProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'unshortlistProspect', playerId })
+  }
+  dismissProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'dismissProspect', playerId })
+  }
+  rescoutProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'rescoutProspect', playerId })
+  }
+
   /* ── story layer ── */
 
   getHistory(): Promise<WorkerResponse> {

@@ -4218,6 +4218,8 @@ export class Career {
     this.surfaceScoutFinds(day)
     this.emitOppositionReport(day)
     this.emitScoutReports()
+    // Weekly scouting digest: one briefing a week rather than a per-find drip.
+    if (day > 0 && day % 7 === 0) this.emitScoutDigest(day)
     this.resolveDueInterviews(day)
     // Snapshot the analyst draft board at each phase boundary so the mid-season
     // and final rankings can show movement arrows vs the previous phase.
@@ -13095,11 +13097,12 @@ export class Career {
     // evaluated-and-rejected). Players we ACCEPT live in `recommendations`, not
     // `seen`, so the cap below can never permanently bury an accepted find.
     const seen = new Set(st.seen)
+    const dismissed = new Set(st.dismissed ?? [])
     const recIds = new Set(st.recommendations.map((r) => r.playerId))
     const own = this.ownOrgIds()
     let added = false
     for (const [pid, k] of st.knowledge) {
-      if (k < DISCOVERY_THRESHOLD || seen.has(pid) || recIds.has(pid)) continue
+      if (k < DISCOVERY_THRESHOLD || seen.has(pid) || recIds.has(pid) || dismissed.has(pid)) continue
       if (own.has(pid)) { seen.add(pid); continue } // don't "discover" our own org
       const p = this.data.players.get(asPlayerId(pid))
       if (!p) { seen.add(pid); continue }
@@ -13114,6 +13117,82 @@ export class Career {
       if (st.recommendations.length > 120) st.recommendations.length = 120
     }
     st.seen = [...seen]
+  }
+
+  /* ─────────────────── Scouting Centre triage (FM-style) ─────────────────── */
+
+  /** TRACK a flagged prospect — pin him to the shortlist so he isn't lost in the
+   *  queue. Idempotent; a tracked prospect stays in `recommendations` too. */
+  shortlistProspect(playerId: string): { ok: boolean } {
+    const st = this.scouting
+    const list = new Set(st.shortlist ?? [])
+    list.add(playerId)
+    st.shortlist = [...list]
+    // A tracked prospect is never "passed".
+    if (st.dismissed) st.dismissed = st.dismissed.filter((id) => id !== playerId)
+    return { ok: true }
+  }
+
+  /** Un-track a prospect (remove from the shortlist; he returns to the queue). */
+  unshortlistProspect(playerId: string): { ok: boolean } {
+    const st = this.scouting
+    if (st.shortlist) st.shortlist = st.shortlist.filter((id) => id !== playerId)
+    return { ok: true }
+  }
+
+  /** PASS on a prospect — drop him from the queue and don't re-surface him. */
+  dismissProspect(playerId: string): { ok: boolean } {
+    const st = this.scouting
+    const dis = new Set(st.dismissed ?? [])
+    dis.add(playerId)
+    st.dismissed = [...dis]
+    if (st.recommendations) st.recommendations = st.recommendations.filter((r) => r.playerId !== playerId)
+    if (st.shortlist) st.shortlist = st.shortlist.filter((id) => id !== playerId)
+    return { ok: true }
+  }
+
+  /** "Take another look" — put the best-fit scout (a nation specialist first,
+   *  else the sharpest) on this player for a deeper read. Keeps him in the queue;
+   *  returns which scout took the assignment. */
+  rescoutProspect(playerId: string): { ok: boolean; scoutName?: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false }
+    const scouts = this.getScouting().scouts
+    if (scouts.length === 0) return { ok: false }
+    const ranked = [...scouts].sort((a, b) => {
+      const aSpec = a.specialtyNation && p.nationality === a.specialtyNation ? 1 : 0
+      const bSpec = b.specialtyNation && p.nationality === b.specialtyNation ? 1 : 0
+      if (aSpec !== bSpec) return bSpec - aSpec
+      return b.rating - a.rating
+    })
+    const scout = ranked[0]!
+    this.assignScoutTarget(scout.scoutId, { kind: 'player', playerId }, 'all')
+    return { ok: true, scoutName: scout.name }
+  }
+
+  /** Weekly scout digest: one inbox summary of what the department worked on and
+   *  who it flagged this week — so finds arrive as a briefing, not a per-player
+   *  news drip. Fires on the weekly cadence from the daily advance pass. */
+  private emitScoutDigest(day: number): void {
+    const st = this.scouting
+    const recs = st.recommendations ?? []
+    const scouts = this.getScouting().scouts
+    if (recs.length === 0 && scouts.length === 0) return
+    // "This week" = finds whose foundDate lands in the last 7 sim days.
+    const weekAgoISO = dayToDateISO(this.year, Math.max(1, day - 6))
+    const fresh = recs.filter((r) => r.foundDate >= weekAgoISO)
+    const nameOf = (pid: string): string => this.data.players.get(asPlayerId(pid))?.name ?? 'a prospect'
+    const gradeRank = { 'A+': 0, A: 1, B: 2, C: 3 } as const
+    const top = [...fresh].sort((a, b) => gradeRank[a.grade] - gradeRank[b.grade]).slice(0, 5)
+    const flagged = top.length
+      ? `New this week: ${top.map((r) => `${nameOf(r.playerId)} (${r.grade})`).join(', ')}.`
+      : `No new names crossed the threshold this week.`
+    // Where the department is deployed — the distinct assignment labels.
+    const labels = [...new Set(scouts.map((s) => s.assignmentLabel).filter(Boolean))].slice(0, 3)
+    const working = labels.length ? ` The department is out on ${labels.join(', ')}.` : ''
+    const untriaged = recs.filter((r) => !(st.shortlist ?? []).includes(r.playerId)).length
+    const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call in the Scouting Centre.`
+    this.pushNews('scouting', `Weekly scouting digest`, body, { press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutDigest' } })
   }
 
   /** Decide whether a freshly-known player is worth flagging — primarily youth
@@ -13150,10 +13229,8 @@ export class Career {
       : `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)
-
-    this.pushNews('scouting', `Scout report: ${p.name}`,
-      `${scoutName} flagged ${p.name} (${p.age}, ${p.position}) as one to watch — ${reason} Open the Scouting Centre for the full report.`,
-      { playerId: p.id as string })
+    // No per-find inbox ping — finds are batched into the weekly scouting digest
+    // (emitScoutDigest) so the inbox reads as a briefing, not a per-player drip.
     return { playerId: p.id as string, ...(scout ? { scoutId: scout.scoutId } : {}), scoutName, foundDate, reason, grade }
   }
 
@@ -15918,6 +15995,8 @@ export class Career {
         seen: [...(this.scouting.seen ?? [])],
         judgment: [...(this.scouting.judgment ?? [])],
         scoutHistory: (this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, [...pids]] as [string, string[]]),
+        shortlist: [...(this.scouting.shortlist ?? [])],
+        dismissed: [...(this.scouting.dismissed ?? [])],
       },
       arcs: structuredClone(this.arcsState),
       chronicle: structuredClone(this.chronicle),
@@ -16067,6 +16146,8 @@ export class Career {
         seen: [...(snapshot.scouting.seen ?? [])],
         judgment: [...(snapshot.scouting.judgment ?? [])],
         scoutHistory: [...(snapshot.scouting.scoutHistory ?? [])],
+        shortlist: [...(snapshot.scouting.shortlist ?? [])],
+        dismissed: [...(snapshot.scouting.dismissed ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({
