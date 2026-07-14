@@ -10198,6 +10198,20 @@ export class Career {
     const offer = this.tradeOffers.find((o) => o.offerId === offerId)
     if (!offer) throw new Error('offer no longer available')
     const partner = this.data.teams.get(offer.partnerTeamId)!
+    // Cap guard: you can't complete a deal that puts you over the ceiling — the
+    // same check the AGM shows in his read. Salary in minus salary out, netted
+    // against a former club's retained share.
+    const salOf = (id: string): number => {
+      const p = this.data.players.get(asPlayerId(id))
+      return p ? p.contract.salary - (p.contract.retainedByOthers ?? 0) : 0
+    }
+    const incoming = offer.userReceivesPlayerIds.reduce((s, id) => s + salOf(id as string), 0)
+    const outgoing = offer.userGivesPlayerIds.reduce((s, id) => s + salOf(id as string), 0)
+    const capAfter = rosterCapUsed(this.userTeam, this.data.players) + incoming - outgoing
+    if (capAfter > this.userTeam.finances.salaryCap) {
+      const over = capAfter - this.userTeam.finances.salaryCap
+      throw new Error(`Accepting would put you $${(over / 1e6).toFixed(1)}M over the cap — shed salary or move a contract first.`)
+    }
     executeTrade({
       teams: this.data.teams,
       players: this.data.players,
