@@ -5941,9 +5941,24 @@ export class Career {
         // Individual signing items: notable names only (no firehose of depth deals).
         for (const s of res.signings) {
           const p = this.resolve(s.playerId)
+          const t = this.data.teams.get(s.teamId)!
+          if (p.overall >= 78) {
+            // Marquee UFA — a real headline that belongs in the front-office mail,
+            // not just the ticker. Deliberately worded "land" (not "signs with"):
+            // the inbox curation strips generic depth-signing noise, and a summer's
+            // big ticket landing elsewhere is exactly the league news you want.
+            this.pushNews(
+              'contract',
+              `${t.name} land ${p.name}`,
+              `${t.name} have signed ${p.name} (${p.position}, ${p.age}) to a $${(s.salary / 1e6).toFixed(2)}M × ${s.years}-year deal — one of the summer's marquee names is off the board.`,
+              { playerId: s.playerId as string, teamId: s.teamId as string }
+            )
+            continue
+          }
+          // Mid-tier depth: keep the churny format (surfaces in the Feed/ticker,
+          // filtered out of the inbox so it doesn't bury the real headlines).
           if (p.overall < 72 && marketDay > 2) continue
           if (marketDay <= 2 && p.overall < 70) continue
-          const t = this.data.teams.get(s.teamId)!
           this.pushNews(
             'contract',
             `${p.name} signs with ${t.abbreviation}`,
