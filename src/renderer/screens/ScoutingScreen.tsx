@@ -189,6 +189,9 @@ function ScoutCard(props: {
   onAssign: (scoutId: string, target: ScoutTarget, focus: ScoutFocus, positionFilter: PosFilter, minPotentialStars: number) => void
   onFire: (scoutId: string) => void
   canFire: boolean
+  /** When true the brief controls are shown inline (no per-card Edit toggle) —
+   *  used in the Advanced panel so every knob is directly clickable. */
+  defaultExpanded?: boolean
 }): JSX.Element {
   const { scout, view, onAssign, onFire, canFire } = props
   const apply = (patch: { target?: ScoutTarget; focus?: ScoutFocus; positionFilter?: PosFilter; minPotentialStars?: number }): void =>
@@ -199,7 +202,7 @@ function ScoutCard(props: {
       patch.positionFilter ?? scout.positionFilter,
       patch.minPotentialStars ?? scout.minPotentialStars,
     )
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(props.defaultExpanded ?? false)
   const ratingColor =
     scout.rating >= 80 ? 'var(--success)' :
     scout.rating >= 65 ? 'var(--accent)' :
@@ -233,9 +236,11 @@ function ScoutCard(props: {
           </div>
         </div>
         <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)} title="Edit this scout's brief">
-            {editing ? 'Done' : 'Edit'}
-          </button>
+          {!props.defaultExpanded && (
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing((e) => !e)} title="Edit this scout's brief">
+              {editing ? 'Done' : 'Edit'}
+            </button>
+          )}
           <button
             className="btn btn-ghost btn-sm"
             disabled={!canFire}
@@ -921,6 +926,7 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
                 scout={scout}
                 view={data}
                 canFire={data.scouts.length > 1}
+                defaultExpanded
                 onAssign={(id, target, focus, pos, minPot) => scoutCardProps.onAssign(id, target, focus, pos, minPot)}
                 onFire={(id) => scoutCardProps.onFire(id)}
               />
