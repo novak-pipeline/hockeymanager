@@ -170,7 +170,7 @@ export function PhoneCallOverlay(): JSX.Element | null {
         </div>
         {answered ? (
           <>
-            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 10 }}>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 10, maxHeight: 220, overflowY: 'auto' }}>
               “{call.message}”
             </div>
             <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>

@@ -320,6 +320,7 @@ export function InboxScreen(): JSX.Element {
         <RowThumbnail item={item} playerInfo={data.playerInfo} teamInfo={data.teamInfo} size={38} />
         <span style={{ minWidth: 0 }}>
           <div
+            title={item.headline}
             style={{
               fontSize: 12,
               fontWeight: item.read ? 400 : 650,
@@ -563,22 +564,33 @@ function ConcernCard({
     const text = gmText.trim()
     if (!text || reading) return
     const bridge = feedModelBridge()
-    if (!bridge) return
-    setReading(true)
-    setReadAs(null)
-    const prompt = buildIntentPrompt({
-      playerMessage: concern.message,
-      gmReply: text,
-      options: intentOptions,
-    })
-    const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxTokens })
-    setReading(false)
-    const choice = r.ok ? parseIntentChoice(r.text, intentOptions) : null
-    if (!choice) {
-      toast('Could not read that clearly — pick a response below, or rephrase.', 'info')
+    if (!bridge) {
+      // The opt-in local writer isn't loaded — say so rather than silently
+      // doing nothing, so it's clear whether the AI is running.
+      toast('The local AI writer isn\'t running — turn it on in Settings, or pick a response below.', 'info')
       return
     }
-    setReadAs(choice)
+    setReading(true)
+    setReadAs(null)
+    try {
+      const prompt = buildIntentPrompt({
+        playerMessage: concern.message,
+        gmReply: text,
+        options: intentOptions,
+      })
+      const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxTokens })
+      const choice = r.ok ? parseIntentChoice(r.text, intentOptions) : null
+      if (!choice) {
+        toast('Could not read that clearly — pick a response below, or rephrase.', 'info')
+        return
+      }
+      setReadAs(choice)
+    } catch {
+      // A hung or failed model must never leave the button stuck on "Reading…".
+      toast('The writer hit a snag — pick a response below, or try again.', 'info')
+    } finally {
+      setReading(false)
+    }
   }
 
   // Resolved: show the player's in-character spoken reply and let the GM close it.

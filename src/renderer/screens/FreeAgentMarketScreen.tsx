@@ -106,6 +106,9 @@ export function FreeAgentMarketScreen(): JSX.Element {
   const nav = useNav()
   const [posFilter, setPosFilter] = useState<'all' | 'F' | 'D' | 'G' | 'starred'>('all')
   const [search, setSearch] = useState('')
+  // RFA offer-sheet targets are the niche/aggressive play — keep them collapsed
+  // so the open UFA market (the primary signing flow) is the first thing you see.
+  const [showRfa, setShowRfa] = useState(false)
 
   const { data: hub, loading, error, refetch: refetchHub } = useScreenData(
     () => client.getFaHub(),
@@ -171,7 +174,15 @@ export function FreeAgentMarketScreen(): JSX.Element {
 
       {rfa?.windowOpen && rfa.rows.length > 0 && (
         <Panel title={`Restricted free agents — offer-sheet targets (${rfa.rows.length})`}>
-          <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+          <button
+            className="btn btn-sm"
+            style={{ marginBottom: showRfa ? 10 : 0 }}
+            onClick={() => setShowRfa((v) => !v)}
+          >
+            {showRfa ? 'Hide offer-sheet targets ▲' : `Show ${rfa.rows.length} offer-sheet targets ▼`}
+          </button>
+          {showRfa && (<>
+          <p className="muted small" style={{ marginTop: 10, marginBottom: 10 }}>
             These men are signed to rights but unsigned to terms. Tender an offer sheet, the player
             signs it, and his club then has a <b>7-day window</b> to match your number — or let him
             walk and take your own draft picks as compensation. Overpay to make the match hurt.
@@ -245,6 +256,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
               </tbody>
             </table>
           </div>
+          </>)}
         </Panel>
       )}
 
