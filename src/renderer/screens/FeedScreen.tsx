@@ -182,10 +182,17 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
                 )}
                 <span className="muted small">· Day {p.day}</span>
               </div>
-              <div style={{ fontSize: 14, lineHeight: 1.5, margin: '4px 0 6px' }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  margin: '4px 0 6px',
+                  ...(rewrites[p.id]?.source === 'model' ? { color: 'var(--llm-ink)' } : {}),
+                }}
+              >
                 <Linkify text={rewrites[p.id]?.text ?? p.body} />
                 {rewrites[p.id]?.source === 'model' && (
-                  <span className="muted" style={{ fontSize: 9, marginLeft: 4 }} title="Rewritten by your local AI writer">✨</span>
+                  <span style={{ fontSize: 9, marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8 }} title="Written by your local AI writer">✨</span>
                 )}
               </div>
               <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>

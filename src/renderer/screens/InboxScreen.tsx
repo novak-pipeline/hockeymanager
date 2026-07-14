@@ -509,6 +509,8 @@ function ConcernCard({
   const [readAs, setReadAs] = useState<IntentOption | null>(null)
   // The player's in-character spoken reply, authored after the engine resolves.
   const [voiced, setVoiced] = useState<string | null>(null)
+  // Whether that reply came from the local AI writer (color it) vs the template.
+  const [voicedByModel, setVoicedByModel] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -549,6 +551,7 @@ function ConcernCard({
         setBusy(false)
         const reply = line || reaction.outcome // fall back to the engine's prose
         setVoiced(reply)
+        setVoicedByModel(!!line)
         // Show the player's reply, but DON'T auto-speak it — the voice you hear
         // should be the incoming call (their message on pickup), not a read-back
         // of the resolution. The 🔊 button on the reply lets you hear it if you want.
@@ -605,7 +608,12 @@ function ConcernCard({
           <PlayerFace faceId={concern.faceId} name={concern.playerName} size={44} />
           <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
             <PlayerLink playerId={concern.playerId} name={concern.playerName} />
-            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic' }}>“{voiced}”</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', ...(voicedByModel ? { color: 'var(--llm-ink)' } : {}) }}>
+              “{voiced}”
+              {voicedByModel && (
+                <span style={{ fontSize: 9, marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8 }} title="Written by your local AI writer">✨</span>
+              )}
+            </div>
             <div className="row" style={{ marginTop: 2, gap: 'var(--sp-2)' }}>
               <button className="btn btn-sm" onClick={onDone}>Close</button>
               <button

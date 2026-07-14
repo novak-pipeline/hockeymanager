@@ -66,6 +66,10 @@
   --danger:  var(--red);
   --success: var(--green);
 
+  /* ── local-AI writer ink: prose authored by the on-device model renders in
+        this distinct teal so you always know what the AI wrote vs a template ── */
+  --llm-ink: #6fe3d6;
+
   /* ── shape ── */
   --radius-sm: 6px;
   --radius:    12px;

@@ -15,6 +15,7 @@
  */
 
 import type { FeedAuthor, PostFacts } from './salience'
+import { HUMAN_VOICE_RULES } from './humanVoice'
 
 /** The minimal post shape the writer needs (a SalienceCandidate satisfies it). */
 export interface WritablePost {
@@ -65,7 +66,8 @@ export function buildFeedPrompt(post: WritablePost, author: FeedAuthor): FeedPro
     `- Use ONLY the facts listed and the draft. Invent NO names, numbers, teams, injuries, quotes or results.\n` +
     `- Keep every number exactly as given. If a fact isn't listed, don't mention it.\n` +
     `- One post, at most ${MAX_WORDS} words. No hashtags, no emoji, no @-mentions, no line breaks.\n` +
-    `- Plain declarative prose. Don't preface with "Here's" or restate the instructions.`
+    `- Plain declarative prose. Don't preface with "Here's" or restate the instructions.\n\n` +
+    `HOW TO WRITE IT: ${HUMAN_VOICE_RULES}`
   const user =
     `FACTS:\n${factLines(post.facts)}\n\n` +
     `DRAFT (make this read naturally; keep the facts):\n${post.text}`

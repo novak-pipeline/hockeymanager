@@ -15,6 +15,7 @@
  */
 
 import type { ReactionSpec } from '@engine/league/interactions'
+import { HUMAN_VOICE_RULES } from './humanVoice'
 
 /** What the concern was about, phrased for the prompt. */
 const TOPIC: Record<ReactionSpec['kind'], string> = {
@@ -62,6 +63,7 @@ export function buildReactionPrompt(spec: ReactionSpec): ReactionPrompt {
     'Write ONE short line of dialogue — at most 25 words, in his own voice.',
     'No quotation marks, no name label, no stage directions, no narration. Just the words he says.',
     'Match the mood exactly. Do not invent stats, trades, promises, or events — react only to how the conversation felt.',
+    `HOW HE TALKS: ${HUMAN_VOICE_RULES}`,
   ].join('\n')
   const user = [
     `Player: ${spec.playerName}. Personality: ${persona(spec)}.`,
