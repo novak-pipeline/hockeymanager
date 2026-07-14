@@ -1,22 +1,35 @@
 /**
  * PhoneCallOverlay — the "living phone".
  *
- * When a player has something serious to say (a serious concern), the phone
- * rings in the corner. You answer and he SPEAKS it in his own voice; you can
- * take it into the room (deep-links to the inbox to respond) or hang up. Built to
- * generalise later to incoming GM trade-offer calls.
+ * When something serious needs the GM's ear, the phone rings in the corner. You
+ * answer and the caller SPEAKS it in their own voice; you can take it into the
+ * room (deep-links to where you respond) or hang up. Two callers ring today:
+ *   • the club OWNER, when he has a directive (a rare, high-stakes call — it
+ *     outranks routine business), and
+ *   • a PLAYER with a serious concern.
+ * Built to generalise further to incoming GM trade-offer calls.
  *
- * Self-contained and renderer-only: reads the inbox via useScreenData, tracks a
- * "seen" set in localStorage so a call rings once, and voices through speakAs.
+ * Self-contained and renderer-only: reads the inbox / owner desk / staff via
+ * useScreenData, tracks a "seen" set in localStorage so a call rings once, and
+ * voices through speakAs.
  */
 import { useMemo, useState } from 'react'
-import type { InboxView } from '../../worker/protocol'
+import type { InboxView, OwnerRequestView } from '../../worker/protocol'
+import type { StaffView } from '@engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
 import { speakAs, cancelSpeech } from '../lib/speak'
+import type { VoiceRole } from '../lib/voiceCast'
 
 const SEEN_KEY = 'hockey.phone.seen'
+
+/** Stable, compact hash of a string — for a seen-key on callers without an id. */
+function hashStr(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+  return h.toString(36)
+}
 
 function seenSet(): Set<string> {
   try {
@@ -34,6 +47,18 @@ function markSeen(id: string): void {
   } catch { /* ignore */ }
 }
 
+/** A unified incoming call, whoever is on the line. */
+interface Call {
+  id: string
+  callerName: string
+  callerRole: string
+  faceId?: string
+  voice: VoiceRole
+  message: string
+  actionLabel: string
+  actionTarget: string
+}
+
 export function PhoneCallOverlay(): JSX.Element | null {
   const client = useClient()
   const nav = useNav()
@@ -41,29 +66,65 @@ export function PhoneCallOverlay(): JSX.Element | null {
     () => client.getInbox(),
     (r) => (r.type === 'inbox' ? r.inbox : null),
   )
+  const { data: ownerReq } = useScreenData<OwnerRequestView | null>(
+    () => client.getOwnerRequest(),
+    (r) => (r.type === 'ownerRequest' ? r.ownerRequest : null),
+  )
+  const { data: staff } = useScreenData<StaffView>(
+    () => client.getTeamStaff(),
+    (r) => (r.type === 'teamStaff' ? r.staff : null),
+  )
   const [answered, setAnswered] = useState(false)
   const [dismissedId, setDismissedId] = useState<string | null>(null)
 
-  // The caller: the first serious, unseen player concern.
-  const call = useMemo(() => {
+  // Who's on the line? The owner outranks a routine player concern.
+  const call = useMemo<Call | null>(() => {
     const seen = seenSet()
-    return (inbox?.interactions ?? []).find(
+    if (ownerReq) {
+      const id = `owner:${hashStr(ownerReq.title + ownerReq.body)}`
+      if (!seen.has(id) && id !== dismissedId) {
+        return {
+          id,
+          callerName: staff?.owner.name ?? 'The Owner',
+          callerRole: 'Club Owner',
+          faceId: staff?.owner.faceId,
+          voice: 'owner',
+          message: ownerReq.body,
+          actionLabel: 'Take it upstairs →',
+          actionTarget: 'board',
+        }
+      }
+    }
+    const concern = (inbox?.interactions ?? []).find(
       (c) => c.severity === 'serious' && !seen.has(c.id) && c.id !== dismissedId,
-    ) ?? null
-  }, [inbox, dismissedId])
+    )
+    if (concern) {
+      return {
+        id: concern.id,
+        callerName: concern.playerName,
+        callerRole: 'Player',
+        faceId: concern.faceId,
+        voice: 'player',
+        message: concern.message,
+        actionLabel: 'Talk it out →',
+        actionTarget: 'inbox',
+      }
+    }
+    return null
+  }, [inbox, ownerReq, staff, dismissedId])
 
   if (!call) return null
 
   const answer = (): void => {
     setAnswered(true)
-    speakAs('player', call.message, { seed: call.playerName, importance: 3 })
+    speakAs(call.voice, call.message, { seed: call.callerName, importance: 3 })
   }
-  const hangUp = (goInbox: boolean): void => {
+  const hangUp = (act: boolean): void => {
     cancelSpeech()
     markSeen(call.id)
     setAnswered(false)
     setDismissedId(call.id)
-    if (goInbox) nav.navigate('inbox')
+    if (act) nav.navigate(call.actionTarget)
   }
 
   return (
@@ -72,11 +133,11 @@ export function PhoneCallOverlay(): JSX.Element | null {
       <div className={answered ? 'phone-card' : 'phone-card phone-ringing'} style={CARD}>
         <div style={{ textAlign: 'center' }}>
           <div className={answered ? '' : 'phone-face'} style={{ display: 'inline-block' }}>
-            <PlayerFace faceId={call.faceId} name={call.playerName} size={72} />
+            <PlayerFace faceId={call.faceId} name={call.callerName} size={72} />
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 8 }}>{call.playerName}</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 8 }}>{call.callerName}</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            {answered ? 'On the line' : '📞 Incoming call…'}
+            {answered ? `${call.callerRole} · on the line` : `📞 Incoming call · ${call.callerRole}`}
           </div>
         </div>
         {answered ? (
@@ -85,11 +146,11 @@ export function PhoneCallOverlay(): JSX.Element | null {
               “{call.message}”
             </div>
             <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-sm btn-primary" onClick={() => hangUp(true)}>Talk it out →</button>
+              <button className="btn btn-sm btn-primary" onClick={() => hangUp(true)}>{call.actionLabel}</button>
               <button
                 className="btn btn-sm btn-ghost"
                 title="Hear it again"
-                onClick={() => speakAs('player', call.message, { seed: call.playerName })}
+                onClick={() => speakAs(call.voice, call.message, { seed: call.callerName })}
               >🔊</button>
               <button className="btn btn-sm btn-ghost" onClick={() => hangUp(false)}>Hang up</button>
             </div>
