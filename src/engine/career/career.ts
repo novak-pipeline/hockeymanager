@@ -9356,8 +9356,13 @@ export class Career {
 
     const aiCtx = this.faAiCtx()
 
+    // Unsigned free agents soften their demands as the summer drags on — the same
+    // decay the negotiation engine applies, surfaced so the market visibly cools
+    // (and the displayed ask matches what he'll actually take).
+    const decay = faAskDecay(faDay)
     const rows = pool.map((p, rank) => {
-      const ask = askTerms(p, this.year)
+      const rawAsk = askTerms(p, this.year)
+      const ask = { salary: Math.round((rawAsk.salary * decay) / 25000) * 25000, years: rawAsk.years }
       const agent = agentFor(p)
       const { interest, note } = this.faInterestFor(p)
       const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
@@ -9372,6 +9377,7 @@ export class Career {
           : {}),
         askSalary: ask.salary,
         askYears: ask.years,
+        ...(decay < 0.97 ? { askSoftened: true } : {}),
         decidesInDays: Math.max(0, decideDay - faDay),
         agentName: agent.name,
         interest,

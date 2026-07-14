@@ -1580,6 +1580,8 @@ export interface FaHubRowView extends PlayerBadge {
   wants: string
   /** Rival appetite — hot names negotiate from strength. */
   hot: boolean
+  /** True once his camp has started dropping the ask as the summer drags on. */
+  askSoftened?: boolean
   shortlisted: boolean
   /** An open/paused negotiation session exists with this player. */
   inTalks: boolean

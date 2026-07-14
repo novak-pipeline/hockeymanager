@@ -333,6 +333,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                       <td className="num"><OverallStars value={fa.overall} /></td>
                       <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                         {fmtMoney(fa.askSalary)} × {fa.askYears}yr
+                        {fa.askSoftened && <span className="chip" style={{ fontSize: 9, marginLeft: 6, color: 'var(--success)', borderColor: 'var(--success)' }} title="His camp is dropping the ask as the summer drags on">▼ softening</span>}
                         {capTight && <div style={{ color: 'var(--danger)', fontSize: 10 }}>over your cap</div>}
                       </td>
                       <td style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
