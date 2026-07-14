@@ -14,6 +14,7 @@ import {
   createInitialArcsState,
   tickArcs,
   createArc,
+  createOrEscalateRelationshipArc,
   escalateArc,
   resolveArc,
   type ArcsState,
@@ -159,6 +160,55 @@ describe('external arc helpers', () => {
     resolveArc(state, arc.id, 'Done', 2, 2024)
     const result = escalateArc(state, arc.id, 'After resolution', 10, 3, 2024)
     expect(result).toBeUndefined()
+  })
+})
+
+/* ────────────────── relationship arcs: dedup + resolution ────────────────── */
+
+describe('relationship arcs (feud / mentorship)', () => {
+  it('dedupes a feud on the same player set — escalates instead of duplicating', () => {
+    const state = createInitialArcsState()
+    const a1 = createOrEscalateRelationshipArc(state, 'feud', ['p1', 'p2'], ['t1'], 'Sparks fly', 1, 2024)
+    // Same pair, reversed order — must escalate the SAME arc, not spawn a copy.
+    const a2 = createOrEscalateRelationshipArc(state, 'feud', ['p2', 'p1'], ['t1'], 'It flares again', 5, 2024)
+    expect(state.arcs.filter((a) => a.kind === 'feud')).toHaveLength(1)
+    expect(a2.id).toBe(a1.id)
+    expect(a2.beats.length).toBe(2)
+    expect(a2.tension).toBeGreaterThan(30) // escalated above the starting tension
+  })
+
+  it('a feud cools to a resolution when it is not re-stoked', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'feud', { playerIds: ['p1', 'p2'], teamIds: ['t1'] }, 'Tension', 1, 2024)
+    const headlines: string[] = []
+    for (let d = 2; d < 80; d++) {
+      const r = tickArcs({ state, inputs: quietInputs({ day: d }), rng: makeRng(d) })
+      for (const s of r.newsSeeds) headlines.push(s.headline)
+      if (arc.status === 'resolved') break
+    }
+    expect(arc.status).toBe('resolved')
+    expect(headlines.some((h) => /feud cools/i.test(h))).toBe(true)
+  })
+
+  it('a repeatedly-flaring feud boils over', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'feud', { playerIds: ['p1', 'p2'], teamIds: ['t1'] }, 'Tension', 1, 2024)
+    escalateArc(state, arc.id, 'blow-up brewing', 60, 2, 2024) // 30 -> 90, above the boil-over line
+    const { newsSeeds } = tickArcs({ state, inputs: quietInputs({ day: 3 }), rng: makeRng(3) })
+    expect(arc.status).toBe('resolved')
+    expect(newsSeeds.some((s) => /boils over/i.test(s.headline))).toBe(true)
+  })
+
+  it('a mentorship runs its course only after a full run', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'mentorship', { playerIds: ['vet', 'kid'], teamIds: ['t1'] }, 'Bond forms', 1, 2024)
+    // Early in the run: still open.
+    tickArcs({ state, inputs: quietInputs({ day: 20 }), rng: makeRng(1) })
+    expect(arc.status).not.toBe('resolved')
+    // Past the horizon: resolves with a payoff item.
+    const { newsSeeds } = tickArcs({ state, inputs: quietInputs({ day: 60 }), rng: makeRng(2) })
+    expect(arc.status).toBe('resolved')
+    expect(newsSeeds.some((s) => /mentorship pays off/i.test(s.headline))).toBe(true)
   })
 })
 

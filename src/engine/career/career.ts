@@ -106,6 +106,7 @@ import { scoutDraftBias, buildNhlComp } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo, runWorldChampionship } from '@engine/league/nationalTeam'
 import {
   createArc,
+  createOrEscalateRelationshipArc,
   createInitialArcsState,
   resolveArc,
   tickArcs,
@@ -2334,14 +2335,28 @@ export class Career {
       this.pushSeeds(out.newsSeeds.map((s) => ({ ...s, teamId: teamId as string })))
     }
     for (const a of out.arcSeeds) {
-      createArc(
-        this.arcsState,
-        a.kind,
-        { playerIds: a.playerIds, teamIds: [teamId as string] },
-        a.summary,
-        day,
-        this.year
-      )
+      if (a.kind === 'feud' || a.kind === 'mentorship') {
+        // Relationship arcs dedupe on the player set: a recurring flare-up
+        // intensifies the existing saga instead of spawning parallel copies.
+        createOrEscalateRelationshipArc(
+          this.arcsState,
+          a.kind,
+          a.playerIds,
+          [teamId as string],
+          a.summary,
+          day,
+          this.year
+        )
+      } else {
+        createArc(
+          this.arcsState,
+          a.kind,
+          { playerIds: a.playerIds, teamIds: [teamId as string] },
+          a.summary,
+          day,
+          this.year
+        )
+      }
     }
   }
 
@@ -3486,10 +3501,11 @@ export class Career {
           const a = skaters[Math.floor(rng.next() * skaters.length)]
           let b = skaters[Math.floor(rng.next() * skaters.length)]
           if (b.id === a.id) b = skaters[(skaters.indexOf(a) + 1) % skaters.length]
-          createArc(
+          createOrEscalateRelationshipArc(
             this.arcsState,
             'feud',
-            { playerIds: [a.id as string, b.id as string], teamIds: [this.userTeamId as string] },
+            [a.id as string, b.id as string],
+            [this.userTeamId as string],
             `Tempers simmer between ${a.name} and ${b.name} after the manager's fiery press conference.`,
             this.currentDay,
             this.year
@@ -6500,12 +6516,23 @@ export class Career {
     this.hireableStaff = []
     this.coachMarket = null // fresh slate of available coaches each offseason
     // Keep practiceState team focus across seasons (intentional persistence)
-    // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
+    // Season-scoped arcs close at year's end. A career milestone chase genuinely
+    // spans seasons, so it carries over with a continuity beat; a feud or
+    // mentorship that somehow survived a whole season has run its course by now
+    // (the in-season tick resolves the rest) — close it rather than let it linger
+    // forever with an annual generic beat.
     for (const arc of this.arcsState.arcs) {
       if (arc.status === 'resolved') continue
-      if (arc.kind === 'feud' || arc.kind === 'mentorship' || arc.kind === 'milestoneWatch') {
-        // Durable arcs live on — stamp a continuity beat so the saga reads across years.
-        arc.beats.push({ day: 0, year: newYear, summary: `The story carries into the ${newYear} season.` })
+      if (arc.kind === 'milestoneWatch') {
+        arc.beats.push({ day: 0, year: newYear, summary: `The chase carries into the ${newYear} season.` })
+        continue
+      }
+      if (arc.kind === 'feud') {
+        resolveArc(this.arcsState, arc.id, 'A summer apart cooled whatever was left of it.', 0, newYear)
+        continue
+      }
+      if (arc.kind === 'mentorship') {
+        resolveArc(this.arcsState, arc.id, 'The mentorship ran its course over the year.', 0, newYear)
         continue
       }
       resolveArc(this.arcsState, arc.id, 'The season came to an end.', 0, newYear)

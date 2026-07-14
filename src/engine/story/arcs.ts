@@ -278,6 +278,39 @@ export function resolveArc(
   return arc
 }
 
+/** Order-independent key for the set of players a relationship arc links. */
+function actorKey(playerIds: string[]): string {
+  return [...playerIds].sort().join('|')
+}
+
+/**
+ * Relationship arcs (feud/mentorship) are seeded by events, not game data. If an
+ * unresolved arc of the same kind already links the SAME set of players, escalate
+ * that one (new beat + tension) instead of spawning a duplicate — so a feud that
+ * keeps flaring becomes one intensifying saga, not five parallel copies. Returns
+ * the arc that was created or escalated.
+ */
+export function createOrEscalateRelationshipArc(
+  state: ArcsState,
+  kind: 'feud' | 'mentorship',
+  playerIds: string[],
+  teamIds: string[],
+  summary: string,
+  day: number,
+  year: number,
+  tensionDelta = 15,
+): Arc {
+  const key = actorKey(playerIds)
+  const existing = state.arcs.find(
+    a => a.kind === kind && a.status !== 'resolved' && actorKey(a.actors.playerIds) === key,
+  )
+  if (existing) {
+    escalateArc(state, existing.id, summary, tensionDelta, day, year)
+    return existing
+  }
+  return createArc(state, kind, { playerIds, teamIds }, summary, day, year)
+}
+
 /* ─────────────────────────── ordinal helper ─────────────────────────── */
 
 function ordinal(n: number): string {
@@ -1181,6 +1214,68 @@ export interface TickArcsResult {
  * Deterministic: given the same state + inputs + rng sequence, always produces
  * the same output.
  */
+/* ─────────────────────── relationship arc resolution ─────────────────────── */
+
+const FEUD_COOL_PER_DAY = 1.5
+const FEUD_BOILOVER_TENSION = 78
+const FEUD_COOLED_TENSION = 12
+const REL_MIN_AGE_DAYS = 8
+const MENTORSHIP_RESOLVE_DAYS = 55
+
+/**
+ * feud/mentorship arcs are seeded by events (locker room, press), not game data,
+ * and before this they never ended — lingering forever with a generic annual
+ * beat. Here they finally RESOLVE in the feed: a feud's tension bleeds off each
+ * match day, so it cools to peace if it isn't re-stoked, or boils over if repeated
+ * flare-ups push it past the boil-over line; a mentorship runs its course once the
+ * protégé has had a full run. Each resolves exactly once (resolveArc is idempotent).
+ */
+function tickRelationshipArcs(state: ArcsState, inputs: ArcInputs, seeds: NewsSeed[]): void {
+  const ageDays = (a: Arc): number =>
+    (inputs.year - a.startedYear) * Math.max(1, inputs.seasonLength) + (inputs.day - a.startedDay)
+  const pairNames = (a: Arc): string => {
+    const names = a.actors.playerIds.map(id => inputs.playerName(id)).filter(Boolean)
+    if (names.length >= 2) return `${names[0]} and ${names[1]}`
+    return names[0] ?? 'two teammates'
+  }
+  for (const arc of state.arcs) {
+    if (arc.status === 'resolved') continue
+    if (arc.kind === 'feud') {
+      setTension(arc, arc.tension - FEUD_COOL_PER_DAY)
+      if (arc.tension >= FEUD_BOILOVER_TENSION) {
+        resolveArc(state, arc.id, `The feud between ${pairNames(arc)} boiled over — a locker-room blow-up the staff had to step in on.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `Locker-room feud boils over`,
+          body: `The simmering feud involving ${pairNames(arc)} finally erupted — a confrontation the coaching staff had to break up. The room will need to reset.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      } else if (arc.tension <= FEUD_COOLED_TENSION && ageDays(arc) >= REL_MIN_AGE_DAYS) {
+        resolveArc(state, arc.id, `${pairNames(arc)} have put their differences behind them.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `A locker-room feud cools`,
+          body: `Whatever was brewing between ${pairNames(arc)} has settled — teammates say the two have made their peace.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      }
+    } else if (arc.kind === 'mentorship') {
+      if (ageDays(arc) >= MENTORSHIP_RESOLVE_DAYS) {
+        resolveArc(state, arc.id, `The mentorship linking ${pairNames(arc)} has run its course — the young player has found his feet.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `A mentorship pays off`,
+          body: `The partnership between ${pairNames(arc)} has borne fruit — the mentorship that shaped the youngster's season has run its course.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      }
+    }
+  }
+}
+
 export function tickArcs({ state, inputs, rng }: TickArcsArgs): TickArcsResult {
   const seeds: NewsSeed[] = []
 
@@ -1191,6 +1286,7 @@ export function tickArcs({ state, inputs, rng }: TickArcsArgs): TickArcsResult {
   detectCinderellaCollapse(state, inputs, seeds)
   detectRookieRace(state, inputs, seeds)
   detectGoalieDuel(state, inputs, seeds, rng)
+  tickRelationshipArcs(state, inputs, seeds)
 
   // Final cap enforcement across all detectors.
   enforceCapInPlace(state)
