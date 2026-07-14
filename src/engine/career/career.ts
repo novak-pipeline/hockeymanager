@@ -2066,71 +2066,52 @@ export class Career {
   }
 
   /**
-   * In-season record watch: news when a player CHASES (your own club, late in a
-   * big year) or BREAKS (anyone — history is history) the all-time single-season
-   * points or goals record. Seeds on first tick so a mid-season load can't
-   * re-announce. Fires from storyTickDay after the milestone check.
+   * The moment a player actually BREAKS the all-time single-season points or
+   * goals record. The existing pace-watch already flags who's ON TRACK; this is
+   * the discrete "the record is gone" beat (for anyone in the league), which a
+   * projection can't give. Seeds already-broken keys on the first tick so a
+   * mid-season load can't re-announce. Fires from storyTickDay.
    */
-  private emitRecordWatch(day: number, outcomes: GameOutcome[]): void {
+  private emitRecordWatch(_day: number, outcomes: GameOutcome[]): void {
     const ptsRec = this.recordsState.singleSeason.points[0]
     const gRec = this.recordsState.singleSeason.goals[0]
     if (!ptsRec && !gRec) return
     const y = this.year
 
-    // Seed already-satisfied thresholds silently (covers a mid-season load).
+    // Seed already-broken thresholds silently (covers a mid-season load).
     if (!this.recordWatchSeeded) {
       for (const [pid, t] of this.totals) {
         const key = pid as string
-        const sp = t.goals + t.assists
-        if (ptsRec && sp >= Math.ceil(ptsRec.value * 0.9)) this.recordWatchFired.add(`${key}:points:chase:${y}`)
-        if (ptsRec && sp > ptsRec.value) this.recordWatchFired.add(`${key}:points:break:${y}`)
-        if (gRec && t.goals >= Math.ceil(gRec.value * 0.9)) this.recordWatchFired.add(`${key}:goals:chase:${y}`)
-        if (gRec && t.goals > gRec.value) this.recordWatchFired.add(`${key}:goals:break:${y}`)
+        if (ptsRec && t.goals + t.assists > ptsRec.value) this.recordWatchFired.add(`${key}:points:${y}`)
+        if (gRec && t.goals > gRec.value) this.recordWatchFired.add(`${key}:goals:${y}`)
       }
       this.recordWatchSeeded = true
       return
     }
 
-    const lastDay = this.matchDays[this.matchDays.length - 1] ?? 0
-    const lateSeason = lastDay > 0 && day >= lastDay * 0.6
-    const orgIds = this.ownOrgIds()
     const played = new Set<string>()
     for (const res of outcomes) for (const [pid] of res.playerStats) played.add(pid as string)
     for (const pid of played) {
       const p = this.data.players.get(asPlayerId(pid))
       const t = this.totals.get(asPlayerId(pid))
       if (!p || !t) continue
-      const isOwn = orgIds.has(pid)
-      if (ptsRec) this.checkRecordWatch(pid, p, 'points', t.goals + t.assists, ptsRec, isOwn, lateSeason)
-      if (gRec) this.checkRecordWatch(pid, p, 'goals', t.goals, gRec, isOwn, lateSeason)
+      if (ptsRec) this.checkRecordBreak(pid, p, 'points', t.goals + t.assists, ptsRec)
+      if (gRec) this.checkRecordBreak(pid, p, 'goals', t.goals, gRec)
     }
   }
 
-  private checkRecordWatch(
+  private checkRecordBreak(
     pid: string, p: Player, kind: 'points' | 'goals', seasonTotal: number,
-    rec: { value: number; playerName: string; year: number }, isOwn: boolean, lateSeason: boolean,
+    rec: { value: number; playerName: string; year: number },
   ): void {
-    const y = this.year
+    const key = `${pid}:${kind}:${this.year}`
+    if (seasonTotal <= rec.value || this.recordWatchFired.has(key)) return
+    this.recordWatchFired.add(key)
     const label = kind === 'points' ? 'point' : 'goal'
-    const breakKey = `${pid}:${kind}:break:${y}`
-    if (seasonTotal > rec.value && !this.recordWatchFired.has(breakKey)) {
-      this.recordWatchFired.add(breakKey)
-      this.recordWatchFired.add(`${pid}:${kind}:chase:${y}`) // don't also fire the chase
-      this.pushNews('milestone',
-        `${p.name} breaks the all-time single-season ${kind} record`,
-        `${p.name} is up to ${seasonTotal} ${label}s — passing ${rec.playerName}'s ${rec.value} from ${rec.year} for the most in a single season in league history. A record that stood for years, gone. History, made.`,
-        { playerId: pid })
-      return
-    }
-    // Chase alert — your own player, late in the year, in genuine range.
-    const chaseKey = `${pid}:${kind}:chase:${y}`
-    if (isOwn && lateSeason && seasonTotal <= rec.value && seasonTotal >= Math.ceil(rec.value * 0.9) && !this.recordWatchFired.has(chaseKey)) {
-      this.recordWatchFired.add(chaseKey)
-      this.pushNews('milestone',
-        `${p.name} is closing in on the ${kind} record`,
-        `${p.name} has ${seasonTotal} ${label}s and counting — within reach of ${rec.playerName}'s all-time single-season record of ${rec.value}. The whole league is watching now.`,
-        { playerId: pid })
-    }
+    this.pushNews('milestone',
+      `${p.name} breaks the all-time single-season ${kind} record`,
+      `${p.name} is up to ${seasonTotal} ${label}s — passing ${rec.playerName}'s ${rec.value} from ${rec.year} for the most in a single season in league history. A record that stood for years, gone. History, made.`,
+      { playerId: pid })
   }
 
   /** Current-season per-player lines for the records module. */
