@@ -718,6 +718,11 @@ export interface PlayerProfileView extends PlayerBadge {
    *  on the History tab. Absent when none. */
   awards?: Array<{ award: string; year?: number }>
 
+  /** Round-number career milestones reached (e.g. "500 goals", "1,000 games",
+   *  "50 shutouts") — the highest tier passed per category. FM-style career
+   *  highlights. Absent when he hasn't reached a notable one. */
+  careerAchievements?: string[]
+
   /** This season's average match rating (EHM "Avr", 0–10). Absent before he's
    *  played a game this season. */
   avgRating?: number

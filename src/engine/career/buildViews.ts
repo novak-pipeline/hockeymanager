@@ -680,6 +680,31 @@ function buildPositions(p: Player): Array<{ pos: string; level: 'Natural' | 'Acc
   return out
 }
 
+/** FM-style career highlights: the highest round-number career total reached in
+ *  each category, from archived NHL seasons. Empty until he's built a real
+ *  résumé. */
+function careerMilestoneBadges(p: Player): string[] {
+  let g = 0, a = 0, gp = 0, so = 0
+  for (const s of p.stats) {
+    if (s.league === 'ahl') continue
+    g += s.ev.goals + s.pp.goals + s.pk.goals
+    a += s.ev.assists + s.pp.assists + s.pk.assists
+    gp += s.gamesPlayed
+    so += s.shutouts
+  }
+  const pts = g + a
+  const out: string[] = []
+  const top = (val: number, tiers: number[], suffix: string): void => {
+    const hit = [...tiers].reverse().find((t) => val >= t)
+    if (hit) out.push(`${hit.toLocaleString()} ${suffix}`)
+  }
+  top(g, [100, 200, 300, 400, 500, 600, 700, 800], 'goals')
+  top(pts, [500, 1000, 1250, 1500, 1750, 2000], 'points')
+  top(gp, [500, 1000, 1500], 'games')
+  if (p.position === 'G') top(so, [25, 50, 75, 100], 'shutouts')
+  return out
+}
+
 export function buildPlayerProfile(
   ctx: ViewCtx,
   playerId: PlayerId,
@@ -946,6 +971,7 @@ export function buildPlayerProfile(
     personalityReads,
     bio: buildBio(p),
     honours: buildHonours(p),
+    ...(careerMilestoneBadges(p).length ? { careerAchievements: careerMilestoneBadges(p) } : {}),
     profileContract: buildProfileContract(p, teamId !== null, isAmateur),
     scoutReport,
     ...(scoutPanel !== undefined ? { scoutPanel } : {}),

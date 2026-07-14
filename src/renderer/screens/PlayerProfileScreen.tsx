@@ -1781,6 +1781,14 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
           <CareerTotals seasons={d.seasons} isGoalie={isGoalie} {...(d.avgRating !== undefined ? { avgRating: d.avgRating } : {})} />
           {d.awards && d.awards.length > 0 && <TrophyBadges awards={d.awards} />}
         </div>
+        {d.careerAchievements && d.careerAchievements.length > 0 && (
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)', paddingTop: 'var(--sp-3)', borderTop: '1px solid var(--line)' }}>
+            <span className="muted small" style={{ marginRight: 4 }}>Career highlights:</span>
+            {d.careerAchievements.map((m) => (
+              <span key={m} className="chip" style={{ fontSize: 10, color: 'var(--accent, #f5b301)', borderColor: 'var(--accent, #f5b301)' }}>🏅 {m}</span>
+            ))}
+          </div>
+        )}
       </Panel>
     <Panel title="Career Stats">
       <div className="table-wrap">
