@@ -1970,10 +1970,12 @@ export class Career {
     assists: number
     points: number
     gamesPlayed: number
+    shutouts: number
   } {
     let goals = 0
     let assists = 0
     let gamesPlayed = 0
+    let shutouts = 0
     const p = this.data.players.get(pid)
     if (p) {
       for (const s of p.stats) {
@@ -1981,6 +1983,7 @@ export class Career {
         goals += s.ev.goals + s.pp.goals + s.pk.goals
         assists += s.ev.assists + s.pp.assists + s.pk.assists
         gamesPlayed += s.gamesPlayed
+        shutouts += s.shutouts
       }
     }
     const t = this.totals.get(pid)
@@ -1989,7 +1992,8 @@ export class Career {
       assists += t.assists
     }
     gamesPlayed += this.gp.get(pid) ?? 0
-    return { goals, assists, points: goals + assists, gamesPlayed }
+    shutouts += this.shutouts.get(pid) ?? 0
+    return { goals, assists, points: goals + assists, gamesPlayed, shutouts }
   }
 
   /* ─────────────────────── career counting milestones ─────────────────────── */
@@ -1997,13 +2001,15 @@ export class Career {
   private static readonly GOAL_MILES = [100, 200, 300, 400, 500, 600, 700, 800]
   private static readonly POINT_MILES = [500, 1000, 1250, 1500, 1750, 2000]
   private static readonly GAME_MILES = [500, 1000, 1500]
+  private static readonly SHUTOUT_MILES = [25, 50, 75, 100]
 
   /** The milestone keys a player's career totals currently satisfy. */
-  private milestoneKeysFor(pid: string, t: { goals: number; points: number; gamesPlayed: number }): string[] {
+  private milestoneKeysFor(pid: string, t: { goals: number; points: number; gamesPlayed: number; shutouts: number }): string[] {
     const keys: string[] = []
     for (const g of Career.GOAL_MILES) if (t.goals >= g) keys.push(`${pid}:g:${g}`)
     for (const p of Career.POINT_MILES) if (t.points >= p) keys.push(`${pid}:p:${p}`)
     for (const gp of Career.GAME_MILES) if (t.gamesPlayed >= gp) keys.push(`${pid}:gp:${gp}`)
+    for (const so of Career.SHUTOUT_MILES) if (t.shutouts >= so) keys.push(`${pid}:so:${so}`)
     return keys
   }
 
@@ -2036,10 +2042,12 @@ export class Career {
         const [, kind, nStr] = k.split(':')
         const n = Number(nStr)
         const isOwn = orgIds.has(pid)
-        const isMajor = (kind === 'g' && n >= 500) || (kind === 'p' && n >= 1000) || (kind === 'gp' && n >= 1000)
+        const isMajor =
+          (kind === 'g' && n >= 500) || (kind === 'p' && n >= 1000) ||
+          (kind === 'gp' && n >= 1000) || (kind === 'so' && n >= 50)
         if (!isOwn && !isMajor) continue
         const teamAbbr = this.data.teams.get(this.teamOf(asPlayerId(pid)) ?? this.userTeamId)?.abbreviation ?? ''
-        const noun = kind === 'g' ? 'career goal' : kind === 'p' ? 'career point' : 'NHL game'
+        const noun = kind === 'g' ? 'career goal' : kind === 'p' ? 'career point' : kind === 'so' ? 'career shutout' : 'NHL game'
         const headline =
           kind === 'gp' ? `${p.name} plays his ${n.toLocaleString()}th NHL game`
           : `${p.name} reaches ${n.toLocaleString()} ${noun}s`
