@@ -1404,6 +1404,11 @@ export interface TradeAssessmentView {
   line: string
   /** Sentiment bucket for styling. */
   tone: 'love' | 'good' | 'fair' | 'caution' | 'lopsided' | 'blocked' | 'empty'
+  /** 0–1 share of the total value your side GIVES UP — for a balance gauge.
+   *  Present only when both sides carry value (omitted when empty/blocked). */
+  giveShare?: number
+  /** 0–1 share your side RECEIVES (giveShare + receiveShare ≈ 1). */
+  receiveShare?: number
 }
 
 /** The partner GM's NON-BINDING reaction when you "gauge interest" before

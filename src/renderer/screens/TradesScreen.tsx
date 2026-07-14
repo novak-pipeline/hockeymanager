@@ -975,6 +975,28 @@ const INTEREST_TONE: Record<TradeInterestView['lean'], { color: string; label: s
   blocked: { color: 'var(--danger)', label: 'Dealbreaker' },
 }
 
+/** A two-sided value gauge: how the package's value splits between what you give
+ *  up (left) and what you get back (right). A rough read of who's winning the
+ *  deal on paper — the AGM's line above says what to make of it. */
+function ValueBalance({ give, receive }: { give: number; receive: number }): JSX.Element {
+  const givePct = Math.round(give * 100)
+  const receivePct = 100 - givePct
+  // Green when we're getting the better of it, amber/red when we're overpaying.
+  const rColor = receivePct >= 56 ? 'var(--success)' : receivePct >= 44 ? 'var(--muted)' : 'var(--danger)'
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="row" style={{ justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+        <span>You give · {givePct}%</span>
+        <span>You get · {receivePct}%</span>
+      </div>
+      <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--bg0)' }} title={`Value split — you give ${givePct}%, you receive ${receivePct}%`}>
+        <div style={{ width: `${givePct}%`, background: 'rgba(255,255,255,0.18)' }} />
+        <div style={{ width: `${receivePct}%`, background: rColor }} />
+      </div>
+    </div>
+  )
+}
+
 /**
  * EHM-style trade desk. Your assistant GM gives a live read as you build; a
  * "Gauge interest" button pulls the OTHER club's non-binding reaction before you
@@ -993,9 +1015,12 @@ function TradeDeskPanel(props: {
       {assessment && (
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10 }}>
           <span style={{ fontSize: 18, lineHeight: 1 }}>🗒️</span>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{assessment.agmName} · your read</div>
             <div style={{ fontSize: 13, color: ASSESS_TONE[assessment.tone], fontWeight: 500 }}>{assessment.line}</div>
+            {assessment.giveShare !== undefined && assessment.receiveShare !== undefined && (
+              <ValueBalance give={assessment.giveShare} receive={assessment.receiveShare} />
+            )}
           </div>
         </div>
       )}

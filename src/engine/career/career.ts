@@ -9747,11 +9747,13 @@ export class Career {
     }
 
     const rel = (receiveValue - giveValue) / Math.max(giveValue, receiveValue)
-    if (rel > 0.30) return { agmName, tone: 'love', line: 'If they say yes to this, we’re fleecing them. I’d send it before they think twice.' }
-    if (rel > 0.12) return { agmName, tone: 'good', line: 'Good value on our end. I like this one.' }
-    if (rel >= -0.12) return { agmName, tone: 'fair', line: 'Fair hockey trade — it comes down to whether he fits our room.' }
-    if (rel >= -0.30) return { agmName, tone: 'caution', line: 'We’d be paying a premium here. Defensible if you really want him, but don’t expect a bargain.' }
-    return { agmName, tone: 'lopsided', line: 'That’s a steep overpay, boss. I’d pull back before we regret it.' }
+    const total = giveValue + receiveValue
+    const shares = { giveShare: giveValue / total, receiveShare: receiveValue / total }
+    if (rel > 0.30) return { agmName, tone: 'love', line: 'If they say yes to this, we’re fleecing them. I’d send it before they think twice.', ...shares }
+    if (rel > 0.12) return { agmName, tone: 'good', line: 'Good value on our end. I like this one.', ...shares }
+    if (rel >= -0.12) return { agmName, tone: 'fair', line: 'Fair hockey trade — it comes down to whether he fits our room.', ...shares }
+    if (rel >= -0.30) return { agmName, tone: 'caution', line: 'We’d be paying a premium here. Defensible if you really want him, but don’t expect a bargain.', ...shares }
+    return { agmName, tone: 'lopsided', line: 'That’s a steep overpay, boss. I’d pull back before we regret it.', ...shares }
   }
 
   /**
