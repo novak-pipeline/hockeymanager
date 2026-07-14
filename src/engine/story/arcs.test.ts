@@ -552,6 +552,34 @@ describe('milestoneWatch detector', () => {
     const arc = state.arcs.find(a => a.kind === 'milestoneWatch')
     expect(arc?.status).toBe('resolved')
   })
+
+  it('does not re-announce a milestone crossed without a prior approach arc', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const goals200 = (h: string): boolean => h.includes('200 career goals')
+    // Jump straight over 200 career goals with no prior approach arc.
+    const first = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 10,
+        playerLines: [playerLine('p1', 't1', { goals: 2, points: 2 })],
+        careerTotals: () => ({ goals: 201, points: 333, gamesPlayed: 611 }),
+      }),
+      rng,
+    })
+    expect(first.newsSeeds.filter(s => s.category === 'milestone' && goals200(s.headline))).toHaveLength(1)
+    // Next game, still just past 200 — the same milestone must NOT re-announce.
+    const second = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 11,
+        playerLines: [playerLine('p1', 't1', { goals: 1, points: 1 })],
+        careerTotals: () => ({ goals: 202, points: 334, gamesPlayed: 612 }),
+      }),
+      rng,
+    })
+    expect(second.newsSeeds.some(s => s.category === 'milestone' && goals200(s.headline))).toBe(false)
+  })
 })
 
 /* ─────────────────────────── cinderella / collapse ─────────────────────────── */

@@ -801,13 +801,14 @@ function detectMilestone(
     ] as Array<[string, number | null, number]>) {
       if (!milestone) continue
 
-      const existingArc = state.arcs.find(
-        a =>
-          a.kind === 'milestoneWatch' &&
-          a.status !== 'resolved' &&
-          a.actors.playerIds[0] === pl.playerId &&
-          a.beats[0]?.summary.includes(`${milestone} career ${stat}`),
-      )
+      const matchesMilestone = (a: Arc): boolean =>
+        a.kind === 'milestoneWatch' &&
+        a.actors.playerIds[0] === pl.playerId &&
+        (a.beats[0]?.summary.includes(`${milestone} career ${stat}`) ?? false)
+      const existingArc = state.arcs.find(a => a.status !== 'resolved' && matchesMilestone(a))
+      // Any arc for this exact milestone, resolved or not — the fired-marker guard
+      // so a "just crossed" headline can't re-announce every game past the mark.
+      const anyMilestoneArc = state.arcs.find(matchesMilestone)
 
       if (currentVal >= milestone) {
         // Hit the milestone — resolve existing arc or create+resolve.
@@ -824,14 +825,27 @@ function detectMilestone(
             playerId: pl.playerId,
             teamId: pl.teamId,
           })
-        } else if (currentVal - milestone < 5) {
-          // Just crossed it this week, no prior arc — still fire milestone news.
+        } else if (currentVal - milestone < 5 && !anyMilestoneArc) {
+          // Just crossed it this week with no prior arc — fire once, then drop a
+          // resolved marker so the same milestone can't re-announce next game.
           seeds.push({
             category: 'milestone',
             headline: `${name} reaches ${milestone} career ${stat}`,
             body: `${name} has now recorded ${currentVal} career ${stat}, crossing the ${milestone} mark.`,
             playerId: pl.playerId,
             teamId: pl.teamId,
+          })
+          state.counter += 1
+          state.arcs.push({
+            id: makeId(state.counter),
+            kind: 'milestoneWatch',
+            actors: { playerIds: [pl.playerId], teamIds: [pl.teamId] },
+            tension: 100,
+            startedDay: inputs.day,
+            startedYear: inputs.year,
+            beats: [{ day: inputs.day, year: inputs.year, summary: `Reached ${milestone} career ${stat}` }],
+            status: 'resolved',
+            resolution: `Reached ${milestone} career ${stat}`,
           })
         }
       } else if (!existingMilestoneIds.has(pl.playerId) && !existingArc && milestone - currentVal <= MILESTONE_APPROACH_WINDOW) {
