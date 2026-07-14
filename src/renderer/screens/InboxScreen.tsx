@@ -549,8 +549,9 @@ function ConcernCard({
         setBusy(false)
         const reply = line || reaction.outcome // fall back to the engine's prose
         setVoiced(reply)
-        // The player answers back aloud, in his own cast voice.
-        speakAs('player', reply, { seed: reaction.playerName })
+        // Show the player's reply, but DON'T auto-speak it — the voice you hear
+        // should be the incoming call (their message on pickup), not a read-back
+        // of the resolution. The 🔊 button on the reply lets you hear it if you want.
         return
       }
     }
