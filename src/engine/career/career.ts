@@ -15225,8 +15225,17 @@ export class Career {
   /** Assign each roster player an individual training focus targeting his weakest
    *  area (goalies → goaltending). One click to development-optimise the squad. */
   recommendPlayerFocuses(): { ok: true; count: number } {
+    // Cover the WHOLE organisation, not just the NHL club: the AHL affiliate and
+    // the rights-held prospects in junior/Europe are exactly who a development
+    // plan is for, and an individual focus follows a prospect wherever he plays.
+    const affiliateId = this.userTeam.affiliateId
+    const ahlRoster = affiliateId ? (this.data.teams.get(affiliateId as TeamId)?.roster ?? []) : []
+    const ids = new Set<PlayerId>([...this.userTeam.roster, ...ahlRoster])
+    for (const p of this.data.players.values()) {
+      if (p.rightsTeamId === this.userTeamId) ids.add(p.id)
+    }
     let count = 0
-    for (const id of this.userTeam.roster) {
+    for (const id of ids) {
       const p = this.data.players.get(id)
       if (!p) continue
       this.practiceState = setPlayerFocus(this.practiceState, id as string, suggestPlayerFocus(p))

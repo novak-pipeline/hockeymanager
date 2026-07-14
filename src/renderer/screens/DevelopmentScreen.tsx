@@ -73,7 +73,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
     setBusy(true)
     try {
       const r = await client.recommendPlayerFocuses()
-      if (r.type !== 'error') { toast('Individual development plans set from each prospect’s profile.', 'success'); refetch() }
+      if (r.type !== 'error') { toast('Development plans set across the whole system — NHL, AHL and your junior prospects.', 'success'); refetch() }
     } finally { setBusy(false) }
   }
 
