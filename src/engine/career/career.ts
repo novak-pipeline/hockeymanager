@@ -3350,10 +3350,16 @@ export class Career {
           .filter(Boolean)
       : []
 
-    // Month label from current match day.
-    const monthNames = ['October', 'November', 'December', 'January', 'February', 'March', 'April']
-    const monthIdx = Math.floor(this.currentDay / 14) % monthNames.length
-    const monthLabel = monthNames[monthIdx] ?? ''
+    // Month label from the REAL calendar date of the current match day — the
+    // same source as the header ("23 Dec 2026"). The old `currentDay / 14`
+    // heuristic counted match days, not calendar months, so a December game
+    // could be labelled "April".
+    const MONTH_FULL = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ]
+    const monthNum = parseInt(dayToDateISO(this.year, this.currentDay).split('-')[1] ?? '1', 10)
+    const monthLabel = MONTH_FULL[monthNum - 1] ?? ''
 
     // Playoff round label.
     let playoffRound = 'Playoffs'

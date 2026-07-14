@@ -1130,7 +1130,7 @@ const MONTHLY_REPORT_NATIONAL: TentpoleTemplateFn[] = [
     const t = sheet.team
     const monthStr = s.monthLabel || 'the latest stretch'
     const headline = `${monthStr} power report: who has separated — and who has fallen off`
-    const lede = `A month into the season is enough data to tell a story. Here is the league narrative after ${monthStr}.`
+    const lede = `Another month of hockey is in the books. Here is the league narrative after ${monthStr}.`
     const highlightsStr = s.monthlyHighlights.length > 0
       ? s.monthlyHighlights.join(' ')
       : ''
