@@ -851,6 +851,11 @@ export class Career {
   /** Players already reported on in the inbox (avoids re-reporting). Seeded lazily. */
   private scoutReported = new Set<string>()
   private scoutReportSeeded = false
+  /** Career counting milestones already announced (`${pid}:g:500` …). Seeded from
+   *  current totals on first tick so we never announce an already-reached one;
+   *  transient (re-seeds after load, which is correct — nothing to re-announce). */
+  private milestonesFired = new Set<string>()
+  private milestonesSeeded = false
   /** `${oppId}:${gameDay}` matchups already given an advance-scout report (transient). */
   private oppReported = new Set<string>()
   /** Per-player opinion timeline (rating/stars/knowledge over the season). */
@@ -1985,6 +1990,66 @@ export class Career {
     }
     gamesPlayed += this.gp.get(pid) ?? 0
     return { goals, assists, points: goals + assists, gamesPlayed }
+  }
+
+  /* ─────────────────────── career counting milestones ─────────────────────── */
+
+  private static readonly GOAL_MILES = [100, 200, 300, 400, 500, 600, 700, 800]
+  private static readonly POINT_MILES = [500, 1000, 1250, 1500, 1750, 2000]
+  private static readonly GAME_MILES = [500, 1000, 1500]
+
+  /** The milestone keys a player's career totals currently satisfy. */
+  private milestoneKeysFor(pid: string, t: { goals: number; points: number; gamesPlayed: number }): string[] {
+    const keys: string[] = []
+    for (const g of Career.GOAL_MILES) if (t.goals >= g) keys.push(`${pid}:g:${g}`)
+    for (const p of Career.POINT_MILES) if (t.points >= p) keys.push(`${pid}:p:${p}`)
+    for (const gp of Career.GAME_MILES) if (t.gamesPlayed >= gp) keys.push(`${pid}:gp:${gp}`)
+    return keys
+  }
+
+  /**
+   * Fire a news headline when a player crosses a round career milestone (goals,
+   * points, games). Your own org's players make news at every tier; the rest of
+   * the league only for the truly historic ones (500 goals, 1000 points/games) —
+   * emergent multi-decade colour without spamming the inbox.
+   */
+  private emitCareerMilestones(outcomes: GameOutcome[]): void {
+    // Seed once (also after load) so already-reached milestones never re-announce.
+    if (!this.milestonesSeeded) {
+      for (const p of this.data.players.values()) {
+        for (const k of this.milestoneKeysFor(p.id as string, this.careerTotalsOf(p.id))) this.milestonesFired.add(k)
+      }
+      this.milestonesSeeded = true
+      return
+    }
+    const played = new Set<string>()
+    for (const res of outcomes) for (const [pid] of res.playerStats) played.add(pid as string)
+    if (played.size === 0) return
+    const orgIds = this.ownOrgIds()
+    for (const pid of played) {
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) continue
+      const totals = this.careerTotalsOf(asPlayerId(pid))
+      for (const k of this.milestoneKeysFor(pid, totals)) {
+        if (this.milestonesFired.has(k)) continue
+        this.milestonesFired.add(k)
+        const [, kind, nStr] = k.split(':')
+        const n = Number(nStr)
+        const isOwn = orgIds.has(pid)
+        const isMajor = (kind === 'g' && n >= 500) || (kind === 'p' && n >= 1000) || (kind === 'gp' && n >= 1000)
+        if (!isOwn && !isMajor) continue
+        const teamAbbr = this.data.teams.get(this.teamOf(asPlayerId(pid)) ?? this.userTeamId)?.abbreviation ?? ''
+        const noun = kind === 'g' ? 'career goal' : kind === 'p' ? 'career point' : 'NHL game'
+        const headline =
+          kind === 'gp' ? `${p.name} plays his ${n.toLocaleString()}th NHL game`
+          : `${p.name} reaches ${n.toLocaleString()} ${noun}s`
+        const flavour = isMajor ? ' A milestone that puts him in rare company.' : ''
+        this.pushNews('milestone',
+          headline,
+          `${p.name} (${p.position}${teamAbbr ? `, ${teamAbbr}` : ''}) hit ${n.toLocaleString()} ${noun}s for his career.${flavour}`,
+          { playerId: pid })
+      }
+    }
   }
 
   /** Current-season per-player lines for the records module. */
@@ -3130,6 +3195,9 @@ export class Career {
         `${p.name} slump (${line.scorelessStreak} games) — Coach speaks`
       )
     }
+
+    // Career counting milestones (500 goals, 1000 points, 1000 games …).
+    this.emitCareerMilestones(outcomes)
   }
 
   /** Dashboard ticker line for an arc: actor name + latest beat. */
