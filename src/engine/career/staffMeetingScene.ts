@@ -29,6 +29,7 @@ export type StaffAction =
   | { type: 'ltir'; playerId: string }
   | { type: 'callUp'; playerId: string }
   | { type: 'tactic'; direction: SuggestionDirection }
+  | { type: 'setDevFocus'; playerId: string } // apply the coach's recommended development plan
 
 export interface StaffProposalOption {
   id: string
@@ -70,6 +71,7 @@ export type StaffFinding =
   | { kind: 'fatigued'; playerId: string; name: string; condition: number }
   | { kind: 'prospectReady'; playerId: string; name: string; overall: number; weakestName?: string }
   | { kind: 'tacticMisfit'; coachFit: number; direction: SuggestionDirection }
+  | { kind: 'devFocusUnset'; playerId: string; name: string; potential: number; suggested: string; where: string }
 
 /** The four staff voices a meeting can draw on. Built by the career layer from
  *  real hired staff (with sensible fallback names). Speaker ids are stable. */
@@ -95,6 +97,8 @@ function severity(f: StaffFinding): number {
       return 45 + f.form
     case 'tacticMisfit':
       return 40 + (65 - f.coachFit)
+    case 'devFocusUnset':
+      return 35 + f.potential / 4
   }
 }
 
@@ -230,6 +234,23 @@ function proposalFor(f: StaffFinding, cast: StaffCast, idx: number): StaffPropos
           { id: 'wait', label: 'Leave him in the AHL', detail: 'Keep developing him in the minors', action: { type: 'none' } },
         ],
         defaultOptionId: 'wait',
+      }
+    case 'devFocusUnset':
+      return {
+        id,
+        speakerId: cast.asstCoach.id,
+        title: `No development plan for ${f.name}`,
+        intro: [
+          {
+            speakerId: cast.asstCoach.id,
+            text: `We've got ${f.name} ${f.where} and nobody's steering his work. He's worth developing — I'd put his practice on ${f.suggested} and actually build something.`,
+          },
+        ],
+        options: [
+          { id: 'set', label: `Focus his game on ${f.suggested}`, detail: `Set ${f.name}'s development plan to ${f.suggested}`, action: { type: 'setDevFocus', playerId: f.playerId } },
+          { id: 'leave', label: 'Leave it to the staff', detail: `No plan set — ${f.name} develops on the general program`, action: { type: 'none' } },
+        ],
+        defaultOptionId: 'set',
       }
     case 'tacticMisfit':
       return {

@@ -11734,11 +11734,51 @@ export class Career {
     // Prospect ready — the AGM pushes for a call-up.
     const prospect = this.readyProspectFinding(team, used)
     if (prospect) findings.push(prospect)
+    // A prospect with no development plan — the assistant coach wants one set.
+    const devPlan = this.devFocusFinding(team, used)
+    if (devPlan) findings.push(devPlan)
     // Tactical misfit — the head coach wants to adjust to the personnel.
     const fit = Math.round(styleMatch(roster, team.tactics).fit)
     if (fit < 55) findings.push({ kind: 'tacticMisfit', coachFit: fit, direction: 'fitRoster' })
 
     return findings
+  }
+
+  /** A young, high-upside org player (NHL or AHL) with NO individual development
+   *  plan set — the assistant coach flags him so the GM points his practice
+   *  somewhere. Returns the highest-ceiling such player, or null. */
+  private devFocusFinding(team: Team, used: Set<string>): StaffFinding | null {
+    const focusSet = new Set(this.practiceState.perPlayerFocus.map(([pid]) => pid))
+    const ahlId = team.affiliateId
+    const ahlRoster = ahlId ? (this.data.teams.get(ahlId)?.roster ?? []) : []
+    const pool: Array<{ p: Player; where: string }> = [
+      ...team.roster.map((id) => ({ p: this.resolve(id), where: 'on the NHL roster' })),
+      ...ahlRoster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p).map((p) => ({ p, where: 'down in the AHL' })),
+    ]
+    const label: Record<string, string> = {
+      offense: 'his offence', defense: 'his defensive game', skating: 'his skating',
+      physical: 'his physical game', goaltending: 'his goaltending',
+    }
+    let best: { p: Player; where: string; focus: string; ceil: number } | null = null
+    for (const { p, where } of pool) {
+      if (used.has(p.id as string) || focusSet.has(p.id as string)) continue
+      if (p.age > 23) continue // development plans are for the young ones
+      const ceil = this.scoutedCeilingOf(p)
+      if (ceil < 74) continue // only genuine upside is worth a plan
+      const focus = suggestPlayerFocus(p)
+      if (!label[focus]) continue // 'balanced'/'recovery' — nothing pointed to pitch
+      if (!best || ceil > best.ceil) best = { p, where, focus, ceil }
+    }
+    if (!best) return null
+    used.add(best.p.id as string)
+    return {
+      kind: 'devFocusUnset',
+      playerId: best.p.id as string,
+      name: best.p.name,
+      potential: Math.round(best.ceil),
+      suggested: label[best.focus]!,
+      where: best.where,
+    }
   }
 
   /** Best AHL skater clearly better than the weakest NHL regular — a call-up case. */
@@ -11865,6 +11905,12 @@ export class Career {
       case 'tactic': {
         const r = this.suggestToCoach(action.direction)
         return r.accepted ? 'The system was adjusted toward the roster.' : 'The coach pushed back on the tactical change.'
+      }
+      case 'setDevFocus': {
+        const p = this.data.players.get(asPlayerId(action.playerId))
+        if (!p) return null
+        this.practiceState = setPlayerFocus(this.practiceState, action.playerId, suggestPlayerFocus(p))
+        return `${nameOf(action.playerId)} now has a development plan.`
       }
       case 'moveLine': {
         const moved = this.moveForwardToLine(action.playerId, action.toLine)
