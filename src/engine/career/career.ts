@@ -175,6 +175,7 @@ import {
   type RecordsState,
   type SeasonLine,
 } from '@engine/story/records'
+import { detectGameStory } from '@engine/story/gameStory'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 import {
   buildPreseasonOdds,
@@ -4045,6 +4046,27 @@ export class Career {
       `${away.name} ${res.awayGoals} @ ${home.name} ${res.homeGoals}${suffix}.`,
       { teamId: opp.id as string }
     )
+
+    /* ── Story beat: surface how the game actually went (comeback, blown lead,
+     *    a goalie robbery or shelling) — the drama behind the final score. ── */
+    const userRoster = new Set(this.userTeam.roster.map((id) => id as unknown as string))
+    const goalByUser: boolean[] = []
+    let userShots = 0
+    let oppShots = 0
+    let goalie: { name: string; saves: number; shotsAgainst: number; goalsAgainst: number } | undefined
+    for (const ev of res.stream) {
+      if (ev.type === 'goal') goalByUser.push(userRoster.has(ev.scorer as unknown as string))
+    }
+    for (const [pid, s] of res.playerStats) {
+      const mine = userRoster.has(pid as unknown as string)
+      if (mine) userShots += s.shots
+      else oppShots += s.shots
+      if (mine && s.shotsAgainst > 0 && this.resolve(pid).position === 'G' && (!goalie || s.shotsAgainst > goalie.shotsAgainst)) {
+        goalie = { name: this.resolve(pid).name, saves: s.saves, shotsAgainst: s.shotsAgainst, goalsAgainst: s.goalsAgainst }
+      }
+    }
+    const beat = detectGameStory({ goalByUser, won: us > them, goalie, userShots, oppShots })
+    if (beat) this.pushNews('result', beat.headline, beat.body, { teamId: opp.id as string })
 
     /* ── Coach quote: big win (≥3 goal margin, regulation) or bad loss (≥3 goal margin) ── */
     const diff = us - them
