@@ -52,7 +52,6 @@ import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
 import { JobMarketScreen } from './screens/JobMarketScreen'
 import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
-import { warmNeuralVoices } from './lib/speak'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -85,12 +84,11 @@ export function App(): JSX.Element {
     })
     // Discover available mods (non-blocking; silently empty on browser/no-mod)
     void listMods().then((mods) => setAvailableMods(mods))
-    // Warm the neural voices in the background so they're downloaded and ready
-    // before the first spoken line — a beat after mount so it never competes with
-    // first paint. Opt-out (Settings) and one-time; failure keeps the system voice.
-    const warm = window.setTimeout(() => { void warmNeuralVoices() }, 2500)
+    // NOTE: the neural voices are NOT warmed on startup — running the onnxruntime
+    // WASM at launch is heavy and best kept off the critical boot path. They
+    // auto-load on the first spoken line instead (see speak.ts), so a fresh
+    // launch is always light and stable.
     return () => {
-      clearTimeout(warm)
       c.dispose()
       setClient(null)
     }
