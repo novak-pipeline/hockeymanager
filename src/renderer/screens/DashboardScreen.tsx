@@ -418,7 +418,7 @@ export function DashboardScreen(): JSX.Element {
           )}
 
           {/* Offseason: around the league — real signings/trades as they land */}
-          {d.phase === 'offseason' && <MarketPulse />}
+          {d.phase === 'offseason' && <MarketPulse stageLabel={d.offseasonStageLabel} />}
 
         </div>
       </div>
@@ -860,7 +860,7 @@ const TX_META: Record<string, { icon: string; color: string }> = {
 
 /** Around the league — the July story is the market. Real transactions from
  *  the ledger, newest first, so the right column earns its space in summer. */
-function MarketPulse(): JSX.Element | null {
+function MarketPulse({ stageLabel }: { stageLabel?: string }): JSX.Element | null {
   const client = useClient()
   const nav = useNav()
   const { data: tx } = useScreenData(
@@ -869,11 +869,18 @@ function MarketPulse(): JSX.Element | null {
   )
   const items = tx?.items ?? []
 
+  // Phase-aware empty state (dashboard law: no dead "nothing here" cards) — before
+  // July 1 the market is loading; once it opens, deals land here as they happen.
+  const preFrenzy = !stageLabel || /re-sign|awards|draft/i.test(stageLabel)
+  const emptyMsg = preFrenzy
+    ? 'Quiet before the storm — the wire lights up when free agency opens July 1. Every league signing and trade will land here.'
+    : 'No moves across the league yet today — deals will appear here the moment they happen.'
+
   return (
     <Panel title="Around the league" className="dash-fill">
       <div className="dash-scroll">
         {items.length === 0 && (
-          <span className="muted small">The wire is quiet today — no deals to report.</span>
+          <span className="muted small">{emptyMsg}</span>
         )}
         {items.map((t) => {
           const meta = TX_META[t.kind] ?? { icon: '🏒', color: 'var(--muted)' }
