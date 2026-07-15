@@ -70,6 +70,10 @@ export type QuickSimResult = GameOutcome
 // twice the minutes of the fourth (real NHL: ~19-21 min vs ~9-11), and the top
 // pair ~1.7x the third. Special-teams deployment (PP1/PK1) widens the total
 // spread further on top of these even-strength shares.
+// Home-ice conversion edge (applied +to home / −to away, so it's calibration-
+// neutral on total goals). Tuned to land the equal-strength home win rate near
+// the real-NHL ~53-54%.
+const HOME_ICE_EDGE = 0.06
 const FWD_LINE_WEIGHTS = [0.34, 0.28, 0.22, 0.16]
 const DEF_PAIR_WEIGHTS = [0.42, 0.34, 0.24]
 // #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
@@ -249,6 +253,7 @@ function simShift(
   t: number,
   attackingPositive: boolean,
   lengthSeconds: number,
+  attackingIsHome: boolean,
   threeOnThree = false
 ): void {
   const { rng } = ctx
@@ -325,9 +330,15 @@ function simShift(
     const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
     // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
     const cf = attacking.team.coachFit === undefined ? 1 : coachFitMultiplier(attacking.team.coachFit)
+    // Home-ice edge: last change, familiar boards, no travel, the crowd. The home
+    // side finishes a hair better and the road side a hair worse — symmetric, so
+    // total scoring is conserved while the home team banks the extra points that
+    // give the standings a realistic ~53-54% home win rate. (The full sim already
+    // carries a comparable edge emergently; this brings the quick sim in line.)
+    const homeIce = attackingIsHome ? 1 + HOME_ICE_EDGE : 1 - HOME_ICE_EDGE
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf)
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce)
     )
 
     if (rng.chance(pGoal)) {
@@ -445,11 +456,11 @@ function simPeriod(
 
     const beforeH = home.goals
     const beforeA = away.goals
-    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, lengthSeconds, threeOnThree)
+    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, lengthSeconds, true, threeOnThree)
     // Sudden death ends on the FIRST goal — check between the two teams' shifts
     // so a single step can never let both score and leave the game tied.
     if (suddenDeath && home.goals > beforeH) return true
-    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, lengthSeconds, threeOnThree)
+    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, lengthSeconds, false, threeOnThree)
     if (suddenDeath && away.goals > beforeA) return true
   }
   ctx.stream.push({ t: lengthSeconds, period, type: 'periodEnd' })

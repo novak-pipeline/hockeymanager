@@ -362,13 +362,21 @@ describe('Career — full year cycle', () => {
     const career = new Career(data, 21, data.league.teams[0])
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
+    // Snapshot who already carried draft pedigree (imported players) BEFORE the
+    // draft, so we can isolate exactly the players selected in-game this year.
+    // (rightsTeamId alone is not that marker — trades set it too.)
+    const preDrafted = new Set(
+      [...data.players.values()].filter((p) => p.nhlDrafted === true).map((p) => p.id as string)
+    )
     career.advanceOffseason() // awards → draft (builds the board)
     career.autoDraft() // conduct the (user-gated) draft, auto-picking for the user
     career.advanceOffseason() // draft → resign
 
-    // rightsTeamId is set ONLY by an in-game selection, so it cleanly identifies
-    // players drafted this career (vs. generated/imported pedigree).
-    const drafted = [...data.players.values()].filter((p) => p.rightsTeamId !== undefined)
+    // Players whose nhlDrafted flipped true during the draft = this year's in-game
+    // selections (excludes imported pedigree and trade-acquired rights).
+    const drafted = [...data.players.values()].filter(
+      (p) => p.nhlDrafted === true && !preDrafted.has(p.id as string)
+    )
     expect(drafted.length).toBeGreaterThan(0)
     for (const p of drafted) {
       expect(p.nhlDrafted).toBe(true)
