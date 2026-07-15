@@ -6,6 +6,19 @@ directories:
   output: release
   buildResources: build
 
+# The shipped app has NO native modules (node-llama-cpp is excluded below;
+# better-sqlite3 was dropped for JSON saves), so skip @electron/rebuild — it does
+# nothing useful here and, on Windows, its pass over app.asar collides with
+# antivirus/file-lock timing ("app.asar is being used by another process").
+npmRebuild: false
+
+# Ship the app as loose files instead of an app.asar archive. On this Windows box,
+# antivirus real-time scanning locks the freshly-written app.asar exactly as
+# electron-builder tries to finalize it ("being used by another process"), failing
+# the build. No asar = no such file to lock. Auto-update (electron-updater) is
+# unaffected; the only cost is a slightly larger, unpacked install tree.
+asar: false
+
 # electron-vite emits the app into out/ and EXTERNALIZES main-process deps
 # (electron-updater is `import`ed, not bundled), so node_modules must ship too.
 # electron-builder's default `**/*` includes out/ + production node_modules and
@@ -14,13 +27,36 @@ directories:
 # (node-llama-cpp) — the game and neural VOICES (WASM, in the renderer bundle)
 # work without it; the Feed writer just falls back to templates.
 files:
-  - '!src/*'
-  - '!scripts/*'
-  - '!docs/*'
-  - '!RnD/*'
+  # Source, tooling, and dev-only reference data (never needed at runtime; main
+  # reads none of it). Dropping these alone saves ~200MB.
+  - '!src'
+  - '!scripts'
+  - '!docs'
+  - '!RnD'
+  - '!build'
+  - '!3D assets'
+  - '!Images'
+  - '!EHM.Editor.v1.3.3'
+  - '!EHM.Editor.v1.3.3.zip'
+  - '!References (dont publish)'
+  - '!*.xlsx'
+  - '!_diag.txt'
+  - '!_nhl_sample.json'
   - '!**/*.{map,md,ts,tsx}'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{tsconfig.json,tsconfig.node.json,vitest.config.ts,.gitignore,.npmrc}'
+  # The renderer BUNDLES its libraries into out/renderer (react, pixi, three,
+  # kokoro, transformers + the ONNX WASM), so the node_modules copies are dead
+  # weight — and onnxruntime-node is the NODE binding we never use (we run the
+  # WASM/web path). Excluding these saves ~370MB.
+  - '!node_modules/onnxruntime-node/**/*'
+  - '!node_modules/onnxruntime-web/**/*'
+  - '!node_modules/@huggingface/**/*'
+  - '!node_modules/kokoro-js/**/*'
+  - '!node_modules/pixi.js/**/*'
+  - '!node_modules/three/**/*'
+  - '!node_modules/gifuct-js/**/*'
+  # Optional native text-LLM writer — excluded; the Feed falls back to templates.
   - '!node_modules/node-llama-cpp/**/*'
   - '!node_modules/@node-llama-cpp/**/*'
 
