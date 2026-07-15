@@ -32,3 +32,5 @@ scripts/dev/ui-snaps/
 
 # electron-builder packaging output
 release/
+standalone-build/
+installer-out/
