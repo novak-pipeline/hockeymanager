@@ -541,6 +541,26 @@ describe('effectiveResolve', () => {
     expect(boosted).toBeGreaterThan(0)
   })
 
+  it('makes fatigue a real lever across its realistic 0–25 in-season band', () => {
+    const skatingAt = (fatigue: number): number => {
+      const p = makePlayer('W', { fatigue, morale: 60, form: 0 })
+      return effectiveResolve(() => p)(p.id).composites.skating
+    }
+    const fresh = skatingAt(0)
+    const avg = skatingAt(4) // league-average fatigue → ~neutral (calibration ref)
+    const worked = skatingAt(12)
+    const gassed = skatingAt(20)
+    // A rested player is clearly sharper than a spent one, and it's monotone —
+    // this must be a visible gap at realistic fatigue, not the old ≤1-point sliver.
+    expect(fresh).toBeGreaterThan(gassed + 2)
+    expect(worked).toBeGreaterThan(gassed)
+    expect(gassed).toBeLessThan(avg)
+    // The average-fatigue player stays within a rating point of his raw skating,
+    // so the typical player is neutral and season scoring is undisturbed.
+    const raw = makePlayer('W', { fatigue: 4, morale: 60, form: 0 }).composites.skating
+    expect(Math.abs(avg - raw)).toBeLessThanOrEqual(1)
+  })
+
   it('all composites are clamped to 1–99', () => {
     // Extreme conditions: fatigue 100, morale 0, form -5 — nothing should go below 1
     const base = makePlayer('W', { fatigue: 100, morale: 0, form: -5 })

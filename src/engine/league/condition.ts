@@ -311,7 +311,17 @@ export function formDeltaFromGame(player: Player, stat: GamePlayerStat): number 
 
 /* ────────────────────────── sim injection seam ────────────────────────── */
 
-const FATIGUE_PENALTY = 0.12 // fatigue 100 → ×0.88
+// Fatigue lives in a ~0-25 in-season band (mean ~4), so the old `fatigue/100`
+// scaling made it a near-dead lever (≤3% even for a maxed-out player). Instead we
+// center on the league-average fatigue: the typical player is neutral (so season
+// scoring — and calibration — is unchanged) while the SPREAD does real work. A
+// fresh player is a touch sharper; a gassed one (a heavy stretch, the back half
+// of a back-to-back) is meaningfully duller. Stamina, which slows fatigue accrual
+// in tickRecovery, now shows up on the ice.
+const FATIGUE_REF = 4 // league-average in-season fatigue → neutral
+const FATIGUE_PER_POINT = 0.006 // per fatigue point away from the reference
+const FATIGUE_MIN = 0.87 // a fully gassed player floors here
+const FATIGUE_MAX = 1.03 // a fully rested one tops out here
 const MORALE_FLOOR = 0.96 // morale 0 → ×0.96
 const MORALE_SPAN = 0.07 // morale 100 → ×1.03
 const FORM_SPAN = 0.01 // form ±5 → ×0.95..×1.05
@@ -371,8 +381,9 @@ export function effectiveResolve(base: (id: PlayerId) => Player): (id: PlayerId)
     // Match rust: a just-returned player is a step slow until he's played a few
     // games (rustGames burns down in tickRecovery). Composes with the rest.
     const rust = clamp(p.rustGames ?? 0, 0, RUST_MAX)
+    const fatigueMult = clamp(1 - FATIGUE_PER_POINT * (fatigue - FATIGUE_REF), FATIGUE_MIN, FATIGUE_MAX)
     const mult =
-      (1 - FATIGUE_PENALTY * (fatigue / 100)) *
+      fatigueMult *
       (MORALE_FLOOR + MORALE_SPAN * (morale / 100)) *
       (1 + FORM_SPAN * form) *
       (1 - RUST_PENALTY * (rust / RUST_MAX)) *
