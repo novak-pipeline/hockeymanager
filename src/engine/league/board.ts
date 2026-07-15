@@ -29,6 +29,19 @@ export type Mandate =
   | 'rebuild'
   | 'cutCosts'
 
+/** Short, human-readable label for each mandate — for headlines/chips. The
+ *  full sentence lives in `mandateText`; this is the enum's display name so we
+ *  never surface a raw code like "developYouth" to the player. */
+export const MANDATE_LABEL: Record<Mandate, string> = {
+  cupOrBust: 'Win the Cup',
+  contend: 'Contend',
+  makePlayoffs: 'Make the playoffs',
+  competeRespectably: 'Compete respectably',
+  developYouth: 'Develop the youth',
+  rebuild: 'Rebuild',
+  cutCosts: 'Cut costs',
+}
+
 export interface BoardState {
   mandate: Mandate
   /** One-line human-readable mandate statement. */
@@ -249,7 +262,7 @@ export function setSeasonMandate(args: SetSeasonMandateArgs): SetSeasonMandateRe
   }
 
   // Preseason board announcement.
-  const headline = `Owner sets the ${year} mandate for ${teamName}: ${mandate}`
+  const headline = `Owner sets the ${year} mandate for ${teamName}: ${MANDATE_LABEL[mandate]}`
   const body = buildMandateBody(text, mandate, targetRank, n, teamName, year)
 
   const newsSeed: NewsSeed = {

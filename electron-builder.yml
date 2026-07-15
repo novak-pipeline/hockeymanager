@@ -1,0 +1,43 @@
+appId: com.novakpipeline.theshow
+productName: The Show — Franchise Hockey Manager
+copyright: © novak-pipeline
+
+directories:
+  output: release
+  buildResources: build
+
+# electron-vite emits the app into out/ and EXTERNALIZES main-process deps
+# (electron-updater is `import`ed, not bundled), so node_modules must ship too.
+# electron-builder's default `**/*` includes out/ + production node_modules and
+# auto-drops devDependencies; we only need to negate the source/config that would
+# otherwise bloat the asar, and exclude the OPTIONAL native text-LLM writer
+# (node-llama-cpp) — the game and neural VOICES (WASM, in the renderer bundle)
+# work without it; the Feed writer just falls back to templates.
+files:
+  - '!src/*'
+  - '!scripts/*'
+  - '!docs/*'
+  - '!RnD/*'
+  - '!**/*.{map,md,ts,tsx}'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{tsconfig.json,tsconfig.node.json,vitest.config.ts,.gitignore,.npmrc}'
+  - '!node_modules/node-llama-cpp/**/*'
+  - '!node_modules/@node-llama-cpp/**/*'
+
+win:
+  target: nsis
+  artifactName: TheShow-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: The Show
+
+# Self-update feed: electron-updater reads latest.yml + the installer from the
+# repo's GitHub Releases.
+publish:
+  provider: github
+  owner: novak-pipeline
+  repo: hockeymanager

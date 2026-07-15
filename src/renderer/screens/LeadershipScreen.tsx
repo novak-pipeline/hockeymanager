@@ -13,7 +13,7 @@ import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient } from '../hooks/useSim'
-import { toast } from '../components/store'
+import { toast, bumpRefresh } from '../components/store'
 
 function LeadershipBar({ value, max, color }: { value: number; max: number; color: string }): JSX.Element {
   return (
@@ -37,6 +37,11 @@ export function LeadershipScreen(): JSX.Element {
   const apply = useCallback((res: { type: string; leadership?: LeadershipView; ok?: boolean; message?: string }) => {
     if (res.type === 'leadership' && res.leadership) setLead(res.leadership)
     if (res.ok === false && res.message) toast(res.message, 'error')
+    // Naming the captain clears the preseason gate — bump the refresh bus so the
+    // shell's dashboard (which drives `captainsPending` and the Continue routing)
+    // re-fetches. Without this the "name a captain" nag and the block persist
+    // even after the C is set, because the shell never re-reads the dashboard.
+    else if (res.type === 'leadership') bumpRefresh()
   }, [])
 
   async function setCaptain(playerId: string | null): Promise<void> {

@@ -802,6 +802,16 @@ function TeamInfoTab(): JSX.Element {
     const v = n % 100
     return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]!)
   }
+  // Never surface the raw mandate enum ("developYouth") — map to a readable
+  // label, falling back to de-camelCasing any unknown code.
+  const humanizeMandate = (m: string): string => {
+    const LABELS: Record<string, string> = {
+      cupOrBust: 'Win the Cup', contend: 'Contend', makePlayoffs: 'Make the playoffs',
+      competeRespectably: 'Compete respectably', developYouth: 'Develop the youth',
+      rebuild: 'Rebuild', cutCosts: 'Cut costs',
+    }
+    return LABELS[m] ?? m.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
+  }
 
   return (
     <section className="stack">
@@ -853,7 +863,7 @@ function TeamInfoTab(): JSX.Element {
 
           <Panel title="Vision & Objectives">
             <div className="list">
-              <div className="row-between small"><span className="muted">Board mandate</span><strong>{club.mandate}</strong></div>
+              <div className="row-between small"><span className="muted">Board mandate</span><strong>{humanizeMandate(club.mandate)}</strong></div>
               <p className="small muted" style={{ margin: '4px 0' }}>{club.mandateText}</p>
               <div className="row-between small"><span className="muted">Target finish</span><strong>{ordinal(club.targetRank)}</strong></div>
               <div className="row-between small"><span className="muted">Board confidence</span><strong>{club.confidenceLabel}</strong></div>

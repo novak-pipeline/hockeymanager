@@ -10414,9 +10414,23 @@ export class Career {
       this.lockerArrival(this.userTeamId, id)
     }
     this.tradeOffers = this.tradeOffers.filter((o) => o.offerId !== offerId)
-    this.pushNews('trade', `Trade completed with ${partner.abbreviation}`, `The deal is done.`, {
-      teamId: offer.partnerTeamId as string,
-    })
+    // Spell out the deal — who and what moved each way — so the inbox reads like
+    // real news, not a bare "the deal is done".
+    const roundOrd = (r: number): string => (r === 1 ? '1st' : r === 2 ? '2nd' : r === 3 ? '3rd' : `${r}th`)
+    const nameList = (ids: readonly string[], picks: readonly { round: number; year: number }[]): string => {
+      const names = ids.map((id) => this.data.players.get(asPlayerId(id))?.name).filter(Boolean) as string[]
+      const pickBits = picks.map((p) => `${p.year} ${roundOrd(p.round)}-round pick`)
+      const all = [...names, ...pickBits]
+      return all.length ? all.join(', ') : 'future considerations'
+    }
+    const acquired = nameList(offer.userReceivesPlayerIds, offer.userReceivesPicks)
+    const sent = nameList(offer.userGivesPlayerIds, offer.userGivesPicks)
+    this.pushNews(
+      'trade',
+      `${this.userTeam.abbreviation} acquire ${acquired} from ${partner.name}`,
+      `${this.userTeam.name} have completed a trade with the ${partner.name}: ${this.userTeam.abbreviation} receive ${acquired} in exchange for ${sent}.`,
+      { teamId: offer.partnerTeamId as string }
+    )
     /* ── Coach quote: trade-add reaction (if at least one player received) ── */
     if (offer.userReceivesPlayerIds.length > 0) {
       const firstReceived = offer.userReceivesPlayerIds[0]!
