@@ -316,6 +316,35 @@ const MORALE_FLOOR = 0.96 // morale 0 → ×0.96
 const MORALE_SPAN = 0.07 // morale 100 → ×1.03
 const FORM_SPAN = 0.01 // form ±5 → ×0.95..×1.05
 const RUST_PENALTY = 0.06 // full rust (RUST_MAX games) → ×0.94, easing to ×1.0
+const CONTRACT_BOOST = 0.03 // a max-ambition pending UFA in his walk year → ×1.03
+const CONTRACT_COAST = 0.02 // a low-professionalism player fresh off a big deal → ×0.98
+
+/**
+ * The "contract year" effect: a season-long motivation multiplier read from a
+ * player's deal and personality. A player in the final year of his contract
+ * (yearsRemaining === 1) presses for the payday — scaled by ambition, and
+ * strongest for a pending UFA (age ≥ 27) with everything on the line. A player
+ * just locked up long-term (yearsRemaining ≥ 4) can coast a touch if his
+ * professionalism is low; a true pro never does. Everyone else is neutral.
+ *
+ * Personality attributes are on the 1–20 scale. Deterministic and small (±3%),
+ * it stacks with fatigue/morale/form/rust in effectiveResolve, so a walk-year
+ * sniper's extra goals raise his next contract while a coaster's dip is real.
+ */
+export function contractMotivation(p: Player): number {
+  const yrs = p.contract.yearsRemaining
+  if (yrs === 1) {
+    // Ambition (1–20) drives the push; a pending UFA has the most on the line.
+    const ambPush = clamp((p.personality.ambition - 10) / 10, 0, 1)
+    const stakes = p.age >= 27 ? 1 : 0.6 // RFAs care, but less than pending UFAs
+    return 1 + CONTRACT_BOOST * clamp(ambPush * stakes, 0, 1)
+  }
+  if (yrs >= 4) {
+    const coast = clamp((10 - p.personality.professionalism) / 10, 0, 1)
+    return 1 - CONTRACT_COAST * coast
+  }
+  return 1
+}
 
 /**
  * Wrap a player resolver so the sim reads condition-adjusted composites.
@@ -346,7 +375,8 @@ export function effectiveResolve(base: (id: PlayerId) => Player): (id: PlayerId)
       (1 - FATIGUE_PENALTY * (fatigue / 100)) *
       (MORALE_FLOOR + MORALE_SPAN * (morale / 100)) *
       (1 + FORM_SPAN * form) *
-      (1 - RUST_PENALTY * (rust / RUST_MAX))
+      (1 - RUST_PENALTY * (rust / RUST_MAX)) *
+      contractMotivation(p)
 
     const composites = {} as CompositeRatings
     for (const key in p.composites) {

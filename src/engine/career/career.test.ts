@@ -3206,17 +3206,24 @@ describe('#175 shorthanded stat splits', () => {
     }
 
     // Causal link (the whole point): PP1 is actually deployed on the power play,
-    // so its players collect the club's power-play goals rather than random lines.
-    const clubPpGoals = skaters.reduce((s, r) => s + (r.skater?.ppGoals ?? 0), 0)
-    const pp1PpGoals = skaters
-      .filter((r) => pp1.has(r.playerId))
-      .reduce((s, r) => s + (r.skater?.ppGoals ?? 0), 0)
-    expect(clubPpGoals).toBeGreaterThan(0)
-    // The 5-man PP1 should own the bulk of the club's PP goals. (A null/random
-    // deployment would give five of ~13 dressed skaters only ~0.38; this is a
-    // single-season club sample, so the bar is set clear of that baseline rather
-    // than at a brittle exact majority.)
-    expect(pp1PpGoals / clubPpGoals).toBeGreaterThan(0.45)
+    // so its players collect the bulk of the PP goals rather than random lines.
+    // Measured LEAGUE-WIDE (every club's PP1 vs its own PP goals) so the share
+    // is a stable population statistic, not one noisy single-season club sample
+    // that small legitimate rating effects (form, contract motivation) can tip.
+    let leaguePpGoals = 0
+    let leaguePp1PpGoals = 0
+    for (const tid of data.league.teams) {
+      const t = data.teams.get(asTeamId(tid as string))!
+      const unit = new Set((t.lines.powerPlayUnits[0] ?? []).map((id) => id as string))
+      for (const r of career.getTeamPlayerStats(tid as string).skaters) {
+        const g = r.skater?.ppGoals ?? 0
+        leaguePpGoals += g
+        if (unit.has(r.playerId)) leaguePp1PpGoals += g
+      }
+    }
+    expect(leaguePpGoals).toBeGreaterThan(0)
+    // A null/random deployment would give five of ~13 dressed skaters only ~0.38.
+    expect(leaguePp1PpGoals / leaguePpGoals).toBeGreaterThan(0.45)
   })
 })
 
