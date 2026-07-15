@@ -2577,7 +2577,7 @@ export class Career {
   /** A player speaks up at most this many times per season. */
   private static readonly MAX_INTERACTIONS_PER_PLAYER_SEASON = 2
   /** Minimum quiet days between ANY two concerns being raised. */
-  private static readonly INTERACTION_GLOBAL_SPACING_DAYS = 6
+  private static readonly INTERACTION_GLOBAL_SPACING_DAYS = 14
 
   /** Scan the user roster after a match day and maybe raise new concerns.
    *  LW5 game-theory rules: at most one new concern per day, none within 6
@@ -2606,7 +2606,10 @@ export class Career {
     const busy = new Set<string>()
     for (const i of this.interactions) {
       if (i.status === 'open') busy.add(i.playerId)
-      else if (day - i.day < INTERACTION_COOLDOWN_DAYS) busy.add(i.playerId)
+      // Cooldown runs from the CONVERSATION (resolvedDay), not from when the player
+      // raised it — so answering a concern actually buys you quiet, and a player you
+      // just talked to won't be back the same week (#9).
+      else if (day - (i.resolvedDay ?? i.day) < INTERACTION_COOLDOWN_DAYS) busy.add(i.playerId)
     }
 
     for (const pid of team.roster) {
@@ -2686,6 +2689,7 @@ export class Career {
     interaction.status = 'resolved'
     interaction.chosenOptionId = optionId
     interaction.outcome = result.outcome
+    interaction.resolvedDay = this.currentDay
 
     // LW5: a promise-tone answer is written into the ledger — measurable
     // keep-condition, due date, and your exact words for later quoting.
@@ -9042,7 +9046,16 @@ export class Career {
     const status = this.resignStatus.get(id)
     if (status === 'signed') return { signed: true, message: 'Already signed.' }
     if (status === 'walked') return { signed: false, message: 'He has decided to test free agency.' }
-    if (status === undefined) throw new Error('player is not in your re-sign list')
+    if (status === undefined) {
+      // #15: honor any out-of-contract roster player the snapshot missed, so the
+      // re-sign window shown by getOffseason is always actionable.
+      const onRoster = this.userTeam.roster.some((r) => (r as string) === playerId)
+      if (onRoster && this.resolve(id).contract.yearsRemaining === 0) {
+        this.resignStatus.set(id, 'pending')
+      } else {
+        throw new Error('player is not in your re-sign list')
+      }
+    }
     const player = this.resolve(id)
     // CBA term ceiling: a club may re-sign its OWN player to 8 years (one more
     // than an outside club could offer).
@@ -15058,18 +15071,30 @@ export class Career {
       championTeamName: this.playoffs?.championTeamId
         ? this.data.teams.get(this.playoffs.championTeamId)!.name
         : null,
-      expiring: [...this.resignStatus.entries()].map(([id, status]) => {
-        const p = this.resolve(id)
-        const ask = askTerms(p, this.year)
-        return {
-          ...badge(p),
-          currentSalary: p.contract.salary,
-          askSalary: ask.salary,
-          askYears: ask.years,
-          morale: Math.round(p.morale),
-          status,
+      expiring: (() => {
+        // The re-sign list is the resignStatus snapshot UNIONED with any roster
+        // player who is currently out of contract (yearsRemaining 0) — RFA or UFA.
+        // The snapshot is taken once at the draft→resign transition and is skipped
+        // entirely on a summer takeover, so an out-of-contract player (e.g. an
+        // imported RFA) could silently miss the window (#15). This guarantees every
+        // expiring roster player appears, with their real re-sign status.
+        const rows = new Map(this.resignStatus)
+        for (const id of team.roster) {
+          if (this.resolve(id).contract.yearsRemaining === 0 && !rows.has(id)) rows.set(id, 'pending')
         }
-      }),
+        return [...rows.entries()].map(([id, status]) => {
+          const p = this.resolve(id)
+          const ask = askTerms(p, this.year)
+          return {
+            ...badge(p),
+            currentSalary: p.contract.salary,
+            askSalary: ask.salary,
+            askYears: ask.years,
+            morale: Math.round(p.morale),
+            status,
+          }
+        })
+      })(),
       arbitration: this.getArbitrationCases(),
       freeAgents: this.faPool
         .map((id) => this.resolve(id))

@@ -51,6 +51,9 @@ export interface PlayerInteraction {
   chosenOptionId?: string
   /** Prose result after responding. */
   outcome?: string
+  /** Day the GM answered (for cooldown — a player you just spoke to stays quiet
+   *  for the cooldown window measured from the CONVERSATION, not when he raised it). */
+  resolvedDay?: number
 }
 
 /** Result of applying a GM response — caller mutates state from these. */
