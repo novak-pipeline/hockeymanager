@@ -745,6 +745,35 @@ const STAFF_MEETING_INTERVAL = 14
 
 type ResignStatus = 'pending' | 'signed' | 'walked'
 
+/**
+ * Teams from ONE conference that qualify for the playoffs, given its members
+ * already sorted best→worst by points. NHL-style top-3-per-division + wildcards
+ * up to `qual` when the conference is divisional; otherwise the top `qual`.
+ * Shared by the Monte-Carlo odds and the mathematical clinch check so the two
+ * views of "who's in" can never drift apart.
+ */
+export function qualifiersInConference(
+  sortedMembers: TeamId[],
+  divOf: (t: TeamId) => string,
+  qual: number,
+  useDivisional: boolean
+): TeamId[] {
+  if (!useDivisional) return sortedMembers.slice(0, qual)
+  const byDiv = new Map<string, TeamId[]>()
+  for (const t of sortedMembers) {
+    const d = divOf(t)
+    if (!byDiv.has(d)) byDiv.set(d, [])
+    byDiv.get(d)!.push(t)
+  }
+  const seeded = new Set<TeamId>()
+  for (const d of byDiv.values()) for (const t of d.slice(0, 3)) seeded.add(t) // top 3 per division
+  for (const t of sortedMembers) { // wildcards = next best in the conference
+    if (seeded.size >= qual) break
+    if (!seeded.has(t)) seeded.add(t)
+  }
+  return [...seeded]
+}
+
 export class Career {
   readonly data: LeagueData
   readonly seed: number
@@ -925,6 +954,9 @@ export class Career {
   private readonly losingStreaks = new Map<string, number>()
   /** User team consecutive wins (for coach win-streak quotes). */
   private userWinStreak = 0
+  /** Once-per-season latch so the mathematical clinch / elimination headline
+   *  fires exactly once. Reset at each season rollover; persisted in saves. */
+  private playoffBerthAnnounced: 'clinched' | 'eliminated' | null = null
   /** Yesterday's league ranks for standings-delta arcs. Transient (rebuilt daily). */
   private readonly prevRanks = new Map<string, number>()
   /* ── press corps (Wave 2) ── */
@@ -4300,6 +4332,9 @@ export class Career {
           { playerId: id as string, teamId: this.userTeamId as string })
       }
     }
+    // Stretch-run drama: the day your club mathematically clinches a playoff
+    // spot — or gets eliminated — gets its own headline (once per season).
+    this.checkPlayoffBerth()
     // #184: AI GMs answer any trade proposals whose deliberation has elapsed.
     this.resolvePendingTrades()
     // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
@@ -6737,6 +6772,7 @@ export class Career {
     this.scorelessStreaks.clear()
     this.losingStreaks.clear()
     this.prevRanks.clear()
+    this.playoffBerthAnnounced = null
     /* ── plumbing module rollover ── */
     this.playerRatings.clear()
     this.seasonRatingTotals.clear()
@@ -13048,22 +13084,8 @@ export class Career {
       QUAL === 8 &&
       confs.every((c) => new Set(teamIds.filter((t) => confOf.get(t) === c).map((t) => divOf.get(t))).size >= 2)
     /** Teams from one conference that make the playoffs under the current `pts`. */
-    const qualifiersInConf = (members: TeamId[]): TeamId[] => {
-      if (!useDivisional) return members.slice(0, QUAL)
-      const byDiv = new Map<string, TeamId[]>()
-      for (const t of members) {
-        const d = divOf.get(t) ?? ''
-        if (!byDiv.has(d)) byDiv.set(d, [])
-        byDiv.get(d)!.push(t)
-      }
-      const seeded = new Set<TeamId>()
-      for (const d of byDiv.values()) for (const t of d.slice(0, 3)) seeded.add(t) // top 3 per division
-      for (const t of members) { // 2 wildcards = next best in the conference
-        if (seeded.size >= 8) break
-        if (!seeded.has(t)) seeded.add(t)
-      }
-      return [...seeded]
-    }
+    const qualifiersInConf = (members: TeamId[]): TeamId[] =>
+      qualifiersInConference(members, (t) => divOf.get(t) ?? '', QUAL, useDivisional)
     const sig = (x: number): number => 1 / (1 + Math.exp(-x))
     const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
 
@@ -13115,6 +13137,89 @@ export class Career {
     })
     rows.sort((a, b) => b.projectedPoints - a.projectedPoints || b.playoffPct - a.playoffPct)
     return { available: true, simulations: N, userTeamId: userId, qualifiers: QUAL, rows }
+  }
+
+  /**
+   * The user's *mathematical* playoff-berth status right now: 'clinched' (in no
+   * matter how the season plays out), 'eliminated' (out no matter what), or
+   * 'alive'. Sound and conservative: for clinch the user loses out while every
+   * rival wins out (ties broken against the user); for elimination the user wins
+   * out while rivals lose out (ties broken for the user). It ignores that rivals
+   * play each other, so it can trail the true clinch by a day or two — but it
+   * never declares a clinch or elimination that isn't real. Reuses the same
+   * divisional qualifier logic as the odds screen.
+   */
+  private userPlayoffBerthStatus(): 'clinched' | 'eliminated' | 'alive' {
+    if (this.phase !== 'regularSeason') return 'alive'
+    const teamIds = [...this.data.league.teams]
+    const user = this.userTeamId
+    const confOf = new Map<TeamId, string>()
+    const divOf = new Map<TeamId, string>()
+    const basePts = new Map<TeamId, number>()
+    const gr = new Map<TeamId, number>()
+    for (const t of teamIds) {
+      const team = this.data.teams.get(t)
+      confOf.set(t, team?.conferenceId ?? '')
+      divOf.set(t, team?.divisionId ?? '')
+      basePts.set(t, this.standings.get(t)?.points ?? 0)
+      gr.set(t, 0)
+    }
+    for (const g of this.data.league.schedule) {
+      if (g.day <= this.currentDay) continue
+      gr.set(g.homeTeamId, (gr.get(g.homeTeamId) ?? 0) + 1)
+      gr.set(g.awayTeamId, (gr.get(g.awayTeamId) ?? 0) + 1)
+    }
+    const confs = [...new Set(teamIds.map((t) => confOf.get(t)!))]
+    const minConfSize = Math.min(...confs.map((c) => teamIds.filter((t) => confOf.get(t) === c).length))
+    const qual = minConfSize >= 12 ? 8 : 4
+    const useDivisional =
+      qual === 8 &&
+      confs.every((c) => new Set(teamIds.filter((t) => confOf.get(t) === c).map((t) => divOf.get(t))).size >= 2)
+    const userConf = confOf.get(user)!
+    const members = teamIds.filter((t) => confOf.get(t) === userConf)
+
+    // Does the user land in the field under a given final-points scenario?
+    const userQualifies = (ptsOf: (t: TeamId) => number): boolean => {
+      const sorted = [...members].sort((a, b) => ptsOf(b) - ptsOf(a) || (a < b ? -1 : 1))
+      return qualifiersInConference(sorted, (t) => divOf.get(t) ?? '', qual, useDivisional).includes(user)
+    }
+
+    // Clinch: user loses every remaining game (and every tie), rivals win out.
+    const clinchPts = (t: TeamId): number =>
+      t === user ? basePts.get(t)! - 0.5 : basePts.get(t)! + 2 * gr.get(t)!
+    if (userQualifies(clinchPts)) return 'clinched'
+
+    // Elimination: user wins every remaining game (and every tie), rivals lose out.
+    const elimPts = (t: TeamId): number =>
+      t === user ? basePts.get(t)! + 2 * gr.get(t)! + 0.5 : basePts.get(t)!
+    if (!userQualifies(elimPts)) return 'eliminated'
+
+    return 'alive'
+  }
+
+  /** Fire a one-time headline the day the user mathematically clinches a
+   *  playoff berth or is eliminated from contention. */
+  private checkPlayoffBerth(): void {
+    if (this.phase !== 'regularSeason' || this.playoffBerthAnnounced) return
+    const status = this.userPlayoffBerthStatus()
+    if (status === 'alive') return
+    const team = this.userTeam
+    this.playoffBerthAnnounced = status
+    if (status === 'clinched') {
+      this.pushNews(
+        'playoffs',
+        `${team.name} clinch a playoff spot`,
+        `It's official — the ${team.name} have mathematically secured a place in the playoffs. The regular-season job is done; now the real tournament begins.`,
+        { teamId: this.userTeamId as string, salience: 90 }
+      )
+    } else {
+      this.pushNews(
+        'playoffs',
+        `${team.name} eliminated from playoff contention`,
+        `The ${team.name} can no longer reach the playoffs — mathematically out with the season still running. Attention turns to pride, development, and the draft lottery.`,
+        { teamId: this.userTeamId as string, salience: 85 }
+      )
+    }
   }
 
   /** Squad Planner: experience matrix + depth/age/contract report for the user club. */
@@ -16242,6 +16347,7 @@ export class Career {
         scorelessStreaks: [...this.scorelessStreaks],
         losingStreaks: [...this.losingStreaks],
         userWinStreak: this.userWinStreak,
+        playoffBerthAnnounced: this.playoffBerthAnnounced,
         lastDeadlineRecap: this.lastDeadlineRecap ? structuredClone(this.lastDeadlineRecap) : null,
         lastLottery: this.lastLottery ? structuredClone(this.lastLottery) : null,
         pressSchedule: structuredClone(this.pressScheduleState),
@@ -16432,6 +16538,7 @@ export class Career {
       for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.losingStreaks) career.losingStreaks.set(k, v)
       career.userWinStreak = snapshot.storyMisc.userWinStreak ?? 0
+      career.playoffBerthAnnounced = snapshot.storyMisc.playoffBerthAnnounced ?? null
       career.lastDeadlineRecap = snapshot.storyMisc.lastDeadlineRecap
         ? structuredClone(snapshot.storyMisc.lastDeadlineRecap)
         : null

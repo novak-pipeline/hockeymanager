@@ -2255,6 +2255,10 @@ export interface CareerSnapshot {
     losingStreaks: Array<[string, number]>
     /** User team current consecutive wins (for coach win-streak quotes). Optional; older saves default to 0. */
     userWinStreak?: number
+    /** Latch so the mathematical playoff clinch / elimination headline fires
+     *  once per season. Optional; older saves default to null (may re-announce
+     *  once after loading a stretch-run save, which is harmless). */
+    playoffBerthAnnounced?: 'clinched' | 'eliminated' | null
     lastDeadlineRecap: ExecutedTradeSummary[] | null
     lastLottery: {
       orderAbbrs: string[]
