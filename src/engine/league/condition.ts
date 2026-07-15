@@ -134,10 +134,12 @@ export function rollInjuries(args: {
     if (player.injuryStatus !== null) continue
     if (!rng.chance(injuryChance(player, toi))) continue
     const kind = rollKind(rng)
+    const gamesOut = rollGamesOut(rng, kind)
     const injury: Injury = {
       kind,
-      gamesRemaining: rollGamesOut(rng, kind),
-      description: rng.pick(INJURY_DESCRIPTIONS[kind])
+      gamesRemaining: gamesOut,
+      description: rng.pick(INJURY_DESCRIPTIONS[kind]),
+      totalGames: gamesOut // remembered so the return can carry match rust
     }
     player.injuryStatus = injury
     out.push({ playerId: player.id, injury })
@@ -154,6 +156,13 @@ const MORALE_BASELINE = 60
 const MORALE_DRIFT = 0.05
 const FORM_DECAY = 0.9
 
+/* Match rust: only absences of this many games leave a player needing to round
+ * back into game shape; the ramp length scales with how long he was out. */
+const RUST_THRESHOLD = 5
+const RUST_SCALE = 0.4
+const RUST_MIN = 2
+const RUST_MAX = 6
+
 /**
  * Advance every player's condition by one match day.
  *
@@ -165,16 +174,21 @@ const FORM_DECAY = 0.9
  *  - Morale drifts toward the 60 baseline.
  *  - Form takes a seeded ±1 random-walk step and decays toward 0, clamped
  *    to [-5, 5].
+ *  - Match rust: a player returning from a long absence (≥5 games) picks up a
+ *    rust counter scaled to the layoff; each game he plays burns one off. The
+ *    `returns` array carries the freshly-healed players and their rust so the
+ *    career layer can flavour the comeback ("still finding his legs").
  */
 export function tickRecovery(args: {
   players: Iterable<Player>
   playedToday: Set<PlayerId> | ((id: PlayerId) => boolean)
   rng: Rng
-}): { healed: PlayerId[] } {
+}): { healed: PlayerId[]; returns: Array<{ id: PlayerId; rustGames: number }> } {
   const { players, playedToday, rng } = args
   const played =
     typeof playedToday === 'function' ? playedToday : (id: PlayerId): boolean => playedToday.has(id)
   const healed: PlayerId[] = []
+  const returns: Array<{ id: PlayerId; rustGames: number }> = []
 
   for (const p of players) {
     const playedNow = played(p.id)
@@ -182,11 +196,19 @@ export function tickRecovery(args: {
     if (p.injuryStatus !== null && !playedNow) {
       p.injuryStatus.gamesRemaining -= 1
       if (p.injuryStatus.gamesRemaining <= 0) {
+        const wasOut = p.injuryStatus.totalGames ?? 0
         p.injuryStatus = null
         // #157: a player coming off a long-term injury automatically comes off
         // LTIR — his cap hit counts again (the club must be compliant on return).
         if (p.ltir) p.ltir = false
         healed.push(p.id)
+        // A meaningful layoff leaves ring rust to shake off over the next few
+        // games; a day-to-day tweak (<5 games) does not.
+        if (wasOut >= RUST_THRESHOLD) {
+          const rust = clamp(Math.round(wasOut * RUST_SCALE), RUST_MIN, RUST_MAX)
+          p.rustGames = rust
+          returns.push({ id: p.id, rustGames: rust })
+        }
       }
     }
 
@@ -197,6 +219,11 @@ export function tickRecovery(args: {
         0,
         100
       )
+      // Playing a game (while healthy) is what actually burns off match rust.
+      if (p.injuryStatus === null && p.rustGames) {
+        p.rustGames = Math.max(0, p.rustGames - 1)
+        if (p.rustGames === 0) delete p.rustGames
+      }
     } else {
       // Natural fitness (1–99, 50 = average) speeds rest recovery. Absent → 1.0×.
       const fitFactor = p.naturalFitness !== undefined ? 0.7 + 0.6 * (p.naturalFitness / 100) : 1
@@ -207,7 +234,7 @@ export function tickRecovery(args: {
     p.form = clamp((p.form + rng.float(-1, 1)) * FORM_DECAY, -5, 5)
   }
 
-  return { healed }
+  return { healed, returns }
 }
 
 /* ────────────────────────── result morale ────────────────────────── */
@@ -288,6 +315,7 @@ const FATIGUE_PENALTY = 0.12 // fatigue 100 → ×0.88
 const MORALE_FLOOR = 0.96 // morale 0 → ×0.96
 const MORALE_SPAN = 0.07 // morale 100 → ×1.03
 const FORM_SPAN = 0.01 // form ±5 → ×0.95..×1.05
+const RUST_PENALTY = 0.06 // full rust (RUST_MAX games) → ×0.94, easing to ×1.0
 
 /**
  * Wrap a player resolver so the sim reads condition-adjusted composites.
@@ -311,10 +339,14 @@ export function effectiveResolve(base: (id: PlayerId) => Player): (id: PlayerId)
     const fatigue = clamp(p.fatigue, 0, 100)
     const morale = clamp(p.morale, 0, 100)
     const form = clamp(p.form, -5, 5)
+    // Match rust: a just-returned player is a step slow until he's played a few
+    // games (rustGames burns down in tickRecovery). Composes with the rest.
+    const rust = clamp(p.rustGames ?? 0, 0, RUST_MAX)
     const mult =
       (1 - FATIGUE_PENALTY * (fatigue / 100)) *
       (MORALE_FLOOR + MORALE_SPAN * (morale / 100)) *
-      (1 + FORM_SPAN * form)
+      (1 + FORM_SPAN * form) *
+      (1 - RUST_PENALTY * (rust / RUST_MAX))
 
     const composites = {} as CompositeRatings
     for (const key in p.composites) {

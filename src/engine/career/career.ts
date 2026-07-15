@@ -4275,7 +4275,20 @@ export class Career {
 
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
-    tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    const recovery = tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    // A cleared injury on your club: note the return, and flag if he'll be
+    // shaking off rust for a few games (a long layoff carries match rust).
+    for (const ret of recovery.returns) {
+      if (this.teamOf(ret.id) !== this.userTeamId) continue
+      const p = this.data.players.get(ret.id)
+      if (!p) continue
+      this.pushNews(
+        'injury',
+        `${p.name} returns to the lineup`,
+        `${p.name} is cleared and available for selection. He's been out a while, so expect him to need ${ret.rustGames} game${ret.rustGames === 1 ? '' : 's'} to shake off the rust and round back into form.`,
+        { playerId: ret.id as string, teamId: this.userTeamId as string }
+      )
+    }
     // #171: load management — a rested player who's back to full freshness comes
     // off the shelf automatically, with a note to the GM's desk.
     for (const id of this.userTeam.roster) {

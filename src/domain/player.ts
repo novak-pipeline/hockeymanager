@@ -37,6 +37,10 @@ export interface Injury {
   kind: InjuryKind
   gamesRemaining: number
   description: string
+  /** How many games the injury cost in total, set when it happens. Drives the
+   *  match-rust ramp on return (a long absence → a rusty comeback). Optional/
+   *  additive; absent on pre-existing saves → treated as 0 (no rust). */
+  totalGames?: number
 }
 
 /** Per-situation splits so PP/PK production is tracked separately from ev. */
@@ -256,6 +260,14 @@ export interface Player {
    * player; it auto-clears once he's fresh again. Absent = available.
    */
   resting?: boolean
+
+  /**
+   * Match-rust counter: games still needed to shake off the ring rust after a
+   * long injury layoff. While > 0 the sim scales this player's on-ice ratings
+   * down a touch (via effectiveResolve), burning off one game each time he
+   * plays. Absent/0 = fully sharp. Optional/additive.
+   */
+  rustGames?: number
 
   /**
    * #186: this player has agreed to waive his no-trade clause outright — his agent
