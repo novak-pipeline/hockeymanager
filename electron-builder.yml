@@ -27,6 +27,16 @@ asar: false
 # (node-llama-cpp) — the game and neural VOICES (WASM, in the renderer bundle)
 # work without it; the Feed writer just falls back to templates.
 files:
+  # Build OUTPUT dirs — never bundle a prior build INTO the app (this was silently
+  # recursively including ~900MB of old win-unpacked trees). ~1.3GB saved with mods.
+  - '!release'
+  - '!standalone-build'
+  - '!installer-out'
+  - '!dist'
+  # Mods & facepacks: a PACKAGED build reads these from <userData>/mods, never from
+  # inside the app (see src/main/mods.ts), so the bundled copy is dead weight. To use
+  # real rosters/faces in the standalone, drop the mods folder in <userData>/mods.
+  - '!mods'
   # Source, tooling, and dev-only reference data (never needed at runtime; main
   # reads none of it). Dropping these alone saves ~200MB.
   - '!src'
