@@ -4719,6 +4719,7 @@ export class Career {
       const away = this.data.teams.get(game.awayTeamId)!
       const res = quickSimGame(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
+        intensity: gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor,
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
@@ -5052,6 +5053,7 @@ export class Career {
       const sim = isUser ? fullSimGame : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
+        intensity: gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor,
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
@@ -5158,7 +5160,11 @@ export class Career {
       const isUser = g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId
       const seed = gameSeed(this.seed, this.year, `${g.seriesId}-g${g.gameNumber}`)
       const sim = isUser && watchUser ? fullSimGame : quickSimGame
-      const res = sim(home, away, this.storyResolve(), { seed, rules: 'playoff' })
+      const res = sim(home, away, this.storyResolve(), {
+        seed,
+        rules: 'playoff',
+        intensity: gameIntensity(this.rivalriesState, g.homeTeamId as string, g.awayTeamId as string).factor,
+      })
       if (res.decidedBy === 'shootout') throw new Error('playoff game decided by shootout')
       const result: SeriesGameResult = {
         gameId: asGameId(`${g.seriesId}-g${g.gameNumber}`),

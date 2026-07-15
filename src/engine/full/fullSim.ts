@@ -1764,7 +1764,9 @@ function simPeriod(
       for (const team of [home, away]) {
         const proneness = avg(team.unit.skaters, (p) => p.composites.penaltyProne) / LEAGUE_AVG
         const aggrMult = sliderMult(team.team.tactics.aggressiveness, 0.6, 1.5)
-        if (rng.chance(PENALTY_P * proneness * aggrMult)) {
+        // Rivalry nights run hot: tempers flare, sticks come up, more trips to the box.
+        const rivalryMult = 1 + (ctx.intensity ?? 0) * 0.3
+        if (rng.chance(PENALTY_P * proneness * aggrMult * rivalryMult)) {
           const offender =
             team.unit.skaters[
               weightedIndex(rng, team.unit.skaters.map((r) => 1 + r.player.composites.penaltyProne))
@@ -1797,7 +1799,8 @@ function simPeriod(
     //    hitting (default 0.5→1.0) + aggressiveness both scale hit rate.
     {
       const hitMult = sliderMult(def.team.tactics.hitting, 0.5, 1.6) *
-                      sliderMult(def.team.tactics.aggressiveness, 0.7, 1.4)
+                      sliderMult(def.team.tactics.aggressiveness, 0.7, 1.4) *
+                      (1 + (ctx.intensity ?? 0) * 0.35) // rivalry night: more bodychecks
       if (presserDist < 10 && rng.chance(HIT_P * hitMult)) {
         ctx.stream.push({
           t: clk.t,
@@ -2178,6 +2181,9 @@ export interface FullSimOptions {
    * shootout with repeated 20-minute 5v5 sudden-death periods until a goal.
    */
   rules?: GameRules
+  /** Rivalry heat 0..1 — scales hits and penalties for a chippier grudge match.
+   *  Absent → 0 (an ordinary game, unchanged). */
+  intensity?: number
   /** Optional diagnostic sink (shot kinds/danger, beats, stoppages) for tests. */
   telemetry?: FullSimTelemetry
 }
@@ -2190,7 +2196,7 @@ export function fullSimGame(
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null, scoringMult: playoffScoringMult(rules) }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null, scoringMult: playoffScoringMult(rules), intensity: opts.intensity }
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)

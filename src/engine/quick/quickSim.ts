@@ -201,6 +201,8 @@ interface Ctx {
   /** Per-shot goal-probability multiplier for the game context (playoff
    *  tightening). Absent → 1.0 (regular season, unchanged). */
   scoringMult?: number
+  /** Rivalry heat 0..1 — scales the penalty rate. Absent → 0 (unchanged). */
+  intensity?: number
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -391,9 +393,10 @@ function simShift(
     }
   }
 
-  // Penalties: drawn against the attacking unit by their collective recklessness.
+  // Penalties: drawn against the attacking unit by their collective recklessness,
+  // with more trips to the box on a rivalry night.
   const proneness = avg(atk.skaters, (c) => c.penaltyProne) / LEAGUE_AVG
-  if (rng.chance(PENALTY_CHANCE_PER_SHIFT * proneness)) {
+  if (rng.chance(PENALTY_CHANCE_PER_SHIFT * proneness * (1 + (ctx.intensity ?? 0) * 0.3))) {
     const offender = atk.skaters[weightedIndex(rng, atk.skaters.map((p) => 1 + p.composites.penaltyProne))]
     attacking.penaltyBoxUntil.push(t + PENALTY_SECONDS)
     stat(ctx, offender.id).penaltyMinutes += 2
@@ -524,6 +527,9 @@ export interface QuickSimOptions {
    * competition (juniors/Europe). NHL and AHL keep the default.
    */
   leagueAvg?: number
+  /** Rivalry heat 0..1 — scales the penalty rate for a chippier grudge match.
+   *  Absent → 0 (an ordinary game, unchanged). */
+  intensity?: number
 }
 
 /**
@@ -693,7 +699,7 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG, scoringMult: playoffScoringMult(rules) }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG, scoringMult: playoffScoringMult(rules), intensity: opts.intensity }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
   // Goalie rotation on a SEPARATE deterministic RNG so the game's shot stream is

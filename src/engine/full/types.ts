@@ -159,6 +159,9 @@ export interface Ctx {
   /** Per-shot goal-probability multiplier for the game context (e.g. playoff
    *  tightening). Absent → 1.0 (regular season, unchanged). */
   scoringMult?: number
+  /** Rivalry heat, 0 (ordinary game) → 1 (grudge match): scales the hit and
+   *  penalty rates so a rivalry night is visibly chippier. Absent → 0. */
+  intensity?: number
 }
 
 export function clamp(v: number, lo: number, hi: number): number {
