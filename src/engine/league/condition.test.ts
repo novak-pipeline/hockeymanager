@@ -541,6 +541,26 @@ describe('effectiveResolve', () => {
     expect(boosted).toBeGreaterThan(0)
   })
 
+  it('makes fatigue a real lever across its realistic 0–25 in-season band', () => {
+    const skatingAt = (fatigue: number): number => {
+      const p = makePlayer('W', { fatigue, morale: 60, form: 0 })
+      return effectiveResolve(() => p)(p.id).composites.skating
+    }
+    const fresh = skatingAt(0)
+    const avg = skatingAt(4) // league-average fatigue → ~neutral (calibration ref)
+    const worked = skatingAt(12)
+    const gassed = skatingAt(20)
+    // A rested player is clearly sharper than a spent one, and it's monotone —
+    // this must be a visible gap at realistic fatigue, not the old ≤1-point sliver.
+    expect(fresh).toBeGreaterThan(gassed + 2)
+    expect(worked).toBeGreaterThan(gassed)
+    expect(gassed).toBeLessThan(avg)
+    // The average-fatigue player stays within a rating point of his raw skating,
+    // so the typical player is neutral and season scoring is undisturbed.
+    const raw = makePlayer('W', { fatigue: 4, morale: 60, form: 0 }).composites.skating
+    expect(Math.abs(avg - raw)).toBeLessThanOrEqual(1)
+  })
+
   it('all composites are clamped to 1–99', () => {
     // Extreme conditions: fatigue 100, morale 0, form -5 — nothing should go below 1
     const base = makePlayer('W', { fatigue: 100, morale: 0, form: -5 })
@@ -947,6 +967,38 @@ describe('repairLines', () => {
           expect(p?.injuryStatus).toBeNull()
           expect(team.roster).toContain(id)
         }
+      }
+    }
+  })
+
+  it('never dresses a defenceman at a forward slot while a forward can double-shift', () => {
+    // 5 healthy forwards, plenty of healthy D. Two forwards are hurt — far fewer
+    // than the 12 forward slots — so the only way to fill them all is to
+    // double-shift forwards. A D must NOT be slotted at wing/centre.
+    const fwds = Array.from({ length: 5 }, () => makePlayer('C'))
+    const defs = Array.from({ length: 8 }, () => makePlayer('D'))
+    const goalies = [makeGoalie(), makeGoalie()]
+    fwds[0].injuryStatus = { kind: 'lowerBody', gamesRemaining: 5, description: 'x' }
+    fwds[1].injuryStatus = { kind: 'upperBody', gamesRemaining: 5, description: 'y' }
+    const all = [...fwds, ...defs, ...goalies]
+    const players = new Map(all.map((p) => [p.id, p]))
+    const team = makeTeam(all.map((p) => p.id), makeLines({}))
+
+    repairLines(team, players)
+
+    for (const line of team.lines.forwards) {
+      for (const id of line) {
+        if (!id) continue
+        const p = players.get(id)!
+        expect(p.position).not.toBe('D')
+        expect(p.injuryStatus).toBeNull()
+      }
+    }
+    // And the defence pairs are still all defencemen.
+    for (const pair of team.lines.defensePairs) {
+      for (const id of pair) {
+        if (!id) continue
+        expect(players.get(id)!.position).toBe('D')
       }
     }
   })

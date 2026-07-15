@@ -12,6 +12,8 @@
  * structured clone.
  */
 export type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
+export type { BoardMeetingScene, MeetingAgendaItem, MeetingLine, MeetingOption, MeetingSpeaker } from '@engine/career/boardMeeting'
+import type { BoardMeetingScene } from '@engine/career/boardMeeting'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
@@ -44,6 +46,16 @@ export type {
   LinesView,
   LockerRoomView,
   OffseasonView,
+  WaiverWireRowView,
+  LeagueWireView,
+  GMProfileView,
+  GMJobMarketView,
+  GMRelationshipsView,
+  MentorshipView,
+  ClubDirectionView,
+  FanbaseView,
+  SponsorsView,
+  OwnerRequestView,
   PersonalityReadView,
   PersonalityTraitRead,
   PlayerAnalyticsRow,
@@ -51,6 +63,7 @@ export type {
   PlayerHonoursView,
   PlayerProfileView,
   PlayoffBracketView,
+  PracticePlanView,
   PracticeView,
   ProfileContractView,
   RadarAxes,
@@ -59,7 +72,11 @@ export type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
+  LeadershipView,
+  MediaCircuitView,
+  RoleBoardView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -68,6 +85,8 @@ export type {
   TacticsView,
   TeamAnalyticsRow,
   TentpoleView,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -82,12 +101,32 @@ export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
 import type { TeamLegendsView } from '@engine/career/views'
 export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/views'
 import type { TeamDynamicsView } from '@engine/career/views'
+export type { FeedView, FeedAuthor } from '@engine/career/views'
+import type { FeedView } from '@engine/career/views'
+export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, TrainingCampState } from '@engine/career/views'
+import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView } from '@engine/career/views'
+export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
+import type { NegotiationView, ContractOffer } from '@engine/career/views'
+export type { ReactionSpec } from '@engine/league/interactions'
+import type { ReactionSpec } from '@engine/league/interactions'
+export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
+import type { FaHubView, RfaBoardView } from '@engine/career/views'
 export type { MedicalView, MedicalRow } from '@engine/career/views'
 import type { MedicalView } from '@engine/career/views'
 export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views'
 import type { DevelopmentCenterView } from '@engine/career/views'
 export type { SquadPlannerView, PlannerPlayer, PositionDepth, CareerStage, PosGroup } from '@engine/career/views'
 import type { SquadPlannerView } from '@engine/career/views'
+export type { LeagueComparisonView, LeagueComparisonCard } from '@engine/career/views'
+import type { LeagueComparisonView } from '@engine/career/views'
+export type { StaffMeetingSummaryView, StaffMeetingFlaggedPlayer } from '@engine/career/views'
+import type { StaffMeetingSummaryView } from '@engine/career/views'
+export type { StaffMeetingView, StaffMeetingProposalView, StaffMeetingOptionView } from '@engine/career/views'
+import type { StaffMeetingView } from '@engine/career/views'
+export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
+import type { CoachMarketView } from '@engine/career/views'
+export type { PlayoffOddsView, PlayoffOddsRow } from '@engine/career/views'
+import type { PlayoffOddsView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -124,7 +163,11 @@ import type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
+  LeadershipView,
+  MediaCircuitView,
+  RoleBoardView,
   CompetitionsView,
   InternationalView,
   DraftRankingsView,
@@ -132,6 +175,8 @@ import type {
   StatsView,
   TacticsView,
   TentpoleView,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeEvaluation,
   TradeProposal,
   TradesView,
@@ -139,7 +184,7 @@ import type {
   TeamPlayerStatsView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView, StaffView, StaffRowView } from '@engine/career/views'
@@ -152,7 +197,7 @@ export type WorkerRequestBody =
   | { type: 'newLeague'; seed: number; teamCount?: number }
   /** Load a real-roster mod database (parsed JSON from the mod bridge). */
   | { type: 'newLeagueFromMod'; mod: unknown; seed: number }
-  | { type: 'startCareer'; teamId: string }
+  | { type: 'startCareer'; teamId: string; startAt?: 'seasonStart' | 'offseason' }
   /* ── calendar ── */
   | { type: 'advance'; days?: number }
   /** Advance through match days until the user's next fixture has been played. */
@@ -178,12 +223,62 @@ export type WorkerRequestBody =
   | { type: 'getTrades' }
   | { type: 'getDraft' }
   | { type: 'getFinances' }
+  /** #173: set the club's ticket-pricing lever. */
+  | { type: 'setTicketPricing'; tier: 'value' | 'standard' | 'premium' }
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
   | { type: 'getTeamDynamics'; teamId: string }
+  | { type: 'getDevCamp' }
+  | { type: 'getDevCampInvites' }
+  | { type: 'toggleDevCampInvite'; playerId: string }
+  | { type: 'getCampInvites' }
+  | { type: 'toggleCampInvite'; playerId: string }
+  | { type: 'submitDevCamp'; standoutId?: string }
+  | { type: 'skipDevCamp' }
+  | { type: 'getTrainingCamp' }
+  | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }
+  | { type: 'getFeed' }
+  | { type: 'toggleFollowAuthor'; authorId: string }
+  | { type: 'getNegotiation'; playerId: string }
+  | { type: 'startNegotiation'; playerId: string }
+  | { type: 'submitNegotiationOffer'; playerId: string; offer: ContractOffer }
+  | { type: 'getFaHub' }
+  | { type: 'toggleFaShortlist'; playerId: string }
+  | { type: 'askFaAgent'; playerId: string }
+  | { type: 'submitFaOffer'; playerId: string; salary: number; years: number }
+  | { type: 'getRfaBoard' }
+  | { type: 'submitOfferSheet'; playerId: string; salary: number; years: number }
+  /** #188: GM sets a player's squad status / trade posture (null clears). */
+  | { type: 'setSquadStatus'; playerId: string; status: import('@domain/player').SquadStatus | null }
+  | { type: 'setTradeStatus'; playerId: string; status: import('@domain/player').TradeStatus | null }
+  /** #188 roles tab: bulk role board + auto-assign. */
+  | { type: 'getRoleBoard' }
+  | { type: 'autoAssignSquadRoles'; overwrite?: boolean }
+  /** #171 load management: toggle a healthy player's rest directive. */
+  | { type: 'restPlayer'; playerId: string }
+  | { type: 'placeOnLtir'; playerId: string }
+  | { type: 'activateFromLtir'; playerId: string }
+  /** #189: captains + jersey numbers for the user's club. */
+  | { type: 'getLeadership' }
+  | { type: 'getMediaCircuit' }
+  | { type: 'setCaptain'; playerId: string | null }
+  | { type: 'toggleAlternate'; playerId: string }
+  | { type: 'setJerseyNumber'; playerId: string; number: number | null }
+  /** #186: no-trade-clause waive negotiation. */
+  | { type: 'askAgentWaiveNtc'; playerId: string }
+  | { type: 'askPlayerTradeList'; playerId: string }
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
+  | { type: 'getLeagueComparison' }
+  | { type: 'getPlayoffOdds' }
+  | { type: 'getStaffMeetingSummary' }
+  | { type: 'getStaffMeeting' }
+  | { type: 'submitStaffMeeting'; choices: Record<string, string> }
+  | { type: 'delegateStaffMeeting' }
+  | { type: 'getCoachMarket' }
+  | { type: 'fireCoach' }
+  | { type: 'hireCoach'; coachId: string }
   | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
@@ -195,21 +290,68 @@ export type WorkerRequestBody =
   /* ── mutations ── */
   | { type: 'setLines'; lines: LinesUpdate }
   | { type: 'setTactics'; tactics: TeamTactics }
+  | { type: 'saveLineSetup'; name: string }
+  | { type: 'applyLineSetup'; name: string }
+  | { type: 'deleteLineSetup'; name: string }
+  | { type: 'setLineManagementMode'; mode: 'coach' | 'fillGaps' }
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'requestInterview'; playerId: string }
   | { type: 'requestCoachReport'; playerId: string }
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
+  | { type: 'assessTrade'; proposal: TradeProposal }
+  | { type: 'gaugeTradeInterest'; proposal: TradeProposal }
+  | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
   | { type: 'resignPlayer'; playerId: string; salary: number; years: number }
   | { type: 'releasePlayer'; playerId: string }
   | { type: 'signFreeAgent'; playerId: string; salary: number; years: number }
+  /** Match a rival offer sheet on one of your RFAs (re-sign at the offered terms). */
+  | { type: 'matchOfferSheet'; playerId: string }
+  /** Let an offer-sheeted RFA walk and take the draft-pick compensation. */
+  | { type: 'declineOfferSheet'; playerId: string }
+  /** Read the live in-season waiver wire (AI castoffs claimable by the user). */
+  | { type: 'getWaiverWire' }
+  /** Read the leaguewide ticker feed (recent transactions + notable streaks). */
+  | { type: 'getLeagueWire' }
+  /** Read the user's GM profile (identity, reputation, career record). */
+  | { type: 'getGMProfile' }
+  /** Read open GM vacancies (populated when the user is fired). */
+  | { type: 'getGMJobMarket' }
+  /** Read the user GM's standing with rival clubs. */
+  | { type: 'getGMRelationships' }
+  /** Read veteran/rookie mentorships + eligible players. */
+  | { type: 'getMentorships' }
+  /** Pair a veteran mentor with a young mentee. */
+  | { type: 'assignMentor'; menteeId: string; mentorId: string }
+  /** Dissolve a mentorship. */
+  | { type: 'clearMentor'; menteeId: string }
+  /** Read the GM's competitive stance + whether a rebuild can be sanctioned. */
+  | { type: 'getClubDirection' }
+  /** Set the GM's competitive stance (compete / retool / rebuild). */
+  | { type: 'setClubDirection'; direction: 'compete' | 'retool' | 'rebuild' }
+  /** Read fan engagement + its effect on the owner budget. */
+  | { type: 'getFanbase' }
+  /** Read the club's sponsorship deals + revenue. */
+  | { type: 'getSponsors' }
+  /** Accept a GM vacancy and move clubs. */
+  | { type: 'acceptGMJob'; teamId: string }
+  /** Read the pending owner directive, if any. */
+  | { type: 'getOwnerRequest' }
+  /** Respond to the pending owner directive. */
+  | { type: 'respondOwnerRequest'; accept: boolean }
+  /** Claim a player off the in-season waiver wire onto the user's roster. */
+  | { type: 'claimWaiver'; playerId: string }
   /** User makes their selection while on the clock. */
   | { type: 'draftPlayer'; playerId: string }
+  /** Sim exactly one AI pick (pick-by-pick stepping). */
+  | { type: 'simNextPick' }
   /** Sim AI picks until the user is on the clock or the draft ends. */
   | { type: 'advanceDraft' }
+  /** Sim the ENTIRE remaining draft, auto-picking best-available for the user. */
+  | { type: 'autoDraft' }
   /** Move the offseason to its next stage (awards → draft → resign → FA → preseason). */
   | { type: 'advanceOffseason' }
   /* ── persistence ── */
@@ -217,7 +359,38 @@ export type WorkerRequestBody =
   | { type: 'importSave'; snapshot: CareerSnapshot }
   /* ── scouting ── */
   | { type: 'getScouting' }
-  | { type: 'assignScout'; scoutId: string; target: ScoutTarget }
+  | { type: 'getScoutProfile'; scoutId: string }
+  | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus; positionFilter?: 'any' | 'F' | 'D' | 'G'; minPotentialStars?: number }
+  | { type: 'autoAssignScouts' }
+  | { type: 'hireScout'; candidateId: string }
+  | { type: 'fireScout'; scoutId: string }
+  /** Scouting Centre triage (FM-style): track / un-track / pass / re-scout a find. */
+  | { type: 'shortlistProspect'; playerId: string }
+  | { type: 'unshortlistProspect'; playerId: string }
+  | { type: 'dismissProspect'; playerId: string }
+  | { type: 'rescoutProspect'; playerId: string }
+  /** Global search for the command palette (players + teams by name). */
+  | { type: 'searchAll'; query: string }
+  /** [id, name] index of every player, for linkifying names in prose. */
+  | { type: 'getNameIndex' }
+  /** Buy out a contract during the offseason window (M2). */
+  | { type: 'buyoutPlayer'; playerId: string }
+  /** Arbitration ultimatum: accept the award or walk away (M2). */
+  | { type: 'acceptArbitration'; playerId: string }
+  | { type: 'walkArbitration'; playerId: string }
+  /** Box score of a specific played user game (calendar/schedule click-through). */
+  | { type: 'getBoxScoreFor'; gameId: string }
+  /* ── season rhythm: meetings (M1) ── */
+  /** The pending preseason board-meeting scene (null once attended). */
+  | { type: 'getBoardMeeting' }
+  /** Attend the meeting with your chosen answers per agenda item. */
+  | { type: 'submitBoardMeeting'; choices: Record<string, string> }
+  /** The deadline war-room briefing (only while the deadline hold is active). */
+  | { type: 'getWarRoom' }
+  /** The staged End-of-Season Review scene (M4), or null. */
+  | { type: 'getSeasonReview' }
+  /** Answer for the season (single 'answer' agenda choice). */
+  | { type: 'submitSeasonReview'; choice: string }
   /* ── story layer ── */
   /** All-time record boards, season archive, awards, legends/Hall of Fame. */
   | { type: 'getHistory' }
@@ -247,6 +420,8 @@ export type WorkerRequestBody =
   | { type: 'toggleScratch'; playerId: string }
   /** Set (or clear) a per-player individual focus override (null = revert to team focus). */
   | { type: 'setPlayerFocusDrill'; playerId: string; focus: PracticeFocus | null }
+  /** Auto-assign each roster player a focus targeting his weakest area. */
+  | { type: 'recommendPlayerFocuses' }
   /** League-wide top-N leaderboards for the League hub. */
   | { type: 'getLeagueLeaders'; topN?: number }
   /** Team leaders panel (goals/assists/points/+-/AvR/GAA/SV%). */
@@ -282,6 +457,10 @@ export type WorkerRequestBody =
   | { type: 'callUp'; playerId: string }
   /** Assign an NHL player to the user's AHL affiliate. */
   | { type: 'sendDown'; playerId: string }
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  | { type: 'setCoachRoster' }
+  /** Revert the most recent coach roster auto-set. */
+  | { type: 'undoCoachRoster' }
   /* ── Phase B: player profile view layer ── */
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   | { type: 'compareRadar'; playerIdA: string; playerIdB: string }
@@ -315,7 +494,14 @@ export type WorkerResponse = { id: number } & (
   /* ── v2 screens ── */
   | { type: 'dashboard'; dashboard: DashboardView }
   | { type: 'squad'; squad: SquadView }
+  | { type: 'leadership'; leadership: LeadershipView; ok?: boolean; message?: string }
+  | { type: 'mediaCircuit'; mediaCircuit: MediaCircuitView }
+  | { type: 'roleBoard'; roleBoard: RoleBoardView; assigned?: number }
   | { type: 'player'; player: PlayerProfileView }
+  /** #186: result of a no-trade-clause waive negotiation + the refreshed player. */
+  | { type: 'ntcNegotiation'; player: PlayerProfileView; ok: boolean; message: string
+      verdict?: 'granted' | 'conditional' | 'refused'
+      teams?: Array<{ teamId: string; name: string }> }
   | { type: 'tactics'; tactics: TacticsView }
   | { type: 'calendar'; calendar: CalendarView }
   | { type: 'schedule'; schedule: ScheduleView }
@@ -328,12 +514,38 @@ export type WorkerResponse = { id: number } & (
   | { type: 'trades'; trades: TradesView }
   | { type: 'draft'; draft: DraftView }
   | { type: 'finances'; finances: FinanceView }
+  | { type: 'waiverWire'; waiverWire: WaiverWireRowView[] }
+  | { type: 'leagueWire'; leagueWire: LeagueWireView }
+  | { type: 'gmProfile'; gmProfile: GMProfileView }
+  | { type: 'gmJobMarket'; gmJobMarket: GMJobMarketView }
+  | { type: 'gmRelationships'; gmRelationships: GMRelationshipsView }
+  | { type: 'mentorships'; mentorships: MentorshipView }
+  | { type: 'clubDirection'; clubDirection: ClubDirectionView }
+  | { type: 'fanbase'; fanbase: FanbaseView }
+  | { type: 'sponsors'; sponsors: SponsorsView }
+  | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
-  | { type: 'medical'; medical: MedicalView }
+  | { type: 'feed'; feed: FeedView }
+  | { type: 'negotiation'; negotiation: NegotiationView | null; signed?: boolean; message?: string }
+  | { type: 'faHub'; faHub: FaHubView }
+  | { type: 'devCamp'; devCamp: DevCampView | null }
+  | { type: 'devCampInvites'; invites: DevCampInvitesView }
+  | { type: 'devCampInviteResult'; ok: boolean; invited: boolean; message?: string; invites: DevCampInvitesView }
+  | { type: 'campInvites'; invites: CampInvitesView }
+  | { type: 'campInviteResult'; ok: boolean; invited: boolean; message?: string; invites: CampInvitesView }
+  | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
+  | { type: 'medical'; medical: MedicalView; ok?: boolean; message?: string }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
+  | { type: 'leagueComparison'; comparison: LeagueComparisonView }
+  | { type: 'playoffOdds'; odds: PlayoffOddsView }
+  | { type: 'staffMeetingSummary'; summary: StaffMeetingSummaryView }
+  | { type: 'staffMeeting'; staffMeeting: StaffMeetingView | null }
+  | { type: 'staffMeetingResult'; applied: string[]; summary: string }
+  | { type: 'coachMarket'; market: CoachMarketView }
+  | { type: 'coachHireResult'; ok: boolean; message: string }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'agenda'; items: AgendaItem[] }
@@ -343,10 +555,50 @@ export type WorkerResponse = { id: number } & (
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
+  /** Your assistant GM's live read as you build a package (advice, not an answer). */
+  | { type: 'tradeAssessment'; assessment: TradeAssessmentView }
+  /** The partner GM's NON-BINDING interest read (gauge interest before proposing). */
+  | { type: 'tradeInterestRead'; read: TradeInterestView }
+  /** Result of shopping a player: how many offers came in + a summary line. */
+  | { type: 'shopResult'; count: number; message: string }
+  /** A free agent's agent's read on the market (may deflect). */
+  | { type: 'agentRead'; text: string }
+  /** Result of tabling a standing offer to a free agent. */
+  | { type: 'faOfferResult'; ok: boolean; message: string; faHub: FaHubView }
+  /** Rival RFAs available to offer-sheet. */
+  | { type: 'rfaBoard'; board: RfaBoardView }
+  /** Result of an offer sheet: matched (kept) or landed (yours). */
+  | { type: 'offerSheetResult'; ok: boolean; matched: boolean; pending?: boolean; message: string; board: RfaBoardView }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
-  | { type: 'ok' }
+  | { type: 'ok'; note?: string; reaction?: ReactionSpec }
+  /** Result of an auto-applied coach roster: the player names moved each way. */
+  | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
+  | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
+  | {
+      type: 'searchResults'
+      results: {
+        players: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; faceId?: string }>
+        teams: Array<{ teamId: string; name: string; abbr: string }>
+      }
+    }
+  | { type: 'nameIndex'; entries: Array<[string, string]> }
+  | {
+      type: 'warRoom'
+      warRoom: {
+        stance: string
+        capLine: string
+        coachLine: string
+        agmLine: string
+        targets: Array<{ playerId: string; name: string; position: string; age: number; teamAbbr: string; gmName: string; gmStyle: string }>
+        suitors: Array<{ teamAbbr: string; gmName: string; gmStyle: string; wantsName: string }>
+        cast: Array<{ id: string; name: string; title: string; faceId?: string }>
+      } | null
+    }
+  /* ── season rhythm: meetings (M1) ── */
+  | { type: 'boardMeeting'; scene: BoardMeetingScene | null }
+  | { type: 'boardMeetingResult'; ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string }
   /* ── story layer ── */
   | { type: 'history'; history: HistoryView }
   | { type: 'lockerRoom'; lockerRoom: LockerRoomView }

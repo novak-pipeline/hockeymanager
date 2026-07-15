@@ -6,8 +6,11 @@ import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods
 import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
+import { PlayerActionMenu } from './components/PlayerActionMenu'
+import { resetNameIndex } from './components/Linkify'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
+import { LeagueTicker } from './components/LeagueTicker'
 import { SideNav } from './components/SideNav'
 import { TeamColorsProvider } from './components/Crest'
 import { SubTabBar } from './components/SubTabBar'
@@ -22,8 +25,23 @@ import { InboxScreen } from './screens/InboxScreen'
 import { MatchCenterScreen } from './screens/MatchCenterScreen'
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
+import { FeedScreen } from './screens/FeedScreen'
+import { DevCampScreen } from './screens/DevCampScreen'
+import { TrainingCampScreen } from './screens/TrainingCampScreen'
+import { LeadershipScreen } from './screens/LeadershipScreen'
+import { NegotiationScreen } from './screens/NegotiationScreen'
+import { FreeAgentMarketScreen } from './screens/FreeAgentMarketScreen'
 import { ScheduleScreen } from './screens/ScheduleScreen'
 import { TradesScreen } from './screens/TradesScreen'
+import { WaiverWireScreen } from './screens/WaiverWireScreen'
+import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
+import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
+import { CommandPalette } from './components/CommandPalette'
+import { PhoneCallOverlay } from './components/PhoneCallOverlay'
+import { WarRoomScreen } from './screens/WarRoomScreen'
+import { GMCareerScreen } from './screens/GMCareerScreen'
+import { MediaCircuitScreen } from './screens/MediaCircuitScreen'
+import { MentorshipScreen } from './screens/MentorshipScreen'
 import { HistoryScreen } from './screens/HistoryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TeamScreen } from './screens/TeamScreen'
@@ -31,9 +49,9 @@ import { LeagueScreen } from './screens/LeagueScreen'
 import { WorldScreen } from './screens/WorldScreen'
 import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
+import { JobMarketScreen } from './screens/JobMarketScreen'
+import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
-import { PressConference } from './components/PressConference'
-import { pollPress } from './lib/press'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -48,9 +66,14 @@ export function App(): JSX.Element {
   const [client, setClient] = useState<SimClient | null>(null)
   const [engine, setEngine] = useState('…')
   const [phase, setPhase] = useState<AppPhase>('setup')
-  const [seed, setSeed] = useState(2026)
+  // Random world by default — the seed is a knob for players who want a specific
+  // world, not something they have to set.
+  const [seed, setSeed] = useState(randomSeed)
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
+  // The most recent save on disk, if any — powers the one-click Resume on the
+  // setup screen so a code reload (dev) or restart drops you back in your game.
+  const [resumeInfo, setResumeInfo] = useState<{ slot: string; teamName: string; year: number; phase: string } | null>(null)
   const [busy, setBusy] = useState(false)
   // Mod picker state
   const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
@@ -64,6 +87,18 @@ export function App(): JSX.Element {
     })
     // Discover available mods (non-blocking; silently empty on browser/no-mod)
     void listMods().then((mods) => setAvailableMods(mods))
+    // Detect the newest save so the setup screen can offer a one-click Resume
+    // (so a dev reload / restart doesn't dump you back to a blank new game).
+    void listCareerSaves()
+      .then((slots) => {
+        const newest = [...slots].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
+        if (newest) setResumeInfo({ slot: newest.slot, teamName: newest.teamName, year: newest.year, phase: newest.phase })
+      })
+      .catch(() => { /* no bridge / no saves — just show the new-game flow */ })
+    // NOTE: the neural voices are NOT warmed on startup — running the onnxruntime
+    // WASM at launch is heavy and best kept off the critical boot path. They
+    // auto-load on the first spoken line instead (see speak.ts), so a fresh
+    // launch is always light and stable.
     return () => {
       c.dispose()
       setClient(null)
@@ -95,10 +130,37 @@ export function App(): JSX.Element {
     }
   }
 
+  // One-click resume of the newest save — restores the worker and drops straight
+  // into the shell, so a dev reload / restart continues your game instead of a
+  // blank new one.
+  const resumeGame = async (): Promise<void> => {
+    if (!client || busy || !resumeInfo) return
+    setBusy(true)
+    try {
+      const snapshot = await loadCareer(resumeInfo.slot)
+      const res = await client.importSave(snapshot)
+      if (res.type === 'error') { toast(`Resume failed: ${res.message}`, 'error'); return }
+      const dashRes = await client.getDashboard()
+      const ut = dashRes.type === 'dashboard' ? dashRes.dashboard.userTeam : null
+      setUserTeam({
+        teamId: ut?.teamId ?? '',
+        name: ut?.name ?? resumeInfo.teamName,
+        abbreviation: ut?.abbreviation ?? '',
+        city: '', conference: '', division: '',
+        strength: 0, colors: { primary: 0, secondary: 0 },
+      })
+      setPhase('shell')
+    } catch (err) {
+      toast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const pickTeam = async (team: TeamInfo): Promise<void> => {
     if (!client || busy) return
     setBusy(true)
-    const res = await client.startCareer(team.teamId)
+    const res = await client.startCareer(team.teamId, 'offseason')
     setBusy(false)
     if (res.type === 'error') {
       toast(res.message, 'error')
@@ -121,6 +183,8 @@ export function App(): JSX.Element {
               selectedModId={selectedModId}
               setSelectedModId={setSelectedModId}
               onCreate={() => void createLeague()}
+              resume={resumeInfo}
+              onResume={() => void resumeGame()}
             />
           )}
           {phase === 'picking' && (
@@ -203,11 +267,27 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     (r) => (r.type === 'dashboard' ? r.dashboard : null)
   )
 
-  // Press pump: fire on every refresh bump (version change).
-  const version = useUiStore((s) => s.version)
-  useEffect(() => {
-    void pollPress(client)
-  }, [version, client])
+  // Press-conference pop-up disabled for now (got in the way of testing).
+  // To re-enable: restore the pollPress pump + <PressConference /> render below.
+
+  // Autosave: after world-mutating calls, snapshot to the 'autosave' slot at
+  // most once every ~12s. Silent and fire-and-forget — so a code reload (dev) or
+  // a crash restores you to seconds ago, not the setup screen. The boot flow
+  // auto-resumes this slot; Load also picks the newest slot by mtime.
+  const lastAutosaveRef = useRef(0)
+  const maybeAutosave = useCallback((): void => {
+    const now = Date.now()
+    if (now - lastAutosaveRef.current < 12 * 1000) return
+    lastAutosaveRef.current = now
+    void (async () => {
+      try {
+        const res = await client.exportSave('Autosave')
+        if (res.type === 'save') await saveCareer('autosave', res.snapshot)
+      } catch {
+        /* autosave is best-effort; the manual Save button reports real errors */
+      }
+    })()
+  }, [client])
 
   /** Serialize world-mutating calls; toast errors; bump the refresh bus. */
   const run = useCallback(
@@ -222,19 +302,65 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           return null
         }
         bumpRefresh()
+        maybeAutosave()
         return res
       } finally {
         busyRef.current = false
         setBusy(false)
       }
     },
-    []
+    [maybeAutosave]
   )
 
   const actions = useMemo<ShellActions>(
     () => ({
       busy,
       continueGame: () => {
+        // On draft day the offseason is parked on the entry draft — Continue
+        // cannot sim past it. Route the GM into the Draft screen to conduct it.
+        if (dashboard?.draftPending) {
+          navigate('draft')
+          return
+        }
+        // Preseason: the season can't open until the GM names a captain. Block
+        // Continue outright while it's unset — routing to the Leadership screen
+        // if you're not already there. (Enforced here, not in the engine, so a
+        // headless advance can still roll a season.)
+        if (dashboard?.captainsPending) {
+          if (nav.screen !== 'leadership') navigate('leadership')
+          else toast('Name a captain to open the season — pick the C on this screen.')
+          return
+        }
+        // Cut day: camp's verdicts await before opening night. Continuing from
+        // the camp screen itself lets the coach apply his plan.
+        if (dashboard?.campPending && nav.screen !== 'trainingCamp') {
+          navigate('trainingCamp')
+          return
+        }
+        // Development camp (July): the first Continue after the draft walks you
+        // onto the rink. Skipping from there mails the staff report instead.
+        if (dashboard?.devCampPending && nav.screen !== 'devCamp') {
+          navigate('devCamp')
+          return
+        }
+        // Preseason board meeting: the first Continue of the year walks you into
+        // the boardroom. Skipping from there sends the AGM (engine-safe defaults).
+        if (dashboard?.boardMeetingPending && nav.screen !== 'boardMeeting') {
+          navigate('boardMeeting')
+          return
+        }
+        // End-of-season review: one Continue press walks you in; continuing
+        // FROM the review screen (or anywhere twice) lets it lapse engine-side.
+        if (dashboard?.reviewPending && nav.screen !== 'seasonReview') {
+          navigate('seasonReview')
+          return
+        }
+        // Bi-weekly staff meeting: the coaches convene with live-roster proposals.
+        // Skipping (delegate) hands the meeting to the AGM (engine-safe defaults).
+        if (dashboard?.staffMeetingDue && nav.screen !== 'staffBriefing') {
+          navigate('staffBriefing')
+          return
+        }
         void run(() => client.continueGame())
       },
       advanceDays: (days: number) => {
@@ -253,7 +379,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run]
+    [busy, client, run, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -264,17 +390,33 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       if (watched || e.repeat) return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
-      if (
-        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
-        tag === 'BUTTON' || tag === 'A' ||
-        t?.isContentEditable || t?.getAttribute('role') === 'button'
-      ) return
+      // Only bail when the GM is actually typing — space must ADVANCE the game
+      // (FM-style) even when a button/link happens to hold focus after a click.
+      // preventDefault below stops the focused control from also activating.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return
+      // Space sims the next day everywhere — EXCEPT on the inbox screen, where
+      // it first steps through the unread mail (the inbox's own handler does
+      // that and consumes the key). Once the inbox is all read, Space sims here.
+      const unread = dashboard?.unreadNews ?? 0
+      if (nav.screen === 'inbox' && unread > 0) return // inbox handler advances messages
       e.preventDefault()
       actions.continueGame()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [watched, actions])
+  }, [watched, actions, nav, dashboard?.unreadNews])
+
+  // Deadline day: when the engine holds the sim, walk the GM into the trade
+  // office automatically — the draft-day pattern, once a season.
+  const deadlineRoutedRef = useRef(false)
+  useEffect(() => {
+    if (dashboard?.deadlinePending && !deadlineRoutedRef.current) {
+      deadlineRoutedRef.current = true
+      navigate('warRoom')
+      toast('Deadline day — your staff are in the war room', 'info')
+    }
+    if (!dashboard?.deadlinePending) deadlineRoutedRef.current = false
+  }, [dashboard?.deadlinePending, navigate])
 
   const closeViewer = useCallback(() => {
     setWatched(null)
@@ -328,6 +470,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           toast(`Load failed: ${res.message}`, 'error')
           return
         }
+        resetNameIndex() // the loaded world may have different players
         setNav({ screen: 'dashboard', params: {} })
         setHistory([])
         bumpRefresh()
@@ -352,7 +495,6 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         ) : (
           <div className="app-shell" style={appTheme}>
-            <PressConference />
             <div className="app-body">
               <SideNav dashboard={dashboard} />
               <div className="app-right">
@@ -366,6 +508,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   onSave={onSave}
                   onLoad={onLoad}
                 />
+                {nav.screen === 'dashboard' && <LeagueTicker />}
+                <CommandPalette />
+                <PhoneCallOverlay />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <ScreenBoundary screen={nav.screen}>
@@ -376,6 +521,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             </div>
           </div>
         )}
+        <PlayerActionMenu />
         </TeamColorsProvider>
       </ActionsContext.Provider>
     </NavContext.Provider>
@@ -431,6 +577,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardScreen />
     case 'staffMeeting':
       return <StaffMeetingScreen />
+    case 'jobMarket':
+      return <JobMarketScreen />
+    case 'scoutProfile':
+      return <ScoutProfileScreen scoutId={props.params.scoutId ?? ''} />
 
     // ── News ──
     case 'inbox':
@@ -464,6 +614,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
+    case 'scoutingCentre':
+    case 'scoutingPlayers':
+    case 'scoutingFocus':
+    case 'scoutingCoverage':
     case 'scoutingDraft':
     case 'draft':
     case 'offseason':
@@ -490,11 +644,39 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
 
     // ── Shared screens ──
     case 'matchcenter':
-      return <MatchCenterScreen />
+      return <MatchCenterScreen gameId={params.gameId as string | undefined} />
     case 'calendar':
       return <CalendarScreen />
+    case 'feed':
+      return <FeedScreen />
+    case 'devCamp':
+      return <DevCampScreen />
+    case 'trainingCamp':
+      return <TrainingCampScreen />
+    case 'leadership':
+      return <LeadershipScreen />
+    case 'negotiation':
+      return <NegotiationScreen />
+    case 'faMarket':
+      return <FreeAgentMarketScreen />
     case 'trades':
       return <TradesScreen />
+    case 'waivers':
+      return <WaiverWireScreen />
+    case 'boardMeeting':
+      return <BoardMeetingScreen />
+    case 'seasonReview':
+      return <BoardMeetingScreen variant="review" />
+    case 'staffBriefing':
+      return <StaffBriefingScreen />
+    case 'warRoom':
+      return <WarRoomScreen />
+    case 'gmCareer':
+      return <GMCareerScreen />
+    case 'mediaCircuit':
+      return <MediaCircuitScreen />
+    case 'mentorship':
+      return <MentorshipScreen />
     case 'lockerRoom':
       return <Notice kind="info">Locker room — navigate via Team &gt; Roster.</Notice>
     case 'settings':
@@ -510,6 +692,11 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
 
 /* ────────────────────────── pre-career ────────────────────────── */
 
+/** A fresh random world seed (1..1,000,000). */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 1_000_000) + 1
+}
+
 function SetupHero(props: {
   seed: number
   setSeed: (n: number) => void
@@ -518,13 +705,32 @@ function SetupHero(props: {
   selectedModId: string
   setSelectedModId: (id: string) => void
   onCreate: () => void
+  resume: { teamName: string; year: number; phase: string } | null
+  onResume: () => void
 }): JSX.Element {
+  const phaseLabel = (p: string): string =>
+    p === 'offseason' ? 'offseason' : p === 'playoffs' ? 'playoffs' : 'regular season'
   return (
     <div className="hero">
-      <h1 className="hero-title">HOCKEY MANAGER</h1>
+      <h1 className="hero-title" style={{ marginBottom: 2 }}>THE SHOW</h1>
+      <div style={{ fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', color: 'var(--accent, #f5b301)', fontWeight: 700, marginBottom: 10 }}>
+        Franchise Hockey Manager
+      </div>
       <p className="hero-sub">
-        Generate a league, choose a club, and live the season from behind the bench.
+        Generate a league and choose a club. You take over in the summer — the draft,
+        free agency and training camp are yours before the puck drops.
       </p>
+      {props.resume && (
+        <div className="panel" style={{ marginBottom: 'var(--sp-4)', borderColor: 'var(--accent, #f5b301)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+            <div>
+              <div className="muted small">Pick up where you left off</div>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{props.resume.teamName} · {props.resume.year} <span className="muted" style={{ fontWeight: 500 }}>({phaseLabel(props.resume.phase)})</span></div>
+            </div>
+            <button className="btn btn-primary btn-lg" autoFocus disabled={props.busy} onClick={props.onResume}>▶ Resume</button>
+          </div>
+        </div>
+      )}
       <div className="panel stack">
         {/* Database picker — only shown when at least one mod is installed */}
         {props.availableMods.length > 0 && (
@@ -551,15 +757,26 @@ function SetupHero(props: {
         )}
         <div>
           <label className="field-label" htmlFor="seed-input">
-            World seed
+            World seed <span className="muted" style={{ fontWeight: 400 }}>— random by default; set one only to replay a specific world</span>
           </label>
-          <input
-            id="seed-input"
-            className="input"
-            type="number"
-            value={props.seed}
-            onChange={(e) => props.setSeed(Number(e.target.value))}
-          />
+          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <input
+              id="seed-input"
+              className="input"
+              type="number"
+              style={{ flex: 1 }}
+              value={props.seed}
+              onChange={(e) => props.setSeed(Number(e.target.value))}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost"
+              title="Roll a new random world"
+              onClick={() => props.setSeed(randomSeed())}
+            >
+              🎲 Randomize
+            </button>
+          </div>
         </div>
         <button className="btn btn-hero btn-lg" onClick={props.onCreate} disabled={props.busy}>
           {props.busy ? 'Generating…' : 'Generate league'}
@@ -580,6 +797,15 @@ function TeamPicker(props: {
         <h1 className="screen-title">Choose your club</h1>
         <span className="muted small">sorted by squad rating</span>
       </div>
+      {props.busy && (
+        <div
+          className="panel"
+          style={{ padding: '12px 16px', marginBottom: 'var(--sp-3)', fontSize: 14 }}
+        >
+          ⏳ Simulating the season before your arrival — standings, storylines and a
+          draft class are being written. This takes a moment…
+        </div>
+      )}
       <div className="grid grid-auto">
         {props.teams.map((t) => (
           <button

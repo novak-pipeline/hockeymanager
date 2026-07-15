@@ -1,4 +1,4 @@
-import type { PlayerId } from './ids'
+import type { PlayerId, TeamId } from './ids'
 import type { RawAttributes, CompositeRatings } from './ratings'
 import type { PlayerRole } from './tactics'
 
@@ -20,6 +20,15 @@ export interface Contract {
   expiryYear: number
   noTradeClause: boolean
   twoWay: boolean
+  /** Negotiated clause detail behind noTradeClause: modified = partial
+   *  no-trade list, full = no-move. Optional/additive (DEPTH 1). */
+  clause?: 'none' | 'modified' | 'full'
+  /** Percent of salary structured as signing bonus. Optional/additive. */
+  signingBonusPct?: number
+  /** Annual cap hit a FORMER team retains on this contract after a
+   *  retained-salary trade — the rostering team only counts salary minus this.
+   *  Optional/additive; absent = nothing retained. (#157) */
+  retainedByOthers?: number
 }
 
 export type InjuryKind = 'upperBody' | 'lowerBody' | 'concussion' | 'illness'
@@ -28,6 +37,10 @@ export interface Injury {
   kind: InjuryKind
   gamesRemaining: number
   description: string
+  /** How many games the injury cost in total, set when it happens. Drives the
+   *  match-rust ramp on return (a long absence → a rusty comeback). Optional/
+   *  additive; absent on pre-existing saves → treated as 0 (no rust). */
+  totalGames?: number
 }
 
 /** Per-situation splits so PP/PK production is tracked separately from ev. */
@@ -41,6 +54,9 @@ export interface SituationStats {
 export interface SeasonStats {
   season: number
   teamId: string
+  /** Which tier this line was played in. Absent = NHL (backward-compatible with
+   *  existing saves and imported histories). An AHL season records its own line. */
+  league?: 'nhl' | 'ahl'
   gamesPlayed: number
   ev: SituationStats
   pp: SituationStats
@@ -52,6 +68,9 @@ export interface SeasonStats {
   shotsAgainst: number
   goalsAgainst: number
   shutouts: number
+  /** Season average match rating (EHM "Avr", 0–10), accumulated from game one.
+   *  Absent on imported pre-career seasons (no in-game ratings exist for them). */
+  avgRating?: number
 }
 
 export interface Player {
@@ -74,6 +93,10 @@ export interface Player {
   fatigue: number
   morale: number
   injuryStatus: Injury | null
+  /** #157 (CBA): placed on Long-Term Injured Reserve. While true AND injured, his
+   *  cap hit is relieved from the club's cap so a replacement can be signed over
+   *  the ceiling. Optional — absent on everyone by default; auto-clears on return. */
+  ltir?: boolean
   /** Hot/cold streak modifier — the drama lever. */
   form: number
   /**
@@ -133,6 +156,13 @@ export interface Player {
   pressure?: number
   /** Fair-play and respect-for-opponents trait (1–20). */
   sportsmanship?: number
+  /**
+   * Hidden "Consistency" trait (1–20): how reliably he performs to his ability
+   * night to night. Shapes the spread of his per-game ratings (low = wide swings
+   * + a lower achievable average; high = tight + reliable), never the sim event
+   * stream. Scouts only hint at it. Absent = treated as no-op. See
+   * src/engine/league/consistency.ts. */
+  consistency?: number
 
   /**
    * Career history counts. Populated by mod loaders; absent on fictional players.
@@ -202,11 +232,77 @@ export interface Player {
   draftClub?: string
 
   /**
+   * The NHL club that holds this player's signing rights — set when he's drafted
+   * (in-game) or imported. A prospect can play in junior/the AHL while his rights
+   * are held by an NHL club. This is the spine for junior age-out, a deeper draft,
+   * and offer sheets. Absent for undrafted players / free agents with no holder.
+   */
+  rightsTeamId?: TeamId
+
+  /**
+   * #188: the GM's declared role for this player — an EHM-style squad status. It
+   * sets an expectation the club is promising to honour: a "key player" iced and
+   * used like one, a "prospect" given patience. The coach's lineup weights it and
+   * a mismatch (a key man buried, a prospect rushed) nudges morale. GM-set only;
+   * absent = unassigned. Persisted with the player.
+   */
+  squadStatus?: SquadStatus
+  /**
+   * #188: the GM's trade posture for this player — untouchable, available (open
+   * to offers), or actively listed (shopped on the block). Feeds the trade block
+   * and AI interest. Absent = default (not on the block).
+   */
+  tradeStatus?: TradeStatus
+
+  /**
+   * #171: GM load-management directive — hold this healthy player out of the
+   * lineup to recover his condition. The coach's auto-lineup skips a resting
+   * player; it auto-clears once he's fresh again. Absent = available.
+   */
+  resting?: boolean
+
+  /**
+   * Match-rust counter: games still needed to shake off the ring rust after a
+   * long injury layoff. While > 0 the sim scales this player's on-ice ratings
+   * down a touch (via effectiveResolve), burning off one game each time he
+   * plays. Absent/0 = fully sharp. Optional/additive.
+   */
+  rustGames?: number
+
+  /**
+   * #186: this player has agreed to waive his no-trade clause outright — his agent
+   * signed off on a move to any destination. Set by the ask-agent negotiation;
+   * lets the club shop/trade him despite the clause. Absent = clause still binds.
+   */
+  ntcWaived?: boolean
+  /**
+   * #186: the specific clubs this player would accept a trade to (a partial waive
+   * he granted when asked). A trade to a team on this list clears his no-trade
+   * clause even without a full waive. Absent = no list given.
+   */
+  tradeAcceptTeams?: TeamId[]
+
+  /**
    * Real season-by-season career history imported from the source DB. Newest
    * first. Absent on fictional players. Display-only — the sim never reads it.
    */
   careerHistory?: CareerSeasonRecord[]
 }
+
+/** #188: the GM's declared role for a player (EHM "squad status"). */
+export type SquadStatus =
+  | 'keyPlayer'    // franchise/top — expects star minutes and every-night deployment
+  | 'coreStarter'  // core regular — a nightly top-six / top-four fixture
+  | 'rotation'     // depth — dresses regularly in a smaller role
+  | 'topProspect'  // hot prospect for the future — protected, on an accelerated track
+  | 'prospect'     // young player, still developing — patience expected (AHL is fine)
+  | 'surplus'      // expendable — no promise; free to move on
+
+/** #188: the GM's trade posture for a player. */
+export type TradeStatus =
+  | 'untouchable'  // not for sale at any price
+  | 'available'    // open to the right offer
+  | 'listed'       // actively shopped on the block
 
 /** One historical season row from the source DB (skater + goalie fields). */
 export interface CareerSeasonRecord {

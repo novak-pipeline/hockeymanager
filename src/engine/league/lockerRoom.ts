@@ -87,7 +87,7 @@ const clamp = (v: number, lo: number, hi: number): number =>
  * same scale and blended with loyalty/determination — otherwise falls back to
  * the professionalism + loyalty + determination personality proxy.
  */
-function leadershipScore(p: Player): number {
+export function leadershipScore(p: Player): number {
   const { professionalism, loyalty, determination } = p.personality
   if (p.leadership !== undefined) {
     return (p.leadership / 99) * 40 + (loyalty + determination) / 2
@@ -108,7 +108,7 @@ function captainScore(p: Player): number {
  * exceptional — a Crosby/McDavid-type — to leapfrog the veterans. Prevents a
  * rookie being handed the captaincy the moment he walks in.
  */
-function isCaptainEligible(p: Player): boolean {
+export function isCaptainEligible(p: Player): boolean {
   if (p.position === 'G') return false
   if (p.age >= 24) return true
   const lead = leadershipScore(p)
@@ -590,10 +590,13 @@ export function chemistryModifier(
 export function onPlayerDeparted(
   state: LockerRoomState,
   playerId: string,
-  rng: Rng
+  rng: Rng,
+  /** Departing player's name for the news copy; falls back to a generic phrase. */
+  playerName?: string
 ): { newsSeeds: NewsSeed[]; leadershipCrisis: boolean } {
   const newsSeeds: NewsSeed[] = []
   let leadershipCrisis = false
+  const who = playerName ?? 'A veteran leader'
 
   const wasCapt = state.captainId === playerId
   const wasAlternate = state.alternateIds.includes(playerId)
@@ -608,16 +611,16 @@ export function onPlayerDeparted(
     state.captainId = null
     newsSeeds.push({
       category: 'league',
-      headline: `Captain vacancy after departure`,
-      body: `The team is without a captain following the departure. A new leader must be named.`,
+      headline: `${who} departs — the captaincy is vacant`,
+      body: `The team is without a captain following ${who}'s departure. A new leader must be named.`,
       playerId,
     })
   } else if (wasAlternate) {
     state.alternateIds = state.alternateIds.filter((id) => id !== playerId)
     newsSeeds.push({
       category: 'league',
-      headline: `Alternate captain departs`,
-      body: `An alternate captain has left the team, creating a vacancy in the leadership group.`,
+      headline: `Alternate captain ${who} departs`,
+      body: `${who}, an alternate captain, has left the team, creating a vacancy in the leadership group.`,
       playerId,
     })
   }

@@ -4,7 +4,24 @@
  * All chrome built from CSS tokens + utility classes; no inline style constants.
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* Inter, self-hosted (variable font: one file serves weights 100-900).
+ * No network fetch at runtime — CSP-clean and Steam/offline-safe. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   color-scheme: dark;
@@ -48,6 +65,10 @@
   --accent2: var(--amber);
   --danger:  var(--red);
   --success: var(--green);
+
+  /* ── local-AI writer ink: prose authored by the on-device model renders in
+        this distinct teal so you always know what the AI wrote vs a template ── */
+  --llm-ink: #6fe3d6;
 
   /* ── shape ── */
   --radius-sm: 6px;
@@ -1104,12 +1125,57 @@ a:hover { text-decoration: underline; }
   font-size: 15px;
 }
 
-/* 3-col card grid */
+/* The dashboard is ONE SCREEN — FM-style. The section locks to the shell's
+   height, the grid takes what's left under the hero, and every column fits;
+   each column nominates one .dash-fill card that absorbs the slack and
+   scrolls internally. The page itself never scrolls. */
+.dash-viewport {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
 .dash-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 1fr 1.6fr 1fr;
-  gap: var(--sp-4);
-  align-items: start;
+  grid-template-columns: 1fr 1.55fr 1.05fr;
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+
+.dash-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.dash-col > .panel {
+  flex-shrink: 0;
+}
+
+/* The column's designated grower: fills leftover height, children scroll.
+   flex-basis 0 keeps its CONTENT from inflating the layout — the viewport
+   sets the height, growers absorb the difference. */
+.dash-col > .dash-fill {
+  flex: 1 1 0;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+.dash-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Tighter cards on the dashboard — density is the point of a portal. */
+.dash-col > .panel {
+  padding: 10px 14px;
 }
 
 @media (max-width: 1100px) {
@@ -1368,3 +1434,114 @@ a:hover { text-decoration: underline; }
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.45; }
 }
+
+/* ── league ticker (ESPN BottomLine-style crawl, bottom of shell) ── */
+
+.ticker {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  background: var(--bg0);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  z-index: 15;
+}
+.ticker--collapsed { height: 22px; }
+.ticker-handle {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.ticker-handle:hover { color: var(--text); }
+
+.ticker-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-right: 1px solid var(--line);
+  background: var(--bg1);
+}
+.ticker-brand {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgb(var(--accent-rgb));
+  margin-right: 2px;
+}
+.ticker-mode {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ticker-mode:hover { color: var(--text); background: var(--bg3); }
+.ticker-mode.is-active { color: var(--accent-ink); background: rgb(var(--accent-rgb)); }
+.ticker-hide {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.ticker-hide:hover { color: var(--text); }
+
+.ticker-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ticker-empty { color: var(--muted); padding: 0 12px; font-style: italic; }
+
+.ticker-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation-name: ticker-scroll;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+.ticker-viewport:hover .ticker-track { animation-play-state: paused; }
+.ticker-run { display: inline-flex; }
+.ticker-item {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 16px;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ticker-item:hover { color: var(--violet-h); }
+.ticker-item.is-accent { color: rgb(var(--accent-rgb)); font-weight: 600; }
+
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* Respect reduced-motion: no crawl — show a static, horizontally scrollable strip. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; transform: none; }
+  .ticker-run:nth-child(2) { display: none; }
+  .ticker-viewport { overflow-x: auto; scrollbar-width: thin; }
+}
+
+/* #187: player action context-menu items */
+.menu-item:hover:not(:disabled) { background: var(--bg3); }
+.menu-item:disabled { opacity: 0.5; cursor: default; }

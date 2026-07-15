@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
-import type { CombineRowView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
+import type { CombineRowView, DraftAdviceView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -139,6 +141,9 @@ function BestAvailable(props: {
     )
   }
 
+  const cm = (v?: number) => (v ? `${Math.floor(v / 30.48)}'${Math.round((v % 30.48) / 2.54)}"` : '—')
+  const lb = (v?: number) => (v ? `${Math.round(v * 2.205)}` : '—')
+
   return (
     <Panel title="Best available">
       <div className="table-wrap">
@@ -148,30 +153,66 @@ function BestAvailable(props: {
               <th>Rank</th>
               <th>Name</th>
               <th>Pos</th>
+              <th title="Shoots/catches">S</th>
               <th>Age</th>
+              <th>League</th>
+              <th title="Height">Ht</th>
+              <th title="Weight (lb)">Wt</th>
+              <th className="num" title="Season scoring (GP · G–A–PTS)">Season</th>
               <th className="num">OVR</th>
               <th>Potential</th>
+              <th title="Your scouts' own board rank vs the public consensus — ▲ they rate higher, ▼ lower">Scouts</th>
+              <th className="num" title="How well your scouts know this prospect (0–100%)">Know.</th>
               {props.userIsOnClock && <th />}
             </tr>
           </thead>
           <tbody>
-            {available.slice(0, 50).map((p) => (
+            {available.slice(0, 60).map((p) => (
               <tr key={p.playerId}>
-                <td className="num" style={{ color: 'var(--muted)', width: 44 }}>
+                <td className="num" style={{ color: 'var(--muted)', width: 40 }}>
                   {p.rank}
                 </td>
                 <td>
                   <PlayerLink playerId={p.playerId} name={p.name} />
+                  {p.club && <div className="muted" style={{ fontSize: 10 }}>{p.club}</div>}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{p.position}</td>
+                <td style={{ color: 'var(--muted)' }}>{p.shoots ?? '—'}</td>
                 <td style={{ color: 'var(--muted)' }}>{p.age}</td>
-                <td className="num" style={{ fontWeight: 600, color: p.scouted && !p.scouted.exact ? 'var(--muted)' : undefined }}>
+                <td className="small" style={{ color: 'var(--muted)' }}>{p.leagueAbbr ?? '—'}</td>
+                <td className="small" style={{ color: 'var(--muted)' }}>{cm(p.heightCm)}</td>
+                <td className="small" style={{ color: 'var(--muted)' }}>{lb(p.weightKg)}</td>
+                <td className="num small" style={{ color: 'var(--muted)' }}
+                  title={p.seasonIsHistory ? 'Last season' : 'This season'}>
+                  {p.seasonGp
+                    ? <>{p.seasonGp}gp · {p.seasonG}-{p.seasonA}-{p.seasonPts}{p.seasonIsHistory ? '' : ''}</>
+                    : '—'}
+                </td>
+                <td className="num">
                   {p.scouted && !p.scouted.exact
-                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
-                    : p.overall}
+                    ? <span style={{ opacity: 0.6 }} title="Fog-of-war estimate"><OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} /></span>
+                    : <OverallStars value={p.overall} />}
                 </td>
                 <td>
                   <PotentialStars stars={p.potentialStars} />
+                </td>
+                <td className="small">
+                  {p.scoutRank
+                    ? <span
+                        title={
+                          p.scoutVerdict === 'higher' ? 'Your scouts are HIGHER on him than the board'
+                          : p.scoutVerdict === 'lower' ? 'Your scouts are LOWER on him than the board'
+                          : 'Your scouts agree with the board'
+                        }
+                        style={{ color: p.scoutVerdict === 'higher' ? 'var(--success)' : p.scoutVerdict === 'lower' ? 'var(--danger)' : 'var(--muted)' }}
+                      >
+                        #{p.scoutRank}{p.scoutVerdict === 'higher' ? ' ▲' : p.scoutVerdict === 'lower' ? ' ▼' : ''}
+                      </span>
+                    : <span style={{ color: 'var(--muted)' }}>—</span>}
+                </td>
+                <td className="num small" style={{ color: p.knowledge >= 60 ? 'var(--success)' : p.knowledge >= 30 ? 'var(--accent)' : 'var(--muted)' }}
+                  title={p.knowledge < 30 ? 'Barely scouted — this read is a guess' : 'How well your scouts know him'}>
+                  {p.knowledge}%
                 </td>
                 {props.userIsOnClock && (
                   <td>
@@ -481,12 +522,138 @@ function CombineTab(props: { combine: CombineRowView[] }): JSX.Element {
   )
 }
 
+// ─── staff war room: advice while on the clock ──────────────────────────────────
+
+const ANGLE_STYLE: Record<DraftAdviceView['kind'], { chip: string; tint: string }> = {
+  bpa: { chip: 'chip chip-hero', tint: 'rgba(var(--accent-rgb),0.10)' },
+  need: { chip: 'chip chip-warn', tint: 'rgba(255,210,74,0.08)' },
+  fit: { chip: 'chip chip-violet', tint: 'rgba(139,92,246,0.10)' },
+  ceiling: { chip: 'chip chip-success', tint: 'rgba(95,208,104,0.08)' },
+  safe: { chip: 'chip', tint: 'var(--bg1)' },
+}
+
+function AdviceCard(props: {
+  a: DraftAdviceView
+  busy: boolean
+  onDraft: (playerId: string) => void
+}): JSX.Element {
+  const { a, busy, onDraft } = props
+  const style = ANGLE_STYLE[a.kind]
+  return (
+    <div
+      style={{
+        background: style.tint,
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)',
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        minWidth: 240,
+        flex: '1 1 240px',
+      }}
+    >
+      <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+        <PlayerFace faceId={a.faceId} name={a.staffName} size={34} />
+        <div style={{ lineHeight: 1.2 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{a.staffName}</div>
+          <div className="muted" style={{ fontSize: 11 }}>{a.role}</div>
+        </div>
+        <div className="row" style={{ marginLeft: 'auto', gap: 4 }}>
+          {a.isConsensus && (
+            <span className="chip chip-hero" style={{ fontSize: 9 }} title="His pick is also the best player available — a clear-cut call">
+              ★ Consensus
+            </span>
+          )}
+          <span className={style.chip} style={{ fontSize: 10 }}>{a.angle}</span>
+        </div>
+      </div>
+      <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
+        <PlayerLink playerId={a.playerId} name={a.playerName} />
+        <span className="muted" style={{ fontSize: 12 }}>{a.position} · #{a.rank}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text)', opacity: 0.9, fontStyle: 'italic' }}>
+        “{a.reason}”
+      </div>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 'auto' }}>
+        <span className="muted small" title="This advisor's evaluation accuracy">
+          Confidence {a.confidence}%
+        </span>
+        <button
+          className="btn btn-primary"
+          style={{ marginLeft: 'auto', padding: '3px 12px', fontSize: 12 }}
+          disabled={busy}
+          onClick={() => onDraft(a.playerId)}
+        >
+          Draft him
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function StaffAdvicePanel(props: {
+  advice: DraftAdviceView[]
+  busy: boolean
+  onDraft: (playerId: string) => void
+}): JSX.Element {
+  // Which advisors are giving you their take — toggle any in/out.
+  const advisors = useMemo(() => {
+    const seen = new Set<string>()
+    const list: { id: string; name: string; role: string }[] = []
+    for (const a of props.advice) {
+      if (!seen.has(a.staffId)) { seen.add(a.staffId); list.push({ id: a.staffId, name: a.staffName, role: a.role }) }
+    }
+    return list
+  }, [props.advice])
+  // Default: only the 4 most important advisors are on (the engine emits them
+  // first — Head Scout, Assistant GM, Head Coach, lead pro scout). The rest are
+  // available but toggled off so the room isn't a wall of cards.
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(advisors.slice(4).map((a) => a.id))
+  )
+  const toggle = (id: string): void =>
+    setHidden((h) => { const n = new Set(h); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const shown = props.advice.filter((a) => !hidden.has(a.staffId))
+
+  return (
+    <Panel title="War room — your staff's recommendations">
+      {advisors.length > 1 && (
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+          <span className="muted small" style={{ marginRight: 2 }}>Ask:</span>
+          {advisors.map((adv) => {
+            const on = !hidden.has(adv.id)
+            return (
+              <button
+                key={adv.id}
+                type="button"
+                className={`chip${on ? ' chip-violet' : ''}`}
+                style={{ cursor: 'pointer', opacity: on ? 1 : 0.45, fontSize: 11 }}
+                title={`${adv.role} — click to ${on ? 'hide' : 'show'}`}
+                onClick={() => toggle(adv.id)}
+              >
+                {adv.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        {shown.map((a) => (
+          <AdviceCard key={a.staffId + a.playerId} a={a} busy={props.busy} onDraft={props.onDraft} />
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
 // ─── main screen ──────────────────────────────────────────────────────────────
 
 type DraftTab = 'board' | 'available' | 'combine'
 
 export function DraftScreen(): JSX.Element {
   const client = useClient()
+  const nav = useNav()
   const { data, loading, error, refetch } = useScreenData<DraftView>(
     () => client.getDraft(),
     (r) => (r.type === 'draft' ? r.draft : null)
@@ -526,6 +693,44 @@ export function DraftScreen(): JSX.Element {
     }
   }
 
+  async function handleSimNextPick() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.simNextPick()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      refetch()
+    }
+  }
+
+  async function handleAutoDraft() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.autoDraft()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      toast('Draft completed — best available auto-picked for your club.', 'success')
+      refetch()
+    }
+  }
+
+  /** Draft done → resume the offseason (move to re-signings) and return. */
+  async function handleProceed() {
+    setBusy(true)
+    setMutErr(null)
+    const r = await client.advanceOffseason()
+    setBusy(false)
+    if (r.type === 'error') {
+      setMutErr(r.message)
+    } else {
+      nav.navigate('offseason')
+    }
+  }
+
   return (
     <section>
       <ScreenHeader title={data ? `${data.year} Draft` : 'Draft'}>
@@ -559,6 +764,16 @@ export function DraftScreen(): JSX.Element {
             </div>
             {!data.complete && !data.userIsOnClock && (
               <button
+                className="btn"
+                disabled={busy}
+                onClick={handleSimNextPick}
+                title="Advance one pick"
+              >
+                {busy ? '…' : 'Sim next pick'}
+              </button>
+            )}
+            {!data.complete && !data.userIsOnClock && (
+              <button
                 className="btn btn-primary"
                 disabled={busy}
                 onClick={handleSimToMyPick}
@@ -566,7 +781,31 @@ export function DraftScreen(): JSX.Element {
                 {busy ? 'Simming…' : 'Sim to my pick'}
               </button>
             )}
+            {!data.complete && (
+              <button
+                className="btn"
+                disabled={busy}
+                onClick={handleAutoDraft}
+                title="Auto-pick best available for your remaining picks and finish the draft"
+              >
+                {busy ? 'Simming…' : 'Sim entire draft'}
+              </button>
+            )}
+            {data.complete && (
+              <button
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={handleProceed}
+              >
+                {busy ? '…' : 'Proceed to re-signings →'}
+              </button>
+            )}
           </div>
+
+          {/* war room — staff recommendations while you're on the clock */}
+          {data.userIsOnClock && data.advice && data.advice.length > 0 && (
+            <StaffAdvicePanel advice={data.advice} busy={busy} onDraft={handleDraft} />
+          )}
 
           {/* tab strip */}
           <div className="tabs" style={{ marginBottom: 0 }}>

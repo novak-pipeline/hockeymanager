@@ -56,7 +56,15 @@ const NHLE_BY_ABBREV: Record<string, number> = {
   WHL: 0.29,
   QMJHL: 0.26, // a.k.a. LHJMQ / QMJHL
   USHL: 0.19,
-  J20: 0.15, // Swedish/Finnish U20
+  NTDP: 0.18, // USA Hockey National Team Development Program (plays USHL + exhibitions)
+  BCHL: 0.18, // British Columbia HL — now an elite Tier-1 junior
+  MHL: 0.2, // Russian Molodyozhnaya HL — Russia's top junior
+  J20: 0.15, // Swedish U20 Nationell
+  U20SM: 0.15, // Finnish U20 SM-sarja
+  CZEJR: 0.13, // Czech Extraliga juniorů
+  NAHL: 0.12, // North American HL — US Tier-II junior
+  SVKJR: 0.11, // Slovak Extraliga juniorov
+  DNL: 0.1, // Deutsche Nachwuchs Liga — German top junior
 }
 
 /** Name keywords → abbrev key, for leagues whose abbrev doesn't match cleanly. */
@@ -71,6 +79,15 @@ const NAME_KEYWORDS: Array<[RegExp, string]> = [
   [/western hockey/i, 'WHL'],
   [/quebec|lhjmq|maritimes/i, 'QMJHL'],
   [/united states hockey|\bUSHL\b/i, 'USHL'],
+  [/national team development|\bUSNTDP\b|\bNTDP\b/i, 'NTDP'],
+  [/british columbia hockey|\bBCHL\b/i, 'BCHL'],
+  [/north american hockey|\bNAHL\b/i, 'NAHL'],
+  [/molodyozhnaya|\bMHL\b/i, 'MHL'],
+  [/u20 nationell/i, 'J20'],
+  [/u20 sm-sarja/i, 'U20SM'],
+  [/extraliga junioru/i, 'CZEJR'],
+  [/extraliga juniorov/i, 'SVKJR'],
+  [/nachwuchs liga/i, 'DNL'],
   [/\bNCAA\b|college/i, 'NCAA'],
   [/national league|\bNL\b/i, 'NL'],
   [/extraliga/i, 'EXTRALIGA'],
@@ -131,4 +148,12 @@ export function nhlEquivalent(value: number, factor: number): number {
 export function nhleFactorByAbbrev(abbrev: string): number {
   const key = (abbrev || '').trim().toUpperCase()
   return NHLE_BY_ABBREV[key] ?? 0.30
+}
+
+/** NHL-system PRO tiers whose players are signed (drafted/contracted) and so are
+ *  NOT part of the amateur draft pool. The NHL and its AHL farm — every other
+ *  league (junior, college, European) can hold draft-eligible amateurs. */
+const PRO_LEAGUE_ABBREVS = new Set(['NHL', 'AHL'])
+export function isProLeagueAbbrev(abbrev: string): boolean {
+  return PRO_LEAGUE_ABBREVS.has((abbrev || '').trim().toUpperCase())
 }

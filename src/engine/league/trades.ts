@@ -221,7 +221,10 @@ export function teamPhilosophy(teamId: TeamId): TeamPhilosophy {
  */
 export function buildTeamProfile(
   team: Team,
-  players: Map<PlayerId, Player>
+  players: Map<PlayerId, Player>,
+  /** Persona-derived philosophy override (Living World LW3). Absent → the
+   *  original hash-based assignment (back-compat). */
+  philosophy?: TeamPhilosophy
 ): TeamProfile {
   const counts = groupCounts(team, players, [])
   const needs: PositionGroup[] = []
@@ -229,9 +232,13 @@ export function buildTeamProfile(
     if (counts[g] < GROUP_TARGET[g]) needs.push(g)
   }
   return {
-    philosophy: teamPhilosophy(team.id),
+    philosophy: philosophy ?? teamPhilosophy(team.id),
     needs,
-    capSpace: team.finances.salaryCap - team.finances.capUsed,
+    // Recompute from the live roster — finances.capUsed goes stale across a
+    // season (retirements, ELCs, call-ups) and a stale-high value makes a club
+    // look capped-out and wrongly refuse deals that actually fit. Matches the
+    // evaluator (evaluateTradeProposal) and executeTrade.
+    capSpace: team.finances.salaryCap - rosterCapUsed(team, players),
   }
 }
 
@@ -454,14 +461,35 @@ export function evaluateProposal(args: {
   partnerTeam: Team
   partnerPlayers: Map<PlayerId, Player>
   rng: Rng
+  /** The proposing GM's standing with this club (0–100, 50 = neutral). A friendly
+   *  GM gets a slightly easier ask; a frosty one a harder one. Omitted/50 → no
+   *  change (keeps existing trade behaviour byte-identical). */
+  relationship?: number
+  /** Persona-derived philosophy override (Living World LW3). Absent → the
+   *  original hash-based teamPhilosophy (back-compat). */
+  philosophy?: TeamPhilosophy
+  /** Real-GM context (LW3 realism overhaul): the partner's competitive stance
+   *  and deadline proximity (0 = October, 1 = the final hours). Shapes what
+   *  THIS club would actually pay for — rentals, futures, urgency. */
+  context?: { posture: 'contend' | 'retool' | 'rebuild'; deadlineProximity: number }
+  /** #186: player ids whose no-trade clause has been waived for THIS deal (agent
+   *  sign-off / an acceptable-destination list). Absent → no waivers (identical
+   *  to the original behaviour). */
+  waivedNtcIds?: ReadonlySet<string>
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
 
   // Draw the mood wiggle up front so rng consumption is identical on every
   // path — repeat evaluations with the same seed must match exactly.
-  const threshold = 1.03 + rng.float(-0.04, 0.04)
+  const moodThreshold = 1.03 + rng.float(-0.04, 0.04)
+  // Relationship nudge applied AFTER the draw so RNG order is unchanged.
+  const relAdj = ((50 - (args.relationship ?? 50)) / 50) * 0.1 // ±0.10 at the extremes
+  let threshold = moodThreshold + relAdj
 
-  const ntc = [...give.players, ...receive.players].find((p) => p.contract.noTradeClause)
+  const waived = args.waivedNtcIds
+  const ntc = [...give.players, ...receive.players].find(
+    (p) => p.contract.noTradeClause && !(waived?.has(p.id as string) ?? false)
+  )
   if (ntc) {
     return {
       verdict: 'reject',
@@ -471,14 +499,49 @@ export function evaluateProposal(args: {
   }
 
   // Cap check: retained salary on incoming players reduces the partner's cap hit.
+  // Compute the partner's cap hit from their ACTUAL roster, not the stored
+  // finances.capUsed — that field goes stale across a season (retirements,
+  // departures, ELCs, call-ups) and a stale-high value wrongly rejects deals
+  // that actually shed salary. Matches how applyTrade recomputes cap.
   const incomingSalary = sumSalary(give.players, give.retainedAmounts)
   const outgoingSalary = sumSalary(receive.players)
-  const capAfter = partnerTeam.finances.capUsed + incomingSalary - outgoingSalary
+  const partnerCapUsed = rosterCapUsed(partnerTeam, partnerPlayers)
+  const capAfter = partnerCapUsed + incomingSalary - outgoingSalary
   if (capAfter > partnerTeam.finances.salaryCap) {
     return {
       verdict: 'reject',
       message: `${partnerTeam.name} can't fit those contracts — the deal would put them over the salary cap.`,
       counterAskValue: 0
+    }
+  }
+
+  /* ── real-GM rule: never leave yourself short ──
+   * A club will not deal itself below a playable roster at any position, no
+   * matter the value coming back at other spots. Nobody trades their only
+   * goalie for three wingers. */
+  {
+    const post: Record<PositionGroup, number> = { F: 0, D: 0, G: 0 }
+    const outIds = new Set(receive.players.map((pl) => pl.id as string))
+    for (const id of partnerTeam.roster) {
+      if (outIds.has(id as string)) continue
+      const pl = partnerPlayers.get(id)
+      if (pl) post[groupOf(pl.position)]++
+    }
+    for (const pl of give.players) post[groupOf(pl.position)]++
+    // One short up front is recallable from the farm; gutted is gutted.
+    const MIN: Record<PositionGroup, number> = { F: 8, D: 4, G: 2 }
+    for (const g of ['F', 'D', 'G'] as const) {
+      const netOut =
+        receive.players.filter((pl) => groupOf(pl.position) === g).length -
+        give.players.filter((pl) => groupOf(pl.position) === g).length
+      if (netOut > 0 && post[g] < MIN[g]) {
+        const short = g === 'G' ? 'in the crease' : g === 'D' ? 'on the blue line' : 'up front'
+        return {
+          verdict: 'reject',
+          message: `${partnerTeam.name} won't do it — the deal would leave them short ${short}, and no return at other positions fixes that.`,
+          counterAskValue: 0
+        }
+      }
     }
   }
 
@@ -492,30 +555,101 @@ export function evaluateProposal(args: {
     return g === 'G' ? 1.1 : 1.07
   }
 
-  const philosophy = teamPhilosophy(partnerTeam.id)
+  const philosophy = args.philosophy ?? teamPhilosophy(partnerTeam.id)
+
+  /* ── real-GM context: what would THIS club, in THIS situation, pay for? ──
+   * A rental (expiring deal, 27+) is deadline gold to a contender and nearly
+   * worthless to a rebuilder; a 31-year-old is a discount to a rebuilder and a
+   * premium to a contender; picks appreciate in a seller's market. */
+  const ctx = args.context
+  const acquiringMult = (p: Player): number => {
+    if (!ctx) return 1
+    let m = 1
+    const rental = p.contract.yearsRemaining <= 1 && p.age >= 27
+    if (rental) {
+      if (ctx.posture === 'contend') m *= 1 + 0.08 * ctx.deadlineProximity
+      else if (ctx.posture === 'rebuild') m *= 0.55
+      else m *= 0.8
+    }
+    if (ctx.posture === 'rebuild') {
+      if (p.age >= 32) m *= 0.6
+      else if (p.age >= 29) m *= 0.75
+      else if (p.age <= 23) m *= 1.12
+    } else if (ctx.posture === 'contend') {
+      if (p.age >= 27 && p.age <= 31) m *= 1.06
+      if (p.age <= 22 && ratedOverall(p) < 70) m *= 0.85
+    }
+    return m
+  }
+  const pickCtxMult = ctx && ctx.posture === 'rebuild' ? 1 + 0.1 * ctx.deadlineProximity : 1
 
   // Gain = what the partner receives (the user's "give" side).
   const gain =
     give.players.reduce((s, p) => {
-      const base = playerValue(p) * needBonus(p.position)
+      const base = playerValue(p) * needBonus(p.position) * acquiringMult(p)
       const bias = philosophyGainBias(philosophy, { kind: 'player', player: p })
       // Cap relief bonus: if the player's salary is retained by the other side,
       // the partner benefits from reduced cap hit.
       const retained = give.retainedAmounts?.get(p.id as string) ?? 0
-      const partnerCapAfterPlayer = partnerTeam.finances.capUsed + (p.contract.salary - retained) - outgoingSalary
+      // Fresh roster cap (partnerCapUsed), not the stale finances.capUsed — same
+      // reason the hard cap check above was switched off the stored field.
+      const partnerCapAfterPlayer = partnerCapUsed + (p.contract.salary - retained) - outgoingSalary
       const relief = retentionValueBonus(retained, partnerTeam.finances.salaryCap - partnerCapAfterPlayer)
       return s + base * bias + relief
     }, 0) +
     give.picks.reduce((s, p) => {
-      const pv = pickValue(p, { year })
+      const pv = pickValue(p, { year }) * pickCtxMult
       const bias = philosophyGainBias(philosophy, { kind: 'pick', pick: p })
       return s + pv * bias
     }, 0)
 
   // Loss = what the partner gives up (the user's "receive" side).
+  // Real-GM rule: the endowment effect — every GM values his own players a
+  // shade above market (picks are commodity; players are HIS guys). This is
+  // what makes fleecing the AI impossible: a "fair" offer is not enough.
+  const ENDOWMENT = 1.08
   const loss =
-    receive.players.reduce((s, p) => s + playerValue(p), 0) +
+    receive.players.reduce((s, p) => s + playerValue(p) * ENDOWMENT, 0) +
     receive.picks.reduce((s, p) => s + pickValue(p, { year }), 0)
+
+  /* ── real-GM rule: the young core is basically untouchable ──
+   * Prying a 23-and-under star out of any front office takes a massive
+   * overpay — real GMs get fired for moving those players, and they know it. */
+  const youngStar = receive.players.find((p) => p.age <= 23 && playerValue(p) >= 55)
+  if (youngStar) threshold += 0.35
+
+  /* ── real-GM rule: the best player in the deal wins the deal ──
+   * Nobody trades a top-six player for four third-liners. If the partner is
+   * giving up a clear best asset, the return must be headlined by something
+   * comparable — quantity is not quality. */
+  const bestOut = Math.max(
+    0,
+    ...receive.players.map((p) => playerValue(p)),
+    ...receive.picks.map((p) => pickValue(p, { year }))
+  )
+  const bestIn = Math.max(
+    0,
+    ...give.players.map((p) => playerValue(p)),
+    ...give.picks.map((p) => pickValue(p, { year }))
+  )
+  if (bestOut >= 45 && bestIn < bestOut * 0.6) {
+    return {
+      verdict: 'reject',
+      message: `${partnerTeam.name} pass. ${receive.players.length + receive.picks.length > 1 ? 'Quantity is not quality — ' : ''}they need the best asset in the deal coming back their way, not depth pieces.`,
+      counterAskValue: round1(bestOut * 0.75 - bestIn)
+    }
+  }
+
+  /* ── real-GM rule: blockbusters die on the margin ──
+   * Star-level deals carry career risk for the GM who makes them; the bar is
+   * higher and the phone calls are longer. */
+  if (bestOut >= 70) threshold += 0.05
+
+  /* ── deadline urgency: a contender buying help near the deadline is the one
+   * moment a real GM knowingly pays a little over ── */
+  if (ctx && ctx.posture === 'contend' && give.players.length > 0) {
+    threshold -= 0.04 * ctx.deadlineProximity
+  }
 
   if (loss <= 0) {
     return gain > 0
@@ -573,16 +707,29 @@ function findOwnedPicks(allPicks: DraftPick[], wanted: DraftPick[], owner: TeamI
   })
 }
 
-function movePlayers(from: Team, to: Team, ids: PlayerId[]): void {
+function movePlayers(from: Team, to: Team, ids: PlayerId[], players: Map<PlayerId, Player>): void {
   for (const id of ids) {
     from.roster.splice(from.roster.indexOf(id), 1)
     to.roster.push(id)
+    // Rights follow the player to the acquiring club. Only update an existing
+    // holder so we don't fabricate rights for players who never had any tracked.
+    const p = players.get(id)
+    if (p && p.rightsTeamId !== undefined) p.rightsTeamId = to.id
   }
 }
 
-/** Roster ids missing from the player map contribute nothing to the cap. */
-const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number =>
-  team.roster.reduce((s, id) => s + (players.get(id)?.contract.salary ?? 0), 0)
+/** Roster ids missing from the player map contribute nothing to the cap. Each
+ *  rostered player counts his hit minus any salary a former club retained on him;
+ *  salary this club retained on players it traded away is added on top (#157). */
+export const rosterCapUsed = (team: Team, players: Map<PlayerId, Player>): number => {
+  let sum = 0
+  for (const id of team.roster) {
+    const p = players.get(id)
+    if (p) sum += p.contract.salary - (p.contract.retainedByOthers ?? 0)
+  }
+  for (const slot of team.finances.retained ?? []) sum += slot.amount
+  return sum
+}
 
 /**
  * Apply an agreed trade: move players between roster arrays, flip pick
@@ -612,8 +759,8 @@ export function executeTrade(args: {
   const aPicks = findOwnedPicks(args.allPicks, args.aGivesPicks, args.teamA)
   const bPicks = findOwnedPicks(args.allPicks, args.bGivesPicks, args.teamB)
 
-  movePlayers(a, b, args.aGivesPlayerIds)
-  movePlayers(b, a, args.bGivesPlayerIds)
+  movePlayers(a, b, args.aGivesPlayerIds, args.players)
+  movePlayers(b, a, args.bGivesPlayerIds, args.players)
   for (const p of aPicks) p.ownerTeamId = args.teamB
   for (const p of bPicks) p.ownerTeamId = args.teamA
 
@@ -723,17 +870,47 @@ export function generateAiOffers(args: {
   picks: DraftPick[]
   rng: Rng
   nextOfferId: () => string
+  /** Trade deadline day — offers ramp up as it approaches (Living World LW3).
+   *  Absent → the original flat 1/8 rate (back-compat). */
+  deadlineDay?: number
+  /** Club stance lookup: contenders shop hardest, rebuilders rarely buy. */
+  postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
+  /** GM aggression lookup, 0–1 — aggressive GMs overpay more. */
+  aggressionOf?: (teamId: TeamId) => number
 }): StoredTradeOffer[] {
   const { day, userTeamId, teams, players, picks, rng, nextOfferId } = args
 
-  if (!rng.chance(1 / 8)) return []
+  // Deadline urgency: quiet in October, frantic in deadline week — up to ~3.5×
+  // the base offer rate in the final days (Living World LW3).
+  const daysLeft = args.deadlineDay !== undefined ? args.deadlineDay - day : undefined
+  let chance = 1 / 8
+  if (daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 20) {
+    chance = (1 / 8) * (1 + 2.5 * (1 - daysLeft / 20))
+  }
+  if (!rng.chance(chance)) return []
 
   const user = teams.get(userTeamId)
   if (!user) return []
   const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId)
   if (aiTeams.length === 0) return []
 
-  const partner = rng.pick(aiTeams)
+  // Posture-weighted partner selection: contenders come calling most often.
+  let partner: Team
+  if (args.postureOf) {
+    const weighted = aiTeams.map((t) => {
+      const posture = args.postureOf!(t.id)
+      return { t, w: posture === 'contend' ? 3 : posture === 'rebuild' ? 0.6 : 1 }
+    })
+    const total = weighted.reduce((s, e) => s + e.w, 0)
+    let roll = rng.float(0, total)
+    partner = weighted[weighted.length - 1]!.t
+    for (const e of weighted) {
+      roll -= e.w
+      if (roll <= 0) { partner = e.t; break }
+    }
+  } else {
+    partner = rng.pick(aiTeams)
+  }
   const need = weakestGroup(partner, players)
 
   // Target one of the user's best few players at the need group. NTC players
@@ -755,7 +932,11 @@ export function generateAiOffers(args: {
   const target = rng.pick(targets)
 
   // Fair-ish aim with a slight overpay tendency — AI clubs chase their need.
-  const aim = target.value * rng.float(1.0, 1.15)
+  // Aggressive GMs stretch further, and deadline week adds desperation.
+  const aggression = args.aggressionOf?.(partner.id)
+  const urgencyBump = daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 7 ? 0.06 : 0
+  const aimHi = aggression === undefined ? 1.15 : 1.03 + 0.18 * aggression + urgencyBump
+  const aim = target.value * rng.float(1.0, aimHi)
 
   const ranks = strengthRanks(teams, players)
   const currentYear =
@@ -816,4 +997,292 @@ export function generateAiOffers(args: {
     expiresOnDay: day + rng.range(6, 8)
   }
   return [offer]
+}
+
+/**
+ * DEPTH 3: the user actively SHOPS a specific player. Every AI club that is
+ * thin at his position group tables its best concrete package (same value +
+ * overpay logic as the unsolicited offers), and the strongest few are returned,
+ * sorted by generosity. Pure function of its inputs + the seeded Rng.
+ */
+export function solicitOffersForPlayer(args: {
+  target: Player
+  userTeamId: TeamId
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  picks: DraftPick[]
+  rng: Rng
+  nextOfferId: () => string
+  expiresOnDay: number
+  /** GM aggression lookup, 0–1 — aggressive GMs stretch their package further. */
+  aggressionOf?: (teamId: TeamId) => number
+  /** Cap on how many offers come back (default 4). */
+  maxOffers?: number
+}): StoredTradeOffer[] {
+  const { target, userTeamId, teams, players, picks, rng, nextOfferId, expiresOnDay } = args
+  const tgtGroup = groupOf(target.position)
+  const tgtValue = playerValue(target)
+  const ranks = strengthRanks(teams, players)
+  const currentYear =
+    picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
+
+  const built: Array<{ offer: StoredTradeOffer; total: number }> = []
+  for (const partner of teams.values()) {
+    if (partner.id === userTeamId) continue
+    // Interested only if this club is below its target depth at his group.
+    if (groupCounts(partner, players, [])[tgtGroup] >= GROUP_TARGET[tgtGroup]) continue
+
+    const aggression = args.aggressionOf?.(partner.id)
+    const aimHi = aggression === undefined ? 1.15 : 1.03 + 0.18 * aggression
+    const aim = tgtValue * rng.float(1.0, aimHi)
+
+    // Candidate assets: the partner's players (keeping his need group + both
+    // goalies at home) plus the picks he owns.
+    const candidates: Asset[] = []
+    for (const id of partner.roster) {
+      const p = players.get(id)
+      if (!p || p.contract.noTradeClause || p.injuryStatus !== null) continue
+      if (p.position === 'G' || groupOf(p.position) === tgtGroup) continue
+      candidates.push({ kind: 'player', player: p, value: playerValue(p) })
+    }
+    for (const pick of picks) {
+      if (pick.ownerTeamId !== partner.id) continue
+      const rank = ranks.get(pick.originalTeamId)
+      const value =
+        rank === undefined
+          ? pickValue(pick, { year: currentYear })
+          : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
+      candidates.push({ kind: 'pick', pick, value })
+    }
+    candidates.sort((x, y) => y.value - x.value || (assetKey(x) < assetKey(y) ? -1 : 1))
+
+    const chosen: Asset[] = []
+    let total = 0
+    for (const c of candidates) {
+      if (chosen.length >= 3 || total >= aim) break
+      if (total + c.value > aim * 1.2) continue
+      chosen.push(c)
+      total += c.value
+    }
+    if (chosen.length === 0 || total < tgtValue * 0.85) continue
+
+    const salaryOut = chosen.reduce((s, c) => s + (c.kind === 'player' ? c.player.contract.salary : 0), 0)
+    if (partner.finances.capUsed + target.contract.salary - salaryOut > partner.finances.salaryCap) continue
+
+    built.push({
+      total,
+      offer: {
+        offerId: nextOfferId(),
+        partnerTeamId: partner.id,
+        userReceivesPlayerIds: chosen
+          .filter((c): c is Extract<Asset, { kind: 'player' }> => c.kind === 'player')
+          .map((c) => c.player.id),
+        userReceivesPicks: chosen
+          .filter((c): c is Extract<Asset, { kind: 'pick' }> => c.kind === 'pick')
+          .map((c) => ({ ...c.pick })),
+        userGivesPlayerIds: [target.id],
+        userGivesPicks: [],
+        message: `${partner.name} have interest in ${target.name}. On the table: ${chosen.map(assetLabel).join(', ')}.`,
+        expiresOnDay,
+      },
+    })
+  }
+  built.sort((a, b) => b.total - a.total || (a.offer.partnerTeamId < b.offer.partnerTeamId ? -1 : 1))
+  return built.slice(0, args.maxOffers ?? 4).map((b) => b.offer)
+}
+
+/* ────────────────────────── AI ↔ AI trades (Living World LW3) ────────────────────────── */
+
+/** A league trade between two AI clubs: the seller moves a veteran for draft
+ *  capital. The career layer executes it, chronicles it and reports the news. */
+export interface AiAiTradeResult {
+  sellerTeamId: TeamId
+  buyerTeamId: TeamId
+  /** Players the SELLER gives up (NHL roster). */
+  playerIds: PlayerId[]
+  /** Picks the BUYER gives up. */
+  picks: DraftPick[]
+  /** Prospects the BUYER gives up as part of the return — an AHL affiliate
+   *  player or a rights-held junior. They move into the SELLER's system (his AHL,
+   *  or rights). Empty for a pure picks-for-rental deal. */
+  prospectIds: PlayerId[]
+  /** Salary the SELLER retains to make the deal fit under the buyer's cap (#157).
+   *  Absent/0 = no retention. The seller keeps paying this until the deal expires. */
+  retainedAmount?: number
+  summary: string
+}
+
+/**
+ * Occasionally two AI clubs make a deal with each other — the league lives
+ * without the user. A rebuild-posture seller moves a veteran on an expiring
+ * or short deal to a contend-posture buyer for draft capital. Frequency is
+ * quiet early (~1 in 12 match days) and ramps toward the deadline (~1 in 4).
+ * Pure function of its inputs + the seeded Rng.
+ */
+export function generateAiAiTrade(args: {
+  day: number
+  deadlineDay?: number
+  userTeamId: TeamId
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  picks: DraftPick[]
+  rng: Rng
+  postureOf: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
+}): AiAiTradeResult | null {
+  const { day, userTeamId, teams, players, picks, rng, postureOf } = args
+
+  const daysLeft = args.deadlineDay !== undefined ? args.deadlineDay - day : undefined
+  let chance = 1 / 9
+  if (daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 20) {
+    chance = (1 / 9) * (1 + 2.5 * (1 - daysLeft / 20))
+  }
+  if (!rng.chance(chance)) return null
+
+  // NHL clubs only — the AHL/junior/world tiers never trade with the NHL here.
+  const ai = [...teams.values()].filter(
+    (t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world',
+  )
+
+  // Sellers: clubs NOT in a win-now push (rebuild or retool) with a healthy,
+  // movable veteran and roster depth to spare. The vet is on a short deal — an
+  // expiring rental or a 1–2-year piece a retooling club is happy to move.
+  const sellers = ai
+    .filter((t) => (postureOf(t.id) === 'rebuild' || postureOf(t.id) === 'retool') && t.roster.length >= 20)
+    .map((t) => {
+      const vets = t.roster
+        .map((id) => players.get(id))
+        .filter(
+          (p): p is Player =>
+            p !== undefined &&
+            p.age >= 26 &&
+            p.contract.yearsRemaining <= 2 &&
+            !p.contract.noTradeClause &&
+            p.injuryStatus === null &&
+            p.position !== 'G' &&
+            playerValue(p) >= 12
+        )
+        .sort((a, b) => playerValue(b) - playerValue(a) || (a.id < b.id ? -1 : 1))
+      return { team: t, vet: vets[0] }
+    })
+    .filter((s): s is { team: Team; vet: Player } => s.vet !== undefined)
+    .sort((a, b) => (a.team.id < b.team.id ? -1 : 1))
+  if (sellers.length === 0) return null
+  const seller = rng.pick(sellers)
+  const vetValue = playerValue(seller.vet)
+
+  // Buyers: clubs adding for a push (contenders, or retoolers rounding out a
+  // roster) that can absorb the salary, have roster room, and own draft capital
+  // worth roughly the vet.
+  const ranks = strengthRanks(teams, players)
+  const currentYear = picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
+  const vetSalary = seller.vet.contract.salary
+  // The seller can retain salary to make a cap-tight buyer fit — but only if he
+  // has a free retention slot (NHL rule: max 3 retained contracts per club).
+  const sellerHasRetentionSlot = (seller.team.finances.retained?.length ?? 0) < MAX_RETAIN_SLOTS
+  const buyers = ai
+    .filter(
+      (t) =>
+        t.id !== seller.team.id &&
+        (postureOf(t.id) === 'contend' || postureOf(t.id) === 'retool') &&
+        t.roster.length < 23,
+    )
+    .map((t) => {
+      const room = t.finances.salaryCap - rosterCapUsed(t, players)
+      if (vetSalary <= room) return { team: t, retained: 0 }
+      // Doesn't fit outright — see if retaining (up to 50%) makes it work.
+      if (!sellerHasRetentionSlot) return null
+      const needed = vetSalary - room
+      if (needed > vetSalary * MAX_RETAIN_PCT) return null // can't retain enough to fit
+      return { team: t, retained: Math.ceil(needed) }
+    })
+    .filter((x): x is { team: Team; retained: number } => x !== null)
+    .sort((a, b) => (a.team.id < b.team.id ? -1 : 1))
+  for (const { team: buyer, retained } of rng.shuffle(buyers)) {
+    const owned = picks
+      .filter((p) => p.ownerTeamId === buyer.id)
+      .map((pick) => {
+        const rank = ranks.get(pick.originalTeamId)
+        const value = rank === undefined
+          ? pickValue(pick, { year: currentYear })
+          : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
+        return { pick, value }
+      })
+      .sort((x, y) => y.value - x.value)
+    // Greedy 1–2 picks. Rentals fetch well below full player value — the
+    // seller has no leverage on an expiring deal, so the market band is
+    // roughly 30–80% of the vet's trade points in draft capital (a good
+    // rental ≈ a 1st + a mid pick, matching real deadline precedent).
+    const chosen: DraftPick[] = []
+    let total = 0
+    for (const c of owned) {
+      if (chosen.length >= 2 || total >= vetValue * 0.5) break
+      if (total + c.value > vetValue * 0.8) continue
+      chosen.push(c.pick)
+      total += c.value
+    }
+    // Real returns aren't only picks — a rental often fetches "a pick and a
+    // prospect". Roughly half the time, if the buyer has a tradeable prospect
+    // (an AHL affiliate player or a rights-held junior) that keeps the combined
+    // return inside the value band, throw it in.
+    const prospects = buyerProspects(buyer, teams, players).sort((a, b) => playerValue(b) - playerValue(a))
+    let prospect: Player | null = null
+    if (prospects.length > 0 && rng.chance(0.5)) {
+      for (const pr of rng.shuffle(prospects)) {
+        if (total + playerValue(pr) <= vetValue * 0.85) { prospect = pr; break }
+      }
+    }
+    const returnTotal = total + (prospect ? playerValue(prospect) : 0)
+    // A prospect can carry the deal, so the picks floor relaxes when one's in it.
+    const floor = prospect ? vetValue * 0.25 : vetValue * 0.3
+    if ((chosen.length === 0 && !prospect) || returnTotal < floor || returnTotal > vetValue * 0.85) continue
+    const parts = [
+      ...chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`),
+      ...(prospect ? [`${prospect.position} ${prospect.name}`] : []),
+    ]
+    const retentionNote = retained > 0
+      ? ` ${seller.team.abbreviation} retain $${(retained / 1e6).toFixed(2)}M.`
+      : ''
+    return {
+      sellerTeamId: seller.team.id,
+      buyerTeamId: buyer.id,
+      playerIds: [seller.vet.id],
+      picks: chosen,
+      prospectIds: prospect ? [prospect.id] : [],
+      ...(retained > 0 ? { retainedAmount: retained } : {}),
+      summary: `${seller.team.abbreviation} send ${seller.vet.position} ${seller.vet.name} to ${buyer.abbreviation} for ${parts.join(' and ')}.${retentionNote}`,
+    }
+  }
+  return null
+}
+
+/**
+ * A club's tradeable prospects — young players in its AHL affiliate plus the
+ * juniors whose rights it holds. Healthy, no NTC, with real trade value. These
+ * are what a buyer packages alongside picks in a "pick and a prospect" return.
+ */
+function buyerProspects(
+  buyer: Team,
+  teams: Map<TeamId, Team>,
+  players: Map<PlayerId, Player>,
+): Player[] {
+  const out: Player[] = []
+  const seen = new Set<string>()
+  const consider = (p: Player | undefined): void => {
+    if (!p || seen.has(p.id as string)) return
+    if (p.age > 24 || p.position === 'G') return
+    if (p.injuryStatus !== null || p.contract.noTradeClause) return
+    if (playerValue(p) < 8) return
+    seen.add(p.id as string)
+    out.push(p)
+  }
+  const affiliate = buyer.affiliateId ? teams.get(buyer.affiliateId) : undefined
+  for (const id of affiliate?.roster ?? []) consider(players.get(id))
+  // Rights-held juniors: drafted, held by the buyer, not on his NHL/AHL roster.
+  const onRoster = new Set<string>([...buyer.roster, ...(affiliate?.roster ?? [])].map((id) => id as string))
+  for (const p of players.values()) {
+    if ((p.rightsTeamId as string | undefined) === (buyer.id as string) && !onRoster.has(p.id as string)) {
+      consider(p)
+    }
+  }
+  return out
 }

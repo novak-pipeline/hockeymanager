@@ -135,45 +135,50 @@ export function TeamHeader({ viewedTeamId, userTeamId, currentTab }: TeamHeaderP
         flexWrap: 'wrap',
       }}
     >
-      {/* Team-navigation cluster: prev / affiliate / next as one segmented control */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'stretch',
-          border: '1px solid var(--line)',
-          borderRadius: 'var(--radius-sm)',
-          overflow: 'hidden',
-          background: 'var(--bg1)',
-        }}
-      >
-        <button
-          className="teamnav-btn"
-          title="Previous team"
-          onClick={goPrev}
-          disabled={nhlIndex <= 0 && !isAhl}
-          style={navBtnStyle}
+      {/* Team-navigation cluster: prev / affiliate / next as one segmented
+          control. Only shown while BROWSING another club — on your own screens
+          it's clutter (you reach the farm via the roster's AHL tab or the
+          "Jump to team" picker). */}
+      {!isOwnTeam && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'stretch',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-sm)',
+            overflow: 'hidden',
+            background: 'var(--bg1)',
+          }}
         >
-          ‹
-        </button>
-        <button
-          className="teamnav-btn"
-          title={isAhl ? 'Back to NHL parent' : 'View AHL affiliate'}
-          onClick={goAffiliate}
-          disabled={!hasAffiliate}
-          style={{ ...navBtnStyle, borderLeft: '1px solid var(--line)', borderRight: '1px solid var(--line)', fontSize: 12 }}
-        >
-          {isAhl ? '↑ NHL' : '↓ Farm'}
-        </button>
-        <button
-          className="teamnav-btn"
-          title="Next team"
-          onClick={goNext}
-          disabled={!isAhl && nhlIndex >= nhlList.length - 1}
-          style={navBtnStyle}
-        >
-          ›
-        </button>
-      </div>
+          <button
+            className="teamnav-btn"
+            title="Previous team"
+            onClick={goPrev}
+            disabled={nhlIndex <= 0 && !isAhl}
+            style={navBtnStyle}
+          >
+            ‹
+          </button>
+          <button
+            className="teamnav-btn"
+            title={isAhl ? 'Back to NHL parent' : 'View AHL affiliate'}
+            onClick={goAffiliate}
+            disabled={!hasAffiliate}
+            style={{ ...navBtnStyle, borderLeft: '1px solid var(--line)', borderRight: '1px solid var(--line)', fontSize: 12 }}
+          >
+            {isAhl ? '↑ NHL' : '↓ Farm'}
+          </button>
+          <button
+            className="teamnav-btn"
+            title="Next team"
+            onClick={goNext}
+            disabled={!isAhl && nhlIndex >= nhlList.length - 1}
+            style={navBtnStyle}
+          >
+            ›
+          </button>
+        </div>
+      )}
 
       {/* Crest + name */}
       <CrestView

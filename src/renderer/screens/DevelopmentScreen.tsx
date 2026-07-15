@@ -5,11 +5,22 @@
  */
 import { useState } from 'react'
 import type { DevelopmentCenterView, DevelopmentRow } from '../../worker/protocol'
+import type { PracticeFocus } from '../../engine/league/practice'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { toast } from '../components/store'
+
+/** #174: the individual-development-focus options offered on a prospect. */
+const FOCUS_OPTIONS: Array<{ value: PracticeFocus; label: string }> = [
+  { value: 'offense', label: 'Offense' },
+  { value: 'defense', label: 'Defense' },
+  { value: 'skating', label: 'Skating' },
+  { value: 'physical', label: 'Physical' },
+  { value: 'goaltending', label: 'Goaltending' },
+]
 
 /** Render half-step stars out of 5. */
 function Stars(props: { value: number; muted?: boolean }): JSX.Element {
@@ -44,12 +55,27 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
   const client = useClient()
   // User-club scoped; teamId accepted for future per-team use.
   void props.teamId
-  const { data, loading, error } = useScreenData<DevelopmentCenterView>(
+  const { data, loading, error, refetch } = useScreenData<DevelopmentCenterView>(
     () => client.getDevelopment(),
     (r) => (r.type === 'development' ? r.development : null)
   )
 
-  const [tab, setTab] = useState<'prospects' | 'progress'>('prospects')
+  const [tab, setTab] = useState<'prospects' | 'system' | 'progress'>('prospects')
+  const [busy, setBusy] = useState(false)
+
+  async function setFocus(playerId: string, focus: PracticeFocus | null): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try { await client.setPlayerFocusDrill(playerId, focus); refetch() } finally { setBusy(false) }
+  }
+  async function recommendAll(): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await client.recommendPlayerFocuses()
+      if (r.type !== 'error') { toast('Development plans set across the whole system — NHL, AHL and your junior prospects.', 'success'); refetch() }
+    } finally { setBusy(false) }
+  }
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
@@ -60,12 +86,13 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
     <section className="stack">
       <ScreenHeader title="Development Center">
         <span className="muted small">
-          {d.count} prospects tracked · {d.highCeiling} high-ceiling
+          {d.count} prospects tracked · {d.highCeiling} high-ceiling · set the NHL roster on the Roster screen
         </span>
       </ScreenHeader>
 
       <div className="row" style={{ gap: 'var(--sp-2)' }}>
         <button type="button" className={`btn btn-sm${tab === 'prospects' ? ' btn-primary' : ''}`} onClick={() => setTab('prospects')}>Prospects</button>
+        <button type="button" className={`btn btn-sm${tab === 'system' ? ' btn-primary' : ''}`} onClick={() => setTab('system')}>In Your System ({d.systemElsewhere.length})</button>
         <button type="button" className={`btn btn-sm${tab === 'progress' ? ' btn-primary' : ''}`} onClick={() => setTab('progress')}>U23 Progress</button>
       </div>
 
@@ -80,6 +107,10 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
 
       {tab === 'prospects' && (
       <Panel title="Prospects (NHL + Affiliate)">
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+          <span className="muted small">Set an individual development focus per prospect — it biases his growth and follows him to the AHL or junior.</span>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void recommendAll()}>Auto-set plans</button>
+        </div>
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -91,6 +122,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                 <th>Current</th>
                 <th>Potential</th>
                 <th>Projection</th>
+                <th>Dev focus</th>
                 <th>Development</th>
               </tr>
             </thead>
@@ -116,11 +148,65 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                   <td><Stars value={r.currentStars} muted /></td>
                   <td><Stars value={r.potentialStars} /></td>
                   <td style={{ color: tierColor(r.tier), fontWeight: 600, fontSize: 12 }}>{r.projection}</td>
+                  <td>
+                    <select className="select" style={{ fontSize: 11 }} value={r.focus ?? ''} disabled={busy}
+                      onChange={(e) => void setFocus(r.playerId, e.target.value === '' ? null : (e.target.value as PracticeFocus))}>
+                      <option value="">— Default —</option>
+                      {FOCUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </td>
                   <td className="small muted">{r.note}</td>
                 </tr>
               ))}
               {d.rows.length === 0 && (
-                <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No prospects in the system.</td></tr>
+                <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No prospects in the system.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      )}
+
+      {tab === 'system' && (
+      <Panel title="In Your System — rights held, playing elsewhere">
+        <div className="muted small" style={{ marginBottom: 8 }}>
+          Players whose NHL rights your club holds but who skate outside your NHL/AHL rosters — juniors,
+          college, or Europe. They join the farm as they turn pro.
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th className="num">Pos</th>
+                <th className="num">Age</th>
+                <th>Club</th>
+                <th>Current</th>
+                <th>Potential</th>
+                <th>Projection</th>
+                <th>Development</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.systemElsewhere.map((r) => (
+                <tr key={r.playerId}>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <PlayerFace faceId={r.faceId} name={r.name} size={22} />
+                      <PlayerLink playerId={r.playerId} name={r.name} />
+                    </span>
+                  </td>
+                  <td className="num muted">{r.position}</td>
+                  <td className="num muted">{r.age}</td>
+                  <td className="muted small">{r.clubAbbrev ?? '—'}</td>
+                  <td><Stars value={r.currentStars} muted /></td>
+                  <td><Stars value={r.potentialStars} /></td>
+                  <td style={{ color: tierColor(r.tier), fontWeight: 600, fontSize: 12 }}>{r.projection}</td>
+                  <td className="small muted">{r.note}</td>
+                </tr>
+              ))}
+              {d.systemElsewhere.length === 0 && (
+                <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No rights-held players outside your NHL/AHL rosters yet — they'll appear here as you draft.</td></tr>
               )}
             </tbody>
           </table>

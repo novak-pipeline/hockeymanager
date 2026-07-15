@@ -65,6 +65,12 @@ export interface StaffMember {
    * 'fiery' | 'calm' | 'analytical' | 'motivator' | 'pragmatic'
    */
   demeanor?: 'fiery' | 'calm' | 'analytical' | 'motivator' | 'pragmatic'
+  /**
+   * Tactical identity for head coaches. Derived (from EHM attributes or
+   * synthesised) — see coachProfile.ts. Absent on non-coach staff and on old
+   * saves; regenerated lazily. Type-only import to avoid a runtime cycle.
+   */
+  profile?: import('./coachProfile').CoachProfile
 }
 
 /**

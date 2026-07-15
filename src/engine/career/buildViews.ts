@@ -27,6 +27,7 @@ import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport } from '@engine/career/scoutReport'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
+import { contractStatus, requiresWaivers, CAP_FLOOR } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -38,6 +39,7 @@ import {
   styleMatch,
   teamStyleFit,
 } from '@engine/league/archetypes'
+import { deploymentProfile } from '@engine/league/deployment'
 import type {
   ArchetypeInfo,
   AttributeGroupView,
@@ -77,7 +79,8 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, maskAttribute, maskedOverall } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutFormBias, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { draftRoundLabel } from '@engine/league/draftRankings'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -101,6 +104,10 @@ export interface ViewCtx {
   goalieLosses: Map<PlayerId, number>
   ppGoals: Map<PlayerId, number>
   ppAssists: Map<PlayerId, number>
+  /** #175: shorthanded goals/assists (optional so existing ctx builders/tests
+   *  that don't supply them keep compiling; absent → 0). */
+  shGoals?: Map<PlayerId, number>
+  shAssists?: Map<PlayerId, number>
   /** League-wide standings, best first (already tiebreak-sorted). */
   standingsSorted: Standing[]
 }
@@ -156,7 +163,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
     }
   }
   const k = knowledgeOf(fog.scouting, pid)
-  const { lo, hi } = maskedOverall(ovr, k, pid)
+  const { lo, hi } = maskedOverall(ovr, k, pid, accuracyOf(fog.scouting, pid))
   const midOvr = Math.round((lo + hi) / 2)
   return {
     playerId: pid,
@@ -188,12 +195,16 @@ function skaterLine(ctx: ViewCtx, id: PlayerId): SkaterSeasonLine {
     goals: t?.goals ?? 0,
     assists: t?.assists ?? 0,
     points: (t?.goals ?? 0) + (t?.assists ?? 0),
-    plusMinus: 0,
+    plusMinus: t?.plusMinus ?? 0,
     penaltyMinutes: t?.penaltyMinutes ?? 0,
     shots: t?.shots ?? 0,
     toiPerGame: games > 0 ? Math.round((t?.toi ?? 0) / games) : 0,
     ppGoals: ctx.ppGoals.get(id) ?? 0,
     ppAssists: ctx.ppAssists.get(id) ?? 0,
+    shGoals: ctx.shGoals?.get(id) ?? 0,
+    shAssists: ctx.shAssists?.get(id) ?? 0,
+    ppToiPerGame: games > 0 ? Math.round((t?.ppToi ?? 0) / games) : 0,
+    pkToiPerGame: games > 0 ? Math.round((t?.pkToi ?? 0) / games) : 0,
   }
 }
 
@@ -302,6 +313,30 @@ function lineLabel(team: Team, id: PlayerId): string {
   return parts.length > 0 ? parts.join('/') : '—'
 }
 
+/**
+ * Positions a player can fill (natural first). Derived from position + handedness
+ * + the versatility attribute, so only genuinely versatile players show extra
+ * slots. Forwards slide between C and the wings; D can cover their off side.
+ */
+function eligiblePositions(p: Player): string {
+  const v = p.versatility ?? 50
+  if (p.position === 'G') return 'G'
+  if (p.position === 'D') {
+    const nat = p.handedness === 'L' ? 'LD' : 'RD'
+    const off = p.handedness === 'L' ? 'RD' : 'LD'
+    return v >= 55 ? `${nat}, ${off}` : nat
+  }
+  if (p.position === 'C') {
+    return v >= 50 ? 'C, LW, RW' : 'C'
+  }
+  // Winger: the off-hand wing is the natural side (a right shot plays LW).
+  const natWing = p.handedness === 'R' ? 'LW' : 'RW'
+  const offWing = p.handedness === 'R' ? 'RW' : 'LW'
+  if (v >= 65) return `C, ${natWing}, ${offWing}`
+  if (v >= 50) return `${natWing}, ${offWing}`
+  return natWing
+}
+
 export function buildSquadView(
   ctx: ViewCtx,
   opts?: {
@@ -325,6 +360,7 @@ export function buildSquadView(
         ...badge(p),
         role: p.role,
         handedness: p.handedness,
+        positions: eligiblePositions(p),
         condition: conditionOf(p),
         morale: Math.round(p.morale),
         form: Math.round(p.form),
@@ -334,8 +370,11 @@ export function buildSquadView(
         skater: p.position === 'G' ? null : skaterLine(ctx, id),
         goalie: p.position === 'G' ? goalieLine(ctx, id) : null,
         scratched: scratchedSet.has(pid),
+        waiverRequired: requiresWaivers(p),
         gameRatingForm: formString(ratings),
         avgRating: seasonAvgRating(ratings),
+        ...(p.squadStatus ? { squadStatus: p.squadStatus } : {}),
+        ...(p.tradeStatus ? { tradeStatus: p.tradeStatus } : {}),
       }
     })
     .sort(
@@ -343,7 +382,8 @@ export function buildSquadView(
     )
 
   const dressedCount = rows.filter((r) => !r.scratched && r.injury === null).length
-  return { teamName: team.name, rows, rosterCount: rows.length, dressedCount }
+  const capUsed = team.roster.reduce((s, id) => s + (ctx.players.get(id)?.contract.salary ?? 0), 0)
+  return { teamName: team.name, rows, rosterCount: rows.length, dressedCount, capUsed, salaryCap: team.finances.salaryCap }
 }
 
 
@@ -426,17 +466,47 @@ function groupView(
         return { label, value }
       }
       const k = knowledgeOf(fog.scouting, playerId)
-      const { lo, hi } = maskAttribute(value, k, playerId, key)
+      const { lo, hi } = maskAttribute(value, k, playerId, key, accuracyOf(fog.scouting, playerId))
       const mid = Math.round((lo + hi) / 2)
       return { label, value: mid, lo, hi, masked: true }
     }),
   }
 }
 
-/** Stars from the player's age-aware ceiling (no growth left past ~25), on the
+/**
+ * Our scouts' read of a player's age-aware CEILING, in overall points. With a
+ * scouting state it's fog-aware: exact for own/fully-scouted players, and a
+ * deterministically-biased estimate (narrowing as knowledge + scout judgment
+ * improve) for the rest — so the profile never leaks a prospect's true potential
+ * before he's been watched. Without a scouting state it returns the true ceiling
+ * (used by engines that model their own scout variance, e.g. the multi-scout panel).
+ */
+export function scoutedCeiling(p: Player, scouting?: ScoutingState): number {
+  const ceiling = agedPotential(p)
+  if (!scouting) return ceiling
+  const pid = p.id as string
+  const k = knowledgeOf(scouting, pid)
+  if (k >= 95) return ceiling
+  const acc = accuracyOf(scouting, pid)
+  const { lo, hi } = maskedCeiling(ceiling, k, pid, acc)
+  const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, k, acc)
+  return Math.max(1, Math.min(99, Math.round(biased)))
+}
+
+/** Stars from our scouts' (fog-aware) read of the player's ceiling, on the
  *  shared NHL-calibrated scale. */
-export function potentialStars(p: Player): number {
-  return overallToStars(agedPotential(p))
+export function potentialStars(p: Player, scouting?: ScoutingState): number {
+  return overallToStars(scoutedCeiling(p, scouting))
+}
+
+/** scoutedCeiling when knowledge + accuracy are already in hand — skips the O(n)
+ *  knowledgeOf/accuracyOf scans, for row-heavy builders (scouting tables). */
+export function scoutedCeilingK(p: Player, knowledge: number, accuracy: number): number {
+  const ceiling = agedPotential(p)
+  if (knowledge >= 95) return ceiling
+  const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
+  const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, knowledge, accuracy)
+  return Math.max(1, Math.min(99, Math.round(biased)))
 }
 
 /** FM-style trend arrow from a signed development delta. A move of a full
@@ -457,8 +527,11 @@ function trendOf(delta: number | undefined): 'up' | 'down' | 'steady' {
  * Centred on agedPotential, asymmetric (more downside for high-pedigree youth,
  * more upside for low-pedigree youth) mirrors real draft-outcome distributions.
  */
-function potentialBandOf(p: Player, knowledge: number | undefined): { lo: number; hi: number } {
-  const ceiling = agedPotential(p)
+function potentialBandOf(p: Player, scouting: ScoutingState | undefined): { lo: number; hi: number } {
+  // Centre the band on our scouts' (fog-aware) read, not the hidden truth, so the
+  // displayed range matches the POTENTIAL stars and never reveals the true ceiling.
+  const ceiling = scoutedCeiling(p, scouting)
+  const knowledge = scouting ? knowledgeOf(scouting, p.id as string) : undefined
   // Age-driven base spread in overall points (the dominant signal).
   let down: number
   let up: number
@@ -531,9 +604,18 @@ function buildHonours(p: Player): PlayerHonoursView {
  * UFA: yearsRemaining === 0 and age >= 27.
  * Under contract: yearsRemaining > 0 → null status.
  */
-function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView | null {
+function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false): ProfileContractView | null {
   if (!hasTeam) return null
   const c = p.contract
+  // Amateurs (junior/college/Europe) hold no NHL deal — surface a zeroed,
+  // flagged block the renderer shows as "Amateur — NHL rights held" rather than
+  // a bogus pro salary/term.
+  if (isAmateur) {
+    return {
+      salary: 0, yearsRemaining: 0, expiryYear: 0, noTradeClause: false,
+      twoWay: false, capHit: 0, freeAgentStatus: null, amateur: true,
+    }
+  }
   let freeAgentStatus: 'RFA' | 'UFA' | null = null
   if (c.yearsRemaining <= 0) {
     freeAgentStatus = p.age < 27 ? 'RFA' : 'UFA'
@@ -546,6 +628,10 @@ function buildProfileContract(p: Player, hasTeam: boolean): ProfileContractView 
     twoWay: c.twoWay,
     capHit: c.salary,
     freeAgentStatus,
+    // The rights status he'll carry when this deal ends (ELC/RFA → club retains
+    // rights; UFA → free to leave). Drives both the engine's re-sign logic and the
+    // profile label so they agree.
+    rightsStatus: contractStatus(p),
   }
   // Two-way contracts: buried cap hit is the minor-league minimum (approximation).
   // EHM uses actual minor-league salary; we approximate as half the NHL salary,
@@ -594,13 +680,45 @@ function buildPositions(p: Player): Array<{ pos: string; level: 'Natural' | 'Acc
   return out
 }
 
+/** FM-style career highlights: the highest round-number career total reached in
+ *  each category, from archived NHL seasons. Empty until he's built a real
+ *  résumé. */
+function careerMilestoneBadges(p: Player): string[] {
+  let g = 0, a = 0, gp = 0, so = 0
+  for (const s of p.stats) {
+    if (s.league === 'ahl') continue
+    g += s.ev.goals + s.pp.goals + s.pk.goals
+    a += s.ev.assists + s.pp.assists + s.pk.assists
+    gp += s.gamesPlayed
+    so += s.shutouts
+  }
+  const pts = g + a
+  const out: string[] = []
+  const top = (val: number, tiers: number[], suffix: string): void => {
+    const hit = [...tiers].reverse().find((t) => val >= t)
+    if (hit) out.push(`${hit.toLocaleString()} ${suffix}`)
+  }
+  top(g, [100, 200, 300, 400, 500, 600, 700, 800], 'goals')
+  top(pts, [500, 1000, 1250, 1500, 1750, 2000], 'points')
+  top(gp, [500, 1000, 1500], 'games')
+  if (p.position === 'G') top(so, [25, 50, 75, 100], 'shutouts')
+  return out
+}
+
 export function buildPlayerProfile(
   ctx: ViewCtx,
   playerId: PlayerId,
   fog?: FogCtx,
   mindsetCtx?: MindsetBuildCtx,
   /** The user team's scouts — used to build the multi-scout panel. */
-  userScouts?: StaffMember[]
+  userScouts?: StaffMember[],
+  /** The league the player plays in — used to frame his point projection. */
+  playerLeague?: { factor: number; name: string },
+  /** The player's current-season scoring pace (points/game) in the league he
+   *  actually plays in — for the scouts' "what I saw in a recent viewing" line.
+   *  Pass this for prospects whose stats live in the world/AHL sim (ctx only has
+   *  the user-league totals). Omit when there's no game sample. */
+  observedPace?: number,
 ): PlayerProfileView {
   const p = ctx.players.get(playerId)
   if (!p) throw new Error(`unknown player ${playerId}`)
@@ -608,15 +726,20 @@ export function buildPlayerProfile(
   let teamName: string | null = null
   let teamAbbr = 'FA'
   let teamColors: { primary: number; secondary: number } | undefined
+  let teamTier: 'nhl' | 'ahl' | 'world' | undefined
   for (const t of ctx.teams.values()) {
     if (t.roster.includes(playerId)) {
       teamId = t.id as string
       teamName = t.name
       teamAbbr = t.abbreviation
       teamColors = t.colors
+      teamTier = t.tier
       break
     }
   }
+  // Amateur = skating in a non-pro loop (junior/college/Europe). These players
+  // hold no NHL contract, so the imported salary/term is not a pro deal.
+  const isAmateur = teamId !== null && teamTier !== undefined && teamTier !== 'nhl' && teamTier !== 'ahl'
 
   const pidStr = playerId as string
   const groups: AttributeGroupView[] = [
@@ -644,6 +767,7 @@ export function buildPlayerProfile(
       year: s.season,
       teamAbbr: ctx.teams.get(s.teamId as TeamId)?.abbreviation ?? s.teamId,
       ...(ctx.teams.has(s.teamId as TeamId) ? { teamId: s.teamId as string } : {}),
+      ...(s.league === 'ahl' ? { league: 'ahl' as const } : {}),
       skater:
         p.position === 'G'
           ? null
@@ -662,6 +786,11 @@ export function buildPlayerProfile(
                   : 0,
               ppGoals: s.pp.goals,
               ppAssists: s.pp.assists,
+              shGoals: s.pk.goals,
+              shAssists: s.pk.assists,
+              ppToiPerGame: s.gamesPlayed > 0 ? Math.round(s.pp.timeOnIce / s.gamesPlayed) : 0,
+              pkToiPerGame: s.gamesPlayed > 0 ? Math.round(s.pk.timeOnIce / s.gamesPlayed) : 0,
+              ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             },
       goalie:
         p.position === 'G'
@@ -675,6 +804,7 @@ export function buildPlayerProfile(
               shutouts: s.shutouts,
               saves: s.saves,
               shotsAgainst: s.shotsAgainst,
+              ...(s.avgRating !== undefined ? { avgRating: s.avgRating } : {}),
             }
           : null,
     }))
@@ -751,9 +881,35 @@ export function buildPlayerProfile(
         return { label: a.label, blurb: a.blurb }
       })()
     : undefined
-  const potStars = potentialStars(p)
-  const scoutReport = buildScoutReport(p, fog?.scouting, potStars)
-  const scoutPanel = buildScoutPanel(userScouts ?? [], p, fog?.scouting, potStars)
+  // Truth ceiling drives engines that model their OWN scout variance (the multi-
+  // scout panel); the fog-aware read drives everything we DISPLAY as our verdict.
+  const truePotStars = potentialStars(p)
+  const potStars = potentialStars(p, fog?.scouting)
+  const scoutReport = buildScoutReport(p, fog?.scouting, potStars, playerLeague, observedPace)
+  // Scout Opinions: only scouts who have ACTUALLY watched this player file an
+  // opinion (FM-style — a scout can't grade someone he's never seen). Own-org
+  // players are known to the whole staff. When no scout has seen an opponent, the
+  // panel is omitted entirely rather than inventing reads.
+  const isOwnPlayer = teamId !== null && teamId === ctx.userTeamId
+  const allScouts = userScouts ?? []
+  const sawIds = fog ? new Set(scoutsWhoSaw(fog.scouting, p.id as string)) : null
+  const opinionScouts = isOwnPlayer || !sawIds
+    ? allScouts
+    : allScouts.filter((s) => sawIds.has(s.id as string))
+  // The player's real current-season scoring pace, so each scout's report can
+  // describe what he saw the prospect do in a recent viewing. Prefer the pace the
+  // caller passed (it knows the player's actual league — world/AHL/NHL); fall back
+  // to the user-league totals in ctx.
+  let obsPpg = observedPace
+  if (obsPpg === undefined) {
+    const obsGp = ctx.gp.get(p.id as PlayerId) ?? 0
+    const obsTot = ctx.totals.get(p.id as PlayerId)
+    if (obsGp > 0) obsPpg = ((obsTot?.goals ?? 0) + (obsTot?.assists ?? 0)) / obsGp
+  }
+  const observed = obsPpg !== undefined ? { ppg: obsPpg } : undefined
+  const scoutPanel = (isOwnPlayer || !fog || opinionScouts.length > 0)
+    ? buildScoutPanel(opinionScouts, p, fog?.scouting, truePotStars, observed)
+    : undefined
   // FM-style Overall Report verdict (own players / reliably scouted opponents).
   const scoutVerdict = archetypeKnown
     ? buildScoutVerdict(
@@ -763,6 +919,10 @@ export function buildPlayerProfile(
         teamId !== null,
       )
     : undefined
+
+  // #73: deployment read — how to USE this skater. Own players always; opponents
+  // only once reliably scouted. Goalies return undefined (starter/tandem elsewhere).
+  const deployment = archetypeKnown ? deploymentProfile(p) : undefined
 
   // Mindset (optional; only built when mindsetCtx provided, or when no fog = own player)
   let mindset: import('@engine/career/playerMindset').MindsetView | undefined
@@ -795,7 +955,7 @@ export function buildPlayerProfile(
     potentialStars: potStars,
     overallTrend: trendOf(p.devTrend),
     potentialTrend: trendOf(p.ceilingTrend),
-    potentialBand: potentialBandOf(p, fog ? knowledgeOf(fog.scouting, pidStr) : undefined),
+    potentialBand: potentialBandOf(p, fog?.scouting),
     personality: PERSONALITY_LABELS.map(([key, label]) => ({
       label,
       value: (p.personality as unknown as Record<string, number>)[key] ?? 0,
@@ -811,12 +971,14 @@ export function buildPlayerProfile(
     personalityReads,
     bio: buildBio(p),
     honours: buildHonours(p),
-    profileContract: buildProfileContract(p, teamId !== null),
+    ...(careerMilestoneBadges(p).length ? { careerAchievements: careerMilestoneBadges(p) } : {}),
+    profileContract: buildProfileContract(p, teamId !== null, isAmateur),
     scoutReport,
-    scoutPanel,
+    ...(scoutPanel !== undefined ? { scoutPanel } : {}),
     ...(mindset !== undefined ? { mindset } : {}),
     ...(personalityType !== undefined ? { personalityType } : {}),
     ...(scoutVerdict !== undefined ? { scoutVerdict } : {}),
+    ...(deployment !== undefined ? { deployment } : {}),
   }
 }
 
@@ -1019,8 +1181,13 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
   const roster = team.roster.map((id) => ctx.players.get(id)!).filter(Boolean)
   const payroll = roster.map(payrollRow).sort((a, b) => b.salary - a.salary)
   const capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
+  // League-average payroll is an NHL-only figure — the AHL/world tiers pay a
+  // fraction of NHL wages and would drag the average below the salary floor.
   let leagueTotal = 0
+  let leagueTeamCount = 0
   for (const t of ctx.teams.values()) {
+    if (t.tier === 'ahl' || t.tier === 'world') continue
+    leagueTeamCount += 1
     for (const id of t.roster) leagueTotal += ctx.players.get(id)?.contract.salary ?? 0
   }
   // Salary by position group.
@@ -1073,10 +1240,12 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     salaryCap: team.finances.salaryCap,
     capUsed,
     capSpace: team.finances.salaryCap - capUsed,
+    salaryFloor: CAP_FLOOR,
+    underFloor: capUsed < CAP_FLOOR,
     budget: team.finances.budget,
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),
-    leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, ctx.teams.size)),
+    leagueAvgPayroll: Math.round(leagueTotal / Math.max(1, leagueTeamCount)),
     byPosition,
     commitments,
     revenue,
@@ -1089,11 +1258,24 @@ export interface ScoutingViewCtx extends ViewCtx {
   scouting: ScoutingState
   /** All draft class prospect ids across all years. */
   draftProspectIds: Set<string>
+  /** Analyst full-ordering draft rank by playerId (for showing/filtering draft
+   *  standing in the scouting lists). Optional. */
+  draftRankById?: Record<string, number>
+  /** Leagues for `competition`/`nation` scopes (synthetic NHL/AHL included). */
+  competitions: ScoutingCompetition[]
+  /** Display metadata for feeder/international competitions. */
+  competitionMeta: Array<{ id: string; name: string; abbrev: string; nation: string }>
+  /** The user's next-opponent team id, or null. */
+  nextOpponentId: string | null
+  /** Hireable scouts on the market. */
+  scoutMarket: ScoutCandidate[]
+  /** Soft cap on the scouting department size. */
+  maxScouts: number
 }
 
 function assignmentLabel(
-  target: { kind: string; teamId?: string; divisionId?: string },
-  ctx: ViewCtx
+  target: { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string },
+  ctx: ScoutingViewCtx
 ): string {
   switch (target.kind) {
     case 'team': {
@@ -1104,26 +1286,161 @@ function assignmentLabel(
       const d = ctx.divisions.find((div) => div.id === target.divisionId)
       return d ? `Watching ${d.name} division` : 'Watching division'
     }
+    case 'competition': {
+      if (target.competitionId === 'nhl') return 'Covering the NHL'
+      if (target.competitionId === 'ahl') return 'Covering the AHL'
+      const c = ctx.competitionMeta.find((m) => m.id === target.competitionId)
+      return c ? `Covering the ${c.abbrev}` : 'Covering a league'
+    }
+    case 'nation':
+      return `Covering ${target.nation}`
+    case 'nextOpponent':
+      return 'Advance-scouting next opponent'
     case 'draftClass':
       return 'Scouting draft class'
     case 'freeAgents':
       return 'Watching free agents'
+    case 'ownProspects':
+      return 'Assessing our players & prospects'
     default:
       return 'Unassigned'
   }
 }
 
+const FOCUS_LABEL: Record<string, string> = { youth: 'U23', senior: 'Senior', all: 'All players' }
+const SCOUT_YOUTH_MAX_AGE = YOUTH_MAX_AGE
+
 export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const { scouting, teams, divisions, players, draftProspectIds } = ctx
 
+  const { competitions, competitionMeta, nextOpponentId, scoutMarket } = ctx
+
+  // PERF: precompute scout-read accuracy once (judgmentOf/accuracyOf are O(n)
+  // linear scans; the scouted-players table iterates every known player, so
+  // calling them per row was O(n²)). Look up O(1) from this map instead.
+  const judgmentByPid = new Map<string, number>()
+  for (const [pid, j] of scouting.judgment ?? []) judgmentByPid.set(pid, j)
+  const accFor = (pid: string): number => {
+    const j = judgmentByPid.get(pid) ?? 0
+    return j <= 0 ? 0.5 : Math.max(0, Math.min(1, j / 100))
+  }
+
+  // Resolve a scope (+focus) to the set of player ids it covers — mirrors the
+  // engine's resolveTarget so the cards/coverage match what actually ticks.
+  const isYouth = (pid: string): boolean => {
+    const p = players.get(pid as PlayerId)
+    return !!p && p.age <= SCOUT_YOUTH_MAX_AGE
+  }
+  const rostersOf = (teamIds: Iterable<string>): string[] => {
+    const ids: string[] = []
+    for (const tid of teamIds) {
+      const t = teams.get(tid as TeamId)
+      if (t) for (const id of t.roster) ids.push(id as string)
+    }
+    return ids
+  }
+  const resolveScope = (target: { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string }): string[] => {
+    switch (target.kind) {
+      case 'team': return target.teamId ? rostersOf([target.teamId]) : []
+      case 'division': {
+        const ids: string[] = []
+        for (const [tid, t] of teams) {
+          if ((t as { divisionId?: string }).divisionId === target.divisionId) ids.push(...rostersOf([tid as string]))
+        }
+        return ids
+      }
+      case 'competition': {
+        const c = competitions.find((x) => x.id === target.competitionId)
+        return c ? rostersOf(c.teamIds) : []
+      }
+      case 'nation': {
+        const set = new Set<string>()
+        for (const c of competitions) if (c.nation === target.nation) for (const t of c.teamIds) set.add(t)
+        return rostersOf(set)
+      }
+      case 'nextOpponent': return nextOpponentId ? rostersOf([nextOpponentId]) : []
+      case 'draftClass': return [...draftProspectIds]
+      case 'freeAgents': return [] // FA coverage isn't league-bounded; skip the count
+      case 'ownProspects': {
+        const u = ctx.userTeamId as string
+        const ahl = teams.get(ctx.userTeamId)?.affiliateId as string | undefined
+        const ids = new Set<string>(rostersOf(ahl ? [u, ahl] : [u]))
+        for (const p of ctx.players.values()) {
+          if ((p.rightsTeamId as unknown as string | undefined) === u) ids.add(p.id as string)
+        }
+        return [...ids]
+      }
+      default: return []
+    }
+  }
+  const posOf = (id: string): string | undefined => players.get(id as PlayerId)?.position
+  const matchesPos = (id: string, f: 'any' | 'F' | 'D' | 'G'): boolean => {
+    if (f === 'any') return true
+    const pos = posOf(id) ?? ''
+    const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+    return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
+  }
+  const coverageOf = (target: { kind: string }, focus: string | undefined, posFilter: 'any' | 'F' | 'D' | 'G'): number => {
+    let ids = resolveScope(target as { kind: string })
+    if (focus && focus !== 'all') ids = ids.filter((id) => (focus === 'youth' ? isYouth(id) : !isYouth(id)))
+    if (posFilter !== 'any') ids = ids.filter((id) => matchesPos(id, posFilter))
+    return ids.length
+  }
+
+  // Map a scout's scope to a single host nation (for the world map + flag).
+  const teamNation = new Map<string, string>()
+  for (const c of competitions) for (const t of c.teamIds) if (c.nation !== 'North America') teamNation.set(t, c.nation)
+  const playerTeam = new Map<string, string>()
+  for (const [tid, t] of teams) for (const id of t.roster) playerTeam.set(id as string, tid as string)
+  const scopeNation = (t: { kind: string; teamId?: string; competitionId?: string; nation?: string; playerId?: string }): string | null => {
+    if (t.kind === 'nation') return t.nation ?? null
+    if (t.kind === 'competition') { const c = competitions.find((x) => x.id === t.competitionId); return c && c.nation !== 'North America' ? c.nation : null }
+    if (t.kind === 'team' && t.teamId) return teamNation.get(t.teamId) ?? null
+    if (t.kind === 'player' && t.playerId) { const tid = playerTeam.get(t.playerId); return tid ? (teamNation.get(tid) ?? null) : null }
+    return null
+  }
+
   // Scout cards
-  const scouts = scouting.assignments.map((s) => ({
-    scoutId: s.scoutId,
-    name: s.name,
-    rating: s.rating,
-    assignmentLabel: assignmentLabel(s.target as { kind: string; teamId?: string; divisionId?: string }, ctx),
-    target: s.target,
-  }))
+  const scouts = scouting.assignments.map((s) => {
+    const focus = (s.focus ?? 'all') as 'youth' | 'senior' | 'all'
+    const positionFilter = (s.positionFilter ?? 'any') as 'any' | 'F' | 'D' | 'G'
+    const cov = coverageOf(s.target as { kind: string }, focus, positionFilter)
+    return {
+      scoutId: s.scoutId,
+      name: s.name,
+      rating: s.rating,
+      ...(s.judgment !== undefined ? { judgment: s.judgment } : {}),
+      ...(s.specialtyNation !== undefined ? { specialtyNation: s.specialtyNation } : {}),
+      ...(s.salary !== undefined ? { salary: s.salary } : {}),
+      assignmentLabel: assignmentLabel(s.target as { kind: string; teamId?: string; divisionId?: string; competitionId?: string; nation?: string }, ctx),
+      focusLabel: FOCUS_LABEL[focus] ?? 'All players',
+      target: s.target,
+      focus,
+      positionFilter,
+      minPotentialStars: s.minPotentialStars ?? 0,
+      coverage: cov,
+      readSpeed: scoutReadSpeed(cov),
+      focusNation: scopeNation(s.target as { kind: string }),
+    }
+  })
+  // Nations covered: a WORLD brief covers every scouted nation; league/team/
+  // draft briefs cover North America; narrow briefs contribute their nation.
+  const allCompNations = [...new Set(competitions.map((c) => c.nation).filter((n) => n !== 'North America'))]
+  const coveredNations = new Set<string>()
+  for (const s of scouts) {
+    const kind = (s.target as { kind: string }).kind
+    if (kind === 'world') {
+      for (const n of allCompNations) coveredNations.add(n)
+      coveredNations.add('North America')
+    } else if (s.focusNation) {
+      coveredNations.add(s.focusNation)
+    } else {
+      // League / division / NA team / own prospects / draft class / next opp.
+      coveredNations.add('North America')
+    }
+  }
+  const scoutedNations = [...coveredNations]
+  const activeScouts = scouting.assignments.length
 
   // Teams list for dropdown options
   const teamsOpts = [...teams.values()].map((t) => ({
@@ -1137,6 +1454,98 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     divisionId: d.id,
     divisionName: d.name,
   }))
+
+  // Scope options — nations (regions) and leagues (competitions, incl. NHL/AHL).
+  const nationSet = new Set<string>()
+  for (const c of competitions) if (c.nation && c.nation !== 'North America') nationSet.add(c.nation)
+  const nations: import('./views').ScoutScopeOption[] = [...nationSet].sort()
+    .map((n) => ({ kind: 'nation', id: n, label: n }))
+  const compLabel = (id: string): string =>
+    id === 'nhl' ? 'NHL' : id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === id)?.abbrev ?? id.toUpperCase())
+  const competitionsOpts: import('./views').ScoutScopeOption[] = competitions.map((c) => ({
+    kind: 'competition', id: c.id, label: compLabel(c.id),
+  }))
+
+  // Coverage by league + nation (avg knowledge, plus a youth-only split).
+  const coverageRow = (id: string, label: string, nation: string | undefined, teamIds: string[]): import('./views').ScoutCoverageRow => {
+    const ids = rostersOf(teamIds)
+    const ks = ids.map((pid) => knowledgeOf(scouting, pid))
+    const youthKs = ids.filter(isYouth).map((pid) => knowledgeOf(scouting, pid))
+    const mean = (arr: number[]): number => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0)
+    return { id, label, ...(nation ? { nation } : {}), avgKnowledge: mean(ks), youthAvgKnowledge: mean(youthKs), playerCount: ids.length }
+  }
+  const leagueCoverage = competitions
+    .map((c) => coverageRow(c.id, c.id === 'nhl' ? 'NHL' : c.id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === c.id)?.name ?? compLabel(c.id)), c.nation, c.teamIds))
+    .filter((r) => r.playerCount > 0)
+  const nationCoverage = [...nationSet].sort().map((n) => {
+    const teamIds = new Set<string>()
+    for (const c of competitions) if (c.nation === n) for (const t of c.teamIds) teamIds.add(t)
+    return coverageRow(n, n, n, [...teamIds])
+  }).filter((r) => r.playerCount > 0)
+
+  const scoutMarketRows: import('./views').ScoutMarketRow[] = scoutMarket.map((c) => ({
+    id: c.id, name: c.name, rating: c.rating, judgment: c.judgment,
+    ...(c.specialtyNation ? { specialtyNation: c.specialtyNation } : {}),
+    salary: c.salary,
+  }))
+  const nextOpponentName = nextOpponentId ? (teams.get(nextOpponentId as TeamId)?.name ?? null) : null
+
+  // World knowledge — average across players we have a read on, EXCLUDING our own
+  // roster (always 100%, would otherwise inflate the department KPI).
+  const ownRoster = new Set((teams.get(ctx.userTeamId)?.roster ?? []).map((id) => id as string))
+  const knownVals = scouting.knowledge.filter(([id, k]) => k > 0 && !ownRoster.has(id)).map(([, k]) => k)
+  const worldKnowledge = knownVals.length ? Math.round(knownVals.reduce((a, b) => a + b, 0) / knownVals.length) : 0
+
+  // Roster needs — which position GROUPS the user is thin on NHL-quality bodies.
+  // A find that fills a need is flagged and floated to the top of the Centre.
+  const groupOf = (pos: string): 'C' | 'W' | 'D' | 'G' =>
+    pos === 'G' ? 'G' : (pos === 'D' || pos === 'LD' || pos === 'RD') ? 'D' : pos === 'C' ? 'C' : 'W'
+  const GROUP_LABEL: Record<'C' | 'W' | 'D' | 'G', string> = { C: 'Centre', W: 'Wing', D: 'Defense', G: 'Goaltending' }
+  const QUALITY_BAR = 68
+  const NEED_TARGET: Record<'C' | 'W' | 'D' | 'G', number> = { C: 3, W: 5, D: 5, G: 2 }
+  const qualityCount: Record<'C' | 'W' | 'D' | 'G', number> = { C: 0, W: 0, D: 0, G: 0 }
+  for (const id of ownRoster) {
+    const p = players.get(id as PlayerId)
+    if (p && ratedOverall(p) >= QUALITY_BAR) qualityCount[groupOf(p.position)]++
+  }
+  const needGroups = new Set<'C' | 'W' | 'D' | 'G'>(
+    (['C', 'W', 'D', 'G'] as const).filter((g) => qualityCount[g] < NEED_TARGET[g]),
+  )
+  const rosterNeeds = [...needGroups].map((g) => GROUP_LABEL[g])
+
+  // Scouting Centre — the surfaced finds (fills over the career).
+  const teamAbbrOf = new Map<string, string>()
+  for (const [, team] of teams) for (const id of team.roster) teamAbbrOf.set(id as string, team.abbreviation)
+  const shortlistSet = new Set(scouting.shortlist ?? [])
+  const recommendations: import('./views').ScoutFindView[] = []
+  for (const r of scouting.recommendations ?? []) {
+    const p = players.get(r.playerId as PlayerId)
+    if (!p) continue
+    const recK = knowledgeOf(scouting, r.playerId)
+    recommendations.push({
+      ...badge(p),
+      age: p.age,
+      position: p.position,
+      teamAbbr: teamAbbrOf.get(r.playerId) ?? 'FA',
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      currentStars: overallToStars(ratedOverall(p)),
+      potentialStars: overallToStars(scoutedCeilingK(p, recK, accFor(r.playerId))),
+      knowledge: Math.round(recK),
+      grade: r.grade,
+      reason: r.reason,
+      scoutName: r.scoutName,
+      foundDate: r.foundDate,
+      fitsNeed: needGroups.has(groupOf(p.position)),
+      draftEligible: draftProspectIds.has(r.playerId),
+      ...(shortlistSet.has(r.playerId) ? { shortlisted: true } : {}),
+      ...(ctx.draftRankById?.[r.playerId] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[r.playerId]) } : {}),
+    })
+  }
+  const recRank = { 'A+': 0, A: 1, B: 2, C: 3 }
+  // Need-fillers float up (within grade), then by potential.
+  recommendations.sort((a, b) =>
+    (a.fitsNeed === b.fitsNeed ? 0 : a.fitsNeed ? -1 : 1) ||
+    recRank[a.grade] - recRank[b.grade] || b.potentialStars - a.potentialStars)
 
   // Per-team knowledge summary
   const teamKnowledge: TeamKnowledgeSummary[] = []
@@ -1173,17 +1582,30 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const scoutedPlayers: import('./views').ScoutedPlayerRow[] = []
   for (const [pid, k] of scouting.knowledge) {
     if (k < 15) continue
+    if (ownRoster.has(pid as string)) continue // your own players aren't acquisition targets
     const p = players.get(pid as PlayerId)
     if (!p) continue
     const cur = overallToStars(ratedOverall(p))
-    const pot = potentialStars(p)
-    const ceiling = Math.max(cur, pot)
-    const young = p.age <= 23
+    const pot = overallToStars(scoutedCeilingK(p, k, accFor(pid as string)))
+    const headroom = Math.max(0, pot - cur)
+    // TARGET value (FM-style): a recommendation is about who's worth PURSUING, not
+    // raw quality. Youth + remaining upside drive it; value fades hard with age
+    // (you don't "target" a 30-year-old — for established NHLers scouting just keeps
+    // your knowledge current), and elite CURRENT players are near-impossible to
+    // acquire so they're discounted too. A 19-year-old with a high ceiling and room
+    // to grow is the prize; a world-class veteran on another roster is not.
+    const ageFactor = p.age <= 20 ? 1 : p.age <= 23 ? 0.9 : p.age <= 26 ? 0.6 : p.age <= 29 ? 0.4 : 0.25
+    const acquirability = cur >= 4.5 ? 0.5 : cur >= 4 ? 0.7 : cur >= 3 ? 0.9 : 1
+    const targetScore = (pot * 0.55 + headroom * 1.2) * ageFactor * acquirability
+    // Thresholds calibrated against the formula's real range so the column actually
+    // DISCRIMINATES. A pool filtered to young prospects (all high ageFactor + low
+    // current → big headroom) previously landed everyone at A+; only the genuinely
+    // elite (≥4★ ceiling with room to grow) should earn the top grade.
     const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =
-      ceiling >= 4.5 ? 'A+'
-      : ceiling >= 4 ? (young ? 'A+' : 'A')
-      : ceiling >= 3 ? (young ? 'A' : 'B')
-      : ceiling >= 2 ? 'C'
+      targetScore >= 5.5 ? 'A+'
+      : targetScore >= 4.2 ? 'A'
+      : targetScore >= 3.2 ? 'B'
+      : targetScore >= 2.2 ? 'C'
       : 'D'
     scoutedPlayers.push({
       playerId: pid as string,
@@ -1196,13 +1618,16 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       potentialStars: pot,
       knowledge: Math.round(k),
       rec,
+      targetScore: Math.round(targetScore * 100) / 100,
       salary: p.contract.salary,
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      draftEligible: draftProspectIds.has(pid as string),
+      ...(ctx.draftRankById?.[pid as string] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid as string]) } : {}),
     })
   }
-  const recOrder = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
+  // Best targets first — young, high-upside, acquirable.
   scoutedPlayers.sort((a, b) =>
-    recOrder[a.rec] - recOrder[b.rec] ||
+    b.targetScore - a.targetScore ||
     b.potentialStars - a.potentialStars ||
     b.currentStars - a.currentStars,
   )
@@ -1213,9 +1638,21 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     scoutedPlayers,
     teams: teamsOpts,
     divisions: divisionsOpts,
+    nations,
+    competitions: competitionsOpts,
+    nextOpponentName,
+    scoutedNations,
+    worldKnowledge,
+    activeScouts,
+    recommendations,
+    rosterNeeds,
     hasDraftClass: draftProspectIds.size > 0,
+    leagueCoverage,
+    nationCoverage,
     teamKnowledge,
     topGains,
+    scoutMarket: scoutMarketRows,
+    maxScouts: ctx.maxScouts,
   }
 }
 
@@ -1282,7 +1719,8 @@ export function buildAhlStandingsView(ctx: AhlViewCtx): AhlStandingsView {
  */
 export function buildAhlSquadView(
   ctx: AhlViewCtx,
-  ahlGp: Map<PlayerId, number>
+  ahlGp: Map<PlayerId, number>,
+  ahlTotals?: Map<PlayerId, import('@engine/shared/outcome').GamePlayerStat>,
 ): AhlSquadView {
   if (!ctx.userAhlTeamId) {
     return { teamName: 'No Affiliate', teamId: '', rows: [], rosterCount: 0, hasAffiliate: false }
@@ -1297,30 +1735,35 @@ export function buildAhlSquadView(
       const p = ctx.players.get(id)
       if (!p) return null
       const gp = ahlGp.get(id) ?? 0
+      // Farm production from the accumulated AHL totals (goals/assists/…), so the
+      // Statistics view shows real numbers instead of a row of zeros. PP/PK aren't
+      // split at the farm level — everything is even-strength here.
+      const t = ahlTotals?.get(id)
       const skaterLine: SkaterSeasonLine | null = p.position !== 'G'
         ? {
             gamesPlayed: gp,
-            goals: 0,
-            assists: 0,
-            points: 0,
-            plusMinus: 0,
-            penaltyMinutes: 0,
-            shots: 0,
-            toiPerGame: 0,
+            goals: t?.goals ?? 0,
+            assists: t?.assists ?? 0,
+            points: (t?.goals ?? 0) + (t?.assists ?? 0),
+            plusMinus: t?.plusMinus ?? 0,
+            penaltyMinutes: t?.penaltyMinutes ?? 0,
+            shots: t?.shots ?? 0,
+            toiPerGame: t && gp > 0 ? Math.round(t.toi / gp) : 0,
             ppGoals: 0,
             ppAssists: 0,
           }
         : null
+      const gaGp = t ? gp : 0
       const goalieLine = p.position === 'G'
         ? {
             gamesPlayed: gp,
             wins: 0,
             losses: 0,
-            savePct: 0,
-            goalsAgainstAverage: 0,
+            savePct: t && t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : 0,
+            goalsAgainstAverage: gaGp > 0 ? (t!.goalsAgainst / gaGp) : 0,
             shutouts: 0,
-            saves: 0,
-            shotsAgainst: 0,
+            saves: t?.saves ?? 0,
+            shotsAgainst: t?.shotsAgainst ?? 0,
           }
         : null
       const b = badge(p)
@@ -1373,6 +1816,10 @@ export interface CalendarCtx extends ViewCtx {
   playoffsStartDay: number | null
   /** Scheduled GM interviews to mark on the calendar. */
   interviewDates?: Array<{ dateISO: string; label: string }>
+  /** Extra dated beats (summer tentpoles: FA opening, camps, cut day). */
+  extraKeyDates?: Array<{ dateISO: string; label: string }>
+  /** The current in-world date (offseason-aware) — anchors the default month. */
+  todayISO?: string
 }
 
 /**
@@ -1383,6 +1830,9 @@ export interface CalendarCtx extends ViewCtx {
  */
 export function buildCalendarView(ctx: CalendarCtx): CalendarView {
   const entries: CalendarEntry[] = []
+  for (const k of ctx.extraKeyDates ?? []) {
+    entries.push({ kind: 'keydate', dateISO: k.dateISO, label: k.label })
+  }
 
   // ── user fixtures ──
   const userGames = ctx.schedule.filter(
@@ -1426,8 +1876,11 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
     const firstDay = Math.min(...allDays)
     const lastDay = Math.max(...allDays)
 
-    // Pre-season: training camp (mid-September, before the Oct 1 season start).
-    entries.push({ kind: 'keydate', dateISO: `${ctx.year}-09-18`, label: 'Training Camp Opens' })
+    // Pre-season: training camp (the summer beat list owns the exact date, so
+    // only add the legacy marker when no extra key dates were provided).
+    if (!ctx.extraKeyDates?.length) {
+      entries.push({ kind: 'keydate', dateISO: `${ctx.year}-09-15`, label: 'Training Camp Opens' })
+    }
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
 
     // Holiday roster freeze (late December).
@@ -1464,7 +1917,7 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
 
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
 
-  return { year: ctx.year, entries }
+  return { year: ctx.year, entries, ...(ctx.todayISO ? { todayISO: ctx.todayISO } : {}) }
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */
@@ -1792,7 +2245,7 @@ export function buildTeamDataHubView(
           goalsPer60: per60(s.goals),
           shootingPct: Math.round(shootPct * 1000) / 1000,
           finishing,
-          plusMinus: 0, // GamePlayerStat doesn't accumulate +/- directly
+          plusMinus: s.plusMinus,
           ppGoals: ppG,
           ppAssists: ppA,
           ppPoints: ppG + ppA,

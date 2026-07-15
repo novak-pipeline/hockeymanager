@@ -23,8 +23,12 @@ import type {
   XY
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
-import type { GameRules } from '@engine/shared/rules'
+import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { goalieNightFactor } from '@engine/shared/goalieNight'
+import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -32,6 +36,10 @@ const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
 const SHIFT_SECONDS = 40
 const OT_SECONDS = 300
+// Open-ice shot-volume boost during 3-on-3 overtime (regular season). Combined
+// with a shot-quality bump, this lands roughly a majority of OT-reaching games
+// on an overtime winner rather than a shootout — the modern NHL split.
+const THREE_ON_THREE_SHOT_MULT = 1.25
 
 // League-average targets the coefficients aim at (calibration will refine).
 const SHOTS_PER_TEAM_PER_GAME = 30
@@ -60,9 +68,19 @@ const LEAGUE_AVG = 50
 /** Quick-sim returns the shared box-score contract. */
 export type QuickSimResult = GameOutcome
 
-/** Forward-line usage weights (top lines play more). */
-const FWD_LINE_WEIGHTS = [0.3, 0.27, 0.24, 0.19]
-const DEF_PAIR_WEIGHTS = [0.38, 0.34, 0.28]
+// Forward-line / D-pair even-strength usage weights. The top line plays roughly
+// twice the minutes of the fourth (real NHL: ~19-21 min vs ~9-11), and the top
+// pair ~1.7x the third. Special-teams deployment (PP1/PK1) widens the total
+// spread further on top of these even-strength shares.
+// Home-ice conversion edge (applied +to home / −to away, so it's calibration-
+// neutral on total goals). Tuned to land the equal-strength home win rate near
+// the real-NHL ~53-54%.
+const HOME_ICE_EDGE = 0.05
+const FWD_LINE_WEIGHTS = [0.34, 0.28, 0.22, 0.16]
+const DEF_PAIR_WEIGHTS = [0.42, 0.34, 0.24]
+// #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
+const PP_UNIT_WEIGHTS = [0.7, 0.3]
+const PK_UNIT_WEIGHTS = [0.62, 0.38]
 
 interface OnIce {
   skaters: Player[]
@@ -104,19 +122,45 @@ class TeamSim {
   readonly resolve: (id: PlayerId) => Player
   goals = 0
   penaltyBoxUntil: number[] = [] // game-clock expiry times of active minors
+  /** The goalie starting THIS game (rotation, set by the caller). Falls back to
+   *  the depth-chart starter when unset. */
+  startingGoalie: PlayerId | null = null
+  /** Multiplier on goals this starter concedes tonight (mean 1.0; <1 = hot, >1 =
+   *  leaking) — the "hot goalie / off night" lever, set once per game. */
+  goalieNight = 1
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
     this.resolve = resolve
   }
 
-  pickOnIce(rng: Rng): OnIce {
+  /** #175: deploy the unit that matches the strength state — the real PP/PK units
+   *  during special teams (so PP1 gets the power-play chances → the power-play
+   *  goals, as in the full sim), the even-strength lines otherwise. */
+  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev'): OnIce {
     const lines = this.team.lines
+    const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
+    if (situation === 'pp' && lines.powerPlayUnits.length > 0) {
+      const unit = lines.powerPlayUnits[weightedIndex(rng, lines.powerPlayUnits.map((_, i) => PP_UNIT_WEIGHTS[i] ?? 0.15))]
+      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+    }
+    if (situation === 'pk' && lines.penaltyKillUnits.length > 0) {
+      const unit = lines.penaltyKillUnits[weightedIndex(rng, lines.penaltyKillUnits.map((_, i) => PK_UNIT_WEIGHTS[i] ?? 0.15))]
+      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+    }
     const fwd = lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
     const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
     const skaters = [...fwd, ...pair].map(this.resolve)
-    const goalie = this.resolve(lines.goalies[0])
     return { skaters, goalie }
+  }
+
+  /** #175: this team's strength state at game-clock `t` (relative to its opponent). */
+  situationVs(opp: TeamSim, t: number): 'ev' | 'pp' | 'pk' {
+    const meSH = this.shorthanded(t)
+    const oppSH = opp.shorthanded(t)
+    if (oppSH && !meSH) return 'pp'
+    if (meSH && !oppSH) return 'pk'
+    return 'ev'
   }
 
   /** Active penalties at game-clock t (expired ones pruned). */
@@ -148,6 +192,15 @@ interface Ctx {
   rng: Rng
   stream: GameEvent[]
   stats: Map<PlayerId, GamePlayerStat>
+  /** Baseline rating this game's scoring is judged against. Defaults to the global
+   *  LEAGUE_AVG (NHL). A weaker league passes its OWN lower average so its best
+   *  players read as stars RELATIVE to their competition and produce realistic
+   *  point totals — otherwise a junior loop of sub-50 skaters scores almost
+   *  nothing and its leader tops out around 0.4 PPG. */
+  leagueAvg: number
+  /** Per-shot goal-probability multiplier for the game context (playoff
+   *  tightening). Absent → 1.0 (regular season, unchanged). */
+  scoringMult?: number
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -206,7 +259,10 @@ function simShift(
   def: OnIce,
   period: number,
   t: number,
-  attackingPositive: boolean
+  attackingPositive: boolean,
+  lengthSeconds: number,
+  attackingIsHome: boolean,
+  threeOnThree = false
 ): void {
   const { rng } = ctx
 
@@ -226,8 +282,22 @@ function simShift(
   const offense = avg(atk.skaters, (c) => c.scoring * 0.6 + c.playmaking * 0.4)
   const defense = avg(def.skaters, (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
 
+  const lgAvg = ctx.leagueAvg
+  // Cap the team-strength shot multiplier: a stacked line in a weak league must
+  // not generate runaway shot volume. NHL top lines sit ~1.25, so a 1.4 ceiling
+  // is invisible there but tames weak-league outliers.
+  const offMult = Math.min(1.4, offense / lgAvg)
+  // 3-on-3 overtime is wide-open: acres of ice, constant odd-man rushes. Chances
+  // come faster and from more dangerous spots, which is why so many OTs end well
+  // before the shootout. Model that as an open-ice boost on both shot volume and
+  // shot quality (only when actually skating 3v3 — regular-season OT).
+  const openIceMult = threeOnThree ? THREE_ON_THREE_SHOT_MULT : 1
+  // Score effects: the trailing team pushes, the leading team protects the lead,
+  // stronger as the clock runs down. Tuned to conserve total shot volume, so only
+  // the share tilts toward the chaser (see scoreEffects.ts).
+  const scoreMult = scoreEffectMult(attacking.goals - defending.goals, (period - 1 + t / lengthSeconds) / 3)
   const rate =
-    BASE_SHOTS_PER_SHIFT * (offense / LEAGUE_AVG) * (LEAGUE_AVG / Math.max(20, defense)) * strengthMult
+    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult * openIceMult * scoreMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -235,7 +305,7 @@ function simShift(
     const tShot = t + rng.float(0, SHIFT_SECONDS)
     const danger = Math.max(
       0,
-      Math.min(1, rng.normal(0.45 + (offense - defense) / 200, 0.2))
+      Math.min(1, rng.normal(0.45 + (offense - defense) / 200 + (threeOnThree ? 0.12 : 0), 0.2))
     )
     const from = shotPosition(rng, attackingPositive, danger)
     ctx.stream.push({
@@ -260,11 +330,25 @@ function simShift(
     goalieStat.shotsAgainst++
     goalieStat.xgAgainst = (goalieStat.xgAgainst ?? 0) + shotXgApprox
 
-    const finish = shooter.composites.scoring / LEAGUE_AVG
-    const goaliePull = (goalie.composites.goaltending - LEAGUE_AVG) / 220
+    // Cap the per-shooter finishing multiplier. Relative-to-league finishing lets
+    // a weak league's best players score realistically, but uncapped it let a
+    // genuine star in a very weak loop convert at a supernatural rate (200-pt
+    // junior seasons). NHL stars top out ~1.6, so this ceiling is NHL-neutral.
+    const finish = Math.min(1.6, shooter.composites.scoring / lgAvg)
+    const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = attacking.team.coachFit === undefined ? 1 : coachFitMultiplier(attacking.team.coachFit)
+    // Home-ice edge: last change, familiar boards, no travel, the crowd. The home
+    // side finishes a hair better and the road side a hair worse — symmetric, so
+    // total scoring is conserved while the home team banks the extra points that
+    // give the standings a realistic ~53-54% home win rate. (The full sim already
+    // carries a comparable edge emergently; this brings the quick sim in line.)
+    const homeIce = attackingIsHome ? 1 + HOME_ICE_EDGE : 1 - HOME_ICE_EDGE
+    // defending.goalieNight (mean 1.0) is the goalie's night — a hot one turns
+    // more aside, an off night lets more through.
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull))
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce * defending.goalieNight * (ctx.scoringMult ?? 1))
     )
 
     if (rng.chance(pGoal)) {
@@ -273,6 +357,11 @@ function simShift(
       const assists = pickAssists(rng, atk.skaters, shooter)
       stat(ctx, shooter.id).goals++
       for (const a of assists) stat(ctx, a.id).assists++
+      // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
+      if (goalStrength !== 'pp') {
+        for (const sk of atk.skaters) stat(ctx, sk.id).plusMinus += 1
+        for (const sk of def.skaters) stat(ctx, sk.id).plusMinus -= 1
+      }
       // Credit the primary assister xA = shooter's xG for this shot.
       if (assists.length > 0) {
         const primaryA = stat(ctx, assists[0].id)
@@ -319,8 +408,14 @@ function simShift(
   }
 }
 
-function creditToi(ctx: Ctx, onIce: OnIce, seconds: number): void {
-  for (const p of onIce.skaters) stat(ctx, p.id).toi += seconds
+function creditToi(ctx: Ctx, onIce: OnIce, seconds: number, situation: 'ev' | 'pp' | 'pk' = 'ev'): void {
+  for (const p of onIce.skaters) {
+    const s = stat(ctx, p.id)
+    s.toi += seconds
+    // #175: literal special-teams ice time — the unit that's actually deployed.
+    if (situation === 'pp') s.ppToi = (s.ppToi ?? 0) + seconds
+    else if (situation === 'pk') s.pkToi = (s.pkToi ?? 0) + seconds
+  }
   stat(ctx, onIce.goalie.id).toi += seconds
 }
 
@@ -349,7 +444,8 @@ function simPeriod(
   away: TeamSim,
   period: number,
   lengthSeconds: number,
-  suddenDeath: boolean
+  suddenDeath: boolean,
+  threeOnThree = false
 ): boolean {
   const hOn = home.pickOnIce(ctx.rng)
   const aOn = away.pickOnIce(ctx.rng)
@@ -359,18 +455,22 @@ function simPeriod(
   const homeAttacksPositive = period % 2 === 1
 
   for (let t = 0; t < lengthSeconds; t += SHIFT_SECONDS) {
-    const homeUnit = home.pickOnIce(ctx.rng)
-    const awayUnit = away.pickOnIce(ctx.rng)
-    creditToi(ctx, homeUnit, SHIFT_SECONDS)
-    creditToi(ctx, awayUnit, SHIFT_SECONDS)
+    // #175: deploy the unit that fits the strength state, so PP1 takes the
+    // power-play shifts (and thus the power-play goals), PK1 the kills.
+    const homeSit = home.situationVs(away, t)
+    const awaySit = away.situationVs(home, t)
+    const homeUnit = home.pickOnIce(ctx.rng, homeSit)
+    const awayUnit = away.pickOnIce(ctx.rng, awaySit)
+    creditToi(ctx, homeUnit, SHIFT_SECONDS, homeSit)
+    creditToi(ctx, awayUnit, SHIFT_SECONDS, awaySit)
 
     const beforeH = home.goals
     const beforeA = away.goals
-    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive)
+    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, lengthSeconds, true, threeOnThree)
     // Sudden death ends on the FIRST goal — check between the two teams' shifts
     // so a single step can never let both score and leave the game tied.
     if (suddenDeath && home.goals > beforeH) return true
-    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive)
+    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, lengthSeconds, false, threeOnThree)
     if (suddenDeath && away.goals > beforeA) return true
   }
   ctx.stream.push({ t: lengthSeconds, period, type: 'periodEnd' })
@@ -378,28 +478,29 @@ function simPeriod(
 }
 
 function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
-  // Best-of-3 then sudden death; a coin-flavored skill roll per attempt.
+  // Best-of-3 then sudden death; each team sends its snipers best-first, cycling
+  // back once everyone's shot. A specific shooter vs the goalie each attempt.
   const rng = ctx.rng
-  const shooterSkill = (t: TeamSim): number => {
-    const shooters = t.team.lines.forwards.flat().map(t.resolve)
-    return avg(shooters, (c) => c.scoring) / LEAGUE_AVG
+  const order = (t: TeamSim): Player[] => shootoutOrder(t.team.lines.forwards.flat().map(t.resolve))
+  const homeShooters = order(home)
+  const awayShooters = order(away)
+  const goaltending = (t: TeamSim): number =>
+    t.resolve(t.startingGoalie ?? t.team.lines.goalies[0]).composites.goaltending
+  const attempt = (shooters: Player[], round: number, def: TeamSim): boolean => {
+    const shooter = shooters[round % Math.max(1, shooters.length)]
+    return rng.chance(shootoutGoalChance(shootoutSkill(shooter.composites), goaltending(def), ctx.leagueAvg))
   }
-  const goalieSkill = (t: TeamSim): number => {
-    const g = t.resolve(t.team.lines.goalies[0])
-    return g.composites.goaltending / LEAGUE_AVG
-  }
+
   let h = 0
   let a = 0
-  const attempt = (atk: TeamSim, def: TeamSim): boolean =>
-    rng.chance(Math.max(0.1, Math.min(0.6, 0.33 * shooterSkill(atk) * (2 - goalieSkill(def)))))
-
-  for (let round = 0; round < 3; round++) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  let round = 0
+  for (; round < 3; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
-  while (h === a) {
-    const hg = attempt(home, away)
-    const ag = attempt(away, home)
+  for (; h === a; round++) {
+    const hg = attempt(homeShooters, round, away)
+    const ag = attempt(awayShooters, round, home)
     if (hg) h++
     if (ag) a++
   }
@@ -416,6 +517,13 @@ export interface QuickSimOptions {
    * shootout with repeated 20-minute 5v5 sudden-death periods until a goal.
    */
   rules?: GameRules
+  /**
+   * Average skater rating of THIS game's league, used as the baseline scoring is
+   * judged against. Defaults to the global NHL average (50) — pass a weaker
+   * league's own average so its stars produce realistic totals relative to their
+   * competition (juniors/Europe). NHL and AHL keep the default.
+   */
+  leagueAvg?: number
 }
 
 /**
@@ -449,7 +557,11 @@ function simEmptyNetPhase(
     leading.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
-    stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
+    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus += 1
+    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
+    // The trailing net is empty and the leading goalie is at the far end — no
+    // goalie faces this shot, so no goalie stat is credited (crediting the leading
+    // goalie a shot-against here inflated his volume and broke saves+GA=SA).
     ctx.stream.push({
       t: tEN,
       period,
@@ -466,6 +578,8 @@ function simEmptyNetPhase(
     trailing.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
+    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus += 1
+    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
     stat(ctx, leadingOn.goalie.id).shotsAgainst++
     stat(ctx, leadingOn.goalie.id).goalsAgainst++
     ctx.stream.push({
@@ -480,6 +594,90 @@ function simEmptyNetPhase(
   }
 }
 
+/** Real NHL per-team-per-game physical-play volume (calibration targets). The
+ *  quick sim doesn't track these tick-by-tick like the full sim, so it hands out
+ *  a game's worth at the end, weighted by the relevant attribute. */
+const PHYS_PER_GAME = { hits: 22.8, blockedShots: 17.5, takeaways: 6.1, giveaways: 7.8 }
+
+/** Largest-remainder apportionment: hand out `total` whole units across weighted
+ *  buckets so the parts sum to exactly `total`. Deterministic (no RNG). */
+function distributeCount(weights: number[], total: number): number[] {
+  if (total <= 0 || weights.length === 0) return weights.map(() => 0)
+  const sum = weights.reduce((a, b) => a + b, 0) || 1
+  const raw = weights.map((w) => (w / sum) * total)
+  const base = raw.map((r) => Math.floor(r))
+  const left = total - base.reduce((a, b) => a + b, 0)
+  const order = raw.map((r, i) => ({ i, frac: r - Math.floor(r) })).sort((a, b) => b.frac - a.frac)
+  for (let k = 0; k < left && k < order.length; k++) base[order[k]!.i]++
+  return base
+}
+
+/**
+ * Hand each team a realistic game's worth of hits / blocks / takeaways /
+ * giveaways, split across the skaters who played and weighted by the matching
+ * composite (checkers hit, D block, disruptors take pucks away, puck-movers
+ * cough it up). Without this the whole background league reads 0 in these
+ * columns. Runs AFTER the game is decided, so it never affects the result.
+ */
+function distributePhysicalStats(
+  sim: TeamSim,
+  resolve: (id: PlayerId) => Player,
+  stats: Map<PlayerId, GamePlayerStat>,
+  rng: Rng,
+): void {
+  const skaters = sim.team.roster
+    .map((id) => ({ id, p: resolve(id) }))
+    .filter(({ id, p }) => p.position !== 'G' && (stats.get(id)?.toi ?? 0) > 0)
+  if (skaters.length === 0) return
+  const vary = (target: number): number => Math.max(0, Math.round(target * rng.float(0.72, 1.28)))
+  const apply = (
+    total: number,
+    weight: (c: CompositeRatings) => number,
+    add: (s: GamePlayerStat, n: number) => void,
+  ): void => {
+    const counts = distributeCount(skaters.map(({ p }) => Math.max(0.2, weight(p.composites))), total)
+    skaters.forEach(({ id }, i) => { const s = stats.get(id); if (s) add(s, counts[i]!) })
+  }
+  apply(vary(PHYS_PER_GAME.hits), (c) => c.hitting, (s, n) => { s.hits += n })
+  apply(vary(PHYS_PER_GAME.blockedShots), (c) => c.blocking, (s, n) => { s.blockedShots += n })
+  apply(vary(PHYS_PER_GAME.takeaways), (c) => c.takeaway, (s, n) => { s.takeaways += n })
+  apply(vary(PHYS_PER_GAME.giveaways), (c) => c.playmaking, (s, n) => { s.giveaways += n })
+}
+
+/**
+ * Pick the goalie starting this game — a real tandem, not the #1 every night.
+ * The backup gets a realistic share (~a third for a 1a/1b, tapering toward ~1
+ * in 8 behind a workhorse starter), scaled by the goaltending gap. A gassed
+ * starter also gets rested: the more fatigue he's carrying, the likelier the
+ * backup draws in — modelling load management and the back half of a
+ * back-to-back, where coaches almost always turn to the No. 2. In the playoffs
+ * the starter rides (backups only appear on a blowout hook, which the sim
+ * doesn't model here), so no rotation. Deterministic via its own RNG (one draw
+ * regardless of the threshold) so it never perturbs the shot-by-shot stream.
+ */
+export function chooseStartingGoalie(
+  team: Team,
+  resolve: (id: PlayerId) => Player,
+  leagueAvg: number,
+  rng: Rng,
+  rules: GameRules,
+): PlayerId {
+  const gs = team.lines.goalies
+  if (gs.length < 2 || (gs[0] as string) === (gs[1] as string)) return gs[0]
+  if (rules === 'playoff') return gs[0]
+  const starter = resolve(gs[0])
+  const backup = resolve(gs[1])
+  const relGap = (starter.composites.goaltending - backup.composites.goaltending) / Math.max(1, leagueAvg)
+  let backupShare = Math.max(0.12, Math.min(0.40, 0.34 - relGap * 1.5))
+  // Load management: goalie fatigue tops out around 20 in practice (rest recovers
+  // it fast), so a starter carrying ~6+ has been worked recently — a back-to-back
+  // or a dense week. The more he's carrying, the likelier the backup draws in, so
+  // a worn No. 1 gets a breather instead of being run into the ground.
+  const fatigueBoost = Math.max(0, Math.min(1, (starter.fatigue - 6) / 14)) // 0 at ≤6 … 1 at 20
+  backupShare = Math.min(0.85, backupShare + fatigueBoost * 0.6)
+  return rng.chance(backupShare) ? gs[1] : gs[0]
+}
+
 export function quickSimGame(
   home: Team,
   away: Team,
@@ -488,14 +686,28 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map() }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG, scoringMult: playoffScoringMult(rules) }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
+  // Goalie rotation on a SEPARATE deterministic RNG so the game's shot stream is
+  // unchanged — only which netminder is behind it rotates game to game.
+  const gRng = new Rng((opts.seed ^ 0x60a11e5) >>> 0)
+  homeSim.startingGoalie = chooseStartingGoalie(home, resolve, ctx.leagueAvg, gRng, rules)
+  awaySim.startingGoalie = chooseStartingGoalie(away, resolve, ctx.leagueAvg, gRng, rules)
+  // The starter's night (hot goalie / off night), mean 1.0 so season scoring is
+  // unchanged — stable hash, so the shot stream is untouched.
+  homeSim.goalieNight = goalieNightFactor(opts.seed, homeSim.startingGoalie as string)
+  awaySim.goalieNight = goalieNightFactor(opts.seed, awaySim.startingGoalie as string)
 
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
     simPeriod(ctx, homeSim, awaySim, period, PERIOD_SECONDS, false)
-    // Occasional late empty-net goals in regulation one-goal games.
-    simEmptyNetPhase(ctx, homeSim, awaySim, period, (period - 1) * PERIOD_SECONDS)
+    // Pulling the goalie for a 6th attacker only happens in the dying minutes of
+    // the THIRD — a team down one doesn't empty its net at the first or second
+    // intermission. So the empty-net phase runs after the final regulation
+    // period only.
+    if (period === REGULATION_PERIODS) {
+      simEmptyNetPhase(ctx, homeSim, awaySim, period, (period - 1) * PERIOD_SECONDS)
+    }
   }
 
   let decidedBy: QuickSimResult['decidedBy'] = 'regulation'
@@ -514,8 +726,8 @@ export function quickSimGame(
         period++
       }
     } else {
-      // Regular season: 5-minute 3-on-3, then shootout.
-      const otEnded = simPeriod(ctx, homeSim, awaySim, REGULATION_PERIODS + 1, OT_SECONDS, true)
+      // Regular season: 5-minute 3-on-3 (open-ice scoring), then shootout.
+      const otEnded = simPeriod(ctx, homeSim, awaySim, REGULATION_PERIODS + 1, OT_SECONDS, true, true)
       if (otEnded) {
         decidedBy = 'overtime'
       } else {
@@ -536,6 +748,10 @@ export function quickSimGame(
       : REGULATION_PERIODS + (decidedBy === 'shootout' ? 1 : 0)
 
   ctx.stream.push({ t: 0, period: finalPeriod, type: 'gameEnd' })
+
+  // Physical-play box score (hits/blocks/takeaways/giveaways) for both teams.
+  distributePhysicalStats(homeSim, resolve, ctx.stats, ctx.rng)
+  distributePhysicalStats(awaySim, resolve, ctx.stats, ctx.rng)
 
   return {
     homeTeamId: home.id,

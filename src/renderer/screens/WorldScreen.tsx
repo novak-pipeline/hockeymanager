@@ -5,7 +5,7 @@
  * getCompetitions (League.competitions). Empty when the active DB is NHL-only.
  */
 import { useState } from 'react'
-import type { CompetitionNotableView, CompetitionView, NationView } from '../../engine/career/views'
+import type { CompetitionNotableView, CompetitionView, NationView, WorldJuniorsView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -48,7 +48,7 @@ function StrengthBar({ pct }: { pct: number }): JSX.Element {
   )
 }
 
-function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showAge?: boolean }): JSX.Element {
+function NotableTable({ rows, showAge, hideRatings }: { rows: CompetitionNotableView[]; showAge?: boolean; hideRatings?: boolean }): JSX.Element {
   return (
     <table className="data-table" style={{ width: '100%' }}>
       <thead>
@@ -57,8 +57,8 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
           <th style={{ textAlign: 'left' }}>Team</th>
           <th>Pos</th>
           {showAge && <th>Age</th>}
-          <th style={{ textAlign: 'left' }}>Ability</th>
-          <th style={{ textAlign: 'left' }}>Potential</th>
+          {!hideRatings && <th style={{ textAlign: 'left' }}>Ability</th>}
+          {!hideRatings && <th style={{ textAlign: 'left' }}>Potential</th>}
         </tr>
       </thead>
       <tbody>
@@ -68,8 +68,8 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
             <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
             <td style={{ textAlign: 'center' }}>{p.position}</td>
             {showAge && <td style={{ textAlign: 'center' }}>{p.age}</td>}
-            <td><Stars value={p.currentStars} /></td>
-            <td><Stars value={p.potentialStars} /></td>
+            {!hideRatings && <td><Stars value={p.currentStars} /></td>}
+            {!hideRatings && <td><Stars value={p.potentialStars} /></td>}
           </tr>
         ))}
       </tbody>
@@ -247,7 +247,6 @@ function InternationalPanel(): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
 
   const nations = data?.nations ?? []
-  const wj = data?.worldJuniors ?? null
   const current = nations.find((n) => n.nation === selected) ?? nations[0] ?? null
 
   return (
@@ -258,34 +257,6 @@ function InternationalPanel(): JSX.Element {
         empty={!loading && nations.length === 0}
         emptyText="No nationality data in this database. Load a multi-league database to see national-team power rankings."
       />
-
-      {wj && (
-        <Panel title="World Juniors (U20) — projected">
-          <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 180 }}>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥇 <strong>{wj.gold ?? '—'}</strong></div>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥈 {wj.silver ?? '—'}</div>
-              <div style={{ fontSize: 13, marginBottom: 8 }}>🥉 {wj.bronze ?? '—'}</div>
-              <div className="muted small">Projected from current U20 pools.</div>
-            </div>
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <div className="muted small" style={{ marginBottom: 4 }}>All-tournament team</div>
-              <table className="data-table" style={{ width: '100%' }}>
-                <tbody>
-                  {wj.allStars.map((s) => (
-                    <tr key={s.playerId}>
-                      <td><PlayerLink playerId={s.playerId} name={s.name} /></td>
-                      <td className="muted" style={{ textAlign: 'center' }}>{s.position}</td>
-                      <td className="muted">{s.nation}</td>
-                      <td><Stars value={s.stars} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Panel>
-      )}
 
       {nations.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
@@ -321,7 +292,94 @@ function InternationalPanel(): JSX.Element {
           {current && <NationDetail nation={current} />}
         </div>
       )}
+
+      {data?.worldJuniors && <WorldJuniorsPanel wj={data.worldJuniors} />}
     </div>
+  )
+}
+
+/** #48/P5: projected World Juniors medal table + all-tournament team, with the
+ *  user's own prospects highlighted — the marquee prospect showcase. */
+function WorldJuniorsPanel({ wj }: { wj: WorldJuniorsView }): JSX.Element {
+  const medal = (n: string | null, label: string, color: string): JSX.Element => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 18 }}>{label}</span>
+      <span style={{ fontWeight: 800, color }}>{n ?? '—'}</span>
+    </div>
+  )
+  return (
+    <Panel title="World Juniors (U20) — projected">
+      <div className="muted small" style={{ marginBottom: 10 }}>
+        If the World Juniors were held now, here's how the U20 field would shake out — the marquee
+        prospect showcase.
+      </div>
+
+      {wj.yours && wj.yours.length > 0 && (
+        <div
+          style={{
+            marginBottom: 12, padding: '8px 12px', borderRadius: 8,
+            background: 'var(--accent-soft, rgba(120,120,255,0.12))',
+            border: '1px solid var(--accent, var(--violet-h))',
+          }}
+        >
+          <div className="small" style={{ fontWeight: 700, marginBottom: 4 }}>
+            ★ Your prospects on show ({wj.yours.length})
+          </div>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+            {wj.yours.map((s) => (
+              <span key={s.playerId} className="small">
+                <PlayerLink playerId={s.playerId} name={s.name} /> <span className="muted">({s.nation}, {s.position})</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
+        {/* Medal table + standings */}
+        <div>
+          <div className="stack" style={{ gap: 4, marginBottom: 10 }}>
+            {medal(wj.gold, '🥇', 'var(--accent, #f5b301)')}
+            {medal(wj.silver, '🥈', 'var(--muted)')}
+            {medal(wj.bronze, '🥉', '#cd7f32')}
+          </div>
+          <table className="data-table" style={{ width: '100%' }}>
+            <thead>
+              <tr><th>#</th><th style={{ textAlign: 'left' }}>Nation</th><th>Pool</th></tr>
+            </thead>
+            <tbody>
+              {wj.standings.map((s) => (
+                <tr key={s.nation}>
+                  <td className="muted" style={{ textAlign: 'center' }}>{s.finish}</td>
+                  <td style={{ fontWeight: 700 }}>{s.nation}</td>
+                  <td className="muted" style={{ textAlign: 'center' }}>{s.rating}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* All-tournament team */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 4 }}>All-tournament team</div>
+          <table className="data-table" style={{ width: '100%' }}>
+            <tbody>
+              {wj.allStars.map((s) => (
+                <tr key={s.playerId} style={s.isYours ? { background: 'var(--accent-soft, rgba(120,120,255,0.12))' } : undefined}>
+                  <td style={{ fontWeight: 700 }}>
+                    <PlayerLink playerId={s.playerId} name={s.name} />
+                    {s.isYours && <span className="chip" style={{ marginLeft: 6, fontSize: 9, color: 'var(--accent, var(--violet-h))', borderColor: 'var(--accent, var(--violet-h))' }}>YOURS</span>}
+                  </td>
+                  <td className="muted">{s.nation}</td>
+                  <td className="muted" style={{ textAlign: 'center' }}>{s.position}</td>
+                  <td className="muted" style={{ textAlign: 'right' }}>{'★'.repeat(Math.round(s.stars))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Panel>
   )
 }
 
@@ -404,13 +462,13 @@ function NationDetail({ nation }: { nation: NationView }): JSX.Element {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
             <div>
               <div className="muted small" style={{ marginBottom: 4 }}>Top players</div>
-              <NotableTable rows={nation.topPlayers} />
+              <NotableTable rows={nation.topPlayers} hideRatings />
             </div>
             <div>
               <div className="muted small" style={{ marginBottom: 4 }}>Top youth players</div>
               {nation.topYouth.length === 0
                 ? <div className="muted small">No notable youth.</div>
-                : <NotableTable rows={nation.topYouth} showAge />}
+                : <NotableTable rows={nation.topYouth} showAge hideRatings />}
             </div>
           </div>
         </div>

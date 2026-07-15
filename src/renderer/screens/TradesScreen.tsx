@@ -1,13 +1,18 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
   PlayerBadge,
+  TradeAssessmentView,
+  TradeInterestView,
   TradeOfferView,
   TradePartnerView,
   TradeRumorView,
 } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerFace } from '../components/PlayerFace'
+import { TeamCrest } from '../components/Crest'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -18,13 +23,13 @@ import { toast } from '../components/store'
 function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
   if (badge.scouted && !badge.scouted.exact) {
     return (
-      <span className="muted small" style={{ color: 'var(--muted)' }}>
-        {badge.scouted.overallLo}–{badge.scouted.overallHi}
+      <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
+        <OverallStars value={Math.round((badge.scouted.overallLo + badge.scouted.overallHi) / 2)} />
       </span>
     )
   }
   if (!badge.scouted) return null
-  return <span className="muted small">{badge.overall}</span>
+  return <OverallStars value={badge.overall} />
 }
 
 function PlayerChip(props: {
@@ -133,6 +138,8 @@ function OfferCard(props: {
   offer: TradeOfferView
   currentDay: number
   onAction: () => void
+  /** Open the builder pre-loaded with this deal to send a counter back. */
+  onCounter: (offer: TradeOfferView) => void
 }): JSX.Element {
   const { offer } = props
   const client = useClient()
@@ -228,6 +235,14 @@ function OfferCard(props: {
         <button className="btn btn-primary" disabled={busy} onClick={doAccept}>
           Accept
         </button>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={() => props.onCounter(offer)}
+          title="Open the builder pre-loaded with this deal so you can tweak it and send it back"
+        >
+          Counter
+        </button>
         <button className="btn btn-danger" disabled={busy} onClick={doReject}>
           Decline
         </button>
@@ -249,6 +264,39 @@ function EvalPanel(props: {
   const client = useClient()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  if (evaluation.verdict === 'pending') {
+    // #184: the GM took it under advisement — no instant handshake. The real
+    // answer lands in the inbox after a day or two of sim time.
+    return (
+      <Panel>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 14px',
+            background: 'rgba(214,160,86,0.12)',
+            border: '1px solid rgba(214,160,86,0.4)',
+            borderRadius: 6,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ fontSize: 20 }}>⏳</span>
+          <span style={{ color: 'var(--amber, #d6a056)', fontWeight: 700, fontSize: 15 }}>
+            Under advisement
+          </span>
+        </div>
+        <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 12px' }}>{evaluation.message}</p>
+        <p style={{ color: 'var(--muted)', fontSize: 12, margin: '0 0 12px' }}>
+          Sim forward — his answer (completed, a counter, or a pass) arrives in your inbox.
+        </p>
+        <button className="btn btn-ghost" onClick={props.onDismiss}>
+          Done
+        </button>
+      </Panel>
+    )
+  }
 
   if (evaluation.verdict === 'accept') {
     return (
@@ -392,27 +440,159 @@ function EvalPanel(props: {
   )
 }
 
+// ─── partner dropdown (crest-rich, re-render-proof) ─────────────────────────────
+
+function PartnerDropdown(props: {
+  partners: TradePartnerView[]
+  value: string
+  onChange: (id: string) => void
+}): JSX.Element {
+  const { partners, value, onChange } = props
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+  const cur = partners.find((p) => p.teamId === value)
+  const crestStyle = { width: 20, height: 20, flexShrink: 0 }
+  return (
+    <div ref={ref} style={{ position: 'relative', maxWidth: 360 }}>
+      <button
+        type="button"
+        className="select"
+        onClick={() => setOpen((o) => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, cursor: 'pointer', textAlign: 'left' }}
+      >
+        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+          {cur && <TeamCrest teamId={cur.teamId} abbr={cur.teamAbbr} style={crestStyle} />}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {cur ? `${cur.teamName} (${cur.teamAbbr})` : 'Select a team…'}
+          </span>
+        </span>
+        <span className="muted" style={{ fontSize: 10 }}>▾</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+            maxHeight: 340, overflowY: 'auto', background: 'var(--bg1)',
+            border: '1px solid var(--line)', borderRadius: 8, boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
+          }}
+        >
+          {partners.map((p) => (
+            <button
+              key={p.teamId}
+              type="button"
+              onClick={() => { onChange(p.teamId); setOpen(false) }}
+              className="row"
+              style={{
+                width: '100%', gap: 8, alignItems: 'center', padding: '7px 12px',
+                background: p.teamId === value ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
+                border: 'none', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: 13,
+              }}
+            >
+              <TeamCrest teamId={p.teamId} abbr={p.teamAbbr} style={crestStyle} />
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.teamName}</span>
+              <span className="muted small">{p.teamAbbr}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── propose tab ──────────────────────────────────────────────────────────────
+
+/** A counter's starting point: the partner + the players from the offer being
+ *  countered. `nonce` forces a re-seed if another counter comes in mid-edit. */
+interface TradeSeed {
+  partnerId: string
+  myPlayerIds: string[]
+  theirPlayerIds: string[]
+  nonce: number
+}
 
 function ProposeTab(props: {
   data: TradesView
   onRefetch: () => void
   currentDay: number
+  /** When countering an incoming offer, the builder opens pre-loaded with that
+   *  deal's players and partner so the GM can tweak it and send it back. */
+  seed?: TradeSeed | null
 }): JSX.Element {
   const client = useClient()
   const { data } = props
 
-  const [partnerId, setPartnerId] = useState(data.partners[0]?.teamId ?? '')
+  const [partnerId, setPartnerId] = useState(props.seed?.partnerId ?? data.partners[0]?.teamId ?? '')
   const partner: TradePartnerView | undefined = data.partners.find((p) => p.teamId === partnerId)
 
-  const [myPlayerIds, setMyPlayerIds] = useState<Set<string>>(new Set())
+  const [myPlayerIds, setMyPlayerIds] = useState<Set<string>>(new Set(props.seed?.myPlayerIds ?? []))
   const [myPickIds, setMyPickIds] = useState<Set<string>>(new Set())
-  const [theirPlayerIds, setTheirPlayerIds] = useState<Set<string>>(new Set())
+  const [theirPlayerIds, setTheirPlayerIds] = useState<Set<string>>(new Set(props.seed?.theirPlayerIds ?? []))
   const [theirPickIds, setTheirPickIds] = useState<Set<string>>(new Set())
+
+  // Re-seed when a NEW counter arrives while the builder is already mounted.
+  const seedNonce = props.seed?.nonce
+  useEffect(() => {
+    if (!props.seed) return
+    setPartnerId(props.seed.partnerId)
+    setMyPlayerIds(new Set(props.seed.myPlayerIds))
+    setTheirPlayerIds(new Set(props.seed.theirPlayerIds))
+    setMyPickIds(new Set())
+    setTheirPickIds(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedNonce])
 
   const [busy, setBusy] = useState(false)
   const [evalResult, setEvalResult] = useState<TradeEvaluation | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Your own assistant GM's live take (advice) + the partner GM's non-binding
+  // "gauge interest" read (only after you ask). Both cleared as the deal changes.
+  const [assessment, setAssessment] = useState<TradeAssessmentView | null>(null)
+  const [interest, setInterest] = useState<TradeInterestView | null>(null)
+  const [gauging, setGauging] = useState(false)
+
+  const proposalPayload = (): {
+    partnerTeamId: string; givePlayerIds: string[]; givePickIds: string[]
+    receivePlayerIds: string[]; receivePickIds: string[]
+  } => ({
+    partnerTeamId: partnerId,
+    givePlayerIds: [...myPlayerIds],
+    givePickIds: [...myPickIds],
+    receivePlayerIds: [...theirPlayerIds],
+    receivePickIds: [...theirPickIds],
+  })
+
+  // Live assistant-GM read as you build. The partner's interest is stale the
+  // moment the package changes, so drop it here — you re-gauge deliberately.
+  useEffect(() => {
+    setInterest(null)
+    if (evalResult) return
+    const anySide = myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0
+    if (!partnerId || !anySide) { setAssessment(null); return }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      const r = await client.assessTrade(proposalPayload())
+      if (!cancelled && r.type === 'tradeAssessment') setAssessment(r.assessment)
+    }, 180)
+    return () => { cancelled = true; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerId, myPlayerIds, myPickIds, theirPlayerIds, theirPickIds, evalResult])
+
+  async function handleGauge() {
+    if (!partnerId) return
+    setGauging(true)
+    const r = await client.gaugeTradeInterest(proposalPayload())
+    setGauging(false)
+    if (r.type === 'tradeInterestRead') setInterest(r.read)
+    else if (r.type === 'error') setErr(r.message)
+  }
 
   function toggleSet<T>(set: Set<T>, val: T): Set<T> {
     const next = new Set(set)
@@ -428,6 +608,8 @@ function ProposeTab(props: {
     setTheirPickIds(new Set())
     setEvalResult(null)
     setErr(null)
+    setAssessment(null)
+    setInterest(null)
   }
 
   async function handlePropose() {
@@ -452,33 +634,61 @@ function ProposeTab(props: {
     }
   }
 
+  // DEPTH 3: shop the single selected player around the whole league — every
+  // club that needs him tables its best package, landing in the offers tab.
+  async function handleShop(playerId: string) {
+    setBusy(true)
+    setErr(null)
+    const r = await client.shopPlayer(playerId)
+    setBusy(false)
+    if (r.type === 'error') { setErr(r.message); return }
+    if (r.type === 'shopResult') {
+      toast(r.message, r.count > 0 ? 'success' : 'info')
+      props.onRefetch()
+    }
+  }
+
   const hasSelections =
     myPlayerIds.size > 0 || myPickIds.size > 0 || theirPlayerIds.size > 0 || theirPickIds.size > 0
 
   return (
     <div className="stack">
-      {/* partner selector */}
+      {/* partner selector — custom dropdown (a native <select>'s popup gets
+          closed by the screen's periodic re-renders, so it wouldn't open
+          reliably in-season). */}
       <Panel title="Trade partner">
-        <select
-          className="select"
+        <PartnerDropdown
+          partners={data.partners}
           value={partnerId}
-          onChange={(e) => {
-            setPartnerId(e.target.value)
-            resetSelections()
-          }}
-          style={{ maxWidth: 320 }}
-        >
-          {data.partners.map((p) => (
-            <option key={p.teamId} value={p.teamId}>
-              {p.teamName} ({p.teamAbbr})
-            </option>
-          ))}
-        </select>
+          onChange={(id) => { setPartnerId(id); resetSelections() }}
+        />
       </Panel>
 
       {partner && (
         <Panel title={`${partner.teamName} profile`}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+            {partner.gmName && (
+              <div>
+                <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>General Manager</span>
+                <span style={{ fontWeight: 700 }}>{partner.gmName}</span>
+                {partner.gmStyle && <div className="muted" style={{ fontSize: 11 }}>{partner.gmStyle}</div>}
+              </div>
+            )}
+            {partner.posture && (
+              <div>
+                <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Stance</span>
+                <span
+                  className="chip"
+                  title={partner.postureReason}
+                  style={{
+                    fontSize: 11, textTransform: 'capitalize',
+                    color: partner.posture === 'contend' ? 'var(--success)' : partner.posture === 'rebuild' ? 'var(--amber, #f59e0b)' : undefined,
+                  }}
+                >
+                  {partner.posture}
+                </span>
+              </div>
+            )}
             <div>
               <span style={{ color: 'var(--muted)', fontSize: 11, display: 'block', marginBottom: 2 }}>Philosophy</span>
               <span className="chip" style={{ fontSize: 11 }}>{partner.philosophy}</span>
@@ -537,10 +747,13 @@ function ProposeTab(props: {
                         gap: 8,
                       }}
                     >
-                      <span>
-                        <PlayerLink playerId={p.playerId} name={p.name} />
-                        <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                          {p.position} · {p.age}
+                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                        <span>
+                          <PlayerLink playerId={p.playerId} name={p.name} />
+                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                            {p.position} · {p.age}
+                          </span>
                         </span>
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -553,6 +766,23 @@ function ProposeTab(props: {
                   )
                 })}
               </div>
+              {/* DEPTH 3: shop the one selected player around the whole league */}
+              {myPlayerIds.size === 1 && (() => {
+                const shopId = [...myPlayerIds][0]!
+                const shopName = data.myPlayers.find((p) => p.playerId === shopId)?.name ?? 'him'
+                return (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() => void handleShop(shopId)}
+                    style={{ marginTop: 8, width: '100%', fontSize: 12 }}
+                    title="Solicit concrete offers for this player from every club that needs him"
+                  >
+                    📣 Shop {shopName} around the league
+                  </button>
+                )
+              })()}
             </div>
             {data.myPicks.length > 0 && (
               <div>
@@ -592,9 +822,6 @@ function ProposeTab(props: {
                 {partner.players.map((p) => {
                   const selected = theirPlayerIds.has(p.playerId)
                   const ntc = p.noTradeClause
-                  const ovrLabel = p.scouted && !p.scouted.exact
-                    ? `${p.scouted.overallLo}–${p.scouted.overallHi}`
-                    : String(p.overall)
                   return (
                     <button
                       key={p.playerId}
@@ -618,16 +845,25 @@ function ProposeTab(props: {
                         gap: 8,
                       }}
                     >
-                      <span>
+                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                        <span>
                         <PlayerLink playerId={p.playerId} name={p.name} />
                         <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
                           {p.position} · {p.age}
                         </span>
                         {p.scouted && (
                           <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
-                            {ovrLabel}
+                            {p.scouted.exact
+                              ? <OverallStars value={p.overall} />
+                              : (
+                                <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
+                                  <OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} />
+                                </span>
+                              )}
                           </span>
                         )}
+                        </span>
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
@@ -672,6 +908,17 @@ function ProposeTab(props: {
         </div>
       )}
 
+      {/* your assistant GM's live read + gauge the other club's interest */}
+      {partner && !evalResult && (assessment || interest) && (
+        <TradeDeskPanel
+          assessment={assessment}
+          interest={interest}
+          gauging={gauging}
+          canGauge={hasSelections && myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0}
+          onGauge={handleGauge}
+        />
+      )}
+
       {/* evaluation result */}
       {evalResult && (
         <EvalPanel
@@ -696,17 +943,121 @@ function ProposeTab(props: {
       {err && <Notice kind="warn">{err}</Notice>}
 
       {!evalResult && (
-        <div>
+        <div className="stack" style={{ gap: 4 }}>
           <button
             className="btn btn-primary"
             disabled={busy || !hasSelections || !partnerId}
             onClick={handlePropose}
           >
-            {busy ? 'Sending…' : 'Propose trade'}
+            {busy ? 'Sending…' : 'Send official offer'}
           </button>
+          {hasSelections && (
+            <span className="muted" style={{ fontSize: 11 }}>
+              They'll take a day or two to weigh it — expect an acceptance, a counter, or a pass by inbox.
+            </span>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+// ─── the trade desk (assistant-GM read + gauge interest) ───────────────────────
+
+const ASSESS_TONE: Record<TradeAssessmentView['tone'], string> = {
+  love: 'var(--success)', good: 'var(--success)', fair: 'var(--muted)',
+  caution: 'var(--amber, #f59e0b)', lopsided: 'var(--danger)', blocked: 'var(--danger)', empty: 'var(--muted)',
+}
+const INTEREST_TONE: Record<TradeInterestView['lean'], { color: string; label: string }> = {
+  warm: { color: 'var(--success)', label: 'Interested' },
+  tepid: { color: 'var(--amber, #f59e0b)', label: 'Wants more' },
+  cool: { color: 'var(--muted)', label: 'Lukewarm' },
+  blocked: { color: 'var(--danger)', label: 'Dealbreaker' },
+}
+
+/** A two-sided value gauge: how the package's value splits between what you give
+ *  up (left) and what you get back (right). A rough read of who's winning the
+ *  deal on paper — the AGM's line above says what to make of it. */
+function ValueBalance({ give, receive }: { give: number; receive: number }): JSX.Element {
+  const givePct = Math.round(give * 100)
+  const receivePct = 100 - givePct
+  // Green when we're getting the better of it, amber/red when we're overpaying.
+  const rColor = receivePct >= 56 ? 'var(--success)' : receivePct >= 44 ? 'var(--muted)' : 'var(--danger)'
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="row" style={{ justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+        <span>You give · {givePct}%</span>
+        <span>You get · {receivePct}%</span>
+      </div>
+      <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', background: 'var(--bg0)' }} title={`Value split — you give ${givePct}%, you receive ${receivePct}%`}>
+        <div style={{ width: `${givePct}%`, background: 'rgba(255,255,255,0.18)' }} />
+        <div style={{ width: `${receivePct}%`, background: rColor }} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * EHM-style trade desk. Your assistant GM gives a live read as you build; a
+ * "Gauge interest" button pulls the OTHER club's non-binding reaction before you
+ * commit. A warm reaction is not a yes — a real offer still gets slept on.
+ */
+function TradeDeskPanel(props: {
+  assessment: TradeAssessmentView | null
+  interest: TradeInterestView | null
+  gauging: boolean
+  canGauge: boolean
+  onGauge: () => void
+}): JSX.Element {
+  const { assessment, interest } = props
+  return (
+    <Panel title="The trade desk">
+      {assessment && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10 }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>🗒️</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{assessment.agmName} · your read</div>
+            <div style={{ fontSize: 13, color: ASSESS_TONE[assessment.tone], fontWeight: 500 }}>{assessment.line}</div>
+            {assessment.giveShare !== undefined && assessment.receiveShare !== undefined && (
+              <ValueBalance give={assessment.giveShare} receive={assessment.receiveShare} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {interest ? (
+        <div style={{
+          borderTop: '1px solid var(--line)', paddingTop: 10, display: 'flex', gap: 10, alignItems: 'flex-start',
+        }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>📞</span>
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 2 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>you gauged their interest</span>
+              <span className="chip" style={{ fontSize: 10, fontWeight: 700, color: INTEREST_TONE[interest.lean].color, borderColor: INTEREST_TONE[interest.lean].color }}>
+                {INTEREST_TONE[interest.lean].label}
+              </span>
+            </div>
+            <div style={{ fontSize: 13 }}>{interest.line}</div>
+            {interest.lean !== 'blocked' && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontStyle: 'italic' }}>
+                Just a read — nothing's official until you send it, and they'll take a day or two to answer for real.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!props.canGauge || props.gauging}
+          onClick={props.onGauge}
+          style={{ fontSize: 12, width: '100%', borderTop: assessment ? '1px solid var(--line)' : undefined }}
+          title="Ask the other club how they feel about this package — without officially offering it"
+        >
+          {props.gauging ? 'Calling around…' : '📞 Gauge their interest'}
+        </button>
+      )}
+    </Panel>
   )
 }
 
@@ -805,8 +1156,9 @@ function RumorMillPanel(props: {
             <thead>
               <tr>
                 <th>Player</th>
+                <th>Pos / Age</th>
                 <th>Team</th>
-                <th style={{ width: 80 }}>Heat</th>
+                <th style={{ width: 120 }}>Heat</th>
                 <th className="num" style={{ width: 60 }}>Since</th>
               </tr>
             </thead>
@@ -816,14 +1168,18 @@ function RumorMillPanel(props: {
                 .map((r) => (
                   <tr key={r.playerId}>
                     <td>
-                      <button
-                        type="button"
-                        className="player-link"
-                        onClick={() => nav.navigate('player', { playerId: r.playerId })}
-                      >
-                        {r.playerName}
-                      </button>
+                      <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+                        <PlayerFace faceId={r.faceId} name={r.playerName} size={26} />
+                        <button
+                          type="button"
+                          className="player-link"
+                          onClick={() => nav.navigate('player', { playerId: r.playerId })}
+                        >
+                          {r.playerName}
+                        </button>
+                      </span>
                     </td>
+                    <td className="muted small">{r.position ?? '—'}{r.age !== undefined ? ` · ${r.age}` : ''}</td>
                     <td>
                       <span className="chip" style={{ fontSize: 11 }}>
                         {r.teamAbbr}
@@ -969,7 +1325,7 @@ function DeadlineRecapCard(props: {
 
 // ─── main screen ──────────────────────────────────────────────────────────────
 
-type Tab = 'incoming' | 'propose'
+type Tab = 'offers' | 'build' | 'block'
 
 export function TradesScreen(): JSX.Element {
   const client = useClient()
@@ -983,17 +1339,33 @@ export function TradesScreen(): JSX.Element {
     (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
-  const [tab, setTab] = useState<Tab>('incoming')
+  const [tab, setTab] = useState<Tab>('offers')
+  const [seed, setSeed] = useState<TradeSeed | null>(null)
+
+  /** Counter an incoming offer: preload the builder with its players + partner,
+   *  switch to the build tab, and clear the original offer off the desk. */
+  function counterOffer(offer: TradeOfferView): void {
+    setSeed({
+      partnerId: offer.receive.teamId,
+      myPlayerIds: offer.give.players.map((p) => p.playerId),
+      theirPlayerIds: offer.receive.players.map((p) => p.playerId),
+      nonce: Date.now(),
+    })
+    setTab('build')
+    void client.rejectTrade(offer.offerId).then(refetch)
+  }
 
   // infer currentDay from expiry info — use 0 as fallback
   const currentDay = 0
+  const incomingCount = data?.incoming.length ?? 0
+  const rumorCount = tentpoles?.rumors.length ?? 0
 
   return (
-    <section>
-      <ScreenHeader title="Trades">
+    <section className="stack">
+      <ScreenHeader title="Trade Centre">
         {data && (
           <span className={data.tradingOpen ? 'chip chip-success' : 'chip chip-danger'}>
-            {data.tradingOpen ? 'Trading open' : 'Trading closed'}
+            {data.tradingOpen ? 'Trading open' : 'Deadline passed — frozen'}
           </span>
         )}
       </ScreenHeader>
@@ -1005,75 +1377,59 @@ export function TradesScreen(): JSX.Element {
         emptyText="No trade data yet."
       />
 
-      {/* Rumor mill panel — always shown when tentpoles available */}
-      {tentpoles ? (
-        <div style={{ marginBottom: 'var(--sp-4)' }}>
-          <RumorMillPanel
-            rumors={tentpoles.rumors}
-            deadlineDay={tentpoles.deadlineDay}
-            deadlinePassed={tentpoles.deadlinePassed}
-            currentDay={currentDay}
-            lastDeadlineRecap={tentpoles.lastDeadlineRecap}
-          />
-        </div>
-      ) : (
-        !loading && (
-          <div style={{ marginBottom: 'var(--sp-4)' }}>
-            <Notice kind="warn">Rumor mill not available yet.</Notice>
-          </div>
-        )
-      )}
-
-      {data && !data.tradingOpen && (
-        <Notice kind="warn" >
-          The trade deadline has passed. Trades are frozen for the remainder of the season.
-        </Notice>
-      )}
-
       {data && (
         <>
-          {!data.tradingOpen && <div style={{ marginBottom: 16 }} />}
-
+          {/* segmented tab bar */}
           <div className="tabs">
-            <button
-              className={`tab${tab === 'incoming' ? ' active' : ''}`}
-              onClick={() => setTab('incoming')}
-            >
-              Incoming offers
-              {data.incoming.length > 0 && (
-                <span className="badge" style={{ marginLeft: 6 }}>
-                  {data.incoming.length}
-                </span>
-              )}
+            <button className={`tab${tab === 'offers' ? ' active' : ''}`} onClick={() => setTab('offers')}>
+              📨 Offers{incomingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{incomingCount}</span>}
             </button>
             <button
-              className={`tab${tab === 'propose' ? ' active' : ''}`}
-              onClick={() => setTab('propose')}
+              className={`tab${tab === 'build' ? ' active' : ''}`}
+              onClick={() => setTab('build')}
               disabled={!data.tradingOpen}
+              title={data.tradingOpen ? undefined : 'The deadline has passed — no new deals.'}
             >
-              Propose trade
+              🛠 Build a Trade
+            </button>
+            <button className={`tab${tab === 'block' ? ' active' : ''}`} onClick={() => setTab('block')}>
+              🔥 Trade Block{rumorCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{rumorCount}</span>}
             </button>
           </div>
 
-          {tab === 'incoming' && (
+          {tab === 'offers' && (
             <div className="stack">
+              {!data.tradingOpen && (
+                <Notice kind="warn">The trade deadline has passed. Trades are frozen for the rest of the season.</Notice>
+              )}
               {data.incoming.length === 0 ? (
-                <Notice kind="info">No incoming offers at this time.</Notice>
+                <Notice kind="info">
+                  No offers on your desk right now. Shop a player from <b>Build a Trade</b>, or watch the <b>Trade Block</b> for names on the move.
+                </Notice>
               ) : (
                 data.incoming.map((offer) => (
-                  <OfferCard
-                    key={offer.offerId}
-                    offer={offer}
-                    currentDay={currentDay}
-                    onAction={refetch}
-                  />
+                  <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} onCounter={counterOffer} />
                 ))
               )}
             </div>
           )}
 
-          {tab === 'propose' && data.tradingOpen && (
-            <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} />
+          {tab === 'build' && (
+            data.tradingOpen
+              ? <ProposeTab data={data} onRefetch={refetch} currentDay={currentDay} seed={seed} />
+              : <Notice kind="warn">The trade deadline has passed — no new deals until the offseason.</Notice>
+          )}
+
+          {tab === 'block' && (
+            tentpoles
+              ? <RumorMillPanel
+                  rumors={tentpoles.rumors}
+                  deadlineDay={tentpoles.deadlineDay}
+                  deadlinePassed={tentpoles.deadlinePassed}
+                  currentDay={currentDay}
+                  lastDeadlineRecap={tentpoles.lastDeadlineRecap}
+                />
+              : <Notice kind="info">The trade block is quiet — no names on the move yet.</Notice>
           )}
         </>
       )}

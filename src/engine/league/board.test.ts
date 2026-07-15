@@ -316,6 +316,23 @@ describe('seasonReview', () => {
     expect(state.firedAtYear).toBe(2026)
   })
 
+  it('a sanctioned rebuild shields a losing season from a firing and consumes the flag', () => {
+    const state = makeBoardState({
+      mandate: 'contend',
+      targetRank: 4,
+      confidence: 20,
+      patience: 5,
+      warnings: 2,
+      rebuildSanctioned: true,
+    })
+    const { verdict, fired } = seasonReview({ state, finalRank: 26, madePlayoffs: false, wonCup: false, year: 2026 })
+    expect(fired).toBe(false)
+    expect(verdict).not.toBe('failed')
+    expect(state.firedAtYear).toBeNull()
+    // Sanction is one season only — it's consumed.
+    expect(state.rebuildSanctioned).toBe(false)
+  })
+
   it('contend: missed playoffs + no patience = fired', () => {
     const state = makeBoardState({
       mandate: 'contend',

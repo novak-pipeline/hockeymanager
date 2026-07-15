@@ -16,6 +16,7 @@ import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import {
   aiSelectProspect,
+  buildDraftClassFromPlayers,
   buildDraftOrder,
   developPlayers,
   expectedPointsFor,
@@ -195,6 +196,26 @@ describe('developPlayers', () => {
     // Technical (from 32) and mental (from 35) are untouched at season-age 31.
     expect(Object.values(p.ratings.technical).every((v) => v === 70)).toBe(true)
     expect(Object.values(p.ratings.mental).every((v) => v === 70)).toBe(true)
+  })
+
+  it('ages goalies on a later curve: a 31-year-old goalie holds while a skater slips', () => {
+    const goalie = testPlayer({ id: 'g', age: 31, current: 70, potential: 70, position: 'G' })
+    const skater = testPlayer({ id: 's', age: 31, current: 70, potential: 70, position: 'C' })
+    dev(new Map([[goalie.id, goalie]]), 5)
+    dev(new Map([[skater.id, skater]]), 5)
+    // Skater is into decline at 31; his skating erodes.
+    expect(skater.ratings.physical.speed).toBeLessThan(70)
+    // Goalie is still in his prime plateau — nothing has slipped.
+    expect(goalie.ratings.physical.speed).toBe(70)
+    if (goalie.ratings.goalie) {
+      expect(Object.values(goalie.ratings.goalie).every((v) => v === 70)).toBe(true)
+    }
+  })
+
+  it('eventually declines goalies too, once they hit their mid-30s', () => {
+    const goalie = testPlayer({ id: 'g35', age: 35, current: 70, potential: 70, position: 'G' })
+    dev(new Map([[goalie.id, goalie]]), 5)
+    expect(goalie.ratings.physical.speed).toBeLessThan(70)
   })
 
   it('declines steeper after 33', () => {
@@ -635,10 +656,25 @@ describe('processRetirements', () => {
   })
 
   it('never retires under-33s or players signed 2+ years before 38', () => {
+    // A replacement-level (60) 32-year-old is above the washout band — he stays.
     expect(retirementFreq(32, 100)).toBe(0)
     expect(retirementFreq(35, 100, { yearsRemaining: 3 })).toBe(0)
     // 38+ can walk away from a live contract.
     expect(retirementFreq(38, 150, { yearsRemaining: 3 })).toBeGreaterThan(0.2)
+  })
+
+  it('washes fringe 28-32 players out of the league (sub-replacement tweeners)', () => {
+    // A clearly sub-replacement (OVR ~45) player in his early 30s drifts out even
+    // before the usual retirement age — but not every year.
+    const fringe = retirementFreq(31, 400, { current: 45 })
+    expect(fringe).toBeGreaterThan(0.05)
+    expect(fringe).toBeLessThan(0.4)
+    // A genuine roster player of the same age never washes out this way.
+    expect(retirementFreq(31, 200, { current: 68 })).toBe(0)
+    // Fringe kids (under 28) are still developing — they don't wash out yet.
+    expect(retirementFreq(26, 200, { current: 45 })).toBe(0)
+    // A live multi-year deal keeps a fringe player around.
+    expect(retirementFreq(31, 200, { current: 45, yearsRemaining: 3 })).toBe(0)
   })
 
   it('removes retirees from the roster but keeps them in the players map', () => {
@@ -746,6 +782,50 @@ describe('generateDraftClass', () => {
   })
 })
 
+describe('buildDraftClassFromPlayers', () => {
+  it('ranks real eligibles, caps to count, and mints no new players', () => {
+    const { players } = makeClass(11, 200) // reuse generated players as "real eligibles"
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(3) })
+    expect(cls.year).toBe(2027)
+    // capped to the class size
+    expect(cls.prospects).toHaveLength(64)
+    // contiguous ranks 1..64
+    expect(cls.prospects.map((p) => p.rank)).toEqual(Array.from({ length: 64 }, (_, i) => i + 1))
+    // every prospect references an EXISTING player id (no new players created)
+    const ids = new Set(players.map((p) => p.id))
+    for (const pr of cls.prospects) expect(ids.has(pr.playerId)).toBe(true)
+  })
+
+  it('takes all eligibles when fewer than the cap', () => {
+    const { players } = makeClass(12, 20)
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(3) })
+    expect(cls.prospects).toHaveLength(20)
+  })
+
+  it('is deterministic for the same eligibles + seed', () => {
+    const { players } = makeClass(13, 80)
+    const a = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(5) })
+    const b = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(5) })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+
+  it('ranks by scouting consensus (top board slot is a high-potential player)', () => {
+    const { players } = makeClass(14, 120)
+    const cls = buildDraftClassFromPlayers({ year: 2027, eligible: players, count: 64, rng: new Rng(7) })
+    const byId = new Map(players.map((p) => [p.id as string, p]))
+    const topPot = overall(
+      computeComposites(byId.get(cls.prospects[0].playerId as string)!.potential,
+        byId.get(cls.prospects[0].playerId as string)!.role,
+        byId.get(cls.prospects[0].playerId as string)!.position),
+      byId.get(cls.prospects[0].playerId as string)!.position
+    )
+    // #1 overall sits comfortably in the upper tier of the eligible pool.
+    const allPot = players.map((p) => overall(computeComposites(p.potential, p.role, p.position), p.position))
+    const median = [...allPot].sort((a, b) => a - b)[Math.floor(allPot.length / 2)]
+    expect(topPot).toBeGreaterThan(median)
+  })
+})
+
 /* ────────────────────────── draft order & AI selection ────────────────────────── */
 
 describe('buildDraftOrder', () => {
@@ -809,5 +889,46 @@ describe('aiSelectProspect', () => {
       return Array.from({ length: 50 }, () => aiSelectProspect({ remaining: board(20), rng }).rank)
     }
     expect(run(5)).toEqual(run(5))
+  })
+
+  it('needBonus drafts for need without abandoning best-available', () => {
+    // "need" is a worse-ranked prospect (rank 4) the club wants; "bpa" is rank 1.
+    const remaining: DraftProspect[] = [
+      { playerId: asPlayerId('bpa'), rank: 1 },
+      { playerId: asPlayerId('need'), rank: 4 },
+    ]
+    const needBonus = (p: DraftProspect): number => ((p.playerId as string) === 'need' ? 5 : 0)
+    const countNeed = (withBonus: boolean): number => {
+      let n = 0
+      for (let s = 0; s < 200; s++) {
+        const pick = aiSelectProspect({
+          remaining,
+          rng: new Rng(s),
+          ...(withBonus ? { needBonus } : {}),
+        })
+        if ((pick.playerId as string) === 'need') n++
+      }
+      return n
+    }
+    // The need bias lifts the thin-position prospect up the board far more often.
+    expect(countNeed(true)).toBeGreaterThan(countNeed(false))
+  })
+
+  it('boardBias lets a club move a prospect up its own board', () => {
+    // Two near-equal prospects; the bias makes the lower-ranked one this club's guy.
+    const remaining: DraftProspect[] = [
+      { playerId: asPlayerId('a'), rank: 1 },
+      { playerId: asPlayerId('b'), rank: 2 },
+    ]
+    const bias = (p: DraftProspect): number => ((p.playerId as string) === 'b' ? 4 : 0)
+    const countB = (withBias: boolean): number => {
+      let n = 0
+      for (let s = 0; s < 200; s++) {
+        const pick = aiSelectProspect({ remaining, rng: new Rng(s), ...(withBias ? { boardBias: bias } : {}) })
+        if ((pick.playerId as string) === 'b') n++
+      }
+      return n
+    }
+    expect(countB(true)).toBeGreaterThan(countB(false))
   })
 })

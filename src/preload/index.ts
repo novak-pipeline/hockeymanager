@@ -39,6 +39,8 @@ const api = {
     > => ipcRenderer.invoke('mods:list'),
     read: (id: string): Promise<unknown> => ipcRenderer.invoke('mods:read', id),
     face: (faceId: string): Promise<string | null> => ipcRenderer.invoke('mods:face', faceId),
+    scene: (name: string): Promise<string | null> => ipcRenderer.invoke('mods:scene', name),
+    logo: (logoId: string): Promise<string | null> => ipcRenderer.invoke('mods:logo', logoId),
   },
   press: {
     setKey: (key: string): Promise<{ ok: boolean }> =>
@@ -61,7 +63,21 @@ const api = {
       | { ok: true; tone: string; reaction: string }
       | { ok: false; code: string; message: string }
     > => ipcRenderer.invoke('press:gradeAnswer', args),
-  }
+  },
+  /** #149: the opt-in local Feed writer (model download + prose rewrite). */
+  feedModel: {
+    status: (): Promise<{ ready: boolean; state: string; pct: number; error: string; file: string; approxSizeMb: number }> =>
+      ipcRenderer.invoke('feedModel:status'),
+    download: (): Promise<{ ok: boolean; message?: string }> =>
+      ipcRenderer.invoke('feedModel:download'),
+    infer: (prompt: { system: string; user: string; maxTokens?: number }): Promise<{ ok: boolean; text: string; error?: string }> =>
+      ipcRenderer.invoke('feedModel:infer', prompt),
+    onProgress: (cb: (pct: number) => void): (() => void) => {
+      const handler = (_e: unknown, pct: number): void => cb(pct)
+      ipcRenderer.on('feedModel:progress', handler)
+      return () => ipcRenderer.removeListener('feedModel:progress', handler)
+    },
+  },
 }
 
 contextBridge.exposeInMainWorld('hockey', api)

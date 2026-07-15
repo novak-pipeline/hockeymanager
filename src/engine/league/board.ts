@@ -29,6 +29,19 @@ export type Mandate =
   | 'rebuild'
   | 'cutCosts'
 
+/** Short, human-readable label for each mandate — for headlines/chips. The
+ *  full sentence lives in `mandateText`; this is the enum's display name so we
+ *  never surface a raw code like "developYouth" to the player. */
+export const MANDATE_LABEL: Record<Mandate, string> = {
+  cupOrBust: 'Win the Cup',
+  contend: 'Contend',
+  makePlayoffs: 'Make the playoffs',
+  competeRespectably: 'Compete respectably',
+  developYouth: 'Develop the youth',
+  rebuild: 'Rebuild',
+  cutCosts: 'Cut costs',
+}
+
 export interface BoardState {
   mandate: Mandate
   /** One-line human-readable mandate statement. */
@@ -46,6 +59,10 @@ export interface BoardState {
   firedAtYear: number | null
   /** Number of formal ultimatums issued to the GM this tenure. */
   warnings: number
+  /** Set when ownership has signed off on a rebuild this season: a losing finish
+   *  can't get the GM fired (they knew the plan). Consumed at the season review,
+   *  so the GM re-declares each year. Absent/false = normal expectations. */
+  rebuildSanctioned?: boolean
 }
 
 export interface NewsSeed {
@@ -245,7 +262,7 @@ export function setSeasonMandate(args: SetSeasonMandateArgs): SetSeasonMandateRe
   }
 
   // Preseason board announcement.
-  const headline = `Owner sets the ${year} mandate for ${teamName}: ${mandate}`
+  const headline = `Owner sets the ${year} mandate for ${teamName}: ${MANDATE_LABEL[mandate]}`
   const body = buildMandateBody(text, mandate, targetRank, n, teamName, year)
 
   const newsSeed: NewsSeed = {
@@ -522,6 +539,14 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
       break
     }
   }
+
+  // A board-sanctioned rebuild can't get the GM fired for losing — ownership knew
+  // and approved the plan. Soften a failing/missed verdict, then consume the
+  // sanction (it must be re-declared each season).
+  if (state.rebuildSanctioned && (verdict === 'failed' || verdict === 'missed')) {
+    verdict = 'met'
+  }
+  state.rebuildSanctioned = false
 
   // Firing logic: 'failed' verdict triggers firing when patience is exhausted OR
   // there was already an ultimatum in place.

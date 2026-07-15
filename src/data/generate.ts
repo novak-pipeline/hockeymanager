@@ -29,6 +29,7 @@ import {
   type TeamTactics
 } from '@domain'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { deriveConsistency } from '@engine/league/consistency'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { CONFERENCE_NAMES, DIVISION_NAMES, FIRST_NAMES, FRANCHISES, LAST_NAMES } from './names'
@@ -160,7 +161,7 @@ function makePersonality(rng: Rng): Personality {
   }
 }
 
-function makeContract(rng: Rng, ovr: number, startYear: number): Contract {
+function makeContract(rng: Rng, ovr: number, startYear: number, age: number): Contract {
   // Rough cap-era salary curve: replacement ~0.8M, stars ~12M.
   const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
   const salary = Math.round(base * 1e6)
@@ -169,8 +170,79 @@ function makeContract(rng: Rng, ovr: number, startYear: number): Contract {
     salary,
     yearsRemaining: years,
     expiryYear: startYear + years,
-    noTradeClause: ovr > 80 && rng.chance(0.4),
+    // Trade protection is a veteran perk: a player only earns an NTC once he has
+    // UFA leverage (28+ here). Entry-level and young RFAs never carry one — the
+    // CBA forbids clauses on an ELC. (#185)
+    noTradeClause: ovr > 80 && age >= 28 && rng.chance(0.4),
     twoWay: ovr < 55 && rng.chance(0.5)
+  }
+}
+
+/**
+ * #176 Cap credibility. Per-player salaries are drawn independently from an
+ * OVR curve, which leaves generated NHL rosters sitting at only ~40% of the cap
+ * — nothing like the real league, where clubs run 88–99% of a ~$88M ceiling.
+ * That hollowed out the whole economy: trades were frictionless, offer sheets
+ * always fit, free agency never competed for dollars.
+ *
+ * This rescales a finished roster to a realistic payroll band without flattening
+ * it: everyone earns at least the league minimum, the star tier scales up the
+ * most (preserving the top-heavy shape real cap sheets have), and no single hit
+ * blows past ~18% of the cap. Contenders (higher caliber) spend closer to the
+ * ceiling; rebuilders sit lower. Deterministic — driven by the same seeded rng.
+ */
+const NHL_MIN_SALARY = 775_000
+function calibrateRosterCap(roster: Player[], rng: Rng, teamCaliber: number, cap: number): void {
+  if (roster.length === 0) return
+  const maxHit = Math.round(cap * 0.18)
+  // Contenders push toward the ceiling; cellar clubs carry more slack.
+  const caliberN = Math.max(0, Math.min(1, (teamCaliber - 45) / 20))
+  const frac = Math.max(0.78, Math.min(0.99, 0.83 + caliberN * 0.13 + (rng.range(-4, 4) / 100)))
+  const target = cap * frac
+  // Keep each player's market value as the shape; scale the portion above the
+  // minimum so depth stays cheap and stars carry the sheet. Iterate a few times
+  // so the max-hit clamp doesn't leave the roster short of the target.
+  const orig = roster.map((p) => Math.max(NHL_MIN_SALARY, p.contract.salary))
+  const floorSum = NHL_MIN_SALARY * roster.length
+  let k = 1
+  for (let iter = 0; iter < 5; iter++) {
+    let freeCur = 0
+    let clampedSum = 0
+    for (const s of orig) {
+      const scaled = NHL_MIN_SALARY + (s - NHL_MIN_SALARY) * k
+      if (scaled >= maxHit) clampedSum += maxHit - NHL_MIN_SALARY
+      else freeCur += s - NHL_MIN_SALARY
+    }
+    const freeTarget = target - floorSum - clampedSum
+    if (freeCur <= 0) break
+    const nextK = Math.max(0, freeTarget / freeCur)
+    if (Math.abs(nextK - k) < 0.001) { k = nextK; break }
+    k = nextK
+  }
+  roster.forEach((p, i) => {
+    const scaled = NHL_MIN_SALARY + (orig[i]! - NHL_MIN_SALARY) * k
+    const clamped = Math.max(NHL_MIN_SALARY, Math.min(maxHit, scaled))
+    p.contract.salary = Math.round(clamped / 25_000) * 25_000
+  })
+  // CBA floor: a flat, star-less roster can't be lifted by the star-scaling
+  // above (there's no top tier to inflate). Real clubs in that spot overpay
+  // depth to clear the floor — so lift everyone uniformly to ~the floor.
+  const floor = cap * 0.74
+  let sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+  if (sum < floor) {
+    const lift = floor / sum
+    roster.forEach((p) => {
+      const raised = Math.min(maxHit, p.contract.salary * lift)
+      p.contract.salary = Math.round(raised / 25_000) * 25_000
+    })
+    // A second gentle pass in case max-hit clamps left us short again.
+    sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+    if (sum < floor) {
+      const lift2 = floor / sum
+      roster.forEach((p) => {
+        p.contract.salary = Math.round(Math.min(maxHit, p.contract.salary * lift2) / 25_000) * 25_000
+      })
+    }
   }
 }
 
@@ -196,7 +268,7 @@ function makePlayer(
         : weightedRole(rng, FORWARD_ROLES, FORWARD_ROLE_WEIGHTS)
   const composites = computeComposites(raw, role, position)
   const ovr = overall(composites, position)
-  return {
+  const player: Player = {
     id,
     name: makeName(rng),
     age,
@@ -207,13 +279,17 @@ function makePlayer(
     potential: makePotential(rng, raw, age),
     composites,
     personality: makePersonality(rng),
-    contract: makeContract(rng, ovr, startYear),
+    contract: makeContract(rng, ovr, startYear, age),
     stats: [],
     fatigue: 0,
     morale: rng.range(50, 80),
     injuryStatus: null,
     form: 0
   }
+  // Derived AFTER the literal (no RNG draw) so the generation stream — and the
+  // byte-identical sim calibration — is unchanged.
+  player.consistency = deriveConsistency(id as string, raw.mental.composure, player.personality.determination)
+  return player
 }
 
 const DEFAULT_TACTICS: TeamTactics = {
@@ -334,10 +410,12 @@ export interface WeightedScheduleOptions {
 
 /**
  * Realistic NHL-style weighted schedule: teams play division rivals most often,
- * same-conference clubs next, and the other conference least — ≈82 games with the
- * default 4/3/2 weighting (e.g. a 2×2×8 league → 28+24+32 = 84 per team). Each
- * pairing's meetings are spread evenly across the calendar; home/away is balanced
- * per pair (odd counts alternate the extra home game so team totals stay even).
+ * same-conference clubs next, and the other conference least. With the default
+ * 4/3/2 weighting and the division-neighbour thinning below, a standard 2-conf ×
+ * 4-div-of-8 league lands on exactly 82 per team (26 division + 24 same-conf +
+ * 32 inter-conf), matching the real NHL. Each pairing's meetings are spread
+ * evenly across the calendar; home/away is balanced per pair (odd counts
+ * alternate the extra home game so team totals stay even).
  *
  * Deterministic — no Rng. Falls back gracefully for any conference/division shape.
  */
@@ -363,12 +441,36 @@ export function buildWeightedSchedule(
   // meetings don't all target the same handful of days. Without it every "first
   // meeting" piles near one day and the schedule clusters mid-season, leaving
   // October sparse; the phase fans the targets evenly across the whole window.
+  // Division rivalry sub-weighting: real NHL plays SOME division rivals 4× and
+  // some 3× so the total lands on 82, not 84 (a flat 4× on 7 rivals = 28 div
+  // games → 84). We reduce a cyclic subset of each division's pairs by one
+  // meeting: order the division's teams and give each team exactly its two
+  // cycle-neighbours 3 meetings, the rest 4 (8-team div → 5×4 + 2×3 = 26 div
+  // games; +24 same-conf +32 inter = 82). Deterministic; degrades gracefully
+  // for non-standard division sizes.
+  const divMembers = new Map<string, ScheduleTeam[]>()
+  for (const t of teams) {
+    const k = String(t.divisionId)
+    if (!divMembers.has(k)) divMembers.set(k, [])
+    divMembers.get(k)!.push(t)
+  }
+  const divIndex = new Map<string, number>()
+  for (const [, members] of divMembers) members.forEach((m, i) => divIndex.set(m.id as string, i))
+  const isDivisionNeighbour = (a: ScheduleTeam, b: ScheduleTeam): boolean => {
+    const members = divMembers.get(String(a.divisionId))
+    if (!members || members.length <= 3) return false // too small to thin out
+    const n = members.length
+    const ia = divIndex.get(a.id as string)!, ib = divIndex.get(b.id as string)!
+    const d = Math.abs(ia - ib)
+    return d === 1 || d === n - 1
+  }
+
   let pairingIdx = 0
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       const a = teams[i]!, b = teams[j]!
       const meetings =
-        a.divisionId === b.divisionId ? divM
+        a.divisionId === b.divisionId ? (isDivisionNeighbour(a, b) ? divM - 1 : divM)
         : a.conferenceId === b.conferenceId ? confM
         : interM
       if (meetings <= 0) continue
@@ -499,6 +601,7 @@ export const freshStanding = (teamId: TeamId): Standing => ({
   wins: 0,
   losses: 0,
   overtimeLosses: 0,
+  regulationOtWins: 0,
   points: 0,
   goalsFor: 0,
   goalsAgainst: 0
@@ -602,7 +705,8 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
       finances: { budget: 90e6, salaryCap: 88e6, capUsed: 0, revenue: 0 },
       staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] }
     }
-    // Tally cap used from the generated contracts.
+    // #176: rescale the roster to a realistic payroll band, then tally cap used.
+    calibrateRosterCap(roster, rng, teamCaliber, team.finances.salaryCap)
     team.finances.capUsed = roster.reduce((s, p) => s + p.contract.salary, 0)
     teams.set(teamId, team)
   }
@@ -790,7 +894,7 @@ function makeAhlPlayer(
     ? makePotentialAhl(rng, raw, age, rng.float(55, 82))
     : makePotential(rng, raw, age)
 
-  return {
+  const player: Player = {
     id,
     name: makeName(rng),
     age,
@@ -808,6 +912,8 @@ function makeAhlPlayer(
     injuryStatus: null,
     form: 0,
   }
+  player.consistency = deriveConsistency(id as string, raw.mental.composure, player.personality.determination)
+  return player
 }
 
 /**

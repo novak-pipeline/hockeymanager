@@ -216,6 +216,11 @@ export interface RegisterGameArgs {
   wasPlayoff?: boolean
   year: number
   rng: Rng
+  /** Human-readable club names for the news copy (headlines/body). The rivalry
+   *  STATE stays keyed by the stable team IDs in teamA/teamB; these are used
+   *  only for text. Absent → fall back to the ID so copy is still valid. */
+  nameA?: string
+  nameB?: string
 }
 
 export interface RegisterGameResult {
@@ -241,6 +246,8 @@ export interface RegisterGameResult {
  */
 export function registerGame(args: RegisterGameArgs): RegisterGameResult {
   const { state, teamA, teamB, goalsA, goalsB, penaltyMinutesA, penaltyMinutesB, wasPlayoff, year, rng: _rng } = args
+  const dispA = args.nameA ?? teamA
+  const dispB = args.nameB ?? teamB
   const newsSeeds: NewsSeed[] = []
   let flashed = false
 
@@ -309,16 +316,14 @@ export function registerGame(args: RegisterGameArgs): RegisterGameResult {
     r.intensity > 0
 
   if (isNewRivalry) {
-    const abbrA = teamA
-    const abbrB = teamB
     const whyParts: string[] = []
     if (r.reasons.includes('chippy games')) whyParts.push('physical play')
     if (r.reasons.includes('close races')) whyParts.push('close finishes')
     const why = whyParts.length > 0 ? ` — fuelled by ${whyParts.join(' and ')}` : ''
     newsSeeds.push({
       category: 'league',
-      headline: `A rivalry is born: ${abbrA} vs ${abbrB}`,
-      body: `After ${r.meetings} heated meetings${why}, ${abbrA} and ${abbrB} have developed a genuine rivalry.`,
+      headline: `A rivalry is born: ${dispA} vs ${dispB}`,
+      body: `After ${r.meetings} heated meetings${why}, ${dispA} and ${dispB} have developed a genuine rivalry.`,
       teamId: teamA,
     })
   }
@@ -331,15 +336,16 @@ export function registerGame(args: RegisterGameArgs): RegisterGameResult {
         r.lastFlashYear = year
         flashed = true
         const label = threshold >= FLASH_THRESHOLD_2 ? 'bitter' : 'heated'
-        const winnerTeam = goalsA > goalsB ? teamA : goalsA < goalsB ? teamB : null
+        const winnerTeam = goalsA > goalsB ? dispA : goalsA < goalsB ? dispB : null
         const winnerLine = winnerTeam
           ? ` ${winnerTeam} took this one, adding fuel to the fire.`
           : ' The game ended level, settling nothing.'
+        const tenor = threshold >= FLASH_THRESHOLD_2 ? 'boiled over into genuine bad blood' : 'grown into a real, simmering rivalry'
         newsSeeds.push({
           category: 'league',
-          headline: `${teamA} vs ${teamB}: a ${label} rivalry ignites`,
+          headline: `${dispA} vs ${dispB}: a ${label} rivalry ignites`,
           body:
-            `The ${teamA}–${teamB} rivalry has reached intensity ${r.intensity}/100, ` +
+            `The ${dispA}–${dispB} rivalry has ${tenor}, ` +
             `driven by ${r.reasons.join(', ')}.${winnerLine}`,
           teamId: teamA,
         })

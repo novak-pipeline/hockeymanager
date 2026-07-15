@@ -1,28 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { NewsCategory } from '@domain'
-import type { InboxView, NewsItem, PlayerInteractionView } from '../../worker/protocol'
+import type { InboxView, NewsItem } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { Linkify } from '../components/Linkify'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
+import { dayToDateISO } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
+import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
+import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
+import { speakAs } from '../lib/speak'
 
-/** Category metadata: icon character and accent color class. */
+/** Category metadata: icon, accent color, label, and FM-style "from" sender. */
 const CATEGORY_META: Record<
   NewsCategory,
-  { icon: string; colorClass: string; label: string; color: string }
+  { icon: string; colorClass: string; label: string; color: string; sender: string }
 > = {
-  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)' },
-  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)' },
-  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)' },
-  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)' },
-  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)' },
-  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)' },
-  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)' },
-  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
-  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
-  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)' },
+  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)', sender: 'Match Report' },
+  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)',    sender: 'Medical Staff' },
+  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)',  sender: 'Front Office' },
+  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)',  sender: 'Front Office' },
+  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)',   sender: 'Scouting Dept' },
+  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)',  sender: 'League Office' },
+  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)',  sender: 'League Office' },
+  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)',  sender: 'Club News' },
+  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)', sender: 'League Office' },
+  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)',   sender: 'Scouting Dept' },
+}
+
+/** FM-style "from" line: a press byline source or coach speaker wins over the
+ *  generic department sender for the category. */
+function senderOf(item: NewsItem): string {
+  if (item.speaker) return item.speaker
+  if (item.press?.byline) return item.press.byline.split('—')[0]!.trim()
+  return CATEGORY_META[item.category].sender
 }
 
 const ALL_CATEGORIES: NewsCategory[] = [
@@ -151,7 +165,7 @@ function HeroImage(props: {
 
 /** Format item date: "Day 12 · Oct 2026" style. */
 function itemDate(item: NewsItem): string {
-  return `Day ${item.day} · ${fmtDate(`${item.year}-10-01`)}`
+  return fmtDate(item.dateISO ?? dayToDateISO(item.year, item.day))
 }
 
 export function InboxScreen(): JSX.Element {
@@ -164,6 +178,36 @@ export function InboxScreen(): JSX.Element {
 
   const [selected, setSelected] = useState<NewsItem | null>(null)
   const [categoryFilter, setCategoryFilter] = useState<NewsCategory | null>(null)
+
+  // Spacebar advances to the next message. These hooks must run on every render
+  // (before any early return) to keep React's hook order stable; the ref is
+  // pointed at the live selectNext once data is available, below.
+  const selectNextRef = useRef<() => boolean>(() => false)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.code !== 'Space' && e.key !== ' ') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      // Only consume Space if there's an unread to step to; otherwise let the
+      // global handler advance the day (the inbox is clear).
+      if (selectNextRef.current()) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Deep-link: a dashboard message click arrives with the exact item to open.
+  const openedFromParam = useRef(false)
+  useEffect(() => {
+    if (openedFromParam.current) return
+    const id = nav.params.newsId
+    if (!id || !data) return
+    const item = data.items.find((i) => i.id === id)
+    if (item) {
+      openedFromParam.current = true
+      setSelected(item)
+    }
+  }, [data, nav.params.newsId])
 
   if (error) {
     return (
@@ -190,35 +234,25 @@ export function InboxScreen(): JSX.Element {
     ? items.filter((it) => it.category === categoryFilter)
     : items
 
-  // Sort: unread first, then newest day first, then id desc
-  const sorted = [...visible].sort((a, b) => {
+  // Unread first, then newest first. Read messages fall to the bottom (greyed
+  // out) — the same order drives Space-to-advance through the feed.
+  const ordered = [...visible].sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1
     if (b.day !== a.day) return b.day - a.day
     return b.id.localeCompare(a.id)
   })
+  const unreadItems = ordered.filter((i) => !i.read)
+  const readItems = ordered.filter((i) => i.read)
 
-  // FM-style date grouping: newest day first; within a day, unread first then id desc.
-  const dayGroups: Array<{ day: number; year: number; items: NewsItem[] }> = []
-  {
-    const byDay = new Map<number, NewsItem[]>()
-    for (const it of visible) {
-      const arr = byDay.get(it.day)
-      if (arr) arr.push(it)
-      else byDay.set(it.day, [it])
-    }
-    for (const day of [...byDay.keys()].sort((a, b) => b - a)) {
-      const its = byDay.get(day)!.sort((a, b) => {
-        if (a.read !== b.read) return a.read ? 1 : -1
-        return b.id.localeCompare(a.id)
-      })
-      dayGroups.push({ day, year: its[0]!.year, items: its })
-    }
-  }
-
+  // Open a message WITHOUT marking it read — instead mark the one you're
+  // LEAVING as read. The message you're currently reading stays in the Unread
+  // section (highlighted) until you move on, so it's clear where you are in the
+  // list; advancing shrinks the unread pile one at a time.
   async function handleSelect(item: NewsItem) {
+    const leaving = selected
     setSelected(item)
-    if (!item.read) {
-      await client.markNewsRead([item.id])
+    if (leaving && leaving.id !== item.id && !leaving.read) {
+      await client.markNewsRead([leaving.id])
       refetch()
     }
   }
@@ -230,16 +264,105 @@ export function InboxScreen(): JSX.Element {
     refetch()
   }
 
-  async function handleRespond(interactionId: string, optionId: string) {
-    const res = await client.respondToInteraction(interactionId, optionId)
-    if (res.type === 'error') {
-      toast(res.message, 'error')
-    } else {
-      refetch()
-    }
+  // Unread, OLDEST first — Space works the pile from the bottom of the list up
+  // to the newest. (unreadItems is newest-first, so reverse for traversal.)
+  const unreadOldestFirst = [...unreadItems].reverse()
+
+  // Advance to the next unread (oldest remaining, excluding the current one).
+  // Opening it via handleSelect marks the one you LEFT read, so the pile shrinks
+  // bottom-up. When only the open message is left unread, this Space clears it
+  // (so the count hits zero and the NEXT Space can sim). Returns true if it
+  // handled the key (so the global sim hotkey stays out of the way).
+  function selectNext(): boolean {
+    const next = unreadOldestFirst.find((i) => i.id !== selected?.id)
+    if (next) { void handleSelect(next); return true }
+    if (selected && !selected.read) { void client.markNewsRead([selected.id]).then(() => refetch()); return true }
+    return false
   }
 
-  const interactions = data.interactions ?? []
+  // Point the keyboard handler (registered above, before the guards) at the
+  // current selectNext closure.
+  selectNextRef.current = selectNext
+
+  /** One message row. Read rows are greyed; the selected row is highlighted. */
+  function renderRow(item: NewsItem): JSX.Element {
+    const meta = CATEGORY_META[item.category]
+    const isSelected = selected?.id === item.id
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => handleSelect(item)}
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '44px 1fr',
+          gap: 'var(--sp-2)',
+          alignItems: 'center',
+          padding: '10px var(--sp-3)',
+          borderBottom: '1px solid var(--line)',
+          background: isSelected
+            ? 'rgba(var(--accent-rgb),0.13)'
+            : item.read
+            ? 'transparent'
+            : 'rgba(var(--accent-rgb),0.04)',
+          borderLeft: `3px solid ${isSelected ? 'var(--accent)' : item.read ? 'transparent' : meta.color}`,
+          color: 'var(--text)',
+          textAlign: 'left',
+          cursor: 'pointer',
+          font: 'inherit',
+          width: '100%',
+          borderTop: 'none',
+          borderRight: 'none',
+          opacity: item.read && !isSelected ? 0.55 : 1,
+          transition: 'background 0.1s ease',
+        }}
+      >
+        <RowThumbnail item={item} playerInfo={data.playerInfo} teamInfo={data.teamInfo} size={38} />
+        <span style={{ minWidth: 0 }}>
+          <div
+            title={item.headline}
+            style={{
+              fontSize: 12,
+              fontWeight: item.read ? 400 : 650,
+              lineHeight: 1.35,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: item.read ? 'var(--muted)' : 'var(--text)',
+            }}
+          >
+            {item.headline}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              marginTop: 3,
+              fontSize: 10,
+              color: 'var(--muted)',
+              overflow: 'hidden',
+            }}
+          >
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: meta.color, flexShrink: 0, display: 'inline-block' }} />
+            <span
+              style={{
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                fontWeight: item.read ? 500 : 700,
+                color: item.read ? 'var(--muted)' : 'var(--text)',
+              }}
+            >
+              {senderOf(item)}
+            </span>
+            <span style={{ opacity: 0.5 }}>·</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{itemDate(item)}</span>
+          </div>
+        </span>
+      </button>
+    )
+  }
 
   return (
     <section className="stack" style={{ gap: 'var(--sp-3)' }}>
@@ -252,6 +375,14 @@ export function InboxScreen(): JSX.Element {
             </span>
           )}
           <button
+            className="btn btn-sm"
+            onClick={selectNext}
+            disabled={ordered.length === 0}
+            title="Open the next unread message (Space)"
+          >
+            Next unread ▶
+          </button>
+          <button
             className="btn btn-ghost btn-sm"
             onClick={handleMarkAllRead}
             disabled={unread === 0}
@@ -260,15 +391,6 @@ export function InboxScreen(): JSX.Element {
           </button>
         </div>
       </ScreenHeader>
-
-      {/* ── Player → GM concerns awaiting a response ── */}
-      {interactions.length > 0 && (
-        <div style={{ display: 'grid', gap: 'var(--sp-2)' }}>
-          {interactions.map((ix) => (
-            <InteractionCard key={ix.id} interaction={ix} onRespond={handleRespond} />
-          ))}
-        </div>
-      )}
 
       {/* ── Category filter chips ── */}
       <div
@@ -298,175 +420,51 @@ export function InboxScreen(): JSX.Element {
         })}
       </div>
 
-      {/* ── Two-column layout ── */}
+      {/* ── LW5: open player concerns — the knock on your office door ── */}
+      {(data.interactions ?? []).map((concern) => (
+        <ConcernCard key={concern.id} concern={concern} client={client} onDone={refetch} />
+      ))}
+
+      {/* ── Two-column layout (fills the viewport so the reading pane is large) ── */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '320px 1fr',
+          gridTemplateColumns: '340px 1fr',
           gap: 'var(--sp-3)',
-          alignItems: 'start',
-          minHeight: 0,
+          alignItems: 'stretch',
+          height: 'calc(100vh - 210px)',
+          minHeight: 360,
         }}
       >
-        {/* Left: message list */}
+        {/* Left: message list — unread on top, read greyed at the bottom */}
         <div
           className="panel"
-          style={{
-            padding: 0,
-            overflow: 'hidden',
-            maxHeight: 'calc(100vh - 260px)',
-            overflowY: 'auto',
-          }}
+          style={{ padding: 0, overflow: 'hidden', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}
         >
-          {sorted.length === 0 ? (
-            <div
-              className="muted small"
-              style={{ padding: 'var(--sp-4)', textAlign: 'center' }}
-            >
+          {ordered.length === 0 ? (
+            <div className="muted small" style={{ padding: 'var(--sp-4)', textAlign: 'center' }}>
               No messages{categoryFilter ? ' in this category' : ''}.
             </div>
           ) : (
             <div style={{ display: 'grid' }}>
-              {dayGroups.map((group) => (
-                <div key={group.day} style={{ display: 'grid' }}>
-                  <div
-                    style={{
-                      position: 'sticky',
-                      top: 0,
-                      zIndex: 1,
-                      padding: '5px var(--sp-3)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: 0.4,
-                      textTransform: 'uppercase',
-                      color: 'var(--muted)',
-                      background: 'var(--panel, #1a1a24)',
-                      borderBottom: '1px solid var(--line)',
-                    }}
-                  >
-                    Day {group.day} · {fmtDate(`${group.year}-10-01`)}
-                  </div>
-                  {group.items.map((item, idx) => {
-                    const meta = CATEGORY_META[item.category]
-                    const isSelected = selected?.id === item.id
-                    const isLast = idx === group.items.length - 1
-
-                    return (
-                      <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelect(item)}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '44px 1fr',
-                      gap: 'var(--sp-2)',
-                      alignItems: 'center',
-                      padding: '10px var(--sp-3)',
-                      borderBottom: isLast ? 'none' : '1px solid var(--line)',
-                      background: isSelected
-                        ? 'rgba(var(--accent-rgb),0.13)'
-                        : item.read
-                        ? 'transparent'
-                        : 'rgba(var(--accent-rgb),0.04)',
-                      borderLeft: `3px solid ${
-                        isSelected
-                          ? 'var(--accent)'
-                          : item.read
-                          ? 'transparent'
-                          : meta.color
-                      }`,
-                      color: 'var(--text)',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      font: 'inherit',
-                      width: '100%',
-                      borderTop: 'none',
-                      borderRight: 'none',
-                      transition: 'background 0.1s ease',
-                    }}
-                  >
-                    <RowThumbnail
-                      item={item}
-                      playerInfo={data.playerInfo}
-                      teamInfo={data.teamInfo}
-                      size={38}
-                    />
-                    <span style={{ minWidth: 0 }}>
-                      {/* Headline */}
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: item.read ? 400 : 650,
-                          lineHeight: 1.35,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          color: item.read ? 'var(--muted)' : 'var(--text)',
-                        }}
-                      >
-                        {item.headline}
-                      </div>
-                      {/* Meta row */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 5,
-                          marginTop: 3,
-                          fontSize: 10,
-                          color: 'var(--muted)',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: 5,
-                            height: 5,
-                            borderRadius: '50%',
-                            background: meta.color,
-                            flexShrink: 0,
-                            display: 'inline-block',
-                          }}
-                        />
-                        <span style={{ whiteSpace: 'nowrap' }}>{meta.label}</span>
-                        <span style={{ opacity: 0.5 }}>·</span>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {itemDate(item)}
-                        </span>
-                        {item.press && (
-                          <>
-                            <span style={{ opacity: 0.5 }}>·</span>
-                            <span
-                              style={{
-                                fontStyle: 'italic',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {item.press.byline.split('—')[0]?.trim()}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </span>
-                  </button>
-                    )
-                  })}
-                </div>
-              ))}
+              {unreadItems.length > 0 && <SectionHeader label={`Unread · ${unreadItems.length}`} />}
+              {unreadItems.map((item) => renderRow(item))}
+              {readItems.length > 0 && <SectionHeader label="Earlier" muted />}
+              {readItems.map((item) => renderRow(item))}
             </div>
           )}
         </div>
 
-        {/* Right: reading pane */}
+        {/* Right: reading pane (fills the full column height) */}
         {selected ? (
-          <ReadingPane
-            item={selected}
-            playerInfo={data.playerInfo}
-            teamInfo={data.teamInfo}
-            navigate={nav.navigate}
-          />
+          <div style={{ overflowY: 'auto', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <ReadingPane
+              item={selected}
+              playerInfo={data.playerInfo}
+              teamInfo={data.teamInfo}
+              navigate={nav.navigate}
+            />
+          </div>
         ) : (
           <div
             className="panel"
@@ -474,13 +472,12 @@ export function InboxScreen(): JSX.Element {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: 200,
               color: 'var(--muted)',
               fontSize: 13,
               fontStyle: 'italic',
             }}
           >
-            Select a message to read it.
+            Select a message to read it · press Space for the next unread.
           </div>
         )}
       </div>
@@ -488,111 +485,268 @@ export function InboxScreen(): JSX.Element {
   )
 }
 
-const KIND_LABEL: Record<string, string> = {
-  iceTime:      'Wants a bigger role',
-  future:       'Contract / future',
-  unhappy:      'Unsettled',
-  feud:         'Dressing-room friction',
-  tradeRequest: 'Trade request',
-}
-
-/**
- * Player → GM concern card with response options. Compact accent strip on left,
- * small face thumbnail, label + message + buttons on one card row.
- */
-function InteractionCard(props: {
-  interaction: PlayerInteractionView
-  onRespond: (interactionId: string, optionId: string) => void | Promise<void>
+/** LW5: an open player concern — face, his words, and your response options.
+ *  Rare by design (hard rate limits in the engine), so it can afford presence. */
+function ConcernCard({
+  concern,
+  client,
+  onDone,
+}: {
+  concern: NonNullable<InboxView['interactions']>[number]
+  client: ReturnType<typeof useClient>
+  onDone: () => void
 }): JSX.Element {
-  const { interaction: ix, onRespond } = props
   const [busy, setBusy] = useState(false)
-  const accent = ix.severity === 'serious' ? 'var(--danger, #ef4444)' : 'var(--amber, #f59e0b)'
+  const serious = concern.severity === 'serious'
 
-  async function pick(optionId: string) {
+  // ── Freeform reply (local AI). The model only CLASSIFIES your words into one
+  // of the same options the buttons offer; the deterministic engine resolves it.
+  // Gated on the local writer being enabled + the model actually being ready.
+  const [canType, setCanType] = useState(false)
+  const [typing, setTyping] = useState(false)
+  const [gmText, setGmText] = useState('')
+  const [reading, setReading] = useState(false)
+  const [readAs, setReadAs] = useState<IntentOption | null>(null)
+  // The player's in-character spoken reply, authored after the engine resolves.
+  const [voiced, setVoiced] = useState<string | null>(null)
+  // Whether that reply came from the local AI writer (color it) vs the template.
+  const [voicedByModel, setVoicedByModel] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    if (!getFeedWriterEnabled()) return
+    const bridge = feedModelBridge()
+    if (!bridge) return
+    void bridge.status().then((s) => {
+      if (live) setCanType(Boolean(s.ready))
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Options carry only {id,label} in the view; in this engine the option id IS
+  // the tone (promise/supportive/firm/dismissive), so we reuse it as the tone.
+  const intentOptions: IntentOption[] = concern.options.map((o) => ({ id: o.id, label: o.label, tone: o.id }))
+
+  async function respond(optionId: string): Promise<void> {
     if (busy) return
     setBusy(true)
-    await onRespond(ix.id, optionId)
+    const res = await client.respondToInteraction(concern.id, optionId)
+    if (res.type === 'error') {
+      setBusy(false)
+      toast(res.message ?? 'Could not respond.', 'error')
+      return
+    }
+    // The engine has already resolved (morale/escalation decided). When the model
+    // is available, voice the player's spoken reply in-character; the line is pure
+    // presentation over the deterministic result and never alters it.
+    const reaction = res.type === 'ok' ? res.reaction : undefined
+    if (canType && reaction) {
+      const bridge = feedModelBridge()
+      if (bridge) {
+        const p = buildReactionPrompt(reaction)
+        const r = await bridge.infer({ system: p.system, user: p.user, maxTokens: p.maxTokens })
+        const line = r.ok ? sanitizeReactionLine(r.text, reaction.playerName) : ''
+        setBusy(false)
+        const reply = line || reaction.outcome // fall back to the engine's prose
+        setVoiced(reply)
+        setVoicedByModel(!!line)
+        // Show the player's reply, but DON'T auto-speak it — the voice you hear
+        // should be the incoming call (their message on pickup), not a read-back
+        // of the resolution. The 🔊 button on the reply lets you hear it if you want.
+        return
+      }
+    }
     setBusy(false)
+    toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')
+    onDone()
+  }
+
+  /** Send the freeform reply to the model, classify it, and show how it read. */
+  async function readReply(): Promise<void> {
+    const text = gmText.trim()
+    if (!text || reading) return
+    const bridge = feedModelBridge()
+    if (!bridge) {
+      // The opt-in local writer isn't loaded — say so rather than silently
+      // doing nothing, so it's clear whether the AI is running.
+      toast('The local AI writer isn\'t running — turn it on in Settings, or pick a response below.', 'info')
+      return
+    }
+    setReading(true)
+    setReadAs(null)
+    try {
+      const prompt = buildIntentPrompt({
+        playerMessage: concern.message,
+        gmReply: text,
+        options: intentOptions,
+      })
+      const r = await bridge.infer({ system: prompt.system, user: prompt.user, maxTokens: prompt.maxTokens })
+      const choice = r.ok ? parseIntentChoice(r.text, intentOptions) : null
+      if (!choice) {
+        toast('Could not read that clearly — pick a response below, or rephrase.', 'info')
+        return
+      }
+      setReadAs(choice)
+    } catch {
+      // A hung or failed model must never leave the button stuck on "Reading…".
+      toast('The writer hit a snag — pick a response below, or try again.', 'info')
+    } finally {
+      setReading(false)
+    }
+  }
+
+  // Resolved: show the player's in-character spoken reply and let the GM close it.
+  if (voiced !== null) {
+    return (
+      <div
+        className="panel"
+        style={{ borderLeft: '3px solid var(--success, #4caf7d)', padding: 'var(--sp-3) var(--sp-4)' }}
+      >
+        <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+          <PlayerFace faceId={concern.faceId} name={concern.playerName} size={44} />
+          <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
+            <PlayerLink playerId={concern.playerId} name={concern.playerName} />
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', ...(voicedByModel ? { color: 'var(--llm-ink)' } : {}) }}>
+              “{voiced}”
+              {voicedByModel && (
+                <span style={{ fontSize: 9, marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8 }} title="Written by your local AI writer">✨</span>
+              )}
+            </div>
+            <div className="row" style={{ marginTop: 2, gap: 'var(--sp-2)' }}>
+              <button className="btn btn-sm" onClick={onDone}>Close</button>
+              <button
+                className="btn btn-sm btn-ghost"
+                title="Hear it again"
+                onClick={() => voiced && speakAs('player', voiced, { seed: concern.playerName })}
+              >🔊</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div
+      className="panel"
       style={{
-        display: 'flex',
-        background: 'var(--bg1)',
-        border: `1px solid ${accent}44`,
-        borderLeft: `3px solid ${accent}`,
-        borderRadius: 'var(--radius)',
-        overflow: 'hidden',
-        gap: 'var(--sp-3)',
-        padding: 'var(--sp-3) var(--sp-3)',
-        alignItems: 'flex-start',
+        borderLeft: `3px solid ${serious ? 'var(--danger, #e05555)' : 'var(--amber, #d6a056)'}`,
+        padding: 'var(--sp-3) var(--sp-4)',
       }}
     >
-      {/* Player face */}
-      <div style={{ flexShrink: 0, paddingTop: 2 }}>
-        <PlayerFace faceId={ix.faceId} name={ix.playerName} size={40} />
-      </div>
+      <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
+        <PlayerFace faceId={concern.faceId} name={concern.playerName} size={44} />
+        <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
+          <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+            <PlayerLink playerId={concern.playerId} name={concern.playerName} />
+            <span className={`chip ${serious ? 'chip-danger' : 'chip-warn'}`} style={{ fontSize: 10 }}>
+              {serious ? 'Serious' : 'Wants a word'}
+            </span>
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}><Linkify text={concern.message} /></div>
+          <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 2 }}>
+            {concern.options.map((o) => (
+              <button
+                key={o.id}
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => void respond(o.id)}
+                title={o.id === 'promise' ? 'Promises go in the book — break one and he will remember.' : undefined}
+              >
+                {o.label}
+              </button>
+            ))}
+            {canType && !typing && (
+              <button
+                className="btn btn-sm btn-ghost"
+                disabled={busy}
+                onClick={() => setTyping(true)}
+                title="Reply in your own words — the local AI reads which response you mean."
+              >
+                ✍️ Reply in your own words
+              </button>
+            )}
+          </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {/* Top row: label + player link */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sp-2)',
-            marginBottom: 4,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: 1,
-              color: accent,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {KIND_LABEL[ix.kind] ?? 'Player concern'}
-          </span>
-          <span style={{ color: 'var(--line)', fontSize: 10 }}>·</span>
-          <PlayerLink playerId={ix.playerId} name={ix.playerName} className="small" />
+          {canType && typing && (
+            <div className="stack" style={{ gap: 6, marginTop: 4 }}>
+              <textarea
+                className="input"
+                rows={2}
+                value={gmText}
+                placeholder="Say it your way — “You’ll be on the top line by December, you have my word.”"
+                disabled={busy || reading}
+                onChange={(e) => {
+                  setGmText(e.target.value)
+                  setReadAs(null)
+                }}
+                style={{ resize: 'vertical', fontSize: 13, lineHeight: 1.5 }}
+              />
+              {readAs ? (
+                <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    Read as: <strong style={{ color: 'var(--text)' }}>{readAs.label}</strong>
+                    {readAs.id === 'promise' ? ' — this goes in the book.' : ''}
+                  </span>
+                  <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => void respond(readAs.id)}>
+                    Say it
+                  </button>
+                  <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setReadAs(null)}>
+                    Rethink
+                  </button>
+                </div>
+              ) : (
+                <div className="row" style={{ gap: 'var(--sp-2)' }}>
+                  <button
+                    className="btn btn-sm"
+                    disabled={busy || reading || !gmText.trim()}
+                    onClick={() => void readReply()}
+                  >
+                    {reading ? 'Reading…' : 'Read my reply'}
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    disabled={busy || reading}
+                    onClick={() => {
+                      setTyping(false)
+                      setGmText('')
+                      setReadAs(null)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-
-        {/* Message */}
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            lineHeight: 1.55,
-            color: 'var(--text)',
-            maxWidth: '72ch',
-          }}
-        >
-          {ix.message}
-        </p>
-
-        {/* Response buttons */}
-        <div
-          className="row"
-          style={{ flexWrap: 'wrap', gap: 'var(--sp-1)', marginTop: 'var(--sp-2)' }}
-        >
-          {ix.options.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              className="btn btn-sm"
-              disabled={busy}
-              onClick={() => void pick(o.id)}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
       </div>
+    </div>
+  )
+}
+
+/** A small sticky divider between the Unread and Earlier (read) sections. */
+function SectionHeader({ label, muted }: { label: string; muted?: boolean }): JSX.Element {
+  return (
+    <div
+      style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 1,
+        padding: '5px var(--sp-3)',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        color: muted ? 'var(--muted)' : 'var(--accent)',
+        background: 'var(--panel, #1a1a24)',
+        borderBottom: '1px solid var(--line)',
+        opacity: muted ? 0.8 : 1,
+      }}
+    >
+      {label}
     </div>
   )
 }
@@ -653,7 +807,7 @@ function ReadingPane(props: {
   return (
     <div
       className="panel"
-      style={{ padding: 0, overflow: 'hidden' }}
+      style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}
     >
       <PaneAccentBar gradient={`linear-gradient(90deg, ${meta.color}, ${meta.color}88)`} />
 
@@ -673,6 +827,8 @@ function ReadingPane(props: {
                 className="muted small"
                 style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
               >
+                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{senderOf(item)}</span>
+                <span style={{ opacity: 0.5 }}>·</span>
                 <span>{itemDate(item)}</span>
                 {item.playerId && playerInfo?.[item.playerId] && (
                   <PlayerLink
@@ -698,7 +854,7 @@ function ReadingPane(props: {
                   maxWidth: '62ch',
                 }}
               >
-                {para}
+                <Linkify text={para} />
               </p>
             ))}
           </div>
@@ -746,7 +902,7 @@ function CoachQuotePane(props: {
   const meta = CATEGORY_META[item.category]
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--amber))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>
@@ -846,7 +1002,7 @@ function PressArticlePane(props: {
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--cyan))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>
@@ -914,7 +1070,7 @@ function PressArticlePane(props: {
                 color: 'var(--text)',
               }}
             >
-              {para}
+              <Linkify text={para} />
             </p>
           ))}
         </div>

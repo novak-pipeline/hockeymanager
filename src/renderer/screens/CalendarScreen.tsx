@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { CalendarEntry, CalendarView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
+import { useNav, type ScreenId } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -122,8 +123,10 @@ function ResultChip({ entry }: ResultChipProps): JSX.Element | null {
 function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
   const months = monthKeys(calendar.entries)
 
-  // Default month: next unplayed game's month, else last game's month.
+  // Default month: the in-world today (offseason-aware) when known, else the
+  // next unplayed game's month, else last game's month.
   const defaultMonth = useMemo((): string => {
+    if (calendar.todayISO) return monthOf(calendar.todayISO)
     const nextEntry = calendar.entries.find(
       (e): e is Extract<CalendarEntry, { kind: 'game' }> => e.kind === 'game' && e.isNext
     )
@@ -131,7 +134,7 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
     const last = [...calendar.entries].reverse().find((e) => e.kind === 'game')
     if (last) return monthOf(last.dateISO)
     return months[0] ?? monthOf(new Date().toISOString())
-  }, [calendar.entries, months])
+  }, [calendar.entries, calendar.todayISO, months])
 
   const [currentMonthKey, setCurrentMonthKey] = useState(defaultMonth)
   const currentIndex = months.indexOf(currentMonthKey)
@@ -253,19 +256,48 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
                       cellDate.getUTCFullYear() === y && cellDate.getUTCMonth() === monthNum
                     const cellEntries = byDate.get(isoDate) ?? []
                     const dayNum = cellDate.getUTCDate()
+                    const isToday = calendar.todayISO === isoDate
                     return (
-                      <td key={di} style={cellStyle(inMonth, cellEntries.length > 0)}>
+                      <td
+                        key={di}
+                        style={{
+                          ...cellStyle(inMonth, cellEntries.length > 0),
+                          ...(isToday
+                            ? {
+                                outline: '2px solid rgb(var(--accent-rgb, 108,92,231))',
+                                outlineOffset: -2,
+                                background: 'rgba(var(--accent-rgb, 108,92,231), 0.14)',
+                                boxShadow: 'inset 0 0 0 9999px rgba(var(--accent-rgb, 108,92,231), 0.06)',
+                              }
+                            : {}),
+                        }}
+                      >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {/* Day number */}
+                          {/* Day number (a TODAY pill marks the current day) */}
                           <span
                             style={{
                               fontSize: 11,
-                              color: inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              color: isToday ? 'rgb(var(--accent-rgb, 108,92,231))' : inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              fontWeight: isToday ? 800 : 400,
                               fontVariantNumeric: 'tabular-nums',
                               alignSelf: 'flex-end',
                               lineHeight: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 5,
                             }}
                           >
+                            {isToday && (
+                              <span
+                                style={{
+                                  fontSize: 8, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase',
+                                  color: '#fff', background: 'rgb(var(--accent-rgb, 108,92,231))',
+                                  borderRadius: 4, padding: '1px 5px',
+                                }}
+                              >
+                                Today
+                              </span>
+                            )}
                             {dayNum}
                           </span>
 
@@ -300,67 +332,102 @@ function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
   }
 }
 
+/** #146: map a calendar key-date to an icon + (where useful) a screen to jump to.
+ *  Targets are always-available screens so a beat marker never dead-ends. */
+function keyDateMeta(label: string): { icon: string; screen?: ScreenId } {
+  if (label.startsWith('Interview')) return { icon: '🎤' }
+  switch (label) {
+    case 'Free Agency Opens': return { icon: '💰', screen: 'faMarket' }
+    case 'Trade Deadline': return { icon: '🔁', screen: 'trades' }
+    case 'Entry Draft': return { icon: '🎫', screen: 'scoutingDraft' }
+    case 'Scouting Combine': return { icon: '🔍', screen: 'scoutingDraft' }
+    case 'Playoffs Begin': return { icon: '🏆', screen: 'standings' }
+    case 'Regular Season Ends': return { icon: '🏁', screen: 'standings' }
+    case 'Holiday Roster Freeze': return { icon: '❄️', screen: 'squad' }
+    case 'All-Star Break': return { icon: '⭐' }
+    case 'Season Begins': return { icon: '🏒' }
+    case 'Training Camp Opens': return { icon: '🏒', screen: 'practice' }
+    case 'Development Camp': return { icon: '🏒' }
+    case 'Cut Day': return { icon: '✂️', screen: 'squad' }
+    default: return { icon: '📌' }
+  }
+}
+
 function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
+  const nav = useNav()
   if (entry.kind === 'keydate') {
+    const meta = keyDateMeta(entry.label)
+    const clickable = meta.screen !== undefined
     return (
       <span
         className="chip chip-violet"
-        style={{ fontSize: 11, padding: '2px 6px', width: '100%', boxSizing: 'border-box' }}
+        onClick={clickable ? () => nav.navigate(meta.screen!) : undefined}
+        title={clickable ? `${entry.label} — open` : entry.label}
+        style={{
+          fontSize: 11, padding: '2px 6px', width: '100%', boxSizing: 'border-box',
+          cursor: clickable ? 'pointer' : 'default',
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}
       >
-        {entry.label}
+        <span aria-hidden style={{ fontSize: 10 }}>{meta.icon}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.label}</span>
       </span>
     )
   }
 
-  // game entry
+  // game entry — the opponent's crest fills the cell (EHM-style), with the
+  // H/A tag and the result / Next badge overlaid. Played games open the box score.
   const isNext = entry.isNext
+  const played = entry.result !== null
   return (
     <div
+      onClick={played ? () => nav.navigate('matchcenter', { gameId: entry.gameId }) : undefined}
+      title={played ? `${entry.home ? 'vs' : '@'} ${entry.opponentName} — view box score` : `${entry.home ? 'vs' : '@'} ${entry.opponentName}`}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
-        padding: '2px 3px',
-        borderRadius: 3,
-        background: isNext ? 'rgba(var(--accent-rgb),0.18)' : 'transparent',
+        position: 'relative',
+        minHeight: 52,
+        borderRadius: 4,
+        overflow: 'hidden',
+        background: isNext ? 'rgba(var(--accent-rgb),0.14)' : 'transparent',
         border: isNext ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid transparent',
         boxSizing: 'border-box',
+        cursor: played ? 'pointer' : 'default',
+        opacity: played ? 0.92 : 1,
       }}
     >
-      {/* H/A + opponent row */}
-      <div className="row" style={{ gap: 3, alignItems: 'center', flexWrap: 'nowrap' }}>
-        <span
-          className={entry.home ? 'chip chip-accent' : 'chip'}
-          style={{ fontSize: 10, padding: '1px 5px', flexShrink: 0 }}
-        >
-          {entry.home ? 'H' : 'A'}
-        </span>
-        <TeamCrest
-          className="crest"
-          teamId={entry.opponentAbbr}
-          abbr={entry.opponentAbbr.slice(0, 2)}
-          style={{ width: 18, height: 18, fontSize: 8, flexShrink: 0 }}
-        />
-        <span
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: isNext ? 'var(--violet-h)' : 'var(--text)',
-          }}
-          title={entry.opponentName}
-        >
-          {entry.opponentAbbr}
-        </span>
+      {/* the big watermark crest */}
+      <TeamCrest
+        className="crest"
+        teamId={entry.opponentAbbr}
+        abbr={entry.opponentAbbr}
+        style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 20, fontWeight: 800, borderRadius: 0,
+          opacity: played ? 0.5 : 0.9, pointerEvents: 'none',
+        }}
+      />
+      {/* readability scrim so overlays pop over busy logos */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(8,10,15,0.35) 0%, rgba(8,10,15,0) 40%, rgba(8,10,15,0.55) 100%)', pointerEvents: 'none' }} />
+      {/* top-left H/A tag */}
+      <span
+        style={{
+          position: 'absolute', top: 2, left: 2, zIndex: 1,
+          fontSize: 9, fontWeight: 800, padding: '1px 4px', borderRadius: 3,
+          background: entry.home ? 'rgba(var(--accent-rgb),0.85)' : 'rgba(0,0,0,0.55)',
+          color: '#fff',
+        }}
+      >
+        {entry.home ? 'H' : 'A'}
+      </span>
+      {/* bottom result / Next */}
+      <div style={{ position: 'absolute', bottom: 2, left: 2, right: 2, zIndex: 1, display: 'flex', justifyContent: 'center' }}>
+        {entry.result ? (
+          <ResultChip entry={entry} />
+        ) : isNext ? (
+          <span className="chip chip-warn" style={{ fontSize: 9, padding: '1px 5px' }}>Next</span>
+        ) : null}
       </div>
-      {/* Result chip or "Next" badge */}
-      {entry.result ? (
-        <ResultChip entry={entry} />
-      ) : isNext ? (
-        <span className="chip chip-warn" style={{ fontSize: 9, padding: '1px 5px' }}>Next</span>
-      ) : null}
     </div>
   )
 }

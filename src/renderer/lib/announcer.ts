@@ -33,6 +33,9 @@ export interface SpeakLine {
   text: string
   speech: string
   importance: 1 | 2 | 3
+  /** Optional Kokoro voice id for per-character casting (see voiceCast.ts). The
+   *  system Web-Speech engine ignores this; Kokoro reads it. */
+  voice?: string
 }
 
 // ── VoiceEngine interface ───────────────────────────────────────────────────
@@ -253,6 +256,15 @@ export class Announcer {
     this.enabled = false
     writeEnabled(false)
     this.cancel()
+  }
+
+  /**
+   * Attach a loaded Kokoro engine WITHOUT switching to it or persisting a choice.
+   * The Announcer still speaks through whatever engine the user selected — so this
+   * just makes the neural path available if their preference is already 'kokoro'.
+   */
+  attachKokoro(engine: VoiceEngine): void {
+    this.kokoroEngine = engine
   }
 
   /**

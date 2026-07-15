@@ -64,6 +64,84 @@ export interface InteractionResult {
   news?: { headline: string; body: string }
 }
 
+/* ─────────────────────────── promises (LW5) ─────────────────────────── */
+
+export type PromiseKind = 'iceTime' | 'newDeal' | 'exploreTrade'
+
+/**
+ * A promise the GM made to a player's face. JSON-safe; lives in the save.
+ * Words are cheap the day you say them — the ledger makes them expensive later:
+ * every promise has a measurable keep-condition and a due date, and a broken
+ * one costs far more morale than the promise bought.
+ */
+export interface PlayerPromise {
+  id: string
+  playerId: string
+  kind: PromiseKind
+  /** Your words, quoted back to you when the bill comes due. */
+  text: string
+  year: number
+  day: number
+  /** In-season due day. Absent = evaluated at season rollover. */
+  dueDay?: number
+  /** iceTime baseline: games/TOI at the moment of the promise. */
+  baselineGp?: number
+  baselineToi?: number
+  /** newDeal baseline: contract years remaining when promised. */
+  baselineYears?: number
+  /** One grace extension granted (injury/short sample). */
+  extended?: boolean
+  status: 'open' | 'kept' | 'broken'
+}
+
+/**
+ * Turn a promise-tone response into a ledger entry. Returns null for kinds
+ * where "promising" is just reassurance with nothing measurable behind it.
+ */
+export function promiseFromResponse(args: {
+  interaction: PlayerInteraction
+  player: Player
+  nextId: string
+  deadlineDay: number
+  seasonGp: number
+  seasonToi: number
+}): PlayerPromise | null {
+  const { interaction: it, player: p } = args
+  const base = { id: args.nextId, playerId: it.playerId, year: it.year, day: it.day, status: 'open' as const }
+  switch (it.kind) {
+    case 'iceTime':
+      return {
+        ...base, kind: 'iceTime',
+        text: 'a bigger role and more ice time',
+        dueDay: it.day + 35,
+        baselineGp: args.seasonGp, baselineToi: args.seasonToi,
+      }
+    case 'future':
+      return {
+        ...base, kind: 'newDeal',
+        text: 'a new contract is coming',
+        baselineYears: p.contract.yearsRemaining,
+      }
+    case 'tradeRequest':
+      return {
+        ...base, kind: 'exploreTrade',
+        text: 'we will work to find you a move',
+        // Before the deadline the deadline IS the due date; after it, the
+        // promise carries to season's end (evaluated at rollover).
+        ...(it.day < args.deadlineDay ? { dueDay: args.deadlineDay } : {}),
+      }
+    default:
+      return null
+  }
+}
+
+/** Human label for when a promise comes due, for the ledger UI. */
+export function promiseDueLabel(pr: PlayerPromise): string {
+  if (pr.status === 'kept') return 'Kept'
+  if (pr.status === 'broken') return 'Broken'
+  return pr.dueDay !== undefined ? `Due day ${pr.dueDay}` : 'Due at season end'
+}
+
 /* ─────────────────────────── generation ─────────────────────────── */
 
 /** Per-check probability that an eligible player actually speaks up. */
@@ -289,4 +367,66 @@ export function applyInteractionResponse(args: {
   const result: InteractionResult = { moraleDelta, roomMoraleDelta, escalateToTrade, outcome }
   if (news) result.news = news
   return result
+}
+
+/* ─────────────────────── reaction descriptor (RP voice) ─────────────────────── */
+
+/** How the player took the answer — derived ONLY from the engine's resolution. */
+export type ReactionDirection =
+  | 'escalating' // dismissed → hardened into a trade demand
+  | 'pleased' //     clearly happier
+  | 'reassured' //   heard, a bit more settled
+  | 'neutral' //     took it flatly
+  | 'unsettled' //   not thrilled but accepted it
+  | 'angry' //       clearly unhappy
+
+/**
+ * A JSON-safe summary of a *resolved* interaction, for the personality layer to
+ * voice the player's spoken reply. It carries the direction the ENGINE already
+ * decided plus personality context; the model turns it into one line of dialogue
+ * and never changes the underlying morale/escalation. `outcome` is the
+ * deterministic prose shown when no model is available.
+ */
+export interface ReactionSpec {
+  playerName: string
+  firstName: string
+  kind: InteractionKind
+  tone: ResponseTone
+  direction: ReactionDirection
+  professionalism: number // 1–20
+  temperament: number // 1–20
+  ambition: number // 1–20
+  outcome: string
+}
+
+/** Build the reaction descriptor from the already-resolved response. Pure. */
+export function reactionSpec(args: {
+  interaction: PlayerInteraction
+  option: InteractionOption
+  player: Player
+  result: InteractionResult
+}): ReactionSpec {
+  const { player, option, interaction, result } = args
+  const direction: ReactionDirection = result.escalateToTrade
+    ? 'escalating'
+    : result.moraleDelta >= 8
+      ? 'pleased'
+      : result.moraleDelta > 0
+        ? 'reassured'
+        : result.moraleDelta === 0
+          ? 'neutral'
+          : result.moraleDelta > -8
+            ? 'unsettled'
+            : 'angry'
+  return {
+    playerName: player.name,
+    firstName: player.name.split(' ')[0] ?? player.name,
+    kind: interaction.kind,
+    tone: option.tone,
+    direction,
+    professionalism: player.personality.professionalism,
+    temperament: player.personality.temperament,
+    ambition: player.personality.ambition,
+    outcome: result.outcome,
+  }
 }

@@ -18,6 +18,7 @@ import {
   askTerms,
   capSpace,
   capUsedFor,
+  contractStatus,
   initialPicks,
   offerAcceptable,
   processExpiries,
@@ -168,24 +169,21 @@ function giveHeadroom(team: Team, players: Map<PlayerId, Player>, extra: number)
 }
 
 describe('signPlayer', () => {
-  it('generated teams may start over the hard cap; capSpace can be negative', () => {
-    // This is real: league generation fills rosters by salary curve without
-    // enforcing the hard cap. The offseason / FA system must tolerate negative
-    // cap space (teams shed contracts during the offseason). This test
-    // documents that contract.ts never silently hides the overage.
+  it('generated teams start under the hard cap with credible payrolls (#176)', () => {
+    // League generation now rescales each roster to a realistic payroll band
+    // (~78–99% of the cap) instead of leaving it at ~40% or blowing past the
+    // ceiling. Every generated club should ice a cap-legal roster.
     const data = gen()
-    // Check all four teams — at least one will be over the cap with seed 7.
-    const overCap = data.league.teams.some((id) => {
+    for (const id of data.league.teams) {
       const t = data.teams.get(id)!
-      return capSpace(t, data.players) < 0
-    })
-    expect(overCap).toBe(true)
-    // capSpace returns the raw value; it is the caller's responsibility to act
-    // on a negative number (e.g. refuse new signings, trigger buyouts).
+      expect(capSpace(t, data.players)).toBeGreaterThanOrEqual(0)
+      // Credible spending: not a skeleton roster far below the floor.
+      expect(t.finances.capUsed).toBeGreaterThan(t.finances.salaryCap * 0.6)
+    }
+    // capSpace still returns the raw value; callers act on it. capUsed remains
+    // the true sum of roster salaries.
     const team = teamAt(data, 0)
-    const space = capSpace(team, data.players)
-    expect(typeof space).toBe('number')
-    // capUsed is the true sum of roster salaries regardless of the cap ceiling.
+    expect(typeof capSpace(team, data.players)).toBe('number')
     expect(capUsedFor(team, data.players)).toBe(team.finances.capUsed)
   })
 
@@ -212,6 +210,44 @@ describe('signPlayer', () => {
     })
     expect(team.finances.capUsed).toBe(before + 2_000_000)
     expect(team.finances.capUsed).toBe(capUsedFor(team, data.players))
+  })
+
+  it('grants a no-trade clause to an established star on a real deal', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 8_000_000)
+    const star = mkSkater('ntc-star', 88, 30)
+    data.players.set(star.id, star)
+    signPlayer({ team, player: star, salary: 6_000_000, years: 5, year: 2026, players: data.players })
+    expect(star.contract.noTradeClause).toBe(true)
+  })
+
+  it('does not grant a no-trade clause to a young player or a cheap/short deal', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 12_000_000)
+    // Young player, even on a rich deal.
+    const kid = mkSkater('ntc-kid', 85, 23)
+    data.players.set(kid.id, kid)
+    signPlayer({ team, player: kid, salary: 6_000_000, years: 5, year: 2026, players: data.players })
+    expect(kid.contract.noTradeClause).toBe(false)
+    // Eligible vet, but a cheap short bridge — no clause.
+    const vet = mkSkater('ntc-cheapvet', 78, 31)
+    data.players.set(vet.id, vet)
+    signPlayer({ team, player: vet, salary: 2_000_000, years: 2, year: 2026, players: data.players })
+    expect(vet.contract.noTradeClause).toBe(false)
+  })
+
+  it('lets an eligible vet keep an existing no-trade clause when he re-signs', () => {
+    const data = gen()
+    const team = teamAt(data, 0)
+    giveHeadroom(team, data.players, 8_000_000)
+    const vet = mkSkater('ntc-keep', 84, 32)
+    vet.contract.noTradeClause = true
+    data.players.set(vet.id, vet)
+    // Modest 2-year extension — would not earn a clause fresh, but he keeps his.
+    signPlayer({ team, player: vet, salary: 3_000_000, years: 2, year: 2026, players: data.players })
+    expect(vet.contract.noTradeClause).toBe(true)
   })
 
   it('marks sub-1.1M contracts as two-way', () => {
@@ -389,6 +425,57 @@ describe('aiResignDay', () => {
   })
 })
 
+describe('contractStatus', () => {
+  it('classifies by age and pro service (ELC / RFA / UFA)', () => {
+    expect(contractStatus(mkSkater('a', 60, 21))).toBe('ELC') // young, no pro record
+    expect(contractStatus(mkSkater('b', 60, 25))).toBe('RFA') // under 27
+    expect(contractStatus(mkSkater('c', 60, 28))).toBe('UFA') // 27+
+    // 7+ pro seasons makes a sub-27 player a UFA on service.
+    const veteranYoung = mkSkater('d', 60, 25)
+    ;(veteranYoung as unknown as { stats: unknown[] }).stats = new Array(8).fill({})
+    expect(contractStatus(veteranYoung)).toBe('UFA')
+  })
+})
+
+describe('aiResignDay — restricted free agents', () => {
+  it('retains an expiring RFA the club would otherwise let walk as a UFA', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000 // headroom
+
+    // ovr ~52: below the UFA keeper bar (55) and not in the young-keeper branch
+    // (age > 23), so as a UFA he'd walk — but as a 25-year-old he's an RFA.
+    const rfa = mkSkater('rfa-keep', 52, 25)
+    rfa.contract.yearsRemaining = 0
+    expect(contractStatus(rfa)).toBe('RFA')
+    team.roster.push(rfa.id)
+    data.players.set(rfa.id, rfa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(rfa.contract.yearsRemaining).toBeGreaterThan(0)
+    expect(team.roster).toContain(rfa.id)
+  })
+
+  it('still lets a comparable UFA walk', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000
+
+    const ufa = mkSkater('ufa-walk', 52, 30) // same ovr, but 30 → UFA, not a keeper
+    ufa.contract.yearsRemaining = 0
+    expect(contractStatus(ufa)).toBe('UFA')
+    team.roster.push(ufa.id)
+    data.players.set(ufa.id, ufa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(ufa.contract.yearsRemaining).toBe(0)
+  })
+})
+
 describe('aiFreeAgencyDay', () => {
   it('fills a positional hole: the only team missing a goalie signs the FA goalie', () => {
     const data = gen()
@@ -453,6 +540,9 @@ describe('aiFreeAgencyDay', () => {
         .sort(byOverallDesc)
       releasePlayer({ team, playerId: fwds[fwds.length - 1].id, players: data.players })
       releasePlayer({ team, playerId: fwds[fwds.length - 2].id, players: data.players })
+      // Generated rosters now sit near the cap (#176); this test isolates the
+      // signing-priority logic, so give both clubs room to actually sign the FAs.
+      giveHeadroom(team, data.players, 40_000_000)
     }
     const pool = [88, 82, 76, 70, 64].map((v, i) => {
       const p = mkSkater(`fa${i + 1}`, v, 26)
@@ -519,6 +609,90 @@ describe('aiFreeAgencyDay', () => {
       return JSON.stringify(all)
     }
     expect(run()).toBe(run())
+  })
+})
+
+describe('aiFreeAgencyDay posture (LW3)', () => {
+  const openTwoForwards = (data: LeagueData, team: Team): void => {
+    const fwds = rosterPlayers(data, team)
+      .filter((p) => p.position !== 'D' && p.position !== 'G')
+      .sort(byOverallDesc)
+    releasePlayer({ team, playerId: fwds[fwds.length - 1].id, players: data.players })
+    releasePlayer({ team, playerId: fwds[fwds.length - 2].id, players: data.players })
+    giveHeadroom(team, data.players, 40_000_000)
+  }
+
+  it('a rebuilding club passes on an aging, pricey UFA — a contender lands him', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const rebuild = teamAt(data, 1)
+    const contend = teamAt(data, 2)
+    openTwoForwards(data, rebuild)
+    openTwoForwards(data, contend)
+    const vet = mkSkater('vetfa', 85, 32) // ~$9M ask, 3–5y term
+    data.players.set(vet.id, vet)
+
+    const { signings } = aiFreeAgencyDay({
+      teams: data.teams,
+      players: data.players,
+      freeAgentIds: [vet.id],
+      userTeamId,
+      year: 2026,
+      rng: new Rng(5),
+      faDay: 1,
+      postureOf: (tid) =>
+        tid === rebuild.id ? 'rebuild' : tid === contend.id ? 'contend' : 'retool',
+    })
+
+    expect(signings).toHaveLength(1)
+    expect(signings[0].teamId).toBe(contend.id)
+    expect(rebuild.roster).not.toContain(vet.id)
+  })
+
+  it('a rebuilding club still takes a cheap short-term stopgap', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const rebuild = teamAt(data, 1)
+    openTwoForwards(data, rebuild)
+    const stopgap = mkSkater('cheapfa', 52, 34) // sub-$1M ask, 1-year term
+    data.players.set(stopgap.id, stopgap)
+
+    const { signings } = aiFreeAgencyDay({
+      teams: data.teams,
+      players: data.players,
+      freeAgentIds: [stopgap.id],
+      userTeamId,
+      year: 2026,
+      rng: new Rng(5),
+      faDay: 1,
+      postureOf: () => 'rebuild',
+    })
+
+    expect(signings).toHaveLength(1)
+    expect(signings[0].teamId).toBe(rebuild.id)
+  })
+
+  it('is neutral when postureOf is absent (behaviour unchanged)', () => {
+    const build = (): { data: LeagueData; userTeamId: TeamId; pid: PlayerId } => {
+      const data = gen(13)
+      const userTeamId = data.league.teams[0]
+      openTwoForwards(data, teamAt(data, 1))
+      openTwoForwards(data, teamAt(data, 2))
+      const p = mkSkater('x', 80, 30)
+      data.players.set(p.id, p)
+      return { data, userTeamId, pid: p.id }
+    }
+    const a = build()
+    const b = build()
+    const noPosture = aiFreeAgencyDay({
+      teams: a.data.teams, players: a.data.players, freeAgentIds: [a.pid],
+      userTeamId: a.userTeamId, year: 2026, rng: new Rng(7), faDay: 1,
+    })
+    const retoolAll = aiFreeAgencyDay({
+      teams: b.data.teams, players: b.data.players, freeAgentIds: [b.pid],
+      userTeamId: b.userTeamId, year: 2026, rng: new Rng(7), faDay: 1, postureOf: () => 'retool',
+    })
+    expect(JSON.stringify(noPosture.signings)).toBe(JSON.stringify(retoolAll.signings))
   })
 })
 

@@ -142,7 +142,7 @@ export function DraftRankingsScreen(): JSX.Element {
                   <td style={{ textAlign: 'center' }}>{p.position}</td>
                   <td className="muted">{p.nation}</td>
                   <td className="muted">{p.leagueAbbr}</td>
-                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
+                  <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
                   <td><Stars value={p.currentStars} /></td>
                   <td><Stars value={p.potentialStars} /></td>
                   <td style={{ textAlign: 'center' }}><Pct value={p.pNHLer} /></td>
@@ -180,7 +180,7 @@ export function DraftRankingsScreen(): JSX.Element {
                   <td style={{ textAlign: 'center' }}>{p.position}</td>
                   <td className="muted">{p.nation}</td>
                   <td className="muted">{p.leagueAbbr}</td>
-                  <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
+                  <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
                   <td><Stars value={p.potentialStars} /></td>
                 </tr>
               ))}
@@ -259,7 +259,7 @@ function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; 
               <td style={{ textAlign: 'center' }}>{p.age}</td>
               <td style={{ textAlign: 'center' }}>{p.position}</td>
               <td className="muted">{p.leagueAbbr}</td>
-              <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
+              <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
               <td><Stars value={p.potentialStars} /></td>
             </tr>
           ))}

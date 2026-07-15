@@ -24,6 +24,7 @@ import {
   practiceDevModifier,
   setPlayerFocus,
   suggestFocus,
+  suggestPlayerFocus,
   tickPractice,
   toggleScratch
 } from './practice'
@@ -178,6 +179,19 @@ describe('practiceDevModifier', () => {
 })
 
 /* ──────────────────────── suggestFocus ──────────────────────── */
+
+describe('suggestPlayerFocus', () => {
+  it('goalies always train goaltending', () => {
+    expect(suggestPlayerFocus(makePlayer('g', 'G'))).toBe('goaltending')
+  })
+  it('a skater targets his weakest area', () => {
+    expect(suggestPlayerFocus(makePlayer('w', 'W', { scoring: 30, defensiveZone: 70, skating: 70, hitting: 70 }))).toBe('offense')
+    expect(suggestPlayerFocus(makePlayer('d', 'D', { hitting: 25, scoring: 70, defensiveZone: 70, skating: 70 }))).toBe('physical')
+  })
+  it('an all-round strong skater stays balanced', () => {
+    expect(suggestPlayerFocus(makePlayer('s', 'C', { scoring: 88, defensiveZone: 85, skating: 90, hitting: 84 }))).toBe('balanced')
+  })
+})
 
 describe('suggestFocus', () => {
   it('suggests defense when blue line has weak defensiveZone', () => {

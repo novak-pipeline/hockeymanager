@@ -70,8 +70,11 @@ import type {
   Zone
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
-import type { GameRules } from '@engine/shared/rules'
+import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { goalieNightFactor } from '@engine/shared/goalieNight'
+import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -94,6 +97,7 @@ import { steer, type MoveOrder } from './movement'
 import { defenderOrders, faceoffOrders, faceoffSpot } from './formations'
 import { attackPlayOrders, phaseForPlay, type PlayId } from './playbook'
 import { Director } from './director'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
@@ -109,9 +113,14 @@ const PK_SHOT_MULT = 0.75
 // A 6th attacker (goalie pulled) tilts the ice without a penalty.
 const EXTRA_ATTACKER_SHOT_MULT = 1.25
 
-// Goalie pull: trailing by 1–2 inside the final stretch of regulation.
-const PULL_WINDOW_SECONDS = 90
-const PULL_MAX_DEFICIT = 2
+// Goalie pull. The window (seconds of regulation remaining at which a trailing
+// team empties the net) widens with the deficit — you gamble earlier the more
+// you trail — indexed by deficit: down 1 ≈ 1:20, down 2 ≈ 1:40, down 3 ≈ 1:45.
+// Down 4+ teams stay honest. A coach's aggressiveness slider then pulls the
+// trigger earlier or later (0.8×…1.3× the window). Windows are held modest to
+// keep empty-net goals near the NHL rate (the engine converts 6v5 richly).
+const PULL_WINDOW_BY_DEFICIT: readonly number[] = [0, 80, 100, 105]
+const PULL_MAX_DEFICIT = 3
 const BENCH_X = 0.97
 const BENCH_Y = -0.85
 /** P(goal) for an unblocked shot at an empty net. */
@@ -164,6 +173,18 @@ function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): n
   const v = val ?? 0.5
   if (v <= 0.5) return 1 + (v - 0.5) * 2 * (1 - lowEnd)
   return 1 + (v - 0.5) * 2 * (highEnd - 1)
+}
+
+/**
+ * Seconds of regulation remaining at which a team trailing by `deficit` empties
+ * the net for a sixth attacker. Returns 0 when a team should never pull (tied,
+ * leading, or down 4+). The window widens with the deficit — you gamble earlier
+ * the more you trail — and an aggressive bench (higher `aggressiveness`, 0–1)
+ * pulls the trigger 0.8×…1.3× sooner. Exported for tests/calibration.
+ */
+export function goaliePullWindow(deficit: number, aggressiveness: number | undefined): number {
+  if (deficit < 1 || deficit > PULL_MAX_DEFICIT) return 0
+  return PULL_WINDOW_BY_DEFICIT[deficit] * sliderMult(aggressiveness, 0.8, 1.3)
 }
 
 // Passing tempo: base per-tick chance, raised by defensive pressure and pace.
@@ -278,6 +299,9 @@ class TeamSim {
   pulled = false
   /** "<kind>:<count>" of the current deployment, so strength changes redeploy. */
   deployKey = ''
+  /** Multiplier on goals this goalie concedes tonight (mean 1.0; <1 = hot, >1 =
+   *  leaking) — the "hot goalie / off night" lever, rolled once per game. */
+  goalieNight = 1
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -641,13 +665,22 @@ function simPeriod(
     return { kind: 'ev', count: clamp(5 + extra, 3, 6) }
   }
 
-  /** Credit time-on-ice for the shift just completed. */
+  /** Credit time-on-ice for the shift just completed. #175: also split each
+   *  skater's ice time into pp/pk buckets from the strength state he was deployed
+   *  at (deployKey is set at deploy() and reflects the shift now ending, since a
+   *  strength change credits BEFORE redeploying). */
   const creditShift = (upTo: number): void => {
     const dur = upTo - lastShift
-    for (const r of home.unit.skaters) stat(ctx, r.player.id).toi += dur
-    stat(ctx, home.unit.goalie.player.id).toi += dur
-    for (const r of away.unit.skaters) stat(ctx, r.player.id).toi += dur
-    stat(ctx, away.unit.goalie.player.id).toi += dur
+    for (const team of [home, away]) {
+      const kind = team.deployKey.split(':')[0] // 'ev' | 'pp' | 'pk' | 'ot'
+      for (const r of team.unit.skaters) {
+        const s = stat(ctx, r.player.id)
+        s.toi += dur
+        if (kind === 'pp') s.ppToi = (s.ppToi ?? 0) + dur
+        else if (kind === 'pk') s.pkToi = (s.pkToi ?? 0) + dur
+      }
+      stat(ctx, team.unit.goalie.player.id).toi += dur
+    }
     lastShift = upTo
   }
 
@@ -681,15 +714,21 @@ function simPeriod(
     }
   }
 
-  /** Pull (or re-insert) the goalie: down 1–2 in the last stretch of regulation. */
+  /** Pull (or re-insert) the goalie: trailing late in regulation. The window
+   *  widens with the deficit and with the coach's aggressiveness; a team that
+   *  scores to erase the gap (or that goes down 4+) gets its goalie back. */
   const updatePull = (team: TeamSim, opp: TeamSim): void => {
     if (period !== REGULATION_PERIODS) {
       team.pulled = false
       return
     }
     const deficit = opp.goals - team.goals
-    team.pulled =
-      lengthSeconds - clk.t <= PULL_WINDOW_SECONDS && deficit >= 1 && deficit <= PULL_MAX_DEFICIT
+    const window = goaliePullWindow(deficit, team.team.tactics.aggressiveness)
+    if (window <= 0) {
+      team.pulled = false
+      return
+    }
+    team.pulled = lengthSeconds - clk.t <= window
   }
 
   /** Park every skater exactly on his faceoff spot (period start only). */
@@ -870,9 +909,13 @@ function simPeriod(
 
     const finish = shooterSk.player.composites.scoring / LEAGUE_AVG
     const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
+    // def.goalieNight (mean 1.0) is the goalie's night: a hot one eats goals, an
+    // off night coughs them up. Empty net is nobody's fault, so it's exempt.
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge), 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight * (ctx.scoringMult ?? 1), 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
     const gs = goalStrengthNow(atk, def)
@@ -885,6 +928,11 @@ function simPeriod(
         if (gStat) gStat.goalsAgainst++
         stat(ctx, shooterSk.player.id).goals++
         for (const as of assists) stat(ctx, as).assists++
+        // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
+        if (gs !== 'pp') {
+          for (const r of atk.unit.skaters) stat(ctx, r.player.id).plusMinus += 1
+          for (const r of def.unit.skaters) stat(ctx, r.player.id).plusMinus -= 1
+        }
         // Credit the primary assister (first in list) xA = shooter's xG value.
         if (assists.length > 0) {
           const primaryA = stat(ctx, assists[0])
@@ -1682,6 +1730,10 @@ function simPeriod(
     if (defSH && !atkSH) strengthMult = PP_SHOT_MULT
     else if (atkSH && !defSH) strengthMult = PK_SHOT_MULT
     if (atk.pulled) strengthMult *= EXTRA_ATTACKER_SHOT_MULT
+    // Score effects: the trailing team pushes, the leading team protects — the
+    // effect grows as regulation runs down. Tuned to conserve total shot volume
+    // (and thus calibration); only the share tilts toward the chaser.
+    strengthMult *= scoreEffectMult(atk.goals - def.goals, (period - 1 + clk.t / lengthSeconds) / 3)
     const edge = edgeOf(atk)
 
     // Breakaway: the carrier is clean past EVERY defender heading up ice —
@@ -2077,26 +2129,27 @@ function simPeriod(
 
 function shootout(ctx: Ctx, home: TeamSim, away: TeamSim, period: number): void {
   const rng = ctx.rng
-  const shooterSkill = (t: TeamSim): number => {
-    const shooters = t.team.lines.forwards.flat().map((id) => t.resolve(id))
-    let s = 0
-    for (const p of shooters) s += p.composites.scoring
-    return s / shooters.length / LEAGUE_AVG
+  // Each team's snipers, best first; a round sends the next one down the list and
+  // wraps around once everyone's shot (NHL rules).
+  const order = (t: TeamSim): Player[] => shootoutOrder(t.team.lines.forwards.flat().map((id) => t.resolve(id)))
+  const homeShooters = order(home)
+  const awayShooters = order(away)
+  const goaltending = (t: TeamSim): number => t.resolve(t.team.lines.goalies[0]).composites.goaltending
+  const attempt = (shooters: Player[], round: number, def: TeamSim): boolean => {
+    const shooter = shooters[round % Math.max(1, shooters.length)]
+    return rng.chance(shootoutGoalChance(shootoutSkill(shooter.composites), goaltending(def), LEAGUE_AVG))
   }
-  const goalieSkill = (t: TeamSim): number =>
-    t.resolve(t.team.lines.goalies[0]).composites.goaltending / LEAGUE_AVG
-  const attempt = (atk: TeamSim, def: TeamSim): boolean =>
-    rng.chance(clamp(0.33 * shooterSkill(atk) * (2 - goalieSkill(def)), 0.1, 0.6))
 
   let h = 0
   let a = 0
-  for (let round = 0; round < 3; round++) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  let round = 0
+  for (; round < 3; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
-  while (h === a) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  for (; h === a; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
   const winner = h > a ? home : away
   winner.goals++
@@ -2137,10 +2190,13 @@ export function fullSimGame(
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null, scoringMult: playoffScoringMult(rules) }
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
+  // Roll each starter's nightly sharpness once (stable hash → no RNG-stream cost).
+  homeSim.goalieNight = goalieNightFactor(opts.seed, home.lines.goalies[0] as string)
+  awaySim.goalieNight = goalieNightFactor(opts.seed, away.lines.goalies[0] as string)
 
   let absBase = 0
   for (let period = 1; period <= REGULATION_PERIODS; period++) {

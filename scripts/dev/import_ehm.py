@@ -60,7 +60,7 @@ AHL->NHL parent map (32 affiliates):
 Usage:
     py scripts/dev/import_ehm.py <export.xlsx> <out_dir> [facepack_dir ...]
 """
-import sys, os, io, json, unicodedata, glob, shutil, zlib
+import sys, os, io, json, re, unicodedata, glob, shutil, zlib
 
 # Column indices (0-based) for the full "Players and non-players" EHM export
 # (two header rows: section markers on row 0, field names on row 1; data row 2+).
@@ -83,6 +83,27 @@ C_INTL_APPS, C_INTL_GOALS, C_INTL_ASSISTS, C_STANLEY_CUPS = 23, 24, 25, 27
 C_HOME_REP, C_CURRENT_REP, C_WORLD_REP = 41, 42, 43
 C_JUNIOR_PREF = 59
 C_NHL_DRAFT_ELIGIBLE, C_NHL_DRAFTED = 29, 30
+
+# #185: trade-protection clause columns aren't at a stable index across export
+# versions (many exports omit them entirely), so we auto-detect them from the
+# field-name header row. None => the export carries no clause data and the game
+# synthesises a realistic veteran-only fallback instead.
+CLAUSE_NTC_COL = None
+CLAUSE_NMC_COL = None
+
+def detect_clause_columns(header):
+    """Scan the field-name header for no-trade / no-movement clause columns."""
+    global CLAUSE_NTC_COL, CLAUSE_NMC_COL
+    for i, name in enumerate(header or ()):
+        n = str(name or "").strip().lower()
+        if CLAUSE_NTC_COL is None and ("no trade" in n or "no-trade" in n or n in ("ntc", "no trade clause")):
+            CLAUSE_NTC_COL = i
+        if CLAUSE_NMC_COL is None and ("no movement" in n or "no-movement" in n or "no move" in n or n in ("nmc", "no movement clause")):
+            CLAUSE_NMC_COL = i
+
+def clause_truthy(v):
+    s = str(v if v is not None else "").strip().lower()
+    return s in ("1", "yes", "true", "y", "t", "on") or s.startswith("yes")
 
 # Physical sizes + the full 1-20 attribute columns (EHM scale). Mapped to our
 # 1-99 RawAttributes so imported players start out exactly as the DB describes.
@@ -228,14 +249,24 @@ def map_role(role_str, pos):
     return "twoWay"  # "Two-way", "Defensive", "Grinder", "All around", default
 
 def contract_from_row(row):
-    """Build {salary, years} from the EHM wage + contract-expiry columns."""
+    """Build {salary, years[, noTradeClause, noMovementClause]} from the EHM
+    wage + contract-expiry columns, plus any real clause columns found."""
     salary = to_int(row[C_WAGE], 0)
     if salary <= 0:
         return None
     parts = str(row[C_EXPIRES] or "").split(".")
     exp_year = to_int(parts[2]) if len(parts) == 3 else 0
-    years = clamp(exp_year - SEASON_YEAR, 1, 8) if exp_year else 2
-    return {"salary": salary, "years": years}
+    # Floor at 0, not 1: a contract already expired in the DB means the player
+    # reaches free agency at the game's opening summer (accurate day-one UFAs
+    # for exports that carry them; the post-frenzy Pivot rosters have none).
+    years = clamp(exp_year - SEASON_YEAR, 0, 8) if exp_year else 2
+    out = {"salary": salary, "years": years}
+    # #185: carry real trade protection from the DB when the export has it.
+    if CLAUSE_NTC_COL is not None:
+        out["noTradeClause"] = clause_truthy(row[CLAUSE_NTC_COL])
+    if CLAUSE_NMC_COL is not None:
+        out["noMovementClause"] = clause_truthy(row[CLAUSE_NMC_COL])
+    return out
 
 def personality_from_row(row):
     """EHM personality columns (1-20) -> our Personality (same 1-20 scale)."""
@@ -663,6 +694,13 @@ COMP_LEAGUES = {
     "Ontario Hockey League": "OHL",
     "Western Hockey League": "WHL",
     "United States Hockey League": "USHL",
+    # USA Hockey National Team Development Program (Hughes brothers etc.). The DB
+    # may file it under any of these names; all map to the NTDP feeder. If the DB
+    # instead lumps the NTDP clubs into the USHL division, they import as USHL.
+    "United States National Team Development Program": "NTDP",
+    "USA Hockey National Team Development Program": "NTDP",
+    "US National Team Development Program": "NTDP",
+    "USA NTDP": "NTDP",
     "Kontinental Hockey League": "KHL",
     "Swedish Hockey League": "SHL",
     "Finnish Liiga": "LIIGA",
@@ -676,6 +714,23 @@ COMP_LEAGUES = {
     # NCAA Division I — clubs file under this umbrella name (where US college
     # draft prospects like Gavin McKenna play).
     "National Collegiate Athletic Association": "NCAA",
+    # ── Top junior/prospect leagues by nation (NHL-draft feeders) ──────────
+    # Russia's premier junior league (MHL) — Demidov-tier prospects. The lower
+    # "Natsyonalnaya" tier (NMHL) is deliberately NOT whitelisted (exact match).
+    "Russian Molodyozhnaya Hokkeinaya Liga": "MHL",
+    # Nordic top junior tiers (where SHL/Liiga clubs' teenagers play).
+    "Swedish U20 Nationell": "J20",
+    "Finnish U20 SM-sarja": "U20SM",
+    # British Columbia Hockey League — now an elite Tier-1 junior drawing
+    # NHL first-rounders and NCAA commits.
+    "British Columbia Hockey League": "BCHL",
+    # North American Hockey League — US Tier-II junior.
+    "North American Hockey League": "NAHL",
+    # Czech / Slovak / German top junior leagues (Slafkovský, Stützle paths).
+    # Exact match keeps the "… 2/3/4/5" German sub-tiers out.
+    "Czech DHL Extraliga junioru": "CZEJR",
+    "Slovenská Extraliga juniorov": "SVKJR",
+    "Deutsche Nachwuchs Liga": "DNL",
 }
 COMP_BY_LOWER = {k.lower(): k for k in COMP_LEAGUES}
 
@@ -858,7 +913,9 @@ def main():
     print(f"neg-PA ceilings: {dict(sorted(NEG_PA_CEILINGS.items(), reverse=True))}")
     wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
     ws = wb["Sheet1"]
-    it = ws.iter_rows(values_only=True); next(it); next(it)
+    it = ws.iter_rows(values_only=True); next(it); field_header = next(it)
+    detect_clause_columns(field_header)  # #185: find real NTC/NMC columns if present
+    print(f"clause cols: ntc={CLAUSE_NTC_COL} nmc={CLAUSE_NMC_COL}")
 
     # team -> list of player dicts
     nhl_teams = {nick: [] for nick in NHL}
@@ -1212,15 +1269,29 @@ def main():
             g = [p for p in roster if p["position"] == "G"][:3]
             d = [p for p in roster if p["position"] == "D"][:8]
             fwd = [p for p in roster if p["position"] in ("C", "W")][:14]
-            if len(g) < 2 or len(d) < 5 or len(fwd) < 9:
+            # Quick-sim only ices a starter (goalies[0]), so 1 goalie is enough.
+            # National development squads (NTDP U17/U18) legitimately carry a
+            # single goalie; a stricter 2-goalie floor wrongly drops the famous
+            # U18 team (Hughes brothers et al.) and then the whole programme.
+            if len(g) < 1 or len(d) < 5 or len(fwd) < 9:
                 continue
             chosen = g[:max(2, len(g))] + d + fwd
             clean = resolve_faces(chosen, faces_out, comp_total, comp_matched)
             prim, sec = COMP_PALETTE[zlib.crc32(club_name.encode("utf-8")) % len(COMP_PALETTE)]
+            team_city, team_nick = info["city"] or club_name, info["nickname"]
+            # Some programmes (notably the NTDP) ice an under-17 and an under-18
+            # squad that share a generic nickname ("Team USA") and city, which
+            # collapses to one indistinguishable name. Disambiguate by the age
+            # tier embedded in the club name ("… U18 Team" -> "USA" / "U18").
+            age_tier = re.search(r"\bU(1[0-9]|2[0-9])\b", club_name)
+            if age_tier:
+                team_nick = age_tier.group(0)
+                if abbrev == "NTDP":
+                    team_city = "USA"
             teams_out.append({
                 "externalId": f"ehm-{abbrev.lower()}-{norm(club_name)}",
-                "city": info["city"] or club_name,
-                "nickname": info["nickname"],
+                "city": team_city,
+                "nickname": team_nick,
                 "abbreviation": info["abbr"],
                 "primary": prim,
                 "secondary": sec,

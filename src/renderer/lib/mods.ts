@@ -15,6 +15,8 @@ interface ModsBridge {
   list(): Promise<ModListEntry[]>
   read(id: string): Promise<unknown>
   face(faceId: string): Promise<string | null>
+  scene?(name: string): Promise<string | null>
+  logo?(logoId: string): Promise<string | null>
 }
 
 function bridge(): ModsBridge | null {
@@ -40,6 +42,19 @@ export async function readModDatabase(id: string): Promise<unknown> {
   }
 }
 
+/** User-supplied scene backdrop (assets/scenes/<name>.png) as a data URL, or null. */
+export async function getScene(name: string): Promise<string | null> {
+  const b = bridge()
+  if (!b) { console.warn('[scenes] mods bridge missing (preload not loaded?)'); return null }
+  if (!b.scene) { console.warn('[scenes] bridge has no scene() — preload is stale, restart the app'); return null }
+  try {
+    return (await b.scene(name)) ?? null
+  } catch (err) {
+    console.warn('[scenes] IPC failed:', err)
+    return null
+  }
+}
+
 /** Returns a data URL string or null if the face image is absent / bridge unavailable. */
 export async function getFace(faceId: string): Promise<string | null> {
   try {
@@ -47,4 +62,18 @@ export async function getFace(faceId: string): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+/** Team logo (mods/<mod>/logos/<logoId>.png) as a data URL, or null. */
+export async function getLogo(logoId: string): Promise<string | null> {
+  try {
+    return (await bridge()?.logo?.(logoId)) ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Mirror of the import script's sanitize(): team name -> logoId. */
+export function logoIdFor(teamName: string): string {
+  return teamName.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60)
 }

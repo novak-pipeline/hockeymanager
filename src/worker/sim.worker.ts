@@ -52,6 +52,9 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'startCareer': {
       if (!pendingData) throw new Error('no league generated; call newLeague first')
       career = new Career(pendingData, pendingSeed, asTeamId(req.teamId))
+      // Summer takeover: the game begins the day after the draft the database
+      // already reflects — instant, rosters exactly as imported.
+      if (req.startAt === 'offseason') career.startAtOffseason()
       return { id: req.id, type: 'view', view: career.view() }
     }
 
@@ -110,6 +113,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'getFinances':
       return { id: req.id, type: 'finances', finances: must().getFinances() }
+    case 'setTicketPricing': {
+      must().setTicketPricing(req.tier)
+      return { id: req.id, type: 'finances', finances: must().getFinances() }
+    }
     case 'getInbox':
       return { id: req.id, type: 'inbox', inbox: must().getInbox() }
     case 'getPlayoffs':
@@ -126,6 +133,20 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'setTactics':
       must().setTactics(req.tactics)
       return { id: req.id, type: 'ok' }
+    case 'saveLineSetup': {
+      const r = must().saveLineSetup(req.name)
+      return r.ok ? { id: req.id, type: 'tactics', tactics: must().getTactics() } : { id: req.id, type: 'error', message: 'Could not save the setup.' }
+    }
+    case 'applyLineSetup': {
+      const r = must().applyLineSetup(req.name)
+      return r.ok ? { id: req.id, type: 'tactics', tactics: must().getTactics() } : { id: req.id, type: 'error', message: 'That setup is no longer available.' }
+    }
+    case 'deleteLineSetup':
+      must().deleteLineSetup(req.name)
+      return { id: req.id, type: 'tactics', tactics: must().getTactics() }
+    case 'setLineManagementMode':
+      must().setLineManagementMode(req.mode)
+      return { id: req.id, type: 'tactics', tactics: must().getTactics() }
     case 'markNewsRead':
       must().markNewsRead(req.ids)
       return { id: req.id, type: 'ok' }
@@ -133,12 +154,148 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
     case 'getTeamDynamics':
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
+    case 'getDevCamp':
+      return { id: req.id, type: 'devCamp', devCamp: must().getDevCamp() }
+    case 'getDevCampInvites':
+      return { id: req.id, type: 'devCampInvites', invites: must().getDevCampInvites() }
+    case 'toggleDevCampInvite': {
+      const r = must().toggleDevCampInvite(req.playerId)
+      return { id: req.id, type: 'devCampInviteResult', ok: r.ok, invited: r.invited, message: r.message, invites: must().getDevCampInvites() }
+    }
+    case 'getCampInvites':
+      return { id: req.id, type: 'campInvites', invites: must().getCampInvites() }
+    case 'toggleCampInvite': {
+      const r = must().toggleCampInvite(req.playerId)
+      return { id: req.id, type: 'campInviteResult', ok: r.ok, invited: r.invited, message: r.message, invites: must().getCampInvites() }
+    }
+    case 'submitDevCamp': {
+      const res = must().submitDevCamp(req.standoutId)
+      if (!res.ok) throw new Error(res.message ?? 'Could not resolve development camp.')
+      return { id: req.id, type: 'devCamp', devCamp: null }
+    }
+    case 'skipDevCamp':
+      must().autoResolveDevCamp()
+      return { id: req.id, type: 'devCamp', devCamp: null }
+    case 'getTrainingCamp':
+      return { id: req.id, type: 'trainingCamp', camp: must().getTrainingCamp() }
+    case 'submitTrainingCamp': {
+      const res = must().submitTrainingCamp(req.placements)
+      return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
+    }
+    case 'getFeed':
+      return { id: req.id, type: 'feed', feed: must().getFeed() }
+    case 'toggleFollowAuthor': {
+      must().toggleFollowAuthor(req.authorId)
+      return { id: req.id, type: 'feed', feed: must().getFeed() }
+    }
+    case 'getNegotiation':
+      return { id: req.id, type: 'negotiation', negotiation: must().getNegotiation(req.playerId) }
+    case 'startNegotiation':
+      return { id: req.id, type: 'negotiation', negotiation: must().startNegotiation(req.playerId) }
+    case 'submitNegotiationOffer': {
+      const res = must().submitNegotiationOffer(req.playerId, req.offer)
+      return { id: req.id, type: 'negotiation', negotiation: res.view, signed: res.signed, message: res.message }
+    }
+    case 'getFaHub':
+      return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
+    case 'askFaAgent':
+      return { id: req.id, type: 'agentRead', text: must().askFaAgent(req.playerId).text }
+    case 'submitFaOffer': {
+      const r = must().submitFaOffer(req.playerId, req.salary, req.years)
+      return { id: req.id, type: 'faOfferResult', ok: r.ok, message: r.message, faHub: must().getFaHub() }
+    }
+    case 'getRfaBoard':
+      return { id: req.id, type: 'rfaBoard', board: must().getRfaBoard() }
+    case 'submitOfferSheet': {
+      const r = must().submitOfferSheet(req.playerId, req.salary, req.years)
+      return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, pending: r.pending, message: r.message, board: must().getRfaBoard() }
+    }
+    case 'setSquadStatus': {
+      must().setSquadStatus(req.playerId, req.status)
+      return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
+    }
+    case 'getRoleBoard':
+      return { id: req.id, type: 'roleBoard', roleBoard: must().getRoleBoard() }
+    case 'autoAssignSquadRoles': {
+      const r = must().autoAssignSquadRoles(req.overwrite ?? false)
+      return { id: req.id, type: 'roleBoard', roleBoard: must().getRoleBoard(), assigned: r.assigned }
+    }
+    case 'setTradeStatus': {
+      must().setTradeStatus(req.playerId, req.status)
+      return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
+    }
+    case 'getLeadership':
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership() }
+    case 'getMediaCircuit':
+      return { id: req.id, type: 'mediaCircuit', mediaCircuit: must().getMediaCircuit() }
+    case 'setCaptain': {
+      const r = must().setCaptain(req.playerId)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
+    case 'toggleAlternate': {
+      const r = must().toggleAlternate(req.playerId)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
+    case 'setJerseyNumber': {
+      const r = must().setJerseyNumber(req.playerId, req.number)
+      return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
+    }
+    case 'askAgentWaiveNtc': {
+      const r = must().askAgentWaiveNtc(req.playerId)
+      return { id: req.id, type: 'ntcNegotiation', player: must().getPlayer(req.playerId), ok: r.ok, message: r.message, verdict: r.verdict }
+    }
+    case 'askPlayerTradeList': {
+      const r = must().askPlayerTradeList(req.playerId)
+      return { id: req.id, type: 'ntcNegotiation', player: must().getPlayer(req.playerId), ok: r.ok, message: r.message, teams: r.teams }
+    }
+    case 'toggleFaShortlist': {
+      must().toggleFaShortlist(req.playerId)
+      return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
+    }
     case 'getMedical':
       return { id: req.id, type: 'medical', medical: must().getMedical() }
+    case 'restPlayer': {
+      const r = must().restPlayer(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
+    case 'placeOnLtir': {
+      const r = must().placeOnLtir(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
+    case 'activateFromLtir': {
+      const r = must().activateFromLtir(req.playerId)
+      return { id: req.id, type: 'medical', medical: must().getMedical(), ok: r.ok, message: r.message }
+    }
     case 'getDevelopment':
       return { id: req.id, type: 'development', development: must().getDevelopment() }
     case 'getSquadPlanner':
       return { id: req.id, type: 'squadPlanner', squadPlanner: must().getSquadPlanner() }
+    case 'getLeagueComparison':
+      return { id: req.id, type: 'leagueComparison', comparison: must().getLeagueComparison() }
+    case 'getPlayoffOdds':
+      return { id: req.id, type: 'playoffOdds', odds: must().getPlayoffOdds() }
+    case 'getStaffMeetingSummary':
+      return { id: req.id, type: 'staffMeetingSummary', summary: must().getStaffMeetingSummary() }
+    case 'getStaffMeeting':
+      return { id: req.id, type: 'staffMeeting', staffMeeting: must().getStaffMeeting() }
+    case 'submitStaffMeeting': {
+      const res = must().submitStaffMeeting(req.choices)
+      return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
+    }
+    case 'delegateStaffMeeting': {
+      const res = must().delegateStaffMeeting()
+      return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
+    }
+    case 'getCoachMarket':
+      return { id: req.id, type: 'coachMarket', market: must().getCoachMarket() }
+    case 'fireCoach': {
+      const r = must().fireCoach()
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
+    case 'hireCoach': {
+      const r = must().hireCoach(req.coachId)
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
     case 'getLeagueStatTable':
       return { id: req.id, type: 'leagueStatTable', table: must().getLeagueStatTable(req.teamId) }
     case 'suggestToCoach': {
@@ -160,7 +317,12 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'respondToInteraction': {
       const res = must().respondToInteraction(req.interactionId, req.optionId)
       if (!res.ok) throw new Error(res.message ?? 'Could not respond.')
-      return { id: req.id, type: 'ok' }
+      return {
+        id: req.id,
+        type: 'ok',
+        ...(res.message ? { note: res.message } : {}),
+        ...(res.reaction ? { reaction: res.reaction } : {}),
+      }
     }
     case 'requestInterview': {
       const res = must().requestInterview(req.playerId)
@@ -174,6 +336,14 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'proposeTrade':
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
+    case 'assessTrade':
+      return { id: req.id, type: 'tradeAssessment', assessment: must().assessTrade(req.proposal) }
+    case 'gaugeTradeInterest':
+      return { id: req.id, type: 'tradeInterestRead', read: must().gaugeTradeInterest(req.proposal) }
+    case 'shopPlayer': {
+      const r = must().shopPlayer(req.playerId)
+      return { id: req.id, type: 'shopResult', count: r.count, message: r.message }
+    }
     case 'acceptTrade':
       must().acceptTrade(req.offerId)
       return { id: req.id, type: 'ok' }
@@ -193,11 +363,75 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.signed) throw new Error(res.message)
       return { id: req.id, type: 'ok' }
     }
+    case 'matchOfferSheet': {
+      const r = must().matchOfferSheet(req.playerId)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'declineOfferSheet': {
+      const r = must().declineOfferSheet(req.playerId)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'getWaiverWire':
+      return { id: req.id, type: 'waiverWire', waiverWire: must().getWaiverWire() }
+    case 'getLeagueWire':
+      return { id: req.id, type: 'leagueWire', leagueWire: must().getLeagueWire() }
+    case 'getGMProfile':
+      return { id: req.id, type: 'gmProfile', gmProfile: must().getGMProfile() }
+    case 'getGMJobMarket':
+      return { id: req.id, type: 'gmJobMarket', gmJobMarket: must().getGMJobMarket() }
+    case 'getGMRelationships':
+      return { id: req.id, type: 'gmRelationships', gmRelationships: must().getGMRelationships() }
+    case 'getMentorships':
+      return { id: req.id, type: 'mentorships', mentorships: must().getMentorships() }
+    case 'assignMentor': {
+      const r = must().assignMentor(req.menteeId, req.mentorId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'clearMentor': {
+      const r = must().clearMentor(req.menteeId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'getClubDirection':
+      return { id: req.id, type: 'clubDirection', clubDirection: must().getClubDirection() }
+    case 'setClubDirection': {
+      const r = must().setClubDirection(req.direction)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'getFanbase':
+      return { id: req.id, type: 'fanbase', fanbase: must().getFanbase() }
+    case 'getSponsors':
+      return { id: req.id, type: 'sponsors', sponsors: must().getSponsors() }
+    case 'acceptGMJob': {
+      const r = must().acceptGMJob(req.teamId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'getOwnerRequest':
+      return { id: req.id, type: 'ownerRequest', ownerRequest: must().getOwnerRequest() }
+    case 'respondOwnerRequest': {
+      const r = must().respondToOwnerRequest(req.accept)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'claimWaiver': {
+      const r = must().claimWaiver(req.playerId)
+      if (!r.ok) throw new Error(r.reason)
+      return { id: req.id, type: 'ok', note: r.note }
+    }
     case 'draftPlayer':
       must().draftPlayer(req.playerId)
       return { id: req.id, type: 'ok' }
+    case 'simNextPick':
+      must().simNextPick()
+      return { id: req.id, type: 'ok' }
     case 'advanceDraft':
       must().advanceDraft()
+      return { id: req.id, type: 'ok' }
+    case 'autoDraft':
+      must().autoDraft()
       return { id: req.id, type: 'ok' }
     case 'advanceOffseason':
       must().advanceOffseason()
@@ -220,9 +454,73 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── scouting ── */
     case 'getScouting':
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'getScoutProfile':
+      return { id: req.id, type: 'scoutProfile', scoutProfile: must().getScoutProfile(req.scoutId) }
     case 'assignScout':
-      must().assignScoutTarget(req.scoutId, req.target)
-      return { id: req.id, type: 'ok' }
+      must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'getBoxScoreFor':
+      return { id: req.id, type: 'boxScore', boxScore: must().getBoxScoreFor(req.gameId) }
+    case 'acceptArbitration': {
+      const res = must().acceptArbitration(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
+    case 'walkArbitration': {
+      const res = must().walkAwayArbitration(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
+    case 'buyoutPlayer': {
+      const res = must().buyoutContract(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
+    case 'searchAll':
+      return { id: req.id, type: 'searchResults', results: must().searchAll(req.query) }
+    case 'getNameIndex':
+      return { id: req.id, type: 'nameIndex', entries: must().getNameIndex() }
+    case 'getWarRoom':
+      return { id: req.id, type: 'warRoom', warRoom: must().getWarRoom() }
+    case 'getSeasonReview':
+      return { id: req.id, type: 'boardMeeting', scene: must().getSeasonReview() }
+    case 'submitSeasonReview': {
+      const res = must().submitSeasonReview(req.choice)
+      return { id: req.id, type: 'boardMeetingResult', ok: res.ok, lines: res.lines, summary: res.summary }
+    }
+    case 'getBoardMeeting':
+      return { id: req.id, type: 'boardMeeting', scene: must().getBoardMeeting() }
+    case 'submitBoardMeeting': {
+      const res = must().submitBoardMeeting(req.choices)
+      return { id: req.id, type: 'boardMeetingResult', ok: res.ok, lines: res.lines, summary: res.summary }
+    }
+    case 'autoAssignScouts':
+      must().autoAssignScouts()
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'hireScout': {
+      const res = must().hireScoutFromMarket(req.candidateId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not hire scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'fireScout': {
+      const res = must().fireScoutFromStaff(req.scoutId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not release scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'shortlistProspect':
+      must().shortlistProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'unshortlistProspect':
+      must().unshortlistProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'dismissProspect':
+      must().dismissProspect(req.playerId)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'rescoutProspect': {
+      const res = must().rescoutProspect(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: 'No scout available to send.' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
 
     /* ── story layer ── */
     case 'getHistory':
@@ -267,6 +565,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'setPlayerFocusDrill':
       must().setPlayerFocusDrill(req.playerId, req.focus)
       return { id: req.id, type: 'ok' }
+    case 'recommendPlayerFocuses': {
+      const r = must().recommendPlayerFocuses()
+      return { id: req.id, type: 'ok', note: `Set individual focuses for ${r.count} players.` }
+    }
     case 'getLeagueLeaders':
       return { id: req.id, type: 'leagueLeaders', leaders: must().getLeagueLeaders(req.topN) }
     case 'getTeamLeaders': {
@@ -306,7 +608,15 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'sendDown': {
       const res = must().sendDown(req.playerId)
       if (!res.ok) throw new Error(res.reason)
-      return { id: req.id, type: 'ok' }
+      return res.note ? { id: req.id, type: 'ok', note: res.note } : { id: req.id, type: 'ok' }
+    }
+    case 'setCoachRoster': {
+      const res = must().applyCoachRoster()
+      return { id: req.id, type: 'coachRosterSet', promoted: res.promoted, demoted: res.demoted }
+    }
+    case 'undoCoachRoster': {
+      const res = must().undoCoachRoster()
+      return res.ok ? { id: req.id, type: 'ok' } : { id: req.id, type: 'ok', note: 'nothing to undo' }
     }
 
     /* ── Phase B: player profile view layer ── */

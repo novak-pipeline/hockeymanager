@@ -16,11 +16,24 @@ export interface Lines {
   penaltyKillUnits: PlayerId[][]
 }
 
+/** A salary a team keeps paying on a player it traded away (retained-salary
+ *  deal). Counts against the retaining team's cap until the contract expires. */
+export interface RetainedSlot {
+  playerId: string
+  /** Annual cap hit retained. */
+  amount: number
+  /** Season the retention comes off the books (mirrors the player's contract). */
+  expiryYear: number
+}
+
 export interface Finances {
   budget: number
   salaryCap: number
   capUsed: number
   revenue: number
+  /** Salaries this club retained on players it traded away (#157). Optional/
+   *  additive — absent means none. Adds to the club's cap until each expires. */
+  retained?: RetainedSlot[]
 }
 
 export interface Staff {
@@ -76,10 +89,27 @@ export interface Team {
    * Drives call-up/send-down routing and UI grouping.
    */
   affiliateId?: TeamId
+  /**
+   * Head-coach roster-fit (0–100), computed by the career layer when the coach's
+   * system is applied. The sim turns it into a small (~±1.5%) shot-conversion
+   * multiplier. Absent = neutral (no effect). Never set by the sim engine itself.
+   */
+  coachFit?: number
   /** Home arena name from the source DB (display-only). */
   arena?: string
   /** Home arena capacity from the source DB (display-only). */
   arenaCapacity?: number
   /** Retired jersey numbers from the source DB (display-only). */
   retiredNumbers?: Array<{ number: number; player: string }>
+  /**
+   * #189: the club captain (wears the C). GM-set on the user's team; AI clubs
+   * auto-appoint their highest-leadership veteran. Absent = no captain named yet.
+   */
+  captainId?: PlayerId
+  /**
+   * #189: the alternate captains (wear an A). NHL letter rules: with a captain,
+   * up to 2 alternates; with no captain, up to 3. Order is display order.
+   * Absent/empty = none named.
+   */
+  alternateCaptainIds?: PlayerId[]
 }

@@ -127,6 +127,18 @@ describe('buildScoutPanel – determinism', () => {
     const r2 = buildScoutPanel([scout], player, NO_FOG, 4)
     expect(r1.reads[0]!.tier).toBe(r2.reads[0]!.tier)
   })
+
+  it('reports what the scout saw in a recent viewing when given a scoring pace', () => {
+    const player = makePlayer({ id: 'obs-1', overall: 72 })
+    const scouts = [makeScout({ id: 'a', name: 'A', judgment: 60 }), makeScout({ id: 'b', name: 'B', judgment: 60 })]
+    // No game sample → no "watched" line.
+    expect(buildScoutPanel(scouts, player, NO_FOG, 3).reads[0]!.watched).toBeUndefined()
+    // With a pace, each scout's report carries a recent-viewing note...
+    const panel = buildScoutPanel(scouts, player, NO_FOG, 3, { ppg: 1.0 })
+    expect(panel.reads[0]!.watched).toBeTruthy()
+    // ...and two scouts can describe different games they caught.
+    expect(panel.reads[0]!.watched).not.toBe(panel.reads[1]!.watched)
+  })
 })
 
 /* ────────────────────────── per-scout variance ────────────────────────── */

@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import { openPlayerMenu } from './playerMenuStore'
 
 /**
  * Screen routing — a plain state machine, no router lib. App owns the nav
@@ -15,7 +16,13 @@ export type ScreenId =
   // Front Office section
   | 'dashboard'
   | 'board'
+  | 'boardMeeting'
+  | 'seasonReview'
+  | 'warRoom'
+  | 'gmCareer'
+  | 'mediaCircuit'
   | 'staffMeeting'
+  | 'staffBriefing'
   // News section
   | 'inbox'
   // Team section
@@ -23,6 +30,7 @@ export type ScreenId =
   | 'teamStats'
   | 'report'
   | 'personnel'
+  | 'jobMarket'
   | 'practice'
   | 'tactics'
   | 'finances'
@@ -32,6 +40,7 @@ export type ScreenId =
   | 'teamDynamics'
   | 'teamMedical'
   | 'teamDevelopment'
+  | 'mentorship'
   | 'teamPlanner'
   // League section
   | 'leagueOverview'
@@ -46,18 +55,30 @@ export type ScreenId =
   | 'world'
   | 'worldInternational'
   | 'scouting'
+  | 'scoutingCentre'
+  | 'scoutingPlayers'
+  | 'scoutingFocus'
+  | 'scoutingCoverage'
   | 'scoutingDraft'
+  | 'scoutProfile'
   | 'dataHub'
   // Contextual (phase-gated)
   | 'draft'
   | 'offseason'
+  | 'negotiation'
   | 'playoffs'
   // Shared / overlay
   | 'player'
   | 'matchcenter'
   | 'trades'
+  | 'waivers'
+  | 'faMarket'
   | 'lockerRoom'
   | 'calendar'
+  | 'feed'
+  | 'devCamp'
+  | 'trainingCamp'
+  | 'leadership'
   | 'settings'
   // Legacy aliases kept for backward compat (redirect to new equivalents)
   | 'schedule'
@@ -69,11 +90,13 @@ export type SectionId = 'frontOffice' | 'news' | 'team' | 'league'
 export function sectionOf(screen: ScreenId): SectionId {
   switch (screen) {
     case 'inbox':
+    case 'feed':
       return 'news'
     case 'squad':
     case 'teamStats':
     case 'report':
     case 'personnel':
+    case 'jobMarket':
     case 'practice':
     case 'tactics':
     case 'finances':
@@ -84,6 +107,9 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'teamMedical':
     case 'teamDevelopment':
     case 'teamPlanner':
+    case 'devCamp':
+    case 'trainingCamp':
+    case 'leadership':
       return 'team'
     case 'leagueOverview':
     case 'standings':
@@ -97,10 +123,17 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'world':
     case 'worldInternational':
     case 'scouting':
+    case 'scoutingCentre':
+    case 'scoutingPlayers':
+    case 'scoutingFocus':
+    case 'scoutingCoverage':
     case 'scoutingDraft':
+    case 'scoutProfile':
     case 'dataHub':
     case 'draft':
     case 'offseason':
+    case 'negotiation':
+    case 'faMarket':
     case 'playoffs':
       return 'league'
     case 'board':
@@ -115,6 +148,10 @@ export interface NavParams {
   playerId?: string
   /** Team being browsed in the Team section. Absent = user's own club. */
   teamId?: string
+  /** Scout being viewed in the scout profile screen. */
+  scoutId?: string
+  /** Inbox deep-link: open this message on arrival (dashboard click-through). */
+  newsId?: string
 }
 
 export interface NavApi {
@@ -147,6 +184,7 @@ export function PlayerLink(props: {
       type="button"
       className={props.className ? `player-link ${props.className}` : 'player-link'}
       onClick={() => nav.navigate('player', { playerId: props.playerId })}
+      onContextMenu={(e) => openPlayerMenu(e, props.playerId, props.name)}
     >
       {props.name}
     </button>

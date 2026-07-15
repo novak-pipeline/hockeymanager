@@ -6,7 +6,6 @@
 import { useState } from 'react'
 import type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
-import { MarkForMeetingButton } from '../components/MarkForMeetingButton'
 import { fmtToi } from '../components/format'
 import { Notice, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -35,6 +34,9 @@ const SKATER_COLS: Col<LeagueSkaterStatRow>[] = [
   { key: 'ppGoals', label: 'PPG', title: 'Power-play goals', fmt: (r) => String(r.ppGoals) },
   { key: 'ppAssists', label: 'PPA', title: 'Power-play assists', fmt: (r) => String(r.ppAssists) },
   { key: 'ppPoints', label: 'PPP', title: 'Power-play points', fmt: (r) => String(r.ppPoints) },
+  { key: 'ppToiPerGame', label: 'PP TOI', title: 'Power-play time on ice / game', fmt: (r) => fmtToi(r.ppToiPerGame ?? 0) },
+  { key: 'shPoints', label: 'SHP', title: 'Shorthanded points', fmt: (r) => String(r.shPoints ?? 0) },
+  { key: 'pkToiPerGame', label: 'PK TOI', title: 'Penalty-kill time on ice / game', fmt: (r) => fmtToi(r.pkToiPerGame ?? 0) },
   { key: 'hits', label: 'HIT', title: 'Hits', fmt: (r) => String(r.hits) },
   { key: 'blocks', label: 'BLK', title: 'Blocked shots', fmt: (r) => String(r.blocks) },
   { key: 'takeaways', label: 'TKA', title: 'Takeaways', fmt: (r) => String(r.takeaways) },
@@ -173,7 +175,6 @@ export function LeagueStatsTableScreen(props: { teamId?: string } = {}): JSX.Ele
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <PlayerLink playerId={r.playerId} name={r.name} />
-                    <MarkForMeetingButton playerId={r.playerId} />
                   </span>
                 </td>
                 {!scoped && <td className="muted small">{r.teamAbbr}</td>}

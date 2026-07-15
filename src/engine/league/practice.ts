@@ -86,6 +86,14 @@ export function createInitialPracticeState(): TeamPracticeState {
  * recovery has no positive bias: it trades growth for fatigue reduction.
  * goaltending targets goalie-only attributes; skaters effectively get no bias.
  */
+/**
+ * Opportunity cost of specialising (#170): attributes NOT targeted by the focus
+ * close their gap to potential this much slower during development. A single
+ * source of truth shared by the dev engines (offseason/inSeason) and the UI plan
+ * preview. `balanced` passes no bias, so nothing drags — it's the neutral default.
+ */
+export const UNTARGETED_FOCUS_DRAG = 0.06
+
 const FOCUS_BIAS: Record<PracticeFocus, Record<string, number>> = {
   balanced: {
     // Tiny nudge everywhere — keeps the radar even
@@ -247,6 +255,27 @@ const FOCUS_PRIMARY_COMPOSITE: Record<PracticeFocus, CompositeDimension | null> 
  *
  * Returns a rationale string suitable for displaying in the UI (1–2 sentences).
  */
+/**
+ * Recommend an individual training focus for ONE player — the area that most needs
+ * work. Goalies always train goaltending; a skater targets his weakest of
+ * scoring/defensiveZone/skating/hitting, unless he's already strong across the
+ * board (→ balanced). Pure; mirrors the team-level suggestFocus weighting.
+ */
+export function suggestPlayerFocus(p: Player): PracticeFocus {
+  if (p.position === 'G') return 'goaltending'
+  const c = p.composites
+  const candidates: Array<{ focus: PracticeFocus; value: number }> = [
+    { focus: 'offense', value: c.scoring },
+    { focus: 'defense', value: c.defensiveZone },
+    { focus: 'skating', value: c.skating },
+    { focus: 'physical', value: c.hitting },
+  ]
+  candidates.sort((a, b) => a.value - b.value) // weakest first
+  const weakest = candidates[0]!
+  // If even his weakest area is strong, keep him balanced rather than over-drilling.
+  return weakest.value >= 80 ? 'balanced' : weakest.focus
+}
+
 export function suggestFocus(
   roster: Player[]
 ): { teamFocus: PracticeFocus; rationale: string } {

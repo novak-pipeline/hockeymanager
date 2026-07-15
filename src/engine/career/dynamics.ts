@@ -47,8 +47,25 @@ export interface TeamDynamicsView {
   cohesion: DynamicsBar
   atmosphere: DynamicsBar
   leadership: DynamicsBar
+  /** #189: true when this is the user's own club — unlocks the captaincy /
+   *  jersey-number editor on the Dynamics screen. Optional/additive. */
+  isUserClub?: boolean
   /** Top influencers (≤4), most influential first. */
   topInfluencers: Array<{ playerId: string; name: string; faceId?: string; tierLabel: string }>
+  /**
+   * LW5 promise ledger (user club only): every promise you've made to a
+   * player's face, with its due date and whether you kept your word.
+   * Optional/additive.
+   */
+  promises?: Array<{
+    playerId: string
+    playerName: string
+    faceId?: string
+    text: string
+    madeLabel: string
+    dueLabel: string
+    status: 'open' | 'kept' | 'broken'
+  }>
   hierarchy: {
     leaders: DynamicsPlayerView[]
     highlyInfluential: DynamicsPlayerView[]

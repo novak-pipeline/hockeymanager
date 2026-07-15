@@ -1,12 +1,14 @@
 import { useState, useMemo } from 'react'
 import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
-import { PlayerLink, useNav } from '../components/NavContext'
+import type { SquadStatus } from '../../domain/player'
+import { PlayerLink } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
-import { useUiStore } from '../components/store'
+import { useUiStore, toast } from '../components/store'
 
 type ScreenTab = 'nhl' | 'ahl'
 type PosFilter = 'ALL' | 'F' | 'D' | 'G'
@@ -22,6 +24,16 @@ const POS_TABS: { label: string; value: PosFilter }[] = [
   { label: 'Defence', value: 'D' },
   { label: 'Goalies', value: 'G' },
 ]
+
+/** #188: compact squad-status chip styling (GM's declared role). */
+const SQUAD_STATUS_UI: Record<SquadStatus, { short: string; hint: string; bg: string; fg: string }> = {
+  keyPlayer:   { short: 'KEY',  hint: 'Key Player — franchise cornerstone', bg: 'var(--violet-dim)', fg: 'var(--violet-h)' },
+  coreStarter: { short: 'CORE', hint: 'Core Starter — nightly regular',      bg: 'var(--violet-dim)', fg: 'var(--violet-h)' },
+  rotation:    { short: 'DEPTH',hint: 'Rotation — depth role',               bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+  topProspect: { short: 'HOT',  hint: 'Hot Prospect — protected future',      bg: 'var(--bg3)',        fg: 'var(--accent)' },
+  prospect:    { short: 'PROSP',hint: 'Young Prospect — still developing',    bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+  surplus:     { short: 'SURPL',hint: 'Surplus — expendable',                bg: 'var(--bg3)',        fg: 'var(--text-dim)' },
+}
 
 function posGroup(pos: string): PosFilter {
   if (pos === 'G') return 'G'
@@ -86,11 +98,6 @@ function ArchetypeLabel({ archetype }: { archetype: ArchetypeInfo | undefined })
   )
 }
 
-function OvrChip({ value }: { value: number }): JSX.Element {
-  const cls = value >= 85 ? 'chip chip-success' : value >= 75 ? 'chip chip-accent' : value >= 65 ? 'chip' : 'chip chip-warn'
-  return <span className={cls}>{value}</span>
-}
-
 function CondBar({ value }: { value: number }): JSX.Element {
   const pct = Math.max(0, Math.min(100, value))
   const cls = pct < 50 ? 'meter-fill over' : pct < 75 ? 'meter-fill warn' : 'meter-fill'
@@ -105,22 +112,27 @@ function CondBar({ value }: { value: number }): JSX.Element {
 }
 
 function FormArrow({ value }: { value: number }): JSX.Element {
-  if (value > 1) return <span style={{ color: 'var(--success)' }}>▲</span>
-  if (value < -1) return <span style={{ color: 'var(--danger)' }}>▼</span>
-  return <span style={{ color: 'var(--muted)' }}>—</span>
+  if (value > 1) return <span style={{ color: 'var(--success)' }} title="Form trending up — playing above their level lately">▲</span>
+  if (value < -1) return <span style={{ color: 'var(--danger)' }} title="Form trending down — in a slump">▼</span>
+  return <span style={{ color: 'var(--muted)' }} title="Steady form">—</span>
 }
 
 function InjuryBadge({ row }: { row: SquadRowView }): JSX.Element | null {
   if (!row.injury) return null
+  const n = row.injury.gamesRemaining
   return (
-    <span className="chip chip-danger" style={{ fontSize: 10 }}>
-      {row.injury.gamesRemaining}gm
+    <span
+      className="chip chip-danger"
+      style={{ fontSize: 10 }}
+      title={`Injured${row.injury.description ? ` (${row.injury.description})` : ''} — out ~${n} game${n === 1 ? '' : 's'}`}
+    >
+      {n}gm
     </span>
   )
 }
 
 function SortTh({
-  label, sortKey, current, asc, onSort, align = 'left',
+  label, sortKey, current, asc, onSort, align = 'left', title,
 }: {
   label: string
   sortKey: SortKey
@@ -128,6 +140,7 @@ function SortTh({
   asc: boolean
   onSort: (k: SortKey) => void
   align?: 'left' | 'right'
+  title?: string
 }): JSX.Element {
   const active = current === sortKey
   return (
@@ -135,6 +148,7 @@ function SortTh({
       className={align === 'right' ? 'num' : undefined}
       style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
       onClick={() => onSort(sortKey)}
+      title={title}
     >
       {label}
       {active && <span style={{ marginLeft: 3, color: 'var(--accent)' }}>{asc ? '↑' : '↓'}</span>}
@@ -178,7 +192,6 @@ function GoalieCols({ row }: { row: SquadRowView }): JSX.Element {
 
 export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
-  const nav = useNav()
   const bump = useUiStore((s) => s.bump)
   const { teamId } = props
   // When a specific (non-user) teamId is provided, hide write controls
@@ -228,6 +241,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
     if (res.type === 'error') {
       alert(res.message)
     } else {
+      if (res.type === 'ok' && res.note) alert(res.note)
       bump()
       refetchAhl()
     }
@@ -243,10 +257,51 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
     }
   }
 
+  const [settingRoster, setSettingRoster] = useState(false)
+  const [coachMoves, setCoachMoves] = useState<{ promoted: string[]; demoted: string[] } | null>(null)
+  async function handleSetCoachRoster(): Promise<void> {
+    if (settingRoster) return
+    setSettingRoster(true)
+    try {
+      const res = await client.setCoachRoster()
+      if (res.type === 'error') { toast(res.message, 'error'); return }
+      if (res.type === 'coachRosterSet') {
+        setCoachMoves({ promoted: res.promoted, demoted: res.demoted })
+        toast(
+          res.promoted.length + res.demoted.length === 0
+            ? 'Coach is happy with the roster as set — no moves.'
+            : `Coach set the roster: ${res.promoted.length} up, ${res.demoted.length} down.`,
+          'success'
+        )
+      }
+      bump()
+      refetchAhl()
+    } finally {
+      setSettingRoster(false)
+    }
+  }
+  async function handleUndoCoachRoster(): Promise<void> {
+    const res = await client.undoCoachRoster()
+    if (res.type === 'error') { toast(res.message, 'error'); return }
+    setCoachMoves(null)
+    toast('Reverted the coach’s roster moves.', 'success')
+    bump()
+    refetchAhl()
+  }
+
   return (
     <section className="stack">
-      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Squad') : (ahlData?.teamName ?? 'AHL Affiliate')}>
-        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Roster') : (ahlData?.teamName ?? 'AHL Affiliate')}>
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {screenTab === 'nhl' && data && (
+            <span className="muted small" style={{ whiteSpace: 'nowrap' }} title="Roster size · cap used vs ceiling">
+              {data.rosterCount} players ·{' '}
+              <span style={{ color: data.capUsed > data.salaryCap ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
+                {fmtMoney(data.capUsed)}
+              </span>
+              {' / '}{fmtMoney(data.salaryCap)}
+            </span>
+          )}
           {screenTab === 'nhl' && (
             <input
               className="input"
@@ -258,15 +313,52 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
           )}
           {!isReadOnly && (
             <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => nav.navigate('lockerRoom')}
-              title="View locker room dynamics"
+              className="btn btn-sm"
+              disabled={settingRoster}
+              onClick={() => void handleSetCoachRoster()}
+              title="Let the coach auto-set the NHL roster by ability — calls up the best AHL options and sends down those they've bettered"
             >
-              Locker Room
+              {settingRoster ? 'Setting…' : 'Ask coach to set roster'}
             </button>
           )}
         </div>
       </ScreenHeader>
+
+      {/* What the coach just did — explicit report of the auto-set moves. */}
+      {!isReadOnly && coachMoves && (
+        <Panel title="Coach set the roster">
+          {coachMoves.promoted.length + coachMoves.demoted.length === 0 ? (
+            <div className="muted small">No changes — the coach was happy with the roster as it stood.</div>
+          ) : (
+            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+              <div>
+                <div className="field-label" style={{ color: 'var(--success)' }}>Called up ({coachMoves.promoted.length})</div>
+                {coachMoves.promoted.length === 0
+                  ? <div className="muted small" style={{ marginTop: 4 }}>None.</div>
+                  : <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{coachMoves.promoted.map((n) => <li key={n} style={{ fontSize: 13 }}>{n}</li>)}</ul>}
+              </div>
+              <div>
+                <div className="field-label" style={{ color: 'var(--accent2, #e0b341)' }}>Sent down ({coachMoves.demoted.length})</div>
+                {coachMoves.demoted.length === 0
+                  ? <div className="muted small" style={{ marginTop: 4 }}>None.</div>
+                  : <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{coachMoves.demoted.map((n) => <li key={n} style={{ fontSize: 13 }}>{n}</li>)}</ul>}
+              </div>
+            </div>
+          )}
+          <div className="row" style={{ marginTop: 'var(--sp-2)', gap: 'var(--sp-2)' }}>
+            {coachMoves.promoted.length + coachMoves.demoted.length > 0 && (
+              <button
+                className="btn btn-sm"
+                onClick={() => void handleUndoCoachRoster()}
+                title="Put the roster back exactly as it was before the coach's moves"
+              >
+                ↶ Undo
+              </button>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={() => setCoachMoves(null)}>Dismiss</button>
+          </div>
+        </Panel>
+      )}
 
       {/* Top-level NHL / AHL tab switcher — only shown for own team */}
       {!isReadOnly && (
@@ -331,45 +423,45 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                       <tr>
                         <SortTh label="Name" sortKey="name" {...sharedSortProps} />
                         <SortTh label="Age" sortKey="age" {...sharedSortProps} align="right" />
-                        <SortTh label="Pos" sortKey="pos" {...sharedSortProps} />
-                        <SortTh label="Role" sortKey="line" {...sharedSortProps} />
+                        <SortTh label="Pos" sortKey="pos" {...sharedSortProps} title="Position" />
+                        <SortTh label="Role" sortKey="line" {...sharedSortProps} title="Depth role / assigned line" />
                         {colView === 'general' && (
                           <>
-                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" />
-                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" />
-                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" />
-                            <th title="Form trend">Form</th>
-                            <th>Inj</th>
+                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Overall ability (0–100)" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition / fitness (0–100)" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale (0–100)" />
+                            <th title="Recent form trend">Form</th>
+                            <th title="Injury status">Inj</th>
                           </>
                         )}
                         {colView === 'contract' && (
                           <>
-                            <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" />
-                            <th className="num">Years</th>
-                            <th className="num">Expires</th>
-                            <th>Clauses</th>
+                            <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" title="Annual cap hit" />
+                            <th className="num" title="Years remaining on the contract">Years</th>
+                            <th className="num" title="Season the contract expires">Expires</th>
+                            <th title="No-trade / no-movement clauses">Clauses</th>
                           </>
                         )}
                         {colView === 'stats' && (
                           <>
-                            <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" />
+                            <SortTh label="GP" sortKey="gp" {...sharedSortProps} align="right" title="Games played" />
                             {isGoalieView || hasGoalies ? (
                               <>
-                                <th className="num" title="Wins (G) or Goals (S)">W/G</th>
-                                <th className="num" title="SV% (G) or Assists (S)">SV%/A</th>
-                                <th className="num" title="GAA (G) or Points (S)">GAA/P</th>
-                                <th className="num" title="Shutouts / +/-">SO/±</th>
-                                <th className="num">PIM</th>
-                                <th className="num">TOI</th>
+                                <th className="num" title="Wins (goalie) or Goals (skater)">W/G</th>
+                                <th className="num" title="Save % (goalie) or Assists (skater)">SV%/A</th>
+                                <th className="num" title="Goals-against average (goalie) or Points (skater)">GAA/P</th>
+                                <th className="num" title="Shutouts (goalie) or plus/minus (skater)">SO/±</th>
+                                <th className="num" title="Penalty minutes">PIM</th>
+                                <th className="num" title="Time on ice">TOI</th>
                               </>
                             ) : (
                               <>
-                                <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" />
-                                <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" />
-                                <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" />
-                                <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" />
-                                <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" />
-                                <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" />
+                                <SortTh label="G" sortKey="g" {...sharedSortProps} align="right" title="Goals" />
+                                <SortTh label="A" sortKey="a" {...sharedSortProps} align="right" title="Assists" />
+                                <SortTh label="P" sortKey="pts" {...sharedSortProps} align="right" title="Points (goals + assists)" />
+                                <SortTh label="±" sortKey="plusMinus" {...sharedSortProps} align="right" title="Plus/minus" />
+                                <SortTh label="PIM" sortKey="pim" {...sharedSortProps} align="right" title="Penalty minutes" />
+                                <SortTh label="TOI/g" sortKey="toi" {...sharedSortProps} align="right" title="Time on ice per game" />
                               </>
                             )}
                           </>
@@ -388,6 +480,18 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                                   <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                                     <PlayerLink playerId={row.playerId} name={row.name} />
+                                    {row.squadStatus && (
+                                      <span className="chip" title={SQUAD_STATUS_UI[row.squadStatus].hint}
+                                        style={{ marginLeft: 2, fontSize: 9, background: SQUAD_STATUS_UI[row.squadStatus].bg, color: SQUAD_STATUS_UI[row.squadStatus].fg, borderColor: 'transparent' }}>
+                                        {SQUAD_STATUS_UI[row.squadStatus].short}
+                                      </span>
+                                    )}
+                                    {row.tradeStatus === 'listed' && (
+                                      <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }} title="On the trade block">BLOCK</span>
+                                    )}
+                                    {row.tradeStatus === 'untouchable' && (
+                                      <span className="chip" style={{ marginLeft: 2, fontSize: 9 }} title="Untouchable">🔒</span>
+                                    )}
                                     {row.contract.noTradeClause && (
                                       <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>
                                     )}
@@ -409,7 +513,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                             </td>
                             {colView === 'general' && (
                               <>
-                                <td className="num"><OvrChip value={row.overall} /></td>
+                                <td className="num"><OverallStars value={row.overall} /></td>
                                 <td><CondBar value={row.condition} /></td>
                                 <td style={{ color: moraleColor(row.morale), fontWeight: 600, fontSize: 12 }}>{moraleWord(row.morale)}</td>
                                 <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
@@ -424,17 +528,26 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                 <td>
                                   {row.contract.noTradeClause && <span className="chip chip-warn" style={{ fontSize: 9 }}>NTC</span>}
                                   {row.contract.twoWay && <span className="chip" style={{ fontSize: 9, marginLeft: 2 }}>2-way</span>}
-                                  {!row.contract.noTradeClause && !row.contract.twoWay && <span className="muted">—</span>}
+                                  {row.waiverRequired && (
+                                    <span
+                                      className="chip chip-danger"
+                                      style={{ fontSize: 9, marginLeft: 2 }}
+                                      title="Sending him to the AHL requires clearing waivers — any club can claim him for nothing"
+                                    >
+                                      WV
+                                    </span>
+                                  )}
+                                  {!row.contract.noTradeClause && !row.contract.twoWay && !row.waiverRequired && <span className="muted">—</span>}
                                 </td>
                               </>
                             )}
                             {colView === 'stats' && (isGoalie ? <GoalieCols row={row} /> : <SkaterCols row={row} />)}
                             <td>
-                              {!isReadOnly && row.contract.twoWay && (
+                              {!isReadOnly && (
                                 <button
                                   className="btn btn-ghost btn-sm"
                                   style={{ fontSize: 11, padding: '2px 6px' }}
-                                  title="Send down to AHL affiliate"
+                                  title={row.contract.twoWay ? 'Send down to AHL affiliate' : 'Send down to the AHL (one-way deal — counts against the cap in the minors)'}
                                   onClick={() => void handleSendDown(row.playerId)}
                                 >
                                   Send ↓
@@ -553,7 +666,7 @@ function AhlSquadPanel({
                         </td>
                         <td className="num muted">{row.age}</td>
                         <td className="muted">{row.position}</td>
-                        <td className="num"><OvrChip value={row.overall} /></td>
+                        <td className="num"><OverallStars value={row.overall} /></td>
                         <td><CondBar value={row.condition} /></td>
                         <td><InjuryBadge row={row} /></td>
                         <td className="num" style={{ whiteSpace: 'nowrap' }}>

@@ -1,7 +1,8 @@
 {
-  "name": "hockey-manager",
+  "name": "the-show-fhm",
+  "productName": "The Show: Franchise Hockey Manager",
   "version": "0.0.1",
-  "description": "Single-player hockey management simulation (Football Manager / EHM spirit).",
+  "description": "The Show: Franchise Hockey Manager — single-player hockey management simulation (Football Manager / EHM spirit).",
   "author": "max",
   "license": "UNLICENSED",
   "private": true,
@@ -14,12 +15,17 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "app": "electron-vite build && electron-vite preview",
+    "dist": "electron-vite build && electron-builder --win --publish never",
+    "release": "electron-vite build && electron-builder --win --publish always",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ui:snap": "electron-vite build && node scripts/dev/ui-snapshot.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.104.1",
+    "electron-updater": "6.3.9",
     "kokoro-js": "1.2.1",
     "pixi.js": "8.18.1",
     "react": "18.3.1",
@@ -34,9 +40,14 @@
     "@types/three": "0.184.1",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "42.4.0",
+    "electron-builder": "25.1.8",
     "electron-vite": "5.0.0",
+    "playwright-core": "1.61.1",
     "typescript": "5.9.3",
     "vite": "7.3.5",
     "vitest": "4.1.8"
+  },
+  "optionalDependencies": {
+    "node-llama-cpp": "3.19.0"
   }
 }

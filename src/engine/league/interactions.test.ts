@@ -7,6 +7,8 @@ import { Rng } from '@engine/shared/rng'
 import {
   applyInteractionResponse,
   maybeRaiseInteraction,
+  promiseFromResponse,
+  promiseDueLabel,
   type PlayerInteraction,
 } from './interactions'
 
@@ -126,6 +128,52 @@ describe('applyInteractionResponse — effects', () => {
     expect(r.moraleDelta).toBeLessThan(0)
     expect(r.escalateToTrade).toBe(true)
     expect(r.news).toBeDefined()
+  })
+
+  it('LW5: an ice-time promise becomes a measurable ledger entry', () => {
+    const p = makePlayer({})
+    const pr = promiseFromResponse({
+      interaction: { ...tradeIx, kind: 'iceTime', severity: 'mild', day: 40 },
+      player: p, nextId: 'pp1', deadlineDay: 100, seasonGp: 20, seasonToi: 24000,
+    })
+    expect(pr?.kind).toBe('iceTime')
+    expect(pr?.dueDay).toBe(75)
+    expect(pr?.baselineGp).toBe(20)
+    expect(pr?.baselineToi).toBe(24000)
+    expect(pr?.status).toBe('open')
+    expect(promiseDueLabel(pr!)).toContain('75')
+  })
+
+  it('LW5: a pre-deadline trade promise comes due AT the deadline; post-deadline at season end', () => {
+    const p = makePlayer({})
+    const before = promiseFromResponse({
+      interaction: { ...tradeIx, day: 60 },
+      player: p, nextId: 'pp1', deadlineDay: 100, seasonGp: 0, seasonToi: 0,
+    })
+    expect(before?.kind).toBe('exploreTrade')
+    expect(before?.dueDay).toBe(100)
+    const after = promiseFromResponse({
+      interaction: { ...tradeIx, day: 110 },
+      player: p, nextId: 'pp2', deadlineDay: 100, seasonGp: 0, seasonToi: 0,
+    })
+    expect(after?.dueDay).toBeUndefined()
+    expect(promiseDueLabel(after!)).toBe('Due at season end')
+  })
+
+  it('LW5: a contract promise records the baseline years; vague concerns yield no ledger entry', () => {
+    const p = makePlayer({ contractYears: 1 })
+    const deal = promiseFromResponse({
+      interaction: { ...tradeIx, kind: 'future', severity: 'mild' },
+      player: p, nextId: 'pp1', deadlineDay: 100, seasonGp: 0, seasonToi: 0,
+    })
+    expect(deal?.kind).toBe('newDeal')
+    expect(deal?.baselineYears).toBe(1)
+    expect(deal?.dueDay).toBeUndefined()
+    const vague = promiseFromResponse({
+      interaction: { ...tradeIx, kind: 'unhappy', severity: 'mild' },
+      player: p, nextId: 'pp2', deadlineDay: 100, seasonGp: 0, seasonToi: 0,
+    })
+    expect(vague).toBeNull()
   })
 
   it('professionals take a firm message better than flaky players', () => {

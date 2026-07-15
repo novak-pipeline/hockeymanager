@@ -22,11 +22,14 @@ import type {
   PlayerAnalyticsRow,
   TeamPlayerAnalyticsRow,
   GoalieAnalyticsRow,
+  PlayoffOddsView,
+  LeagueComparisonView,
 } from '../../worker/protocol'
+import { PlayoffOddsCard } from '../components/PlayoffOddsCard'
+import { StacksUpCard } from '../components/StacksUpCard'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
-import { MarkForMeetingButton } from '../components/MarkForMeetingButton'
 
 /* ═══════════════════════════════════════════════════════════════════
    Helpers
@@ -476,7 +479,6 @@ function PlayerLeaderTable({
                       <button type="button" className="player-link" style={{ fontWeight: isUser ? 700 : 400, fontSize: 12 }} onClick={() => onPlayerClick(row.playerId)}>
                         {row.name}
                       </button>
-                      <MarkForMeetingButton playerId={row.playerId} />
                     </span>
                   </td>
                   <td style={{ color: 'var(--muted)', fontSize: 11 }}>{row.teamAbbr}</td>
@@ -1064,9 +1066,23 @@ export function TeamDataHubBody({ teamId }: { teamId: string }): JSX.Element {
   const client = useClient()
   const nav = useNav()
   const [teamData, setTeamData] = useState<TeamDataHubView | null>(null)
+  const [odds, setOdds] = useState<PlayoffOddsView | null>(null)
+  const [comparison, setComparison] = useState<LeagueComparisonView | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const seqRef = useRef(0)
+
+  // The playoff picture + league-rank board live here now — both are analytics.
+  useEffect(() => {
+    let alive = true
+    void client.getPlayoffOdds().then((r) => {
+      if (alive && r.type === 'playoffOdds') setOdds(r.odds)
+    })
+    void client.getLeagueComparison().then((r) => {
+      if (alive && r.type === 'leagueComparison') setComparison(r.comparison)
+    })
+    return () => { alive = false }
+  }, [client])
 
   useEffect(() => {
     if (!teamId) return
@@ -1112,6 +1128,24 @@ export function TeamDataHubBody({ teamId }: { teamId: string }): JSX.Element {
             </div>
           </div>
           <TeamCategoryTabs hub={teamData} onPlayerClick={navigateToPlayer} />
+
+          {/* Club context models — the odds engine + the league-rank board */}
+          <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {odds?.available && (
+              <Panel title="Playoff picture — Monte-Carlo odds">
+                <div style={{ width: 440, maxWidth: '100%' }}>
+                  <PlayoffOddsCard view={odds} />
+                </div>
+              </Panel>
+            )}
+            {comparison && comparison.cards.length > 0 && (
+              <Panel title="How you stack up">
+                <div style={{ width: 440, maxWidth: '100%' }}>
+                  <StacksUpCard view={comparison} />
+                </div>
+              </Panel>
+            )}
+          </div>
         </div>
       )}
     </section>

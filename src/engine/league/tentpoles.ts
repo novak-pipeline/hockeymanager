@@ -314,6 +314,9 @@ export interface DeadlineDayArgs {
   userTeamId: string
   year: number
   rng: Rng
+  /** The real NHL team ids — deadline deals happen only between these, never with
+   *  AHL affiliates or junior/overseas clubs. Absent ⇒ all teams (legacy/tests). */
+  nhlTeamIds?: ReadonlySet<string>
 }
 
 export interface DeadlineDayResult {
@@ -346,20 +349,22 @@ function tradeGrade(valueDelta: number, baseValue: number): string {
  *  - The user's team participates only as a bystander (this is AI-to-AI).
  */
 export function runDeadlineDay(args: DeadlineDayArgs): DeadlineDayResult {
-  const { teams, players, picks, userTeamId, year, rng } = args
+  const { teams, players, picks, userTeamId, year, rng, nhlTeamIds } = args
   const newsSeeds: NewsSeed[] = []
   const trades: ExecutedTradeSummary[] = []
 
+  // Only real NHL clubs make deadline deals — never AHL affiliates or junior/
+  // overseas teams. Strength thresholds are computed over the NHL set alone.
+  const isNhl = (id: string): boolean => (nhlTeamIds ? nhlTeamIds.has(id) : true)
+  const nhlIds = [...teams.keys()].map((id) => id as string).filter(isNhl)
   const strengths = teamStrengths(teams, players)
-  const totalTeams = teams.size
+  const totalTeams = nhlIds.length
   const sellerThreshold = Math.ceil(totalTeams / 3)
   const contenderThreshold = Math.floor(totalTeams * 0.75) // top-quarter
 
-  const sellerIds = [...teams.keys()]
-    .map((id) => id as string)
+  const sellerIds = nhlIds
     .filter((id) => id !== userTeamId && (strengths.get(id) ?? 0) <= sellerThreshold)
-  const contenderIds = [...teams.keys()]
-    .map((id) => id as string)
+  const contenderIds = nhlIds
     .filter((id) => id !== userTeamId && (strengths.get(id) ?? 0) > contenderThreshold)
 
   if (sellerIds.length === 0 || contenderIds.length === 0) {

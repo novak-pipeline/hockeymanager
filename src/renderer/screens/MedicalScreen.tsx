@@ -4,11 +4,13 @@
  * games remaining and an estimated return. A risk-assessment table for the full
  * roster sits below. Read-only.
  */
+import { useState } from 'react'
 import type { MedicalView, MedicalRow } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { toast } from '../components/store'
 
 function riskColor(label: MedicalRow['riskLabel']): string {
   if (label === 'High') return 'var(--danger)'
@@ -20,6 +22,21 @@ function condColor(c: number): string {
   if (c >= 75) return 'var(--success)'
   if (c >= 50) return 'var(--amber, #f59e0b)'
   return 'var(--danger)'
+}
+
+/** #171: severity chip colours. */
+function severityBg(s: NonNullable<MedicalRow['severity']>): string {
+  return s === 'day-to-day' ? 'var(--amber-dim, rgba(245,158,11,0.18))' : s === 'weeks' ? 'rgba(239,68,68,0.16)' : 'rgba(239,68,68,0.28)'
+}
+function severityFg(s: NonNullable<MedicalRow['severity']>): string {
+  return s === 'day-to-day' ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+}
+
+/** ISO date → "12 Nov". */
+function fmtDate(iso: string): string {
+  const [, m, d] = iso.split('-').map(Number)
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${d} ${months[(m ?? 1) - 1]}`
 }
 
 type Region = 'head' | 'upper' | 'lower' | 'illness' | null
@@ -69,7 +86,14 @@ function BodyDiagram(props: { region: Region; size?: number }): JSX.Element {
   )
 }
 
-function InjuryCard(props: { row: MedicalRow }): JSX.Element {
+const fmtM = (v: number): string => `$${(v / 1e6).toFixed(2)}M`
+
+function InjuryCard(props: {
+  row: MedicalRow
+  busy: boolean
+  onPlaceLtir: (id: string) => void
+  onActivateLtir: (id: string) => void
+}): JSX.Element {
   const r = props.row
   const region = regionOf(r.injuryKind)
   const weeks = r.injuryGamesRemaining !== undefined ? Math.max(1, Math.round(r.injuryGamesRemaining / 3)) : null
@@ -88,11 +112,18 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
           <PlayerLink playerId={r.playerId} name={r.name} />
           <span className="muted small">· {r.position}</span>
         </div>
-        <div style={{ color: HURT, fontWeight: 700, fontSize: 13 }}>
-          {r.injuryDescription ?? 'Injured'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: HURT, fontWeight: 700, fontSize: 13 }}>{r.injuryDescription ?? 'Injured'}</span>
+          {r.severity && (
+            <span className="chip" style={{ fontSize: 9, fontWeight: 700, background: severityBg(r.severity), color: severityFg(r.severity), borderColor: 'transparent' }}>
+              {r.severity === 'day-to-day' ? 'DAY-TO-DAY' : r.severity === 'weeks' ? 'WEEKS' : 'LONG-TERM'}
+            </span>
+          )}
         </div>
         <div className="small muted" style={{ marginTop: 2 }}>
-          {r.injuryGamesRemaining ?? '?'} games remaining{weeks ? ` · ~${weeks} wk${weeks === 1 ? '' : 's'}` : ''}
+          {r.estReturn
+            ? <>Est. return <strong style={{ color: 'var(--text)' }}>{fmtDate(r.estReturn)}</strong> · {r.injuryGamesRemaining ?? '?'} game{r.injuryGamesRemaining === 1 ? '' : 's'} out</>
+            : <>{r.injuryGamesRemaining ?? '?'} games remaining{weeks ? ` · ~${weeks} wk${weeks === 1 ? '' : 's'}` : ''}</>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
           <span className="meter" style={{ flex: 1, height: 6, maxWidth: 120 }}>
@@ -100,6 +131,30 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
           </span>
           <span className="small muted">{r.condition}% fit</span>
         </div>
+        {/* #157: LTIR lever — place a long-term injury on IR for cap relief. */}
+        {(r.ltir || r.ltirEligible) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            {r.ltir ? (
+              <>
+                <span className="chip" style={{ fontSize: 9, fontWeight: 700, color: 'var(--cyan, #38bdf8)', borderColor: 'var(--cyan, #38bdf8)' }}>
+                  ON LTIR{r.capHit ? ` · ${fmtM(r.capHit)} relief` : ''}
+                </span>
+                <button className="btn btn-xs" disabled={props.busy} onClick={() => props.onActivateLtir(r.playerId)}>
+                  Activate
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-xs"
+                disabled={props.busy}
+                title={`Free his ${r.capHit ? fmtM(r.capHit) : 'cap'} hit while he's out so you can sign a replacement over the ceiling`}
+                onClick={() => props.onPlaceLtir(r.playerId)}
+              >
+                Place on LTIR{r.capHit ? ` (+${fmtM(r.capHit)})` : ''}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -108,10 +163,48 @@ function InjuryCard(props: { row: MedicalRow }): JSX.Element {
 export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
   void props.teamId
-  const { data, loading, error } = useScreenData<MedicalView>(
+  const { data, loading, error, refetch } = useScreenData<MedicalView>(
     () => client.getMedical(),
     (r) => (r.type === 'medical' ? r.medical : null)
   )
+  const [busy, setBusy] = useState(false)
+
+  async function toggleRest(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.restPlayer(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function placeLtir(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.placeOnLtir(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        else if (res.message) toast(res.message, 'success')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
+
+  async function activateLtir(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.activateFromLtir(playerId)
+      if (res.type === 'medical') {
+        if (res.ok === false && res.message) toast(res.message, 'error')
+        refetch()
+      }
+    } finally { setBusy(false) }
+  }
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading medical centre…</Notice>
@@ -127,6 +220,34 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
         </span>
       </ScreenHeader>
 
+      {/* #171: physio + injury-bill summary strip */}
+      <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+        {d.physioName !== undefined && (
+          <div className="panel" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div>
+              <div className="field-label">Head Physio</div>
+              <div style={{ fontWeight: 700 }}>{d.physioName}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div className="field-label">Rating</div>
+              <div style={{ fontWeight: 800, color: d.physioRating != null && d.physioRating >= 65 ? 'var(--success)' : d.physioRating != null && d.physioRating >= 45 ? 'var(--amber, #f59e0b)' : 'var(--danger)' }}>
+                {d.physioRating ?? '–'}
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="panel" style={{ padding: '8px 14px' }}>
+          <div className="field-label">Injury bill</div>
+          <div style={{ fontWeight: 700 }}>{d.injuredCount} out · {d.gamesToReturnTotal} club-game{d.gamesToReturnTotal === 1 ? '' : 's'} to be missed</div>
+        </div>
+        {d.ltirRelief !== undefined && d.ltirRelief > 0 && (
+          <div className="panel" style={{ padding: '8px 14px' }}>
+            <div className="field-label">LTIR relief</div>
+            <div style={{ fontWeight: 800, color: 'var(--cyan, #38bdf8)' }}>{fmtM(d.ltirRelief)} freed</div>
+          </div>
+        )}
+      </div>
+
       <Panel title="Treatment Room">
         {injured.length === 0 ? (
           <p className="muted small" style={{ padding: 'var(--sp-2)' }}>
@@ -140,7 +261,9 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
               gap: 'var(--sp-3)',
             }}
           >
-            {injured.map((r) => <InjuryCard key={r.playerId} row={r} />)}
+            {injured.map((r) => (
+              <InjuryCard key={r.playerId} row={r} busy={busy} onPlaceLtir={placeLtir} onActivateLtir={activateLtir} />
+            ))}
           </div>
         )}
       </Panel>
@@ -155,6 +278,7 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
                 <th>Condition</th>
                 <th>Status</th>
                 <th>Injury Risk</th>
+                <th>Manage</th>
               </tr>
             </thead>
             <tbody>
@@ -178,13 +302,29 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
                   <td className="small">
                     {r.injuryDescription
                       ? <span style={{ color: 'var(--danger)' }}>{r.injuryDescription} ({r.injuryGamesRemaining}g)</span>
-                      : <span className="muted">Fit</span>}
+                      : r.resting
+                        ? <span style={{ color: 'var(--accent, var(--violet-h))', fontWeight: 700 }}>Resting</span>
+                        : <span className="muted">Fit</span>}
                   </td>
                   <td style={{ color: riskColor(r.riskLabel), fontWeight: 700, fontSize: 13 }}>{r.riskLabel}</td>
+                  <td>
+                    {r.injuryDescription
+                      ? <span className="muted small">—</span>
+                      : (
+                        <button
+                          className={`btn btn-xs ${r.resting ? 'btn-primary' : 'btn-ghost'}`}
+                          disabled={busy}
+                          title={r.resting ? 'Return to the lineup' : 'Rest to recover condition (held out of the lineup)'}
+                          onClick={() => void toggleRest(r.playerId)}
+                        >
+                          {r.resting ? 'Recall' : 'Rest'}
+                        </button>
+                      )}
+                  </td>
                 </tr>
               ))}
               {d.rows.length === 0 && (
-                <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players.</td></tr>
+                <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No players.</td></tr>
               )}
             </tbody>
           </table>

@@ -34,6 +34,7 @@ import {
   type TeamId
 } from '@domain'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { deriveConsistency } from '@engine/league/consistency'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
 import { buildSchedule, buildWeightedSchedule, freshStanding, type ScheduleTeam } from './generate'
@@ -99,6 +100,11 @@ export interface ModContract {
   /** Annual salary in dollars (e.g. 5_000_000). */
   salary: number
   years: number
+  /** #185: real trade protection from the source DB. Present ⇒ used verbatim;
+   *  absent ⇒ a realistic veteran-only fallback is synthesised. A no-movement
+   *  clause implies a no-trade clause. */
+  noTradeClause?: boolean
+  noMovementClause?: boolean
 }
 
 export interface ModPlayer {
@@ -1220,14 +1226,30 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
     potentialRaw = synthesisePotential(rng, raw, modPlayer.age)
   }
 
+  // #185: prefer the real clause from the source DB; only synthesise when the
+  // export carries no clause data, and then only for UFA-eligible vets (never an
+  // entry-level kid — the CBA forbids it). A no-move implies a no-trade.
+  const dbHasClause =
+    modPlayer.contract !== undefined &&
+    (modPlayer.contract.noTradeClause !== undefined || modPlayer.contract.noMovementClause !== undefined)
+  const ntc = dbHasClause
+    ? Boolean(modPlayer.contract!.noTradeClause || modPlayer.contract!.noMovementClause)
+    : ovr > 80 && modPlayer.age >= 28 && rng.chance(0.4)
+  const clause: Contract['clause'] = dbHasClause
+    ? (modPlayer.contract!.noMovementClause ? 'full' : modPlayer.contract!.noTradeClause ? 'modified' : 'none')
+    : ntc
+      ? 'modified'
+      : 'none'
+
   let contract: Contract
   if (modPlayer.contract) {
     contract = {
       salary: modPlayer.contract.salary,
       yearsRemaining: modPlayer.contract.years,
       expiryYear: startYear + modPlayer.contract.years,
-      noTradeClause: ovr > 80 && rng.chance(0.4),
-      twoWay: ovr < 55 && rng.chance(0.5)
+      noTradeClause: ntc,
+      twoWay: ovr < 55 && rng.chance(0.5),
+      clause,
     }
   } else {
     const base = 0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11
@@ -1237,12 +1259,13 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
       salary,
       yearsRemaining: years,
       expiryYear: startYear + years,
-      noTradeClause: ovr > 80 && rng.chance(0.4),
-      twoWay: ovr < 55 && rng.chance(0.5)
+      noTradeClause: ntc,
+      twoWay: ovr < 55 && rng.chance(0.5),
+      clause,
     }
   }
 
-  return {
+  const player: Player = {
     id: playerId,
     name: modPlayer.name,
     age: modPlayer.age,
@@ -1266,6 +1289,17 @@ function buildModPlayer(modPlayer: ModPlayer, playerId: PlayerId, rng: Rng, star
       : modPlayer.potential !== undefined ? { basePotential: modPlayer.potential } : {}),
     ...bioFields(modPlayer)
   }
+  // Imported rosters rarely label a consistency column — derive a stable hidden
+  // value (no RNG draw) so real players get the trait too. Keyed off the EHM
+  // external id when present so it survives re-imports.
+  if (player.consistency === undefined) {
+    player.consistency = deriveConsistency(
+      modPlayer.externalId ?? (playerId as string),
+      raw.mental.composure,
+      player.personality.determination
+    )
+  }
+  return player
 }
 
 export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueData {
@@ -1439,6 +1473,21 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     return player
   }
 
+  // A player below this age can't realistically be in the AHL — he belongs in a
+  // junior league. Some mod affiliate lists lump junior-age prospects in with the
+  // farm club; we hold those and place them on a junior-league team below (only
+  // when the mod actually ships junior competitions to route them into, so no
+  // player is ever orphaned and NHL-only mods keep their current behaviour).
+  const AHL_MIN_AGE = 18
+  const JUNIOR_TARGET_ABBREVS = new Set([
+    'OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL', 'NTDP', 'USNTDP',
+    'BCHL', 'NAHL', 'MHL', 'J20', 'U20SM', 'CZEJR', 'SVKJR', 'DNL',
+  ])
+  const hasJuniorComps = (mod.competitions ?? []).some(
+    (c) => JUNIOR_TARGET_ABBREVS.has(c.abbrev.toUpperCase()) && c.teams.length > 0
+  )
+  const underageProspects: Player[] = []
+
   for (const { teamId: nhlTeamId, modTeam, roster: nhlRoster } of nhlTeamSpecs) {
     const nhlTeam = teams.get(nhlTeamId)!
     const ahlTeamId = asTeamId(`ahl-mt${ahlTeamNum++}`)
@@ -1508,6 +1557,12 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           externalId: modPlayer.externalId,
           ...(modPlayer.faceId !== undefined ? { faceId: modPlayer.faceId } : {}),
           ...bioFields(modPlayer)
+        }
+        if (hasJuniorComps && player.age < AHL_MIN_AGE) {
+          // Too young for the AHL — hold him for junior-league placement below.
+          players.set(playerId, player)
+          underageProspects.push(player)
+          continue
         }
         const goaliesBefore = ahlRoster.filter((p) => p.position === 'G').length
         if (modPlayer.position === 'G' && goaliesBefore > 0) player.role = 'backup'
@@ -1643,7 +1698,9 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   if (mod.competitions && mod.competitions.length > 0) {
     const rawComps: RawCompetition[] = []
     const membership: Array<{ teamId: TeamId; competitionId: string }> = []
+    const juniorTeamIds: TeamId[] = []
     for (const mc of mod.competitions) {
+      const isJuniorComp = JUNIOR_TARGET_ABBREVS.has(mc.abbrev.toUpperCase())
       rawComps.push({
         id: mc.id,
         name: mc.name,
@@ -1688,9 +1745,58 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         }
         teams.set(teamId, team)
         membership.push({ teamId, competitionId: mc.id })
+        if (isJuniorComp) juniorTeamIds.push(teamId)
       }
     }
+
+    // Place the held under-age prospects onto junior-league teams (round-robin),
+    // then rebuild those teams' lines so the new bodies are slotted. This is what
+    // keeps junior-age players out of the AHL — they now live in a junior loop
+    // where they play, develop, and remain draft-eligible.
+    if (underageProspects.length > 0 && juniorTeamIds.length > 0) {
+      const touched = new Set<TeamId>()
+      underageProspects.forEach((prospect, i) => {
+        const tid = juniorTeamIds[i % juniorTeamIds.length]!
+        teams.get(tid)!.roster.push(prospect.id)
+        touched.add(tid)
+      })
+      for (const tid of touched) {
+        const t = teams.get(tid)!
+        t.lines = buildLinesFromRoster(t.roster.map((id) => players.get(id)!))
+      }
+    }
+
     competitions = buildCompetitions({ comps: rawComps, membership, season: startYear })
+  }
+
+  // Link drafted-but-unsigned prospects to the NHL club that holds their rights,
+  // so imported rosters show "in the system" players from game start — not only
+  // after the first in-game draft. `draftClub` is a club name/abbr string from
+  // the import. We only tag players who AREN'T on an NHL or AHL roster (so an
+  // established or traded player is never mis-linked to his original draft club).
+  {
+    const nhlByKey = new Map<string, TeamId>()
+    const proRostered = new Set<string>()
+    for (const [tid, t] of teams) {
+      // NHL teams are the top-tier clubs (tier is left unset for them; only AHL
+      // and world/junior teams carry an explicit tier).
+      const isNhl = t.tier === undefined || t.tier === 'nhl'
+      if (isNhl) {
+        nhlByKey.set(t.name.toLowerCase(), tid)
+        nhlByKey.set(t.abbreviation.toLowerCase(), tid)
+      }
+      if (isNhl || t.tier === 'ahl') {
+        for (const pid of t.roster) proRostered.add(pid as string)
+      }
+    }
+    for (const p of players.values()) {
+      if (p.rightsTeamId !== undefined) continue
+      if (proRostered.has(p.id as string)) continue
+      const club = p.draftClub
+      if (!club) continue
+      const tid = nhlByKey.get(club.toLowerCase())
+      if (tid) p.rightsTeamId = tid
+    }
   }
 
   const league: League = {

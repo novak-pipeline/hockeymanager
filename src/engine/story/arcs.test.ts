@@ -14,6 +14,7 @@ import {
   createInitialArcsState,
   tickArcs,
   createArc,
+  createOrEscalateRelationshipArc,
   escalateArc,
   resolveArc,
   type ArcsState,
@@ -159,6 +160,55 @@ describe('external arc helpers', () => {
     resolveArc(state, arc.id, 'Done', 2, 2024)
     const result = escalateArc(state, arc.id, 'After resolution', 10, 3, 2024)
     expect(result).toBeUndefined()
+  })
+})
+
+/* ────────────────── relationship arcs: dedup + resolution ────────────────── */
+
+describe('relationship arcs (feud / mentorship)', () => {
+  it('dedupes a feud on the same player set — escalates instead of duplicating', () => {
+    const state = createInitialArcsState()
+    const a1 = createOrEscalateRelationshipArc(state, 'feud', ['p1', 'p2'], ['t1'], 'Sparks fly', 1, 2024)
+    // Same pair, reversed order — must escalate the SAME arc, not spawn a copy.
+    const a2 = createOrEscalateRelationshipArc(state, 'feud', ['p2', 'p1'], ['t1'], 'It flares again', 5, 2024)
+    expect(state.arcs.filter((a) => a.kind === 'feud')).toHaveLength(1)
+    expect(a2.id).toBe(a1.id)
+    expect(a2.beats.length).toBe(2)
+    expect(a2.tension).toBeGreaterThan(30) // escalated above the starting tension
+  })
+
+  it('a feud cools to a resolution when it is not re-stoked', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'feud', { playerIds: ['p1', 'p2'], teamIds: ['t1'] }, 'Tension', 1, 2024)
+    const headlines: string[] = []
+    for (let d = 2; d < 80; d++) {
+      const r = tickArcs({ state, inputs: quietInputs({ day: d }), rng: makeRng(d) })
+      for (const s of r.newsSeeds) headlines.push(s.headline)
+      if (arc.status === 'resolved') break
+    }
+    expect(arc.status).toBe('resolved')
+    expect(headlines.some((h) => /feud cools/i.test(h))).toBe(true)
+  })
+
+  it('a repeatedly-flaring feud boils over', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'feud', { playerIds: ['p1', 'p2'], teamIds: ['t1'] }, 'Tension', 1, 2024)
+    escalateArc(state, arc.id, 'blow-up brewing', 60, 2, 2024) // 30 -> 90, above the boil-over line
+    const { newsSeeds } = tickArcs({ state, inputs: quietInputs({ day: 3 }), rng: makeRng(3) })
+    expect(arc.status).toBe('resolved')
+    expect(newsSeeds.some((s) => /boils over/i.test(s.headline))).toBe(true)
+  })
+
+  it('a mentorship runs its course only after a full run', () => {
+    const state = createInitialArcsState()
+    const arc = createArc(state, 'mentorship', { playerIds: ['vet', 'kid'], teamIds: ['t1'] }, 'Bond forms', 1, 2024)
+    // Early in the run: still open.
+    tickArcs({ state, inputs: quietInputs({ day: 20 }), rng: makeRng(1) })
+    expect(arc.status).not.toBe('resolved')
+    // Past the horizon: resolves with a payoff item.
+    const { newsSeeds } = tickArcs({ state, inputs: quietInputs({ day: 60 }), rng: makeRng(2) })
+    expect(arc.status).toBe('resolved')
+    expect(newsSeeds.some((s) => /mentorship pays off/i.test(s.headline))).toBe(true)
   })
 })
 
@@ -379,7 +429,8 @@ describe('breakoutSeason detector', () => {
           id === 'p1'
             ? { goals: 10, assists: 15, points: 25, gamesPlayed: 20 }
             : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
-        expectedPoints: (id) => (id === 'p1' ? 40 : undefined), // pace = 25/20*82 ≈ 102 vs expected 40
+        // expectedPoints is PER GAME (as the career supplies it): 0.5/g ≈ 41/season.
+        expectedPoints: (id) => (id === 'p1' ? 0.5 : undefined), // pace = 25/20*82 ≈ 102 vs expected ≈41
       }),
       rng,
     })
@@ -399,7 +450,8 @@ describe('breakoutSeason detector', () => {
           id === 'p1'
             ? { goals: 1, assists: 2, points: 3, gamesPlayed: 20 }
             : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
-        expectedPoints: (id) => (id === 'p1' ? 60 : undefined), // pace = 3/20*82 ≈ 12 vs expected 60
+        // Per game: 0.73/g ≈ 60/season.
+        expectedPoints: (id) => (id === 'p1' ? 0.73 : undefined), // pace = 3/20*82 ≈ 12 vs expected ≈60
       }),
       rng,
     })
@@ -416,7 +468,30 @@ describe('breakoutSeason detector', () => {
         day: 5,
         playerLines: [playerLine('p1', 't1', { points: 3 })],
         seasonTotals: () => ({ goals: 5, assists: 5, points: 10, gamesPlayed: 5 }),
-        expectedPoints: () => 40,
+        expectedPoints: () => 0.5,
+      }),
+      rng,
+    })
+    expect(state.arcs.filter(a => a.kind === 'breakoutSeason' || a.kind === 'bustWatch')).toHaveLength(0)
+  })
+
+  it('does NOT flag a player producing right at his (per-game) expectation', () => {
+    // Regression: expectedPoints is per-GAME. A 0.5/g player producing ~0.5/g is
+    // ordinary — not a breakout. (The old code compared a per-season pace to the
+    // per-game number, so essentially every scorer tripped a false breakout.)
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 20,
+        playerLines: [playerLine('p1', 't1', { points: 1 })],
+        // 10 points in 20 games = 0.5/g → ~41/season, exactly the expectation.
+        seasonTotals: (id) =>
+          id === 'p1'
+            ? { goals: 4, assists: 6, points: 10, gamesPlayed: 20 }
+            : { goals: 0, assists: 0, points: 0, gamesPlayed: 20 },
+        expectedPoints: (id) => (id === 'p1' ? 0.5 : undefined),
       }),
       rng,
     })
@@ -476,6 +551,34 @@ describe('milestoneWatch detector', () => {
     expect(milestoneNews.some(s => s.headline.includes('200'))).toBe(true)
     const arc = state.arcs.find(a => a.kind === 'milestoneWatch')
     expect(arc?.status).toBe('resolved')
+  })
+
+  it('does not re-announce a milestone crossed without a prior approach arc', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const goals200 = (h: string): boolean => h.includes('200 career goals')
+    // Jump straight over 200 career goals with no prior approach arc.
+    const first = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 10,
+        playerLines: [playerLine('p1', 't1', { goals: 2, points: 2 })],
+        careerTotals: () => ({ goals: 201, points: 333, gamesPlayed: 611 }),
+      }),
+      rng,
+    })
+    expect(first.newsSeeds.filter(s => s.category === 'milestone' && goals200(s.headline))).toHaveLength(1)
+    // Next game, still just past 200 — the same milestone must NOT re-announce.
+    const second = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 11,
+        playerLines: [playerLine('p1', 't1', { goals: 1, points: 1 })],
+        careerTotals: () => ({ goals: 202, points: 334, gamesPlayed: 612 }),
+      }),
+      rng,
+    })
+    expect(second.newsSeeds.some(s => s.category === 'milestone' && goals200(s.headline))).toBe(false)
   })
 })
 
@@ -921,5 +1024,40 @@ describe('headline quality', () => {
       expect(seed.headline).toMatch(/\d+/)
       expect(seed.headline).not.toBe('Nyberg scored')
     }
+  })
+})
+
+describe('games-played milestones (#48 story slice)', () => {
+  it('fires a career-games milestone news beat when a veteran crosses 500 games', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const { newsSeeds } = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 40,
+        playerLines: [playerLine('p1', 't1', { points: 1 })],
+        playerName: () => 'Ironman',
+        careerTotals: () => ({ goals: 120, points: 300, gamesPlayed: 500 }),
+      }),
+      rng,
+    })
+    const seed = newsSeeds.find((s) => s.category === 'milestone' && /career games/.test(s.headline))
+    expect(seed).toBeTruthy()
+    expect(seed!.headline).toContain('500')
+  })
+
+  it('does NOT fire a games milestone at a non-marquee count (e.g. 300 games)', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    const { newsSeeds } = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 40,
+        playerLines: [playerLine('p2', 't1', { points: 1 })],
+        careerTotals: () => ({ goals: 60, points: 150, gamesPlayed: 300 }),
+      }),
+      rng,
+    })
+    expect(newsSeeds.some((s) => /career games/.test(s.headline))).toBe(false)
   })
 })

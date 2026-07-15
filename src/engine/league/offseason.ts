@@ -42,6 +42,8 @@ import {
 } from '@domain'
 import { FIRST_NAMES, LAST_NAMES } from '@data'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { analystEdge } from '@engine/league/draftRankings'
+import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
 import type { Rng } from '@engine/shared/rng'
 
 /* ────────────────────────── shared helpers ────────────────────────── */
@@ -75,8 +77,20 @@ const FAST_DECLINE = new Set(['speed', 'acceleration', 'agility', 'stamina'])
 /**
  * Close a fraction (`rate`, jittered per attribute) of each attribute's gap to
  * potential. Monotone non-decreasing and hard-capped at potential.
+ *
+ * `attributeBias` (#170) reallocates growth by practice focus: a raw-attribute
+ * key present in the map grows at `rate * (1 + bias)`, everything else at
+ * `rate * (1 - UNTARGETED_DRAG)`. Passing `undefined` (no focus / balanced /
+ * AI teams) leaves the rate untouched — and since the multiplier consumes no
+ * RNG, the result is identical to before, preserving calibration.
  */
-function applyGrowth(ratings: RawAttributes, potential: RawAttributes, rate: number, rng: Rng): void {
+function applyGrowth(
+  ratings: RawAttributes,
+  potential: RawAttributes,
+  rate: number,
+  rng: Rng,
+  attributeBias?: Partial<Record<string, number>>
+): void {
   const curGroups = groupsOf(ratings)
   const potGroups = groupsOf(potential)
   const n = Math.min(curGroups.length, potGroups.length)
@@ -88,7 +102,8 @@ function applyGrowth(ratings: RawAttributes, potential: RawAttributes, rate: num
       if (ceiling === undefined) continue
       const gap = ceiling - cur[key]
       if (gap <= 0) continue
-      const r = Math.min(0.85, rate * rng.float(0.75, 1.25))
+      const focusMult = attributeBias ? 1 + (attributeBias[key] ?? -UNTARGETED_FOCUS_DRAG) : 1
+      const r = Math.min(0.85, rate * Math.max(0, focusMult) * rng.float(0.75, 1.25))
       cur[key] = Math.max(cur[key], Math.min(ceiling, Math.round(cur[key] + gap * r)))
     }
   }
@@ -178,8 +193,13 @@ function driftYouthCeiling(
   // Slight negative mean: more prospects fall short of their ceiling than exceed
   // it (busts outnumber breakouts), matching real draft outcomes.
   const luck = rng.normal(-0.5, 2.2)
+  // The hidden "analyst edge" pays out here — a stable factor the PUBLIC board read
+  // (and your scouts, reading raw tools, didn't), so an analyst darling tends to
+  // rise and an analyst fade tends to slip. Modest per-offseason; accumulates over
+  // the development window. This is what lets the analysts be right vs your scouts.
+  const edgeBias = analystEdge(p.id as unknown as string) * 1.2
   const youthMult = seasonAge <= 19 ? 1 : seasonAge <= 21 ? 0.8 : 0.55
-  const delta = Math.round((personaBias + perfBias + luck) * youthMult)
+  const delta = Math.round((personaBias + perfBias + luck + edgeBias) * youthMult)
   if (delta === 0) return 0
 
   const curOvr = overall(p.composites, p.position)
@@ -262,6 +282,10 @@ export function developPlayers(args: {
    *  is active the caller passes <1 so the summer pass only delivers the share
    *  not already gained continuously, keeping annual totals calibrated. Default 1. */
   growthScale?: number
+  /** Optional (#170): per-player practice-focus attribute bias. Returning a map
+   *  reallocates growth toward the targeted raw attributes (others drag); return
+   *  undefined for players with no active focus (byte-identical to before). */
+  attributeBias?: (id: PlayerId) => Partial<Record<string, number>> | undefined
 }): { newsSeeds: Array<{ playerId: PlayerId; kind: 'breakout' | 'decline' | 'confidenceBoost' | 'crisisOfConfidence' }> } {
   const { players, rng } = args
   const gamesPlayed = toGamesLookup(args.gamesPlayedById)
@@ -347,20 +371,30 @@ export function developPlayers(args: {
     // updated target — a breakout opens new room, a bust shuts it down.
     p.ceilingTrend = driftYouthCeiling(p, seasonAge, perfRatio, hadSample, rng)
 
-    if (seasonAge < 26) {
+    // Goalies develop and age on a later curve than skaters: they keep growing
+    // into their late 20s, hold a long prime, and don't start slipping until
+    // their mid-30s. Skaters peak ~24–27 and decline from 30.
+    const isGoalie = p.position === 'G'
+    const peakAge = isGoalie ? 28 : 26
+    const declineAge = isGoalie ? 33 : 30
+    if (seasonAge < peakAge) {
       const persona =
         (p.personality.ambition + p.personality.professionalism + p.personality.determination) / 3
       const personaFactor = 0.5 + (persona / 20) * 0.8
       const gamesFactor = 0.6 + 0.4 * Math.min(1, gamesPlayed(p.id) / 60)
-      const baseRate = 0.12 + 0.03 * (26 - seasonAge)
+      const baseRate = 0.12 + 0.03 * (peakAge - seasonAge)
       const growthScale = args.growthScale ?? 1
       // Persistent per-player arc: busts under-develop, late bloomers over-develop.
       const arc = devArc(p.id as unknown as string)
-      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng)
-    } else if (seasonAge >= 30) {
-      applyDecline(p.ratings, seasonAge, rng)
+      const bias = args.attributeBias ? args.attributeBias(p.id) : undefined
+      applyGrowth(p.ratings, p.potential, baseRate * personaFactor * gamesFactor * growthMult * growthScale * arc, rng, bias)
+    } else if (seasonAge >= declineAge) {
+      // Goalie decline is also gentler — treat the curve as if they were a few
+      // years younger so a 36-year-old netminder slips like a 33-year-old skater.
+      const declineAgeEff = isGoalie ? seasonAge - 3 : seasonAge
+      applyDecline(p.ratings, declineAgeEff, rng)
       // Second pass for vet underperformers (accelerated −50% decline).
-      if (declineExtraPass) applyDecline(p.ratings, seasonAge, rng)
+      if (declineExtraPass) applyDecline(p.ratings, declineAgeEff, rng)
     }
 
     p.composites = computeComposites(p.ratings, p.role, p.position)
@@ -419,6 +453,21 @@ function retirementProbability(age: number, ovr: number): number {
   return Math.min(0.995, Math.max(floor, adjusted))
 }
 
+// A sub-replacement pro (below this overall) can drift out of the league in his
+// late 20s / early 30s — the classic AHL/ECHL tweener who never sticks and stops
+// getting NHL looks. Genuine roster players (60+) never wash out this way.
+const WASHOUT_OVR_CEIL = 55
+const WASHOUT_MIN_AGE = 28
+const WASHOUT_MAX_AGE = 32
+
+/** Annual chance a fringe 28–32 player leaves pro hockey (goes to Europe, retires,
+ *  falls off the map). Rises the weaker he is and the older he gets. */
+function washoutProbability(age: number, ovr: number): number {
+  if (ovr >= WASHOUT_OVR_CEIL) return 0
+  const p = 0.04 + (WASHOUT_OVR_CEIL - ovr) * 0.01 + (age - WASHOUT_MIN_AGE) * 0.015
+  return Math.min(0.35, p)
+}
+
 /**
  * Roll retirements for everyone 33+. Retirees are removed from their team's
  * roster array but stay in the players map so history screens keep working —
@@ -439,13 +488,25 @@ export function processRetirements(args: {
   }
 
   const retired: PlayerId[] = []
-  for (const p of players.values()) {
-    if (p.age < 33) continue
-    if (p.contract.yearsRemaining >= 2 && p.age < 38) continue
-    if (!rng.chance(retirementProbability(p.age, overall(p.composites, p.position)))) continue
+  const retire = (p: Player): void => {
     retired.push(p.id)
     const team = teamOf.get(p.id)
     if (team) team.roster = team.roster.filter((id) => id !== p.id)
+  }
+  for (const p of players.values()) {
+    const ovr = overall(p.composites, p.position)
+    if (p.age >= 33) {
+      // Age-driven retirement curve.
+      if (p.contract.yearsRemaining >= 2 && p.age < 38) continue
+      if (!rng.chance(retirementProbability(p.age, ovr))) continue
+      retire(p)
+    } else if (p.age >= WASHOUT_MIN_AGE && p.age <= WASHOUT_MAX_AGE) {
+      // Fringe washout: marginal pros drift out before the usual retirement age.
+      // A live 2-year deal keeps them around (someone's paying them to play).
+      if (p.contract.yearsRemaining >= 2) continue
+      if (!rng.chance(washoutProbability(p.age, ovr))) continue
+      retire(p)
+    }
   }
   return { retired }
 }
@@ -628,6 +689,34 @@ export function generateDraftClass(args: {
   return { players, draftClass: { year, prospects } }
 }
 
+/**
+ * Build a draft class from REAL, already-existing draft-eligible players (the
+ * imported junior/college/European prospects living in the wider-world
+ * competitions) rather than generating fictional ones. Ranks them by the same
+ * scouting-consensus formula `generateDraftClass` uses — true potential plus
+ * rng noise, so the top board slot isn't always the genuine best — and keeps
+ * the top `count` to match the generated class size (the rest stay in junior,
+ * undrafted / re-entry eligible next year). Creates no new players.
+ */
+export function buildDraftClassFromPlayers(args: {
+  year: number
+  eligible: Player[]
+  count: number
+  rng: Rng
+}): DraftClass {
+  const { year, eligible, count, rng } = args
+  const consensus = eligible.map((p, i) => ({
+    playerId: p.id,
+    index: i,
+    score: overall(computeComposites(p.potential, p.role, p.position), p.position) + rng.normal(0, 4),
+  }))
+  consensus.sort((a, b) => b.score - a.score || a.index - b.index)
+  const prospects: DraftProspect[] = consensus
+    .slice(0, Math.max(0, count))
+    .map((c, i) => ({ playerId: c.playerId, rank: i + 1 }))
+  return { year, prospects }
+}
+
 /* ────────────────────────── draft order & AI picks ────────────────────────── */
 
 /**
@@ -655,13 +744,29 @@ export function buildDraftOrder(args: {
 }
 
 /**
- * AI pick: heavily biased toward the best remaining consensus rank, with the
- * occasional reach a few spots down the board (never past ~8 spots).
+ * AI pick: best-player-available, biased by team need and with the occasional
+ * reach a few spots down the board. `needBonus` (0+, optional) nudges a prospect
+ * UP the board when his position is thin in the drafting org — it shifts the
+ * effective rank by a few spots so a club fills holes without passing on a
+ * clearly superior talent. Omitted → pure BPA-with-reach (unchanged).
  */
-export function aiSelectProspect(args: { remaining: DraftProspect[]; rng: Rng }): DraftProspect {
-  const { remaining, rng } = args
-  const board = [...remaining].sort((a, b) => a.rank - b.rank)
+export function aiSelectProspect(args: {
+  remaining: DraftProspect[]
+  rng: Rng
+  needBonus?: (p: DraftProspect) => number
+  /** Per-club board variance (rank nudge, + = this club is higher on him). Lets
+   *  each org keep its own slightly different board instead of all AI sharing the
+   *  public consensus. Deterministic per (team, prospect). Omitted → consensus. */
+  boardBias?: (p: DraftProspect) => number
+}): DraftProspect {
+  const { remaining, rng, needBonus, boardBias } = args
+  const eff = (p: DraftProspect): number =>
+    p.rank - (needBonus ? needBonus(p) : 0) - (boardBias ? boardBias(p) : 0)
+  const board = [...remaining].sort((a, b) => eff(a) - eff(b) || a.rank - b.rank)
+  // Mostly take the best available (need-adjusted); occasionally reach a spot or
+  // two, rarely further. Real GMs don't routinely pass on the clear top of their
+  // board — keep reaches shallow so AI picks read as sane.
   let i = 0
-  while (i < board.length - 1 && i < 7 && rng.chance(0.42)) i++
+  while (i < board.length - 1 && i < 4 && rng.chance(0.22)) i++
   return board[i]
 }

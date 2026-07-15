@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import type { HistoryView } from '../../worker/protocol'
+import type { FranchiseHistoryView } from '@engine/career/views'
 import type { AwardRecord, LegendRecord, RecordEntry, SeasonArchive } from '@engine/story/records'
 import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── tab ids ── */
-type TabId = 'records' | 'seasons' | 'awards' | 'legends'
+type TabId = 'records' | 'seasons' | 'awards' | 'legends' | 'franchises'
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'records', label: 'Records' },
   { id: 'seasons', label: 'Seasons' },
   { id: 'awards',  label: 'Awards' },
   { id: 'legends', label: 'Legends' },
+  { id: 'franchises', label: 'Franchises' },
 ]
 
 /* ── gold accent helpers ── */
@@ -99,6 +101,7 @@ export function HistoryScreen(): JSX.Element {
           {tab === 'seasons' && <SeasonsTab seasons={data.seasons} />}
           {tab === 'awards'  && <AwardsTab awards={data.awards} />}
           {tab === 'legends' && <LegendsTab legends={data.legends} />}
+          {tab === 'franchises' && <FranchisesTab franchises={data.franchises ?? []} />}
         </>
       )}
     </section>
@@ -117,6 +120,7 @@ function RecordsTab(props: { data: HistoryView }): JSX.Element {
     { label: 'Assists (Single Season)', stat: 'assists', entries: data.singleSeason.assists },
     { label: 'Points (Single Season)',  stat: 'points',  entries: data.singleSeason.points },
     { label: 'Wins (Single Season)',    stat: 'wins',    entries: data.singleSeason.wins },
+    { label: 'Shutouts (Single Season)', stat: 'shutouts', entries: data.singleSeason.shutouts ?? [] },
     { label: 'Save % (Single Season)',  stat: 'savePct', entries: data.singleSeason.savePct },
   ]
 
@@ -714,6 +718,72 @@ function LegendStat(props: { label: string; value: number; gold: boolean }): JSX
       <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
         {props.label}
       </div>
+    </div>
+  )
+}
+
+/** Banner rafters: every club's championship pedigree, most titles first. */
+function FranchisesTab(props: { franchises: FranchiseHistoryView[] }): JSX.Element {
+  const { franchises } = props
+  if (franchises.length === 0) {
+    return <Notice kind="info">No franchise history yet.</Notice>
+  }
+  const withTitles = franchises.filter((f) => f.championships > 0)
+  const withoutTitles = franchises.filter((f) => f.championships === 0)
+  const mostTitles = withTitles[0]?.championships ?? 0
+
+  return (
+    <div className="stack">
+      <Panel title="Banner rafters">
+        <div className="stack" style={{ gap: 6 }}>
+          {withTitles.map((f) => (
+            <div
+              key={f.teamId}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: f.isUser ? 'rgba(var(--accent-rgb),0.12)' : 'var(--bg0)',
+                border: f.isUser ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
+              }}
+            >
+              <span style={{ width: 44, fontWeight: 700, fontSize: 13 }}>{f.abbreviation}</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
+                {f.name}
+                {f.isUser && <span className="chip" style={{ marginLeft: 8, fontSize: 10 }}>Your club</span>}
+              </span>
+              {/* one 🏆 per title, up to the leader */}
+              <span title={`${f.championships} championship${f.championships !== 1 ? 's' : ''}`} style={{ letterSpacing: 1 }}>
+                {'🏆'.repeat(Math.min(f.championships, Math.max(1, mostTitles)))}
+              </span>
+              <span style={{ width: 28, textAlign: 'right', fontWeight: 700, color: GOLD }}>{f.championships}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 11, width: 140, textAlign: 'right' }}>
+                {f.championYears.slice(0, 4).join(', ')}{f.championYears.length > 4 ? '…' : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Panel>
+      {withoutTitles.length > 0 && (
+        <Panel title="Still chasing a first title">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {withoutTitles.map((f) => (
+              <span
+                key={f.teamId}
+                className="chip"
+                style={{
+                  fontSize: 11,
+                  ...(f.isUser ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}),
+                }}
+              >
+                {f.name}
+              </span>
+            ))}
+          </div>
+        </Panel>
+      )}
     </div>
   )
 }

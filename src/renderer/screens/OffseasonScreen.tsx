@@ -1,11 +1,192 @@
-import { useState } from 'react'
-import type { OffseasonView } from '../../worker/protocol'
-import type { FreeAgentRowView, ResignRowView } from '../../engine/career/views'
+import { useCallback, useEffect, useState } from 'react'
+import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
+import type { FreeAgentRowView, OfferSheetRowView, ResignRowView, CampInviteRow } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
+import { OverallStars } from '../components/Stars'
+import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+
+// ─── #182: training-camp PTO invite editor ────────────────────────────────────
+
+/** Bring unsigned veterans to main camp on a pro tryout — they fight for a
+ *  league-minimum deal. Curate the AGM's shortlist before camp opens. */
+function CampInvitesPanel(): JSX.Element | null {
+  const client = useClient()
+  const [view, setView] = useState<CampInvitesView | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    const r = await client.getCampInvites()
+    if (r.type === 'campInvites') setView(r.invites)
+  }, [client])
+  useEffect(() => { void load() }, [load])
+
+  async function toggle(playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await client.toggleCampInvite(playerId)
+      if (r.type === 'campInviteResult') {
+        if (!r.ok && r.message) toast(r.message, 'error')
+        setView(r.invites)
+      }
+    } finally { setBusy(false) }
+  }
+
+  if (!view) return null
+  const Row = ({ p, invited }: { p: CampInviteRow; invited: boolean }): JSX.Element => (
+    <div className="row" style={{ alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
+      <PlayerFace faceId={p.faceId} name={p.name} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <PlayerLink playerId={p.playerId} name={p.name} />
+        <span className="muted small" style={{ marginLeft: 6 }}>{p.position} · {p.age} · OVR {p.overall}</span>
+      </div>
+      {!view.locked && (
+        <button className={`btn btn-sm ${invited ? 'btn-ghost' : 'btn-primary'}`} disabled={busy} onClick={() => void toggle(p.playerId)}>
+          {invited ? 'Withdraw' : 'Invite'}
+        </button>
+      )}
+    </div>
+  )
+  return (
+    <Panel title="Training Camp — Pro Tryout Invites (PTO)">
+      {view.locked ? (
+        <Notice kind="info">Camp is set — the tryout list is locked for this year.</Notice>
+      ) : (
+        <div className="muted small" style={{ marginBottom: 8 }}>
+          Unsigned veterans you bring to main camp on a tryout. They must earn a league-minimum deal — the coach files a verdict at the end of camp.
+        </div>
+      )}
+      <div className="field-label" style={{ marginTop: 4 }}>Invited ({view.invited.length})</div>
+      {view.invited.length === 0
+        ? <div className="muted small" style={{ padding: '4px 0' }}>No tryout invites — the AGM will bring a few if you don't.</div>
+        : view.invited.map((p) => <Row key={p.playerId} p={p} invited />)}
+      {!view.locked && view.available.length > 0 && (
+        <>
+          <div className="field-label" style={{ marginTop: 10 }}>Available veterans</div>
+          {view.available.slice(0, 20).map((p) => <Row key={p.playerId} p={p} invited={false} />)}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+// ─── arbitration hearings (Season Rhythm M2) ──────────────────────────────────
+
+/** The classic ultimatum: the arbitrator set the number — sign it or lose him. */
+function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch: () => void }): JSX.Element | null {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const cases = view.arbitration ?? []
+  if (cases.length === 0) return null
+
+  const act = async (kind: 'accept' | 'walk', playerId: string, name: string): Promise<void> => {
+    if (kind === 'walk' && !window.confirm(`Walk away from ${name}'s award? He becomes an unrestricted free agent immediately.`)) return
+    setBusy(true)
+    const res = kind === 'accept' ? await client.acceptArbitration(playerId) : await client.walkArbitration(playerId)
+    setBusy(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else { toast(res.type === 'ok' && res.note ? res.note : 'Done', 'success'); onRefetch() }
+  }
+
+  return (
+    <Panel title={`Arbitration hearings (${cases.length})`}>
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+        The arbitrator has ruled. Accept the award and he's signed at that number —
+        or walk away and he hits the open market. Unanswered awards bind the club when free agency closes.
+      </p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr><th>Player</th><th className="num">Age</th><th className="num">Award</th><th className="num">Term</th><th></th></tr>
+          </thead>
+          <tbody>
+            {cases.map((c) => (
+              <tr key={c.playerId}>
+                <td><PlayerLink playerId={c.playerId} name={c.name} /> <span className="muted small">{c.position}</span></td>
+                <td className="num muted">{c.age}</td>
+                <td className="num" style={{ fontWeight: 700 }}>{fmtMoney(c.salary)}</td>
+                <td className="num muted">{c.years}y</td>
+                <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn btn-ghost small" disabled={busy} onClick={() => { void act('accept', c.playerId, c.name) }}>Accept award</button>
+                  <button className="btn btn-ghost small" style={{ color: 'var(--danger)', marginLeft: 4 }} disabled={busy} onClick={() => { void act('walk', c.playerId, c.name) }}>Walk away</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
+
+// ─── buyout window (Season Rhythm M2) ─────────────────────────────────────────
+
+/** Eat a bad contract: player walks, one-third of his remaining money sticks
+ *  to next season's cap. Only multi-year deals qualify (expiring ones walk free). */
+function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | null {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const { data: squad, refetch: refetchSquad } = useScreenData(
+    () => client.getSquad(),
+    (r) => (r.type === 'squad' ? r.squad : null)
+  )
+  if (!squad) return null
+  const candidates = squad.rows
+    .filter((r) => r.contract.yearsRemaining >= 1 && !r.contract.twoWay)
+    .sort((a, b) => b.contract.salary - a.contract.salary)
+    .slice(0, 12)
+  if (candidates.length === 0) return null
+
+  const doBuyout = async (playerId: string, name: string, charge: number): Promise<void> => {
+    if (!window.confirm(`Buy out ${name}? He becomes a free agent and $${(charge / 1e6).toFixed(2)}M dead cap stays on next season's books. This cannot be undone.`)) return
+    setBusy(true)
+    const res = await client.buyoutPlayer(playerId)
+    setBusy(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else { toast(res.type === 'ok' && res.note ? res.note : 'Bought out', 'success'); onRefetch(); refetchSquad() }
+  }
+
+  return (
+    <Panel title="Buyout window">
+      <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+        The one time of year you can eat a bad contract: the player becomes a free agent and
+        <b> one-third of his remaining money</b> counts against next season's cap as a dead charge.
+        Expensive freedom — use it on the deal you regret most.
+      </p>
+      <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+        <table className="table">
+          <thead>
+            <tr><th>Player</th><th className="num">Age</th><th className="num">Salary</th><th className="num">Years</th><th className="num">Dead cap</th><th></th></tr>
+          </thead>
+          <tbody>
+            {candidates.map((r) => {
+              const charge = Math.round((r.contract.salary * r.contract.yearsRemaining) / 3)
+              return (
+                <tr key={r.playerId}>
+                  <td><PlayerLink playerId={r.playerId} name={r.name} /> <span className="muted small">{r.position}</span></td>
+                  <td className="num muted">{r.age}</td>
+                  <td className="num">{fmtMoney(r.contract.salary)}</td>
+                  <td className="num muted">{r.contract.yearsRemaining}</td>
+                  <td className="num" style={{ color: 'var(--danger)' }}>{fmtMoney(charge)}</td>
+                  <td className="num">
+                    <button className="btn btn-ghost small" disabled={busy}
+                      onClick={() => { void doBuyout(r.playerId, r.name, charge) }}>
+                      Buy out
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  )
+}
 
 // ─── stage stepper ────────────────────────────────────────────────────────────
 
@@ -196,13 +377,8 @@ function ResignRow(props: {
   row: ResignRowView
   onRefetch: () => void
 }): JSX.Element {
-  const client = useClient()
+  const nav = useNav()
   const { row } = props
-
-  const [salary, setSalary] = useState(String(Math.round(row.askSalary / 100_000) * 100_000))
-  const [years, setYears] = useState(String(row.askYears))
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
 
   if (row.status === 'signed') {
     return (
@@ -211,7 +387,7 @@ function ResignRow(props: {
           <PlayerLink playerId={row.playerId} name={row.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
         <td className="num">{fmtMoney(row.currentSalary)}</td>
         <td colSpan={3}>
           <span className="chip chip-success">Signed</span>
@@ -227,7 +403,7 @@ function ResignRow(props: {
           <PlayerLink playerId={row.playerId} name={row.name} />
         </td>
         <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
         <td className="num">{fmtMoney(row.currentSalary)}</td>
         <td colSpan={3}>
           <span className="chip chip-danger">Left in FA</span>
@@ -236,84 +412,68 @@ function ResignRow(props: {
     )
   }
 
-  async function doResign() {
-    setBusy(true)
-    setErr(null)
-    const salNum = parseFloat(salary)
-    const yrNum = parseInt(years, 10)
-    if (isNaN(salNum) || isNaN(yrNum) || yrNum < 1) {
-      setErr('Invalid salary or years.')
-      setBusy(false)
-      return
-    }
-    const r = await client.resignPlayer(row.playerId, salNum, yrNum)
-    setBusy(false)
-    if (r.type === 'error') {
-      setErr(r.message)
-    } else {
-      toast(`${row.name} re-signed.`, 'success')
-      props.onRefetch()
-    }
-  }
-
   const morale = row.morale
   const moraleColor = morale >= 75 ? 'var(--success)' : morale >= 40 ? 'var(--accent2)' : 'var(--danger)'
 
   return (
-    <>
-      <tr>
-        <td>
-          <PlayerLink playerId={row.playerId} name={row.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-        <td className="num">{row.overall}</td>
-        <td className="num">{fmtMoney(row.currentSalary)}</td>
-        <td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              className="input"
-              type="number"
-              min={100000}
-              step={50000}
-              value={salary}
-              onChange={(e) => setSalary(e.target.value)}
-              style={{ width: 100, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>×</span>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={8}
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-              style={{ width: 52, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>yr</span>
+    <tr>
+      <td>
+        <PlayerLink playerId={row.playerId} name={row.name} />
+      </td>
+      <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
+      <td className="num"><OverallStars value={row.overall} /></td>
+      <td className="num">{fmtMoney(row.currentSalary)}</td>
+      <td style={{ fontSize: 12 }}>
+        {fmtMoney(row.askSalary)} × {row.askYears}yr
+      </td>
+      <td style={{ color: moraleColor, fontSize: 12 }}>
+        {morale >= 75 ? 'Happy' : morale >= 40 ? 'Content' : 'Unsettled'}
+      </td>
+      <td>
+        <button
+          className="btn btn-primary"
+          style={{ padding: '3px 12px', fontSize: 12 }}
+          onClick={() => nav.navigate('negotiation', { playerId: row.playerId })}
+        >
+          Open talks →
+        </button>
+      </td>
+    </tr>
+  )
+}
+
+function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => void }): JSX.Element {
+  const client = useClient()
+  const [busy, setBusy] = useState(false)
+  const act = async (kind: 'match' | 'decline', s: OfferSheetRowView): Promise<void> => {
+    setBusy(true)
+    const r = kind === 'match' ? await client.matchOfferSheet(s.playerId) : await client.declineOfferSheet(s.playerId)
+    setBusy(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else { if (r.type === 'ok' && r.note) toast(r.note, kind === 'match' ? 'success' : 'info'); props.onRefetch() }
+  }
+  return (
+    <Panel title="⚠ Offer sheets on your RFAs">
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        Rival clubs have tendered offer sheets. Match the price to keep your player, or let him walk for the draft-pick compensation.
+      </div>
+      <div className="stack">
+        {props.sheets.map((s) => (
+          <div key={s.playerId} className="row" style={{ gap: 12, alignItems: 'center', padding: '8px 10px', background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)' }}>
+            <div style={{ flex: 1 }}>
+              <PlayerLink playerId={s.playerId} name={s.name} />
+              <span className="muted small" style={{ marginLeft: 8 }}>{s.position} · from {s.fromTeamAbbr}</span>
+              <div className="small" style={{ marginTop: 2 }}>
+                Offer: <strong>{fmtMoney(s.salary)}</strong> × {s.years} · compensation if you pass:{' '}
+                {s.compRounds.length ? s.compRounds.map((r) => `R${r}`).join(' + ') : 'none'}
+              </div>
+            </div>
+            <button className="btn btn-primary" disabled={busy} onClick={() => act('match', s)}>Match</button>
+            <button className="btn" disabled={busy} onClick={() => act('decline', s)}>Let him walk</button>
           </div>
-        </td>
-        <td style={{ color: moraleColor, fontSize: 12 }}>
-          Ask: {fmtMoney(row.askSalary)} / {row.askYears}yr
-        </td>
-        <td>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '3px 12px', fontSize: 12 }}
-            disabled={busy}
-            onClick={doResign}
-          >
-            {busy ? '…' : 'Re-sign'}
-          </button>
-        </td>
-      </tr>
-      {err && (
-        <tr>
-          <td colSpan={7} style={{ paddingTop: 0 }}>
-            <Notice kind="warn">{err}</Notice>
-          </td>
-        </tr>
-      )}
-    </>
+        ))}
+      </div>
+    </Panel>
   )
 }
 
@@ -338,8 +498,8 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
               <th>Pos / Age</th>
               <th className="num">OVR</th>
               <th className="num">Current</th>
-              <th>Offer</th>
-              <th>Ask</th>
+              <th>Their ask</th>
+              <th>Mood</th>
               <th />
             </tr>
           </thead>
@@ -354,173 +514,24 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
   )
 }
 
-// ─── free-agency stage ────────────────────────────────────────────────────────
+// ─── free-agency stage: the market lives in its own Free Agents tab ─────────
 
-function FARow(props: {
-  fa: FreeAgentRowView
-  capUsed: number
-  salaryCap: number
-  onRefetch: () => void
-}): JSX.Element {
-  const client = useClient()
-  const { fa } = props
-
-  const [salary, setSalary] = useState(String(Math.round(fa.askSalary / 100_000) * 100_000))
-  const [years, setYears] = useState(String(fa.askYears))
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [signed, setSigned] = useState(false)
-
-  const capSpace = props.salaryCap - props.capUsed
-  const askNum = parseFloat(salary)
-  const capTight = !isNaN(askNum) && askNum > capSpace
-
-  if (signed) {
-    return (
-      <tr>
-        <td>
-          <PlayerLink playerId={fa.playerId} name={fa.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num">{fa.overall}</td>
-        <td colSpan={4}>
-          <span className="chip chip-success">Signed</span>
-        </td>
-      </tr>
-    )
-  }
-
-  async function doSign() {
-    setBusy(true)
-    setErr(null)
-    const salNum = parseFloat(salary)
-    const yrNum = parseInt(years, 10)
-    if (isNaN(salNum) || isNaN(yrNum) || yrNum < 1) {
-      setErr('Invalid salary or years.')
-      setBusy(false)
-      return
-    }
-    const r = await client.signFreeAgent(fa.playerId, salNum, yrNum)
-    setBusy(false)
-    if (r.type === 'error') {
-      setErr(r.message)
-    } else {
-      toast(`${fa.name} signed.`, 'success')
-      setSigned(true)
-      props.onRefetch()
-    }
-  }
-
-  const daysChip =
-    fa.decidesInDays <= 0
-      ? <span className="chip chip-danger" style={{ fontSize: 10 }}>Decides today</span>
-      : fa.decidesInDays <= 3
-        ? <span className="chip chip-warn" style={{ fontSize: 10 }}>~{fa.decidesInDays}d left</span>
-        : <span className="chip" style={{ fontSize: 10 }}>~{fa.decidesInDays}d left</span>
-
-  return (
-    <>
-      <tr>
-        <td>
-          <PlayerLink playerId={fa.playerId} name={fa.name} />
-        </td>
-        <td style={{ color: 'var(--muted)' }}>{fa.position} · {fa.age}</td>
-        <td className="num">{fa.overall}</td>
-        <td>{daysChip}</td>
-        <td>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              className="input"
-              type="number"
-              min={100000}
-              step={50000}
-              value={salary}
-              onChange={(e) => setSalary(e.target.value)}
-              style={{ width: 100, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>×</span>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={8}
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-              style={{ width: 52, padding: '3px 6px', fontSize: 12 }}
-            />
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>yr</span>
-          </div>
-        </td>
-        <td style={{ color: 'var(--muted)', fontSize: 12 }}>
-          Ask: {fmtMoney(fa.askSalary)} / {fa.askYears}yr
-        </td>
-        <td>
-          {capTight ? (
-            <span style={{ fontSize: 12, color: 'var(--danger)' }}>Cap full</span>
-          ) : (
-            <button
-              className="btn btn-primary"
-              style={{ padding: '3px 12px', fontSize: 12 }}
-              disabled={busy}
-              onClick={doSign}
-            >
-              {busy ? '…' : 'Sign'}
-            </button>
-          )}
-        </td>
-      </tr>
-      {err && (
-        <tr>
-          <td colSpan={7} style={{ paddingTop: 0 }}>
-            <Notice kind="warn">{err}</Notice>
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
+/** July 1 window: the desk keeps the cap picture + arbitration; the market
+ *  itself is the sidebar's Free Agents tab (like Scouting). */
 function FreeAgencyPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX.Element {
+  const nav = useNav()
   const { view } = props
-
-  if (view.freeAgents.length === 0) {
-    return (
-      <Panel title="Free agents">
-        <Notice kind="info">No free agents available.</Notice>
-      </Panel>
-    )
-  }
-
   return (
     <div className="stack">
       <CapBar used={view.capUsed} cap={view.salaryCap} />
-      <Panel title="Free agents">
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Pos / Age</th>
-                <th className="num">OVR</th>
-                <th>Decides</th>
-                <th>Offer</th>
-                <th>Ask</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {view.freeAgents.map((fa) => (
-                <FARow
-                  key={fa.playerId}
-                  fa={fa}
-                  capUsed={view.capUsed}
-                  salaryCap={view.salaryCap}
-                  onRefetch={props.onRefetch}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <Panel title="The open market">
+        <p className="small" style={{ margin: '0 0 8px', lineHeight: 1.5 }}>
+          Free agency is open. The full market — filters, shortlists, agent reads,
+          decision clocks — runs from the <strong>Free Agents</strong> desk.
+        </p>
+        <button className="btn btn-primary" onClick={() => nav.navigate('faMarket')}>
+          Open the market →
+        </button>
       </Panel>
     </div>
   )
@@ -592,12 +603,22 @@ export function OffseasonScreen(): JSX.Element {
             </Panel>
           )}
 
+          {data.stage === 'resign' && data.offerSheets && data.offerSheets.length > 0 && (
+            <OfferSheetPanel sheets={data.offerSheets} onRefetch={refetch} />
+          )}
           {data.stage === 'resign' && (
             <ResignPanel view={data} onRefetch={refetch} />
           )}
+          {(data.stage === 'resign' || data.stage === 'freeAgency') && (
+            <BuyoutPanel onRefetch={refetch} />
+          )}
 
           {data.stage === 'freeAgency' && (
-            <FreeAgencyPanel view={data} onRefetch={refetch} />
+            <>
+              <ArbitrationPanel view={data} onRefetch={refetch} />
+              <FreeAgencyPanel view={data} onRefetch={refetch} />
+              <CampInvitesPanel />
+            </>
           )}
 
           {data.stage === 'preseason' && (
@@ -608,8 +629,9 @@ export function OffseasonScreen(): JSX.Element {
             </Panel>
           )}
 
-          {/* advance button */}
-          {data.stage !== 'preseason' && (
+          {/* advance button — hidden during the draft: Continue can't sim past
+              it, so the only path forward is conducting it via "Go to Draft". */}
+          {data.stage !== 'preseason' && data.stage !== 'draft' && (
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 className="btn"

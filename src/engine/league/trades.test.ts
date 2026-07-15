@@ -19,132 +19,18 @@ import {
   evaluateProposal,
   executeTrade,
   generateAiOffers,
+  generateAiAiTrade,
   perriPickValue,
   pickValue,
   playerValue,
   retentionCapSplit,
+  rosterCapUsed,
   teamPhilosophy,
   type StoredTradeOffer
 } from './trades'
 
-/* ────────────────────────── fixtures ────────────────────────── */
-
-function rawAttrs(v: number, position: Position): RawAttributes {
-  const raw: RawAttributes = {
-    technical: { wristShot: v, slapShot: v, stickhandling: v, passing: v, deflections: v, faceoffs: v },
-    physical: { speed: v, acceleration: v, strength: v, balance: v, stamina: v, agility: v, height: 50 },
-    mental: {
-      offensiveIQ: v,
-      defensiveIQ: v,
-      positioning: v,
-      vision: v,
-      aggression: 50,
-      composure: v,
-      workRate: v,
-      discipline: 55,
-      anticipation: v
-    },
-    defensive: { checking: v, shotBlocking: v, stickChecking: v, takeaway: v }
-  }
-  if (position === 'G') {
-    raw.goalie = {
-      reflexes: v,
-      positioningG: v,
-      reboundControl: v,
-      glove: v,
-      blocker: v,
-      recovery: v,
-      puckHandlingG: v
-    }
-  }
-  return raw
-}
-
-interface PlayerOpts {
-  age?: number
-  position?: Position
-  salary?: number
-  years?: number
-  ntc?: boolean
-  potential?: number
-  morale?: number
-  injuryGames?: number
-}
-
-function makePlayer(id: string, v: number, opts: PlayerOpts = {}): Player {
-  const position = opts.position ?? 'C'
-  const role: PlayerRole = position === 'G' ? 'starter' : 'twoWay'
-  const ratings = rawAttrs(v, position)
-  const years = opts.years ?? 3
-  return {
-    id: asPlayerId(id),
-    name: `Player ${id}`,
-    age: opts.age ?? 25,
-    position,
-    handedness: 'L',
-    role,
-    ratings,
-    potential: rawAttrs(opts.potential ?? v, position),
-    composites: computeComposites(ratings, role, position),
-    personality: { ambition: 10, professionalism: 10, loyalty: 10, temperament: 10, determination: 10 },
-    contract: {
-      salary: opts.salary ?? 3_000_000,
-      yearsRemaining: years,
-      expiryYear: 2026 + years,
-      noTradeClause: opts.ntc ?? false,
-      twoWay: false
-    },
-    stats: [],
-    fatigue: 0,
-    morale: opts.morale ?? 70,
-    injuryStatus:
-      opts.injuryGames !== undefined
-        ? { kind: 'lowerBody', gamesRemaining: opts.injuryGames, description: 'test injury' }
-        : null,
-    form: 0
-  }
-}
-
-function makeTeam(id: string, roster: Player[], opts: { capUsed?: number } = {}): Team {
-  return {
-    id: asTeamId(id),
-    name: `Team ${id.toUpperCase()}`,
-    abbreviation: id.toUpperCase().slice(0, 3),
-    city: 'Test City',
-    colors: { primary: 0x112233, secondary: 0xddeeff },
-    conferenceId: 'c1',
-    divisionId: 'd1',
-    roster: roster.map((p) => p.id),
-    lines: {
-      forwards: [],
-      defensePairs: [],
-      goalies: [asPlayerId(`${id}-gx`), asPlayerId(`${id}-gy`)],
-      powerPlayUnits: [],
-      penaltyKillUnits: []
-    },
-    tactics: {
-      forecheck: '1-2-2',
-      dZoneCoverage: 'zone',
-      tempo: { pace: 0.5, passRisk: 0.5, shotEagerness: 0.5, defensivePinch: 0.5 },
-      specialTeams: { powerPlay: 'umbrella', penaltyKill: 'box' },
-      lineMatching: false
-    },
-    finances: {
-      budget: 90e6,
-      salaryCap: 88e6,
-      capUsed: opts.capUsed ?? roster.reduce((s, p) => s + p.contract.salary, 0),
-      revenue: 0
-    },
-    staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] }
-  }
-}
-
-const makePick = (year: number, round: number, original: string, owner = original): DraftPick => ({
-  year,
-  round,
-  originalTeamId: asTeamId(original),
-  ownerTeamId: asTeamId(owner)
-})
+import { makePlayer, makeTeam, makePick, rawAttrs } from './trades.test.fixtures'
+void rawAttrs
 
 /* ────────────────────────── playerValue ────────────────────────── */
 
@@ -232,10 +118,19 @@ function partnerFixture(opts: { capUsed?: number } = {}): {
   partnerTeam: Team
   partnerPlayers: Map<PlayerId, Player>
 } {
+  // When a target cap hit is requested, distribute it across the roster so the
+  // ACTUAL roster salaries sum to it — evaluateProposal reads the live roster,
+  // not the cached capUsed field (which can go stale in a real career).
+  const per = opts.capUsed === undefined ? undefined : Math.floor(opts.capUsed / 15)
+  const salOpt = (): { salary?: number } => (per === undefined ? {} : { salary: per })
   const roster: Player[] = []
-  for (let i = 0; i < 8; i++) roster.push(makePlayer(`pp-f${i}`, 70, { position: i < 3 ? 'C' : 'W' }))
-  for (let i = 0; i < 5; i++) roster.push(makePlayer(`pp-d${i}`, 68, { position: 'D' }))
-  for (let i = 0; i < 2; i++) roster.push(makePlayer(`pp-g${i}`, 70, { position: 'G' }))
+  for (let i = 0; i < 8; i++) roster.push(makePlayer(`pp-f${i}`, 70, { position: i < 3 ? 'C' : 'W', ...salOpt() }))
+  for (let i = 0; i < 5; i++) roster.push(makePlayer(`pp-d${i}`, 68, { position: 'D', ...salOpt() }))
+  for (let i = 0; i < 2; i++) roster.push(makePlayer(`pp-g${i}`, 70, { position: 'G', ...salOpt() }))
+  if (opts.capUsed !== undefined) {
+    const sum = roster.reduce((s, p) => s + p.contract.salary, 0)
+    roster[roster.length - 1]!.contract.salary += opts.capUsed - sum // absorb rounding
+  }
   const partnerTeam = makeTeam('pt', roster, opts.capUsed === undefined ? {} : { capUsed: opts.capUsed })
   return { partnerTeam, partnerPlayers: new Map(roster.map((p) => [p.id, p])) }
 }
@@ -267,6 +162,49 @@ describe('evaluateProposal', () => {
     })
     expect(result.verdict).toBe('reject')
     expect(result.message).toMatch(/cap/i)
+  })
+
+  it('does NOT reject on cap when the deal SHEDS salary for a near-cap partner', () => {
+    // #178: partner at the cap trades OUT an expensive player and takes back a
+    // cheaper one — net cap DROPS, so cap must never be the reason to reject.
+    const { partnerTeam, partnerPlayers } = partnerFixture({ capUsed: 88_000_000 })
+    const pricey = partnerPlayers.get([...partnerPlayers.keys()][0]!)!
+    pricey.contract.salary = 6_000_000 // the player the partner sends out
+    partnerTeam.finances.capUsed = partnerTeam.roster.reduce((s, id) => s + (partnerPlayers.get(id)?.contract.salary ?? 0), 0)
+    const result = evaluateProposal({
+      give: { players: [makePlayer('cheapie', 82, { salary: 1_000_000 })], picks: [] },
+      receive: { players: [pricey], picks: [] },
+      partnerTeam,
+      partnerPlayers,
+      rng: new Rng(1),
+    })
+    expect(result.message ?? '').not.toMatch(/salary cap/i)
+  })
+
+  it('relationship eases or hardens the ask (neutral default unchanged)', () => {
+    const rank = (v: string): number => (v === 'accept' ? 2 : v === 'counter' ? 1 : 0)
+    const deal = (relationship?: number) => {
+      const { partnerTeam, partnerPlayers } = partnerFixture()
+      return evaluateProposal({
+        // A near-even one-for-one swap so the relationship nudge can tip the verdict.
+        give: { players: [makePlayer('give-w', 73, { position: 'W' })], picks: [] },
+        receive: { players: [makePlayer('recv-w', 72, { position: 'W' })], picks: [] },
+        partnerTeam,
+        partnerPlayers,
+        rng: new Rng(5),
+        ...(relationship === undefined ? {} : { relationship }),
+      }).verdict
+    }
+    const friendly = deal(100)
+    const neutral = deal(50)
+    const omitted = deal(undefined)
+    const hostile = deal(0)
+    // Neutral (50) is identical to omitting the field — byte-compatible default.
+    expect(neutral).toBe(omitted)
+    // A friendlier club is never harder to deal with than a hostile one.
+    expect(rank(friendly)).toBeGreaterThanOrEqual(rank(hostile))
+    // And on a borderline deal it genuinely helps.
+    expect(rank(friendly)).toBeGreaterThan(rank(hostile))
   })
 
   it('accepts when the partner clearly gains value', () => {
@@ -787,11 +725,14 @@ describe('evaluateProposal philosophy bias', () => {
   })
 
   it('retained salary reduces cap hit counted against the partner', () => {
+    // Partner is near the cap: distribute ~85M across the roster so the live
+    // roster sum (what evaluateProposal reads) matches the near-cap intent.
+    const per = Math.floor(85_000_000 / 15)
     const roster: Player[] = []
-    for (let i = 0; i < 8; i++) roster.push(makePlayer(`rs-f${i}`, 70, { position: i < 4 ? 'C' : 'W' }))
-    for (let i = 0; i < 5; i++) roster.push(makePlayer(`rs-d${i}`, 68, { position: 'D' }))
-    for (let i = 0; i < 2; i++) roster.push(makePlayer(`rs-g${i}`, 70, { position: 'G' }))
-    // Partner is near the cap
+    for (let i = 0; i < 8; i++) roster.push(makePlayer(`rs-f${i}`, 70, { position: i < 4 ? 'C' : 'W', salary: per }))
+    for (let i = 0; i < 5; i++) roster.push(makePlayer(`rs-d${i}`, 68, { position: 'D', salary: per }))
+    for (let i = 0; i < 2; i++) roster.push(makePlayer(`rs-g${i}`, 70, { position: 'G', salary: per }))
+    roster[roster.length - 1]!.contract.salary += 85_000_000 - roster.reduce((s, p) => s + p.contract.salary, 0)
     const partnerTeam = makeTeam('rs', roster, { capUsed: 85_000_000 })
     partnerTeam.finances.salaryCap = 88_000_000
     const partnerPlayers = new Map(roster.map((p) => [p.id, p]))
@@ -819,5 +760,275 @@ describe('evaluateProposal philosophy bias', () => {
     })
     // Cap check should pass now
     expect(withRetain.verdict).not.toBe('reject')
+  })
+})
+
+/* ────────────────────────── Living World LW3 ────────────────────────── */
+
+describe('generateAiOffers — deadline urgency (LW3)', () => {
+  const countOffers = (dayLo: number, dayHi: number, deadlineDay: number): number => {
+    const { teams, players, picks, userTeamId } = leagueFixture()
+    let n = 0
+    let counter = 0
+    for (let day = dayLo; day <= dayHi; day++) {
+      n += generateAiOffers({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(55, day)),
+        nextOfferId: () => `o-${++counter}`,
+        deadlineDay,
+      }).length
+    }
+    return n
+  }
+
+  it('offers arrive much more often in deadline week than in the early season', () => {
+    // Simulate the same 200-day window many "seasons" over: early days
+    // (60+ days from the deadline) vs the final 10 days before it.
+    let early = 0
+    let late = 0
+    for (let rep = 0; rep < 10; rep++) {
+      early += countOffers(1 + rep * 1000, 20 + rep * 1000, 999 + rep * 1000)   // far from deadline
+      late += countOffers(990 + rep * 1000, 999 + rep * 1000, 999 + rep * 1000) // deadline week
+    }
+    // Late window is half the length but should still produce comparable-or-more
+    // offers (rate is up to ~3.5×).
+    expect(late).toBeGreaterThan(early * 0.9)
+  })
+
+  it('without deadlineDay behaves at the original flat rate (back-compat)', () => {
+    const flat = collectOffers(400, 9001)
+    expect(flat.length).toBeGreaterThanOrEqual(20)
+    expect(flat.length).toBeLessThanOrEqual(90)
+  })
+})
+
+describe('generateAiAiTrade (LW3)', () => {
+  /** League where t2 is a clear rebuilder with a movable rental vet and t3/t4
+   *  are contenders holding picks. Rosters padded to 22 so depth guards pass. */
+  function aiAiFixture(): {
+    teams: Map<TeamId, Team>
+    players: Map<PlayerId, Player>
+    picks: DraftPick[]
+    userTeamId: TeamId
+    vetId: PlayerId
+  } {
+    const teams = new Map<TeamId, Team>()
+    const players = new Map<PlayerId, Player>()
+    const mk = (teamId: string, strength: number, vet?: { id: string; ovr: number }): Team => {
+      const roster: Player[] = []
+      for (let i = 0; i < 14; i++) roster.push(makePlayer(`${teamId}f${i}`, strength - i, { position: i % 3 === 0 ? 'C' : 'W' }))
+      for (let i = 0; i < 6; i++) roster.push(makePlayer(`${teamId}d${i}`, strength - 2 - i, { position: 'D' }))
+      for (let i = 0; i < 2; i++) roster.push(makePlayer(`${teamId}g${i}`, strength - 4 - i, { position: 'G' }))
+      if (vet) {
+        // A 30-year-old scoring winger on an expiring deal — the classic rental.
+        roster[13] = makePlayer(vet.id, vet.ovr, { position: 'W', age: 30, years: 1, salary: 4_000_000 })
+      }
+      for (const p of roster) players.set(p.id, p)
+      const team = makeTeam(teamId, roster)
+      teams.set(team.id, team)
+      return team
+    }
+    mk('u1', 70)                                  // user club — must never appear
+    mk('t2', 55, { id: 'vet-rental', ovr: 78 })   // weak rebuilder with the rental
+    mk('t3', 74)                                  // strong contender
+    mk('t4', 73)                                  // strong contender
+    const picks: DraftPick[] = []
+    for (const owner of ['t3', 't4']) {
+      for (let round = 1; round <= 3; round++) {
+        picks.push({ year: 2027, round, originalTeamId: asTeamId(owner), ownerTeamId: asTeamId(owner) })
+      }
+    }
+    return { teams, players, picks, userTeamId: asTeamId('u1'), vetId: asPlayerId('vet-rental') }
+  }
+
+  const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+    (tid as string) === 't2' ? 'rebuild' : (tid as string) === 'u1' ? 'retool' : 'contend'
+
+  it('moves a rental vet from a rebuilder to a contender for fair pick value', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 200 && !deal; day++) {
+      deal = generateAiAiTrade({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(31, day)), postureOf,
+      })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.sellerTeamId).toBe(asTeamId('t2'))
+    expect(['t3', 't4']).toContain(deal!.buyerTeamId as string)
+    expect(deal!.playerIds).toEqual([vetId])
+    expect(deal!.picks.length).toBeGreaterThanOrEqual(1)
+    expect(deal!.picks.length).toBeLessThanOrEqual(2)
+    // Fair value band.
+    const vetValue = playerValue(players.get(vetId)!)
+    const pickTotal = deal!.picks.reduce((s, p) => s + pickValue(p, { year: 2027 }), 0)
+    expect(pickTotal).toBeGreaterThanOrEqual(vetValue * 0.25)
+    expect(pickTotal).toBeLessThanOrEqual(vetValue * 0.85)
+    expect(deal!.summary).toContain('T2')
+  })
+
+  it('retained salary is cap-neutral across the league (buyer + retainer = full hit)', () => {
+    const sf = makePlayer('sf', 60, { salary: 1_000_000 })
+    const bf = makePlayer('bf', 62, { salary: 1_000_000 })
+    // The traded vet, now on the buyer at $6M with $2.5M retained by the seller.
+    const vet = makePlayer('vet-ret', 75, { salary: 6_000_000 })
+    vet.contract.retainedByOthers = 2_500_000
+    const seller = makeTeam('sell', [sf])
+    const buyer = makeTeam('buy', [bf, vet])
+    seller.finances.retained = [{ playerId: vet.id as string, amount: 2_500_000, expiryYear: 2028 }]
+    const all = new Map<PlayerId, Player>([[sf.id, sf], [bf.id, bf], [vet.id, vet]])
+    // Buyer counts the vet at 6M - 2.5M = 3.5M; the seller carries the 2.5M slot.
+    expect(rosterCapUsed(buyer, all)).toBe(1_000_000 + 3_500_000)
+    expect(rosterCapUsed(seller, all)).toBe(1_000_000 + 2_500_000)
+    // League-wide the vet still costs exactly his $6M.
+    expect((vet.contract.salary - 2_500_000) + 2_500_000).toBe(vet.contract.salary)
+  })
+
+  it('retains salary to make a cap-tight buyer fit', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    // Squeeze both contenders so the $4M rental does NOT fit outright, but does
+    // with retention (leave ~$2.5M of room → needs $1.5M retained, under 50%).
+    for (const tid of ['t3', 't4']) {
+      const t = teams.get(asTeamId(tid))!
+      t.finances.salaryCap = rosterCapUsed(t, players) + 2_500_000
+    }
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 300 && !(deal && deal.retainedAmount); day++) {
+      deal = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(77, day)), postureOf })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.retainedAmount).toBeGreaterThan(0)
+    expect(deal!.retainedAmount).toBeLessThanOrEqual(4_000_000 * 0.5)
+    expect(deal!.summary).toMatch(/retain/i)
+  })
+
+  it('never involves the user club and is deterministic per seed', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    for (let day = 1; day <= 100; day++) {
+      const a = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf })
+      const b = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf })
+      expect(a).toEqual(b)
+      if (a) {
+        expect(a.sellerTeamId).not.toBe(userTeamId)
+        expect(a.buyerTeamId).not.toBe(userTeamId)
+      }
+    }
+  })
+
+  it('returns null when no rebuilder has a movable rental', () => {
+    const { teams, players, picks, userTeamId } = aiAiFixture()
+    const allContend = (): 'contend' => 'contend'
+    for (let day = 1; day <= 60; day++) {
+      expect(generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf: allContend })).toBeNull()
+    }
+  })
+
+  it('a RETOOL club can move a 1–2-year piece too (not just pure rentals)', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    // Give the movable piece a second year and make its club a retooler.
+    const vet = players.get(vetId)!
+    vet.contract = { ...vet.contract, yearsRemaining: 2 }
+    const posture = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+      (tid as string) === 't2' ? 'retool' : (tid as string) === 'u1' ? 'rebuild' : 'contend'
+    let deal: ReturnType<typeof generateAiAiTrade> = null
+    for (let day = 1; day <= 200 && !deal; day++) {
+      deal = generateAiAiTrade({ day, userTeamId, teams, players, picks, rng: new Rng(deriveSeed(31, day)), postureOf: posture })
+    }
+    expect(deal).not.toBeNull()
+    expect(deal!.sellerTeamId).toBe(asTeamId('t2'))
+    expect(deal!.playerIds).toEqual([vetId])
+  })
+
+  it('a buyer can package a prospect (AHL/rights) into the return, not just picks', () => {
+    const { teams, players, picks, userTeamId, vetId } = aiAiFixture()
+    // Give a contender (t3) an AHL affiliate holding a genuine young prospect.
+    const prospect = makePlayer('prospect-x', 64, { position: 'C', age: 20, potential: 82 })
+    players.set(prospect.id, prospect)
+    const ahl = makeTeam('t3-ahl', [prospect])
+    ahl.tier = 'ahl'
+    teams.set(ahl.id, ahl)
+    teams.get(asTeamId('t3'))!.affiliateId = ahl.id
+    expect(playerValue(prospect)).toBeGreaterThanOrEqual(8) // qualifies as a trade chip
+
+    let sawProspect = false
+    for (let day = 1; day <= 400 && !sawProspect; day++) {
+      const d = generateAiAiTrade({
+        day, userTeamId, teams, players, picks,
+        rng: new Rng(deriveSeed(55, day)), postureOf,
+      })
+      if (d && d.prospectIds.length > 0) {
+        sawProspect = true
+        expect(d.prospectIds).toEqual([prospect.id])
+        expect(d.buyerTeamId).toBe(asTeamId('t3'))
+        expect(d.playerIds).toEqual([vetId]) // the rental still goes the other way
+        expect(d.summary).toContain(prospect.name)
+      }
+    }
+    expect(sawProspect).toBe(true)
+  })
+
+  it('fires more often near the deadline than early in the season', () => {
+    const deadlineDay = 200
+    const countDeals = (days: number[]): number => {
+      const { teams, players, picks, userTeamId } = aiAiFixture()
+      let n = 0
+      for (const day of days) {
+        const d = generateAiAiTrade({
+          day, deadlineDay, userTeamId, teams, players, picks,
+          rng: new Rng(deriveSeed(99, day)), postureOf,
+        })
+        if (d) n++
+      }
+      return n
+    }
+    // 15 far-from-deadline days vs 15 right before it, same seeds.
+    const early = countDeals(Array.from({ length: 15 }, (_, i) => i + 1))       // days 1..15 (185 out)
+    const late = countDeals(Array.from({ length: 15 }, (_, i) => 186 + i))       // days 186..200 (≤14 out)
+    expect(late).toBeGreaterThan(early)
+  })
+})
+
+describe('evaluateProposal — persona philosophy override (LW3)', () => {
+  it('a philosophy override changes willingness vs the hash default', () => {
+    const { teams, players, userTeamId } = leagueFixture()
+    const partner = [...teams.values()].find((t) => t.id !== userTeamId)!
+    const user = teams.get(userTeamId)!
+    // A pick-heavy borderline package: pick bias is where WinNow (0.85x) and
+    // RebuildDraft (1.25x) diverge hardest, and pick-only packages sidestep the
+    // structural real-GM rules so the philosophy weighing is what decides.
+    // Send a depth forward back so the deal is position-neutral (the fixture
+    // partner runs a minimal roster and the depth guard rightly refuses any
+    // package that nets them a man short up front).
+    const userFwds = user.roster
+      .map((id) => players.get(id)!)
+      .filter((pl) => pl.position !== 'G' && pl.position !== 'D')
+      .sort((a, b) => playerValue(a) - playerValue(b))
+    const give = { players: [userFwds[0]!], picks: [makePick(2026, 1, userTeamId as string)] }
+    // A mid-value SKATER return: stays under the best-player rule's star bar
+    // and clear of the depth guard (never their scarce goalies), so the
+    // stance-dependent pick weighing is what decides the verdict.
+    // The return must sit BETWEEN the two stances' valuations of the picks
+    // (WinNow ~0.85x vs RebuildDraft ~1.25x) so the verdicts can diverge.
+    const pickWorth = pickValue(give.picks[0]!, { year: 2026 }) * 1.6
+    const skaters = partner.roster
+      .map((id) => players.get(id)!)
+      .filter((pl) => pl.position !== 'G' && pl.position !== 'D') // forwards are the one group deep enough to sell from
+      .sort(
+        (a, b) => Math.abs(playerValue(a) - pickWorth) - Math.abs(playerValue(b) - pickWorth)
+      )
+    const receive = { players: [skaters[0]!], picks: [] }
+    // Same rng seed both ways — only the philosophy differs.
+    const winNow = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: players,
+      rng: new Rng(1234), philosophy: 'WinNow',
+    })
+    const rebuild = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: players,
+      rng: new Rng(1234), philosophy: 'RebuildDraft',
+    })
+    // Different stances must produce a different evaluation (verdict or ask).
+    expect(
+      winNow.verdict !== rebuild.verdict || winNow.counterAskValue !== rebuild.counterAskValue
+    ).toBe(true)
   })
 })

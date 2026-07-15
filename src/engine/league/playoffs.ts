@@ -5,12 +5,14 @@
  * feeds every result back through `applyGameResult`, which keeps the bracket
  * consistent and advances rounds.
  *
- * Format: 16-team league, two conferences, top four per conference qualify,
- * seeded by the regular-season standings order passed to `seedBracket` (this
- * module never re-sorts — it only filters by conference). Round 1 plays 1v4
- * and 2v3 inside each conference, round 2 is the conference final, round 3 the
- * league final. Series are best-of-`bestOf` with 2-2-1-1-1 home ice: the
- * higher seed hosts games 1, 2, 5 and 7.
+ * Format: two conferences; the top 8 per conference qualify for a large league
+ * (32-team → real 16-team NHL field), else the top 4 (legacy 8-team field).
+ * Seeded by the regular-season standings order passed to `seedBracket` (this
+ * module never re-sorts — it only filters by conference). Round 1 plays the
+ * standard bracket pairings inside each conference (1v4/2v3, or 1v8/4v5/2v7/3v6),
+ * later rounds pair adjacent winners up to the conference final, then the league
+ * final. Series are best-of-`bestOf` with 2-2-1-1-1 home ice: the higher seed
+ * hosts games 1, 2, 5 and 7.
  *
  * PlayoffsState stores no seed numbers, so home ice in later rounds is derived
  * from the bracket itself: a team's conference seed is recovered from where it
@@ -32,9 +34,40 @@ import type {
 } from '@domain'
 
 const CONFERENCE_COUNT = 2
-const QUALIFIERS_PER_CONFERENCE = 4
-const ROUND_NAMES = ['Conference Semifinals', 'Conference Finals', 'League Final']
 const DEFAULT_BEST_OF = 7
+
+/** Playoff qualifiers per conference: NHL-style 8 (a 16-team field) when the
+ *  conference is large, otherwise 4 (the legacy 8-team field for small leagues).
+ *  A 32-team league (16 per conference) gets the real 16-team playoff. */
+function qualifiersFor(conferenceSize: number): 4 | 8 {
+  return conferenceSize >= 12 ? 8 : 4
+}
+
+/** Flat seed order for a single-elimination bracket so that pairing consecutive
+ *  series in each round feeds the tree correctly: 4 → [1,4,2,3];
+ *  8 → [1,8,4,5,2,7,3,6]. */
+function seedOrder(qual: number): number[] {
+  let order = [1]
+  for (let size = 2; size <= qual; size *= 2) {
+    const next: number[] = []
+    for (const s of order) {
+      next.push(s)
+      next.push(size + 1 - s)
+    }
+    order = next
+  }
+  return order
+}
+
+/** Round names for a `qual`-team conference field plus the cross-conference final. */
+function roundNamesFor(qual: number): string[] {
+  const confRounds = Math.round(Math.log2(qual)) // 2 for 4, 3 for 8
+  const early = ['First Round', 'Second Round']
+  const names: string[] = []
+  for (let k = 0; k < confRounds - 2; k++) names.push(early[k] ?? `Round ${k + 1}`)
+  names.push('Conference Semifinals', 'Conference Finals', 'League Final')
+  return names
+}
 
 export interface SeedBracketArgs {
   year: number
@@ -43,6 +76,47 @@ export interface SeedBracketArgs {
   conferences: Array<{ name: string; teamIds: TeamId[] }>
   /** League-wide regular-season order, best first, already tie-broken. */
   standingsOrder: TeamId[]
+  /** Each team's division id. When present AND a conference splits into exactly
+   *  two divisions with an 8-team field, the real NHL divisional format is used
+   *  (top 3 per division + 2 wildcards, bracketed A1-v-WC2 / A2-v-A3 / B1-v-WC1 /
+   *  B2-v-B3). Absent → the legacy top-N-by-points seeding (back-compat). */
+  teamDivision?: ReadonlyMap<TeamId, string>
+}
+
+/**
+ * The `qual` qualifiers for one conference, in the array positions the generic
+ * `seedOrder` bracket expects. For the NHL divisional format (qual 8, two
+ * divisions) that is `[A1,B1,B2,A2,A3,B3,WC1,WC2]`, which the bracket pairs as
+ * A1-v-WC2 / A2-v-A3 / B1-v-WC1 / B2-v-B3 and advances each division up its own
+ * side to the conference final. Falls back to plain top-`qual`-by-points when
+ * divisions are absent or the shape isn't a clean two-division split.
+ */
+function seedConference(
+  confOrder: TeamId[],
+  qual: number,
+  teamDivision: ReadonlyMap<TeamId, string> | undefined,
+): TeamId[] {
+  if (qual !== 8 || !teamDivision) return confOrder.slice(0, qual)
+  // Group the conference's teams by division, preserving standings order.
+  const divs = new Map<string, TeamId[]>()
+  for (const id of confOrder) {
+    const d = teamDivision.get(id) ?? '?'
+    if (!divs.has(d)) divs.set(d, [])
+    divs.get(d)!.push(id)
+  }
+  const divList = [...divs.values()]
+  // Only the clean two-division shape gets the divisional bracket; anything else
+  // (one division, three+, or a division with < 3 teams) keeps top-8 seeding.
+  if (divList.length !== 2 || divList.some((d) => d.length < 3)) return confOrder.slice(0, 8)
+  // `divs` insertion order is by first appearance in the best-first standings, so
+  // divList[0]'s winner is the conference's #1 seed (division "A").
+  const [A1, A2, A3] = divList[0]!
+  const [B1, B2, B3] = divList[1]!
+  const inField = new Set<TeamId>([A1, A2, A3, B1, B2, B3])
+  const wilds = confOrder.filter((id) => !inField.has(id)).slice(0, 2)
+  if (wilds.length < 2) return confOrder.slice(0, 8)
+  const [WC1, WC2] = wilds
+  return [A1!, B1!, B2!, A2!, A3!, B3!, WC1!, WC2!]
 }
 
 /** One playable game, as handed to the career layer to simulate. */
@@ -67,30 +141,42 @@ export function seedBracket(args: SeedBracketArgs): PlayoffsState {
     throw new Error(`expected ${CONFERENCE_COUNT} conferences, got ${args.conferences.length}`)
   }
 
-  const blocks = args.conferences.map((conference) => {
-    const members = new Set<TeamId>(conference.teamIds)
-    const qualifiers = args.standingsOrder.filter((id) => members.has(id))
-    if (qualifiers.length < QUALIFIERS_PER_CONFERENCE) {
+  const perConf = args.conferences.map((c) => {
+    const members = new Set<TeamId>(c.teamIds)
+    return args.standingsOrder.filter((id) => members.has(id))
+  })
+  const qual = qualifiersFor(Math.min(...perConf.map((q) => q.length)))
+  const order = seedOrder(qual)
+
+  const blocks = args.conferences.map((conference, ci) => {
+    const confOrder = perConf[ci]
+    if (confOrder.length < qual) {
       throw new Error(
-        `conference ${conference.name} places ${qualifiers.length} teams in the standings, ` +
-          `needs at least ${QUALIFIERS_PER_CONFERENCE}`
+        `conference ${conference.name} places ${confOrder.length} teams in the standings, ` +
+          `needs at least ${qual}`
       )
     }
+    // Divisional NHL seeding when division data is available; else top-N points.
+    const seeds = seedConference(confOrder, qual, args.teamDivision)
     return {
-      seeds: qualifiers.slice(0, QUALIFIERS_PER_CONFERENCE),
-      topRank: args.standingsOrder.indexOf(qualifiers[0])
+      seeds,
+      topRank: args.standingsOrder.indexOf(seeds[0])
     }
   })
   blocks.sort((a, b) => a.topRank - b.topRank)
 
+  // Openers per conference in bracket order (1v4/2v3, or 1v8/4v5/2v7/3v6), so
+  // pairing consecutive series each round advances the tree correctly.
   const openers: PlayoffSeries[] = []
   for (const block of blocks) {
-    const [s1, s2, s3, s4] = block.seeds
-    openers.push(makeSeries(args.year, 1, openers.length + 1, s1, s4))
-    openers.push(makeSeries(args.year, 1, openers.length + 1, s2, s3))
+    for (let j = 0; j < qual / 2; j++) {
+      const high = block.seeds[order[2 * j] - 1]
+      const low = block.seeds[order[2 * j + 1] - 1]
+      openers.push(makeSeries(args.year, 1, openers.length + 1, high, low))
+    }
   }
 
-  const rounds: PlayoffRound[] = ROUND_NAMES.map((name, i) => ({
+  const rounds: PlayoffRound[] = roundNamesFor(qual).map((name, i) => ({
     round: i + 1,
     name,
     series: i === 0 ? openers : []
@@ -244,7 +330,7 @@ function buildNextRound(
 }
 
 interface BracketSeed {
-  /** Original conference seed 1–4, recovered from the round-1 pairings. */
+  /** Original conference seed (1–4 or 1–8), recovered from the round-1 pairings. */
   seed: number
   /** Conference block index in round 1 (0 = conference with the league-best top seed). */
   block: number
@@ -252,12 +338,14 @@ interface BracketSeed {
 
 function bracketSeedOf(state: PlayoffsState, teamId: TeamId): BracketSeed {
   const openers = state.rounds[0].series
+  const seriesPerBlock = openers.length / CONFERENCE_COUNT // qual / 2
+  const order = seedOrder(seriesPerBlock * 2)
   for (let i = 0; i < openers.length; i++) {
     const series = openers[i]
     const isHigh = series.highSeedTeamId === teamId
     if (!isHigh && series.lowSeedTeamId !== teamId) continue
-    const pairing = i % 2 === 0 ? [1, 4] : [2, 3]
-    return { seed: isHigh ? pairing[0] : pairing[1], block: Math.floor(i / 2) }
+    const j = i % seriesPerBlock // series index within the conference block
+    return { seed: isHigh ? order[2 * j] : order[2 * j + 1], block: Math.floor(i / seriesPerBlock) }
   }
   throw new Error(`team ${teamId} is not in the bracket`)
 }

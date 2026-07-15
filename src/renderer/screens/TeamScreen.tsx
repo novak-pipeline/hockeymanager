@@ -12,6 +12,7 @@ import { overallToStars } from '../../engine/ratings/composites'
 import type {
   AgmReportView,
   ClubInfoView,
+  PracticePlanView,
   PracticeView,
   SquadView,
   StaffView,
@@ -19,6 +20,7 @@ import type {
 import type { PracticeFocus } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import type { ScreenId } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -98,6 +100,83 @@ const FOCUS_DESC: Record<PracticeFocus, string> = {
   recovery:    'Light skate; less growth but fatigue drops instead of rising.',
 }
 
+/** Raw-attribute key → readable label (e.g. "wristShot" → "Wrist Shot"). */
+function attrLabel(key: string): string {
+  const spaced = key.replace(/([A-Z])/g, ' $1').replace(/\bG\b/, '').trim()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+const COACH_TIER_COLOR: Record<PracticePlanView['coachTier'], string> = {
+  elite:    'var(--success, #4caf7d)',
+  strong:   'var(--success, #4caf7d)',
+  adequate: 'var(--amber, #d6a056)',
+  weak:     'var(--danger, #e0575b)',
+}
+
+/** #170: the effect preview — what the active focus actually does to development
+ *  and fatigue, so the choice is a visible tradeoff rather than a blind toggle. */
+function PracticePlanPanel({ plan }: { plan: PracticePlanView }): JSX.Element {
+  const fatigueUp = plan.fatiguePerWeek > 0
+  return (
+    <Panel title="What this focus does">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--sp-3)' }}>
+        {/* Development gains */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Sharpens (per dev pass)</div>
+          {plan.targeted.length === 0 ? (
+            <div className="muted small">
+              {plan.focus === 'recovery'
+                ? 'Nothing — recovery trades development for fresh legs.'
+                : 'Even, balanced development across the board.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {plan.targeted.map((t) => (
+                <span
+                  key={t.attr}
+                  className="chip"
+                  style={{ fontSize: 11, background: 'rgba(76,175,125,0.12)', color: 'var(--success, #4caf7d)' }}
+                >
+                  {attrLabel(t.attr)} +{t.boost}%
+                </span>
+              ))}
+            </div>
+          )}
+          {plan.opportunityCostPct > 0 && (
+            <div className="muted small" style={{ marginTop: 6 }}>
+              Everything else develops ~{plan.opportunityCostPct}% slower — the cost of specialising.
+            </div>
+          )}
+        </div>
+
+        {/* Coach effectiveness */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Coach delivery</div>
+          <div style={{ fontWeight: 700, color: COACH_TIER_COLOR[plan.coachTier], textTransform: 'capitalize' }}>
+            {plan.coachTier} · {plan.coachMult}%
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            {plan.coachName} {plan.coachMult >= 100 ? 'amplifies' : 'blunts'} how well this focus lands.
+          </div>
+        </div>
+
+        {/* Fatigue tradeoff */}
+        <div>
+          <div className="muted small" style={{ marginBottom: 6 }}>Fatigue / week</div>
+          <div style={{ fontWeight: 700, color: fatigueUp ? 'var(--amber, #d6a056)' : 'var(--success, #4caf7d)' }}>
+            {fatigueUp ? '+' : ''}{plan.fatiguePerWeek} {fatigueUp ? '· heavier legs' : '· fresher'}
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            {fatigueUp
+              ? 'Harder practices tire the roster for game nights.'
+              : 'Lighter load keeps the team fresh for the games that count.'}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  )
+}
+
 /* ══════════════════════════════════════════════════════════════
    Root component
    ══════════════════════════════════════════════════════════════ */
@@ -151,7 +230,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
     // Own team: full management
     switch (effectiveTab) {
       case 'squad':       return <SquadScreen />
-      case 'teamStats':   return <TeamStatsScreen teamId={viewedTeamId} />
+      case 'teamStats':   return <LeagueStatsTableScreen teamId={viewedTeamId} />
       case 'teamDataHub': return <TeamDataHubBody teamId={viewedTeamId} />
       case 'teamDynamics': return <DynamicsScreen teamId={viewedTeamId} />
       case 'teamMedical': return <MedicalScreen />
@@ -164,6 +243,7 @@ export function TeamScreen(props: { tab: TeamTab }): JSX.Element {
       case 'finances':    return <FinancesScreen />
       case 'teamInfo':    return <TeamInfoTab />
       case 'teamHistory': return <HistoryScreen />
+      default:            return <SquadScreen />
     }
   }
 
@@ -389,7 +469,7 @@ function TeamHistoryTab(props: { teamId: string }): JSX.Element {
                   <div className="muted small">{l.blurb}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{l.peakOverall}</div>
+                  <div title="Peak ability"><OverallStars value={l.peakOverall} /></div>
                   <div className="muted small">Retired {l.retiredYear}</div>
                   <div className="small" style={{ color: l.status === 'Retired' ? 'var(--muted)' : 'var(--success)' }}>{l.status}</div>
                 </div>
@@ -569,6 +649,18 @@ function PracticeTab(): JSX.Element {
     }
   }
 
+  async function recommendIndividual(): Promise<void> {
+    if (savingFocus || actions.busy) return
+    setSavingFocus(true)
+    const res = await client.recommendPlayerFocuses()
+    setSavingFocus(false)
+    if (res.type === 'error') toast(res.message, 'error')
+    else {
+      if (res.type === 'ok' && res.note) toast(res.note, 'success')
+      bumpRefresh()
+    }
+  }
+
   const { data: squad } = useScreenData<SquadView>(
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
@@ -605,6 +697,14 @@ function PracticeTab(): JSX.Element {
             Apply
           </button>
         </div>
+        <div className="row" style={{ marginTop: 'var(--sp-3)', alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <div style={{ flex: 1, color: 'var(--muted)', fontSize: 13 }}>
+            Or target each player individually — assign every skater a drill for his weakest area (goalies → goaltending).
+          </div>
+          <button className="btn btn-sm" disabled={savingFocus} onClick={() => void recommendIndividual()}>
+            Recommend individual focuses
+          </button>
+        </div>
       </Panel>
 
       {/* Focus picker */}
@@ -627,6 +727,9 @@ function PracticeTab(): JSX.Element {
         </div>
       </Panel>
 
+      {/* #170 Effect preview — the tradeoff, made visible */}
+      {data.plan && <PracticePlanPanel plan={data.plan} />}
+
       {/* Roster dress/scratch */}
       {squad && (
         <Panel title={`Lineup — ${squad.dressedCount} dressed / ${squad.rosterCount} on roster`}>
@@ -648,7 +751,7 @@ function PracticeTab(): JSX.Element {
                     <tr key={row.playerId} style={{ opacity: scratched ? 0.6 : undefined }}>
                       <td><PlayerLink playerId={row.playerId} name={row.name} /></td>
                       <td className="num muted">{row.position}</td>
-                      <td className="num">{row.overall}</td>
+                      <td className="num"><OverallStars value={row.overall} /></td>
                       <td className="num">{row.condition}</td>
                       <td>
                         <button
@@ -698,6 +801,16 @@ function TeamInfoTab(): JSX.Element {
     const s = ['th', 'st', 'nd', 'rd']
     const v = n % 100
     return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]!)
+  }
+  // Never surface the raw mandate enum ("developYouth") — map to a readable
+  // label, falling back to de-camelCasing any unknown code.
+  const humanizeMandate = (m: string): string => {
+    const LABELS: Record<string, string> = {
+      cupOrBust: 'Win the Cup', contend: 'Contend', makePlayoffs: 'Make the playoffs',
+      competeRespectably: 'Compete respectably', developYouth: 'Develop the youth',
+      rebuild: 'Rebuild', cutCosts: 'Cut costs',
+    }
+    return LABELS[m] ?? m.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
   }
 
   return (
@@ -750,7 +863,7 @@ function TeamInfoTab(): JSX.Element {
 
           <Panel title="Vision & Objectives">
             <div className="list">
-              <div className="row-between small"><span className="muted">Board mandate</span><strong>{club.mandate}</strong></div>
+              <div className="row-between small"><span className="muted">Board mandate</span><strong>{humanizeMandate(club.mandate)}</strong></div>
               <p className="small muted" style={{ margin: '4px 0' }}>{club.mandateText}</p>
               <div className="row-between small"><span className="muted">Target finish</span><strong>{ordinal(club.targetRank)}</strong></div>
               <div className="row-between small"><span className="muted">Board confidence</span><strong>{club.confidenceLabel}</strong></div>

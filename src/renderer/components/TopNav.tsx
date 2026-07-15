@@ -76,10 +76,10 @@ export function TopNav(props: {
             className="topnav-util-btn"
             onClick={() => nav.goBack()}
             disabled={!nav.canGoBack}
-            title="Go back"
+            title={nav.canGoBack ? 'Go back to the previous screen' : 'No previous screen'}
             aria-label="Go back"
           >
-            ◄ Back
+            ← Back
           </button>
           <button className="topnav-util-btn" onClick={props.onSave} disabled={props.busy} title="Save career">
             Save
@@ -116,7 +116,12 @@ export function TopNav(props: {
 
           <span className="topnav-version">v{props.engineVersion}</span>
 
-          <button className="btn btn-hero btn-lg" onClick={actions.continueGame} disabled={actions.busy}>
+          <button
+            className="btn btn-hero btn-lg"
+            onClick={actions.continueGame}
+            disabled={actions.busy}
+            title="Advance the calendar to the next game or key date"
+          >
             {actions.busy ? '…' : (d?.continueLabel ?? 'Continue')}
           </button>
         </div>

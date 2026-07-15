@@ -34,8 +34,15 @@ import { deriveSeed, Rng } from '@engine/shared/rng'
 const LEAGUE_MIN_SALARY = 750_000
 /** Contracts below this are two-way deals (minor-league assignable). */
 const TWO_WAY_THRESHOLD = 1_100_000
+// No-trade protection is only earned on a real top-of-roster commitment.
+const NTC_MIN_SALARY = 4_500_000
+const NTC_MIN_YEARS = 3
 /** Hard roster ceiling enforced by signPlayer. */
 const MAX_ROSTER_SIZE = 26
+/** Salary floor — the minimum payroll a club is expected to ice (~74% of the
+ *  $88M ceiling, mirroring the NHL's lower limit). AI clubs spend up to it in
+ *  free agency; the UI flags a user club that sits below it. */
+export const CAP_FLOOR = 65_000_000
 
 type PositionGroup = 'F' | 'D' | 'G'
 
@@ -72,13 +79,43 @@ function hashId(id: string): number {
 
 const roundTo25k = (salary: number): number => Math.round(salary / 25_000) * 25_000
 
-/** Sum of rostered salaries; the live truth `finances.capUsed` caches. */
+/**
+ * Contract status by age + pro service (approximates NHL rules):
+ *   ELC — entry-level: young (≤23) with a short pro record (≤3 seasons).
+ *   RFA — restricted: under 27 and fewer than 7 pro seasons. His club holds his
+ *         rights and can qualify him, so he can't simply walk to the open market.
+ *   UFA — unrestricted: 27+, or 7+ pro seasons — free to sign anywhere.
+ * Matches the age-27 RFA/UFA boundary the profile view already displays, so the
+ * label a GM sees and the way the engine treats the player agree.
+ */
+/** A one-way veteran must clear waivers to go to the AHL; young/two-way players
+ *  are exempt. (Simplified from the NHL's age+games formula.) */
+export function requiresWaivers(player: Player): boolean {
+  return player.contract.twoWay === false && player.age >= 25
+}
+
+export function contractStatus(player: Player): 'ELC' | 'RFA' | 'UFA' {
+  if (player.age >= 27 || player.stats.length >= 7) return 'UFA'
+  if (player.age <= 23 && player.stats.length <= 3) return 'ELC'
+  return 'RFA'
+}
+
+/** A club walks away from (declines to qualify) a restricted FA below this overall
+ *  when the position group is already at its minimum — i.e. a fringe RFA can still
+ *  reach free agency, but quality young players are retained. */
+const RFA_WALKAWAY_OVERALL = 45
+
+/** Sum of rostered salaries; the live truth `finances.capUsed` caches. Each
+ *  rostered player counts his cap hit MINUS any salary a former club retained on
+ *  him; retained-salary this club owes on players it traded away is added on
+ *  top (#157). */
 export function capUsedFor(team: Team, players: Map<PlayerId, Player>): number {
   let sum = 0
   for (const id of team.roster) {
     const p = players.get(id)
-    if (p) sum += p.contract.salary
+    if (p) sum += p.contract.salary - (p.contract.retainedByOthers ?? 0)
   }
+  for (const slot of team.finances.retained ?? []) sum += slot.amount
   return sum
 }
 
@@ -178,11 +215,18 @@ export function signPlayer(args: {
     )
   }
 
+  // No-trade protection follows real practice: only a UFA-eligible player (age
+  // ≥27 or 7+ pro seasons) on a substantial multi-year deal earns an NTC — and a
+  // player who already holds one keeps it when he re-signs while still eligible.
+  // Young players and cheap/short deals never carry one.
+  const ntcEligible = player.age >= 27 || player.stats.length >= 7
+  const ntcWorthy = ntcEligible && salary >= NTC_MIN_SALARY && years >= NTC_MIN_YEARS
+  const keepsExisting = ntcEligible && player.contract.noTradeClause
   player.contract = {
     salary,
     yearsRemaining: years,
     expiryYear: year + years,
-    noTradeClause: false,
+    noTradeClause: ntcWorthy || keepsExisting,
     twoWay: salary < TWO_WAY_THRESHOLD
   }
   if (!onRoster) team.roster.push(player.id)
@@ -283,9 +327,25 @@ export function aiResignDay(args: {
       .sort(byOverallDesc)
 
     for (const player of expiring) {
-      if (!isKeeper(team, player, players)) continue
+      const restricted = contractStatus(player) !== 'UFA'
+      if (restricted) {
+        // A restricted FA has no leverage — his club qualifies him and he can't
+        // walk, so we skip the acceptance check. The club only declines a fringe
+        // RFA when the position is already stocked (he then reaches the open pool).
+        const group = groupOf(player)
+        if (
+          playerOverall(player) < RFA_WALKAWAY_OVERALL &&
+          secureCount(team, players, group) >= ROSTER_MINIMUMS[group]
+        ) {
+          continue
+        }
+      } else {
+        // Unrestricted: the club must both want him and win the negotiation.
+        if (!isKeeper(team, player, players)) continue
+        const ask = askTerms(player, year)
+        if (!offerAcceptable(player, ask, ask, rng)) continue
+      }
       const ask = askTerms(player, year)
-      if (!offerAcceptable(player, ask, ask, rng)) continue
       const prospective = capUsedFor(team, players) - player.contract.salary + ask.salary
       if (prospective > team.finances.salaryCap) continue
       signPlayer({ team, player, salary: ask.salary, years: ask.years, year, players })
@@ -304,7 +364,15 @@ export function aiResignDay(args: {
  * salary and has a roster spot. Lingering free agents discount their ask 5%
  * per day they've gone unsigned (floor 70%). Unsigned players stay in the pool
  * and re-test on later days; the caller removes signed ids from its pool.
+ *
+ * Posture (optional, LW3): a club's competitive window shapes who it chases. A
+ * rebuilding team builds through youth — it won't hand a 30-something UFA
+ * multi-year term, and it stays out of the top of the market; it'll still take a
+ * cheap short-term stopgap. A contender leans in: high-impact UFAs get a scoring
+ * nudge so the best names actually land with clubs trying to win now. Absent
+ * `postureOf`, every club is treated as 'retool' and behaviour is unchanged.
  */
+const REBUILD_MAX_UFA_AAV = 5_500_000 // rebuilders don't shop the top of the market
 export function aiFreeAgencyDay(args: {
   teams: Map<TeamId, Team>
   players: Map<PlayerId, Player>
@@ -313,8 +381,10 @@ export function aiFreeAgencyDay(args: {
   year: number
   rng: Rng
   faDay: number
+  postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
 }): { signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> } {
   const { teams, players, freeAgentIds, userTeamId, year, rng, faDay } = args
+  const postureOf = args.postureOf ?? ((): 'retool' => 'retool')
   const signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> = []
 
   const rostered = new Set<PlayerId>()
@@ -341,6 +411,7 @@ export function aiFreeAgencyDay(args: {
     const discount = Math.max(0.7, 1 - 0.05 * (faDay - decisionDay))
     const salary = Math.max(LEAGUE_MIN_SALARY, roundTo25k(ask.salary * discount))
     const group = groupOf(player)
+    const ovr = playerOverall(player)
 
     let best: Team | null = null
     let bestScore = -Infinity
@@ -350,7 +421,18 @@ export function aiFreeAgencyDay(args: {
       if (deficit <= 0) continue
       const space = capSpace(team, players)
       if (space < salary) continue
-      const score = deficit * 1e9 + space + rng.float(0, 1e6)
+      const posture = postureOf(team.id)
+      if (posture === 'rebuild') {
+        // A rebuilding club builds through youth: no multi-year money to an
+        // aging vet, and no shopping at the top of the market. Cheap, short
+        // stopgaps only.
+        if (player.age >= 30 && ask.years >= 2) continue
+        if (salary >= REBUILD_MAX_UFA_AAV) continue
+      }
+      // Contenders chase the difference-makers — a nudge so the best available
+      // gravitates to a club actually pushing for now.
+      const contendPull = posture === 'contend' && ovr >= 78 ? 5e8 : 0
+      const score = deficit * 1e9 + contendPull + space + rng.float(0, 1e6)
       if (score > bestScore) {
         bestScore = score
         best = team

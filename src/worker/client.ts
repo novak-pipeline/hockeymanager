@@ -1,5 +1,6 @@
 import type {
   CareerSnapshot,
+  ContractOffer,
   LinesUpdate,
   PressTone,
   TeamPracticeState,
@@ -10,7 +11,8 @@ import type {
   WorkerResponse,
 } from './protocol'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { SquadStatus, TradeStatus } from '@domain/player'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 
 /**
  * Minimal worker surface the client needs; lets tests inject a fake without a
@@ -58,12 +60,12 @@ export class SimClient {
     }
   }
 
-  private send(req: WorkerRequestBody): Promise<WorkerResponse> {
+  private send(req: WorkerRequestBody, timeoutMs = REQUEST_TIMEOUT_MS): Promise<WorkerResponse> {
     const id = this.nextId++
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) resolve({ id, type: 'error', message: 'timeout' })
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.pending.set(id, { resolve, timer })
       this.worker.postMessage({ ...req, id } as WorkerRequest)
     })
@@ -90,8 +92,10 @@ export class SimClient {
     return this.send({ type: 'newLeagueFromMod', mod, seed })
   }
 
-  startCareer(teamId: string): Promise<WorkerResponse> {
-    return this.send({ type: 'startCareer', teamId })
+  startCareer(teamId: string, startAt?: 'seasonStart' | 'offseason'): Promise<WorkerResponse> {
+    // The offseason takeover simulates the club's entire year zero inside the
+    // worker — give it minutes, not the default request deadline.
+    return this.send({ type: 'startCareer', teamId, ...(startAt ? { startAt } : {}) }, 300_000)
   }
 
   /* ── calendar ── */
@@ -179,6 +183,10 @@ export class SimClient {
     return this.send({ type: 'getFinances' })
   }
 
+  setTicketPricing(tier: 'value' | 'standard' | 'premium'): Promise<WorkerResponse> {
+    return this.send({ type: 'setTicketPricing', tier })
+  }
+
   getInbox(): Promise<WorkerResponse> {
     return this.send({ type: 'getInbox' })
   }
@@ -205,6 +213,22 @@ export class SimClient {
     return this.send({ type: 'setTactics', tactics })
   }
 
+  saveLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'saveLineSetup', name })
+  }
+
+  applyLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'applyLineSetup', name })
+  }
+
+  deleteLineSetup(name: string): Promise<WorkerResponse> {
+    return this.send({ type: 'deleteLineSetup', name })
+  }
+
+  setLineManagementMode(mode: 'coach' | 'fillGaps'): Promise<WorkerResponse> {
+    return this.send({ type: 'setLineManagementMode', mode })
+  }
+
   markNewsRead(ids: string[]): Promise<WorkerResponse> {
     return this.send({ type: 'markNewsRead', ids })
   }
@@ -225,6 +249,131 @@ export class SimClient {
     return this.send({ type: 'getTeamLegends', teamId })
   }
 
+  getDevCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDevCamp' })
+  }
+
+  getDevCampInvites(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDevCampInvites' })
+  }
+
+  toggleDevCampInvite(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleDevCampInvite', playerId })
+  }
+
+  getCampInvites(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCampInvites' })
+  }
+
+  toggleCampInvite(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleCampInvite', playerId })
+  }
+
+  submitDevCamp(standoutId?: string): Promise<WorkerResponse> {
+    return this.send({ type: 'submitDevCamp', ...(standoutId !== undefined ? { standoutId } : {}) })
+  }
+
+  skipDevCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'skipDevCamp' })
+  }
+
+  getTrainingCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'getTrainingCamp' })
+  }
+
+  submitTrainingCamp(placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitTrainingCamp', placements })
+  }
+
+  getFeed(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFeed' })
+  }
+
+  toggleFollowAuthor(authorId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleFollowAuthor', authorId })
+  }
+
+  getNegotiation(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getNegotiation', playerId })
+  }
+
+  startNegotiation(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'startNegotiation', playerId })
+  }
+
+  submitNegotiationOffer(playerId: string, offer: ContractOffer): Promise<WorkerResponse> {
+    return this.send({ type: 'submitNegotiationOffer', playerId, offer })
+  }
+
+  getFaHub(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFaHub' })
+  }
+
+  toggleFaShortlist(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleFaShortlist', playerId })
+  }
+
+  askFaAgent(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askFaAgent', playerId })
+  }
+
+  submitFaOffer(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
+    return this.send({ type: 'submitFaOffer', playerId, salary, years })
+  }
+
+  getRfaBoard(): Promise<WorkerResponse> {
+    return this.send({ type: 'getRfaBoard' })
+  }
+
+  submitOfferSheet(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
+    return this.send({ type: 'submitOfferSheet', playerId, salary, years })
+  }
+
+  setSquadStatus(playerId: string, status: SquadStatus | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setSquadStatus', playerId, status })
+  }
+
+  getRoleBoard(): Promise<WorkerResponse> {
+    return this.send({ type: 'getRoleBoard' })
+  }
+
+  autoAssignSquadRoles(overwrite = false): Promise<WorkerResponse> {
+    return this.send({ type: 'autoAssignSquadRoles', overwrite })
+  }
+
+  setTradeStatus(playerId: string, status: TradeStatus | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setTradeStatus', playerId, status })
+  }
+
+  getLeadership(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeadership' })
+  }
+
+  /** #90: the GM's media-circuit standing with each named pundit. */
+  getMediaCircuit(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMediaCircuit' })
+  }
+
+  setCaptain(playerId: string | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setCaptain', playerId })
+  }
+
+  toggleAlternate(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleAlternate', playerId })
+  }
+
+  setJerseyNumber(playerId: string, number: number | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setJerseyNumber', playerId, number })
+  }
+
+  askAgentWaiveNtc(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askAgentWaiveNtc', playerId })
+  }
+
+  askPlayerTradeList(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'askPlayerTradeList', playerId })
+  }
+
   getTeamDynamics(teamId: string): Promise<WorkerResponse> {
     return this.send({ type: 'getTeamDynamics', teamId })
   }
@@ -233,12 +382,61 @@ export class SimClient {
     return this.send({ type: 'getMedical' })
   }
 
+  restPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'restPlayer', playerId })
+  }
+
+  /** #157: place a long-term-injured player on LTIR (cap relief) / activate off it. */
+  placeOnLtir(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'placeOnLtir', playerId })
+  }
+
+  activateFromLtir(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'activateFromLtir', playerId })
+  }
+
   getDevelopment(): Promise<WorkerResponse> {
     return this.send({ type: 'getDevelopment' })
   }
 
   getSquadPlanner(): Promise<WorkerResponse> {
     return this.send({ type: 'getSquadPlanner' })
+  }
+
+  getLeagueComparison(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueComparison' })
+  }
+
+  getPlayoffOdds(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPlayoffOdds' })
+  }
+
+  getStaffMeetingSummary(): Promise<WorkerResponse> {
+    return this.send({ type: 'getStaffMeetingSummary' })
+  }
+
+  getStaffMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'getStaffMeeting' })
+  }
+
+  submitStaffMeeting(choices: Record<string, string>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitStaffMeeting', choices })
+  }
+
+  delegateStaffMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'delegateStaffMeeting' })
+  }
+
+  getCoachMarket(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCoachMarket' })
+  }
+
+  fireCoach(): Promise<WorkerResponse> {
+    return this.send({ type: 'fireCoach' })
+  }
+
+  hireCoach(coachId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireCoach', coachId })
   }
 
   getClubInfo(): Promise<WorkerResponse> {
@@ -269,6 +467,18 @@ export class SimClient {
     return this.send({ type: 'proposeTrade', proposal })
   }
 
+  assessTrade(proposal: TradeProposal): Promise<WorkerResponse> {
+    return this.send({ type: 'assessTrade', proposal })
+  }
+
+  gaugeTradeInterest(proposal: TradeProposal): Promise<WorkerResponse> {
+    return this.send({ type: 'gaugeTradeInterest', proposal })
+  }
+
+  shopPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'shopPlayer', playerId })
+  }
+
   acceptTrade(offerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptTrade', offerId })
   }
@@ -293,8 +503,88 @@ export class SimClient {
     return this.send({ type: 'draftPlayer', playerId })
   }
 
+  matchOfferSheet(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'matchOfferSheet', playerId })
+  }
+
+  declineOfferSheet(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'declineOfferSheet', playerId })
+  }
+
+  getWaiverWire(): Promise<WorkerResponse> {
+    return this.send({ type: 'getWaiverWire' })
+  }
+
+  getLeagueWire(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueWire' })
+  }
+
+  getGMProfile(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMProfile' })
+  }
+
+  getGMJobMarket(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMJobMarket' })
+  }
+
+  getGMRelationships(): Promise<WorkerResponse> {
+    return this.send({ type: 'getGMRelationships' })
+  }
+
+  getMentorships(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMentorships' })
+  }
+
+  assignMentor(menteeId: string, mentorId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'assignMentor', menteeId, mentorId })
+  }
+
+  clearMentor(menteeId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'clearMentor', menteeId })
+  }
+
+  getClubDirection(): Promise<WorkerResponse> {
+    return this.send({ type: 'getClubDirection' })
+  }
+
+  setClubDirection(direction: 'compete' | 'retool' | 'rebuild'): Promise<WorkerResponse> {
+    return this.send({ type: 'setClubDirection', direction })
+  }
+
+  getFanbase(): Promise<WorkerResponse> {
+    return this.send({ type: 'getFanbase' })
+  }
+
+  getSponsors(): Promise<WorkerResponse> {
+    return this.send({ type: 'getSponsors' })
+  }
+
+  acceptGMJob(teamId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'acceptGMJob', teamId })
+  }
+
+  getOwnerRequest(): Promise<WorkerResponse> {
+    return this.send({ type: 'getOwnerRequest' })
+  }
+
+  respondOwnerRequest(accept: boolean): Promise<WorkerResponse> {
+    return this.send({ type: 'respondOwnerRequest', accept })
+  }
+
+  claimWaiver(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'claimWaiver', playerId })
+  }
+
+  simNextPick(): Promise<WorkerResponse> {
+    return this.send({ type: 'simNextPick' })
+  }
+
   advanceDraft(): Promise<WorkerResponse> {
     return this.send({ type: 'advanceDraft' })
+  }
+
+  autoDraft(): Promise<WorkerResponse> {
+    return this.send({ type: 'autoDraft' })
   }
 
   advanceOffseason(): Promise<WorkerResponse> {
@@ -317,8 +607,89 @@ export class SimClient {
     return this.send({ type: 'getScouting' })
   }
 
-  assignScout(scoutId: string, target: ScoutTarget): Promise<WorkerResponse> {
-    return this.send({ type: 'assignScout', scoutId, target })
+  getScoutProfile(scoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getScoutProfile', scoutId })
+  }
+
+  assignScout(
+    scoutId: string, target: ScoutTarget, focus?: ScoutFocus,
+    positionFilter?: 'any' | 'F' | 'D' | 'G', minPotentialStars?: number,
+  ): Promise<WorkerResponse> {
+    return this.send({
+      type: 'assignScout', scoutId, target,
+      ...(focus ? { focus } : {}),
+      ...(positionFilter !== undefined ? { positionFilter } : {}),
+      ...(minPotentialStars !== undefined ? { minPotentialStars } : {}),
+    })
+  }
+
+  getBoxScoreFor(gameId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getBoxScoreFor', gameId })
+  }
+
+  acceptArbitration(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'acceptArbitration', playerId })
+  }
+
+  walkArbitration(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'walkArbitration', playerId })
+  }
+
+  buyoutPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'buyoutPlayer', playerId })
+  }
+
+  searchAll(query: string): Promise<WorkerResponse> {
+    return this.send({ type: 'searchAll', query })
+  }
+
+  getNameIndex(): Promise<WorkerResponse> {
+    return this.send({ type: 'getNameIndex' })
+  }
+
+  getWarRoom(): Promise<WorkerResponse> {
+    return this.send({ type: 'getWarRoom' })
+  }
+
+  getSeasonReview(): Promise<WorkerResponse> {
+    return this.send({ type: 'getSeasonReview' })
+  }
+
+  submitSeasonReview(choice: string): Promise<WorkerResponse> {
+    return this.send({ type: 'submitSeasonReview', choice })
+  }
+
+  getBoardMeeting(): Promise<WorkerResponse> {
+    return this.send({ type: 'getBoardMeeting' })
+  }
+
+  submitBoardMeeting(choices: Record<string, string>): Promise<WorkerResponse> {
+    return this.send({ type: 'submitBoardMeeting', choices })
+  }
+
+  autoAssignScouts(): Promise<WorkerResponse> {
+    return this.send({ type: 'autoAssignScouts' })
+  }
+
+  hireScout(candidateId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireScout', candidateId })
+  }
+
+  fireScout(scoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'fireScout', scoutId })
+  }
+
+  shortlistProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'shortlistProspect', playerId })
+  }
+  unshortlistProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'unshortlistProspect', playerId })
+  }
+  dismissProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'dismissProspect', playerId })
+  }
+  rescoutProspect(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'rescoutProspect', playerId })
   }
 
   /* ── story layer ── */
@@ -386,6 +757,10 @@ export class SimClient {
   }
 
   /** Set (or clear) a per-player individual focus override. */
+  recommendPlayerFocuses(): Promise<WorkerResponse> {
+    return this.send({ type: 'recommendPlayerFocuses' })
+  }
+
   setPlayerFocusDrill(playerId: string, focus: PracticeFocus | null): Promise<WorkerResponse> {
     return this.send({ type: 'setPlayerFocusDrill', playerId, focus })
   }
@@ -466,6 +841,15 @@ export class SimClient {
   /** Assign an NHL player to the user's AHL affiliate. */
   sendDown(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'sendDown', playerId })
+  }
+
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  setCoachRoster(): Promise<WorkerResponse> {
+    return this.send({ type: 'setCoachRoster' })
+  }
+
+  undoCoachRoster(): Promise<WorkerResponse> {
+    return this.send({ type: 'undoCoachRoster' })
   }
 
   /** Six-axis radar comparison for two players (Phase C compare UI). */

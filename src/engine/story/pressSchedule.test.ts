@@ -164,7 +164,12 @@ function runFullSeason(seed: number): ReturnType<Career['getInbox']>['items'] {
   // We stop once the new season has begun (year incremented).
   while (guard++ < 2000) {
     const advanced = career.step()
-    if (!advanced) break
+    if (!advanced) {
+      // step() halts on the user-gated entry draft — conduct it (auto-pick) and
+      // keep rolling, mirroring a GM finishing the draft from the Draft screen.
+      if (career.draftPending()) { career.autoDraft(); continue }
+      break
+    }
     // Once the new season starts, seasonReview has already fired
     if (career.year > startYear) break
   }

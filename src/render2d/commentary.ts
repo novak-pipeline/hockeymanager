@@ -128,6 +128,13 @@ const FACEOFF_WIN = [
   '{winner} wins it cleanly.',
   '{winner} draws it back.',
   '{winner} wins the dot.',
+  '{winner} snaps it back off the drop.',
+  '{winner} strong on the draw — possession secured.',
+  '{winner} takes it on the backhand tie-up.',
+  '{winner} beats him to the puck at the dot.',
+  '{winner} with the win — his centres have owned the circle tonight.',
+  '{winner} kicks it back to the point man.',
+  'Clean win for {winner} at the dot.',
 ]
 
 /** Lines spoken after the puck drops following a stoppage. */
@@ -151,6 +158,9 @@ const STOPPAGE_ICING = [
   'Iced it down — whistle for icing.',
   'Icing on the play. Faceoff coming in the defensive zone.',
   'Icing. The linesman waves it off the glass.',
+  'Under pressure, they ring it the length of the ice — icing, and no line change allowed.',
+  "The tired unit ices it. They're stuck out there for the draw.",
+  'A two-hundred-foot clear — the whistle brings it all the way back.',
 ]
 
 const STOPPAGE_GOALIE_FREEZE = [
@@ -233,18 +243,36 @@ const PENALTY_PHRASES = [
   'Penalty on {player}: {infraction}. {team} on the man advantage.',
   '{player} penalised for {infraction} — {team} gets the power play.',
   'Referee blows it up — {infraction} on {player}. {team} PP.',
+  '{player} caught for {infraction}, and he knows it — straight to the box. {team} get two minutes of power play.',
+  'The arm was up a while — {infraction} against {player}. Over to the {team} power play.',
+  "That's a lazy one from {player}: {infraction}. His coach won't love it. {team} to the man advantage.",
+  '{player} takes {infraction} two hundred feet from his own net — the kind that stings. {team} PP.',
+  'No argument from {player} on the {infraction} call. {team} get their chance.',
+  'The officials huddle briefly… {infraction}, {player}. {team} go up a man.',
+  "{player} sits for {infraction}. The penalty-kill units swing over the boards for {team}'s power play.",
+  'A shorthanded test coming up — {infraction} on {player} hands {team} the advantage.',
 ]
 
 const PERIOD_END_PHRASES = [
   "That's the end of period {p}.",
   'Whistle to end the {ord} period.',
   'Period {p} is over.',
+  "The horn sounds — that's the {ord} period in the books.",
+  'And that will do it for the {ord}. The benches file down the tunnel.',
+  'The {ord} period comes to a close. Time to regroup.',
+  "There's the horn. Twenty more minutes gone — end of the {ord}.",
+  'That ends the {ord}. The ice crew comes out as the teams head off.',
+  'Buzzer! End of period {p}. Plenty to talk about in both rooms.',
 ]
 
 const GAME_END_PHRASES = [
   "Final whistle! That's the game.",
   "And that's it! The game is over.",
   'The referee blows the final whistle.',
+  'The horn sounds and that is that — this one is final.',
+  "It's over! Handshakes and helmet taps at the benches.",
+  "That's your final. The story of this one will be told in the summaries.",
+  'Done and dusted — the horn ends it.',
 ]
 
 function ordinal(n: number): string {

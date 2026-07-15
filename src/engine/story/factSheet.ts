@@ -127,6 +127,9 @@ export interface PressConferenceState {
   context: string
   day: number
   year: number
+  /** Which pundit is asking (drives the persistent relationship). Optional so
+   *  old saves with a pending presser load cleanly (default: beat reporter). */
+  personaId?: PressPersonaId
 }
 
 /* ────────────────────────── saga maintenance ────────────────────────── */

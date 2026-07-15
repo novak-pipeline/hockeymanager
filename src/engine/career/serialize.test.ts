@@ -155,6 +155,56 @@ describe('AHL save round-trip', () => {
   })
 })
 
+describe('World Chronicle round-trip (LW1)', () => {
+  it('populates head-to-head as games are played and survives save/load', () => {
+    const data = generateLeague({ seed: 91 })
+    const userId = data.league.teams[0]
+    const career = new Career(data, 91, userId)
+
+    for (let i = 0; i < 5 && career.advanceDay(); i++) { /* play a few match days */ }
+
+    const snap = career.exportSnapshot('test-chronicle', '2026-07-01T00:00:00.000Z')
+    expect(snap.chronicle).toBeDefined()
+    expect(snap.chronicle!.headToHead.length).toBeGreaterThan(0)
+    // Games actually produce wins in the all-time matchup records.
+    const totalWins = snap.chronicle!.headToHead.reduce((s, [, h]) => s + h.aWins + h.bWins, 0)
+    expect(totalWins).toBeGreaterThan(0)
+
+    const validated = validateSnapshot(JSON.parse(JSON.stringify(snap)))
+    const restored = Career.fromSnapshot(validated)
+    const snap2 = restored.exportSnapshot('again', '2026-07-01T00:00:00.000Z')
+    expect(snap2.chronicle).toEqual(snap.chronicle)
+  })
+
+  it('old saves without a chronicle field load with an empty chronicle', () => {
+    const data = generateLeague({ seed: 92 })
+    const snap = {
+      version: 1,
+      savedAt: '2026-07-01T00:00:00.000Z',
+      saveName: 'Old Save',
+      seed: 92,
+      userTeamId: data.league.teams[0],
+      phase: 'regularSeason',
+      currentDay: 0,
+      year: 2025,
+      leagueData: serializeLeagueData(data),
+      standings: [],
+      playerTotals: [],
+      gamesPlayed: [],
+      news: [],
+      newsCounter: 0,
+      playoffs: null,
+      offseason: null,
+      picks: [],
+      history: [],
+      // deliberately omit chronicle
+    }
+    const restored = Career.fromSnapshot(validateSnapshot(snap))
+    const out = restored.exportSnapshot('resaved', '2026-07-01T00:00:00.000Z')
+    expect(out.chronicle).toEqual({ events: [], counter: 0, headToHead: [], provenance: [] })
+  })
+})
+
 describe('validateSnapshot', () => {
   it('accepts a valid snapshot and returns it typed', () => {
     const snap = makeSnapshot()

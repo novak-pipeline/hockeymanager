@@ -13,6 +13,7 @@ import type {
   DraftPick,
   GameResult,
   Injury,
+  Lines,
   NewsItem,
   PlayoffsState,
   Position,
@@ -32,6 +33,9 @@ export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/sta
 export type { TeamLeadersView, LeaderChip, TeamLeadersEntry } from '@engine/league/playerRating'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
+import type { ChronicleState } from '@engine/story/chronicle'
+import type { GmPersona } from '@engine/league/gmPersona'
+import type { SeasonReviewFacts, MeetingSpeaker } from '@engine/career/boardMeeting'
 import type {
   AwardRecord,
   LegendRecord,
@@ -41,8 +45,207 @@ import type {
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
-import type { PlayerInteraction } from '@engine/league/interactions'
-export type { PlayerInteraction, InteractionKind } from '@engine/league/interactions'
+import type { PlayerInteraction, PlayerPromise } from '@engine/league/interactions'
+export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/league/interactions'
+import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
+export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
+import type { NegotiationState } from '@engine/league/negotiation'
+import type { AgentRapportState } from '@engine/league/agentRapport'
+export type { AgentRapportState } from '@engine/league/agentRapport'
+export type {
+  AgentPersona,
+  ClauseLevel,
+  Comparable,
+  ContractOffer,
+  NegotiationKind,
+  NegotiationState,
+  NegotiationStatus,
+  RoundVerdict,
+} from '@engine/league/negotiation'
+
+/* ────────────────────────── camps (Season Rhythm M3) ────────────────────────── */
+
+/** One cut-day roster call staged out of training camp. JSON-safe, persisted. */
+/** One skater's accumulated line across the camp scrimmages. */
+export interface CampSkaterLine {
+  playerId: string
+  name: string
+  position: string
+  faceId?: string
+  team: 'Blue' | 'Red'
+  gp: number
+  g: number
+  a: number
+  p: number
+  plusMinus: number
+  pim: number
+  sog: number
+  /** Coach's average rating out of 10 (EHM "Av R"). */
+  rating: number
+}
+
+/** One goalie's accumulated line across the camp scrimmages. */
+export interface CampGoalieLine {
+  playerId: string
+  name: string
+  faceId?: string
+  team: 'Blue' | 'Red'
+  gp: number
+  mins: number
+  ga: number
+  saves: number
+  gaa: number
+  svPct: number
+  rating: number
+}
+
+/** The coach's end-of-camp verdict on a camp player (EHM "files his report"). */
+export interface CampReport {
+  playerId: string
+  name: string
+  position: string
+  faceId?: string
+  /** sign = PTO worth a contract · keep = makes the roster · develop = farm ·
+   *  watch = fringe/uncertain. Drives the tone. */
+  recommendation: 'sign' | 'keep' | 'develop' | 'watch'
+  /** Whether he was a try-out (PTO) invitee rather than a signed body. */
+  tryout: boolean
+  verdict: string
+}
+
+export interface TrainingCampState {
+  decisions: Array<{
+    playerId: string
+    name: string
+    position: string
+    age: number
+    faceId?: string
+    /** Where he is right now. */
+    current: 'nhl' | 'ahl'
+    /** Where the coach wants him. */
+    coachPlan: 'nhl' | 'ahl'
+    /** Sending him down runs REAL waivers — he can be claimed for nothing. */
+    waiverRequired: boolean
+    /** The coach's one-line verdict. */
+    line: string
+    /** PTO invitee: unsigned, on a tryout. 'nhl' = sign him to a deal, 'ahl' =
+     *  release him back to the market (there's no farm assignment for a tryout). */
+    tryout?: boolean
+  }>
+  resolved: boolean
+  /* ── Training Camp v2 (EHM-style), all additive/optional ── */
+  /** Which day of the camp week we're on (1..8); 8 = final cuts. */
+  campDay?: number
+  /** Camp window, e.g. "Sep 12 – Sep 20". */
+  startISO?: string
+  endISO?: string
+  /** The camp roster split into intra-squad teams (Overview tab). */
+  roster?: Array<{
+    playerId: string
+    name: string
+    position: string
+    age: number
+    faceId?: string
+    team: 'Blue' | 'Red'
+    /** "On Roster" | "Try-out" | "AHL invite". */
+    status: string
+  }>
+  /** Day-by-day beats (Camp Schedule tab). */
+  schedule?: Array<{ label: string; activity: string; info?: string }>
+  /** Accumulated scrimmage box score (Scrimmage Stats tab). */
+  scrimmage?: {
+    skaters: CampSkaterLine[]
+    goalies: CampGoalieLine[]
+    /** "Team Blue 6, Team Red 2" per scrimmage played. */
+    results: string[]
+  }
+  /** The coach's end-of-camp reports on notable camp players. */
+  reports?: CampReport[]
+}
+
+export interface TrainingCampView {
+  decisions: TrainingCampState['decisions']
+  cast: Array<{ name: string; title: string; faceId?: string }>
+  /** Which day of the camp week we're on (1..8); 8 = final cuts. */
+  campDay?: number
+  startISO?: string
+  endISO?: string
+  roster?: TrainingCampState['roster']
+  schedule?: TrainingCampState['schedule']
+  scrimmage?: TrainingCampState['scrimmage']
+  reports?: CampReport[]
+}
+
+/** Dev camp is a WEEK, not a click: arrival -> scrimmage -> wrap. Persisted. */
+export interface DevCampState {
+  /** 1 = arrival, 2 = scrimmage day (lines exist), 3 = wrap (decision). */
+  day: number
+  /** [playerId, scrimmage line] accumulated on day 2. */
+  lines: Array<[string, { g: number; a: number; sog: number; squad: 'white' | 'blue' }]>
+  /** "White 4, Blue 3" once the scrimmage has been played. */
+  scoreline?: string
+}
+
+/** The July development camp — the org's kids on the rink, live. */
+export interface DevCampView {
+  /** Which beat of the week we're on (1 arrival / 2 scrimmage / 3 wrap). */
+  day: number
+  scoreline?: string
+  invitees: Array<{
+    playerId: string
+    name: string
+    age: number
+    position: string
+    faceId?: string
+    /** Drafted by you this summer. */
+    drafted: boolean
+    grade: 'A' | 'B' | 'C'
+    read: string
+    /** Scrimmage line, present from day 2. */
+    line?: { g: number; a: number; sog: number; squad: 'white' | 'blue' }
+  }>
+  cast: Array<{ name: string; title: string; faceId?: string }>
+  /** The COACHES' pick for camp standout (wrap day) — not the GM's. Additive. */
+  coachStandout?: { playerId: string; name: string; reason: string }
+}
+
+/** #182: a prospect on the dev-camp invite editor. */
+export interface DevCampInviteRow extends PlayerBadge {
+  potential: number
+  /** Already in the organisation (vs an external tryout invite). */
+  org: boolean
+}
+
+/** #182: the dev-camp invite editor — who's coming, and who else you could bring. */
+export interface DevCampInvitesView {
+  /** True once camp is underway — invites are locked. */
+  locked: boolean
+  invited: DevCampInviteRow[]
+  available: DevCampInviteRow[]
+}
+
+/** #182: one PTO (pro-tryout) candidate for training camp — an unsigned vet. */
+export interface CampInviteRow extends PlayerBadge {
+  /** Rated overall (0–100). */
+  overall: number
+}
+
+/** #182: the training-camp PTO invite editor. Unsigned veterans the GM may bring
+ *  to main camp on a tryout to fight for a contract. */
+export interface CampInvitesView {
+  /** True once camp has been built — the tryout list is locked. */
+  locked: boolean
+  invited: CampInviteRow[]
+  available: CampInviteRow[]
+}
+
+/** The social feed (docs/THE-FEED.md): posts newest-first + author directory. */
+export interface FeedView {
+  posts: NewsItem[]
+  authors: Record<string, FeedAuthor>
+  /** Author ids the GM follows (Phase B curation). Optional/additive. */
+  following?: string[]
+}
 import type { AgendaItem } from '@engine/league/staffMeeting'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/league/staffMeeting'
 import type { ExecutedTradeSummary, TentpolesState } from '@engine/league/tentpoles'
@@ -141,6 +344,16 @@ export interface SkaterSeasonLine {
   toiPerGame: number
   ppGoals: number
   ppAssists: number
+  /** #175: shorthanded goals/assists (the PK's scoring side). Optional/additive —
+   *  absent on imported pre-career seasons and old saves; treated as 0. */
+  shGoals?: number
+  shAssists?: number
+  /** #175: average power-play / penalty-kill time on ice per game (seconds).
+   *  Optional/additive; absent on imported seasons and old saves. */
+  ppToiPerGame?: number
+  pkToiPerGame?: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 export interface GoalieSeasonLine {
@@ -152,6 +365,8 @@ export interface GoalieSeasonLine {
   shutouts: number
   saves: number
   shotsAgainst: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 /** ISO date string for a given season year + match day (Oct 1 + (day-1) days),
@@ -190,8 +405,17 @@ export interface NextGameView {
   home: boolean
   /** Opponent's league rank for the pre-match blurb. */
   opponentRank: number
+  /** Opponent record, e.g. "24-12-4". */
+  opponentRecord: string
+  /** Opponent head coach's named system, e.g. "Heavy Forecheck". */
+  opponentSystem: string
   /** Non-null when this is a rivalry game (intensity >= 60). */
   rivalryLabel: string | null
+  /** All-time series line vs this opponent from the World Chronicle
+   *  ("You lead all-time 12–5 · playoff series 1–1"). Optional/additive. */
+  allTime?: string | null
+  /** Pre-game storyline (revenge game etc.) from the chronicle. Optional/additive. */
+  storyline?: string | null
 }
 
 export interface LastResultView {
@@ -214,6 +438,27 @@ export interface DashboardView {
   date: string
   /** Label for the Continue button, e.g. "Continue to 12 Oct" or "Start draft". */
   continueLabel: string
+  /** True on draft day: the offseason is parked on an unfinished entry draft.
+   *  The UI must route the GM into the Draft screen — Continue can't sim past it. */
+  draftPending?: boolean
+  /** True in the preseason until the GM names a captain — the season can't open
+   *  first. The UI routes to the Leadership screen; a hard gate like the draft. */
+  captainsPending?: boolean
+  /** True when the preseason board meeting awaits (Season Rhythm M1). Simming
+   *  past it sends the AGM in your place — a soft gate, not a hard one. */
+  boardMeetingPending?: boolean
+  /** A convened bi-weekly staff meeting is waiting (blocking gate). Optional/additive. */
+  staffMeetingDue?: boolean
+  /** Offseason: human stage label for headers ('Free agency — day 3'). Optional/additive. */
+  offseasonStageLabel?: string
+  /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
+  devCampPending?: boolean
+  /** M3: cut day — training camp decisions await before opening night. Optional/additive. */
+  campPending?: boolean
+  /** True when the End-of-Season Review is staged (Season Rhythm M4). */
+  reviewPending?: boolean
+  /** True while the sim is held on deadline day (last chance to trade). */
+  deadlinePending?: boolean
   userTeam: {
     teamId: string
     name: string
@@ -262,6 +507,10 @@ export interface DashboardView {
   board?: BoardSummaryView
   /** True when the GM has been fired (board.firedAtYear is non-null). */
   gmFired?: boolean
+  /** Players currently claimable on the in-season waiver wire (badge for a nudge). */
+  waiverClaimsAvailable?: number
+  /** True when the owner has a pending directive awaiting the GM's response. */
+  ownerRequestPending?: boolean
 }
 
 /* ────────────────────────── squad / player ────────────────────────── */
@@ -269,6 +518,8 @@ export interface DashboardView {
 export interface SquadRowView extends PlayerBadge {
   role: string
   handedness: 'L' | 'R'
+  /** Positions the player can fill, natural first, e.g. "C, LW, RW" or "LD, RD". */
+  positions: string
   /** 0–100; 100 = fully fresh. */
   condition: number
   morale: number
@@ -282,10 +533,17 @@ export interface SquadRowView extends PlayerBadge {
   goalie: GoalieSeasonLine | null
   /** True if listed as a healthy scratch for the next game. */
   scratched: boolean
+  /** True if sending him to the AHL means clearing waivers (claimable for
+   *  nothing) — the training-camp trap, surfaced EHM-style. Optional/additive. */
+  waiverRequired?: boolean
   /** EHM-style form string from last 5 game ratings, e.g. "BABCA" newest-first. */
   gameRatingForm: string
   /** Season average game rating (0 = no games played). */
   avgRating: number
+  /** #188: the GM's declared squad status (key player, core, prospect, …), when set. */
+  squadStatus?: import('@domain/player').SquadStatus
+  /** #188: the GM's trade posture, when set (untouchable / available / listed). */
+  tradeStatus?: import('@domain/player').TradeStatus
 }
 
 export interface SquadView {
@@ -294,6 +552,61 @@ export interface SquadView {
   /** Total roster size / currently dressed players. */
   rosterCount: number
   dressedCount: number
+  /** Summed roster salary and the club's cap ceiling (for the header cap chip). */
+  capUsed: number
+  salaryCap: number
+}
+
+/** #189: one roster player as a captaincy candidate + jersey number. */
+export interface LeadershipRowView {
+  playerId: string
+  name: string
+  faceId?: string
+  position: string
+  age: number
+  /** Current letter worn: 'C', 'A', or null. */
+  letter: 'C' | 'A' | null
+  /** Leadership rating on a 0–99 display scale (DB rating or a personality proxy). */
+  leadership: number
+  /** Room influence 0–100 (from the locker-room model). */
+  influence: number
+  /** Eligible to wear the C (standing gate — age/leadership). */
+  captainEligible: boolean
+  /** Current jersey number, if assigned. */
+  jerseyNumber?: number
+}
+
+/** #188/roles-tab: one org player as a role-assignment row. */
+export interface RoleBoardRow extends PlayerBadge {
+  /** True when he's on the NHL roster (vs the AHL affiliate). */
+  onNhl: boolean
+  /** The GM's currently-set squad status, if any. */
+  squadStatus?: import('@domain/player').SquadStatus
+  /** The engine's recommended status from his ability/age/depth — what
+   *  "Auto-assign" would apply. */
+  suggested: import('@domain/player').SquadStatus
+}
+
+/** #188/roles-tab: bulk squad-role board for the user's whole organisation, so
+ *  roles can be set without right-clicking each player. */
+export interface RoleBoardView {
+  rows: RoleBoardRow[]
+  /** Display labels for each squad status (for the dropdowns/legend). */
+  labels: Record<import('@domain/player').SquadStatus, string>
+  /** How many org players still have no role set. */
+  unassigned: number
+}
+
+/** #189: captains + jersey-number management for the user's club. */
+export interface LeadershipView {
+  teamName: string
+  captainId: string | null
+  alternateIds: string[]
+  /** Max alternates allowed given the current captain state (2 with a C, else 3). */
+  maxAlternates: number
+  /** Retired numbers at this club (unavailable for assignment). */
+  retiredNumbers: number[]
+  rows: LeadershipRowView[]
 }
 
 export interface AttributeGroupView {
@@ -353,6 +666,12 @@ export interface ProfileContractView extends ContractView {
   buriedCapHit?: number
   /** 'RFA' | 'UFA' | null if under contract with years remaining. */
   freeAgentStatus: 'RFA' | 'UFA' | null
+  /** Rights status he'll carry at contract's end: ELC/RFA (club retains rights) or
+   *  UFA (free to leave). Present whenever he's on a club. */
+  rightsStatus?: 'ELC' | 'RFA' | 'UFA'
+  /** True when the player skates in a non-pro loop (junior/college/Europe) and so
+   *  carries no NHL contract — the salary/term fields are not a pro deal. */
+  amateur?: boolean
 }
 
 /** EHM-style position proficiency for one position. */
@@ -388,9 +707,25 @@ export interface PlayerProfileView extends PlayerBadge {
      *  affiliate, or any competition) — makes the row clickable. Absent for
      *  defunct/unmatched historical clubs. */
     teamId?: string
+    /** Present on farm (AHL) season lines so the table can tag them. Absent = NHL. */
+    league?: 'ahl'
     skater: SkaterSeasonLine | null
     goalie: GoalieSeasonLine | null
   }>
+
+  /** Career honours — pre-career honours imported from the source DB (no year)
+   *  plus trophies won during this career (with a year). Shown as trophy badges
+   *  on the History tab. Absent when none. */
+  awards?: Array<{ award: string; year?: number }>
+
+  /** Round-number career milestones reached (e.g. "500 goals", "1,000 games",
+   *  "50 shutouts") — the highest tier passed per category. FM-style career
+   *  highlights. Absent when he hasn't reached a notable one. */
+  careerAchievements?: string[]
+
+  /** This season's average match rating (EHM "Avr", 0–10). Absent before he's
+   *  played a game this season. */
+  avgRating?: number
 
   /* ── Phase B additions (view-layer only, additive) ── */
 
@@ -412,6 +747,25 @@ export interface PlayerProfileView extends PlayerBadge {
    * draft-eligible / on-the-radar young players; omitted for everyone else.
    */
   analystProjection?: string
+  /** Analyst FULL-ordering draft rank (1-based, past the published board too).
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystRank?: number
+  /** Compact draft-standing label, e.g. "R1 · #11" or "R3 · #96" / "Undrafted proj.".
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystDraftLabel?: string
+  /**
+   * The NHL draft analysts' PERCEIVED potential (1–5 stars) — the hype-inflated
+   * consensus ceiling that drives the public draft board, kept separate from
+   * `potentialStars` (your own scouts' grounded read). Lets the profile show
+   * both reads side by side. Present only for draft-relevant prospects.
+   */
+  analystPotentialStars?: number
+  /**
+   * Your scouts' projected ceiling ROLE in plain hockey terms (e.g. "Top-pair D",
+   * "Middle-six F", "Starter") from their grounded read — replaces the vague
+   * "Prospect" projection label. Always present.
+   */
+  scoutsCeilingRole?: string
   /**
    * Your scouts' OWN draft read — can differ from the analyst consensus. Present
    * for draft-relevant prospects once your staff has seen enough of him.
@@ -429,10 +783,33 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   seasonBio?: string
   /**
-   * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
-   * Always present when PlayerProfileView is built.
+   * Living scouting report — the synthesized, always-present write-up that deepens
+   * and shifts its verdict as our scouts' collective read sharpens. Replaces the
+   * thin one-liner prose.
    */
-  scoutPanel: import('@engine/career/multiScout').ScoutPanel
+  scoutSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
+   * Composite prospect grade — weighs talent, our team's need + system fit,
+   * position scarcity, risk and value into one letter (A+…F) with the pros/cons
+   * the scouts weighed. Present for draft-relevant / scouted prospects.
+   */
+  prospectGrade?: {
+    grade: 'A+' | 'A' | 'A-' | 'B+' | 'B' | 'B-' | 'C+' | 'C' | 'C-' | 'D' | 'F'
+    score: number
+    pros: string[]
+    cons: string[]
+  }
+  /**
+   * Formal end-of-season pre-draft edition of the report — present only for
+   * draft-eligible prospects once the class is set (final ranking / offseason).
+   */
+  preDraftSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
+   * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
+   * Only the scouts who have actually watched this player are included; omitted
+   * entirely when no scout has seen an opponent (nothing to report).
+   */
+  scoutPanel?: import('@engine/career/multiScout').ScoutPanel
   /**
    * Staff-gathered mindset: plain-English thoughts on this player's outlook.
    * Present for own players always; present for scouted opponents when knowledge ≥ 40.
@@ -450,6 +827,13 @@ export interface PlayerProfileView extends PlayerBadge {
    * stars + best role. Present for own players / sufficiently scouted opponents.
    */
   scoutVerdict?: import('@engine/career/scoutVerdict').ScoutVerdict
+  /**
+   * #73: EHM-style deployment read — how the coach should USE this skater
+   * (role-suitability stars per bucket + a usage note), distinct from his innate
+   * archetype. Present for own players / reliably scouted skaters; absent for
+   * goalies and low-knowledge opponents.
+   */
+  deployment?: import('@engine/league/deployment').DeploymentProfile
   /**
    * Interview section: answered Q&A (deterministic from traits) + the questions
    * the GM hasn't asked yet. Present whenever the player can be interviewed.
@@ -480,6 +864,35 @@ export interface PlayerProfileView extends PlayerBadge {
   /** Optimism band on the ceiling in stars [lo, hi] — wide for unproven youth,
    *  narrowing to a point as he ages/proves out. */
   potentialBand: { lo: number; hi: number }
+  /**
+   * #188: true when this player is on the user's own NHL club/org — gates the
+   * GM-only role/trade-status controls on the profile.
+   */
+  isOwn: boolean
+  /**
+   * #188: the GM's declared squad status (key player, core, prospect, …) and a
+   * plain-English label for it. Absent = unassigned. Only meaningful/settable for
+   * own players.
+   */
+  squadStatus?: import('@domain/player').SquadStatus
+  squadStatusLabel?: string
+  /** #188: the GM's trade posture — untouchable / available / listed. Absent = default. */
+  tradeStatus?: import('@domain/player').TradeStatus
+  /**
+   * #186: no-trade-clause state for the GM's own player. `hasNtc` when the
+   * contract carries a clause; `ntcWaived` once his agent has signed off on a
+   * move anywhere; `tradeAcceptTeams` the specific clubs he'd accept (a partial
+   * waive). Present only for own players who hold a clause.
+   */
+  hasNtc?: boolean
+  ntcWaived?: boolean
+  tradeAcceptTeams?: Array<{ teamId: string; name: string }>
+  /**
+   * #188: leadership read for captaincy decisions — his leadership rating and
+   * whether he currently wears a letter (C / A). Present for own players.
+   */
+  leadershipRating?: number
+  captaincy?: 'C' | 'A' | null
 }
 
 /** A notable retiree recorded in a club's legends registry. */
@@ -588,6 +1001,10 @@ export interface StyleFitView {
 export interface TacticsView {
   tactics: TeamTactics
   lines: LinesView
+  /** Names of the GM's saved line-board presets (for the load dropdown). */
+  lineSetups?: string[]
+  /** Current line-management mode for the user's club. */
+  lineManagementMode?: 'coach' | 'fillGaps'
   /**
    * Per-forward-line synergy (parallel to lines.forwards).
    * Index i corresponds to lines.forwards[i].
@@ -753,6 +1170,9 @@ export interface WorldJuniorsStandoutView {
   teamAbbr: string
   position: string
   stars: number
+  /** #48/P5: this standout is one of YOUR org's prospects (rights held / on a
+   *  farm roster) — the story hook that makes the tournament yours to follow. */
+  isYours?: boolean
 }
 
 export interface WorldJuniorsView {
@@ -762,6 +1182,9 @@ export interface WorldJuniorsView {
   /** Projected final placings (rank order), with pool strength. */
   standings: Array<{ nation: string; rating: number; finish: number }>
   allStars: WorldJuniorsStandoutView[]
+  /** #48/P5: your org's own prospects on the all-tournament team (subset of
+   *  allStars, for the "your prospects on show" callout). */
+  yours?: WorldJuniorsStandoutView[]
 }
 
 export interface InternationalView {
@@ -779,6 +1202,8 @@ export interface DraftRankRowView {
   name: string
   teamId: string
   teamAbbr: string
+  /** Full club name (e.g. "Penn State Nittany Lions") for a readable label. */
+  teamName?: string
   leagueAbbr: string
   nation: string
   position: string
@@ -794,6 +1219,9 @@ export interface DraftRankRowView {
   pNHLer?: number
   /** NHLe projection: probability (0–100) he becomes an impact/"star" player. Skaters only. */
   pStar?: number
+  /** Raw perceived ceiling (0–100) behind the analyst stars — used to derive the
+   *  analysts' projected role consistently with their ranking. */
+  perceivedCeiling?: number
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
@@ -823,6 +1251,10 @@ export interface DraftRankingsView {
   scoutBoard: ScoutBoardRowView[]
   /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
   scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[] }[]
+  /** Analyst FULL-ordering rank (1-based) for every eligible prospect — past the
+   *  published top board too, so off-board prospects get a concrete "Nth-round"
+   *  projection. playerId → rank. */
+  fullRankById: Record<string, number>
 }
 
 export interface StatsView {
@@ -858,6 +1290,11 @@ export interface LeagueSkaterStatRow {
   ppGoals: number
   ppAssists: number
   ppPoints: number
+  /** #175: shorthanded points (goals + assists). Optional/additive. */
+  shPoints?: number
+  /** #175: PP / PK time on ice per game (seconds). Optional/additive. */
+  ppToiPerGame?: number
+  pkToiPerGame?: number
   hits: number
   blocks: number
   takeaways: number
@@ -952,11 +1389,43 @@ export interface TradeProposal {
 }
 
 export interface TradeEvaluation {
-  verdict: 'accept' | 'reject' | 'counter'
+  /** #184: 'pending' — the GM took it under advisement; the real answer (accept /
+   *  counter / fell-through) arrives by inbox after a day or two of deliberation.
+   *  Only a clear non-starter (NTC / cap / lowball) still returns 'reject' instantly. */
+  verdict: 'accept' | 'reject' | 'counter' | 'pending'
   /** AI's reasoning, shown to the user. */
   message: string
   /** Present when verdict is 'counter'. */
   counter: TradeOfferView | null
+}
+
+/** Your OWN assistant GM's live read as you build a package (EHM-style). Advice
+ *  from your side of the table — is this good value for us, any practical flags.
+ *  Not the other club's answer; just your staff talking. */
+export interface TradeAssessmentView {
+  /** Your assistant GM's name (falls back to "Assistant GM"). */
+  agmName: string
+  /** One line of in-character advice. */
+  line: string
+  /** Sentiment bucket for styling. */
+  tone: 'love' | 'good' | 'fair' | 'caution' | 'lopsided' | 'blocked' | 'empty'
+  /** 0–1 share of the total value your side GIVES UP — for a balance gauge.
+   *  Present only when both sides carry value (omitted when empty/blocked). */
+  giveShare?: number
+  /** 0–1 share your side RECEIVES (giveShare + receiveShare ≈ 1). */
+  receiveShare?: number
+}
+
+/** The partner GM's NON-BINDING reaction when you "gauge interest" before
+ *  officially proposing. A warm read is NOT an acceptance — a real offer still
+ *  gets slept on for a few days and may come back as accept / counter / no. */
+export interface TradeInterestView {
+  /** The responding club's GM (named when known). */
+  gmName: string
+  /** His in-character read of the package. */
+  line: string
+  /** warm = worth pursuing, tepid = wants more, cool = far off, blocked = dealbreaker. */
+  lean: 'warm' | 'tepid' | 'cool' | 'blocked'
 }
 
 export interface TradePartnerView {
@@ -971,6 +1440,14 @@ export interface TradePartnerView {
   needs: string[]
   /** Philosophy label shown in the UI. */
   philosophy: string
+  /** The club's named GM (Living World LW2). Optional/additive. */
+  gmName?: string
+  /** His public reputation ("aggressive dealer, analytics believer"). */
+  gmStyle?: string
+  /** Seasonal stance: 'contend' | 'retool' | 'rebuild'. */
+  posture?: string
+  /** One factual line explaining the posture read. */
+  postureReason?: string
 }
 
 export interface TradesView {
@@ -992,8 +1469,61 @@ export interface TradesView {
 export interface ProspectRowView extends PlayerBadge {
   /** Scouting consensus, 1 = best. */
   rank: number
+  /** Fog-aware potential (your scouts' read) — uncertain for prospects you
+   *  haven't scouted, sharp for ones you have. */
   potentialStars: number
+  /** 0–100 how well YOUR scouts know him (gates how trustworthy potentialStars is). */
+  knowledge: number
   drafted: boolean
+  /* ── EHM-style scouting depth (additive; present for real imported prospects) ── */
+  /** Shooting/catching hand. */
+  shoots?: 'L' | 'R'
+  heightCm?: number
+  weightKg?: number
+  nationality?: string
+  /** The league he's playing in now (OHL, USHL, NTDP, MHL, …). */
+  leagueAbbr?: string
+  /** His current club. */
+  club?: string
+  /** This-season scoring line in his league (or most recent imported season). */
+  seasonGp?: number
+  seasonG?: number
+  seasonA?: number
+  seasonPts?: number
+  /** Whether the season line is live (this sim season) or imported history. */
+  seasonIsHistory?: boolean
+  /** Where YOUR scouts rank him on their own board (differs from the public
+   *  `rank` when your staff is higher/lower than the media consensus). */
+  scoutRank?: number
+  /** Your scouts' read vs the public board: 'higher' = they like him more. */
+  scoutVerdict?: 'higher' | 'inline' | 'lower'
+}
+
+/** One key staff member's draft recommendation while the GM is on the clock.
+ *  Advisors weigh the board differently (best-available vs need vs fit vs
+ *  ceiling), so they don't always agree — that's the point. */
+export interface DraftAdviceView {
+  staffId: string
+  staffName: string
+  /** "Head Scout", "Head Coach", "Assistant GM", "Scout". */
+  role: string
+  faceId?: string
+  /** The angle this advisor argues from. */
+  kind: 'bpa' | 'need' | 'fit' | 'ceiling' | 'safe'
+  /** Short tag for the chip, e.g. "Best available", "Team need", "System fit". */
+  angle: string
+  /** The prospect he's pushing for. */
+  playerId: string
+  playerName: string
+  position: Position
+  rank: number
+  /** One- or two-sentence rationale in the advisor's voice. */
+  reason: string
+  /** 0–100 the advisor's evaluation accuracy (how much to trust him). */
+  confidence: number
+  /** True when this advisor's pick is ALSO the best player available — i.e. his
+   *  lens and pure value agree (a clear-cut, consensus pick). */
+  isConsensus?: boolean
 }
 
 export interface DraftPickRowView {
@@ -1016,6 +1546,10 @@ export interface DraftView {
   userIsOnClock: boolean
   prospects: ProspectRowView[]
   complete: boolean
+  /** Abbreviation of the team currently on the clock (for the controls strip). */
+  onClockTeamAbbr?: string
+  /** Your key staff's recommendations — populated only while YOU are on the clock. */
+  advice?: DraftAdviceView[]
 }
 
 export interface ResignRowView extends PlayerBadge {
@@ -1035,6 +1569,282 @@ export interface FreeAgentRowView extends PlayerBadge {
   decidesInDays: number
 }
 
+/* ───────────────────────── free-agency hub (DEPTH 2) ───────────────────────── */
+
+/** One name on the open market, with everything a GM triages by. */
+export interface FaHubRowView extends PlayerBadge {
+  askSalary: number
+  askYears: number
+  /** Honest market clock: days before AI clubs can sign him out from under you. */
+  decidesInDays: number
+  agentName: string
+  /** HIS read on YOUR club — the market is two-way. */
+  interest: 'keen' | 'warm' | 'cold'
+  interestNote: string
+  /** What his camp leads with (top priority hint). */
+  wants: string
+  /** Rival appetite — hot names negotiate from strength. */
+  hot: boolean
+  /** True once his camp has started dropping the ask as the summer drags on. */
+  askSoftened?: boolean
+  shortlisted: boolean
+  /** An open/paused negotiation session exists with this player. */
+  inTalks: boolean
+  /** Rival clubs known to be circling (abbreviations) — the competition you're
+   *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
+  rivals?: string[]
+  /** #167/#164: a standing offer you've tabled him, awaiting his decision, with
+   *  an honest read on where it sits vs the rival field. */
+  pendingOffer?: {
+    salary: number
+    years: number
+    decidesInDays: number
+    /** 'leading' = clear front-runner · 'competitive' = fair but sniper-able · 'trailing' = below his ask. */
+    standing: 'leading' | 'competitive' | 'trailing'
+    standingNote: string
+  }
+}
+
+export interface FaHubView {
+  rows: FaHubRowView[]
+  faDay: number
+  capSpace: number
+  /** True during the offseason free-agency window, where you can table standing
+   *  offers (they resolve over days). Outside it, sign directly via talks. */
+  windowOpen?: boolean
+}
+
+/** #168: a rival club's restricted free agent you could offer-sheet. */
+export interface RfaTargetView extends PlayerBadge {
+  teamAbbr: string
+  teamId: string
+  /** His camp's asking AAV and term. */
+  askSalary: number
+  askYears: number
+  /** A one-click offer-sheet suggestion (an overpay to pry him loose). */
+  offerSalary: number
+  offerYears: number
+  /** Draft-pick compensation you'd surrender if his club declines to match. */
+  compLabel: string
+  /** #183: present when you've already tendered a sheet awaiting the owner's
+   *  decision — the terms and how many days remain in the match window. */
+  pending?: { salary: number; years: number; daysLeft: number }
+}
+
+export interface RfaBoardView {
+  /** True in the offseason re-sign / free-agency window (when sheets are legal). */
+  windowOpen: boolean
+  rows: RfaTargetView[]
+}
+
+/* ───────────────────── contract negotiation (DEPTH 1) ───────────────────── */
+
+/** One committed round as the UI sees it. */
+export interface NegotiationRoundView {
+  offerSalary: number
+  offerYears: number
+  offerBonusPct: number
+  offerClause: 'none' | 'modified' | 'full'
+  verdict: 'accept' | 'close' | 'reject' | 'walk'
+  agentLines: string[]
+}
+
+/** A live negotiation session — the NegotiationScreen's whole world. */
+export interface NegotiationView {
+  player: PlayerBadge
+  kind: 'resign' | 'freeAgent' | 'extension'
+  status: 'open' | 'signed' | 'paused' | 'walked'
+  /** ELC / RFA / UFA. */
+  rightsLabel: string
+  currentSalary: number
+  agentName: string
+  /** One-line persona read ("a hard-line anchor, talks to the press"). */
+  agentStyle: string
+  /** Persistent GM↔agent standing (agents recur across a career). Optional/additive. */
+  agentStanding?: 'Trusted' | 'Cordial' | 'Neutral' | 'Wary' | 'Burned'
+  /** One-line read of your history with this agent. Optional/additive. */
+  agentRapportNote?: string
+  /** How many of this agent's clients you've signed. Optional/additive. */
+  agentDeals?: number
+  /** The agent's current position. */
+  askSalary: number
+  askYears: number
+  askBonusPct: number
+  askClause: 'none' | 'modified' | 'full'
+  /** Mood band, not the raw meter — negotiations keep their fog. */
+  temperature: 'warm' | 'guarded' | 'testy' | 'hostile'
+  openingLines: string[]
+  rounds: NegotiationRoundView[]
+  /** Real signed contracts the agent argues from. */
+  comparables: Array<{
+    name: string
+    teamAbbr: string
+    overall: number
+    age: number
+    salary: number
+    years: number
+  }>
+  /** What you've learned about his priorities so far. */
+  revealedHints: string[]
+  /** Your cap room right now (offers are validated against it). */
+  capSpace: number
+  /** When paused: the label the UI shows ("talks resume in a few days"). */
+  pausedNote?: string
+}
+
+/* ── Convened staff meeting (bi-weekly war-room). Action stays engine-side; the
+ *    view carries only what the screen renders. Optional/additive. ── */
+export interface StaffMeetingOptionView {
+  id: string
+  label: string
+  /** The receipt preview — what accepting commits you to. */
+  detail: string
+}
+export interface StaffMeetingProposalView {
+  id: string
+  /** Who is pitching. */
+  speaker: MeetingSpeaker
+  title: string
+  /** The pitch, incl. the "why". */
+  intro: string[]
+  options: StaffMeetingOptionView[]
+  /** Option the AGM applies if you delegate. */
+  defaultOptionId: string
+}
+export interface StaffMeetingView {
+  day: number
+  year: number
+  /** Head coach's opening line. */
+  opening: string
+  proposals: StaffMeetingProposalView[]
+}
+
+export interface OfferSheetRowView extends PlayerBadge {
+  /** Rival club that tendered the sheet. */
+  fromTeamAbbr: string
+  salary: number
+  years: number
+  /** Compensation rounds you'd receive if you let him walk (e.g. [1,3]). */
+  compRounds: number[]
+}
+
+/** A player an AI club has exposed on the in-season waiver wire, claimable by the
+ *  user until the window closes (after which AI clubs get a worst-first crack). */
+export interface WaiverWireRowView extends PlayerBadge {
+  /** Club that placed him on waivers. */
+  fromTeamAbbr: string
+  fromTeamName: string
+  salary: number
+  yearsRemaining: number
+  twoWay: boolean
+  /** Match days left before the claim window closes. 0 = closes on the next sim. */
+  claimDeadlineInDays: number
+  /** False when claiming him would breach the cap or the 26-man roster. */
+  canClaim: boolean
+  /** Why the claim is blocked (when canClaim is false). */
+  blockReason?: string
+}
+
+/** A pending owner directive awaiting the GM's response. Response to 'getOwnerRequest'. */
+export interface OwnerRequestView {
+  kind: string
+  title: string
+  body: string
+  /** Human hint for the accept choice incl. the board-confidence consequence. */
+  acceptHint: string
+  declineHint: string
+}
+
+/** Club sponsorship deals + total annual revenue. Response to 'getSponsors'. */
+export interface SponsorsView {
+  total: number
+  deals: Array<{
+    kind: 'title' | 'jersey' | 'arena'
+    kindLabel: string
+    sponsor: string
+    value: number
+    yearsLeft: number
+  }>
+}
+
+/** Fan engagement + its effect on the owner budget. Response to 'getFanbase'. */
+export interface FanbaseView {
+  interest: number
+  label: string
+  /** Owner-budget multiplier from fan interest, as a percentage (e.g. 105 = 1.05×). */
+  budgetFactorPct: number
+}
+
+/** The GM's competitive stance + whether a rebuild can be sanctioned. Response to 'getClubDirection'. */
+export interface ClubDirectionView {
+  direction: 'compete' | 'retool' | 'rebuild'
+  /** True when ownership has signed off on a rebuild this season. */
+  rebuildSanctioned: boolean
+  /** False when the board expects a contender and won't sanction a teardown. */
+  canRebuild: boolean
+  mandateText: string
+}
+
+/** Veteran→rookie mentorships + eligible players. Response to 'getMentorships'. */
+export interface MentorshipView {
+  pairs: Array<{ mentee: MentorBadge; mentor: MentorBadge }>
+  eligibleMentors: MentorBadge[]
+  eligibleMentees: MentorBadge[]
+}
+export interface MentorBadge {
+  playerId: string
+  name: string
+  position: Position
+  age: number
+}
+
+/** The user GM's standing with each rival club. Response to 'getGMRelationships'. */
+export interface GMRelationshipsView {
+  rows: Array<{ teamAbbr: string; teamName: string; standing: number; label: string }>
+}
+
+/** The user's GM identity, reputation, and career record. Response to 'getGMProfile'. */
+export interface GMProfileView {
+  name: string
+  reputation: number
+  tier: string
+  seasons: number
+  wins: number
+  losses: number
+  playoffApps: number
+  cupWins: number
+  presidentsTrophies: number
+  /** Current club name, or null when between jobs (fired). */
+  currentClub: string | null
+  fired: boolean
+  stints: Array<{
+    teamAbbr: string
+    teamName: string
+    fromYear: number
+    toYear: number | null
+    seasons: number
+    record: string
+    cupWins: number
+    endReason: 'fired' | 'moved' | null
+  }>
+}
+
+/** Open GM vacancies the user can take. Response to 'getGMJobMarket'. */
+export interface GMJobMarketView {
+  reputation: number
+  tier: string
+  /** True when the user is between jobs and may accept an opening. */
+  available: boolean
+  openings: Array<{
+    teamId: string
+    teamName: string
+    teamAbbr: string
+    projectedRank: number
+    interest: 'courting' | 'open' | 'longshot'
+    blurb: string
+  }>
+}
+
 export interface OffseasonView {
   year: number
   stage: 'awards' | 'draft' | 'resign' | 'freeAgency' | 'preseason'
@@ -1044,8 +1854,12 @@ export interface OffseasonView {
   championTeamName: string | null
   /** Re-sign stage: the user's expiring contracts. */
   expiring: ResignRowView[]
+  /** Re-sign stage: rival offer sheets on your RFAs — match or take compensation. */
+  offerSheets?: OfferSheetRowView[]
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
+  /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
+  arbitration?: Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }>
   capUsed: number
   salaryCap: number
 }
@@ -1062,6 +1876,15 @@ export interface FinanceView {
   salaryCap: number
   capUsed: number
   capSpace: number
+  /** Buyout dead-cap charge counted against this club's cap (M2). Optional/additive. */
+  deadCap?: number
+  /** #157: LTIR cap relief currently in effect — lowers capUsed while a long-term
+   *  injured player is on IR. Absent (0) when nobody is on LTIR. */
+  ltirRelief?: number
+  /** League salary floor (minimum payroll). */
+  salaryFloor?: number
+  /** True when this club's payroll sits below the floor. */
+  underFloor?: boolean
   budget: number
   payroll: PayrollRowView[]
   /** Contracts expiring at season end. */
@@ -1077,6 +1900,15 @@ export interface FinanceView {
     marketSizeLabel: string
     estimatedRevenue: number
     lines: Array<{ source: string; amount: number }>
+    /** #173: live cadence — gate + merch now scale with fan interest (a winning,
+     *  popular club fills the building) and the GM's ticket-pricing lever. */
+    fanInterest?: number
+    fanInterestLabel?: string
+    /** Estimated attendance as a % of capacity (0–100+). */
+    attendancePct?: number
+    ticketPricing?: 'value' | 'standard' | 'premium'
+    /** Season operating result estimate = revenue − payroll. */
+    operatingResult?: number
   }
 }
 
@@ -1287,6 +2119,31 @@ export interface CareerSnapshot {
   playoffs: PlayoffsState | null
   offseason: import('@domain').OffseasonState | null
   picks: DraftPick[]
+  /** Rival offer sheets pending on the user's RFAs (re-sign window). Additive;
+   *  absent on pre-offer-sheet saves → restored as empty. */
+  offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }>
+  /** Live in-season waiver-wire entries. Additive; absent on old saves → empty. */
+  waiverWire?: Array<{ playerId: string; fromTeamId: string; placedDay: number }>
+  /** Per-team hot/cold streak counters for ambient news. Additive; absent → empty. */
+  teamStreaks?: Array<[string, number]>
+  /** The user's GM identity + reputation + job history. Additive; absent → lazily created. */
+  gmState?: import('@engine/league/gmCareer').GMState
+  /** Open GM vacancies when the user is between jobs. Additive; absent → none. */
+  gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
+  /** Pending owner directive. Additive; absent → none. */
+  ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
+  /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
+  gmRelationships?: Array<[string, number]>
+  /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */
+  mentorships?: Array<[string, string]>
+  /** GM's declared competitive stance. Additive; absent → 'compete'. */
+  clubDirection?: 'compete' | 'retool' | 'rebuild'
+  /** Fan engagement (0–100). Additive; absent → 60. */
+  fanInterest?: number
+  /** #173: ticket-pricing lever. Additive; absent → 'standard'. */
+  ticketPricing?: 'value' | 'standard' | 'premium'
+  /** Captured baseline owner budget for fan-scaling. Additive; absent → 0 (recapture). */
+  baseBudget?: number
   history: SeasonSummary[]
   /**
    * Season counters not derivable from playerTotals (added after v1 froze;
@@ -1297,6 +2154,11 @@ export interface CareerSnapshot {
     goalieLosses: Array<[string, number]>
     ppGoals: Array<[string, number]>
     ppAssists: Array<[string, number]>
+    /** #175: shorthanded splits — optional so pre-#175 saves load (absent → empty). */
+    shGoals?: Array<[string, number]>
+    shAssists?: Array<[string, number]>
+    /** Per-season goalie shutouts — optional so older saves load (absent → empty). */
+    shutouts?: Array<[string, number]>
   }
   /**
    * Scouting fog-of-war state (added after v1 froze; optional so older saves
@@ -1310,11 +2172,63 @@ export interface CareerSnapshot {
   arcs?: ArcsState
   records?: RecordsState
   expectations?: ExpectationsState
+  /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
+  chronicle?: ChronicleState
+  /** Named AI GM personas per club (Living World LW2). Optional/additive. */
+  gmPersonas?: Array<[string, GmPersona]>
+  /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
+  boardMeetingYear?: number | null
+  /** M3 dev camp soft gate. Optional/additive. */
+  devCampPending?: boolean
+  /** #182: the GM's curated dev-camp invite list (undefined ⇒ auto). Additive. */
+  devCampRoster?: string[]
+  /** #182: the GM's curated training-camp PTO invite list (undefined ⇒ AGM auto). Additive. */
+  campPtoInvites?: string[]
+  /** Dev-camp week progress (day + scrimmage lines). Optional/additive. */
+  devCampState?: DevCampState | null
+  /** M3 training-camp cut day (staged decisions). Optional/additive. */
+  trainingCamp?: TrainingCampState | null
+  /** Last season's story for the owner's meeting opener. Optional/additive. */
+  lastSeasonMeta?: { predictedRank: number; actualRank: number; madePlayoffs: boolean; wonCup: boolean } | null
+  /** Owner-investment perk in force this season. Optional/additive. */
+  ownerPerk?: string | null
+  /** Staged End-of-Season Review facts (Season Rhythm M4). Optional/additive. */
+  reviewFacts?: SeasonReviewFacts | null
+  /** Per-game box scores for the user's played games this season. Optional/additive. */
+  boxScoreHistory?: Array<[string, BoxScoreView]>
+  /** Pending arbitration awards for the user's RFAs (M2). Optional/additive. */
+  arbitrationCases?: Array<{ playerId: string; salary: number; years: number }>
+  /** Deadline-day hold state. Optional/additive. */
+  deadlineHold?: boolean
+  deadlineHoldDone?: boolean
+  /** Buyout dead-cap charge on next season's books (M2). Optional/additive. */
+  userDeadCap?: number
+  /** Full buyout dead-cap tail (2× term): season → dead-cap slice. Optional/additive. */
+  deadCapSchedule?: Array<{ year: number; amount: number }>
+  /** Players bought out mid-resign-stage, pending the FA pool. Optional/additive. */
+  buyoutFas?: string[]
   /** [teamId, LockerRoomState][] — one per club. */
   lockerRooms?: Array<[string, LockerRoomState]>
   /** Player→GM concerns (open + recently resolved). Optional/additive. */
   interactions?: PlayerInteraction[]
   interactionCounter?: number
+  /** LW5 promise ledger — tracked debts from promise-tone answers. Optional/additive. */
+  playerPromises?: PlayerPromise[]
+  /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
+  storyPriors?: StoryPriors
+  /** Social-feed posts (separate from inbox news). Optional/additive. */
+  feedPosts?: NewsItem[]
+  feedCounter?: number
+  /** Followed feed accounts (Phase B curation). Optional/additive. */
+  followedFeedAuthors?: string[]
+  /** DEPTH 1: open/paused contract negotiation sessions by playerId. Optional/additive. */
+  negotiations?: Array<[string, NegotiationState]>
+  /** Persistent GM↔contract-agent rapport (keyed by agent name). Optional/additive. */
+  agentRapport?: AgentRapportState
+  /** A pending convened staff meeting (JSON-safe scene). Optional/additive. */
+  staffMeetingScene?: unknown
+  /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
+  faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */
@@ -1341,6 +2255,10 @@ export interface CareerSnapshot {
     losingStreaks: Array<[string, number]>
     /** User team current consecutive wins (for coach win-streak quotes). Optional; older saves default to 0. */
     userWinStreak?: number
+    /** Latch so the mathematical playoff clinch / elimination headline fires
+     *  once per season. Optional; older saves default to null (may re-announce
+     *  once after loading a stretch-run save, which is harmless). */
+    playoffBerthAnnounced?: 'clinched' | 'eliminated' | null
     lastDeadlineRecap: ExecutedTradeSummary[] | null
     lastLottery: {
       orderAbbrs: string[]
@@ -1358,6 +2276,8 @@ export interface CareerSnapshot {
     pressCounter: number
     pressJob: import('@engine/story/factSheet').PressJob | null
     pressConference: import('@engine/story/factSheet').PressConferenceState | null
+    /** #90: the GM's persistent pundit relationships (optional — old saves seed neutral). */
+    pundits?: import('@engine/story/pundits').PunditState
   }
   /**
    * Staff (head coach + AGM) for the user's team.
@@ -1378,6 +2298,8 @@ export interface CareerSnapshot {
    * [playerId, number[]][] — JSON-safe entry array.
    */
   playerRatings?: Array<[string, number[]]>
+  /** Cumulative season match-rating accumulator (true season Avr). JSON-safe. */
+  seasonRatingTotals?: Array<[string, { sum: number; n: number }]>
   /**
    * Team practice state for the user's team.
    * Optional for backward compat; defaults to balanced on load.
@@ -1388,6 +2310,15 @@ export interface CareerSnapshot {
    * Optional for backward compat.
    */
   hireableStaff?: string[]
+  /** Saved named line-board presets for the user club. Optional (back-compat). */
+  lineSetups?: Array<{ name: string; lines: Lines }>
+  /** How the user's lines are managed each matchday. Optional (back-compat). */
+  lineManagementMode?: 'coach' | 'fillGaps'
+  /**
+   * Coach hiring market — available head coaches with profiles. Optional for
+   * backward compat; regenerated deterministically when absent.
+   */
+  coachMarket?: CoachMarketEntry[]
   /**
    * Owner/board expectations state (franchise drama). Optional for backward compat.
    */
@@ -1440,9 +2371,109 @@ export interface ScoutCardView {
   scoutId: string
   name: string
   rating: number
-  /** Human-readable label for current assignment. */
+  /** 0–100 judgment of the qualitative read. */
+  judgment?: number
+  /** Nation the scout knows best. */
+  specialtyNation?: string
+  /** Annual salary. */
+  salary?: number
+  /** Human-readable label for current assignment scope. */
   assignmentLabel: string
+  /** Human-readable focus ('Youth' / 'Senior' / 'All players'). */
+  focusLabel: string
   target: ScoutAssignment['target']
+  focus: 'youth' | 'senior' | 'all'
+  /** Position brief: 'any' | 'F' | 'D' | 'G'. */
+  positionFilter: 'any' | 'F' | 'D' | 'G'
+  /** Only surface prospects projecting ≥ this many stars (0 = any). */
+  minPotentialStars: number
+  /** How many players currently fall under his assignment (post-focus+position). */
+  coverage: number
+  /** Read speed given the scope size — Fast (focused) / Steady / Thin (spread). */
+  readSpeed: 'Fast' | 'Steady' | 'Thin'
+  /** Nation his scope maps to (for the map + flag), or null if global/unassigned. */
+  focusNation: string | null
+}
+
+/** A surfaced prospect/target in the Scouting Centre (fills over the career). */
+export interface ScoutFindView {
+  playerId: string
+  name: string
+  age: number
+  position: string
+  teamAbbr: string
+  nationality?: string
+  faceId?: string
+  currentStars: number
+  potentialStars: number
+  knowledge: number
+  grade: 'A+' | 'A' | 'B' | 'C'
+  reason: string
+  scoutName: string
+  foundDate: string
+  /** True if he plays a position your roster is currently thin at. */
+  fitsNeed: boolean
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
+  /** True when the GM has tracked him — he sits on the shortlist, not the queue. */
+  shortlisted?: boolean
+}
+
+/** A scope option for the assignment dropdowns. */
+export interface ScoutScopeOption {
+  /** 'nation' | 'competition' | 'team' | 'nextOpponent' | 'draftClass' | 'freeAgents' */
+  kind: string
+  /** Stable id (nation name, competition id, team id) — empty for singletons. */
+  id: string
+  label: string
+}
+
+/** Average scouting knowledge across a league/nation, with a youth split. */
+export interface ScoutCoverageRow {
+  id: string
+  label: string
+  nation?: string
+  avgKnowledge: number
+  youthAvgKnowledge: number
+  playerCount: number
+}
+
+/** A hireable scout in the job market. */
+export interface ScoutMarketRow {
+  id: string
+  name: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary: number
+}
+
+/** Full scout profile — attributes, current assignment, and who he's watching. */
+export interface ScoutProfileView {
+  scoutId: string
+  name: string
+  faceId?: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary?: number
+  demeanor?: string
+  /** Discipline attributes (label/value out of 20), display-only. */
+  attributes: Array<{ label: string; value: number }>
+  assignmentLabel: string
+  focusLabel: string
+  /** Players currently in his scope (post-focus). */
+  coverage: number
+  /** Players he has real intel on (in his scope), most-known first. */
+  scouted: Array<{
+    playerId: string; name: string; position: string; age: number
+    teamAbbr: string; nationality?: string; knowledge: number
+    currentStars: number; potentialStars: number; faceId?: string
+  }>
+  /** Prospects he has surfaced to the Scouting Centre. */
+  finds: Array<{ playerId: string; name: string; grade: string; reason: string; foundDate: string }>
 }
 
 /** Per-team knowledge summary for the scouting overview panel. */
@@ -1472,11 +2503,18 @@ export interface ScoutedPlayerRow {
   potentialStars: number
   /** 0–100 scouting knowledge. */
   knowledge: number
-  /** Recommendation grade. */
+  /** Recommendation grade — a TARGET grade (youth + upside + acquirability),
+   *  not raw quality. An ageing star you can't pry loose grades low. */
   rec: 'A+' | 'A' | 'B' | 'C' | 'D'
+  /** Acquisition-target score backing the grade; sorts the list. */
+  targetScore: number
   /** Current salary (≈ transfer/asset value proxy). */
   salary: number
   faceId?: string
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
 }
 
 export interface ScoutingView {
@@ -1487,12 +2525,36 @@ export interface ScoutingView {
   teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
   /** All divisions as assignment options. */
   divisions: Array<{ divisionId: string; divisionName: string }>
+  /** Nations (regions) you can assign a scout to cover. */
+  nations: ScoutScopeOption[]
+  /** Leagues/competitions you can assign a scout to (incl. NHL/AHL). */
+  competitions: ScoutScopeOption[]
+  /** The user's next opponent's name (for the Next Opponent scope label), or null. */
+  nextOpponentName: string | null
+  /** Nations currently covered by at least one scout (for the world map). */
+  scoutedNations: string[]
+  /** Average knowledge across all non-trivially-known players, 0–100. */
+  worldKnowledge: number
+  /** Scouts currently on a concrete assignment (vs idle). */
+  activeScouts: number
+  /** Scouts the surfaced recommendations came from + the finds themselves. */
+  recommendations: ScoutFindView[]
+  /** Position groups your roster is currently thin at (e.g. ['Defense','Centre']). */
+  rosterNeeds: string[]
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
   hasDraftClass: boolean
+  /** Knowledge coverage by league (avg + youth split). */
+  leagueCoverage: ScoutCoverageRow[]
+  /** Knowledge coverage by nation (avg + youth split). */
+  nationCoverage: ScoutCoverageRow[]
   /** Per-team knowledge summary. */
   teamKnowledge: TeamKnowledgeSummary[]
   /** Recently improved players (highest delta-knowledge), for watch-list panel. */
   topGains: Array<PlayerBadge & { knowledge: number }>
+  /** Hireable scouts on the market. */
+  scoutMarket: ScoutMarketRow[]
+  /** Cap on active scouts. */
+  maxScouts: number
 }
 
 /* ────────────────────────── story layer: history / locker room / tentpoles ────────────────────────── */
@@ -1509,6 +2571,8 @@ export interface HistoryView {
     points: RecordEntry[]
     wins: RecordEntry[]
     savePct: RecordEntry[]
+    /** Optional so older view consumers ignore it; absent → treat as empty. */
+    shutouts?: RecordEntry[]
   }
   /** Top-10 career boards. */
   career: {
@@ -1523,6 +2587,19 @@ export interface HistoryView {
   awards: AwardRecord[]
   /** Retired greats; hallOfFame=true once inducted. */
   legends: LegendRecord[]
+  /** Per-franchise championship pedigree (banner rafters), most titles first. */
+  franchises: FranchiseHistoryView[]
+}
+
+/** One NHL club's all-time championship record for the History screen. */
+export interface FranchiseHistoryView {
+  teamId: string
+  name: string
+  abbreviation: string
+  championships: number
+  /** Years the banner was raised, newest first. */
+  championYears: number[]
+  isUser: boolean
 }
 
 export interface RelationshipView {
@@ -1552,15 +2629,36 @@ export interface MedicalRow {
   injuryGamesRemaining?: number
   /** Injury body region, for the medical body diagram. */
   injuryKind?: 'upperBody' | 'lowerBody' | 'concussion' | 'illness'
+  /** #171: estimated return date (ISO) — the date of the next club game he can
+   *  play after sitting out his remaining games. Absent if not injured or no
+   *  scheduled game far enough out. */
+  estReturn?: string
+  /** #171: severity band from the timeline. */
+  severity?: 'day-to-day' | 'weeks' | 'long-term'
+  /** #171: GM has this healthy player on load-management rest. */
+  resting?: boolean
   /** Injury-risk band + 0–100 score. */
   riskLabel: 'Low' | 'Increased' | 'High'
   risk: number
+  /** #157: currently on Long-Term Injured Reserve (cap hit relieved). */
+  ltir?: boolean
+  /** #157: eligible to be placed on LTIR right now (long-term injury, not yet on IR). */
+  ltirEligible?: boolean
+  /** #157: his cap hit — the relief amount if placed on LTIR. Present when injured. */
+  capHit?: number
 }
 
 /** Response to 'getMedical' — the user club's medical/risk picture. */
 export interface MedicalView {
   teamName: string
   injuredCount: number
+  /** #171: total club games still to be missed across all current injuries. */
+  gamesToReturnTotal: number
+  /** #171: head physio (name + 0–100 quality) — better staff shorten recoveries. */
+  physioName?: string
+  physioRating?: number
+  /** #157: total LTIR cap relief in effect (0 when nobody is on LTIR). */
+  ltirRelief?: number
   rows: MedicalRow[]
 }
 
@@ -1575,6 +2673,129 @@ export type {
   CareerStage,
   PosGroup,
 } from './squadPlanner'
+
+/** One league-wide leaderboard the user's club is ranked within. */
+export interface LeagueComparisonCard {
+  key: string
+  label: string
+  /** Plain-English explanation of what the metric measures. */
+  blurb: string
+  /** User club's rank, 1 = best. */
+  rank: number
+  /** League size ranked against. */
+  outOf: number
+  /** 0–1 fraction of the league the user outranks (1 = top). */
+  percentile: number
+  /** User club's value, preformatted for display. */
+  display: string
+  /** League leader for this metric. */
+  leaderTeamId: string
+  leaderAbbr: string
+  leaderDisplay: string
+  /** True when the user's club is itself the leader. */
+  isUserLeader: boolean
+}
+
+/** "How your club stacks up" — dashboard comparison card. Response to 'getLeagueComparison'. */
+export interface LeagueComparisonView {
+  teamName: string
+  cards: LeagueComparisonCard[]
+}
+
+/** A player the coach is likely to act on (form/morale/condition) — staff meeting. */
+export interface StaffMeetingFlaggedPlayer {
+  playerId: string
+  name: string
+  faceId?: string
+  issue: 'slumping' | 'unhappy' | 'tired'
+  detail: string
+}
+
+/** Head-coach tactical identity + roster fit + flagged players. Response to 'getStaffMeetingSummary'. */
+export interface StaffMeetingSummaryView {
+  coachName: string
+  coachFaceId?: string
+  /** Named system, e.g. "Low-Event Trap". */
+  systemLabel: string
+  /** One-line description of how the system plays. */
+  systemBlurb: string
+  /** What roster composition the system favours. */
+  systemFavors: string
+  philosophy: string
+  forecheckName: string
+  breakoutName: string
+  nzName: string
+  dZoneName: string
+  ppName: string
+  pkName: string
+  paceName: string
+  /** 0–100 roster fit (styleMatch). */
+  rosterFit: number
+  fitLabel: string
+  fitAdvice: string[]
+  flagged: StaffMeetingFlaggedPlayer[]
+}
+
+/** A stored available coach in the hiring market (snapshot-serialised). */
+export interface CoachMarketEntry {
+  coach: StaffMember
+  /** Quality the coach is asking to be measured by (~rating). */
+  askingRating: number
+}
+
+/** One candidate row in the coach hiring market. */
+export interface CoachMarketCandidateView {
+  coachId: string
+  name: string
+  faceId?: string
+  rating: number
+  /** Demeanour label, e.g. "analytical". */
+  demeanor: string
+  systemLabel: string
+  philosophy: string
+  /** Roster fit vs the USER's current roster (0–100). */
+  rosterFit: number
+  fitLabel: string
+  fitBlurb: string
+}
+
+/** Coach hiring market. Response to 'getCoachMarket'. */
+export interface CoachMarketView {
+  currentCoachName: string
+  currentSystemLabel: string
+  currentRosterFit: number
+  entries: CoachMarketCandidateView[]
+}
+
+/** One team's Monte-Carlo playoff projection. */
+export interface PlayoffOddsRow {
+  teamId: string
+  name: string
+  abbreviation: string
+  conference: string
+  /** Current standings points. */
+  points: number
+  gamesPlayed: number
+  gamesRemaining: number
+  /** Mean simulated final points. */
+  projectedPoints: number
+  /** 0–100 chance of making the playoffs. */
+  playoffPct: number
+  isUser: boolean
+}
+
+/** Monte-Carlo playoff odds for the league. Response to 'getPlayoffOdds'. */
+export interface PlayoffOddsView {
+  /** False outside the regular season (no projection to make). */
+  available: boolean
+  /** Number of season simulations run. */
+  simulations: number
+  userTeamId: string
+  /** Playoff qualifiers per conference (the cut line): 8 (big league) or 4. */
+  qualifiers?: number
+  /** All teams, best projected points first. */
+  rows: PlayoffOddsRow[]
+}
 
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {
@@ -1598,6 +2819,10 @@ export interface TradeRumorView {
   /** 0–100 rumor heat. */
   heat: number
   sinceDay: number
+  /* additive display fields for the trade block */
+  position?: string
+  age?: number
+  faceId?: string
 }
 
 export interface CombineRowView {
@@ -1730,6 +2955,25 @@ export interface PracticeView {
   state: TeamPracticeState
   /** AGM-style coaching suggestion for team focus. */
   suggestion: { teamFocus: PracticeFocus; rationale: string }
+  /** #170: the effect preview for the active team focus — the tradeoff made
+   *  visible (which attributes it grows, how well the coach delivers it, and the
+   *  weekly fatigue swing). Optional so old snapshots/view builders stay valid. */
+  plan?: PracticePlanView
+}
+
+/** #170: what a practice focus actually does, for the Training screen. */
+export interface PracticePlanView {
+  focus: PracticeFocus
+  /** Top targeted attributes with their coach-scaled growth boost (as a %). */
+  targeted: Array<{ attr: string; boost: number }>
+  /** Signed fatigue points per practice week (negative = recovery). */
+  fatiguePerWeek: number
+  coachName: string
+  /** Coach's delivery effectiveness as a % (100 = neutral). */
+  coachMult: number
+  coachTier: 'elite' | 'strong' | 'adequate' | 'weak'
+  /** How much slower non-targeted attributes develop (opportunity cost, %). */
+  opportunityCostPct: number
 }
 
 /* ────────────────────────── league leaders view ────────────────────────── */
@@ -1742,6 +2986,8 @@ export interface LeagueLeaderEntry {
   gamesPlayed: number
   /** The ranked stat value. */
   value: number
+  /** Facepack image key (for the headshot on the League Overview leader cards). */
+  faceId?: string
 }
 
 /**
@@ -1855,6 +3101,22 @@ export interface TransactionsView {
 }
 
 /**
+ * Leaguewide "wire" feed for the ticker — recent transactions plus current
+ * notable hot/cold team streaks. The LEAGUE's voice (distinct from the club
+ * inbox). Response to 'getLeagueWire'.
+ */
+export interface LeagueWireView {
+  items: Array<{
+    kind: 'transaction' | 'streak'
+    text: string
+    /** Team this item is about, for deep-linking / accenting. */
+    teamAbbr?: string
+    /** True for marquee items (trades, long streaks) — the ticker can highlight. */
+    accent?: boolean
+  }>
+}
+
+/**
  * Daily scoreboard.
  * Response to 'getScoreboard'.
  */
@@ -1911,6 +3173,8 @@ export type CalendarEntry =
 export interface CalendarView {
   year: number
   entries: CalendarEntry[]
+  /** Current in-world date (offseason-aware). Optional/additive. */
+  todayISO?: string
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */
@@ -2075,4 +3339,32 @@ export interface TeamDataHubView {
   allTeams: TeamAnalyticsRow[]
   /** All goalies across the league (for goalie rank context). */
   allGoalies: GoalieAnalyticsRow[]
+}
+
+/* ────────────────────────── media circuit (#90) ────────────────────────── */
+
+/** The GM's standing with one named pundit, for the Media Circuit screen. */
+export interface MediaCircuitRowView {
+  personaId: 'beat' | 'national' | 'homer'
+  name: string
+  outlet: string
+  /** -100 (feud) … +100 (ally). */
+  rapport: number
+  standing: 'Ally' | 'Friendly' | 'Neutral' | 'Critic' | 'Feud'
+  /** One-line human read on the relationship. */
+  read: string
+  /** Number of press exchanges with this pundit. */
+  interactions: number
+  /** Short verb for the most recent exchange (e.g. "came out swinging"). */
+  lastExchange?: string
+}
+
+/** The GM's press relationships plus who leads for/against him. */
+export interface MediaCircuitView {
+  teamName: string
+  rows: MediaCircuitRowView[]
+  /** Strongest ally's display name, when any pundit is friendly or better. */
+  allyName?: string
+  /** Chief critic's display name, when any pundit is a critic or worse. */
+  criticName?: string
 }

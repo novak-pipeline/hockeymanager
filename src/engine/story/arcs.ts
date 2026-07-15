@@ -278,6 +278,39 @@ export function resolveArc(
   return arc
 }
 
+/** Order-independent key for the set of players a relationship arc links. */
+function actorKey(playerIds: string[]): string {
+  return [...playerIds].sort().join('|')
+}
+
+/**
+ * Relationship arcs (feud/mentorship) are seeded by events, not game data. If an
+ * unresolved arc of the same kind already links the SAME set of players, escalate
+ * that one (new beat + tension) instead of spawning a duplicate — so a feud that
+ * keeps flaring becomes one intensifying saga, not five parallel copies. Returns
+ * the arc that was created or escalated.
+ */
+export function createOrEscalateRelationshipArc(
+  state: ArcsState,
+  kind: 'feud' | 'mentorship',
+  playerIds: string[],
+  teamIds: string[],
+  summary: string,
+  day: number,
+  year: number,
+  tensionDelta = 15,
+): Arc {
+  const key = actorKey(playerIds)
+  const existing = state.arcs.find(
+    a => a.kind === kind && a.status !== 'resolved' && actorKey(a.actors.playerIds) === key,
+  )
+  if (existing) {
+    escalateArc(state, existing.id, summary, tensionDelta, day, year)
+    return existing
+  }
+  return createArc(state, kind, { playerIds, teamIds }, summary, day, year)
+}
+
 /* ─────────────────────────── ordinal helper ─────────────────────────── */
 
 function ordinal(n: number): string {
@@ -567,6 +600,9 @@ function detectBreakoutBust(
 
     const expected = inputs.expectedPoints(pid)
     if (expected === undefined) continue
+    // expectedPoints is PER GAME; pace is a full-season projection, so scale the
+    // expectation to a season total before comparing or displaying the two.
+    const expectedSeason = expected * inputs.seasonLength
     const pace = totals.gamesPlayed > 0
       ? (totals.points / totals.gamesPlayed) * inputs.seasonLength
       : 0
@@ -574,7 +610,7 @@ function detectBreakoutBust(
     const name = inputs.playerName(pid)
 
     if (arc.kind === 'breakoutSeason') {
-      if (pace < expected * 1.2) {
+      if (pace < expectedSeason * 1.2) {
         // Pace has regressed to normal — resolve.
         const summary = `Production pace normalized — breakout slowed`
         addBeat(arc, inputs.day, inputs.year, summary)
@@ -589,7 +625,7 @@ function detectBreakoutBust(
       } else {
         const prevTension = arc.tension
         setTension(arc, Math.min(95, arc.tension + 5))
-        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expected)})`
+        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expectedSeason)})`
         addBeat(arc, inputs.day, inputs.year, summary)
         if (
           (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
@@ -598,7 +634,7 @@ function detectBreakoutBust(
           seeds.push({
             category: 'league',
             headline: `${name}'s breakout season continues`,
-            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expected)}. After ${arc.beats.length} beats of this arc, the breakout looks real.`,
+            body: `${name} is on pace for ${Math.round(pace)} points this season, well above the expected ${Math.round(expectedSeason)}. This is no early-season fluke — the breakout looks real.`,
             playerId: pid,
             teamId: arc.actors.teamIds[0],
           })
@@ -606,7 +642,7 @@ function detectBreakoutBust(
       }
     } else {
       // bustWatch
-      if (pace > expected * 0.75) {
+      if (pace > expectedSeason * 0.75) {
         const summary = `Production recovering — bust watch lifted`
         addBeat(arc, inputs.day, inputs.year, summary)
         arc.status = 'resolved'
@@ -620,7 +656,7 @@ function detectBreakoutBust(
       } else {
         const prevTension = arc.tension
         setTension(arc, Math.min(95, arc.tension + 5))
-        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expected)})`
+        const summary = `On pace for ${Math.round(pace)} points (expected ${Math.round(expectedSeason)})`
         addBeat(arc, inputs.day, inputs.year, summary)
         if (
           (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
@@ -629,7 +665,7 @@ function detectBreakoutBust(
           seeds.push({
             category: 'league',
             headline: `${name} falling far short of expectations`,
-            body: `${name} is on pace for only ${Math.round(pace)} points, versus an expectation of ${Math.round(expected)}. The story is getting harder to ignore.`,
+            body: `${name} is on pace for only ${Math.round(pace)} points, versus an expectation of ${Math.round(expectedSeason)}. The story is getting harder to ignore.`,
             playerId: pid,
             ...(arc.actors.teamIds[0] !== undefined ? { teamId: arc.actors.teamIds[0] } : {}),
           })
@@ -647,13 +683,15 @@ function detectBreakoutBust(
 
     const expected = inputs.expectedPoints?.(pid)
     if (expected === undefined || expected <= 0) continue
+    // expectedPoints is PER GAME; scale to a season total to meet the pace.
+    const expectedSeason = expected * inputs.seasonLength
     const pace = (totals.points / totals.gamesPlayed) * inputs.seasonLength
     const name = inputs.playerName(pid)
     const pl = inputs.playerLines.find(p => p.playerId === pid)
     // pl is always found since pid comes from playerLines; teamId is always string.
     const teamId: string | undefined = pl?.teamId
 
-    if (pace >= expected * BREAKOUT_PACE_MULTIPLIER) {
+    if (pace >= expectedSeason * BREAKOUT_PACE_MULTIPLIER) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -666,7 +704,7 @@ function detectBreakoutBust(
           {
             day: inputs.day,
             year: inputs.year,
-            summary: `On pace for ${Math.round(pace)} points — ${Math.round((pace / expected - 1) * 100)}% above expectations`,
+            summary: `On pace for ${Math.round(pace)} points — ${Math.round((pace / expectedSeason - 1) * 100)}% above expectations`,
           },
         ],
         status: 'building',
@@ -675,11 +713,11 @@ function detectBreakoutBust(
       seeds.push({
         category: 'league',
         headline: `Breakout season: ${name} defying expectations`,
-        body: `${name} is on pace for ${Math.round(pace)} points, ${Math.round((pace / expected - 1) * 100)}% above preseason projections. Is this the real thing?`,
+        body: `${name} is on pace for ${Math.round(pace)} points, ${Math.round((pace / expectedSeason - 1) * 100)}% above preseason projections. Is this the real thing?`,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
       })
-    } else if (pace <= expected * BUST_PACE_MULTIPLIER) {
+    } else if (pace <= expectedSeason * BUST_PACE_MULTIPLIER) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -692,7 +730,7 @@ function detectBreakoutBust(
           {
             day: inputs.day,
             year: inputs.year,
-            summary: `On pace for only ${Math.round(pace)} points — ${Math.round((1 - pace / expected) * 100)}% below expectations`,
+            summary: `On pace for only ${Math.round(pace)} points — ${Math.round((1 - pace / expectedSeason) * 100)}% below expectations`,
           },
         ],
         status: 'building',
@@ -701,7 +739,7 @@ function detectBreakoutBust(
       seeds.push({
         category: 'league',
         headline: `${name} off to a costly slow start`,
-        body: `${name} is on pace for only ${Math.round(pace)} points, far below the expected ${Math.round(expected)}. Questions are mounting.`,
+        body: `${name} is on pace for only ${Math.round(pace)} points, far below the expected ${Math.round(expectedSeason)}. Questions are mounting.`,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
       })
@@ -713,14 +751,21 @@ function detectBreakoutBust(
 
 /* ─────────────────────────── detector: milestone watch ─────────────────────────── */
 
-/** Milestone numbers we watch for (goals, points, games). */
+/** Milestone numbers we watch for (goals, points). */
 const MILESTONE_NUMBERS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 50, 150, 250, 350]
+/** Games-played is a coarser, marquee-only ladder (ironman markers) — a 100th
+ *  game isn't news, but a 500th / 1000th is. */
+const GAMES_MILESTONES = [500, 1000, 1500]
 const MILESTONE_APPROACH_WINDOW = 10
 
-function nearestMilestone(current: number): number | null {
-  for (const m of MILESTONE_NUMBERS.sort((a, b) => a - b)) {
-    if (current < m && m - current <= MILESTONE_APPROACH_WINDOW) return m
-    if (current >= m && current - m < MILESTONE_APPROACH_WINDOW) return m
+function nearestMilestone(
+  current: number,
+  numbers: number[] = MILESTONE_NUMBERS,
+  window = MILESTONE_APPROACH_WINDOW,
+): number | null {
+  for (const m of [...numbers].sort((a, b) => a - b)) {
+    if (current < m && m - current <= window) return m
+    if (current >= m && current - m < window) return m
   }
   return null
 }
@@ -746,20 +791,24 @@ function detectMilestone(
     const goalMilestone = nearestMilestone(ct.goals)
     // Points milestone.
     const pointsMilestone = nearestMilestone(ct.points)
+    // Games-played milestone (ironman markers) — coarser ladder.
+    const gamesMilestone = nearestMilestone(ct.gamesPlayed, GAMES_MILESTONES)
 
     for (const [stat, milestone, currentVal] of [
       ['goals', goalMilestone, ct.goals],
       ['points', pointsMilestone, ct.points],
+      ['games', gamesMilestone, ct.gamesPlayed],
     ] as Array<[string, number | null, number]>) {
       if (!milestone) continue
 
-      const existingArc = state.arcs.find(
-        a =>
-          a.kind === 'milestoneWatch' &&
-          a.status !== 'resolved' &&
-          a.actors.playerIds[0] === pl.playerId &&
-          a.beats[0]?.summary.includes(`${milestone} career ${stat}`),
-      )
+      const matchesMilestone = (a: Arc): boolean =>
+        a.kind === 'milestoneWatch' &&
+        a.actors.playerIds[0] === pl.playerId &&
+        (a.beats[0]?.summary.includes(`${milestone} career ${stat}`) ?? false)
+      const existingArc = state.arcs.find(a => a.status !== 'resolved' && matchesMilestone(a))
+      // Any arc for this exact milestone, resolved or not — the fired-marker guard
+      // so a "just crossed" headline can't re-announce every game past the mark.
+      const anyMilestoneArc = state.arcs.find(matchesMilestone)
 
       if (currentVal >= milestone) {
         // Hit the milestone — resolve existing arc or create+resolve.
@@ -776,14 +825,27 @@ function detectMilestone(
             playerId: pl.playerId,
             teamId: pl.teamId,
           })
-        } else if (currentVal - milestone < 5) {
-          // Just crossed it this week, no prior arc — still fire milestone news.
+        } else if (currentVal - milestone < 5 && !anyMilestoneArc) {
+          // Just crossed it this week with no prior arc — fire once, then drop a
+          // resolved marker so the same milestone can't re-announce next game.
           seeds.push({
             category: 'milestone',
             headline: `${name} reaches ${milestone} career ${stat}`,
             body: `${name} has now recorded ${currentVal} career ${stat}, crossing the ${milestone} mark.`,
             playerId: pl.playerId,
             teamId: pl.teamId,
+          })
+          state.counter += 1
+          state.arcs.push({
+            id: makeId(state.counter),
+            kind: 'milestoneWatch',
+            actors: { playerIds: [pl.playerId], teamIds: [pl.teamId] },
+            tension: 100,
+            startedDay: inputs.day,
+            startedYear: inputs.year,
+            beats: [{ day: inputs.day, year: inputs.year, summary: `Reached ${milestone} career ${stat}` }],
+            status: 'resolved',
+            resolution: `Reached ${milestone} career ${stat}`,
           })
         }
       } else if (!existingMilestoneIds.has(pl.playerId) && !existingArc && milestone - currentVal <= MILESTONE_APPROACH_WINDOW) {
@@ -1166,6 +1228,68 @@ export interface TickArcsResult {
  * Deterministic: given the same state + inputs + rng sequence, always produces
  * the same output.
  */
+/* ─────────────────────── relationship arc resolution ─────────────────────── */
+
+const FEUD_COOL_PER_DAY = 1.5
+const FEUD_BOILOVER_TENSION = 78
+const FEUD_COOLED_TENSION = 12
+const REL_MIN_AGE_DAYS = 8
+const MENTORSHIP_RESOLVE_DAYS = 55
+
+/**
+ * feud/mentorship arcs are seeded by events (locker room, press), not game data,
+ * and before this they never ended — lingering forever with a generic annual
+ * beat. Here they finally RESOLVE in the feed: a feud's tension bleeds off each
+ * match day, so it cools to peace if it isn't re-stoked, or boils over if repeated
+ * flare-ups push it past the boil-over line; a mentorship runs its course once the
+ * protégé has had a full run. Each resolves exactly once (resolveArc is idempotent).
+ */
+function tickRelationshipArcs(state: ArcsState, inputs: ArcInputs, seeds: NewsSeed[]): void {
+  const ageDays = (a: Arc): number =>
+    (inputs.year - a.startedYear) * Math.max(1, inputs.seasonLength) + (inputs.day - a.startedDay)
+  const pairNames = (a: Arc): string => {
+    const names = a.actors.playerIds.map(id => inputs.playerName(id)).filter(Boolean)
+    if (names.length >= 2) return `${names[0]} and ${names[1]}`
+    return names[0] ?? 'two teammates'
+  }
+  for (const arc of state.arcs) {
+    if (arc.status === 'resolved') continue
+    if (arc.kind === 'feud') {
+      setTension(arc, arc.tension - FEUD_COOL_PER_DAY)
+      if (arc.tension >= FEUD_BOILOVER_TENSION) {
+        resolveArc(state, arc.id, `The feud between ${pairNames(arc)} boiled over — a locker-room blow-up the staff had to step in on.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `Locker-room feud boils over`,
+          body: `The simmering feud involving ${pairNames(arc)} finally erupted — a confrontation the coaching staff had to break up. The room will need to reset.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      } else if (arc.tension <= FEUD_COOLED_TENSION && ageDays(arc) >= REL_MIN_AGE_DAYS) {
+        resolveArc(state, arc.id, `${pairNames(arc)} have put their differences behind them.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `A locker-room feud cools`,
+          body: `Whatever was brewing between ${pairNames(arc)} has settled — teammates say the two have made their peace.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      }
+    } else if (arc.kind === 'mentorship') {
+      if (ageDays(arc) >= MENTORSHIP_RESOLVE_DAYS) {
+        resolveArc(state, arc.id, `The mentorship linking ${pairNames(arc)} has run its course — the young player has found his feet.`, inputs.day, inputs.year)
+        seeds.push({
+          category: 'league',
+          headline: `A mentorship pays off`,
+          body: `The partnership between ${pairNames(arc)} has borne fruit — the mentorship that shaped the youngster's season has run its course.`,
+          playerId: arc.actors.playerIds[0],
+          teamId: arc.actors.teamIds[0],
+        })
+      }
+    }
+  }
+}
+
 export function tickArcs({ state, inputs, rng }: TickArcsArgs): TickArcsResult {
   const seeds: NewsSeed[] = []
 
@@ -1176,6 +1300,7 @@ export function tickArcs({ state, inputs, rng }: TickArcsArgs): TickArcsResult {
   detectCinderellaCollapse(state, inputs, seeds)
   detectRookieRace(state, inputs, seeds)
   detectGoalieDuel(state, inputs, seeds, rng)
+  tickRelationshipArcs(state, inputs, seeds)
 
   // Final cap enforcement across all detectors.
   enforceCapInPlace(state)

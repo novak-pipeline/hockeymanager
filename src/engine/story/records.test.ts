@@ -5,9 +5,49 @@ import {
   inductHallOfFame,
   recordWatch,
   registerRetirements,
+  seedRecordsHistory,
   type RecordsState,
   type SeasonLine,
 } from './records'
+
+describe('seedRecordsHistory', () => {
+  const teams = Array.from({ length: 16 }, (_, i) => ({
+    id: `t${i}`, abbreviation: `T${i}`, name: `Team ${i}`,
+  }))
+  const mkRand = (seed: number) => {
+    let s = seed >>> 0
+    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0xffffffff }
+  }
+  const seed = (s: number) =>
+    seedRecordsHistory({ teams, currentYear: 2030, yearsBack: 15, rand: mkRand(s), makeName: () => `Player ${Math.floor(mkRand(s)() * 1e6)}` })
+
+  it('fabricates a plausible past: champions, legends, and leaderboards', () => {
+    const h = seed(42)
+    expect(h.seasons).toHaveLength(15)
+    // Every seeded season sits BEFORE the career start and names a champion.
+    for (const s of h.seasons) {
+      expect(s.year).toBeLessThan(2030)
+      expect(s.championName).not.toBeNull()
+      expect(s.leaders.points!.value).toBeGreaterThan(80)
+    }
+    expect(h.retiredLegends.length).toBeGreaterThan(8)
+    expect(h.retiredLegends.some((l) => l.hallOfFame)).toBe(true)
+    // All-time boards are populated and sorted high-to-low.
+    expect(h.career.points.length).toBeGreaterThan(0)
+    expect(h.career.points[0].value).toBeGreaterThanOrEqual(h.career.points[h.career.points.length - 1].value)
+    expect(h.singleSeason.points.length).toBeGreaterThan(0)
+  })
+
+  it('is deterministic for a given seed', () => {
+    expect(seed(7)).toEqual(seed(7))
+  })
+
+  it('returns empty history for an empty league', () => {
+    const h = seedRecordsHistory({ teams: [], currentYear: 2030, rand: mkRand(1), makeName: () => 'X' })
+    expect(h.seasons).toHaveLength(0)
+    expect(h.retiredLegends).toHaveLength(0)
+  })
+})
 
 /* ────────────────────────── helpers ────────────────────────── */
 
@@ -44,6 +84,7 @@ function goalieLine(
     goalieWins: overrides.goalieWins ?? 0,
     savePct: overrides.savePct ?? 0.900,
     shotsAgainst: overrides.shotsAgainst ?? 1800,
+    shutouts: overrides.shutouts ?? 0,
   }
 }
 
@@ -153,6 +194,20 @@ describe('archiveSeason — single-season boards', () => {
     ])
     expect(state.singleSeason.wins[0]!.value).toBe(44)
     expect(state.singleSeason.wins[1]!.value).toBe(38)
+  })
+
+  it('records goalie shutouts on the shutouts board (goalies only, zero omitted)', () => {
+    const state = emptyRecords()
+    archiveWith(state, 2001, [
+      goalieLine({ playerId: 'g1', name: 'Goalie1', shutouts: 9 }),
+      goalieLine({ playerId: 'g2', name: 'Goalie2', shutouts: 6 }),
+      goalieLine({ playerId: 'g3', name: 'Goalie3', shutouts: 0 }), // 0 → not recorded
+      skaterLine({ playerId: 'p1', name: 'Skater', goals: 50 }),
+    ])
+    const board = state.singleSeason.shutouts ?? []
+    expect(board[0]!.value).toBe(9)
+    expect(board[1]!.value).toBe(6)
+    expect(board.every((e) => e.playerId === 'g1' || e.playerId === 'g2')).toBe(true)
   })
 
   it('skaters do not appear on goalie boards and vice versa', () => {
@@ -585,7 +640,7 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     // No induction in 2011 or 2012
@@ -603,7 +658,7 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     inductHallOfFame(state, 2013)
@@ -626,14 +681,14 @@ describe('inductHallOfFame', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 220, careerAssists: 310, careerPoints: 530, careerGames: 980 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 420, careerAssists: 610, careerPoints: 1030, careerGames: 1180 }],
       year: 2010,
     })
     const seeds = inductHallOfFame(state, 2013)
     const body = seeds[0]!.body
-    expect(body).toMatch(/980 GP/)
-    expect(body).toMatch(/220 G/)
-    expect(body).toMatch(/530 PTS/)
+    expect(body).toMatch(/1180 GP/)
+    expect(body).toMatch(/420 G/)
+    expect(body).toMatch(/1030 PTS/)
     expect(body).toMatch(/2010/)  // retired year
   })
 
@@ -642,7 +697,7 @@ describe('inductHallOfFame', () => {
     state.awards.push({ year: 2008, award: 'MVP', playerId: 'p1', playerName: 'Legend', teamAbbr: 'TST', value: '100 PTS' })
     registerRetirements({
       state,
-      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 }],
+      retirees: [{ playerId: 'p1', name: 'Legend', careerGoals: 480, careerAssists: 560, careerPoints: 1040, careerGames: 1300 }],
       year: 2010,
     })
     const seeds = inductHallOfFame(state, 2013)
@@ -662,13 +717,37 @@ describe('inductHallOfFame', () => {
     expect(seeds[0]!.body).toMatch(/career points leader/)
   })
 
+  it('does NOT enshrine a merely-notable retiree — only the elite make the Hall', () => {
+    const state = emptyRecords()
+    registerRetirements({
+      state,
+      // A solid career (makes the Legends screen) but well below the HoF bar.
+      retirees: [{ playerId: 'p1', name: 'Solid Pro', careerGoals: 210, careerAssists: 260, careerPoints: 470, careerGames: 940 }],
+      year: 2010,
+    })
+    expect(state.retiredLegends).toHaveLength(1) // remembered as a legend...
+    expect(inductHallOfFame(state, 2013)).toHaveLength(0) // ...but not enshrined
+    expect(state.retiredLegends[0]!.hallOfFame).toBe(false)
+  })
+
+  it('enshrines a below-bar career if it holds an all-time record', () => {
+    const state = emptyRecords()
+    state.career.points.push({ value: 500, playerId: 'p1', playerName: 'Record Holder', teamAbbr: 'TST', year: 2008 })
+    registerRetirements({
+      state,
+      retirees: [{ playerId: 'p1', name: 'Record Holder', careerGoals: 210, careerAssists: 290, careerPoints: 500, careerGames: 900 }],
+      year: 2010,
+    })
+    expect(inductHallOfFame(state, 2013)).toHaveLength(1)
+  })
+
   it('handles multiple legends retiring in the same year', () => {
     const state = emptyRecords()
     registerRetirements({
       state,
       retirees: [
-        { playerId: 'p1', name: 'Legend1', careerGoals: 200, careerAssists: 210, careerPoints: 410, careerGames: 900 },
-        { playerId: 'p2', name: 'Legend2', careerGoals: 180, careerAssists: 250, careerPoints: 430, careerGames: 950 },
+        { playerId: 'p1', name: 'Legend1', careerGoals: 470, careerAssists: 560, careerPoints: 1030, careerGames: 1250 },
+        { playerId: 'p2', name: 'Legend2', careerGoals: 430, careerAssists: 590, careerPoints: 1020, careerGames: 1280 },
       ],
       year: 2010,
     })
