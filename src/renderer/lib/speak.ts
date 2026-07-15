@@ -72,3 +72,11 @@ export function speakAs(
 export function cancelSpeech(): void {
   _ann?.cancel()
 }
+
+/** Warm the neural voices in the background on app start, so they're already
+ *  downloaded and ready before the GM hears the first line — "downloaded by
+ *  default" rather than on-first-use. Opt-out and one-time; a failure silently
+ *  leaves the system voice in place. Safe post-crash-fix (single-threaded WASM). */
+export function warmNeuralVoices(): void {
+  maybeAutoLoadNeural()
+}
