@@ -150,6 +150,20 @@ export function lineupIssues(team: Team, players: Map<PlayerId, Player>): string
 /* ────────────────────────── repairLines ────────────────────────── */
 
 export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean {
+  // Imported / malformed data may reach here with no (or a broken) lines object.
+  // Synthesise an empty legal structure so the fill passes below can rebuild it
+  // from the roster instead of dereferencing undefined and aborting the caller
+  // (e.g. the offseason continue, which repairs every team in the league).
+  const EMPTY = asPlayerId('')
+  if (!team.lines || !Array.isArray(team.lines.forwards) || !Array.isArray(team.lines.defensePairs) || !Array.isArray(team.lines.goalies)) {
+    team.lines = {
+      forwards: [],
+      defensePairs: [],
+      goalies: [EMPTY, EMPTY],
+      powerPlayUnits: [],
+      penaltyKillUnits: [],
+    }
+  }
   const lines = team.lines
   const roster = new Set(team.roster)
   let changed = false

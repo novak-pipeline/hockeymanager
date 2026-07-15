@@ -5978,7 +5978,12 @@ export class Career {
             )
           }
         }
-        for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+        // Repair every club's lines for July 1 — but never let one malformed
+        // team (e.g. a quirk in an imported roster) throw and dead-end the
+        // GM's Continue. A team that can't be repaired is simply left as-is.
+        for (const team of this.data.teams.values()) {
+          try { repairLines(team, this.data.players) } catch { /* skip a bad team */ }
+        }
         os.stage = 'freeAgency'
         os.faDay = 0
         return true
