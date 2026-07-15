@@ -11056,6 +11056,10 @@ export class Career {
         return `Continue to ${MONTHS[parseInt(m ?? '1', 10) - 1]} ${parseInt(d ?? '1', 10)}`
       }
       if (this.phase === 'playoffs') return 'Continue — next playoff games'
+      // Dev camp is gated ahead of the market: while it's pending, the first
+      // Continue walks you into camp (not free agency), so say so — otherwise the
+      // button reads "open free agency" but routes to the rink.
+      if (this.devCampPending && this.phase === 'offseason') return 'Continue — development camp'
       const stage = this.offseason?.stage ?? 'awards'
       const labels: Record<string, string> = {
         awards: 'Continue — season awards & development',

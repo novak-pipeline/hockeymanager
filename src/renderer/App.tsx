@@ -349,11 +349,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       if (watched || e.repeat) return
       const t = e.target as HTMLElement | null
       const tag = t?.tagName
-      if (
-        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
-        tag === 'BUTTON' || tag === 'A' ||
-        t?.isContentEditable || t?.getAttribute('role') === 'button'
-      ) return
+      // Only bail when the GM is actually typing — space must ADVANCE the game
+      // (FM-style) even when a button/link happens to hold focus after a click.
+      // preventDefault below stops the focused control from also activating.
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return
       // Space sims the next day everywhere — EXCEPT on the inbox screen, where
       // it first steps through the unread mail (the inbox's own handler does
       // that and consumes the key). Once the inbox is all read, Space sims here.
