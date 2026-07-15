@@ -14,20 +14,24 @@ let _ann: Announcer | null = null
 let _neuralPreferred = false // switched the announcer over to neural once it's ready
 let _autoLoadKicked = false // fired the one-time background download
 
-/** GM opt-OUT of the automatic neural-voice download (default: auto-download on).
- *  The neural voices are the intended shipped sound — curated per character — so
- *  they fetch themselves the first time a voice is actually needed, with no button
- *  to hunt for. Only an explicit opt-out stops that. */
+/** GM opt-IN to the neural-voice download (default: OFF).
+ *  The neural (Kokoro) engine runs on onnxruntime-web, whose bundled WASM runtime
+ *  is the *threaded* build — it declares shared memory and aborts instantiation in
+ *  Electron's file:// renderer (no SharedArrayBuffer / cross-origin isolation),
+ *  taking the whole renderer process down as an UNCATCHABLE crash (not a JS error
+ *  a try/catch can stop). That fired on the first voice of a match or a trade call
+ *  and reset the app to the menu. Until the packaged neural path is proven
+ *  crash-free (see the follow-up: force the non-threaded ORT runtime + verify in
+ *  the real build), the model only loads when the GM explicitly opts in on the
+ *  Settings → AI Voices panel. The stable system voice covers everything else. */
 const LS_AUTO = 'hockey.voice.autoNeural'
 function autoNeuralEnabled(): boolean {
-  try { return localStorage.getItem(LS_AUTO) !== 'false' } catch { return true }
+  try { return localStorage.getItem(LS_AUTO) === 'true' } catch { return false }
 }
 
-/** Kick the neural download exactly once, in the background, the first time a
- *  voice is genuinely requested (entering a match, answering the phone). Silent:
- *  a failure just leaves the system voice in place. Now safe to auto-run because
- *  the onnxruntime WASM backend is pinned single-threaded (see kokoroVoice.ts),
- *  so it can no longer crash the renderer. */
+/** Kick the neural download once, in the background — ONLY if the GM opted in.
+ *  Silent: a failure just leaves the system voice in place. Off by default so a
+ *  trade call / match start can never trigger the onnxruntime renderer crash. */
 function maybeAutoLoadNeural(): void {
   if (_autoLoadKicked || !autoNeuralEnabled()) return
   if (kokoroState() !== 'unloaded') return
