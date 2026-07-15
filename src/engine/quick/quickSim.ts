@@ -625,12 +625,15 @@ function distributePhysicalStats(
 /**
  * Pick the goalie starting this game — a real tandem, not the #1 every night.
  * The backup gets a realistic share (~a third for a 1a/1b, tapering toward ~1
- * in 8 behind a workhorse starter), scaled by the goaltending gap. In the
- * playoffs the starter rides (backups only appear on a blowout hook, which the
- * sim doesn't model here), so no rotation. Deterministic via its own RNG so it
- * never perturbs the game's shot-by-shot stream.
+ * in 8 behind a workhorse starter), scaled by the goaltending gap. A gassed
+ * starter also gets rested: the more fatigue he's carrying, the likelier the
+ * backup draws in — modelling load management and the back half of a
+ * back-to-back, where coaches almost always turn to the No. 2. In the playoffs
+ * the starter rides (backups only appear on a blowout hook, which the sim
+ * doesn't model here), so no rotation. Deterministic via its own RNG (one draw
+ * regardless of the threshold) so it never perturbs the shot-by-shot stream.
  */
-function chooseStartingGoalie(
+export function chooseStartingGoalie(
   team: Team,
   resolve: (id: PlayerId) => Player,
   leagueAvg: number,
@@ -643,7 +646,13 @@ function chooseStartingGoalie(
   const starter = resolve(gs[0])
   const backup = resolve(gs[1])
   const relGap = (starter.composites.goaltending - backup.composites.goaltending) / Math.max(1, leagueAvg)
-  const backupShare = Math.max(0.12, Math.min(0.40, 0.34 - relGap * 1.5))
+  let backupShare = Math.max(0.12, Math.min(0.40, 0.34 - relGap * 1.5))
+  // Load management: goalie fatigue tops out around 20 in practice (rest recovers
+  // it fast), so a starter carrying ~6+ has been worked recently — a back-to-back
+  // or a dense week. The more he's carrying, the likelier the backup draws in, so
+  // a worn No. 1 gets a breather instead of being run into the ground.
+  const fatigueBoost = Math.max(0, Math.min(1, (starter.fatigue - 6) / 14)) // 0 at ≤6 … 1 at 20
+  backupShare = Math.min(0.85, backupShare + fatigueBoost * 0.6)
   return rng.chance(backupShare) ? gs[1] : gs[0]
 }
 
