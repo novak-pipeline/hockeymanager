@@ -197,20 +197,22 @@ function chooseKind(
   return null
 }
 
-function messageFor(p: Player, kind: InteractionKind, feudName: string | null): string {
-  const name = p.name.split(' ').pop() ?? p.name
+function messageFor(_p: Player, kind: InteractionKind, feudName: string | null): string {
+  // First person — the player is speaking directly TO the GM (this is voiced on the
+  // phone and read as his own words on the inbox card), not narrated in the third
+  // person (#1).
   switch (kind) {
     case 'tradeRequest':
-      return `${p.name} has asked to speak with you privately. He's unhappy with his situation and wants a move away from the club.`
+      return `I need to be straight with you — I'm not happy here. I think it's best for both of us if you move me. I want out.`
     case 'future':
-      return `${p.name} wants to talk about his future. With his contract winding down, he's looking for clarity on where he stands.`
+      return `I wanted to talk about my future. My deal's winding down, and I need to know where I stand with you.`
     case 'iceTime':
-      return `${p.name} feels he's ready for a bigger role and more responsibility on the ice. He wants to know your plans for him.`
+      return `I feel like I'm ready for more out there — a bigger role, more responsibility. What's your plan for me?`
     case 'feud':
-      return `${p.name} has come to you about friction in the room${feudName ? ` with ${feudName}` : ''}. It's starting to affect his game.`
+      return `I've got to be honest with you: there's friction in that room${feudName ? ` with ${feudName}` : ''}, and it's starting to get into my head on the ice.`
     case 'unhappy':
     default:
-      return `${name} seems unsettled lately. He's asked for a word about how things are going.`
+      return `Something's been off with me lately. Can we sit down and talk about where things are at?`
   }
 }
 

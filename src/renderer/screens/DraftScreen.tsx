@@ -84,6 +84,11 @@ function DraftBoard(props: {
                           >
                             {row.teamAbbr}
                           </span>
+                          {row.viaAbbr && (
+                            <span className="muted" style={{ fontSize: 10, marginLeft: 4 }} title={`Originally ${row.viaAbbr}'s pick`}>
+                              (via {row.viaAbbr})
+                            </span>
+                          )}
                           {isClock && (
                             <span
                               className="chip chip-warn"

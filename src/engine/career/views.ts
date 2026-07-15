@@ -1531,6 +1531,10 @@ export interface DraftPickRowView {
   round: number
   teamId: string
   teamAbbr: string
+  /** #13: abbreviation of the pick's ORIGINAL team when it was acquired via trade
+   *  (owner ≠ origin) — so "VAN (via MTL)" makes clear this slot is MTL's pick, not
+   *  Vancouver's own. Absent for a team's own pick. */
+  viaAbbr?: string
   /** Filled once selected. */
   selection: (PlayerBadge & { rank: number }) | null
   isUserPick: boolean

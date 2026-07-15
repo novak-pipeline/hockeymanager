@@ -15013,11 +15013,17 @@ export class Career {
       board: d.order.map((pick, i) => {
         const sel = d.selections[i]
         const team = this.data.teams.get(pick.ownerTeamId)!
+        // #13: pick provenance — if this slot is a pick the owner acquired via trade,
+        // surface the ORIGINAL team so "VAN (via MTL)" tells you which pick it is.
+        const via = pick.originalTeamId !== pick.ownerTeamId
+          ? this.data.teams.get(pick.originalTeamId)?.abbreviation
+          : undefined
         return {
           overallPick: i + 1,
           round: pick.round,
           teamId: pick.ownerTeamId as string,
           teamAbbr: team.abbreviation,
+          ...(via ? { viaAbbr: via } : {}),
           selection: sel
             ? {
                 ...badge(this.resolve(sel.playerId)),
