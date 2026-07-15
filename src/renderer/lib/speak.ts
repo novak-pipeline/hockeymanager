@@ -14,29 +14,48 @@ let _ann: Announcer | null = null
 let _neuralPreferred = false // switched the announcer over to neural once it's ready
 let _autoLoadKicked = false // fired the one-time background download
 
-/** GM opt-IN to the neural-voice download (default: OFF).
- *  The neural (Kokoro) engine runs on onnxruntime-web, whose bundled WASM runtime
- *  is the *threaded* build — it declares shared memory and aborts instantiation in
- *  Electron's file:// renderer (no SharedArrayBuffer / cross-origin isolation),
- *  taking the whole renderer process down as an UNCATCHABLE crash (not a JS error
- *  a try/catch can stop). That fired on the first voice of a match or a trade call
- *  and reset the app to the menu. Until the packaged neural path is proven
- *  crash-free (see the follow-up: force the non-threaded ORT runtime + verify in
- *  the real build), the model only loads when the GM explicitly opts in on the
- *  Settings → AI Voices panel. The stable system voice covers everything else. */
+/** Neural-voice auto-download — default: ON (opt-OUT).
+ *
+ *  History: the neural (Kokoro) engine runs onnxruntime-web's WASM runtime in the
+ *  renderer. The renderer used to run with the Chromium sandbox OFF
+ *  (webPreferences.sandbox: false), and with the sandbox off ORT access-violates the
+ *  renderer the moment it creates an InferenceSession — an UNCATCHABLE native crash
+ *  (not a JS error a try/catch can stop). That fired on the first voice of a match or a
+ *  trade call and reset the app to the menu, so the auto-load was defaulted OFF as a
+ *  stopgap.
+ *
+ *  Fixed by turning the Chromium renderer sandbox back ON (sandbox: true in
+ *  src/main/index.ts) — with the sandbox on, ORT instantiates cleanly and synthesises
+ *  without crashing. See also kokoroVoice.ts (WASM kept single-threaded, WebGPU never
+ *  attempted). With that in place the neural voices are downloaded and used by default;
+ *  set localStorage 'hockey.voice.autoNeural' to 'false' to opt out. */
 const LS_AUTO = 'hockey.voice.autoNeural'
 function autoNeuralEnabled(): boolean {
-  try { return localStorage.getItem(LS_AUTO) === 'true' } catch { return false }
+  try { return localStorage.getItem(LS_AUTO) !== 'false' } catch { return true }
 }
 
-/** Kick the neural download once, in the background — ONLY if the GM opted in.
- *  Silent: a failure just leaves the system voice in place. Off by default so a
- *  trade call / match start can never trigger the onnxruntime renderer crash. */
+/** Persist the GM's neural-voice preference (Settings toggle). */
+export function setAutoNeuralEnabled(on: boolean): void {
+  try { localStorage.setItem(LS_AUTO, on ? 'true' : 'false') } catch { /* ignore */ }
+  if (on) warmNeuralVoices()
+}
+
+/** Read the current neural-voice preference (for the Settings toggle UI). */
+export function isAutoNeuralEnabled(): boolean {
+  return autoNeuralEnabled()
+}
+
+/** Kick the neural download once, in the background — unless the GM opted out.
+ *  Silent to the user: on failure the stable system voice stays in place. Safe now
+ *  that the renderer sandbox is enabled (see the note above and src/main/index.ts). */
 function maybeAutoLoadNeural(): void {
   if (_autoLoadKicked || !autoNeuralEnabled()) return
   if (kokoroState() !== 'unloaded') return
   _autoLoadKicked = true
-  void loadKokoro().catch(() => { /* stay on the system voice */ })
+  void loadKokoro().then(
+    () => console.info('[voice] neural voices ready'),
+    (e) => console.warn('[voice] neural voices unavailable — using system voice:', (e as Error)?.message ?? e),
+  )
 }
 
 function announcer(): Announcer {

@@ -18,6 +18,7 @@ import {
   type VoiceQuality,
 } from '../lib/kokoroVoice'
 import { voiceFor } from '../lib/voiceCast'
+import { isAutoNeuralEnabled, setAutoNeuralEnabled } from '../lib/speak'
 
 type KeyStatus = 'unknown' | 'present' | 'absent' | 'saving' | 'testing'
 
@@ -257,6 +258,7 @@ function VoicePanel(): JSX.Element {
   const [state, setState] = useState<KokoroLoadState>(kokoroState())
   const [pct, setPct] = useState(0)
   const [errMsg, setErrMsg] = useState('')
+  const [autoNeural, setAutoNeural] = useState<boolean>(isAutoNeuralEnabled())
 
   async function download(): Promise<void> {
     if (state === 'downloading' || state === 'ready') return
@@ -293,9 +295,17 @@ function VoicePanel(): JSX.Element {
     <Panel title="AI Voices">
       <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
         Neural voices for commentary, staff meetings, and calls — cast per character. They
-        download themselves the first time a voice is needed (no button to hunt for) and run
-        fully local and offline after that; the system voice covers the gap until then.
+        download themselves in the background (no button to hunt for) and run fully local and
+        offline after that; the system voice covers the gap until then.
       </div>
+      <label className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12, cursor: 'pointer', fontSize: 12.5 }}>
+        <input
+          type="checkbox"
+          checked={autoNeural}
+          onChange={(e) => { const on = e.target.checked; setAutoNeuralEnabled(on); setAutoNeural(on) }}
+        />
+        <span>Download & use enhanced neural voices automatically <span className="muted">(recommended)</span></span>
+      </label>
       <div className="stack" style={{ gap: 6, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 600 }}>Fidelity</div>
         <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
