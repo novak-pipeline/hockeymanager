@@ -16,6 +16,7 @@ app.disableHardwareAcceleration()
 
 function createWindow(): void {
   const win = new BrowserWindow({
+    title: 'The Show: Franchise Hockey Manager',
     width: 1440,
     height: 900,
     minWidth: 1024,

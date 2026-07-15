@@ -71,6 +71,9 @@ export function App(): JSX.Element {
   const [seed, setSeed] = useState(randomSeed)
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
+  // The most recent save on disk, if any — powers the one-click Resume on the
+  // setup screen so a code reload (dev) or restart drops you back in your game.
+  const [resumeInfo, setResumeInfo] = useState<{ slot: string; teamName: string; year: number; phase: string } | null>(null)
   const [busy, setBusy] = useState(false)
   // Mod picker state
   const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
@@ -84,6 +87,14 @@ export function App(): JSX.Element {
     })
     // Discover available mods (non-blocking; silently empty on browser/no-mod)
     void listMods().then((mods) => setAvailableMods(mods))
+    // Detect the newest save so the setup screen can offer a one-click Resume
+    // (so a dev reload / restart doesn't dump you back to a blank new game).
+    void listCareerSaves()
+      .then((slots) => {
+        const newest = [...slots].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
+        if (newest) setResumeInfo({ slot: newest.slot, teamName: newest.teamName, year: newest.year, phase: newest.phase })
+      })
+      .catch(() => { /* no bridge / no saves — just show the new-game flow */ })
     // NOTE: the neural voices are NOT warmed on startup — running the onnxruntime
     // WASM at launch is heavy and best kept off the critical boot path. They
     // auto-load on the first spoken line instead (see speak.ts), so a fresh
@@ -119,6 +130,33 @@ export function App(): JSX.Element {
     }
   }
 
+  // One-click resume of the newest save — restores the worker and drops straight
+  // into the shell, so a dev reload / restart continues your game instead of a
+  // blank new one.
+  const resumeGame = async (): Promise<void> => {
+    if (!client || busy || !resumeInfo) return
+    setBusy(true)
+    try {
+      const snapshot = await loadCareer(resumeInfo.slot)
+      const res = await client.importSave(snapshot)
+      if (res.type === 'error') { toast(`Resume failed: ${res.message}`, 'error'); return }
+      const dashRes = await client.getDashboard()
+      const ut = dashRes.type === 'dashboard' ? dashRes.dashboard.userTeam : null
+      setUserTeam({
+        teamId: ut?.teamId ?? '',
+        name: ut?.name ?? resumeInfo.teamName,
+        abbreviation: ut?.abbreviation ?? '',
+        city: '', conference: '', division: '',
+        strength: 0, colors: { primary: 0, secondary: 0 },
+      })
+      setPhase('shell')
+    } catch (err) {
+      toast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const pickTeam = async (team: TeamInfo): Promise<void> => {
     if (!client || busy) return
     setBusy(true)
@@ -145,6 +183,8 @@ export function App(): JSX.Element {
               selectedModId={selectedModId}
               setSelectedModId={setSelectedModId}
               onCreate={() => void createLeague()}
+              resume={resumeInfo}
+              onResume={() => void resumeGame()}
             />
           )}
           {phase === 'picking' && (
@@ -231,12 +271,13 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   // To re-enable: restore the pollPress pump + <PressConference /> render below.
 
   // Autosave: after world-mutating calls, snapshot to the 'autosave' slot at
-  // most once every 3 minutes. Silent and fire-and-forget — zero progress-loss
-  // anxiety without save-spam. Load already picks the newest slot by mtime.
+  // most once every ~12s. Silent and fire-and-forget — so a code reload (dev) or
+  // a crash restores you to seconds ago, not the setup screen. The boot flow
+  // auto-resumes this slot; Load also picks the newest slot by mtime.
   const lastAutosaveRef = useRef(0)
   const maybeAutosave = useCallback((): void => {
     const now = Date.now()
-    if (now - lastAutosaveRef.current < 3 * 60 * 1000) return
+    if (now - lastAutosaveRef.current < 12 * 1000) return
     lastAutosaveRef.current = now
     void (async () => {
       try {
@@ -664,14 +705,32 @@ function SetupHero(props: {
   selectedModId: string
   setSelectedModId: (id: string) => void
   onCreate: () => void
+  resume: { teamName: string; year: number; phase: string } | null
+  onResume: () => void
 }): JSX.Element {
+  const phaseLabel = (p: string): string =>
+    p === 'offseason' ? 'offseason' : p === 'playoffs' ? 'playoffs' : 'regular season'
   return (
     <div className="hero">
-      <h1 className="hero-title">HOCKEY MANAGER</h1>
+      <h1 className="hero-title" style={{ marginBottom: 2 }}>THE SHOW</h1>
+      <div style={{ fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', color: 'var(--accent, #f5b301)', fontWeight: 700, marginBottom: 10 }}>
+        Franchise Hockey Manager
+      </div>
       <p className="hero-sub">
         Generate a league and choose a club. You take over in the summer — the draft,
         free agency and training camp are yours before the puck drops.
       </p>
+      {props.resume && (
+        <div className="panel" style={{ marginBottom: 'var(--sp-4)', borderColor: 'var(--accent, #f5b301)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+            <div>
+              <div className="muted small">Pick up where you left off</div>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{props.resume.teamName} · {props.resume.year} <span className="muted" style={{ fontWeight: 500 }}>({phaseLabel(props.resume.phase)})</span></div>
+            </div>
+            <button className="btn btn-primary btn-lg" autoFocus disabled={props.busy} onClick={props.onResume}>▶ Resume</button>
+          </div>
+        </div>
+      )}
       <div className="panel stack">
         {/* Database picker — only shown when at least one mod is installed */}
         {props.availableMods.length > 0 && (

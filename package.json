@@ -1,7 +1,8 @@
 {
-  "name": "hockey-manager",
+  "name": "the-show-fhm",
+  "productName": "The Show: Franchise Hockey Manager",
   "version": "0.0.1",
-  "description": "Single-player hockey management simulation (Football Manager / EHM spirit).",
+  "description": "The Show: Franchise Hockey Manager — single-player hockey management simulation (Football Manager / EHM spirit).",
   "author": "max",
   "license": "UNLICENSED",
   "private": true,
@@ -14,6 +15,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "app": "electron-vite build && electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
