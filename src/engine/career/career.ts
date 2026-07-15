@@ -175,7 +175,7 @@ import {
   type RecordsState,
   type SeasonLine,
 } from '@engine/story/records'
-import { detectGameStory } from '@engine/story/gameStory'
+import { detectGameStory, detectPlayerStory, type PlayerGameLine } from '@engine/story/gameStory'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 import {
   buildPreseasonOdds,
@@ -4067,6 +4067,25 @@ export class Career {
     }
     const beat = detectGameStory({ goalByUser, won: us > them, goalie, userShots, oppShots })
     if (beat) this.pushNews('result', beat.headline, beat.body, { teamId: opp.id as string })
+
+    /* ── Individual heroics: a hat trick, a big multi-point night, a shutout. ── */
+    const userLines: PlayerGameLine[] = []
+    for (const [pid, s] of res.playerStats) {
+      if (!userRoster.has(pid as unknown as string) || s.toi <= 0) continue
+      const p = this.resolve(pid)
+      userLines.push({
+        playerId: pid as unknown as string,
+        name: p.name,
+        isGoalie: p.position === 'G',
+        goals: s.goals,
+        assists: s.assists,
+        saves: s.saves,
+        shotsAgainst: s.shotsAgainst,
+        goalsAgainst: s.goalsAgainst,
+      })
+    }
+    const solo = detectPlayerStory(userLines)
+    if (solo) this.pushNews('result', solo.headline, solo.body, { playerId: solo.playerId, teamId: this.userTeamId as string })
 
     /* ── Coach quote: big win (≥3 goal margin, regulation) or bad loss (≥3 goal margin) ── */
     const diff = us - them

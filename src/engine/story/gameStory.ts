@@ -92,3 +92,74 @@ export function detectGameStory(inp: GameStoryInput): GameStoryBeat | null {
 
   return null
 }
+
+export type PlayerStoryKind = 'hatTrick' | 'bigNight' | 'shutout'
+
+export interface PlayerStoryBeat {
+  kind: PlayerStoryKind
+  playerId: string
+  headline: string
+  body: string
+}
+
+/** One player's line from a finished game, for spotting individual heroics. */
+export interface PlayerGameLine {
+  playerId: string
+  name: string
+  isGoalie: boolean
+  goals: number
+  assists: number
+  saves: number
+  shotsAgainst: number
+  goalsAgainst: number
+}
+
+/**
+ * Pick the single most notable individual performance from a club's box score —
+ * the hat trick, the big multi-point night, the shutout — or null on an ordinary
+ * night. The hat trick is hockey's iconic personal moment, so it outranks a big
+ * points night; a clean shutout is the goalie's equivalent. Pure/deterministic.
+ */
+export function detectPlayerStory(lines: PlayerGameLine[]): PlayerStoryBeat | null {
+  let hat: PlayerGameLine | null = null // most goals ≥ 3
+  let big: PlayerGameLine | null = null // most points ≥ 4 (non-hat)
+  let sho: PlayerGameLine | null = null // shutout, most saves
+  for (const l of lines) {
+    const points = l.goals + l.assists
+    if (!l.isGoalie && l.goals >= 3 && (!hat || l.goals > hat.goals || (l.goals === hat.goals && points > hat.goals + hat.assists))) {
+      hat = l
+    }
+    if (!l.isGoalie && l.goals < 3 && points >= 4 && (!big || points > big.goals + big.assists)) big = l
+    if (l.isGoalie && l.goalsAgainst === 0 && l.shotsAgainst >= 18 && (!sho || l.saves > sho.saves)) sho = l
+  }
+
+  if (hat) {
+    const pts = hat.goals + hat.assists
+    const label = hat.goals >= 4 ? `a ${hat.goals}-goal night` : 'a hat trick'
+    const tail = pts > hat.goals ? ` (${pts} points)` : ''
+    return {
+      kind: 'hatTrick',
+      playerId: hat.playerId,
+      headline: `${hat.name} nets ${label}!`,
+      body: `${hat.name} lit the lamp ${hat.goals} times${tail} — the kind of night that ends up on the highlight reel.`,
+    }
+  }
+  if (big) {
+    const pts = big.goals + big.assists
+    return {
+      kind: 'bigNight',
+      playerId: big.playerId,
+      headline: `${big.name} racks up a ${pts}-point night`,
+      body: `${big.name} was all over the scoresheet: ${big.goals}G, ${big.assists}A.`,
+    }
+  }
+  if (sho) {
+    return {
+      kind: 'shutout',
+      playerId: sho.playerId,
+      headline: `${sho.name} slams the door — ${sho.saves}-save shutout`,
+      body: `${sho.name} turned aside all ${sho.shotsAgainst} shots for the clean sheet.`,
+    }
+  }
+  return null
+}
