@@ -637,38 +637,52 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
     },
   ]
 
+  // Record-watch is RARE by design. Two rules keep it from flooding a league full
+  // of scorers (the "5 million on-pace messages" bug): (1) only a genuine run at
+  // the ALL-TIME #1 mark, clearly ahead of it (>3%), not merely top-3; (2) at most
+  // ONE alert emitted per call — the most emphatic run — so other chasers surface
+  // on later ticks instead of all at once. Per (player,stat,year) dedup still holds.
+  type Cand = { seed: NewsSeed; emitKey: string; margin: number }
+  const cands: Cand[] = []
   for (const { key, extract, filter } of statExtractors) {
     const board = state.singleSeason[key] ?? []
-    if (board.length < 3) continue
-    const top3Record = board[2]! // third-best is the threshold to beat
+    if (board.length < 1) continue
+    const record = board[0]! // the all-time single-season mark to break
 
     for (const line of seasonLines) {
       if (!filter(line)) continue
-
       const current = extract(line)
       if (current === null) continue
 
       const projected = pace(current)
-      if (projected <= top3Record.value) continue
+      if (projected <= record.value * 1.03) continue // clearly on pace to BREAK it
 
-      // Would beat top-3 — check if we've already emitted this alert
       const emitKey = `${line.playerId}:${key}:${year}`
       if (state.emittedPaceKeys.includes(emitKey)) continue
 
-      state.emittedPaceKeys.push(emitKey)
-
       const fv = key === 'savePct' ? projected.toFixed(3).replace(/^0/, '') : Math.round(projected).toString()
       const label = recordLabel(key)
-      newsSeeds.push({
-        category: 'milestone',
-        headline: `${line.name} on pace to crack the all-time top-3 ${label} record`,
-        body:
-          `${line.name} (${line.teamAbbr}) is currently tracking toward ${fv} ${label}s this season, ` +
-          `which would surpass the 3rd-best single-season mark of ${fmtValue(key, top3Record.value)} ` +
-          `set by ${top3Record.playerName} in ${top3Record.year}.`,
-        playerId: line.playerId,
+      cands.push({
+        emitKey,
+        margin: record.value > 0 ? projected / record.value : projected,
+        seed: {
+          category: 'milestone',
+          headline: `${line.name} on pace to break the all-time ${label} record`,
+          body:
+            `${line.name} (${line.teamAbbr}) is tracking toward ${fv} ${label}s this season, ` +
+            `which would break the single-season record of ${fmtValue(key, record.value)} ` +
+            `set by ${record.playerName} in ${record.year}.`,
+          playerId: line.playerId,
+        },
       })
     }
+  }
+
+  cands.sort((a, b) => b.margin - a.margin)
+  const best = cands[0]
+  if (best) {
+    state.emittedPaceKeys.push(best.emitKey)
+    newsSeeds.push(best.seed)
   }
 
   return { newsSeeds }

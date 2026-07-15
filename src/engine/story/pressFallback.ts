@@ -1490,6 +1490,18 @@ export function renderFallback(job: PressJob): FallbackArticle {
   if (kindTemplates) {
     const templates = kindTemplates[persona]
     if (templates && templates.length > 0) {
+      // #5: power rankings must match the calendar. The "preseason projections"
+      // template (index 0) is only right before opening night; a date-agnostic
+      // pick was firing it mid-season (a December "preseason power rankings"). Force
+      // phase-appropriate copy: template[0] preseason, template[1+] in-season refresh.
+      if (sheet.kind === 'powerRankings') {
+        const t = sheet.team
+        const isPreseason = t.wins + t.losses + t.otLosses === 0
+        const idx = isPreseason
+          ? 0
+          : Math.min(templates.length - 1, 1 + (seed % Math.max(1, templates.length - 1)))
+        return templates[idx]!(sheet, seed)
+      }
       return pick(templates, seed)(sheet, seed)
     }
   }
