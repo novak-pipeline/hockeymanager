@@ -358,11 +358,12 @@ function lineupStableFloat(id: string, salt: number): number {
 
 /**
  * How much a coach moves a player up/down the depth chart for current form,
- * morale and condition — on top of raw skill. Exactly 0 at neutral inputs
- * (form 0, morale 50, full condition) so a roster of neutral players reproduces
- * the old skill-only ordering. Form is the loudest lever (the drama lever);
- * morale next; tiredness is a one-sided penalty. Form/morale scale by coach
- * rating — a poor coach under-reacts and leaves a slumping player in too long.
+ * morale, condition and match rust — on top of raw skill. Exactly 0 at neutral
+ * inputs (form 0, morale 50, full condition, no rust) so a roster of neutral
+ * players reproduces the old skill-only ordering. Form is the loudest lever (the
+ * drama lever); morale next; tiredness and match rust are one-sided penalties.
+ * Form/morale scale by coach rating — a poor coach under-reacts and leaves a
+ * slumping player in too long.
  */
 export function coachFormMoraleConditionAdj(p: Player, coach: StaffMember): number {
   const react = Math.max(0, Math.min(1, coach.rating / 90))
@@ -370,7 +371,11 @@ export function coachFormMoraleConditionAdj(p: Player, coach: StaffMember): numb
   const moraleAdj = Math.max(-4, Math.min(4, ((p.morale - 50) / 50) * 4)) * react
   const condition = 100 - p.fatigue
   const conditionAdj = condition >= 60 ? 0 : -((60 - condition) / 60) * 10
-  return formAdj + moraleAdj + conditionAdj
+  // Match rust: a just-returned player is eased back with sheltered minutes
+  // (lower in the order) until he rounds into game shape — rustGames burns off
+  // as he plays. One-sided, like the tiredness penalty; 0 when fully sharp.
+  const rustAdj = p.rustGames ? -Math.min(6, p.rustGames) * 0.9 : 0
+  return formAdj + moraleAdj + conditionAdj + rustAdj
 }
 
 /**

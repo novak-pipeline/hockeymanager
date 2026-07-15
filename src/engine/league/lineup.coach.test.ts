@@ -222,6 +222,20 @@ describe('coachSetLineup — form / morale / condition', () => {
     expect(tired).toBeLessThan(-5) // ≈ -6.7, enough to overcome a sub-5 OVR edge
   })
 
+  it('eases a just-returned rusty player down the depth chart until he is sharp', () => {
+    const p = makeRoster(6).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 80 })
+    const sharp = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 0 } as Player, coach)
+    const veryRusty = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 0, rustGames: 6 } as Player, coach)
+    const easing = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 0, rustGames: 2 } as Player, coach)
+    expect(sharp).toBe(0)
+    expect(veryRusty).toBeLessThan(0)
+    expect(veryRusty).toBeLessThan(easing) // more rust → eased further down
+    // ...and the penalty fades to nothing as he rounds into form.
+    expect(easing).toBeGreaterThan(veryRusty)
+    expect(easing).toBeLessThan(0)
+  })
+
   it('does not bury a star who is cold, unhappy and tired', () => {
     const roster = makeRoster(8)
     const star = topForward(roster)
