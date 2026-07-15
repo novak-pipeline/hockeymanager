@@ -314,6 +314,7 @@ import {
 import {
   applyResultMorale,
   effectiveResolve,
+  formDeltaFromGame,
   rollInjuries,
   tickRecovery,
 } from '@engine/league/condition'
@@ -3964,7 +3965,11 @@ export class Career {
     for (const [pid, s] of res.playerStats) {
       if (s.toi <= 0) continue
       played.add(pid)
-      participants.push({ player: this.resolve(pid), toi: s.toi })
+      const player = this.resolve(pid)
+      participants.push({ player, toi: s.toi })
+      // Earned form: tonight's box score heats up hot hands and cools quiet
+      // stars. Deterministic (no Rng), so it doesn't perturb the injury roll.
+      player.form = Math.max(-5, Math.min(5, player.form + formDeltaFromGame(player, s)))
     }
     const injuries = rollInjuries({ participants, rng: dayRng })
     for (const inj of injuries) {

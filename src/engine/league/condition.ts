@@ -20,6 +20,7 @@
  * harness (build step #5) to refine.
  */
 import type { CompositeRatings, Injury, InjuryKind, Player, PlayerId, Team } from '@domain'
+import type { GamePlayerStat } from '@engine/shared/outcome'
 import type { Rng } from '@engine/shared/rng'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -225,6 +226,60 @@ export function applyResultMorale(args: {
     if (!p) continue
     p.morale = clamp(p.morale + delta, 0, 100)
   }
+}
+
+/* ────────────────────────── earned form (hot/cold) ────────────────────────── */
+
+/**
+ * Performance-driven form nudge from one game's box score.
+ *
+ * `form` (−5..+5) is read all over the app — the lineup AI benches "slumping"
+ * players, scouts bias their reports, coaches flag cold top-sixers, projections
+ * say "in strong form" — but its only other input is a gentle random walk
+ * (`tickRecovery`). That means a hat trick and an invisible night moved form the
+ * same way. This grounds streaks in the ice: a good night pushes form up, a
+ * quiet one nudges it down, measured against what a player of this caliber is
+ * *expected* to produce (a star's pointless night dings more than a grinder's).
+ * The random walk + 0.9 daily decay stay on top as noise/regression, so streaks
+ * build over several games and fade without production.
+ *
+ * Deterministic — a pure function of the box score, so it consumes no Rng and
+ * seeded league replays are byte-for-byte unchanged. Returns a delta to add to
+ * `player.form`; the caller clamps the running total to [-5, 5].
+ */
+export function formDeltaFromGame(player: Player, stat: GamePlayerStat): number {
+  if (player.position === 'G') {
+    const faced = stat.shotsAgainst
+    if (faced <= 0) return 0
+    const savePct = stat.saves / faced
+    // Expected save%, tilted by the goalie's own quality: an elite netminder is
+    // held to a higher bar than a backup (~.870 poor … ~.930 elite).
+    const baseline = 0.9 + (player.composites.goaltending - 60) * 0.001
+    const confidence = Math.min(1, faced / 25) // low-volume nights swing less
+    let d = (savePct - baseline) * 12 * confidence
+    if (stat.goalsAgainst === 0 && faced >= 15) d += 0.4 // shutout glow
+    if (stat.goalsAgainst >= 5) d -= 0.3 // got shelled
+    return clamp(d, -0.7, 1.2)
+  }
+
+  // Skater: a lightweight game-score from the counters fans actually notice.
+  const gs =
+    0.9 * stat.goals +
+    0.6 * stat.assists +
+    0.05 * stat.shots +
+    0.12 * stat.plusMinus +
+    0.05 * stat.blockedShots +
+    0.06 * stat.takeaways -
+    0.06 * stat.giveaways
+  // Expected output scales with offensive caliber → stars are held to standard,
+  // depth guys are graded on a curve. Scoring is steeply non-linear in rating
+  // (a 55 is a bottom-six chip-in; an 85 drives a line), so the baseline uses a
+  // power curve, not the raw rating: ~0.11 at 32, ~0.30 at 55, ~0.70 at 85.
+  const offense = (player.composites.scoring + player.composites.playmaking) / 2
+  const baseline = Math.pow(offense / 100, 1.9) * 0.95
+  // Full-minute players' nights carry full weight; cameo minutes weigh less.
+  const toiWeight = clamp(stat.toi / 1000, 0.4, 1)
+  return clamp((gs - baseline) * 0.7 * toiWeight, -0.6, 1.2)
 }
 
 /* ────────────────────────── sim injection seam ────────────────────────── */
