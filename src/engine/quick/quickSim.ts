@@ -26,6 +26,7 @@ import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
@@ -73,7 +74,7 @@ export type QuickSimResult = GameOutcome
 // Home-ice conversion edge (applied +to home / −to away, so it's calibration-
 // neutral on total goals). Tuned to land the equal-strength home win rate near
 // the real-NHL ~53-54%.
-const HOME_ICE_EDGE = 0.06
+const HOME_ICE_EDGE = 0.05
 const FWD_LINE_WEIGHTS = [0.34, 0.28, 0.22, 0.16]
 const DEF_PAIR_WEIGHTS = [0.42, 0.34, 0.24]
 // #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
@@ -123,6 +124,9 @@ class TeamSim {
   /** The goalie starting THIS game (rotation, set by the caller). Falls back to
    *  the depth-chart starter when unset. */
   startingGoalie: PlayerId | null = null
+  /** Multiplier on goals this starter concedes tonight (mean 1.0; <1 = hot, >1 =
+   *  leaking) — the "hot goalie / off night" lever, set once per game. */
+  goalieNight = 1
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -336,9 +340,11 @@ function simShift(
     // give the standings a realistic ~53-54% home win rate. (The full sim already
     // carries a comparable edge emergently; this brings the quick sim in line.)
     const homeIce = attackingIsHome ? 1 + HOME_ICE_EDGE : 1 - HOME_ICE_EDGE
+    // defending.goalieNight (mean 1.0) is the goalie's night — a hot one turns
+    // more aside, an off night lets more through.
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce)
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce * defending.goalieNight)
     )
 
     if (rng.chance(pGoal)) {
@@ -683,6 +689,10 @@ export function quickSimGame(
   const gRng = new Rng((opts.seed ^ 0x60a11e5) >>> 0)
   homeSim.startingGoalie = chooseStartingGoalie(home, resolve, ctx.leagueAvg, gRng, rules)
   awaySim.startingGoalie = chooseStartingGoalie(away, resolve, ctx.leagueAvg, gRng, rules)
+  // The starter's night (hot goalie / off night), mean 1.0 so season scoring is
+  // unchanged — stable hash, so the shot stream is untouched.
+  homeSim.goalieNight = goalieNightFactor(opts.seed, homeSim.startingGoalie as string)
+  awaySim.goalieNight = goalieNightFactor(opts.seed, awaySim.startingGoalie as string)
 
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
     simPeriod(ctx, homeSim, awaySim, period, PERIOD_SECONDS, false)

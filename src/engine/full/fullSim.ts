@@ -73,6 +73,7 @@ import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -297,6 +298,9 @@ class TeamSim {
   pulled = false
   /** "<kind>:<count>" of the current deployment, so strength changes redeploy. */
   deployKey = ''
+  /** Multiplier on goals this goalie concedes tonight (mean 1.0; <1 = hot, >1 =
+   *  leaking) — the "hot goalie / off night" lever, rolled once per game. */
+  goalieNight = 1
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -906,9 +910,11 @@ function simPeriod(
     const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
     // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
     const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
+    // def.goalieNight (mean 1.0) is the goalie's night: a hot one eats goals, an
+    // off night coughs them up. Empty net is nobody's fault, so it's exempt.
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf, 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight, 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
     const gs = goalStrengthNow(atk, def)
@@ -2186,6 +2192,9 @@ export function fullSimGame(
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
+  // Roll each starter's nightly sharpness once (stable hash → no RNG-stream cost).
+  homeSim.goalieNight = goalieNightFactor(opts.seed, home.lines.goalies[0] as string)
+  awaySim.goalieNight = goalieNightFactor(opts.seed, away.lines.goalies[0] as string)
 
   let absBase = 0
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
