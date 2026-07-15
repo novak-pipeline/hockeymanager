@@ -70,7 +70,7 @@ import type {
   Zone
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
-import type { GameRules } from '@engine/shared/rules'
+import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
@@ -914,7 +914,7 @@ function simPeriod(
     // off night coughs them up. Empty net is nobody's fault, so it's exempt.
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight, 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight * (ctx.scoringMult ?? 1), 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
     const gs = goalStrengthNow(atk, def)
@@ -2188,7 +2188,7 @@ export function fullSimGame(
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null, scoringMult: playoffScoringMult(rules) }
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)

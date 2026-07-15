@@ -23,7 +23,7 @@ import type {
   XY
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
-import type { GameRules } from '@engine/shared/rules'
+import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
@@ -197,6 +197,9 @@ interface Ctx {
    *  point totals — otherwise a junior loop of sub-50 skaters scores almost
    *  nothing and its leader tops out around 0.4 PPG. */
   leagueAvg: number
+  /** Per-shot goal-probability multiplier for the game context (playoff
+   *  tightening). Absent → 1.0 (regular season, unchanged). */
+  scoringMult?: number
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -344,7 +347,7 @@ function simShift(
     // more aside, an off night lets more through.
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce * defending.goalieNight)
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf * homeIce * defending.goalieNight * (ctx.scoringMult ?? 1))
     )
 
     if (rng.chance(pGoal)) {
@@ -681,7 +684,7 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG, scoringMult: playoffScoringMult(rules) }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
   // Goalie rotation on a SEPARATE deterministic RNG so the game's shot stream is

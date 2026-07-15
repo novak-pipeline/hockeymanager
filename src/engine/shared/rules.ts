@@ -9,3 +9,14 @@
  * to 'regularSeason' when omitted.
  */
 export type GameRules = 'regularSeason' | 'playoff'
+
+/**
+ * Playoff hockey scores less than the regular season — tighter checking, more
+ * blocked shots, desperation defense, a shorter leash on mistakes. Real NHL
+ * playoff goals-per-game run roughly 8–12% below the regular-season rate. Both
+ * engines multiply their per-shot goal probability by this in the postseason, so
+ * playoff series are the tense, goaltending-and-defense affairs they should be.
+ */
+export function playoffScoringMult(rules: GameRules): number {
+  return rules === 'playoff' ? 0.88 : 1
+}

@@ -156,6 +156,9 @@ export interface Ctx {
   stream: GameEvent[]
   stats: Map<PlayerId, GamePlayerStat>
   telemetry: FullSimTelemetry | null
+  /** Per-shot goal-probability multiplier for the game context (e.g. playoff
+   *  tightening). Absent → 1.0 (regular season, unchanged). */
+  scoringMult?: number
 }
 
 export function clamp(v: number, lo: number, hi: number): number {
