@@ -675,6 +675,13 @@ export function chooseStartingGoalie(
   // a worn No. 1 gets a breather instead of being run into the ground.
   const fatigueBoost = Math.max(0, Math.min(1, (starter.fatigue - 6) / 14)) // 0 at ≤6 … 1 at 20
   backupShare = Math.min(0.85, backupShare + fatigueBoost * 0.6)
+  // Ride the hot hand: a backup who's been stealing games while the starter
+  // leaks earns extra looks, and a red-hot No. 1 rides even harder. Form is
+  // −5..+5 and moves off save% (see formDeltaFromGame), so this keys off who's
+  // actually playing well — the classic "backup takes the net and won't give it
+  // back" run, or a slumping starter sitting until he finds it.
+  const formEdge = Math.max(-8, Math.min(8, backup.form - starter.form)) // >0 = backup hotter
+  backupShare = Math.max(0.05, Math.min(0.9, backupShare + formEdge * 0.035))
   return rng.chance(backupShare) ? gs[1] : gs[0]
 }
 

@@ -20,7 +20,14 @@ function setup(seed: number) {
     const p = players.get(id)!
     return id === starterId ? { ...p, fatigue } : p
   }
-  return { team, starterId, backupId, resolverWithStarterFatigue }
+  // Resolver that sets each goalie's form (hot/cold), everyone else passes through.
+  const resolverWithForm = (starterForm: number, backupForm: number) => (id: PlayerId): Player => {
+    const p = players.get(id)!
+    if (id === starterId) return { ...p, form: starterForm }
+    if (id === backupId) return { ...p, form: backupForm }
+    return p
+  }
+  return { team, starterId, backupId, resolverWithStarterFatigue, resolverWithForm }
 }
 
 function backupShareOver(
@@ -62,5 +69,23 @@ describe('chooseStartingGoalie — load management', () => {
     const { team, backupId, resolverWithStarterFatigue } = setup(3)
     const gassed = backupShareOver(team, resolverWithStarterFatigue(20), backupId)
     expect(gassed).toBeLessThanOrEqual(0.85)
+  })
+})
+
+describe('chooseStartingGoalie — ride the hot hand', () => {
+  it('a hot backup + cold starter takes the net; a hot starter rides harder', () => {
+    const { team, backupId, resolverWithForm } = setup(7)
+    const neutral = backupShareOver(team, resolverWithForm(0, 0), backupId)
+    const backupHot = backupShareOver(team, resolverWithForm(-4, 4), backupId) // backup stealing, starter leaking
+    const starterHot = backupShareOver(team, resolverWithForm(4, -4), backupId) // No. 1 rolling
+    expect(backupHot).toBeGreaterThan(neutral + 0.15) // backup seizes starts
+    expect(starterHot).toBeLessThan(neutral - 0.05) // hot starter rides even more
+  })
+
+  it('leaves the split alone when both goalies are in even form', () => {
+    const { team, backupId, resolverWithForm } = setup(11)
+    const a = backupShareOver(team, resolverWithForm(0, 0), backupId)
+    const b = backupShareOver(team, resolverWithForm(3, 3), backupId) // both hot, no edge
+    expect(b).toBeCloseTo(a, 5)
   })
 })
