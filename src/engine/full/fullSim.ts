@@ -74,6 +74,7 @@ import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
+import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -2128,26 +2129,27 @@ function simPeriod(
 
 function shootout(ctx: Ctx, home: TeamSim, away: TeamSim, period: number): void {
   const rng = ctx.rng
-  const shooterSkill = (t: TeamSim): number => {
-    const shooters = t.team.lines.forwards.flat().map((id) => t.resolve(id))
-    let s = 0
-    for (const p of shooters) s += p.composites.scoring
-    return s / shooters.length / LEAGUE_AVG
+  // Each team's snipers, best first; a round sends the next one down the list and
+  // wraps around once everyone's shot (NHL rules).
+  const order = (t: TeamSim): Player[] => shootoutOrder(t.team.lines.forwards.flat().map((id) => t.resolve(id)))
+  const homeShooters = order(home)
+  const awayShooters = order(away)
+  const goaltending = (t: TeamSim): number => t.resolve(t.team.lines.goalies[0]).composites.goaltending
+  const attempt = (shooters: Player[], round: number, def: TeamSim): boolean => {
+    const shooter = shooters[round % Math.max(1, shooters.length)]
+    return rng.chance(shootoutGoalChance(shootoutSkill(shooter.composites), goaltending(def), LEAGUE_AVG))
   }
-  const goalieSkill = (t: TeamSim): number =>
-    t.resolve(t.team.lines.goalies[0]).composites.goaltending / LEAGUE_AVG
-  const attempt = (atk: TeamSim, def: TeamSim): boolean =>
-    rng.chance(clamp(0.33 * shooterSkill(atk) * (2 - goalieSkill(def)), 0.1, 0.6))
 
   let h = 0
   let a = 0
-  for (let round = 0; round < 3; round++) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  let round = 0
+  for (; round < 3; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
-  while (h === a) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  for (; h === a; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
   const winner = h > a ? home : away
   winner.goals++

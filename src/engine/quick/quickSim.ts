@@ -27,6 +27,7 @@ import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
+import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
@@ -477,28 +478,29 @@ function simPeriod(
 }
 
 function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
-  // Best-of-3 then sudden death; a coin-flavored skill roll per attempt.
+  // Best-of-3 then sudden death; each team sends its snipers best-first, cycling
+  // back once everyone's shot. A specific shooter vs the goalie each attempt.
   const rng = ctx.rng
-  const shooterSkill = (t: TeamSim): number => {
-    const shooters = t.team.lines.forwards.flat().map(t.resolve)
-    return avg(shooters, (c) => c.scoring) / ctx.leagueAvg
+  const order = (t: TeamSim): Player[] => shootoutOrder(t.team.lines.forwards.flat().map(t.resolve))
+  const homeShooters = order(home)
+  const awayShooters = order(away)
+  const goaltending = (t: TeamSim): number =>
+    t.resolve(t.startingGoalie ?? t.team.lines.goalies[0]).composites.goaltending
+  const attempt = (shooters: Player[], round: number, def: TeamSim): boolean => {
+    const shooter = shooters[round % Math.max(1, shooters.length)]
+    return rng.chance(shootoutGoalChance(shootoutSkill(shooter.composites), goaltending(def), ctx.leagueAvg))
   }
-  const goalieSkill = (t: TeamSim): number => {
-    const g = t.resolve(t.startingGoalie ?? t.team.lines.goalies[0])
-    return g.composites.goaltending / ctx.leagueAvg
-  }
+
   let h = 0
   let a = 0
-  const attempt = (atk: TeamSim, def: TeamSim): boolean =>
-    rng.chance(Math.max(0.1, Math.min(0.6, 0.33 * shooterSkill(atk) * (2 - goalieSkill(def)))))
-
-  for (let round = 0; round < 3; round++) {
-    if (attempt(home, away)) h++
-    if (attempt(away, home)) a++
+  let round = 0
+  for (; round < 3; round++) {
+    if (attempt(homeShooters, round, away)) h++
+    if (attempt(awayShooters, round, home)) a++
   }
-  while (h === a) {
-    const hg = attempt(home, away)
-    const ag = attempt(away, home)
+  for (; h === a; round++) {
+    const hg = attempt(homeShooters, round, away)
+    const ag = attempt(awayShooters, round, home)
     if (hg) h++
     if (ag) a++
   }
