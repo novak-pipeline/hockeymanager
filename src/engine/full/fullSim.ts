@@ -110,9 +110,14 @@ const PK_SHOT_MULT = 0.75
 // A 6th attacker (goalie pulled) tilts the ice without a penalty.
 const EXTRA_ATTACKER_SHOT_MULT = 1.25
 
-// Goalie pull: trailing by 1–2 inside the final stretch of regulation.
-const PULL_WINDOW_SECONDS = 90
-const PULL_MAX_DEFICIT = 2
+// Goalie pull. The window (seconds of regulation remaining at which a trailing
+// team empties the net) widens with the deficit — you gamble earlier the more
+// you trail — indexed by deficit: down 1 ≈ 1:20, down 2 ≈ 1:40, down 3 ≈ 1:45.
+// Down 4+ teams stay honest. A coach's aggressiveness slider then pulls the
+// trigger earlier or later (0.8×…1.3× the window). Windows are held modest to
+// keep empty-net goals near the NHL rate (the engine converts 6v5 richly).
+const PULL_WINDOW_BY_DEFICIT: readonly number[] = [0, 80, 100, 105]
+const PULL_MAX_DEFICIT = 3
 const BENCH_X = 0.97
 const BENCH_Y = -0.85
 /** P(goal) for an unblocked shot at an empty net. */
@@ -165,6 +170,18 @@ function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): n
   const v = val ?? 0.5
   if (v <= 0.5) return 1 + (v - 0.5) * 2 * (1 - lowEnd)
   return 1 + (v - 0.5) * 2 * (highEnd - 1)
+}
+
+/**
+ * Seconds of regulation remaining at which a team trailing by `deficit` empties
+ * the net for a sixth attacker. Returns 0 when a team should never pull (tied,
+ * leading, or down 4+). The window widens with the deficit — you gamble earlier
+ * the more you trail — and an aggressive bench (higher `aggressiveness`, 0–1)
+ * pulls the trigger 0.8×…1.3× sooner. Exported for tests/calibration.
+ */
+export function goaliePullWindow(deficit: number, aggressiveness: number | undefined): number {
+  if (deficit < 1 || deficit > PULL_MAX_DEFICIT) return 0
+  return PULL_WINDOW_BY_DEFICIT[deficit] * sliderMult(aggressiveness, 0.8, 1.3)
 }
 
 // Passing tempo: base per-tick chance, raised by defensive pressure and pace.
@@ -691,15 +708,21 @@ function simPeriod(
     }
   }
 
-  /** Pull (or re-insert) the goalie: down 1–2 in the last stretch of regulation. */
+  /** Pull (or re-insert) the goalie: trailing late in regulation. The window
+   *  widens with the deficit and with the coach's aggressiveness; a team that
+   *  scores to erase the gap (or that goes down 4+) gets its goalie back. */
   const updatePull = (team: TeamSim, opp: TeamSim): void => {
     if (period !== REGULATION_PERIODS) {
       team.pulled = false
       return
     }
     const deficit = opp.goals - team.goals
-    team.pulled =
-      lengthSeconds - clk.t <= PULL_WINDOW_SECONDS && deficit >= 1 && deficit <= PULL_MAX_DEFICIT
+    const window = goaliePullWindow(deficit, team.team.tactics.aggressiveness)
+    if (window <= 0) {
+      team.pulled = false
+      return
+    }
+    team.pulled = lengthSeconds - clk.t <= window
   }
 
   /** Park every skater exactly on his faceoff spot (period start only). */
