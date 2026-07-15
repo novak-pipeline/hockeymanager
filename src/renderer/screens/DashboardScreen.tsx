@@ -19,6 +19,7 @@ import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { bumpRefresh } from '../components/store'
 
 /* ── category metadata ── */
 const CAT_ICON: Record<NewsCategory, string> = {
@@ -264,6 +265,10 @@ export function DashboardScreen(): JSX.Element {
             unread={d.unreadNews}
             onOpen={() => nav.navigate('inbox')}
             onOpenItem={(id) => nav.navigate('inbox', { newsId: id })}
+            onMarkAllRead={() => {
+              const ids = (inbox?.items ?? []).filter((i) => !i.read).map((i) => i.id)
+              if (ids.length) void client.markNewsRead(ids).then(() => bumpRefresh())
+            }}
           />
 
         </div>
@@ -275,7 +280,7 @@ export function DashboardScreen(): JSX.Element {
           <NewsHero
             inbox={inbox ?? null}
             arcs={shown('storylines') ? (d.topArcs ?? []) : []}
-            onOpen={() => nav.navigate('inbox')}
+            onOpenItem={(id) => nav.navigate('inbox', { newsId: id })}
           />
 
           {/* Last result — right under the headline, always above the fold */}
@@ -751,11 +756,12 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
 
 /** FM-portal messages pane: day-grouped, sender lines, unread dots, filters.
  *  A digest with the texture of a real mailbox — click-through to the inbox. */
-function MessagesPane({ inbox, unread, onOpen, onOpenItem }: {
+function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
   inbox: InboxView | null
   unread: number
   onOpen: () => void
   onOpenItem: (id: string) => void
+  onMarkAllRead: () => void
 }): JSX.Element {
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
   const items = [...(inbox?.items ?? [])]
@@ -783,7 +789,7 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem }: {
 
   return (
     <Panel title="Messages" className="dash-fill">
-      <div className="row" style={{ gap: 6, marginBottom: 4, flexShrink: 0 }}>
+      <div className="row" style={{ gap: 6, marginBottom: 4, flexShrink: 0, alignItems: 'center' }}>
         {(['all', 'unread'] as const).map((f) => (
           <button
             key={f}
@@ -794,6 +800,15 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem }: {
             {f === 'all' ? 'All' : `Unread (${unread})`}
           </button>
         ))}
+        <span style={{ flex: 1 }} />
+        {unread > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: 11 }}
+            title="Mark every message as read"
+            onClick={onMarkAllRead}
+          >✓ Mark all read</button>
+        )}
       </div>
       <div className="dash-scroll">
       {groups.length === 0 && <span className="muted small">Nothing here — a quiet desk.</span>}
@@ -912,10 +927,10 @@ function MarketPulse({ stageLabel }: { stageLabel?: string }): JSX.Element | nul
 /** The news hero: the most recent stories as a big rotating card — category
  *  chip, headline at display size, a two-line excerpt, byline, page dots —
  *  with the league's live storyline chips folded into the same card. */
-function NewsHero({ inbox, arcs, onOpen }: {
+function NewsHero({ inbox, arcs, onOpenItem }: {
   inbox: InboxView | null
   arcs: Array<{ kind: string; headline: string }>
-  onOpen: () => void
+  onOpenItem: (id: string) => void
 }): JSX.Element | null {
   const [page, setPage] = useState(0)
   const stories = [...(inbox?.items ?? [])]
@@ -928,7 +943,8 @@ function NewsHero({ inbox, arcs, onOpen }: {
   return (
     <div
       className="panel"
-      onClick={onOpen}
+      onClick={() => onOpenItem(story.id)}
+      title="Open this story in your inbox"
       style={{
         padding: '12px 18px', cursor: 'pointer', position: 'relative', overflow: 'hidden',
         background: 'linear-gradient(115deg, var(--bg1) 55%, rgba(var(--accent-rgb, 108,92,231), 0.14) 100%)',
@@ -965,8 +981,16 @@ function NewsHero({ inbox, arcs, onOpen }: {
           ))}
         </div>
       )}
-      {/* pagination dots */}
-      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+      {/* toggle arrows + pagination dots — flip through the day's headlines */}
+      <div className="row" style={{ gap: 6, marginTop: 8, alignItems: 'center' }}>
+        {stories.length > 1 && (
+          <button
+            aria-label="previous story"
+            onClick={(e) => { e.stopPropagation(); setPage((p) => (p - 1 + stories.length) % stories.length) }}
+            className="btn btn-ghost"
+            style={{ padding: '0 6px', fontSize: 14, lineHeight: 1, height: 18 }}
+          >‹</button>
+        )}
         {stories.map((_, i) => (
           <button
             key={i}
@@ -980,8 +1004,16 @@ function NewsHero({ inbox, arcs, onOpen }: {
             }}
           />
         ))}
+        {stories.length > 1 && (
+          <button
+            aria-label="next story"
+            onClick={(e) => { e.stopPropagation(); setPage((p) => (p + 1) % stories.length) }}
+            className="btn btn-ghost"
+            style={{ padding: '0 6px', fontSize: 14, lineHeight: 1, height: 18 }}
+          >›</button>
+        )}
         <span style={{ flex: 1 }} />
-        <span className="muted small">See all news →</span>
+        <span className="muted small">Read this →</span>
       </div>
     </div>
   )
