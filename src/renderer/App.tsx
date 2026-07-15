@@ -259,6 +259,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const [watched, setWatched] = useState<WatchedGame | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  // #7 cadence: the screen the GM pressed Continue from, so after the calendar
+  // preview + day advance we return them there instead of stranding on the calendar.
+  const preAdvanceScreenRef = useRef<ScreenId>('dashboard')
 
   // The shell-level dashboard fetch feeds the top nav; it refetches on every
   // refresh bump like any screen. Errors here are non-fatal.
@@ -361,7 +364,20 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('staffBriefing')
           return
         }
-        void run(() => client.continueGame())
+        // #7 cadence: a Continue press first previews the CALENDAR — what's ahead —
+        // so advancing the season is a deliberate two-beat rhythm instead of mashing
+        // Continue while reading the dashboard. The next press (from the calendar)
+        // actually ticks the day and returns you to the screen you came from.
+        if (nav.screen !== 'calendar') {
+          preAdvanceScreenRef.current = nav.screen
+          navigate('calendar')
+          return
+        }
+        void (async () => {
+          await run(() => client.continueGame())
+          const back = preAdvanceScreenRef.current
+          navigate(back === 'calendar' ? 'dashboard' : back)
+        })()
       },
       advanceDays: (days: number) => {
         void run(() => client.advance(days))
