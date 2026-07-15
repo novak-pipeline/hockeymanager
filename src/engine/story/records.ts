@@ -654,7 +654,10 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
       const current = extract(line)
       if (current === null) continue
 
-      const projected = pace(current)
+      // savePct is a RATE, not a counting stat — its season-end projection is just
+      // the current rate, NOT games-extrapolated (pace() would absurdly scale .900
+      // to >1.0 and hand it a bogus record chase).
+      const projected = key === 'savePct' ? current : pace(current)
       if (projected <= record.value * 1.03) continue // clearly on pace to BREAK it
 
       const emitKey = `${line.playerId}:${key}:${year}`

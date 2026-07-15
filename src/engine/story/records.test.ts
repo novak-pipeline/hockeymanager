@@ -426,13 +426,10 @@ describe('recordWatch', () => {
     return state
   }
 
-  it('emits news when a player is on pace to beat top-3', () => {
+  it('emits ONE alert when a player is on pace to break an all-time record', () => {
     const state = buildStateWithTopThree()
-    // Player with 30 goals and 5 assists (35 points) in 40 of 82 games
-    // goals pace = (30/40)*82 = 61.5 > 50 (3rd on goals board) → fires
-    // points pace = (35/40)*82 = 71.75 > 50 (3rd on points board) → also fires
-    // assists pace = (5/40)*82 = 10.25 < 50 (3rd on assists board) → no fire
-    // Test that at least the goals alert fires with the right player
+    // points pace = (35/40)*82 = 71.75, clear of the all-time mark (>3%) → fires.
+    // Capped at a single alert per call (the most emphatic run), so exactly one seed.
     const result = recordWatch({
       state,
       seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 30, assists: 5, points: 35, gamesPlayed: 40 })],
@@ -440,10 +437,9 @@ describe('recordWatch', () => {
       teamGamesPlayed: 40,
       totalSeasonGames: 82,
     })
-    const goalNews = result.newsSeeds.filter((n) => n.headline.includes('goal'))
-    expect(goalNews).toHaveLength(1)
-    expect(goalNews[0]!.headline).toMatch(/pace/)
-    expect(goalNews[0]!.playerId).toBe('pX')
+    expect(result.newsSeeds).toHaveLength(1)
+    expect(result.newsSeeds[0]!.playerId).toBe('pX')
+    expect(result.newsSeeds[0]!.headline).toMatch(/all-time/)
   })
 
   it('does NOT emit when fewer than 30 team games played', () => {
@@ -480,11 +476,11 @@ describe('recordWatch', () => {
     // goals pace: (30/40)*82=61.5 > 50 (3rd) → fire goals
     // points pace: same as goals since no assists
     // Ensure 'once per key' logic: fire goals+points in year 2002
-    const mkLine = () => skaterLine({ playerId: 'pX', name: 'Rocket', goals: 30, assists: 0, points: 30 })
+    // goals=32 → pace (32/40)*82 = 65.6, clear of the all-time 60 mark (>3%).
+    const mkLine = () => skaterLine({ playerId: 'pX', name: 'Rocket', goals: 32, assists: 0, points: 32 })
     recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2002, teamGamesPlayed: 40, totalSeasonGames: 82 })
-    // In year 2003 the keys are different (different year), should fire again
+    // In year 2003 the keys are different (different year), so it fires again.
     const second = recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2003, teamGamesPlayed: 40, totalSeasonGames: 82 })
-    // goals + points should both fire again in 2003
     expect(second.newsSeeds.length).toBeGreaterThanOrEqual(1)
     expect(second.newsSeeds.every((n) => n.playerId === 'pX')).toBe(true)
   })
@@ -502,13 +498,9 @@ describe('recordWatch', () => {
     expect(result.newsSeeds).toHaveLength(0)
   })
 
-  it('does NOT emit when fewer than 3 entries on the board', () => {
+  it('does NOT emit when the board is empty (no record to break)', () => {
     const state = emptyRecords()
-    archiveWith(state, 2001, [
-      skaterLine({ playerId: 'p1', name: 'A', goals: 60 }),
-      skaterLine({ playerId: 'p2', name: 'B', goals: 55 }),
-    ])
-    // Board only has 2 entries — no top-3 threshold to beat
+    // No archived seasons → no all-time mark exists, so nothing can be "on pace".
     const result = recordWatch({
       state,
       seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 56 })],
@@ -526,10 +518,11 @@ describe('recordWatch', () => {
       goalieLine({ playerId: 'g2', name: 'B', goalieWins: 42 }),
       goalieLine({ playerId: 'g3', name: 'C', goalieWins: 40 }),
     ])
-    // pace for goalie: 22 wins in 40 games → (22/40)*82 = 45.1 wins > 40
+    // pace for goalie: 23 wins in 40 games → (23/40)*82 = 47.15, clear of the
+    // all-time 44 mark (>3%) → fires.
     const result = recordWatch({
       state,
-      seasonLines: [goalieLine({ playerId: 'gX', name: 'Hotshot', goalieWins: 22, shotsAgainst: 1200 })],
+      seasonLines: [goalieLine({ playerId: 'gX', name: 'Hotshot', goalieWins: 30, shotsAgainst: 1200 })],
       year: 2002,
       teamGamesPlayed: 40,
       totalSeasonGames: 82,
