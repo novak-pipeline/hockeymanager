@@ -10136,6 +10136,20 @@ export class Career {
     if (evaln.verdict === 'reject' || (evaln.verdict === 'counter' && evaln.counterAskValue <= 0)) {
       return { verdict: 'reject', message: evaln.message, counter: null }
     }
+    // #14: on the trade DEADLINE itself and at the DRAFT table, GMs answer on the
+    // spot — no sleeping on it. Resolve inline (execute or counter) instead of
+    // queuing for a day. The completed deal / counter lands in the inbox + trade
+    // offers immediately.
+    if (this.isInstantTradeWindow()) {
+      if (evaln.verdict === 'accept') {
+        const done = this.executeUserTrade(proposal)
+        return done.ok
+          ? { verdict: 'accept', message: 'Deal struck — it is official.', counter: null }
+          : { verdict: 'reject', message: done.message ?? 'The deal fell through under the cap.', counter: null }
+      }
+      this.deliverPendingTrade({ proposal, verdict: 'counter', counterAskValue: evaln.counterAskValue })
+      return { verdict: 'counter', message: 'They came right back — check your trade offers.', counter: null }
+    }
     // Deliberate-yes: a serious offer (would accept, or a workable counter) is
     // taken UNDER ADVISEMENT — no instant handshake. The GM sleeps on it and the
     // real answer (completed / counter / fell-through) arrives by inbox after a
@@ -10164,6 +10178,14 @@ export class Career {
   /** #184: how long the partner GM sits on a serious offer before answering.
    *  Deadline urgency compresses it; the quiet offseason drags it out; a friendly
    *  front office answers a touch quicker. */
+  /** #14: windows where a rival GM answers a trade on the spot rather than sleeping
+   *  on it — the trade deadline day itself, and the draft table. */
+  private isInstantTradeWindow(): boolean {
+    if (this.phase === 'regularSeason' && this.currentDay === this.deadlineDay) return true
+    if (this.phase === 'offseason' && this.offseason?.stage === 'draft') return true
+    return false
+  }
+
   private tradeDeliberationDays(partnerId: TeamId): number {
     const proximity = Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45))
     let d = this.phase === 'offseason' ? 3 : 2
