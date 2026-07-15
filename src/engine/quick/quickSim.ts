@@ -25,6 +25,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
@@ -247,6 +248,7 @@ function simShift(
   period: number,
   t: number,
   attackingPositive: boolean,
+  lengthSeconds: number,
   threeOnThree = false
 ): void {
   const { rng } = ctx
@@ -277,8 +279,12 @@ function simShift(
   // before the shootout. Model that as an open-ice boost on both shot volume and
   // shot quality (only when actually skating 3v3 — regular-season OT).
   const openIceMult = threeOnThree ? THREE_ON_THREE_SHOT_MULT : 1
+  // Score effects: the trailing team pushes, the leading team protects the lead,
+  // stronger as the clock runs down. Tuned to conserve total shot volume, so only
+  // the share tilts toward the chaser (see scoreEffects.ts).
+  const scoreMult = scoreEffectMult(attacking.goals - defending.goals, (period - 1 + t / lengthSeconds) / 3)
   const rate =
-    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult * openIceMult
+    BASE_SHOTS_PER_SHIFT * offMult * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult * openIceMult * scoreMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -439,11 +445,11 @@ function simPeriod(
 
     const beforeH = home.goals
     const beforeA = away.goals
-    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, threeOnThree)
+    simShift(ctx, home, away, homeUnit, awayUnit, period, t, homeAttacksPositive, lengthSeconds, threeOnThree)
     // Sudden death ends on the FIRST goal — check between the two teams' shifts
     // so a single step can never let both score and leave the game tied.
     if (suddenDeath && home.goals > beforeH) return true
-    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, threeOnThree)
+    simShift(ctx, away, home, awayUnit, homeUnit, period, t, !homeAttacksPositive, lengthSeconds, threeOnThree)
     if (suddenDeath && away.goals > beforeA) return true
   }
   ctx.stream.push({ t: lengthSeconds, period, type: 'periodEnd' })

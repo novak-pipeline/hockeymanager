@@ -112,7 +112,10 @@ describe('quickSimGame', () => {
     const line4 = home.lines.forwards[3]
     let toi1 = 0
     let toi4 = 0
-    for (let s = 0; s < 20; s++) {
+    // 50 games — a ratio of averages over line minutes is noisy game-to-game, so
+    // a bigger sample keeps this pinned to the true ~2.1x rather than one seed's
+    // luck (score effects reshuffle the shot-rate RNG, which a tiny sample feels).
+    for (let s = 0; s < 50; s++) {
       const r = quickSimGame(home, teams.get(ids[1 + (s % (ids.length - 1))])!, resolve, { seed: 700 + s })
       for (const id of line1) toi1 += r.playerStats.get(id)?.toi ?? 0
       for (const id of line4) toi4 += r.playerStats.get(id)?.toi ?? 0

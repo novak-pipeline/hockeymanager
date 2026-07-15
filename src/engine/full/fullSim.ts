@@ -72,6 +72,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -1722,6 +1723,10 @@ function simPeriod(
     if (defSH && !atkSH) strengthMult = PP_SHOT_MULT
     else if (atkSH && !defSH) strengthMult = PK_SHOT_MULT
     if (atk.pulled) strengthMult *= EXTRA_ATTACKER_SHOT_MULT
+    // Score effects: the trailing team pushes, the leading team protects — the
+    // effect grows as regulation runs down. Tuned to conserve total shot volume
+    // (and thus calibration); only the share tilts toward the chaser.
+    strengthMult *= scoreEffectMult(atk.goals - def.goals, (period - 1 + clk.t / lengthSeconds) / 3)
     const edge = edgeOf(atk)
 
     // Breakaway: the carrier is clean past EVERY defender heading up ice —
