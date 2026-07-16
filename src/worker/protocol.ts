@@ -91,6 +91,7 @@ export type {
   TradeEvaluation,
   TradeProposal,
   TradesView,
+  DeadlineDayView,
   TransactionsView,
   TeamLeadersView,
   TeamPlayerStatRow,
@@ -184,9 +185,11 @@ import type {
   TradeEvaluation,
   TradeProposal,
   TradesView,
+  DeadlineDayView,
   TransactionsView,
   TeamPlayerStatsView,
 } from '@engine/career/views'
+export type { ShoppedPlayerView, DeadlineFeedItemView } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
@@ -395,6 +398,8 @@ export type WorkerRequestBody =
   | { type: 'submitBoardMeeting'; choices: Record<string, string> }
   /** The deadline war-room briefing (only while the deadline hold is active). */
   | { type: 'getWarRoom' }
+  /** The deadline-day hub — offers, block, live wire (only during the hold). */
+  | { type: 'getDeadlineDay' }
   /** The staged End-of-Season Review scene (M4), or null. */
   | { type: 'getSeasonReview' }
   /** Answer for the season (single 'answer' agenda choice). */
@@ -608,6 +613,7 @@ export type WorkerResponse = { id: number } & (
         cast: Array<{ id: string; name: string; title: string; faceId?: string }>
       } | null
     }
+  | { type: 'deadlineDay'; deadlineDay: DeadlineDayView | null }
   /* ── season rhythm: meetings (M1) ── */
   | { type: 'boardMeeting'; scene: BoardMeetingScene | null }
   | { type: 'boardMeetingResult'; ok: boolean; lines: Array<{ speakerId: string; text: string }>; summary: string }

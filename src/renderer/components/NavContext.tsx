@@ -19,6 +19,7 @@ export type ScreenId =
   | 'boardMeeting'
   | 'seasonReview'
   | 'warRoom'
+  | 'deadlineDay'
   | 'gmCareer'
   | 'mediaCircuit'
   | 'staffMeeting'

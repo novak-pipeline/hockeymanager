@@ -1537,6 +1537,65 @@ export interface TradeDraftView {
   partnerLine: string
 }
 
+/* ────────────────────────── deadline day hub ────────────────────────── */
+
+/** A player an AI club is actively dangling on the deadline market. */
+export interface ShoppedPlayerView extends PlayerBadge {
+  salary: number
+  yearsRemaining: number
+  /** Owning club (deep-link + accenting). */
+  teamId: string
+  teamAbbr: string
+  teamName: string
+  /** The GM you'd be calling about him. */
+  gmName: string
+  /** True for an expiring-deal rental — the classic deadline chip. */
+  rental: boolean
+  /** Perri-scale trade value (rounded), for sorting + a value chip. */
+  value: number
+  /** Plain-English asking price ("a 1st-round pick and a mid-round pick"). */
+  asking: string
+}
+
+/** One completed AI-vs-AI (or user) deal on the live deadline wire. */
+export interface DeadlineFeedItemView {
+  /** Compact summary ("BUF send C X to COL for a 2027 1st-round pick"). */
+  text: string
+  /** Clubs involved, for accenting / crests. */
+  teamAbbrs: string[]
+  /** How long ago, in days ("today", "1d ago"). */
+  when: string
+  /** True for a marquee move (a genuine roster piece changed hands). */
+  accent: boolean
+}
+
+/**
+ * The deadline-day hub (Season Rhythm). Non-null only while the sim is held on
+ * deadline day. Everything is read live from the market: your posture and cap,
+ * the concrete offers on your desk, the league-wide block, and the wire of
+ * deals already done today.
+ */
+export interface DeadlineDayView {
+  dateISO: string
+  deadlineDay: number
+  /** Buying / selling / on-the-fence stance line. */
+  stance: string
+  /** "Space to work with: $X.XM." */
+  capLine: string
+  /** Your head coach's one-line marching order. */
+  coachLine: string
+  /** Your assistant GM (named). */
+  agmName: string
+  /** Whether your club is buying (contender) — colours the framing. */
+  buying: boolean
+  /** Real, concrete offers on your desk right now (each gives up a player of yours). */
+  incoming: TradeOfferView[]
+  /** League-wide board of players being shopped, best first. */
+  shopped: ShoppedPlayerView[]
+  /** Live wire of deals done today / recently, newest first. */
+  feed: DeadlineFeedItemView[]
+}
+
 /* ────────────────────────── draft / offseason / finances ────────────────────────── */
 
 export interface ProspectRowView extends PlayerBadge {
