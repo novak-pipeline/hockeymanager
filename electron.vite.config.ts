@@ -18,7 +18,15 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: resolve('src/preload/index.ts') }
+        input: { index: resolve('src/preload/index.ts') },
+        // The renderer runs with the Chromium sandbox ENABLED (webPreferences.sandbox:
+        // true — required so onnxruntime-web's WASM voice runtime doesn't crash the
+        // renderer). A sandboxed preload is evaluated as a plain CommonJS script and
+        // canNOT use ESM `import` (Electron throws "Cannot use import statement outside a
+        // module" and the window.hockey bridge silently never loads). Force a CommonJS
+        // build with a .cjs extension so it's unambiguously CJS regardless of the
+        // package's "type": "module".
+        output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }
   },

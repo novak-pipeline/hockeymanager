@@ -33,8 +33,16 @@ function createWindow(): void {
     backgroundColor: '#0b0e14',
     show: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      sandbox: false,
+      preload: join(__dirname, '../preload/index.cjs'),
+      // Chromium renderer sandbox MUST stay ON. The enhanced (Kokoro) neural voice
+      // runs onnxruntime-web's WASM runtime in the renderer; with the sandbox OFF,
+      // ORT access-violates the renderer on InferenceSession creation — an
+      // uncatchable native crash that killed the whole window on the first match /
+      // trade-call voice. With the sandbox ON it instantiates cleanly. The preload
+      // only uses contextBridge + ipcRenderer (both sandbox-safe) and the renderer
+      // has no Node usage (contextIsolation + nodeIntegration:false already enforce
+      // that), so nothing else depends on the sandbox being off.
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }

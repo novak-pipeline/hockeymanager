@@ -113,21 +113,23 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
   const kokoro = await import('kokoro-js')
   const { KokoroTTS } = kokoro
 
-  // Harden onnxruntime-web for Electron BEFORE any model loads. The default
-  // multithreaded WASM backend needs SharedArrayBuffer + cross-origin isolation,
-  // which Electron's file:// renderer does NOT provide — onnxruntime then aborts
-  // WASM instantiation and takes the whole renderer process down (an
-  // uncatchable crash, not a JS exception). Forcing a single-threaded, no-proxy
-  // backend keeps it entirely on the main thread and never touches a Worker or
-  // SharedArrayBuffer. Best-effort + guarded: never let config throw abort load.
+  // Keep onnxruntime-web single-threaded and worker-free. The renderer runs under
+  // file:// (not cross-origin isolated), so SharedArrayBuffer / real WASM threads
+  // aren't available anyway; pinning numThreads=1 + proxy=false keeps ORT entirely
+  // on the main thread and never spins up a Worker (whose script URL wouldn't
+  // resolve under file://). NOTE: the renderer MUST run with the Chromium sandbox
+  // ENABLED (webPreferences.sandbox: true in src/main/index.ts) — with the sandbox
+  // OFF, ORT's WASM runtime access-violates the renderer on InferenceSession
+  // creation (an uncatchable native crash). Best-effort + guarded so a config-shape
+  // change can never throw and abort the load.
   try {
     const { env } = (await import('@huggingface/transformers')) as {
-      env?: { backends?: { onnx?: { wasm?: { numThreads?: number; proxy?: boolean; simd?: boolean } } }; allowLocalModels?: boolean }
+      env?: { backends?: { onnx?: { wasm?: { numThreads?: number; proxy?: boolean } } }; allowLocalModels?: boolean }
     }
     const wasm = env?.backends?.onnx?.wasm
     if (wasm) {
-      wasm.numThreads = 1 // no SharedArrayBuffer requirement
-      wasm.proxy = false // no Worker (Worker script URL resolution fails under file://)
+      wasm.numThreads = 1
+      wasm.proxy = false
     }
     if (env && 'allowLocalModels' in env) env.allowLocalModels = false // don't probe file:// paths
   } catch {
@@ -148,22 +150,16 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
     ? { progress_callback: onProgress as ProgressCb }
     : {}
 
-  // Try WebGPU first for hardware acceleration; fall back to WASM.
-  let tts: KokoroTTSLike
-  try {
-    tts = (await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-      ...baseOpts,
-      ...progressOpts,
-      device: 'webgpu',
-    })) as KokoroTTSLike
-  } catch {
-    // WebGPU unavailable — fall back to WASM
-    tts = (await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-      ...baseOpts,
-      ...progressOpts,
-      device: 'wasm',
-    })) as KokoroTTSLike
-  }
+  // WASM only. Hardware acceleration is disabled app-wide (app.disableHardwareAcceleration
+  // in src/main/index.ts), so a WebGPU device can never initialise — and *attempting* it
+  // reaches Dawn/GPU init with no GPU process and access-violates the renderer (an
+  // uncatchable native crash, not a JS error the try/catch can recover). So never ask for
+  // WebGPU; go straight to the single-threaded WASM backend hardened above.
+  const tts = (await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+    ...baseOpts,
+    ...progressOpts,
+    device: 'wasm',
+  })) as KokoroTTSLike
 
   return new KokoroVoiceEngine(tts)
 }
