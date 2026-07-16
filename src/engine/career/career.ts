@@ -166,6 +166,17 @@ import {
   type StaffMeetingScene,
 } from './staffMeetingScene'
 import {
+  buildScoutMeetingScene,
+  delegatedScoutChoices,
+  scoutMeetingHasContent,
+  type ScoutMeetingAction,
+  type ScoutMeetingInput,
+  type ScoutMeetingScene,
+  type ScoutBoardLine,
+  type TrackableFind,
+  type RefocusCandidate,
+} from './scoutMeeting'
+import {
   archiveSeason,
   emptyRecords,
   inductHallOfFame,
@@ -337,6 +348,9 @@ import {
   SCOUT_SPECIALTY_NATIONS,
   DISCOVERY_THRESHOLD,
   YOUTH_MAX_AGE,
+  selectNeedWeighted,
+  scoutPosGroup,
+  type ScoutPosGroup,
   type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
@@ -482,6 +496,7 @@ import {
   type LeagueComparisonCard,
   type StaffMeetingSummaryView,
   type StaffMeetingView,
+  type ScoutMeetingView,
   type CoachMarketView,
   type CoachMarketEntry,
   type PlayoffOddsView,
@@ -743,6 +758,12 @@ const ELC_MAX_TERM = 3
 const RATINGS_WINDOW = 10
 /** Calendar days between recurring staff-meeting prompts. */
 const STAFF_MEETING_INTERVAL = 14
+/** Calendar days between recurring scout-meeting prompts (monthly, rarer than staff). */
+const SCOUT_MEETING_INTERVAL = 28
+/** Phase offset so scout-meeting boundaries (7, 35, 63…) never land on a staff-
+ *  meeting day (every multiple of 14) — otherwise the two convened meetings would
+ *  collide on the same Continue and the scout one would be perpetually skipped. */
+const SCOUT_MEETING_OFFSET = 7
 
 type ResignStatus = 'pending' | 'signed' | 'walked'
 
@@ -977,6 +998,9 @@ export class Career {
   /** The convened bi-weekly staff meeting awaiting the GM (blocking, with a
    *  delegate-to-AGM escape). Null when none is pending. JSON-safe → serialized. */
   private staffMeetingScene: StaffMeetingScene | null = null
+  /** The convened recurring scout meeting awaiting the GM (blocking, with a
+   *  delegate-to-Head-of-Scouting escape). Null when none is pending. Serialized. */
+  private scoutMeetingScene: ScoutMeetingScene | null = null
   private pressCounter = 0
   /** Season-long schedule of recurring media reports (Task #39). */
   private pressScheduleState: PressScheduleState = initialPressScheduleState()
@@ -1682,9 +1706,18 @@ export class Career {
   }
 
   /**
-   * When a scout's work makes a notable player well-known (knowledge ≥ 80 for
-   * the first time), drop a short scout report into the inbox. Capped at 2/day
-   * to avoid flooding; only notable players (high ceiling/ability) qualify.
+   * Drop rich, per-player "Scout report" cards into the inbox as the department
+   * files them — the skippable cards the Scouting Centre queues, delivered to the
+   * inbox too (task #85). Two sources feed the pool: the prospects our scouts
+   * FLAG (Scouting Centre finds) and any notable non-prospect a scout gets a full
+   * read on (knowledge ≥ 80). Capped at 2/day so the feed never floods.
+   *
+   * The daily batch is **position-diverse and need-weighted**: candidates are
+   * bucketed by position group and drawn round-robin, ordering the groups your
+   * roster is thin at first. So the reports never collapse to a single position
+   * (the "only goaltenders" bug) even when the club is desperate at one spot —
+   * a thin group is surfaced first, but the batch still spans other positions.
+   *
    * On the first call (incl. after load) it seeds from existing intel without
    * reporting, so loading a save never spams reports for already-known players.
    */
@@ -1694,36 +1727,62 @@ export class Career {
       for (const [pid, k] of this.scouting.knowledge) {
         if (k >= KNOWN) this.scoutReported.add(pid as string)
       }
+      // Finds already surfaced at seed time are "known" — don't retro-report them.
+      for (const r of this.scouting.recommendations ?? []) this.scoutReported.add(r.playerId)
       this.scoutReportSeeded = true
       return
     }
     const orgIds = this.ownOrgIds()
-    const surfaced = new Set((this.scouting.recommendations ?? []).map((r) => r.playerId))
-    const fresh: Array<{ id: string; p: Player; pot: number }> = []
+
+    type Cand = { id: string; p: Player; group: ScoutPosGroup; potStars: number; reason: string }
+    const cands: Cand[] = []
+    const seenCand = new Set<string>()
+
+    // Source 1: freshly-flagged Scouting Centre finds (prospects our scouts rate).
+    // These carry the scout's own grade + reason. We report them (in addition to
+    // the weekly digest) so a genuine find lands as its own inbox card.
+    for (const r of this.scouting.recommendations ?? []) {
+      const id = r.playerId
+      if (this.scoutReported.has(id) || seenCand.has(id) || orgIds.has(id)) continue
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p) continue
+      seenCand.add(id)
+      cands.push({ id, p, group: scoutPosGroup(p.position), potStars: overallToStars(this.scoutedCeilingOf(p)), reason: r.reason })
+    }
+
+    // Source 2: notable non-prospects a scout has now got a full read on. A player
+    // that never clears the notability bar is marked reported so we never re-scan
+    // him (parity with the old sweep); a notable one that isn't picked today stays
+    // eligible for a later day's batch.
     for (const [pid, k] of this.scouting.knowledge) {
       if (k < KNOWN) continue
       const id = pid as string
-      if (this.scoutReported.has(id)) continue
-      this.scoutReported.add(id) // mark regardless so we never re-scan
+      if (this.scoutReported.has(id) || seenCand.has(id) || orgIds.has(id)) continue
       const p = this.data.players.get(pid as PlayerId)
-      if (!p) continue
-      // Don't report our own org's players (this is acquisition intel), and don't
-      // double-report a prospect the Scouting Centre already surfaced as a find.
-      if (orgIds.has(id) || surfaced.has(id)) continue
-      const pot = overallToStars(this.scoutedCeilingOf(p))
+      if (!p) { this.scoutReported.add(id); continue }
+      const potStars = overallToStars(this.scoutedCeilingOf(p))
       const ovr = ratedOverall(p)
-      if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
-    }
-    if (fresh.length === 0) return
-    fresh.sort((a, b) => b.pot - a.pot)
-    for (const f of fresh.slice(0, 2)) {
-      const cur = overallToStars(ratedOverall(f.p))
-      const v = buildScoutVerdict(f.p, cur, f.pot)
+      if (potStars < 4 && ovr < 78) { this.scoutReported.add(id); continue } // never reportable
+      seenCand.add(id)
+      const cur = overallToStars(ratedOverall(p))
+      const v = buildScoutVerdict(p, cur, potStars)
       const pro = v.pros[0] ? ` ${v.pros[0]}.` : ''
+      cands.push({ id, p, group: scoutPosGroup(p.position), potStars, reason: `${v.recommendation}${pro} Best deployed as ${v.bestRole}.` })
+    }
+    if (cands.length === 0) return
+
+    // Draw a position-diverse, need-weighted batch (thinnest roster group first,
+    // round-robin so it never collapses to a single position — see #1).
+    const picked = selectNeedWeighted<Cand>(
+      cands, (c) => c.group, (c) => c.potStars, (g) => this.positionNeedRank(g), 2,
+    )
+
+    for (const f of picked) {
+      this.scoutReported.add(f.id)
       this.pushNews(
         'scouting',
         `Scout report: ${f.p.name}`,
-        `Our scouts have filed a full report on ${f.p.name} (${f.p.position}, age ${f.p.age}). ${v.recommendation}${pro} Best deployed as ${v.bestRole}.`,
+        `Our scouts have filed a full report on ${f.p.name} (${f.p.position}, age ${f.p.age}). ${f.reason}`,
         { playerId: f.id },
       )
     }
@@ -4672,6 +4731,8 @@ export class Career {
     // applies the safe defaults. (A meeting created THIS pass is created below,
     // after this guard, so it survives to be shown by the App gate next Continue.)
     if (this.staffMeetingScene !== null) this.autoDelegateStaffMeeting()
+    // Same for a pending scout meeting simmed past: the Head of Scouting runs it.
+    if (this.scoutMeetingScene !== null) this.autoDelegateScoutMeeting()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     // Deadline day pauses the sim like draft day: the FIRST continue that would
     // cross the deadline is held — one last chance to work the phones — and the
@@ -4800,6 +4861,21 @@ export class Career {
           year: this.year,
           record: this.userRecordTriple(),
         })
+      }
+    }
+    // ── recurring scout meeting: the recruitment desk convenes roughly monthly ──
+    // The Head of Scouting walks the board — risers/fallers vs consensus, flagged
+    // prospects awaiting a call, and coverage gaps — and the GM acts. Blocking,
+    // with a delegate-to-Head-of-Scouting escape. Only convenes with content.
+    if (
+      this.scoutMeetingScene === null &&
+      this.staffMeetingScene === null && // don't stack two convened meetings on one Continue
+      Math.floor((nextDay - SCOUT_MEETING_OFFSET) / SCOUT_MEETING_INTERVAL) >
+        Math.floor((this.currentDay - SCOUT_MEETING_OFFSET) / SCOUT_MEETING_INTERVAL)
+    ) {
+      const input = this.buildScoutMeetingInput(nextDay)
+      if (input && scoutMeetingHasContent(input)) {
+        this.scoutMeetingScene = buildScoutMeetingScene(input)
       }
     }
     // ────────────────────────────────────────────────────────────────────
@@ -11304,6 +11380,7 @@ export class Career {
       captainsPending: this.captainsPending(),
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       staffMeetingDue: this.staffMeetingScene !== null && this.phase === 'regularSeason',
+      scoutMeetingDue: this.scoutMeetingScene !== null && this.phase === 'regularSeason',
       devCampPending: this.devCampPending && this.phase === 'offseason',
       ...(this.phase === 'offseason' && this.offseason
         ? {
@@ -12200,6 +12277,180 @@ export class Career {
     if (!scene) return
     this.applyStaffChoices(scene, delegatedChoices(scene))
     this.staffMeetingScene = null
+  }
+
+  /* ────────────────────────── scout meeting ────────────────────────── */
+
+  /** The pending scout meeting as a render-ready view (or null if none). */
+  getScoutMeeting(): ScoutMeetingView | null {
+    const scene = this.scoutMeetingScene
+    if (!scene) return null
+    const speakerById = new Map(scene.cast.map((c) => [c.id, c]))
+    const host = speakerById.get(scene.hostId) ?? scene.cast[0] ?? { id: scene.hostId, name: 'Head of Scouting', title: 'Head of Scouting' }
+    return {
+      day: scene.day,
+      year: scene.year,
+      host,
+      opening: scene.opening.map((l) => l.text).join(' '),
+      risers: scene.risers,
+      fallers: scene.fallers,
+      gaps: scene.gaps,
+      proposals: scene.proposals.map((p) => ({
+        id: p.id,
+        speaker: speakerById.get(p.speakerId) ?? host,
+        title: p.title,
+        intro: p.intro.map((l) => l.text),
+        options: p.options.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
+        defaultOptionId: p.defaultOptionId,
+      })),
+    }
+  }
+
+  /** Resolve the scout meeting with the GM's picks; each accepted option mutates the sim. */
+  submitScoutMeeting(choices: Record<string, string>): { applied: string[]; summary: string } {
+    const scene = this.scoutMeetingScene
+    if (!scene) return { applied: [], summary: 'No scout meeting is in session.' }
+    const applied = this.applyScoutChoices(scene, choices)
+    this.scoutMeetingScene = null
+    this.pushNews(
+      'scouting',
+      'Scout meeting wrapped',
+      applied.length ? applied.join(' ') : 'You heard the recruitment staff out and left things as they are.',
+      { press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutMeeting' } },
+    )
+    return {
+      applied,
+      summary: applied.length
+        ? `${applied.length} decision${applied.length === 1 ? '' : 's'} actioned.`
+        : 'No changes made.',
+    }
+  }
+
+  /** Hand the scout meeting to the Head of Scouting — each item to its safe default. */
+  delegateScoutMeeting(): { applied: string[]; summary: string } {
+    const scene = this.scoutMeetingScene
+    if (!scene) return { applied: [], summary: 'No scout meeting is in session.' }
+    const applied = this.applyScoutChoices(scene, delegatedScoutChoices(scene))
+    this.scoutMeetingScene = null
+    this.pushNews(
+      'scouting',
+      'You left the board to the staff',
+      applied.length ? `Your Head of Scouting ran the meeting: ${applied.join(' ')}` : 'Your Head of Scouting ran the meeting; nothing needed doing.',
+      { press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutMeeting' } },
+    )
+    return { applied, summary: `Delegated — ${applied.length} decision${applied.length === 1 ? '' : 's'} handled by the staff.` }
+  }
+
+  /** Auto-resolve a pending scout meeting with safe defaults (non-gated auto-sim past it). */
+  private autoDelegateScoutMeeting(): void {
+    const scene = this.scoutMeetingScene
+    if (!scene) return
+    this.applyScoutChoices(scene, delegatedScoutChoices(scene))
+    this.scoutMeetingScene = null
+  }
+
+  private applyScoutChoices(scene: ScoutMeetingScene, choices: Record<string, string>): string[] {
+    const receipts: string[] = []
+    for (const p of scene.proposals) {
+      const optId = choices[p.id] ?? p.defaultOptionId
+      const opt = p.options.find((o) => o.id === optId)
+      if (!opt) continue
+      const r = this.applyScoutMeetingAction(opt.action)
+      if (r) receipts.push(r)
+    }
+    return receipts
+  }
+
+  /** Dispatch a single accepted scout-meeting proposal to the real mutation API. */
+  private applyScoutMeetingAction(action: ScoutMeetingAction): string | null {
+    switch (action.type) {
+      case 'none':
+        return null
+      case 'track': {
+        const name = this.data.players.get(asPlayerId(action.playerId))?.name ?? 'A prospect'
+        const r = this.shortlistProspect(action.playerId)
+        return r.ok ? `${name} added to the shortlist.` : null
+      }
+      case 'refocus': {
+        const scout = this.scouting.assignments.find((s) => s.scoutId === action.scoutId)
+        const who = scout?.name ?? 'A scout'
+        this.assignScoutTarget(action.scoutId, action.target, action.focus)
+        return `${who} re-aimed to close a coverage gap.`
+      }
+    }
+  }
+
+  /** The scout-meeting cast: the club's scouts, hosted by the top-rated one. */
+  private scoutMeetingCast(): { cast: MeetingSpeaker[]; hostId: string } {
+    const scouts = [...this.getTeamStaff(this.userTeamId as string).scouts]
+      .sort((a, b) => b.rating - a.rating)
+    const cast: MeetingSpeaker[] = scouts.slice(0, 4).map((s, i) => ({
+      id: i === 0 ? 'hs' : `sc${i}`,
+      name: s.name,
+      title: i === 0 ? 'Head of Scouting' : 'Scout',
+      ...(s.faceId !== undefined ? { faceId: s.faceId } : {}),
+    }))
+    if (cast.length === 0) cast.push({ id: 'hs', name: 'Head of Scouting', title: 'Head of Scouting' })
+    return { cast, hostId: cast[0]!.id }
+  }
+
+  /** Digest the live scouting state into the scout-meeting input (or null). */
+  private buildScoutMeetingInput(day: number): ScoutMeetingInput | null {
+    const { cast, hostId } = this.scoutMeetingCast()
+    const view = this.getScouting()
+
+    // Risers / fallers: where OUR board (getDraftRankings scoutBoard) sits above or
+    // below the public consensus, restricted to prospects our staff has actually
+    // seen (so it's a real opinion, not fog).
+    const board = this.getDraftRankings().scoutBoard
+    const toLine = (r: typeof board[number]): ScoutBoardLine => ({
+      playerId: r.playerId,
+      name: r.name,
+      position: r.position,
+      note: `${r.movement > 0 ? '+' : ''}${r.movement} vs consensus`,
+    })
+    const risers = board.filter((r) => r.seen && r.verdict === 'higher').slice(0, 4).map(toLine)
+    const fallers = board.filter((r) => r.seen && r.verdict === 'lower').slice(0, 3).map(toLine)
+
+    // Coverage gaps: position groups the roster is thin at, plus any region with no
+    // scout on it (a nation we know nothing about).
+    const gaps: string[] = []
+    for (const need of view.rosterNeeds) gaps.push(`thin at ${need}`)
+    const uncovered = view.nationCoverage
+      .filter((n) => n.avgKnowledge < 12 && n.playerCount >= 8)
+      .sort((a, b) => a.avgKnowledge - b.avgKnowledge)
+    for (const n of uncovered.slice(0, 2)) gaps.push(`no eyes in ${n.label}`)
+
+    // Trackable finds: flagged prospects the GM hasn't shortlisted yet, best first.
+    const shortlisted = new Set(this.scouting.shortlist ?? [])
+    const trackable: TrackableFind[] = view.recommendations
+      .filter((r) => !shortlisted.has(r.playerId))
+      .slice(0, 4)
+      .map((r) => ({ playerId: r.playerId, name: r.name, position: r.position, grade: r.grade, reason: r.reason }))
+
+    // Refocus: aim a generalist scout (idle/utility, no specialty) at the biggest
+    // gap — an uncovered region if there is one, else the draft class.
+    let refocus: RefocusCandidate | null = null
+    const generalists = view.scouts.filter((s) => !s.specialtyNation)
+    const pickScout = generalists[0] ?? view.scouts[0]
+    if (pickScout) {
+      const region = uncovered[0]
+      if (region && region.nation) {
+        refocus = {
+          scoutId: pickScout.scoutId, scoutName: pickScout.name,
+          target: { kind: 'nation', nation: region.nation }, focus: 'all',
+          label: region.label, why: `we've barely any read on ${region.label}`,
+        }
+      } else if (view.hasDraftClass && pickScout.target.kind !== 'draftClass') {
+        refocus = {
+          scoutId: pickScout.scoutId, scoutName: pickScout.name,
+          target: { kind: 'draftClass' }, focus: 'youth',
+          label: 'the draft class', why: `we're light on this year's draft class`,
+        }
+      }
+    }
+
+    return { cast, hostId, day, year: this.year, risers, fallers, gaps, trackable, refocus }
   }
 
   private applyStaffChoices(scene: StaffMeetingScene, choices: Record<string, string>): string[] {
@@ -14331,6 +14582,14 @@ export class Career {
     return 'ok'
   }
 
+  /** Roster need for a whole position GROUP as a numeric weight (higher = thinner),
+   *  for the position-diverse scout-report selector. */
+  private positionNeedRank(group: ScoutPosGroup): number {
+    const repr = group === 'G' ? 'G' : group === 'D' ? 'D' : group === 'C' ? 'C' : 'LW'
+    const need = this.positionNeed(repr)
+    return need === 'urgent' ? 3 : need === 'need' ? 2 : need === 'surplus' ? 0 : 1
+  }
+
   /** scoutedCeilingOf when knowledge + accuracy are already in hand — avoids the
    *  O(n) knowledgeOf/accuracyOf linear scans in hot loops (e.g. the draft board). */
   private scoutedCeilingWith(p: Player, knowledge: number, accuracy: number): number {
@@ -16429,6 +16688,7 @@ export class Career {
       ),
       agentRapport: structuredClone(this.agentRapport),
       ...(this.staffMeetingScene ? { staffMeetingScene: structuredClone(this.staffMeetingScene) } : {}),
+      ...(this.scoutMeetingScene ? { scoutMeetingScene: structuredClone(this.scoutMeetingScene) } : {}),
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
@@ -16605,6 +16865,7 @@ export class Career {
     }
     career.agentRapport = normalizeAgentRapport(snapshot.agentRapport)
     if (snapshot.staffMeetingScene) career.staffMeetingScene = snapshot.staffMeetingScene as StaffMeetingScene
+    if (snapshot.scoutMeetingScene) career.scoutMeetingScene = snapshot.scoutMeetingScene as ScoutMeetingScene
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))

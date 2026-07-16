@@ -475,6 +475,53 @@ export const SCOUT_DILUTION_FLOOR = 0.25
  *  bandwidth to less-seen players instead. */
 export const SCOUT_MAX_OPINIONS = 3
 
+/** A position group, for coverage/selection that must span the whole roster. */
+export type ScoutPosGroup = 'C' | 'W' | 'D' | 'G'
+
+/** Map any position label to its coverage group. */
+export function scoutPosGroup(position: string): ScoutPosGroup {
+  return position === 'G' ? 'G'
+    : (position === 'D' || position === 'LD' || position === 'RD') ? 'D'
+    : position === 'C' ? 'C' : 'W'
+}
+
+/**
+ * Pick up to `cap` items spread ACROSS position groups so a batch can never
+ * collapse to a single position (the "only goaltenders" bug). Items are bucketed
+ * by group, groups are ordered by roster NEED (thinnest first — `needOf` higher =
+ * thinner), and picks are drawn ROUND-ROBIN across the ordered groups. So when
+ * several positions are available the batch spans them, while a genuinely thin
+ * group is still surfaced first. Ties inside a group break by `rankOf` (higher
+ * first). Pure and deterministic — no RNG.
+ */
+export function selectNeedWeighted<T>(
+  items: readonly T[],
+  groupOf: (t: T) => ScoutPosGroup,
+  rankOf: (t: T) => number,
+  needOf: (g: ScoutPosGroup) => number,
+  cap: number,
+): T[] {
+  if (cap <= 0 || items.length === 0) return []
+  const buckets = new Map<ScoutPosGroup, T[]>()
+  for (const it of items) {
+    const g = groupOf(it)
+    const arr = buckets.get(g)
+    if (arr) arr.push(it)
+    else buckets.set(g, [it])
+  }
+  for (const arr of buckets.values()) arr.sort((a, b) => rankOf(b) - rankOf(a))
+  const groups = [...buckets.keys()].sort((a, b) =>
+    needOf(b) - needOf(a) || rankOf(buckets.get(b)![0]!) - rankOf(buckets.get(a)![0]!))
+  const out: T[] = []
+  let gi = 0
+  while (out.length < cap && groups.some((g) => (buckets.get(g)?.length ?? 0) > 0)) {
+    const arr = buckets.get(groups[gi % groups.length]!)
+    if (arr && arr.length) out.push(arr.shift()!)
+    gi++
+  }
+  return out
+}
+
 /** Qualitative read speed for a scope of the given size — for the UI. */
 export function scoutReadSpeed(scopeSize: number): 'Fast' | 'Steady' | 'Thin' {
   if (scopeSize <= SCOUT_CAPACITY) return 'Fast'

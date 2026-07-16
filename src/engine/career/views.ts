@@ -449,6 +449,8 @@ export interface DashboardView {
   boardMeetingPending?: boolean
   /** A convened bi-weekly staff meeting is waiting (blocking gate). Optional/additive. */
   staffMeetingDue?: boolean
+  /** A convened recurring scout meeting is waiting (blocking gate). Optional/additive. */
+  scoutMeetingDue?: boolean
   /** Offseason: human stage label for headers ('Free agency — day 3'). Optional/additive. */
   offseasonStageLabel?: string
   /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
@@ -1723,6 +1725,31 @@ export interface StaffMeetingView {
   proposals: StaffMeetingProposalView[]
 }
 
+/* ── Convened scout meeting (recurring recruitment briefing). Additive/optional. ── */
+/** One prospect on the meeting's board summary. */
+export interface ScoutBoardLineView {
+  playerId: string
+  name: string
+  position: string
+  note: string
+}
+export interface ScoutMeetingView {
+  day: number
+  year: number
+  /** Who's hosting (top scout / Head of Scouting). */
+  host: MeetingSpeaker
+  /** Host's opening line. */
+  opening: string
+  /** Prospects your board rates above the public consensus. */
+  risers: ScoutBoardLineView[]
+  /** Prospects your board rates below the consensus. */
+  fallers: ScoutBoardLineView[]
+  /** Coverage gaps (positions/regions you're thin on), human-readable. */
+  gaps: string[]
+  /** Decisions — reuses the staff-meeting proposal/option shapes. */
+  proposals: StaffMeetingProposalView[]
+}
+
 export interface OfferSheetRowView extends PlayerBadge {
   /** Rival club that tendered the sheet. */
   fromTeamAbbr: string
@@ -2231,6 +2258,8 @@ export interface CareerSnapshot {
   agentRapport?: AgentRapportState
   /** A pending convened staff meeting (JSON-safe scene). Optional/additive. */
   staffMeetingScene?: unknown
+  /** A pending convened scout meeting (JSON-safe scene). Optional/additive. */
+  scoutMeetingScene?: unknown
   /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
   faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
@@ -2514,6 +2543,10 @@ export interface ScoutedPlayerRow {
   targetScore: number
   /** Current salary (≈ transfer/asset value proxy). */
   salary: number
+  /** Trade/market value — the same asset-value currency the trade AI evaluates
+   *  with (fog-aware: youth + upside + acquirability, discounted for age/contract).
+   *  0 for a player we know too little about to value. */
+  tradeValue: number
   faceId?: string
   /** True if he's a current-class draft-eligible amateur (for filtering). */
   draftEligible: boolean

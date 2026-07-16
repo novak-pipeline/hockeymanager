@@ -23,6 +23,7 @@ export type ScreenId =
   | 'mediaCircuit'
   | 'staffMeeting'
   | 'staffBriefing'
+  | 'scoutMeeting'
   // News section
   | 'inbox'
   // Team section
