@@ -36,6 +36,7 @@ import { TradesScreen } from './screens/TradesScreen'
 import { WaiverWireScreen } from './screens/WaiverWireScreen'
 import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
 import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
+import { ScoutMeetingScreen } from './screens/ScoutMeetingScreen'
 import { CommandPalette } from './components/CommandPalette'
 import { PhoneCallOverlay } from './components/PhoneCallOverlay'
 import { WarRoomScreen } from './screens/WarRoomScreen'
@@ -364,6 +365,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('staffBriefing')
           return
         }
+        // Monthly scout meeting: the recruitment desk convenes with the board.
+        // Skipping (delegate) hands it to the Head of Scouting (safe defaults).
+        if (dashboard?.scoutMeetingDue && nav.screen !== 'scoutMeeting') {
+          navigate('scoutMeeting')
+          return
+        }
         // #7 cadence: a Continue press first previews the CALENDAR — what's ahead —
         // so advancing the season is a deliberate two-beat rhythm instead of mashing
         // Continue while reading the dashboard. The next press (from the calendar)
@@ -395,7 +402,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, nav.screen, navigate]
+    [busy, client, run, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -685,6 +692,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardMeetingScreen variant="review" />
     case 'staffBriefing':
       return <StaffBriefingScreen />
+    case 'scoutMeeting':
+      return <ScoutMeetingScreen />
     case 'warRoom':
       return <WarRoomScreen />
     case 'gmCareer':

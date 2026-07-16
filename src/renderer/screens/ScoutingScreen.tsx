@@ -342,7 +342,7 @@ function stars5(v: number): string {
   return '★'.repeat(full) + (v - full >= 0.5 ? '½' : '')
 }
 
-type ScoutSort = 'rec' | 'potential' | 'current' | 'age' | 'knowledge'
+type ScoutSort = 'rec' | 'potential' | 'current' | 'age' | 'knowledge' | 'value'
 
 function ScoutedTable({ rows, scouts, onScoutPlayer }: {
   rows: ScoutedPlayerRow[]
@@ -366,6 +366,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
       case 'current': return b.currentStars - a.currentStars
       case 'age': return a.age - b.age
       case 'knowledge': return b.knowledge - a.knowledge
+      case 'value': return b.tradeValue - a.tradeValue
       default: return b.targetScore - a.targetScore || recOrder[a.rec]! - recOrder[b.rec]!
     }
   })
@@ -389,6 +390,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
             <option value="potential">Potential</option>
             <option value="current">Current</option>
             <option value="knowledge">Knowledge</option>
+            <option value="value">Market value</option>
             <option value="age">Age</option>
           </select>
         </label>
@@ -401,7 +403,9 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
             <thead>
               <tr>
                 <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
-                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th><th className="num">Salary</th>
+                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th>
+                <th className="num" title="Market value on the trade AI's asset-value currency (fog-aware)">Value</th>
+                <th className="num">Salary</th>
                 {scouts && onScoutPlayer && <th></th>}
               </tr>
             </thead>
@@ -422,6 +426,9 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
                   <td style={{ color: 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.currentStars) || '–'}</td>
                   <td style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}>{stars5(r.potentialStars) || '–'}</td>
                   <td className="num muted small">{r.knowledge}%</td>
+                  <td className="num small" style={{ color: r.tradeValue > 0 ? 'var(--accent2, #e0b341)' : 'var(--muted)' }} title="Estimated trade value">
+                    {r.tradeValue > 0 ? r.tradeValue : '—'}
+                  </td>
                   <td className="num small">{fmtMoney(r.salary)}</td>
                   {scouts && onScoutPlayer && (
                     <td className="num"><ScoutPickerCell playerId={r.playerId} scouts={scouts} onPick={onScoutPlayer} /></td>

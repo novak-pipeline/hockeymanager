@@ -16,6 +16,9 @@ import {
   hireScout,
   fireScout,
   DISCOVERY_THRESHOLD,
+  selectNeedWeighted,
+  scoutPosGroup,
+  type ScoutPosGroup,
 } from './scouting'
 
 /* ────────────────────────── helpers ────────────────────────── */
@@ -754,5 +757,59 @@ describe('knowledge distribution', () => {
       expect(k).toBeGreaterThanOrEqual(0)
       expect(k).toBeLessThanOrEqual(100)
     }
+  })
+})
+
+/* ─────────────────── selectNeedWeighted (position diversity) ─────────────────── */
+
+describe('selectNeedWeighted — position-diverse scout-report batch', () => {
+  interface Cand { id: string; pos: string; pot: number }
+  const groupOf = (c: Cand): ScoutPosGroup => scoutPosGroup(c.pos)
+  const rankOf = (c: Cand): number => c.pot
+
+  it('never collapses to one position when several are available', () => {
+    const cands: Cand[] = [
+      { id: 'g1', pos: 'G', pot: 5 }, { id: 'g2', pos: 'G', pot: 5 },
+      { id: 'd1', pos: 'D', pot: 4 }, { id: 'w1', pos: 'LW', pot: 4 },
+    ]
+    // Even with goalies the highest-rated AND a huge goalie need, the batch of 2
+    // must span more than one position group.
+    const need = (g: ScoutPosGroup): number => (g === 'G' ? 3 : 1)
+    const picked = selectNeedWeighted(cands, groupOf, rankOf, need, 2)
+    expect(picked).toHaveLength(2)
+    const groups = new Set(picked.map(groupOf))
+    expect(groups.size).toBe(2) // not both goalies
+    expect(groups.has('G')).toBe(true) // the thin group is surfaced first
+  })
+
+  it('orders thinnest-roster group first', () => {
+    const cands: Cand[] = [
+      { id: 'c1', pos: 'C', pot: 5 }, { id: 'd1', pos: 'D', pot: 5 },
+    ]
+    const need = (g: ScoutPosGroup): number => (g === 'D' ? 3 : 1)
+    const picked = selectNeedWeighted(cands, groupOf, rankOf, need, 1)
+    expect(picked).toHaveLength(1)
+    expect(groupOf(picked[0]!)).toBe('D')
+  })
+
+  it('falls back to a single group only when that is all there is', () => {
+    const cands: Cand[] = [
+      { id: 'w1', pos: 'LW', pot: 5 }, { id: 'w2', pos: 'RW', pot: 4 }, { id: 'w3', pos: 'LW', pot: 3 },
+    ]
+    const picked = selectNeedWeighted(cands, groupOf, rankOf, () => 1, 2)
+    expect(picked).toHaveLength(2)
+    // All wingers → same group; and the higher-rated one comes first.
+    expect(picked.every((c) => groupOf(c) === 'W')).toBe(true)
+    expect(picked[0]!.pot).toBeGreaterThanOrEqual(picked[1]!.pot)
+  })
+
+  it('is deterministic and respects the cap', () => {
+    const cands: Cand[] = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, pos: ['C', 'LW', 'D', 'G'][i % 4]!, pot: 5 - (i % 3) }))
+    const need = (): number => 1
+    const a = selectNeedWeighted(cands, groupOf, rankOf, need, 3)
+    const b = selectNeedWeighted(cands, groupOf, rankOf, need, 3)
+    expect(a).toHaveLength(3)
+    expect(a.map((c) => c.id)).toEqual(b.map((c) => c.id))
+    expect(new Set(a.map(groupOf)).size).toBeGreaterThanOrEqual(3)
   })
 })

@@ -123,6 +123,8 @@ export type { StaffMeetingSummaryView, StaffMeetingFlaggedPlayer } from '@engine
 import type { StaffMeetingSummaryView } from '@engine/career/views'
 export type { StaffMeetingView, StaffMeetingProposalView, StaffMeetingOptionView } from '@engine/career/views'
 import type { StaffMeetingView } from '@engine/career/views'
+export type { ScoutMeetingView, ScoutBoardLineView } from '@engine/career/views'
+import type { ScoutMeetingView } from '@engine/career/views'
 export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
 import type { CoachMarketView } from '@engine/career/views'
 export type { PlayoffOddsView, PlayoffOddsRow } from '@engine/career/views'
@@ -276,6 +278,9 @@ export type WorkerRequestBody =
   | { type: 'getStaffMeeting' }
   | { type: 'submitStaffMeeting'; choices: Record<string, string> }
   | { type: 'delegateStaffMeeting' }
+  | { type: 'getScoutMeeting' }
+  | { type: 'submitScoutMeeting'; choices: Record<string, string> }
+  | { type: 'delegateScoutMeeting' }
   | { type: 'getCoachMarket' }
   | { type: 'fireCoach' }
   | { type: 'hireCoach'; coachId: string }
@@ -544,6 +549,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'staffMeetingSummary'; summary: StaffMeetingSummaryView }
   | { type: 'staffMeeting'; staffMeeting: StaffMeetingView | null }
   | { type: 'staffMeetingResult'; applied: string[]; summary: string }
+  | { type: 'scoutMeeting'; scoutMeeting: ScoutMeetingView | null }
+  | { type: 'scoutMeetingResult'; applied: string[]; summary: string }
   | { type: 'coachMarket'; market: CoachMarketView }
   | { type: 'coachHireResult'; ok: boolean; message: string }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }

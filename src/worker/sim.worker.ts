@@ -286,6 +286,16 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().delegateStaffMeeting()
       return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
     }
+    case 'getScoutMeeting':
+      return { id: req.id, type: 'scoutMeeting', scoutMeeting: must().getScoutMeeting() }
+    case 'submitScoutMeeting': {
+      const res = must().submitScoutMeeting(req.choices)
+      return { id: req.id, type: 'scoutMeetingResult', applied: res.applied, summary: res.summary }
+    }
+    case 'delegateScoutMeeting': {
+      const res = must().delegateScoutMeeting()
+      return { id: req.id, type: 'scoutMeetingResult', applied: res.applied, summary: res.summary }
+    }
     case 'getCoachMarket':
       return { id: req.id, type: 'coachMarket', market: must().getCoachMarket() }
     case 'fireCoach': {

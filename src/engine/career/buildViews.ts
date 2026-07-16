@@ -40,6 +40,7 @@ import {
   teamStyleFit,
 } from '@engine/league/archetypes'
 import { deploymentProfile } from '@engine/league/deployment'
+import { playerValue } from '@engine/league/trades'
 import type {
   ArchetypeInfo,
   AttributeGroupView,
@@ -1620,6 +1621,9 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       rec,
       targetScore: Math.round(targetScore * 100) / 100,
       salary: p.contract.salary,
+      // Market value on the trade AI's own asset-value currency — shown only once
+      // we have a real read (fog-of-war), so an unknown player doesn't leak a value.
+      tradeValue: k >= 40 ? Math.round(playerValue(p)) : 0,
       ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
       draftEligible: draftProspectIds.has(pid as string),
       ...(ctx.draftRankById?.[pid as string] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid as string]) } : {}),
