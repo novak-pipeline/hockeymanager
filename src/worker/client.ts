@@ -651,6 +651,10 @@ export class SimClient {
     return this.send({ type: 'getWarRoom' })
   }
 
+  getDeadlineDay(): Promise<WorkerResponse> {
+    return this.send({ type: 'getDeadlineDay' })
+  }
+
   getSeasonReview(): Promise<WorkerResponse> {
     return this.send({ type: 'getSeasonReview' })
   }

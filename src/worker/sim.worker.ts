@@ -482,6 +482,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'nameIndex', entries: must().getNameIndex() }
     case 'getWarRoom':
       return { id: req.id, type: 'warRoom', warRoom: must().getWarRoom() }
+    case 'getDeadlineDay':
+      return { id: req.id, type: 'deadlineDay', deadlineDay: must().getDeadlineDay() }
     case 'getSeasonReview':
       return { id: req.id, type: 'boardMeeting', scene: must().getSeasonReview() }
     case 'submitSeasonReview': {

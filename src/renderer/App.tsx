@@ -39,6 +39,7 @@ import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
 import { CommandPalette } from './components/CommandPalette'
 import { PhoneCallOverlay } from './components/PhoneCallOverlay'
 import { WarRoomScreen } from './screens/WarRoomScreen'
+import { DeadlineDayScreen } from './screens/DeadlineDayScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
 import { MediaCircuitScreen } from './screens/MediaCircuitScreen'
 import { MentorshipScreen } from './screens/MentorshipScreen'
@@ -428,8 +429,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   useEffect(() => {
     if (dashboard?.deadlinePending && !deadlineRoutedRef.current) {
       deadlineRoutedRef.current = true
-      navigate('warRoom')
-      toast('Deadline day — your staff are in the war room', 'info')
+      navigate('deadlineDay')
+      toast('Deadline day — the phones are ringing', 'info')
     }
     if (!dashboard?.deadlinePending) deadlineRoutedRef.current = false
   }, [dashboard?.deadlinePending, navigate])
@@ -687,6 +688,8 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <StaffBriefingScreen />
     case 'warRoom':
       return <WarRoomScreen />
+    case 'deadlineDay':
+      return <DeadlineDayScreen />
     case 'gmCareer':
       return <GMCareerScreen />
     case 'mediaCircuit':

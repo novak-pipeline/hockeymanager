@@ -310,7 +310,9 @@ import {
   playerValue,
   rosterCapUsed,
   solicitOffersForPlayer,
+  askingPriceText,
   type StoredTradeOffer,
+  type AiAiTradeResult,
 } from '@engine/league/trades'
 import {
   applyResultMorale,
@@ -531,6 +533,9 @@ import {
   type TradeProposal,
   type TradeSideView,
   type TradesView,
+  type DeadlineDayView,
+  type ShoppedPlayerView,
+  type DeadlineFeedItemView,
   type TransactionsView,
   type TeamPlayerStatRow,
   type TeamPlayerStatsView,
@@ -4561,87 +4566,7 @@ export class Career {
           postureOf,
         })
         if (!aiDeal) continue
-        // Value of the piece changing hands — gates whether this reaches your inbox.
-        const movedValue = Math.max(
-          0,
-          ...aiDeal.playerIds.map((id) => playerValue(this.resolve(asPlayerId(id as string)))),
-        )
-        executeTrade({
-          teams: this.data.teams,
-          players: this.data.players,
-          teamA: aiDeal.sellerTeamId,
-          teamB: aiDeal.buyerTeamId,
-          aGivesPlayerIds: aiDeal.playerIds,
-          aGivesPicks: [],
-          bGivesPlayerIds: [],
-          bGivesPicks: aiDeal.picks,
-          allPicks: this.picks,
-        })
-        // Retained salary (#157): the seller keeps paying part of the vet's hit so
-        // the cap-tight buyer fits. The player carries `retainedByOthers` (so his
-        // new club counts only the balance), and the seller books a retention slot
-        // that draws against its cap until the contract expires.
-        if (aiDeal.retainedAmount && aiDeal.retainedAmount > 0) {
-          const vetId = asPlayerId(aiDeal.playerIds[0] as string)
-          const vet = this.data.players.get(vetId)
-          const seller = this.data.teams.get(aiDeal.sellerTeamId)
-          const buyer = this.data.teams.get(aiDeal.buyerTeamId)
-          if (vet && seller && buyer) {
-            vet.contract.retainedByOthers = aiDeal.retainedAmount
-            seller.finances.retained = [
-              ...(seller.finances.retained ?? []),
-              { playerId: vetId as string, amount: aiDeal.retainedAmount, expiryYear: vet.contract.expiryYear },
-            ]
-            seller.finances.capUsed = rosterCapUsed(seller, this.data.players)
-            buyer.finances.capUsed = rosterCapUsed(buyer, this.data.players)
-          }
-        }
-        // Prospects (AHL / rights) the buyer sends back move into the SELLER's
-        // system: out of the buyer's affiliate (or off his rights), into the
-        // seller's affiliate, with rights following the player.
-        for (const pid of aiDeal.prospectIds) {
-          this.moveProspectBetweenOrgs(pid, aiDeal.buyerTeamId, aiDeal.sellerTeamId)
-        }
-        repairLines(this.data.teams.get(aiDeal.sellerTeamId)!, this.data.players)
-        repairLines(this.data.teams.get(aiDeal.buyerTeamId)!, this.data.players)
-        const txResult = recordTransaction(this.transactionLedger, {
-          day,
-          year: this.year,
-          kind: 'trade',
-          teamIds: [aiDeal.sellerTeamId as string, aiDeal.buyerTeamId as string],
-          summary: aiDeal.summary,
-        })
-        this.transactionLedger = txResult.ledger
-        this.chronicleTrade({
-          teamAId: aiDeal.sellerTeamId,
-          teamBId: aiDeal.buyerTeamId,
-          aGivesPlayerIds: aiDeal.playerIds,
-          aGivesPicks: [],
-          bGivesPlayerIds: [],
-          bGivesPicks: aiDeal.picks,
-        })
-        // Every deal is on the transactions ledger + ticker; only NOTABLE ones
-        // (a genuine roster piece changing hands) reach your inbox, so the
-        // deadline hums without burying your mail in depth-for-a-7th swaps.
-        if (movedValue >= 35) {
-          const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
-          const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
-          // Deterministic framing variety so deadline day doesn't read like one
-          // template on repeat — same house voice, different angle each time.
-          const takes = [
-            `${buyerGm.name} adds a piece for the run; ${sellerGm.name} banks the return.`,
-            `A win-now club and a seller found each other. ${buyerGm.name} pays up; ${sellerGm.name} restocks.`,
-            `${sellerGm.name} cashed in. Whether ${buyerGm.name} got value is the question the standings will answer.`,
-            `${buyerGm.name} went and got their guy. ${sellerGm.name} took the futures and moved on.`,
-          ]
-          const pick = (Career.pidNum(aiDeal.sellerTeamId as string) + Career.pidNum(aiDeal.buyerTeamId as string) + day) % takes.length
-          this.pushNews(
-            'trade',
-            `Trade: ${aiDeal.summary.split('.')[0]}`,
-            `${aiDeal.summary} ${takes[pick]}`,
-            { teamId: aiDeal.buyerTeamId as string }
-          )
-        }
+        this.executeAiAiDeal(aiDeal, day)
       }
     }
     this.currentDay = day
@@ -4686,6 +4611,9 @@ export class Career {
     ) {
       this.deadlineHold = true
       this.deadlineHoldDone = true
+      // The market comes alive the instant we hold: concrete offers on your desk
+      // and a morning flurry of AI-to-AI deals on the wire (runs once).
+      this.openDeadlineDay()
       this.pushNews(
         'trade',
         'DEADLINE DAY — the window closes tonight',
@@ -10764,6 +10692,268 @@ export class Career {
       `${fx.summary}${receipts}`,
       { teamId: this.userTeamId as string }
     )
+  }
+
+  /**
+   * Execute one AI-to-AI deal: move the assets, apply retention/prospects,
+   * repair both lineups, record it to the ledger + chronicle, and — for a
+   * genuine roster piece — put it on your inbox. Shared by the daily rumour tick
+   * and the deadline-day morning flurry so both read identically.
+   */
+  private executeAiAiDeal(aiDeal: AiAiTradeResult, day: number): void {
+    // Value of the piece changing hands — gates whether this reaches your inbox.
+    const movedValue = Math.max(
+      0,
+      ...aiDeal.playerIds.map((id) => playerValue(this.resolve(asPlayerId(id as string)))),
+    )
+    executeTrade({
+      teams: this.data.teams,
+      players: this.data.players,
+      teamA: aiDeal.sellerTeamId,
+      teamB: aiDeal.buyerTeamId,
+      aGivesPlayerIds: aiDeal.playerIds,
+      aGivesPicks: [],
+      bGivesPlayerIds: [],
+      bGivesPicks: aiDeal.picks,
+      allPicks: this.picks,
+    })
+    // Retained salary (#157): the seller keeps paying part of the vet's hit so
+    // the cap-tight buyer fits. The player carries `retainedByOthers` (so his
+    // new club counts only the balance), and the seller books a retention slot
+    // that draws against its cap until the contract expires.
+    if (aiDeal.retainedAmount && aiDeal.retainedAmount > 0) {
+      const vetId = asPlayerId(aiDeal.playerIds[0] as string)
+      const vet = this.data.players.get(vetId)
+      const seller = this.data.teams.get(aiDeal.sellerTeamId)
+      const buyer = this.data.teams.get(aiDeal.buyerTeamId)
+      if (vet && seller && buyer) {
+        vet.contract.retainedByOthers = aiDeal.retainedAmount
+        seller.finances.retained = [
+          ...(seller.finances.retained ?? []),
+          { playerId: vetId as string, amount: aiDeal.retainedAmount, expiryYear: vet.contract.expiryYear },
+        ]
+        seller.finances.capUsed = rosterCapUsed(seller, this.data.players)
+        buyer.finances.capUsed = rosterCapUsed(buyer, this.data.players)
+      }
+    }
+    // Prospects (AHL / rights) the buyer sends back move into the SELLER's
+    // system: out of the buyer's affiliate (or off his rights), into the
+    // seller's affiliate, with rights following the player.
+    for (const pid of aiDeal.prospectIds) {
+      this.moveProspectBetweenOrgs(pid, aiDeal.buyerTeamId, aiDeal.sellerTeamId)
+    }
+    repairLines(this.data.teams.get(aiDeal.sellerTeamId)!, this.data.players)
+    repairLines(this.data.teams.get(aiDeal.buyerTeamId)!, this.data.players)
+    const txResult = recordTransaction(this.transactionLedger, {
+      day,
+      year: this.year,
+      kind: 'trade',
+      teamIds: [aiDeal.sellerTeamId as string, aiDeal.buyerTeamId as string],
+      summary: aiDeal.summary,
+    })
+    this.transactionLedger = txResult.ledger
+    this.chronicleTrade({
+      teamAId: aiDeal.sellerTeamId,
+      teamBId: aiDeal.buyerTeamId,
+      aGivesPlayerIds: aiDeal.playerIds,
+      aGivesPicks: [],
+      bGivesPlayerIds: [],
+      bGivesPicks: aiDeal.picks,
+    })
+    // Every deal is on the transactions ledger + ticker; only NOTABLE ones
+    // (a genuine roster piece changing hands) reach your inbox, so the
+    // deadline hums without burying your mail in depth-for-a-7th swaps.
+    if (movedValue >= 35) {
+      const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
+      const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
+      // Deterministic framing variety so deadline day doesn't read like one
+      // template on repeat — same house voice, different angle each time.
+      const takes = [
+        `${buyerGm.name} adds a piece for the run; ${sellerGm.name} banks the return.`,
+        `A win-now club and a seller found each other. ${buyerGm.name} pays up; ${sellerGm.name} restocks.`,
+        `${sellerGm.name} cashed in. Whether ${buyerGm.name} got value is the question the standings will answer.`,
+        `${buyerGm.name} went and got their guy. ${sellerGm.name} took the futures and moved on.`,
+      ]
+      const pick = (Career.pidNum(aiDeal.sellerTeamId as string) + Career.pidNum(aiDeal.buyerTeamId as string) + day) % takes.length
+      this.pushNews(
+        'trade',
+        `Trade: ${aiDeal.summary.split('.')[0]}`,
+        `${aiDeal.summary} ${takes[pick]}`,
+        { teamId: aiDeal.buyerTeamId as string }
+      )
+    }
+  }
+
+  /**
+   * Deadline-day tentpole: the moment the sim is held on deadline day, the
+   * market comes alive. Runs exactly once per season. Two things happen up
+   * front so the war room isn't a static briefing:
+   *   (A) rival GMs table CONCRETE offers for your most movable players — real,
+   *       acceptable {@link StoredTradeOffer}s that show on your desk and ring
+   *       the phone; and
+   *   (B) a morning flurry of AI-to-AI deals lands on the wire before you've
+   *       made a call, so the league is visibly moving without you.
+   * Fully deterministic (seeded Rng), additive to the existing hold.
+   */
+  private openDeadlineDay(): void {
+    const key = `deadline-open-${this.year}`
+    if (this.tentpoles.emittedKeys.includes(key)) return
+    this.tentpoles.emittedKeys.push(key)
+    const day = this.currentDay
+
+    /* (A) Concrete incoming offers for your movable players. */
+    const alreadyShopping = new Set(
+      this.tradeOffers
+        .filter((o) => o.userGivesPlayerIds.length === 1)
+        .map((o) => o.userGivesPlayerIds[0] as string),
+    )
+    const movable = this.userTeam.roster
+      .map((id) => this.resolve(id))
+      .filter(
+        (p) =>
+          p.injuryStatus === null &&
+          (!p.contract.noTradeClause || p.ntcWaived) &&
+          !alreadyShopping.has(p.id as string) &&
+          playerValue(p) >= 15,
+      )
+      .sort((a, b) => playerValue(b) - playerValue(a) || (a.id < b.id ? -1 : 1))
+      .slice(0, 4)
+    let tabled = 0
+    for (const target of movable) {
+      if (tabled >= 6) break
+      const offers = solicitOffersForPlayer({
+        target,
+        userTeamId: this.userTeamId,
+        teams: this.data.teams,
+        players: this.data.players,
+        picks: this.picks,
+        rng: this.rngFor(7113, day, Career.pidNum(target.id as string)),
+        nextOfferId: () => `d${this.offerCounter++}`,
+        expiresOnDay: this.deadlineDay + 1,
+        aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
+        maxOffers: 2,
+      })
+      for (const o of offers) {
+        if (tabled >= 6) break
+        this.tradeOffers.push(o)
+        tabled++
+        const partner = this.data.teams.get(o.partnerTeamId)!
+        const gm = this.gmPersonaFor(o.partnerTeamId)
+        this.pushNews(
+          'trade',
+          `Deadline call from ${partner.abbreviation}`,
+          `${gm.name} (${gm.styleLabel}) is on the line. ${o.message}`,
+          { teamId: o.partnerTeamId as string },
+        )
+      }
+    }
+
+    /* (B) Morning AI-to-AI flurry — populates the live wire immediately. */
+    const ranks = this.strengthRanks()
+    const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+      this.clubPostureFor(tid, ranks).posture
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const aiDeal = generateAiAiTrade({
+        day,
+        deadlineDay: this.deadlineDay,
+        userTeamId: this.userTeamId,
+        teams: this.data.teams,
+        players: this.data.players,
+        picks: this.picks,
+        rng: this.rngFor(7112, attempt),
+        postureOf,
+      })
+      if (!aiDeal) continue
+      this.executeAiAiDeal(aiDeal, day)
+    }
+  }
+
+  /** The league-wide "who's being shopped" board: every selling/retooling club's
+   *  movable veterans, with a plain-English asking price on the Perri scale. Fog
+   *  applies (you see them as your scouts do). Best value first, capped. */
+  private buildShoppedBoard(ranks: Map<string, number>): ShoppedPlayerView[] {
+    const fog = this.fogCtx()
+    const out: ShoppedPlayerView[] = []
+    for (const [tid, team] of this.data.teams) {
+      if (tid === this.userTeamId || team.tier === 'ahl' || team.tier === 'world') continue
+      // Contenders aren't selling their roster — only sellers put names out.
+      if (this.clubPostureFor(tid, ranks).posture === 'contend') continue
+      const gm = this.gmPersonaFor(tid)
+      for (const pid of team.roster) {
+        const p = this.data.players.get(pid)
+        if (!p || p.injuryStatus !== null || p.contract.noTradeClause) continue
+        // What a selling club actually dangles: a movable veteran with real value.
+        if (p.age < 26 || p.position === 'G') continue
+        const value = playerValue(p)
+        if (value < 14) continue
+        const rental = p.contract.yearsRemaining <= 1
+        out.push({
+          ...badge(p, fog),
+          salary: p.contract.salary,
+          yearsRemaining: p.contract.yearsRemaining,
+          teamId: tid as string,
+          teamAbbr: team.abbreviation,
+          teamName: team.name,
+          gmName: gm.name,
+          rental,
+          value: Math.round(value * 10) / 10,
+          asking: askingPriceText(value, rental),
+        })
+      }
+    }
+    out.sort((a, b) => b.value - a.value || (a.playerId < b.playerId ? -1 : 1))
+    return out.slice(0, 16)
+  }
+
+  /** The live deadline wire: recent completed trades (AI-to-AI + your own),
+   *  newest first, read straight off the transaction ledger. */
+  private buildDeadlineFeed(): DeadlineFeedItemView[] {
+    const abbrOf = (tid: string): string => this.data.teams.get(asTeamId(tid))?.abbreviation ?? tid
+    return this.transactionLedger.items
+      .filter((t) => t.kind === 'trade' && t.year === this.year)
+      .slice(-14)
+      .reverse()
+      .map((t) => {
+        const ago = this.currentDay - t.day
+        return {
+          text: t.summary,
+          teamAbbrs: t.teamIds.map(abbrOf),
+          when: ago <= 0 ? 'today' : `${ago}d ago`,
+          accent: true,
+        }
+      })
+  }
+
+  /** The deadline-day hub (Season Rhythm M4). Non-null only while the sim is held
+   *  on deadline day; everything is read live from the market. */
+  getDeadlineDay(): DeadlineDayView | null {
+    if (!this.deadlineHold) return null
+    const staff = this.getTeamStaff(this.userTeamId as string)
+    const ranks = this.strengthRanks()
+    const myPosture = this.clubPostureFor(this.userTeamId, ranks)
+    const buying = myPosture.posture === 'contend'
+    const space = this.userTeam.finances.salaryCap - this.userCapUsed() - this.userDeadCap
+    const counts = this.rosterCounts(this.userTeam)
+    const need = counts.d <= 6 ? 'the blue line' : counts.g < 2 ? 'the crease' : 'scoring depth'
+    return {
+      dateISO: dayToDateISO(this.year, this.currentDay),
+      deadlineDay: this.deadlineDay,
+      stance: buying
+        ? `We're contenders — ${myPosture.reason}. Today we buy, or we explain why we didn't.`
+        : myPosture.posture === 'rebuild'
+          ? `We're selling — ${myPosture.reason}. Every expiring veteran is a draft pick wearing skates.`
+          : `We're on the fence — ${myPosture.reason}. Pick a side before the phones decide for you.`,
+      capLine: this.userDeadCap > 0
+        ? `Space to work with: $${(space / 1e6).toFixed(2)}M after $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap.`
+        : `Space to work with: $${(space / 1e6).toFixed(2)}M.`,
+      coachLine: `If we add anywhere, add to ${need}. Don't bring me a project — bring me someone who plays TONIGHT.`,
+      agmName: staff.agm?.name ?? 'Your Assistant GM',
+      buying,
+      // Only offers where you'd move one of YOUR players — the real "calls".
+      incoming: this.tradeOffers.filter((o) => o.userGivesPlayerIds.length > 0).map((o) => this.offerView(o)),
+      shopped: this.buildShoppedBoard(ranks),
+      feed: this.buildDeadlineFeed(),
+    }
   }
 
   /** Season Rhythm M4: the deadline war-room briefing — staged while the sim

@@ -177,6 +177,28 @@ export function pickValue(
   return base * Math.pow(FUTURE_YEAR_DISCOUNT, yearsOut)
 }
 
+/**
+ * Plain-English asking price for a player on the deadline block, expressed in
+ * draft-pick currency on the same Perri scale the AI actually trades on. A
+ * rental (expiring deal) commands a discount to a signed player of equal value
+ * — a buyer is paying for a playoff run, not for term — so the demand is framed
+ * a notch lower.
+ *
+ * NOTE: a sibling chip is introducing a shared `assetValue()` that unifies
+ * player + pick valuation on one currency. When it lands, feed its value in
+ * here instead of `playerValue`; the tier thresholds are already calibrated to
+ * the Perri pick scale (a 1st ≈ 28 points) so they carry over unchanged.
+ */
+export function askingPriceText(value: number, rental: boolean): string {
+  const v = rental ? value * 0.85 : value
+  if (v >= 60) return 'a 1st-round pick and a top prospect'
+  if (v >= 42) return 'a 1st-round pick and a mid-round pick'
+  if (v >= 30) return 'a 1st-round pick'
+  if (v >= 20) return 'a 2nd-round pick'
+  if (v >= 12) return 'a mid-round pick'
+  return 'a late pick or a depth piece'
+}
+
 /* ────────────────────────── team philosophy & needs ────────────────────────── */
 
 /**
