@@ -6899,7 +6899,7 @@ export class Career {
       for (const pr of this.playerPromises) {
         if (pr.status !== 'open') continue
         const p = this.data.players.get(asPlayerId(pr.playerId))
-        const onOrg = p ? this.ownOrgIds().some((id) => (id as string) === pr.playerId) : false
+        const onOrg = p ? this.ownOrgIds().has(pr.playerId as string) : false
         if (pr.kind === 'newDeal') {
           // Kept if he's still in the organization (the deal came, or he chose
           // to stay); broken if he walked or you shipped him after promising.
