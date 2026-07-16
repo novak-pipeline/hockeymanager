@@ -302,6 +302,8 @@ import {
 } from '@engine/league/agentRapport'
 import {
   buildTeamProfile,
+  describePickValue,
+  describePlayerValue,
   evaluateProposal,
   executeTrade,
   generateAiOffers,
@@ -525,6 +527,8 @@ import {
   type TacticsView,
   type TentpoleView,
   type TradeAssessmentView,
+  type TradeDraftView,
+  type TradeDraftAsset,
   type TradeInterestView,
   type TradeEvaluation,
   type TradeOfferView,
@@ -10023,6 +10027,152 @@ export class Career {
   }
 
   /**
+   * Live per-asset value breakdown for the trade builder. Every number comes
+   * from the SAME `describePlayerValue`/`describePickValue` (i.e. `playerValue`/
+   * `pickValue`) the AI accepts/rejects with, so the builder's math matches the
+   * engine's. Your own assets read exactly; an unscouted opponent's player is
+   * valued off your scouts' fogged overall (flagged `estimated`). The
+   * `marketVerdict` is a pure who-wins-on-paper read; the `partnerVerdict` is a
+   * side-effect-free dry-run of the real `evaluateProposal`. Deterministic.
+   */
+  evaluateTradeDraft(proposal: TradeProposal): TradeDraftView {
+    const year = this.year
+    const fog = this.fogCtx()
+    const r1 = (v: number): number => Math.round(v * 10) / 10
+
+    const playerAsset = (p: Player, useFog: boolean): TradeDraftAsset => {
+      const b = badge(p, useFog ? fog : undefined)
+      const estimated = !!b.scouted && !b.scouted.exact
+      const { value, drivers } = describePlayerValue(p, estimated ? b.overall : undefined)
+      return {
+        key: p.id as string,
+        name: p.name,
+        kind: 'player',
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        value: r1(value),
+        estimated,
+        drivers,
+      }
+    }
+    const pickAssetDraft = (pk: DraftPick): TradeDraftAsset => {
+      const { value, drivers } = describePickValue(pk, { year })
+      const via = pk.originalTeamId !== pk.ownerTeamId
+        ? this.data.teams.get(pk.originalTeamId)?.abbreviation
+        : undefined
+      const ord = pk.round === 1 ? '1st' : pk.round === 2 ? '2nd' : pk.round === 3 ? '3rd' : `${pk.round}th`
+      return {
+        key: this.pickId(pk),
+        name: `${pk.year} ${ord}`,
+        kind: 'pick',
+        ...(via ? { viaAbbr: via } : {}),
+        value: r1(value),
+        drivers,
+      }
+    }
+
+    const give: TradeDraftAsset[] = [
+      ...proposal.givePlayerIds.map((id) => playerAsset(this.resolve(asPlayerId(id)), false)),
+      ...this.pickByIds(proposal.givePickIds).map(pickAssetDraft),
+    ]
+    const receive: TradeDraftAsset[] = [
+      ...proposal.receivePlayerIds.map((id) => playerAsset(this.resolve(asPlayerId(id)), true)),
+      ...this.pickByIds(proposal.receivePickIds).map(pickAssetDraft),
+    ]
+
+    const giveTotal = r1(give.reduce((s, a) => s + a.value, 0))
+    const receiveTotal = r1(receive.reduce((s, a) => s + a.value, 0))
+    const net = r1(receiveTotal - giveTotal)
+
+    let marketVerdict: TradeDraftView['marketVerdict'] = 'empty'
+    let marketLine = 'Add players or picks to both sides to see the balance.'
+    let marketPct: number | undefined
+    if (giveTotal > 0 && receiveTotal > 0) {
+      const rel = (receiveTotal - giveTotal) / Math.max(giveTotal, receiveTotal)
+      if (Math.abs(rel) <= 0.1) {
+        marketVerdict = 'fair'
+        marketLine = 'Even value on paper.'
+      } else if (rel < 0) {
+        marketVerdict = 'overpay'
+        marketPct = Math.round(((giveTotal - receiveTotal) / receiveTotal) * 100)
+        marketLine = `You're overpaying by ~${marketPct}% on paper.`
+      } else {
+        marketVerdict = 'fleece'
+        marketPct = Math.round(((receiveTotal - giveTotal) / giveTotal) * 100)
+        marketLine = `You come out ~${marketPct}% ahead on paper.`
+      }
+    }
+
+    // Reuse the assistant-GM read verbatim so the two panels never disagree.
+    const agm = this.assessTrade(proposal)
+    const { partnerVerdict, partnerLine } = this.partnerDraftVerdict(proposal, give.length > 0, receive.length > 0)
+
+    return {
+      give,
+      receive,
+      giveTotal,
+      receiveTotal,
+      net,
+      marketVerdict,
+      marketLine,
+      ...(marketPct !== undefined ? { marketPct } : {}),
+      agmName: agm.agmName,
+      agmLine: agm.line,
+      agmTone: agm.tone,
+      partnerVerdict,
+      partnerLine,
+    }
+  }
+
+  /**
+   * The partner's projected answer to a draft package — a side-effect-free
+   * dry-run of the REAL `evaluateProposal` on a STABLE package-seeded RNG (never
+   * touches the live proposal counter, so a later real offer is unchanged). This
+   * is a projection: a formally proposed deal still gets slept on for a day or two.
+   */
+  private partnerDraftVerdict(
+    proposal: TradeProposal,
+    hasGive: boolean,
+    hasReceive: boolean,
+  ): { partnerVerdict: TradeDraftView['partnerVerdict']; partnerLine: string } {
+    const partnerId = asTeamId(proposal.partnerTeamId)
+    const partner = this.data.teams.get(partnerId)
+    const name = partner?.name ?? 'The club'
+    if (!partner) return { partnerVerdict: 'empty', partnerLine: 'That front office is unreachable right now.' }
+    if (!this.tradingOpen()) return { partnerVerdict: 'empty', partnerLine: 'The trade market is closed.' }
+    if (!hasGive || !hasReceive) return { partnerVerdict: 'empty', partnerLine: 'Put something on both sides to gauge their answer.' }
+
+    const give = {
+      players: proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))),
+      picks: this.pickByIds(proposal.givePickIds),
+    }
+    const receive = {
+      players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))),
+      picks: this.pickByIds(proposal.receivePickIds),
+    }
+    const waivedNtcIds = new Set(
+      give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
+    )
+    const charSum = (s: string): number => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h }
+    const stableKey = [...proposal.givePlayerIds, ...proposal.givePickIds, ...proposal.receivePlayerIds, ...proposal.receivePickIds]
+      .reduce((h, s) => (h * 31 + charSum(s)) | 0, 11)
+    const rng = this.rngFor(7011, this.currentDay, stableKey)
+    const posture = this.clubPostureFor(partnerId)
+    const evaln = evaluateProposal({
+      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds,
+      relationship: this.relationshipWith(partnerId as string),
+      philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), posture.posture),
+      context: {
+        posture: posture.posture,
+        deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
+      },
+    })
+    if (evaln.verdict === 'accept') return { partnerVerdict: 'accept', partnerLine: `${name} would likely accept this.` }
+    if (evaln.verdict === 'counter') return { partnerVerdict: 'counter', partnerLine: `${name} would want a bit more before saying yes.` }
+    if (evaln.verdict === 'reject' && evaln.counterAskValue <= 0) return { partnerVerdict: 'blocked', partnerLine: evaln.message }
+    return { partnerVerdict: 'reject', partnerLine: `${name} would reject this — the return falls short.` }
+  }
+
+  /**
    * NON-BINDING interest read from the partner GM when you "gauge interest"
    * before officially proposing (EHM-style). Runs the same `evaluateProposal`
    * the club would use, but on a STABLE gauge RNG (seeded from the package, not
@@ -14904,14 +15054,22 @@ export class Career {
   }
 
   private pickAsset(p: DraftPick): PickAssetView {
-    const pv = pickValue(p, { year: this.year })
+    const { value, drivers } = describePickValue(p, { year: this.year })
+    const origAbbr = this.data.teams.get(p.originalTeamId)!.abbreviation
+    // #13-style provenance: surface the ORIGINAL club when the pick was acquired
+    // via trade, so "2026 1st (via MTL)" tells you which slot it really is.
+    const via = p.originalTeamId !== p.ownerTeamId ? origAbbr : undefined
+    const ord = p.round === 1 ? '1st' : p.round === 2 ? '2nd' : p.round === 3 ? '3rd' : `${p.round}th`
     return {
       id: this.pickId(p),
       year: p.year,
       round: p.round,
-      originalTeamAbbr: this.data.teams.get(p.originalTeamId)!.abbreviation,
-      label: `${p.year} R${p.round} (${this.data.teams.get(p.originalTeamId)!.abbreviation})`,
-      value: Math.round(pv * 10) / 10,
+      originalTeamAbbr: origAbbr,
+      label: `${p.year} ${ord}`,
+      value: Math.round(value * 10) / 10,
+      ...(via ? { viaAbbr: via } : {}),
+      isOwnPick: p.originalTeamId === p.ownerTeamId,
+      drivers,
     }
   }
 
@@ -14947,11 +15105,20 @@ export class Career {
       return team.roster.map((id) => {
         const p = this.resolve(id)
         const playerFog = isUserTeam ? undefined : fog
+        const b = badge(p, playerFog)
+        // Your own players read exactly; an unscouted opponent's value is your
+        // staff's estimate from the fogged (mid-range) overall, so a plain number
+        // never leaks his true rating.
+        const estimated = !!b.scouted && !b.scouted.exact
+        const { value, drivers } = describePlayerValue(p, estimated ? b.overall : undefined)
         return {
-          ...badge(p, playerFog),
+          ...b,
           salary: p.contract.salary,
           yearsRemaining: p.contract.yearsRemaining,
           noTradeClause: p.contract.noTradeClause,
+          tradeValue: Math.round(value * 10) / 10,
+          valueEstimated: estimated,
+          valueDrivers: drivers,
         }
       })
     }

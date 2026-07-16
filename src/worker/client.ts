@@ -471,6 +471,10 @@ export class SimClient {
     return this.send({ type: 'assessTrade', proposal })
   }
 
+  evaluateTradeDraft(proposal: TradeProposal): Promise<WorkerResponse> {
+    return this.send({ type: 'evaluateTradeDraft', proposal })
+  }
+
   gaugeTradeInterest(proposal: TradeProposal): Promise<WorkerResponse> {
     return this.send({ type: 'gaugeTradeInterest', proposal })
   }

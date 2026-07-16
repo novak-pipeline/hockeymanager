@@ -75,19 +75,13 @@ const fairSalaryFor = (ovr: number): number =>
   (0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11) * 1e6
 
 /**
- * Trade value of a player, in trade points.
- *
- *  - Base: exponential in overall (stars are disproportionately valuable).
- *  - Age curve peaking at 23–27.
- *  - U24 upside: unrealized potential is partially priced in, more so the
- *    younger the player.
- *  - Contract drag: paid above the fair curve reduces value, a cheap deal adds
- *    value; longer remaining terms amplify either way.
- *  - Small discounts for current injury and poor morale.
+ * Core player value computation for a GIVEN overall. `playerValue` passes the
+ * player's true `ratedOverall`; the trade-builder's fog path passes a scouted
+ * estimate so an unscouted opponent's displayed value doesn't leak his exact
+ * rating. Every factor other than overall (age, contract, injury, morale) is
+ * public, so only the overall is substituted.
  */
-export function playerValue(player: Player): number {
-  const ovr = ratedOverall(player)
-
+function computePlayerValue(player: Player, ovr: number): number {
   // U24 upside: price in a slice of the gap to potential, fading to nothing
   // by age 24 — buyers pay for projection, but never the full ceiling.
   let effective = ovr
@@ -112,6 +106,79 @@ export function playerValue(player: Player): number {
     value *= 1 - ((50 - player.morale) / 50) * 0.06
   }
   return value
+}
+
+/**
+ * Trade value of a player, in trade points.
+ *
+ *  - Base: exponential in overall (stars are disproportionately valuable).
+ *  - Age curve peaking at 23–27.
+ *  - U24 upside: unrealized potential is partially priced in, more so the
+ *    younger the player.
+ *  - Contract drag: paid above the fair curve reduces value, a cheap deal adds
+ *    value; longer remaining terms amplify either way.
+ *  - Small discounts for current injury and poor morale.
+ */
+export function playerValue(player: Player): number {
+  return computePlayerValue(player, ratedOverall(player))
+}
+
+/* ────────────────────────── value drivers (UI) ────────────────────────── */
+
+/** A single human-readable factor behind an asset's trade value, for the trade
+ *  builder's hover breakdown. `tone` colours it: raises / lowers / context. */
+export interface ValueDriver {
+  label: string
+  tone: 'up' | 'down' | 'flat'
+}
+
+/**
+ * Endowment multiplier the AI applies to its OWN players when weighing a return
+ * (see `evaluateProposal`). Exported so the trade builder can explain, with the
+ * exact same constant the acceptance math uses, why a paper-even deal still
+ * needs a sweetener to get a yes.
+ */
+export const OWN_PLAYER_ENDOWMENT = 1.08
+
+/**
+ * `playerValue` plus the human-readable drivers behind it, for the trade
+ * builder. `.value` is byte-identical to `playerValue(player)` when
+ * `overrideOverall` is omitted (locked by a test) — so displayed numbers match
+ * what the AI weighs. Pass a scouted-overall estimate to fog an opponent whose
+ * exact rating your staff don't know.
+ */
+export function describePlayerValue(
+  player: Player,
+  overrideOverall?: number,
+): { value: number; drivers: ValueDriver[] } {
+  const ovr = overrideOverall ?? ratedOverall(player)
+  const value = computePlayerValue(player, ovr)
+  const drivers: ValueDriver[] = []
+
+  const tier =
+    ovr >= 86 ? 'elite' : ovr >= 78 ? 'top-line' : ovr >= 70 ? 'middle-six' : ovr >= 60 ? 'depth' : 'fringe'
+  drivers.push({ label: `${ovr} OVR — ${tier}`, tone: ovr >= 78 ? 'up' : ovr < 60 ? 'down' : 'flat' })
+
+  if (player.age <= 22) drivers.push({ label: `Age ${player.age} — young`, tone: 'up' })
+  else if (player.age <= 27) drivers.push({ label: `Age ${player.age} — prime`, tone: 'up' })
+  else if (player.age <= 30) drivers.push({ label: `Age ${player.age}`, tone: 'flat' })
+  else drivers.push({ label: `Age ${player.age} — declining`, tone: 'down' })
+
+  if (player.age < 24) {
+    const potOvr = ratedPotential(player)
+    if (potOvr - ovr >= 4) drivers.push({ label: `Upside to ~${potOvr}`, tone: 'up' })
+  }
+
+  const fair = fairSalaryFor(ovr)
+  const yrs = player.contract.yearsRemaining
+  const termTag = yrs > 1 ? ` · ${yrs}yr` : ''
+  if (player.contract.salary <= fair * 0.85) drivers.push({ label: `Team-friendly deal${termTag}`, tone: 'up' })
+  else if (player.contract.salary >= fair * 1.2) drivers.push({ label: `Rich contract${termTag}`, tone: 'down' })
+
+  if (player.injuryStatus) drivers.push({ label: 'Injured', tone: 'down' })
+  if (player.morale < 50) drivers.push({ label: 'Unhappy', tone: 'down' })
+
+  return { value, drivers }
 }
 
 /* ────────────────────────── Perri pick-value curve ────────────────────────── */
@@ -175,6 +242,30 @@ export function pickValue(
   const base = perriPickValue(overallPick)
   const yearsOut = Math.max(0, pick.year - args.year)
   return base * Math.pow(FUTURE_YEAR_DISCOUNT, yearsOut)
+}
+
+const roundOrdinal = (round: number): string =>
+  round === 1 ? '1st' : round === 2 ? '2nd' : round === 3 ? '3rd' : `${round}th`
+
+/**
+ * `pickValue` plus the human-readable drivers behind it, for the trade builder.
+ * `.value` is byte-identical to `pickValue(pick, args)` (locked by a test).
+ */
+export function describePickValue(
+  pick: DraftPick,
+  args: { year: number; teamStrengthRank?: number },
+): { value: number; drivers: ValueDriver[] } {
+  const value = pickValue(pick, args)
+  const drivers: ValueDriver[] = []
+  drivers.push({
+    label: `${roundOrdinal(pick.round)}-round pick`,
+    tone: pick.round <= 1 ? 'up' : pick.round >= 5 ? 'down' : 'flat',
+  })
+  const slot = Math.round(expectedOverallPick(pick.round, args.teamStrengthRank))
+  drivers.push({ label: `~#${slot} projected`, tone: 'flat' })
+  const yearsOut = Math.max(0, pick.year - args.year)
+  if (yearsOut >= 1) drivers.push({ label: `${yearsOut}yr out — discounted`, tone: 'down' })
+  return { value, drivers }
 }
 
 /* ────────────────────────── team philosophy & needs ────────────────────────── */
@@ -607,7 +698,7 @@ export function evaluateProposal(args: {
   // Real-GM rule: the endowment effect — every GM values his own players a
   // shade above market (picks are commodity; players are HIS guys). This is
   // what makes fleecing the AI impossible: a "fair" offer is not enough.
-  const ENDOWMENT = 1.08
+  const ENDOWMENT = OWN_PLAYER_ENDOWMENT
   const loss =
     receive.players.reduce((s, p) => s + playerValue(p) * ENDOWMENT, 0) +
     receive.picks.reduce((s, p) => s + pickValue(p, { year }), 0)

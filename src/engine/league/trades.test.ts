@@ -16,6 +16,8 @@ import { Rng, deriveSeed } from '@engine/shared/rng'
 import {
   buildTeamProfile,
   canRetain,
+  describePickValue,
+  describePlayerValue,
   evaluateProposal,
   executeTrade,
   generateAiOffers,
@@ -109,6 +111,42 @@ describe('pickValue', () => {
     const strongR3 = pickValue(makePick(2026, 3, 't1'), { year: 2026, teamStrengthRank: 1 })
     const weakR3 = pickValue(makePick(2026, 3, 't1'), { year: 2026, teamStrengthRank: 16 })
     expect(weak / strong).toBeGreaterThan(weakR3 / strongR3)
+  })
+})
+
+/* ────────────────────────── describe* (builder wrappers) ────────────────────────── */
+
+describe('describePlayerValue / describePickValue', () => {
+  it('the builder value is byte-identical to the AI value (no override)', () => {
+    for (const [ovr, age] of [[90, 25], [78, 22], [65, 33], [55, 19]] as const) {
+      const p = makePlayer(`p${ovr}-${age}`, ovr, { age })
+      expect(describePlayerValue(p).value).toBe(playerValue(p))
+    }
+    const args = { year: 2026 }
+    for (const round of [1, 2, 4, 7]) {
+      const pk = makePick(2026, round, 't1')
+      expect(describePickValue(pk, args).value).toBe(pickValue(pk, args))
+    }
+  })
+
+  it('a fog override lowers the shown value without touching playerValue', () => {
+    const star = makePlayer('star', 88, { age: 26 })
+    const fogged = describePlayerValue(star, 74) // scouts guess him lower
+    expect(fogged.value).toBeLessThan(playerValue(star))
+    // playerValue itself is unaffected by the override path
+    expect(playerValue(star)).toBe(describePlayerValue(star).value)
+  })
+
+  it('surfaces human-readable drivers for both kinds', () => {
+    const p = makePlayer('p', 88, { age: 24 })
+    const pd = describePlayerValue(p)
+    expect(pd.drivers.length).toBeGreaterThan(0)
+    expect(pd.drivers.some((d) => d.label.includes('OVR'))).toBe(true)
+
+    const pkd = describePickValue(makePick(2027, 1, 't1'), { year: 2026 })
+    expect(pkd.drivers.some((d) => d.label.includes('pick'))).toBe(true)
+    // future pick carries a discount driver
+    expect(pkd.drivers.some((d) => /discount/i.test(d.label))).toBe(true)
   })
 })
 

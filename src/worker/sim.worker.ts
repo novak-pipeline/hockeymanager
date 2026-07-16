@@ -338,6 +338,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'tradeEvaluation', evaluation: must().proposeTrade(req.proposal) }
     case 'assessTrade':
       return { id: req.id, type: 'tradeAssessment', assessment: must().assessTrade(req.proposal) }
+    case 'evaluateTradeDraft':
+      return { id: req.id, type: 'tradeDraft', draft: must().evaluateTradeDraft(req.proposal) }
     case 'gaugeTradeInterest':
       return { id: req.id, type: 'tradeInterestRead', read: must().gaugeTradeInterest(req.proposal) }
     case 'shopPlayer': {
