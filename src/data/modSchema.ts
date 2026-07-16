@@ -393,6 +393,9 @@ export interface ModDatabase {
   conferences: ModConference[]
   /** Optional wider-world leagues beyond the NHL. Absent on NHL-only mods. */
   competitions?: ModCompetition[]
+  /** Optional real club/league history (champions + franchise records) exported
+   *  from the source DB. Absent on mods without a history block. Additive. */
+  history?: import('@engine/story/records').ImportedHistory
 }
 
 /* ─────────────────────────── Validation ─────────────────────────── */
@@ -748,6 +751,10 @@ export function validateModDatabase(x: unknown): ModDatabase {
     )
   }
 
+  // Optional real history (champions + franchise records). Lenient: it is
+  // display/records-seed data, so a malformed row is dropped, not fatal.
+  const history = r['history'] !== undefined ? validateHistory(r['history']) : undefined
+
   return {
     formatVersion: 1,
     meta: {
@@ -756,8 +763,45 @@ export function validateModDatabase(x: unknown): ModDatabase {
       ...(meta['season'] !== undefined ? { season: meta['season'] as string } : {})
     },
     conferences,
-    ...(competitions !== undefined ? { competitions } : {})
+    ...(competitions !== undefined ? { competitions } : {}),
+    ...(history !== undefined ? { history } : {})
   }
+}
+
+/** Lenient parse of the optional `history` block: skips any row that doesn't
+ *  have the expected primitive shape rather than failing the whole import. */
+function validateHistory(raw: unknown): import('@engine/story/records').ImportedHistory {
+  const empty = { clubRecords: [], competitionHistory: [] }
+  if (typeof raw !== 'object' || raw === null) return empty
+  const r = raw as Record<string, unknown>
+  const num = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
+  const str = (x: unknown): string => (typeof x === 'string' ? x : '')
+  const clubRecords = Array.isArray(r['clubRecords'])
+    ? (r['clubRecords'] as unknown[])
+        .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+        .map((x) => ({
+          club: str(x['club']),
+          type: str(x['type']),
+          year: num(x['year']),
+          value: num(x['value']),
+          player: str(x['player']),
+        }))
+        .filter((x) => x.club && x.type)
+    : []
+  const competitionHistory = Array.isArray(r['competitionHistory'])
+    ? (r['competitionHistory'] as unknown[])
+        .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+        .map((x) => ({
+          competition: str(x['competition']),
+          year: num(x['year']),
+          champion: str(x['champion']),
+          runnerUp: str(x['runnerUp']),
+          third: str(x['third']),
+          regularChampion: str(x['regularChampion']),
+        }))
+        .filter((x) => x.competition && x.year > 0)
+    : []
+  return { clubRecords, competitionHistory }
 }
 
 /** Lenient team parse for wider-world competitions: validates players and
@@ -1825,5 +1869,6 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
     teams,
     players,
     ...(staffByTeam.size > 0 ? { staffByTeam } : {}),
+    ...(mod.history !== undefined ? { importedHistory: mod.history } : {}),
   }
 }

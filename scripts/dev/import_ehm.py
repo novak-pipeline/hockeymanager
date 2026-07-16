@@ -662,6 +662,72 @@ def load_draft_history(path, keep_keys):
     return out
 
 
+def load_club_records(path):
+    """club_records.xlsx (TWO header rows) -> list of real franchise player records.
+    Cols: Club0 RecordType1 Year2 Value3 First4 Second5 DOB6.
+
+    Keeps only PLAYER records ('... in a season' / 'career ...' types, which carry
+    a name) with a real value and year; drops team-level rows and the year-1900,
+    zero-value placeholders EHM emits for clubs with no history. The record `type`
+    string is kept verbatim — the runtime maps the ones it charts (goals/assists/
+    points/wins/shutouts in a season; career goals/assists/points/games) and
+    ignores the rest. Result feeds the imported all-time leaderboards."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it); next(it)  # title row + column-header row
+    out = []
+    for r in it:
+        rtype = str(r[1] or "").strip()
+        if "in a season" not in rtype and "career" not in rtype:
+            continue  # team-level record (no player)
+        value = to_int(r[3], 0)
+        if value <= 0:
+            continue
+        year = to_int(r[2], 0)
+        if year <= 1900:
+            continue  # EHM placeholder
+        club = str(r[0] or "").strip()
+        player = (str(r[4] or "").strip() + " " + str(r[5] or "").strip()).strip()
+        if not club or not player:
+            continue
+        out.append({"club": club, "type": rtype, "year": year, "value": value, "player": player})
+    wb.close()
+    return out
+
+
+def load_competition_history(path):
+    """club_competition_history.xlsx (1 header row) -> list of competition seasons.
+    Cols: id0 Competition1 Year2 1st3 2nd4 3rd5 RegSeasonChampion6 Hosts7.
+    '[None]' placeholders are normalised to empty strings. Feeds the champions +
+    Presidents'-Trophy archive; the runtime picks the competition whose winners
+    overlap the current clubs the most."""
+    import openpyxl
+    def clean(x):
+        s = str(x or "").strip()
+        return "" if s in ("[None]", "None") else s
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    it = ws.iter_rows(values_only=True)
+    next(it)  # column-header row
+    out = []
+    for r in it:
+        comp = clean(r[1]); year = to_int(r[2], 0)
+        if not comp or year <= 0:
+            continue
+        out.append({
+            "competition": comp,
+            "year": year,
+            "champion": clean(r[3]),
+            "runnerUp": clean(r[4]),
+            "third": clean(r[5]),
+            "regularChampion": clean(r[6]),
+        })
+    wb.close()
+    return out
+
+
 def load_clubs(path):
     """clubs.xlsx (1 header row) -> full-name(lower) -> {arena, capacity} for NHL clubs.
     Cols: Name1 Abbreviation4 Division5 Arena13 MaxAttendance19 Cash20 PlayerBudget21."""
@@ -1143,6 +1209,14 @@ def main():
     retired_path = _sibling(xlsx, "retired_numbers.xlsx", "EHM_RETIRED")
     clubs = load_clubs(clubs_path) if clubs_path else {}
     retired = load_retired_numbers(retired_path) if retired_path else {}
+
+    # Real club/league history — actual champions + franchise records. Optional:
+    # a mod without these sheets just omits the `history` key and the game seeds a
+    # fabricated past instead.
+    records_path = _sibling(xlsx, "club_records.xlsx", "EHM_CLUB_RECORDS")
+    comphist_path = _sibling(xlsx, "club_competition_history.xlsx", "EHM_CLUB_COMPETITION_HISTORY")
+    club_records = load_club_records(records_path) if records_path else []
+    competition_history = load_competition_history(comphist_path) if comphist_path else []
     def club_meta(nick):
         nl = nick.lower()
         for name, meta in clubs.items():
@@ -1322,6 +1396,11 @@ def main():
         ],
         "competitions": competitions_out,
     }
+    if club_records or competition_history:
+        db["history"] = {
+            "clubRecords": club_records,
+            "competitionHistory": competition_history,
+        }
     os.makedirs(out_dir, exist_ok=True)
     io.open(os.path.join(out_dir, "database.json"), "w", encoding="utf-8").write(
         json.dumps(db, ensure_ascii=False))
@@ -1333,6 +1412,7 @@ def main():
     print(f"Staff: {staff_total[0]}  faces matched: {staff_matched[0]} ({100*staff_matched[0]//max(1,staff_total[0])}%)")
     print(f"Competitions: {len(competitions_out)}  "
           f"teams: {sum(len(c['teams']) for c in competitions_out)}  players: {comp_total[0]}")
+    print(f"History: clubRecords={len(club_records)}  competitionHistory={len(competition_history)}")
     for c in competitions_out:
         print(f"  {c['abbrev']:6} {c['name'][:36]:36} teams={len(c['teams']):2}")
 
