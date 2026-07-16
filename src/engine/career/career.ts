@@ -12075,7 +12075,159 @@ export class Career {
     const fit = Math.round(styleMatch(roster, team.tactics).fit)
     if (fit < 55) findings.push({ kind: 'tacticMisfit', coachFit: fit, direction: 'fitRoster' })
 
+    // ── INFO briefings: staff report real numbers, no decision. The team-form
+    //    briefing always opens; the rest ride along only when they have something
+    //    to say (injuries present, a genuinely hard stretch, a real slump). ──
+    findings.push(this.teamFormFinding())
+    const injuryOutlook = this.injuryOutlookFinding(roster)
+    if (injuryOutlook) findings.push(injuryOutlook)
+    const toughStretch = this.toughStretchFinding()
+    if (toughStretch) findings.push(toughStretch)
+    const chemistry = this.lineChemistryFinding(team)
+    if (chemistry) findings.push(chemistry)
+    findings.push(this.capRosterFinding(team))
+    const slump = this.slumpingStarFinding(roster, used)
+    if (slump) findings.push(slump)
+
     return findings
+  }
+
+  /* ── INFO-briefing composers: each reads live state and returns pre-computed
+   *    display numbers, so staffMeetingScene.ts stays pure. ── */
+
+  /** State-of-the-team briefing: record, last-10, goals-for/against per game. */
+  private teamFormFinding(): StaffFinding {
+    const s = this.standings.get(this.userTeamId)
+    const gp = Math.max(1, s?.gamesPlayed ?? 0)
+    const w = s?.wins ?? 0, l = s?.losses ?? 0, otl = s?.overtimeLosses ?? 0
+    // Last-10 record and current streak from the user's played games.
+    const results: Array<'W' | 'L' | 'O'> = []
+    for (const g of this.data.league.schedule) {
+      if (!g.result) continue
+      const home = g.homeTeamId === this.userTeamId
+      if (!home && g.awayTeamId !== this.userTeamId) continue
+      const us = home ? g.result.homeGoals : g.result.awayGoals
+      const them = home ? g.result.awayGoals : g.result.homeGoals
+      results.push(us > them ? 'W' : g.result.decidedBy === 'regulation' ? 'L' : 'O')
+    }
+    const last10 = results.slice(-10)
+    const t10 = { w: last10.filter((r) => r === 'W').length, l: last10.filter((r) => r === 'L').length, o: last10.filter((r) => r === 'O').length }
+    // Current streak text.
+    let streakText = 'even of late'
+    if (results.length > 0) {
+      const last = results[results.length - 1]!
+      let n = 0
+      for (let i = results.length - 1; i >= 0 && results[i] === last; i--) n++
+      streakText = last === 'W' ? `won ${n} straight` : last === 'L' ? `lost ${n} straight` : `${n} without a regulation win`
+    }
+    const trend: 'up' | 'down' | 'flat' = t10.w >= t10.l + 2 ? 'up' : t10.l >= t10.w + 2 ? 'down' : 'flat'
+    return {
+      kind: 'teamFormInfo',
+      record: `${w}-${l}-${otl}`,
+      points: s?.points ?? 0,
+      lastTen: `${t10.w}-${t10.l}-${t10.o}`,
+      gfPer: (s?.goalsFor ?? 0) / gp,
+      gaPer: (s?.goalsAgainst ?? 0) / gp,
+      streakText,
+      trend,
+    }
+  }
+
+  /** Injury-outlook briefing: who's hurt and roughly how long, worst first. */
+  private injuryOutlookFinding(roster: Player[]): StaffFinding | null {
+    const hurt = roster
+      .filter((p) => p.injuryStatus !== null)
+      .sort((a, b) => (b.injuryStatus!.gamesRemaining) - (a.injuryStatus!.gamesRemaining))
+    if (hurt.length === 0) return null
+    // ~3.5 NHL games per week → convert games-remaining to a weeks estimate.
+    const items = hurt.slice(0, 4).map((p) => ({
+      name: p.name,
+      weeks: Math.round((p.injuryStatus!.gamesRemaining) / 3.5),
+      desc: p.injuryStatus!.description,
+    }))
+    return { kind: 'injuryOutlookInfo', count: hurt.length, items }
+  }
+
+  /** Tough-stretch briefing: the next four opponents, flagged only when at least
+   *  two of them are top-10 clubs by roster strength. */
+  private toughStretchFinding(): StaffFinding | null {
+    const descriptors = this.teamDescriptors().sort((a, b) => b.strength - a.strength)
+    const total = descriptors.length
+    const rankOf = new Map(descriptors.map((d, i) => [d.teamId, i + 1]))
+    const upcoming = this.data.league.schedule
+      .filter((g) => g.day > this.currentDay && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId))
+      .sort((a, b) => a.day - b.day)
+      .slice(0, 4)
+    if (upcoming.length < 3) return null
+    const opps = upcoming.map((g) => (g.homeTeamId === this.userTeamId ? g.awayTeamId : g.homeTeamId))
+    const ranks = opps.map((id) => rankOf.get(id as string) ?? Math.ceil(total / 2))
+    const toughCount = ranks.filter((r) => r <= 10).length
+    if (toughCount < 2) return null
+    const oppNames = opps.map((id) => this.data.teams.get(id)?.abbreviation ?? this.data.teams.get(id)?.name ?? '—')
+    const avgRank = Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length)
+    return { kind: 'toughStretchInfo', games: upcoming.length, oppNames, toughCount, avgRank, totalTeams: total }
+  }
+
+  /** Line-chemistry briefing: best & worst forward line by complementarity. */
+  private lineChemistryFinding(team: Team): StaffFinding | null {
+    const lines = team.lines?.forwards
+    if (!lines || lines.length === 0) return null
+    const rated = lines
+      .map((line, idx) => {
+        const players = line.map((id) => this.data.players.get(id as PlayerId)).filter((p): p is Player => !!p)
+        if (players.length !== 3) return null
+        const syn = lineSynergy(players)
+        return { idx, score: Math.round(syn.score), reason: syn.notes[0] ?? 'balanced group' }
+      })
+      .filter((r): r is { idx: number; score: number; reason: string } => r !== null)
+    if (rated.length < 2) return null
+    const best = rated.reduce((a, b) => (b.score > a.score ? b : a))
+    const worst = rated.reduce((a, b) => (b.score < a.score ? b : a))
+    if (best.idx === worst.idx || best.score - worst.score < 8) return null // nothing worth noting
+    const lineNm = (i: number): string => (i === 0 ? 'Top line' : i === 1 ? '2nd line' : i === 2 ? '3rd line' : '4th line')
+    return {
+      kind: 'lineChemistryInfo',
+      bestLine: lineNm(best.idx), bestScore: best.score, bestReason: best.reason,
+      worstLine: lineNm(worst.idx), worstScore: worst.score, worstReason: worst.reason,
+    }
+  }
+
+  /** Cap & roster briefing: space, usage, active roster size. Always available. */
+  private capRosterFinding(team: Team): StaffFinding {
+    const cap = this.userTeam.finances.salaryCap
+    const used = this.userCapUsed() + this.userDeadCap
+    const space = Math.max(0, cap - used)
+    return {
+      kind: 'capRosterInfo',
+      capSpaceM: space / 1_000_000,
+      usedPct: cap > 0 ? Math.round((used / cap) * 100) : 0,
+      rosterSize: team.roster.length,
+    }
+  }
+
+  /** Slumping-key-player briefing: a top-line/pair skater whose season points
+   *  pace is well below what his rating tier should produce. Info only. */
+  private slumpingStarFinding(roster: Player[], used: Set<string>): StaffFinding | null {
+    let worst: { p: Player; ppg: number; expected: number; behind: number; games: number } | null = null
+    for (const p of roster) {
+      if (p.position === 'G' || p.injuryStatus !== null || used.has(p.id as string)) continue
+      const ovr = ratedOverall(p)
+      if (ovr < 75) continue // only players we lean on
+      const games = this.gp.get(p.id as PlayerId) ?? 0
+      if (games < 12) continue // need a real sample before calling a slump
+      const t = this.totals.get(p.id as PlayerId)
+      const points = (t?.goals ?? 0) + (t?.assists ?? 0)
+      const ppg = points / games
+      // Expected pace from rating tier (calibrated to typical NHL scoring bands).
+      const expected = ovr >= 88 ? 1.0 : ovr >= 83 ? 0.75 : ovr >= 78 ? 0.55 : 0.42
+      if (ppg >= expected * 0.7) continue // producing acceptably
+      const behind = Math.round((expected - ppg) * games)
+      if (behind < 3) continue
+      if (!worst || behind > worst.behind) worst = { p, ppg, expected, behind, games }
+    }
+    if (!worst) return null
+    used.add(worst.p.id as string)
+    return { kind: 'slumpingStarInfo', name: worst.p.name, ppg: worst.ppg, expectedPpg: worst.expected, games: worst.games, pointsBehind: worst.behind }
   }
 
   /** A young, high-upside org player (NHL or AHL) with NO individual development
@@ -12155,6 +12307,8 @@ export class Career {
         intro: p.intro.map((l) => l.text),
         options: p.options.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
         defaultOptionId: p.defaultOptionId,
+        ...(p.info ? { info: true } : {}),
+        ...(p.facts ? { facts: p.facts } : {}),
       })),
     }
   }

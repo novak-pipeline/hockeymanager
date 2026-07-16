@@ -1716,6 +1716,10 @@ export interface StaffMeetingProposalView {
   options: StaffMeetingOptionView[]
   /** Option the AGM applies if you delegate. */
   defaultOptionId: string
+  /** True for an INFO briefing (real numbers, no decision). Optional/additive. */
+  info?: boolean
+  /** Cited data bullets shown under an INFO briefing. Optional/additive. */
+  facts?: string[]
 }
 export interface StaffMeetingView {
   day: number

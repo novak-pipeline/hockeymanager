@@ -69,6 +69,8 @@ export function StaffBriefingScreen(): JSX.Element {
     }
   }
 
+  const hasDecisions = (view?.proposals ?? []).some((p) => p.options.length > 0)
+
   if (loading) return <Notice kind="info">Gathering the staff…</Notice>
   if (!view) {
     return (
@@ -111,28 +113,46 @@ export function StaffBriefingScreen(): JSX.Element {
                     onClick={() => speakAs(roleForTitle(p.speaker.title), p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}
                   >🔊</button>
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</div>
+                <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</span>
+                  {p.info && (
+                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 4, padding: '0 5px' }}>
+                      Briefing
+                    </span>
+                  )}
+                </div>
                 {p.intro.map((line, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.55, fontStyle: 'italic', color: 'var(--text)' }}>
                     “{line}”
                   </div>
                 ))}
-                <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 4 }}>
-                  {p.options.map((o) => {
-                    const sel = picks[p.id] === o.id
-                    return (
-                      <button
-                        key={o.id}
-                        className={`btn btn-sm${sel ? ' btn-primary' : ''}`}
-                        disabled={busy}
-                        title={o.detail}
-                        onClick={() => setPicks((prev) => ({ ...prev, [p.id]: o.id }))}
-                      >
-                        {o.label}
-                      </button>
-                    )
-                  })}
-                </div>
+                {/* INFO briefing: cited numbers, no decision. */}
+                {p.info && p.facts && p.facts.length > 0 && (
+                  <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+                    {p.facts.map((fct, i) => (
+                      <li key={i} style={{ fontSize: 12.5, lineHeight: 1.5, marginBottom: 1 }}>{fct}</li>
+                    ))}
+                  </ul>
+                )}
+                {/* DECISION: grounded options that mutate the sim. */}
+                {p.options.length > 0 && (
+                  <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 4 }}>
+                    {p.options.map((o) => {
+                      const sel = picks[p.id] === o.id
+                      return (
+                        <button
+                          key={o.id}
+                          className={`btn btn-sm${sel ? ' btn-primary' : ''}`}
+                          disabled={busy}
+                          title={o.detail}
+                          onClick={() => setPicks((prev) => ({ ...prev, [p.id]: o.id }))}
+                        >
+                          {o.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
                 {/* The receipt for the current pick. */}
                 {(() => {
                   const chosen = p.options.find((o) => o.id === picks[p.id])
@@ -147,11 +167,13 @@ export function StaffBriefingScreen(): JSX.Element {
 
         <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" disabled={busy} onClick={() => void resolve('submit')}>
-            {busy ? 'Working…' : 'Confirm decisions'}
+            {busy ? 'Working…' : hasDecisions ? 'Confirm decisions' : 'Wrap up the meeting'}
           </button>
-          <button className="btn btn-ghost" disabled={busy} onClick={() => void resolve('delegate')}>
-            Let the AGM handle it
-          </button>
+          {hasDecisions && (
+            <button className="btn btn-ghost" disabled={busy} onClick={() => void resolve('delegate')}>
+              Let the AGM handle it
+            </button>
+          )}
         </div>
       </div>
     </Backdrop>
