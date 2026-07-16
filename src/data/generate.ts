@@ -45,6 +45,14 @@ export interface LeagueData {
    * Career.generateAllTeamStaff prefers these over generated staff.
    */
   staffByTeam?: Map<TeamId, import('@engine/league/staff').TeamStaff>
+  /**
+   * Real club/league history from a mod import (champions, franchise records).
+   * Populated only when a ModDatabase provides a `history` block; absent for
+   * generated leagues (which seed a fabricated past instead). Career seeds the
+   * record book from this so records-chase news and the history screens cite
+   * actual marks. Not serialized — the seeded RecordsState persists in saves.
+   */
+  importedHistory?: import('@engine/story/records').ImportedHistory
 }
 
 export interface GenerateOptions {

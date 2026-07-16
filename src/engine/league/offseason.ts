@@ -296,6 +296,7 @@ export function developPlayers(args: {
 
   const deltas: Array<{ playerId: PlayerId; delta: number }> = []
   for (const p of players.values()) {
+    if (p.retiredYear !== undefined) continue // a retired player is frozen — no aging/dev
     const before = overall(p.composites, p.position)
     const seasonAge = p.age
     p.age += 1
@@ -490,10 +491,15 @@ export function processRetirements(args: {
   const retired: PlayerId[] = []
   const retire = (p: Player): void => {
     retired.push(p.id)
+    // First-class retirement marker: frozen from future aging/dev passes and
+    // excluded from the free-agent pool rebuild, so a retiree never silently
+    // reappears or gets processed again. (offseason.ts / career.ts read this.)
+    p.retiredYear = args.year
     const team = teamOf.get(p.id)
     if (team) team.roster = team.roster.filter((id) => id !== p.id)
   }
   for (const p of players.values()) {
+    if (p.retiredYear !== undefined) continue // already retired — never re-process
     const ovr = overall(p.composites, p.position)
     if (p.age >= 33) {
       // Age-driven retirement curve.

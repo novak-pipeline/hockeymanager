@@ -228,6 +228,154 @@ export function seedRecordsHistory(args: SeedHistoryArgs): RecordsState {
   return state
 }
 
+/* ────────────────────────── real imported history ────────────────────────── */
+
+/** One franchise record row from the source DB (EHM club_records export). */
+export interface ImportedClubRecord {
+  club: string
+  type: string
+  year: number
+  value: number
+  player: string
+}
+
+/** One competition-season row (EHM club_competition_history export): who won
+ *  the trophy (`champion`) and who topped the regular season (`regularChampion`). */
+export interface ImportedCompetitionSeason {
+  competition: string
+  year: number
+  champion: string
+  runnerUp: string
+  third: string
+  regularChampion: string
+}
+
+/** Real club/league history imported from a mod DB. Optional + additive; when
+ *  present it seeds the record book with actual marks instead of fabricated ones. */
+export interface ImportedHistory {
+  clubRecords: ImportedClubRecord[]
+  competitionHistory: ImportedCompetitionSeason[]
+}
+
+/** Which record book a raw EHM record `type` string feeds. */
+const SINGLE_SEASON_RECORD_TYPES: Record<string, keyof RecordsState['singleSeason']> = {
+  'Most goals in a season': 'goals',
+  'Most assists in a season': 'assists',
+  'Most points in a season': 'points',
+  'Most wins in a season': 'wins',
+  'Most shutouts in a season': 'shutouts',
+}
+const CAREER_RECORD_TYPES: Record<string, keyof RecordsState['career']> = {
+  'Most career goals': 'goals',
+  'Most career assists': 'assists',
+  'Most career points': 'points',
+  'Most career games': 'gamesPlayed',
+}
+
+/** Deterministic placeholder id for a historical name not in the live DB. The
+ *  history screens render these as plain text (a profile lookup throws). */
+function histId(name: string, salt: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  return `hist-${salt}-${slug || 'unknown'}`
+}
+
+/**
+ * Seed the record book from a mod's REAL club/league history instead of a
+ * fabricated past. Only the current league's own clubs contribute (so an
+ * imported NHL cites NHL franchise records, not junior/minor/European marks),
+ * and the champions come from whichever competition's winners overlap the
+ * current clubs the most — the DB names the league differently ("National
+ * Hockey League") than our meta ("NHL (EHM import)"), so we match by overlap,
+ * not by name. Pure + deterministic: no RNG, no wall-clock.
+ */
+export function seedRecordsFromHistory(args: {
+  history: ImportedHistory
+  teams: SeedTeamRef[]
+  currentYear: number
+}): RecordsState {
+  const { history, teams, currentYear } = args
+  const state = emptyRecords()
+  if (teams.length === 0) return state
+
+  const clubNames = new Set(teams.map((t) => t.name))
+  const abbrOf = new Map(teams.map((t) => [t.name, t.abbreviation] as const))
+  const idOf = new Map(teams.map((t) => [t.name, t.id] as const))
+
+  /* ── single-season + career leaderboards from this league's franchise records ── */
+  const ssBoards: Record<string, RecordEntry[]> = {}
+  const carBoards: Record<string, RecordEntry[]> = {}
+  for (const r of history.clubRecords) {
+    if (!clubNames.has(r.club)) continue // only our own league's clubs
+    if (!Number.isFinite(r.value) || r.value <= 0 || !r.player) continue
+    const ssKey = SINGLE_SEASON_RECORD_TYPES[r.type]
+    const carKey = CAREER_RECORD_TYPES[r.type]
+    const entry: RecordEntry = {
+      value: r.value,
+      playerId: histId(r.player, `${ssKey ?? carKey ?? 'x'}${r.year}`),
+      playerName: r.player,
+      teamAbbr: abbrOf.get(r.club) ?? '',
+      year: r.year,
+    }
+    if (ssKey) (ssBoards[ssKey] ??= []).push(entry)
+    else if (carKey) (carBoards[carKey] ??= []).push(entry)
+  }
+  const top = (xs: RecordEntry[]): RecordEntry[] =>
+    [...xs].sort((a, b) => b.value - a.value).slice(0, TOP_N)
+  for (const key of Object.keys(ssBoards)) {
+    ;(state.singleSeason as Record<string, RecordEntry[]>)[key] = top(ssBoards[key]!)
+  }
+  for (const key of Object.keys(carBoards)) {
+    ;(state.career as Record<string, RecordEntry[]>)[key] = top(carBoards[key]!)
+  }
+
+  /* ── champions + Presidents' from the best-overlapping competition ── */
+  const byComp = new Map<string, ImportedCompetitionSeason[]>()
+  for (const row of history.competitionHistory) {
+    if (!byComp.has(row.competition)) byComp.set(row.competition, [])
+    byComp.get(row.competition)!.push(row)
+  }
+  let bestComp: ImportedCompetitionSeason[] | null = null
+  let bestOverlap = 0
+  for (const rows of byComp.values()) {
+    const champs = new Set(rows.map((r) => r.champion).filter(Boolean))
+    let overlap = 0
+    for (const c of champs) if (clubNames.has(c)) overlap++
+    if (overlap > bestOverlap) { bestOverlap = overlap; bestComp = rows }
+  }
+  if (bestComp && bestOverlap > 0) {
+    for (const row of bestComp) {
+      if (row.year >= currentYear || !row.champion) continue
+      state.seasons.push({
+        year: row.year,
+        championTeamId: (idOf.get(row.champion) as string | undefined) ?? null,
+        championName: row.champion,
+        presidentsTeamName: row.regularChampion || null,
+        userTeamRank: 0, // no user before the career began
+        leaders: { points: null, goals: null, wins: null }, // per-year leaders aren't in the export
+      })
+    }
+    state.seasons.sort((a, b) => a.year - b.year)
+  }
+
+  /* ── retired legends from the real career-points board (populates the HoF) ── */
+  const careerGoalsByName = new Map(state.career.goals.map((e) => [e.playerName, e.value] as const))
+  const careerGamesByName = new Map(state.career.gamesPlayed.map((e) => [e.playerName, e.value] as const))
+  for (const e of state.career.points) {
+    if (e.value < LEGEND_POINTS_THRESHOLD) continue
+    state.retiredLegends.push({
+      playerId: histId(e.playerName, 'legend'),
+      name: e.playerName,
+      retiredYear: e.year,
+      careerPoints: e.value,
+      careerGoals: careerGoalsByName.get(e.playerName) ?? Math.round(e.value * 0.4),
+      careerGames: careerGamesByName.get(e.playerName) ?? 0,
+      hallOfFame: e.value >= HOF_POINTS_THRESHOLD,
+    })
+  }
+
+  return state
+}
+
 /* ────────────────────────── news seed ────────────────────────── */
 
 /** Minimal shape returned to the career layer; career.ts stamps the real id/day/year. */
