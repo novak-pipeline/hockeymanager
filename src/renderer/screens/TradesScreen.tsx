@@ -4,10 +4,13 @@ import type {
   PickAssetView,
   PlayerBadge,
   TradeAssessmentView,
+  TradeDraftAsset,
+  TradeDraftView,
   TradeInterestView,
   TradeOfferView,
   TradePartnerView,
   TradeRumorView,
+  ValueDriver,
 } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
@@ -30,6 +33,47 @@ function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
   }
   if (!badge.scouted) return null
   return <OverallStars value={badge.overall} />
+}
+
+// ─── per-asset trade value ──────────────────────────────────────────────────
+
+/** Multi-line hover breakdown of the factors behind an asset's value. */
+function driversTitle(drivers?: ValueDriver[], header?: string): string {
+  const rows = (drivers ?? []).map(
+    (d) => `${d.tone === 'up' ? '▲' : d.tone === 'down' ? '▼' : '·'} ${d.label}`,
+  )
+  return [header, ...rows].filter(Boolean).join('\n')
+}
+
+/** Compact mono value pill; hover reveals the drivers. Shows "~" when the value
+ *  is a fog-of-war estimate for an unscouted opponent. */
+function ValuePill(props: {
+  value?: number
+  drivers?: ValueDriver[]
+  estimated?: boolean
+  title?: string
+}): JSX.Element | null {
+  if (props.value === undefined) return null
+  return (
+    <span
+      className="mono"
+      title={driversTitle(props.drivers, props.title)}
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        padding: '1px 6px',
+        borderRadius: 4,
+        background: 'rgba(var(--accent-rgb),0.12)',
+        border: '1px solid rgba(var(--accent-rgb),0.3)',
+        color: 'var(--accent)',
+        whiteSpace: 'nowrap',
+        cursor: 'help',
+      }}
+    >
+      {props.estimated ? '~' : ''}
+      {props.value.toFixed(1)}
+    </span>
+  )
 }
 
 function PlayerChip(props: {
@@ -71,9 +115,10 @@ function PlayerChip(props: {
 }
 
 function PickChip(props: { pick: PickAssetView }): JSX.Element {
+  const { pick } = props
   return (
     <span
-      title={`Perri value: ${props.pick.value}`}
+      title={driversTitle(pick.drivers, pick.viaAbbr ? `Originally ${pick.viaAbbr}'s pick` : undefined)}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -87,8 +132,11 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
         whiteSpace: 'nowrap',
       }}
     >
-      {props.pick.label}
-      <span style={{ color: 'var(--muted)', fontSize: 10 }}>{props.pick.value}</span>
+      {pick.label}
+      {pick.viaAbbr && (
+        <span style={{ color: 'var(--muted)', fontSize: 10 }}>(via {pick.viaAbbr})</span>
+      )}
+      <span className="mono" style={{ color: 'var(--muted)', fontSize: 10 }}>{pick.value.toFixed(1)}</span>
     </span>
   )
 }
@@ -559,9 +607,10 @@ function ProposeTab(props: {
   const [busy, setBusy] = useState(false)
   const [evalResult, setEvalResult] = useState<TradeEvaluation | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  // Your own assistant GM's live take (advice) + the partner GM's non-binding
-  // "gauge interest" read (only after you ask). Both cleared as the deal changes.
-  const [assessment, setAssessment] = useState<TradeAssessmentView | null>(null)
+  // Live per-asset value breakdown + verdicts (your AGM read, the market split,
+  // the partner's projected answer) + the partner GM's non-binding "gauge
+  // interest" read (only after you ask). All cleared as the deal changes.
+  const [draft, setDraft] = useState<TradeDraftView | null>(null)
   const [interest, setInterest] = useState<TradeInterestView | null>(null)
   const [gauging, setGauging] = useState(false)
 
@@ -582,11 +631,11 @@ function ProposeTab(props: {
     setInterest(null)
     if (evalResult) return
     const anySide = myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0
-    if (!partnerId || !anySide) { setAssessment(null); return }
+    if (!partnerId || !anySide) { setDraft(null); return }
     let cancelled = false
     const t = setTimeout(async () => {
-      const r = await client.assessTrade(proposalPayload())
-      if (!cancelled && r.type === 'tradeAssessment') setAssessment(r.assessment)
+      const r = await client.evaluateTradeDraft(proposalPayload())
+      if (!cancelled && r.type === 'tradeDraft') setDraft(r.draft)
     }, 180)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -615,7 +664,7 @@ function ProposeTab(props: {
     setTheirPickIds(new Set())
     setEvalResult(null)
     setErr(null)
-    setAssessment(null)
+    setDraft(null)
     setInterest(null)
   }
 
@@ -767,11 +816,12 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
-                        {p.value !== undefined && (
-                          <span title={`Trade value: ${p.value}`} style={{ color: 'var(--accent)', fontSize: 11 }}>
-                            {p.value}
-                          </span>
-                        )}
+                        <ValuePill
+                          value={p.tradeValue}
+                          drivers={p.valueDrivers}
+                          estimated={p.valueEstimated}
+                          title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
+                        />
                         {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                       </span>
                     </button>
@@ -817,7 +867,11 @@ function ProposeTab(props: {
                           cursor: 'pointer',
                         }}
                       >
-                        {pk.label}
+                        <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
+                          {pk.label}
+                          {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
+                          <span className="mono" style={{ marginLeft: 5, opacity: 0.7, fontSize: 10 }}>{pk.value.toFixed(1)}</span>
+                        </span>
                       </button>
                     )
                   })}
@@ -881,11 +935,12 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
-                        {p.value !== undefined && (
-                          <span title={`Trade value: ${p.value}`} style={{ color: 'var(--accent)', fontSize: 11 }}>
-                            {p.value}
-                          </span>
-                        )}
+                        <ValuePill
+                          value={p.tradeValue}
+                          drivers={p.valueDrivers}
+                          estimated={p.valueEstimated}
+                          title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
+                        />
                         {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                       </span>
                     </button>
@@ -914,7 +969,11 @@ function ProposeTab(props: {
                           cursor: 'pointer',
                         }}
                       >
-                        {pk.label}
+                        <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
+                          {pk.label}
+                          {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
+                          <span className="mono" style={{ marginLeft: 5, opacity: 0.7, fontSize: 10 }}>{pk.value.toFixed(1)}</span>
+                        </span>
                       </button>
                     )
                   })}
@@ -925,10 +984,10 @@ function ProposeTab(props: {
         </div>
       )}
 
-      {/* your assistant GM's live read + gauge the other club's interest */}
-      {partner && !evalResult && (assessment || interest) && (
-        <TradeDeskPanel
-          assessment={assessment}
+      {/* live deal balance: per-asset values, subtotals, verdicts + gauge */}
+      {partner && !evalResult && (draft || interest) && (
+        <DealDeskPanel
+          draft={draft}
           interest={interest}
           gauging={gauging}
           canGauge={hasSelections && myPlayerIds.size + myPickIds.size > 0 && theirPlayerIds.size + theirPickIds.size > 0}
@@ -1014,37 +1073,120 @@ function ValueBalance({ give, receive }: { give: number; receive: number }): JSX
   )
 }
 
+const MARKET_TONE: Record<TradeDraftView['marketVerdict'], string> = {
+  fair: 'var(--muted)', overpay: 'var(--danger)', fleece: 'var(--success)', empty: 'var(--muted)',
+}
+const PARTNER_TONE: Record<TradeDraftView['partnerVerdict'], { color: string; label: string }> = {
+  accept: { color: 'var(--success)', label: 'They’d accept' },
+  counter: { color: 'var(--amber, #f59e0b)', label: 'They’d want more' },
+  reject: { color: 'var(--danger)', label: 'They’d reject' },
+  blocked: { color: 'var(--danger)', label: 'Blocked' },
+  empty: { color: 'var(--muted)', label: '' },
+}
+
+/** One side of the deal-balance breakdown: each asset with its value + a
+ *  subtotal. Player rows carry a face; picks their provenance. */
+function DealColumn(props: {
+  label: string
+  color: string
+  assets: TradeDraftAsset[]
+  total: number
+}): JSX.Element {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="row-between" style={{ marginBottom: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: props.color }}>
+          {props.label}
+        </span>
+        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: props.color }}>{props.total.toFixed(1)}</span>
+      </div>
+      <div className="stack" style={{ gap: 3 }}>
+        {props.assets.length === 0 && <span className="muted small">—</span>}
+        {props.assets.map((a) => (
+          <div key={a.key} className="row-between" style={{ gap: 6, fontSize: 12 }}>
+            <span className="row" style={{ gap: 5, alignItems: 'center', minWidth: 0 }}>
+              {a.kind === 'player'
+                ? <PlayerFace faceId={a.faceId} name={a.name} size={18} />
+                : <span style={{ fontSize: 12 }}>🎟️</span>}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {a.name}
+                {a.viaAbbr && <span className="muted" style={{ fontSize: 10 }}> (via {a.viaAbbr})</span>}
+              </span>
+            </span>
+            <ValuePill value={a.value} drivers={a.drivers} estimated={a.estimated} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /**
- * EHM-style trade desk. Your assistant GM gives a live read as you build; a
- * "Gauge interest" button pulls the OTHER club's non-binding reaction before you
- * commit. A warm reaction is not a yes — a real offer still gets slept on.
+ * The deal desk. As you build a package, every asset's value (the same points
+ * the AI weighs) is broken out per side with subtotals and a NET; a plain
+ * market read ("Fair" / "You're overpaying by ~X%") sits alongside the
+ * partner's projected answer ("They'd reject this") and your AGM's take. The
+ * "Gauge interest" button still pulls the club's non-binding word before you
+ * commit — a warm read is not a yes; a real offer still gets slept on.
  */
-function TradeDeskPanel(props: {
-  assessment: TradeAssessmentView | null
+function DealDeskPanel(props: {
+  draft: TradeDraftView | null
   interest: TradeInterestView | null
   gauging: boolean
   canGauge: boolean
   onGauge: () => void
 }): JSX.Element {
-  const { assessment, interest } = props
+  const { draft, interest } = props
+  const total = draft ? draft.giveTotal + draft.receiveTotal : 0
   return (
-    <Panel title="The trade desk">
-      {assessment && (
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>🗒️</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{assessment.agmName} · your read</div>
-            <div style={{ fontSize: 13, color: ASSESS_TONE[assessment.tone], fontWeight: 500 }}>{assessment.line}</div>
-            {assessment.giveShare !== undefined && assessment.receiveShare !== undefined && (
-              <ValueBalance give={assessment.giveShare} receive={assessment.receiveShare} />
-            )}
+    <Panel title="Deal balance">
+      {draft && (
+        <>
+          <div style={{ display: 'flex', gap: 14 }}>
+            <DealColumn label="You give" color="var(--danger)" assets={draft.give} total={draft.giveTotal} />
+            <div style={{ width: 1, background: 'var(--line)', alignSelf: 'stretch' }} />
+            <DealColumn label="You get" color="var(--success)" assets={draft.receive} total={draft.receiveTotal} />
           </div>
-        </div>
+
+          <div className="row-between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: MARKET_TONE[draft.marketVerdict] }}>{draft.marketLine}</span>
+            <span
+              className="mono"
+              style={{ fontSize: 13, fontWeight: 700, color: draft.net >= 0 ? 'var(--success)' : 'var(--danger)' }}
+              title="Net value swing in your favour (in trade points)"
+            >
+              NET {draft.net >= 0 ? '+' : ''}{draft.net.toFixed(1)}
+            </span>
+          </div>
+          {total > 0 && <ValueBalance give={draft.giveTotal / total} receive={draft.receiveTotal / total} />}
+
+          {draft.marketVerdict !== 'empty' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10 }}>
+              <span style={{ fontSize: 16, lineHeight: 1 }}>🗒️</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>{draft.agmName} · your read</div>
+                <div style={{ fontSize: 13, color: ASSESS_TONE[draft.agmTone], fontWeight: 500 }}>{draft.agmLine}</div>
+              </div>
+            </div>
+          )}
+
+          {draft.partnerVerdict !== 'empty' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+              <span
+                className="chip"
+                style={{ fontSize: 10, fontWeight: 700, color: PARTNER_TONE[draft.partnerVerdict].color, borderColor: PARTNER_TONE[draft.partnerVerdict].color }}
+              >
+                {PARTNER_TONE[draft.partnerVerdict].label}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{draft.partnerLine}</span>
+            </div>
+          )}
+        </>
       )}
 
       {interest ? (
         <div style={{
-          borderTop: '1px solid var(--line)', paddingTop: 10, display: 'flex', gap: 10, alignItems: 'flex-start',
+          borderTop: '1px solid var(--line)', paddingTop: 10, marginTop: 10, display: 'flex', gap: 10, alignItems: 'flex-start',
         }}>
           <span style={{ fontSize: 18, lineHeight: 1 }}>📞</span>
           <div>
@@ -1068,7 +1210,7 @@ function TradeDeskPanel(props: {
           className="btn btn-ghost"
           disabled={!props.canGauge || props.gauging}
           onClick={props.onGauge}
-          style={{ fontSize: 12, width: '100%', borderTop: assessment ? '1px solid var(--line)' : undefined }}
+          style={{ fontSize: 12, width: '100%', marginTop: 10, borderTop: draft ? '1px solid var(--line)' : undefined }}
           title="Ask the other club how they feel about this package — without officially offering it"
         >
           {props.gauging ? 'Calling around…' : '📞 Gauge their interest'}

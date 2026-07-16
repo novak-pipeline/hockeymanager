@@ -2927,6 +2927,59 @@ describe('trade desk (assistant-GM read + gauge interest)', () => {
     expect(again).toEqual(read)
     expect(career.getInbox().items.some((n) => /weighing your offer/i.test(n.headline))).toBe(false)
   })
+
+  it('evaluateTradeDraft breaks out per-asset value matching the engine, and reads the balance', () => {
+    const data = generateLeague({ seed: 909 })
+    const userId = data.league.teams[2]
+    const career = new Career(data, 909, userId)
+    career.advance(6)
+
+    const trades = career.getTrades()
+    const partner = trades.partners[0]
+    const myBest = [...trades.myPlayers].sort((a, b) => b.overall - a.overall)[0]
+    const myWorst = [...trades.myPlayers].sort((a, b) => a.overall - b.overall)[0]
+    const theirWorst = [...partner.players].sort((a, b) => a.overall - b.overall)[0]
+    const theirBest = [...partner.players].sort((a, b) => b.overall - a.overall)[0]
+
+    // getTrades already attaches a per-player value; the draft must agree with it.
+    const overpay = career.evaluateTradeDraft({
+      partnerTeamId: partner.teamId, givePlayerIds: [myBest.playerId], givePickIds: [],
+      receivePlayerIds: [theirWorst.playerId], receivePickIds: [],
+    })
+    const giveAsset = overpay.give.find((a) => a.key === myBest.playerId)!
+    expect(giveAsset.value).toBe(myBest.tradeValue)
+    // Subtotals are the sum of the shown per-asset values (rounded 1dp).
+    expect(overpay.giveTotal).toBeCloseTo(overpay.give.reduce((s, a) => s + a.value, 0), 1)
+    expect(overpay.net).toBeCloseTo(overpay.receiveTotal - overpay.giveTotal, 1)
+    // My best for their worst is a clear overpay on paper.
+    expect(overpay.marketVerdict).toBe('overpay')
+    expect(overpay.marketPct).toBeGreaterThan(0)
+
+    // A lowball (my worst for their best) reads as user-favourable on paper and
+    // the partner would NOT accept it.
+    const fleece = career.evaluateTradeDraft({
+      partnerTeamId: partner.teamId, givePlayerIds: [myWorst.playerId], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
+    })
+    expect(fleece.marketVerdict).toBe('fleece')
+    expect(['reject', 'blocked']).toContain(fleece.partnerVerdict)
+    expect(fleece.partnerLine.length).toBeGreaterThan(0)
+
+    // Empty side → an empty, crash-free read.
+    const empty = career.evaluateTradeDraft({
+      partnerTeamId: partner.teamId, givePlayerIds: [], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
+    })
+    expect(empty.marketVerdict).toBe('empty')
+    expect(empty.partnerVerdict).toBe('empty')
+
+    // Deterministic: same package → identical draft.
+    const repeat = career.evaluateTradeDraft({
+      partnerTeamId: partner.teamId, givePlayerIds: [myWorst.playerId], givePickIds: [],
+      receivePlayerIds: [theirBest.playerId], receivePickIds: [],
+    })
+    expect(repeat).toEqual(fleece)
+  })
 })
 
 describe('#182 training-camp PTO invites', () => {

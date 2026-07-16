@@ -86,6 +86,7 @@ export type {
   TeamAnalyticsRow,
   TentpoleView,
   TradeAssessmentView,
+  TradeDraftView,
   TradeInterestView,
   TradeEvaluation,
   TradeProposal,
@@ -178,6 +179,7 @@ import type {
   TacticsView,
   TentpoleView,
   TradeAssessmentView,
+  TradeDraftView,
   TradeInterestView,
   TradeEvaluation,
   TradeProposal,
@@ -306,6 +308,7 @@ export type WorkerRequestBody =
   | { type: 'suggestToCoach'; direction: string }
   | { type: 'proposeTrade'; proposal: TradeProposal }
   | { type: 'assessTrade'; proposal: TradeProposal }
+  | { type: 'evaluateTradeDraft'; proposal: TradeProposal }
   | { type: 'gaugeTradeInterest'; proposal: TradeProposal }
   | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
@@ -564,6 +567,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Your assistant GM's live read as you build a package (advice, not an answer). */
   | { type: 'tradeAssessment'; assessment: TradeAssessmentView }
+  /** Live per-asset value breakdown + verdicts for the trade builder. */
+  | { type: 'tradeDraft'; draft: TradeDraftView }
   /** The partner GM's NON-BINDING interest read (gauge interest before proposing). */
   | { type: 'tradeInterestRead'; read: TradeInterestView }
   /** Result of shopping a player: how many offers came in + a summary line. */

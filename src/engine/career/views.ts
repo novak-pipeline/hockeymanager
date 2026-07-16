@@ -30,6 +30,8 @@ export type { OpinionSnapshot } from '@engine/career/opinionTracker'
 import type { ScoutAssignment, ScoutingState, ScoutTarget } from '@domain/scouting'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
+import type { ValueDriver } from '@engine/league/trades'
+export type { ValueDriver } from '@engine/league/trades'
 export type { TeamLeadersView, LeaderChip, TeamLeadersEntry } from '@engine/league/playerRating'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 import type { ArcsState } from '@engine/story/arcs'
@@ -1361,15 +1363,31 @@ export interface PickAssetView {
   label: string
   /** Perri-curve value on the 0–100 scale (rounded to 1 decimal). */
   value: number
+  /** Provenance: the ORIGINAL team's abbr when this pick was acquired via trade
+   *  (mirrors the draft board's "VAN 1st (via MTL)"). Absent for own picks. */
+  viaAbbr?: string
+  /** True when the pick still belongs to its original team (not acquired). */
+  isOwnPick?: boolean
+  /** Human-readable factors behind `value`, for the builder's hover breakdown. */
+  drivers?: ValueDriver[]
+}
+
+/** Value fields attached to a tradeable player row (additive to PlayerBadge). */
+export interface TradeValued {
+  /** This player's trade value in the same points the AI weighs (rounded 1dp).
+   *  For unscouted opponents it's your staff's estimate — see `valueEstimated`. */
+  tradeValue?: number
+  /** True when `tradeValue` is a fog-of-war estimate, not exact. */
+  valueEstimated?: boolean
+  /** Human-readable factors behind `tradeValue`, for the builder's hover. */
+  valueDrivers?: ValueDriver[]
 }
 
 export interface TradeSideView {
   teamId: string
   teamName: string
   teamAbbr: string
-  /** `value` (optional/additive) is the player's trade value on the shared
-   *  asset-value scale — directly comparable to PickAssetView.value. */
-  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; value?: number }>
+  players: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number }>
   picks: PickAssetView[]
 }
 
@@ -1436,7 +1454,7 @@ export interface TradePartnerView {
   teamId: string
   teamName: string
   teamAbbr: string
-  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean; value?: number }>
+  players: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
   picks: PickAssetView[]
   /** Roster cap space ($). Positive = room available. */
   capSpace: number
@@ -1459,13 +1477,64 @@ export interface TradesView {
   incoming: TradeOfferView[]
   /** Every other club's tradeable assets for the proposal builder. */
   partners: TradePartnerView[]
-  myPlayers: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean; value?: number }>
+  myPlayers: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
   myPicks: PickAssetView[]
   /** Trades are frozen outside the regular season (and after the deadline day, if set). */
   deadlineDay: number | null
   tradingOpen: boolean
   /** User team's current cap space. */
   myCapSpace: number
+}
+
+/** One asset (player or pick) in the live trade-builder balance breakdown. */
+export interface TradeDraftAsset {
+  /** playerId or pick id. */
+  key: string
+  /** Player name or pick label (e.g. "2026 1st"). */
+  name: string
+  kind: 'player' | 'pick'
+  faceId?: string
+  /** Provenance for acquired picks — "(via MTL)". */
+  viaAbbr?: string
+  /** Value in the AI's own trade points (rounded 1dp). */
+  value: number
+  /** True when this is a fog-of-war estimate (unscouted opponent). */
+  estimated?: boolean
+  drivers: ValueDriver[]
+}
+
+/**
+ * Live read of the package being built (worker → UI). Every number is sourced
+ * from the SAME `playerValue`/`pickValue` the AI accepts/rejects with, so the
+ * builder's breakdown matches the engine's own math. The `marketVerdict` is a
+ * pure who-wins-on-paper read from your side's totals; `partnerVerdict` is a
+ * side-effect-free dry-run of the real `evaluateProposal` — the club's actual
+ * answer (still slept on for a day or two once formally proposed).
+ */
+export interface TradeDraftView {
+  /** What you give up (your assets, exact values). */
+  give: TradeDraftAsset[]
+  /** What you get back (opponent assets; player values may be fogged). */
+  receive: TradeDraftAsset[]
+  giveTotal: number
+  receiveTotal: number
+  /** receiveTotal − giveTotal, from your perspective (rounded 1dp). */
+  net: number
+  /** Pure market read from the totals you see. */
+  marketVerdict: 'fair' | 'overpay' | 'fleece' | 'empty'
+  /** Plain line, e.g. "Even value on paper." / "You're overpaying by ~24%." */
+  marketLine: string
+  /** Magnitude of the imbalance as a percent (present for overpay/fleece). */
+  marketPct?: number
+  /** Your assistant GM's one-line take + tone (mirrors the trade desk read). */
+  agmName: string
+  agmLine: string
+  agmTone: TradeAssessmentView['tone']
+  /** The partner's projected answer from an `evaluateProposal` dry-run. */
+  partnerVerdict: 'accept' | 'counter' | 'reject' | 'blocked' | 'empty'
+  /** Plain projection, e.g. "Vancouver would likely reject this." or the
+   *  concrete blocker (NTC / over the cap). */
+  partnerLine: string
 }
 
 /* ────────────────────────── draft / offseason / finances ────────────────────────── */
