@@ -38,10 +38,13 @@ function PlayerChip(props: {
   salary: number
   yearsRemaining: number
   noTradeClause?: boolean
+  /** Trade value on the shared asset-value scale (same currency as pick value). */
+  value?: number
   badge?: PlayerBadge
 }): JSX.Element {
   return (
     <div
+      title={props.value !== undefined ? `Trade value: ${props.value}` : undefined}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -59,6 +62,9 @@ function PlayerChip(props: {
       <span style={{ color: 'var(--muted)' }}>
         {fmtMoney(props.salary)} / {props.yearsRemaining}yr
       </span>
+      {props.value !== undefined && (
+        <span style={{ color: 'var(--muted)', fontSize: 10 }}>· {props.value}</span>
+      )}
       {props.noTradeClause && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
     </div>
   )
@@ -90,7 +96,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
 // ─── trade side summary (receive / give) ──────────────────────────────────────
 
 function TradeSideChips(props: {
-  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause?: boolean }>
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause?: boolean; value?: number }>
   picks: PickAssetView[]
   label: string
   labelColor?: string
@@ -118,6 +124,7 @@ function TradeSideChips(props: {
             salary={p.salary}
             yearsRemaining={p.yearsRemaining}
             noTradeClause={p.noTradeClause}
+            value={p.value}
             badge={p}
           />
         ))}
@@ -760,6 +767,11 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
+                        {p.value !== undefined && (
+                          <span title={`Trade value: ${p.value}`} style={{ color: 'var(--accent)', fontSize: 11 }}>
+                            {p.value}
+                          </span>
+                        )}
                         {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                       </span>
                     </button>
@@ -869,6 +881,11 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
+                        {p.value !== undefined && (
+                          <span title={`Trade value: ${p.value}`} style={{ color: 'var(--accent)', fontSize: 11 }}>
+                            {p.value}
+                          </span>
+                        )}
                         {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                       </span>
                     </button>

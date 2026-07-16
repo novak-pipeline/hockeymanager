@@ -2,10 +2,15 @@
  * Trade system (build step #6): asset valuation, AI evaluation of user
  * proposals, trade execution, and AI-initiated offers.
  *
- * Values are abstract "trade points" — only ratios between assets matter,
- * never the absolute scale. The overall→value curve is exponential so stars
- * are disproportionately expensive (one 90 costs far more than two 75s),
- * which is how real GMs price elite talent.
+ * ONE CURRENCY. Players and picks are priced on the SAME scale so they are
+ * directly comparable — {@link assetValue} is the single entry point the AI and
+ * every trade/scouting UI consume. The scale is the Perri pick curve (below):
+ * the #1 pick = 100, a middling 1st (~#16) ≈ 28. Players are pinned to that:
+ * a replacement-level regular (ovr 70) ≈ 9, a fringe top-six (ovr 75) ≈ 20, a
+ * 25-goal scorer with term (ovr ~79) ≈ a 1st, a genuine star (ovr 88+) ≈ two-
+ * plus 1sts. This is a deliberate recalibration: a mid UFA-bound centre now
+ * fetches a 2nd/3rd, NOT the two first-rounders the old (3–4× hot) player scale
+ * implied. Only ratios between assets matter, never the absolute magnitude.
  *
  * Pick values follow the Perri curve (Matt Perri, PuckPedia) anchored at
  * #1=100, #2=72.69, with steep early decay and a long flat tail through ~224.
@@ -31,8 +36,29 @@ import type { Rng } from '@engine/shared/rng'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** Exponential overall→value curve; ~10 points at replacement level. */
-const valueFromOverall = (ovr: number): number => 10 * Math.pow(1.09, ovr - 50)
+/**
+ * Base ability→value curve, pinned to the Perri pick scale so players and picks
+ * share one currency. Anchors: overall 75 → 20 points (a fringe top-six / 2nd-
+ * pair regular, roughly a low 1st-round pick) and overall 90 → 180 (a franchise
+ * superstar, worth more than the #1 pick). Exponential in between — each overall
+ * point multiplies value by ~1.158, so stars are disproportionately expensive
+ * (one 90 costs far more than two 75s), which is how real GMs price elite talent.
+ *
+ * Sample: ovr70 ≈ 9.5, 72 ≈ 12.9, 75 = 20, 77 ≈ 26.8, 80 ≈ 42, 83 ≈ 65, 85 ≈ 87.
+ */
+const BASE_OVERALL = 75
+const BASE_OVERALL_VALUE = 20
+/** Per-overall-point growth so overall 90 lands at 180 (= 9× the ovr-75 anchor). */
+const BASE_K = Math.pow(180 / BASE_OVERALL_VALUE, 1 / 15) // ≈ 1.1584
+const valueFromOverall = (ovr: number): number =>
+  BASE_OVERALL_VALUE * Math.pow(BASE_K, ovr - BASE_OVERALL)
+
+/**
+ * Positional premium at equal overall: centres carry a shade more trade value
+ * than wingers (harder to find, drive a line), top-pair defencemen likewise;
+ * goalies a shade less (deep, volatile, streaky position GMs pay down for).
+ */
+const POSITION_MULT: Record<Position, number> = { C: 1.06, W: 1.0, D: 1.05, G: 0.9 }
 
 /**
  * Age multiplier anchors (age, multiplier), linear between, clamped outside.
@@ -77,12 +103,16 @@ const fairSalaryFor = (ovr: number): number =>
 /**
  * Trade value of a player, in trade points.
  *
- *  - Base: exponential in overall (stars are disproportionately valuable).
+ *  - Base: exponential in overall on the shared Perri scale (stars are
+ *    disproportionately valuable), times a small positional premium.
  *  - Age curve peaking at 23–27.
  *  - U24 upside: unrealized potential is partially priced in, more so the
  *    younger the player.
  *  - Contract drag: paid above the fair curve reduces value, a cheap deal adds
  *    value; longer remaining terms amplify either way.
+ *  - Rental discount: an expiring deal is a few months of control, not an asset
+ *    you keep, so it is worth far less than the same player with term — the lever
+ *    that makes a mid UFA-bound player a 2nd/3rd rather than a 1st.
  *  - Small discounts for current injury and poor morale.
  */
 export function playerValue(player: Player): number {
@@ -98,12 +128,18 @@ export function playerValue(player: Player): number {
     effective = ovr + upside * 0.55 * youth
   }
 
-  let value = valueFromOverall(effective) * ageMultiplier(player.age)
+  let value = valueFromOverall(effective) * POSITION_MULT[player.position] * ageMultiplier(player.age)
 
   const fair = fairSalaryFor(ovr)
   const surplusRatio = (fair - player.contract.salary) / Math.max(fair, 1e6)
   const horizon = clamp(player.contract.yearsRemaining, 1, 4)
   value *= clamp(1 + surplusRatio * 0.12 * horizon, 0.55, 1.3)
+
+  // Rental discount: an expiring contract (one year or less of control) is worth
+  // markedly less as a trade asset — you rent the player, you don't acquire him.
+  // Real deadline precedent: a good rental fetches a 2nd/3rd (plus maybe a mid
+  // pick), not the return a controllable player of the same overall commands.
+  if (player.contract.yearsRemaining <= 1) value *= 0.65
 
   if (player.injuryStatus) {
     value *= clamp(0.95 - player.injuryStatus.gamesRemaining * 0.004, 0.8, 0.95)
@@ -176,6 +212,43 @@ export function pickValue(
   const yearsOut = Math.max(0, pick.year - args.year)
   return base * Math.pow(FUTURE_YEAR_DISCOUNT, yearsOut)
 }
+
+/* ────────────────────────── unified asset value ────────────────────────── */
+
+/** A single tradeable asset — a player or a draft pick. */
+export type TradeAsset =
+  | { kind: 'player'; player: Player }
+  | { kind: 'pick'; pick: DraftPick }
+
+/** Context a pick needs to be valued (the current draft year for discounting
+ *  future picks, and the ORIGINAL team's league strength rank, 1 = strongest,
+ *  so a weak club's pick — which lands earlier — is worth more). Players ignore
+ *  it. */
+export interface AssetValueContext {
+  year: number
+  teamStrengthRank?: number
+}
+
+/**
+ * THE unified trade-asset valuation — the single currency the AI evaluator, the
+ * AI offer generators, the deadline sim and the trade/scouting UIs all consume.
+ * Players and picks come back on the same Perri-anchored scale (see {@link
+ * playerValue} / {@link pickValue}), so `assetValue(a) >= assetValue(b)` is a
+ * meaningful comparison across the two kinds. Pure and deterministic.
+ */
+export function assetValue(asset: TradeAsset, ctx: AssetValueContext): number {
+  return asset.kind === 'player'
+    ? playerValue(asset.player)
+    : pickValue(asset.pick, { year: ctx.year, teamStrengthRank: ctx.teamStrengthRank })
+}
+
+/**
+ * Minimum asset value (on the shared scale) worth putting in a trade — below
+ * this a player/pick is roster filler no club shops or packages. ≈ a depth NHLer
+ * (overall ~68) or a late pick. Used as the floor for AI target selection and
+ * tradeable-prospect eligibility so the same bar applies everywhere.
+ */
+export const MIN_SHOP_VALUE = 8
 
 /* ────────────────────────── team philosophy & needs ────────────────────────── */
 
@@ -925,7 +998,7 @@ export function generateAiOffers(args: {
         p.injuryStatus === null
     )
     .map((player) => ({ player, value: playerValue(player) }))
-    .filter((t) => t.value >= 15)
+    .filter((t) => t.value >= MIN_SHOP_VALUE)
     .sort((x, y) => y.value - x.value || (x.player.id < y.player.id ? -1 : 1))
     .slice(0, 3)
   if (targets.length === 0) return []
@@ -1159,7 +1232,7 @@ export function generateAiAiTrade(args: {
             !p.contract.noTradeClause &&
             p.injuryStatus === null &&
             p.position !== 'G' &&
-            playerValue(p) >= 12
+            playerValue(p) >= MIN_SHOP_VALUE
         )
         .sort((a, b) => playerValue(b) - playerValue(a) || (a.id < b.id ? -1 : 1))
       return { team: t, vet: vets[0] }
@@ -1208,33 +1281,40 @@ export function generateAiAiTrade(args: {
         return { pick, value }
       })
       .sort((x, y) => y.value - x.value)
-    // Greedy 1–2 picks. Rentals fetch well below full player value — the
-    // seller has no leverage on an expiring deal, so the market band is
-    // roughly 30–80% of the vet's trade points in draft capital (a good
-    // rental ≈ a 1st + a mid pick, matching real deadline precedent).
+
+    // Real returns aren't only picks — a rental often fetches "a pick and a
+    // prospect". Decide up front (≈ half the time, when the buyer has a tradeable
+    // prospect worth at most 3/4 of the return) whether a prospect anchors the
+    // deal, and take it FIRST so the picks top up the remaining room rather than a
+    // single 1st filling the whole band and squeezing the prospect out.
+    const prospects = buyerProspects(buyer, teams, players).sort((a, b) => playerValue(b) - playerValue(a))
+    const wantProspect = prospects.length > 0 && rng.chance(0.5)
+    let prospect: Player | null = null
+    if (wantProspect) {
+      for (const pr of rng.shuffle(prospects)) {
+        if (playerValue(pr) <= vetValue * 0.75) { prospect = pr; break }
+      }
+    }
+
+    // Greedy 1–2 picks toward fair value. `vetValue` already carries the rental
+    // discount (an expiring deal is priced as a rental, not an asset), so the
+    // whole return is roughly 50–105% of that discounted value — the seller has
+    // limited leverage but still gets close to fair for a short-term piece (e.g.
+    // a good rental ≈ a 2nd/3rd, matching real deadline precedent).
+    const stop = vetValue * 0.75
+    const ceil = vetValue * 1.05
     const chosen: DraftPick[] = []
-    let total = 0
+    let total = prospect ? playerValue(prospect) : 0
     for (const c of owned) {
-      if (chosen.length >= 2 || total >= vetValue * 0.5) break
-      if (total + c.value > vetValue * 0.8) continue
+      if (chosen.length >= 2 || total >= stop) break
+      if (total + c.value > ceil) continue
       chosen.push(c.pick)
       total += c.value
     }
-    // Real returns aren't only picks — a rental often fetches "a pick and a
-    // prospect". Roughly half the time, if the buyer has a tradeable prospect
-    // (an AHL affiliate player or a rights-held junior) that keeps the combined
-    // return inside the value band, throw it in.
-    const prospects = buyerProspects(buyer, teams, players).sort((a, b) => playerValue(b) - playerValue(a))
-    let prospect: Player | null = null
-    if (prospects.length > 0 && rng.chance(0.5)) {
-      for (const pr of rng.shuffle(prospects)) {
-        if (total + playerValue(pr) <= vetValue * 0.85) { prospect = pr; break }
-      }
-    }
-    const returnTotal = total + (prospect ? playerValue(prospect) : 0)
-    // A prospect can carry the deal, so the picks floor relaxes when one's in it.
-    const floor = prospect ? vetValue * 0.25 : vetValue * 0.3
-    if ((chosen.length === 0 && !prospect) || returnTotal < floor || returnTotal > vetValue * 0.85) continue
+    const returnTotal = total
+    // A prospect can carry the deal on its own, so the floor relaxes when one's in it.
+    const floor = prospect ? vetValue * 0.4 : vetValue * 0.5
+    if ((chosen.length === 0 && !prospect) || returnTotal < floor || returnTotal > ceil) continue
     const parts = [
       ...chosen.map((p) => `a ${p.year} ${ordinal(p.round)}-round pick`),
       ...(prospect ? [`${prospect.position} ${prospect.name}`] : []),
@@ -1271,7 +1351,7 @@ function buyerProspects(
     if (!p || seen.has(p.id as string)) return
     if (p.age > 24 || p.position === 'G') return
     if (p.injuryStatus !== null || p.contract.noTradeClause) return
-    if (playerValue(p) < 8) return
+    if (playerValue(p) < MIN_SHOP_VALUE) return
     seen.add(p.id as string)
     out.push(p)
   }
