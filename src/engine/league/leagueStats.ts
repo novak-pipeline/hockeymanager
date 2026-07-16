@@ -164,6 +164,7 @@ export type TransactionKind =
   | 'draft'
   | 'callup'
   | 'waiver'
+  | 'retire'
 
 export interface Transaction {
   id: string

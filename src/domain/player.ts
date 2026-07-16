@@ -287,6 +287,14 @@ export interface Player {
    * first. Absent on fictional players. Display-only — the sim never reads it.
    */
   careerHistory?: CareerSeasonRecord[]
+
+  /**
+   * The season a player retired, once he hangs up the skates. A first-class
+   * marker so a retired player is never re-processed (aged, developed, swept
+   * into the free-agent pool) and never silently reappears. Absent on active
+   * players and on pre-existing saves (treated as "still active"). Additive.
+   */
+  retiredYear?: number
 }
 
 /** #188: the GM's declared role for a player (EHM "squad status"). */

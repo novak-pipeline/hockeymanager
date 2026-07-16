@@ -172,6 +172,7 @@ import {
   recordWatch,
   registerRetirements,
   seedRecordsHistory,
+  seedRecordsFromHistory,
   type RecordsState,
   type SeasonLine,
 } from '@engine/story/records'
@@ -1098,18 +1099,31 @@ export class Career {
       // Seed a plausible franchise past so the record book + banner rafters
       // aren't empty on day one (P1 story history). Deterministic per seed.
       {
-        const histRng = new Rng(deriveSeed(seed, 9500))
-        const makeName = (): string =>
-          `${FIRST_NAMES[Math.floor(histRng.next() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(histRng.next() * LAST_NAMES.length)]}`
-        this.recordsState = seedRecordsHistory({
-          teams: this.data.league.teams.map((id) => {
-            const t = this.data.teams.get(id)!
-            return { id: id as string, abbreviation: t.abbreviation, name: t.name }
-          }),
-          currentYear: this.year,
-          rand: () => histRng.next(),
-          makeName,
+        const seedTeams = this.data.league.teams.map((id) => {
+          const t = this.data.teams.get(id)!
+          return { id: id as string, abbreviation: t.abbreviation, name: t.name }
         })
+        // An imported DB carries REAL history — actual Stanley Cup champions and
+        // franchise records (Gretzky's 215, and so on). Seed the record book
+        // from it so records-chase news and the history screens cite the truth.
+        // Generated leagues (no imported history) fabricate a plausible past.
+        if (this.data.importedHistory) {
+          this.recordsState = seedRecordsFromHistory({
+            history: this.data.importedHistory,
+            teams: seedTeams,
+            currentYear: this.year,
+          })
+        } else {
+          const histRng = new Rng(deriveSeed(seed, 9500))
+          const makeName = (): string =>
+            `${FIRST_NAMES[Math.floor(histRng.next() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(histRng.next() * LAST_NAMES.length)]}`
+          this.recordsState = seedRecordsHistory({
+            teams: seedTeams,
+            currentYear: this.year,
+            rand: () => histRng.next(),
+            makeName,
+          })
+        }
       }
       this.tentpoles = createInitialTentpolesState()
       this.initLockerRooms()
@@ -6672,6 +6686,159 @@ export class Career {
     }
   }
 
+  /**
+   * Career totals for a send-off: the player's simmed NHL career plus any real
+   * imported pre-sim history (careerHistory). Used only for retirement copy and
+   * the records/HOF ledger — never by the sim itself.
+   */
+  private realCareerTotalsOf(p: Player): {
+    gp: number; goals: number; assists: number; points: number; shutouts: number
+  } {
+    const sim = this.careerTotalsOf(p.id)
+    let gp = sim.gamesPlayed, goals = sim.goals, assists = sim.assists, shutouts = sim.shutouts
+    for (const h of p.careerHistory ?? []) {
+      if (/ahl|american hockey/i.test(h.league)) continue // NHL/senior career line only
+      gp += h.gamesPlayed
+      goals += h.goals
+      assists += h.assists
+      shutouts += h.shutouts
+    }
+    return { gp, goals, assists, points: goals + assists, shutouts }
+  }
+
+  /**
+   * Reconcile every player against the rosters so nobody is left in limbo.
+   *
+   * A player under contract who is on no roster — the classic "Crosby vanished"
+   * bug, where a star drops off his club with no trade, no signing, no news — is
+   * invisible: he appears on no screen and no transaction ever explained the
+   * exit. So is a washed-up veteran lingering in the players map with no club
+   * and no free-agent listing. This sweep guarantees the invariant that every
+   * NHL-ecosystem player is in exactly one *visible* state — rostered, a listed
+   * free agent, or an announced retiree — and heals saves that already broke it.
+   *
+   * Runs at every rollover (so a fresh drop is caught the same summer) and once
+   * on load (so an existing broken save is healed). Deterministic: every choice
+   * is a threshold on age/ability, no randomness.
+   */
+  private reconcileOrphans(): void {
+    // Everyone already accounted for: on a roster, a listed free agent, or a
+    // current draft-eligible prospect. Anyone else in the map is an orphan.
+    const rostered = new Set<string>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) rostered.add(id as string)
+    const listed = new Set<string>(this.faPool.map((id) => id as string))
+    const prospectIds = new Set<string>()
+    for (const c of this.data.league.draftClasses) for (const pr of c.prospects) prospectIds.add(pr.playerId as string)
+    const nhlPool = new Set<string>(this.data.league.players.map((id) => id as string))
+
+    // Pro clubs a dropped player can legitimately be re-homed to (NHL + AHL).
+    const proTeams = new Set<string>([
+      ...this.data.league.teams.map((id) => id as string),
+      ...(this.data.league.ahlTeams ?? []).map((id) => id as string),
+    ])
+    // The player's most recent NHL/AHL club — where a dropped contract belongs.
+    const lastProTeamOf = (p: Player): TeamId | null => {
+      let best: { season: number; teamId: string } | null = null
+      for (const s of p.stats) {
+        if (!s.teamId || !proTeams.has(s.teamId)) continue
+        if (!best || s.season >= best.season) best = { season: s.season, teamId: s.teamId }
+      }
+      return best ? asTeamId(best.teamId) : null
+    }
+
+    // Part of the NHL ecosystem (vs an imported world/junior body that was never
+    // on a pro roster)? Only these are swept — an unattached KHL grinder in the
+    // source DB is not our vanished star and stays out of the NHL market.
+    const isNhlUniverse = (p: Player): boolean => {
+      if (nhlPool.has(p.id as string)) return true
+      if (p.contract.yearsRemaining > 0) return true
+      for (const s of p.stats) if ((s.league ?? 'nhl') === 'nhl' || s.league === 'ahl') return true
+      return false
+    }
+
+    const restored: Player[] = []
+    const retirees: Player[] = []
+
+    for (const p of this.data.players.values()) {
+      const id = p.id as string
+      if (rostered.has(id) || listed.has(id) || prospectIds.has(id)) continue
+      if (p.retiredYear !== undefined) continue
+      if (!isNhlUniverse(p)) continue
+
+      if (p.contract.yearsRemaining > 0) {
+        // Under contract → he must be on a roster. Restore him where he last
+        // played; only if that club is gone do we fall through to retire/list.
+        const home = lastProTeamOf(p)
+        if (home) {
+          this.data.teams.get(home)!.roster.push(p.id)
+          rostered.add(id)
+          restored.push(p)
+          continue
+        }
+      }
+
+      // Expired (or a contract with no resolvable club): retire the ones whose
+      // careers are plainly finished; list everyone else as a free agent so the
+      // GM can actually sign them.
+      const ovr = ratedOverall(p)
+      const done = p.age >= 37 || (p.age >= 34 && ovr < 74) || (p.age >= 31 && ovr < 58)
+      if (done) {
+        p.retiredYear = this.year
+        retirees.push(p)
+      } else {
+        this.faPool.push(p.id)
+        listed.add(id)
+      }
+    }
+
+    // Announce retirements. Genuine legends (registerRetirements' own bar) get a
+    // proper retrospective; everyone else is gathered into a single digest so a
+    // backlog heal (an old save with dozens of lingering veterans) never floods
+    // the inbox. Every retiree hits the transactions ledger either way — a paper
+    // trail, never a silent exit.
+    if (retirees.length > 0) {
+      const entries = retirees.map((p) => {
+        const tot = this.realCareerTotalsOf(p)
+        return { p, tot }
+      })
+      entries.sort((a, b) => b.tot.points - a.tot.points)
+      const rr = registerRetirements({
+        state: this.recordsState,
+        retirees: entries.map(({ p, tot }) => ({
+          playerId: p.id as string,
+          name: p.name,
+          careerGoals: tot.goals,
+          careerAssists: tot.assists,
+          careerPoints: tot.points,
+          careerGames: tot.gp,
+        })),
+        year: this.year,
+      })
+      this.pushSeeds(rr.newsSeeds)
+      const announced = new Set(rr.newsSeeds.map((s) => s.playerId).filter((x): x is string => !!x))
+      const rest = entries.filter(({ p }) => !announced.has(p.id as string))
+      if (rest.length > 0) {
+        const names = rest.slice(0, 6).map(({ p }) => p.name)
+        this.pushNews(
+          'league',
+          `${rest.length} veteran${rest.length > 1 ? 's' : ''} call it a career`,
+          `${names.join(', ')}${rest.length > names.length ? `, and ${rest.length - names.length} others` : ''} have retired from professional hockey.`,
+        )
+      }
+      for (const { p } of entries) {
+        const home = lastProTeamOf(p)
+        const tx = recordTransaction(this.transactionLedger, {
+          day: this.currentDay,
+          year: this.year,
+          kind: 'retire',
+          teamIds: home ? [home as string] : [],
+          summary: `${p.name} (${p.position}, ${p.age}) retires`,
+        })
+        this.transactionLedger = tx.ledger
+      }
+    }
+  }
+
   private startNewSeason(): void {
     const champ = this.playoffs?.championTeamId
       ? this.data.teams.get(this.playoffs.championTeamId)!
@@ -6933,6 +7100,12 @@ export class Career {
     this.specialTeams = []
     // Reset hot/cold streak tracking for the new season.
     this.teamStreaks.clear()
+
+    // Safety net: no player leaves the league unseen. Any contracted player who
+    // fell off a roster is restored; any washed-up veteran still lingering in
+    // the map retires (announced) or is listed as a free agent. Runs last, after
+    // every roster op for the new season has settled.
+    this.reconcileOrphans()
 
     this.pushNews(
       'league',
@@ -16792,11 +16965,18 @@ export class Career {
       career.faPool = career.data.league.players.filter((id) => {
         if (rostered.has(id as string) || prospectIds.has(id as string)) return false
         const p = career.data.players.get(id)
-        return !!p && p.age < 38
+        // Keep every unsigned, un-retired player on the board — including old
+        // veterans (the age<38 cut used to hide 39/40-year-olds like a lingering
+        // Crosby entirely). reconcileOrphans below settles who retires.
+        return !!p && p.retiredYear === undefined
       })
     }
     // Ensure every staff scout is deployable (adds any not yet in the roster).
     career.syncScoutRoster()
+    // Heal any save that already lost a player to limbo: restore dropped
+    // contracts to their clubs, retire (announced) the plainly-finished, and
+    // list the rest as free agents. Idempotent on a healthy save (a no-op).
+    career.reconcileOrphans()
     return career
   }
 }
