@@ -14923,7 +14923,12 @@ export class Career {
       teamAbbr: team.abbreviation,
       players: playerIds.map((id) => {
         const p = this.resolve(id)
-        return { ...badge(p), salary: p.contract.salary, yearsRemaining: p.contract.yearsRemaining }
+        return {
+          ...badge(p),
+          salary: p.contract.salary,
+          yearsRemaining: p.contract.yearsRemaining,
+          value: Math.round(playerValue(p) * 10) / 10,
+        }
       }),
       picks: picks.map((p) => this.pickAsset(p)),
     }
@@ -14952,6 +14957,8 @@ export class Career {
           salary: p.contract.salary,
           yearsRemaining: p.contract.yearsRemaining,
           noTradeClause: p.contract.noTradeClause,
+          // Trade value on the shared asset-value scale (comparable to pick value).
+          value: Math.round(playerValue(p) * 10) / 10,
         }
       })
     }

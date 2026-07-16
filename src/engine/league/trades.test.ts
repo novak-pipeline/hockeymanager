@@ -14,6 +14,7 @@ import {
 import { computeComposites, overall } from '@engine/ratings/composites'
 import { Rng, deriveSeed } from '@engine/shared/rng'
 import {
+  assetValue,
   buildTeamProfile,
   canRetain,
   evaluateProposal,
@@ -109,6 +110,97 @@ describe('pickValue', () => {
     const strongR3 = pickValue(makePick(2026, 3, 't1'), { year: 2026, teamStrengthRank: 1 })
     const weakR3 = pickValue(makePick(2026, 3, 't1'), { year: 2026, teamStrengthRank: 16 })
     expect(weak / strong).toBeGreaterThan(weakR3 / strongR3)
+  })
+})
+
+/* ──────────────────── unified assetValue + calibration ──────────────────── */
+
+describe('assetValue (one currency)', () => {
+  it('delegates to playerValue / pickValue exactly', () => {
+    const p = makePlayer('p', 80, { position: 'D', age: 26 })
+    expect(assetValue({ kind: 'player', player: p }, { year: 2026 })).toBe(playerValue(p))
+    const pk = makePick(2026, 1, 't1')
+    expect(assetValue({ kind: 'pick', pick: pk }, { year: 2026 })).toBe(pickValue(pk, { year: 2026 }))
+    expect(assetValue({ kind: 'pick', pick: pk }, { year: 2026, teamStrengthRank: 30 })).toBe(
+      pickValue(pk, { year: 2026, teamStrengthRank: 30 }),
+    )
+  })
+
+  it('CALIBRATION: a mid UFA-bound centre is a 2nd/3rd, NOT two first-round picks', () => {
+    // The reported bug: "PHI send C Wennberg to OTT for a 2028 1st and a 2029
+    // 1st". A middling, expiring centre must never price near two 1sts.
+    const midC = makePlayer('wennberg', 76, { position: 'C', age: 30, years: 1, salary: 5_000_000 })
+    const v = playerValue(midC)
+    const mid1st = perriPickValue(16)   // ≈ 27.9
+    const second = perriPickValue(48)   // ≈ 16.8
+    const third = perriPickValue(80)    // ≈ 13.3
+    // Priced in the 2nd/3rd neighbourhood (roughly a 4th up to a late 1st) …
+    expect(v).toBeGreaterThan(perriPickValue(140))
+    expect(v).toBeLessThan(mid1st)
+    // … within a country mile of a single mid 1st, and NOWHERE NEAR two of them.
+    expect(v).toBeLessThan(2 * perriPickValue(32))
+    // Concretely: closer to a 2nd/3rd than to a 1st.
+    expect(Math.abs(v - (second + third) / 2)).toBeLessThan(Math.abs(v - mid1st))
+  })
+
+  it('CALIBRATION: term is the lever — the same centre with years is worth clearly more', () => {
+    const rental = playerValue(makePlayer('c', 76, { position: 'C', age: 30, years: 1, salary: 5_000_000 }))
+    const controllable = playerValue(makePlayer('c', 76, { position: 'C', age: 30, years: 4, salary: 5_000_000 }))
+    expect(controllable).toBeGreaterThan(rental * 1.3)
+  })
+
+  it('CALIBRATION: a true 1st ≈ a 25-goal scorer with term / a top-pair D', () => {
+    const mid1st = perriPickValue(16) // ≈ 27.9
+    // A 25-goal scorer with term (good top-six winger, prime, multi-year).
+    const scorer = playerValue(makePlayer('sc', 79, { position: 'W', age: 26, years: 4, salary: 5_500_000 }))
+    // A top-pair defenceman with term.
+    const topD = playerValue(makePlayer('d', 80, { position: 'D', age: 26, years: 4, salary: 6_000_000 }))
+    // Both land in the "one-to-two-and-a-half first-rounders" band — a premium
+    // (but not superstar) asset — rather than the 3–4× a first that even middling
+    // players fetched on the old, over-hot player scale.
+    for (const val of [scorer, topD]) {
+      expect(val).toBeGreaterThan(mid1st * 0.7)
+      expect(val).toBeLessThan(mid1st * 2.6)
+    }
+  })
+
+  it('CALIBRATION: an AI-AI deal never sends a mid rental centre for two 1sts', () => {
+    // Rebuilder t2 holds a mid UFA-bound centre; contenders hold plenty of picks
+    // including multiple firsts. The vet's return must never be two 1st-rounders.
+    const teams = new Map<TeamId, Team>()
+    const players = new Map<PlayerId, Player>()
+    const mk = (teamId: string, strength: number, midC?: boolean): void => {
+      const roster: Player[] = []
+      for (let i = 0; i < 14; i++) roster.push(makePlayer(`${teamId}f${i}`, strength - i, { position: i % 3 === 0 ? 'C' : 'W' }))
+      for (let i = 0; i < 6; i++) roster.push(makePlayer(`${teamId}d${i}`, strength - 2 - i, { position: 'D' }))
+      for (let i = 0; i < 2; i++) roster.push(makePlayer(`${teamId}g${i}`, strength - 4 - i, { position: 'G' }))
+      if (midC) roster[13] = makePlayer('mid-rental-c', 76, { position: 'C', age: 30, years: 1, salary: 5_000_000 })
+      for (const p of roster) players.set(p.id, p)
+      teams.set(asTeamId(teamId), makeTeam(teamId, roster))
+    }
+    mk('u1', 70); mk('t2', 58, true); mk('t3', 75); mk('t4', 74)
+    const picks: DraftPick[] = []
+    for (const owner of ['t3', 't4']) {
+      for (const year of [2027, 2028, 2029]) for (let round = 1; round <= 3; round++) {
+        picks.push({ year, round, originalTeamId: asTeamId(owner), ownerTeamId: asTeamId(owner) })
+      }
+    }
+    const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
+      (tid as string) === 't2' ? 'rebuild' : (tid as string) === 'u1' ? 'retool' : 'contend'
+
+    let dealsWithMidC = 0
+    for (let day = 1; day <= 600; day++) {
+      const deal = generateAiAiTrade({
+        day, userTeamId: asTeamId('u1'), teams, players, picks,
+        rng: new Rng(deriveSeed(2029, day)), postureOf,
+      })
+      if (!deal || (deal.playerIds[0] as string) !== 'mid-rental-c') continue
+      dealsWithMidC++
+      const firsts = deal.picks.filter((p) => p.round === 1).length
+      expect(firsts).toBeLessThanOrEqual(1) // never two 1sts for a mid rental
+    }
+    // The scenario actually fires (otherwise the assertion above is vacuous).
+    expect(dealsWithMidC).toBeGreaterThan(0)
   })
 })
 
@@ -859,11 +951,19 @@ describe('generateAiAiTrade (LW3)', () => {
     expect(deal!.playerIds).toEqual([vetId])
     expect(deal!.picks.length).toBeGreaterThanOrEqual(1)
     expect(deal!.picks.length).toBeLessThanOrEqual(2)
-    // Fair value band.
+    // Fair value band. `playerValue` now carries the rental discount, so the
+    // draft-capital return aims for fair value (≈ 40–105% of the discounted vet
+    // value) rather than re-discounting on top of it. Value the returned picks
+    // with the SAME strength ranks the engine used (a strong contender's 1st
+    // lands late and is worth less than a rank-less mid-slot estimate).
     const vetValue = playerValue(players.get(vetId)!)
-    const pickTotal = deal!.picks.reduce((s, p) => s + pickValue(p, { year: 2027 }), 0)
-    expect(pickTotal).toBeGreaterThanOrEqual(vetValue * 0.25)
-    expect(pickTotal).toBeLessThanOrEqual(vetValue * 0.85)
+    const dealRanks = strengthRanks(teams, players)
+    const pickTotal = deal!.picks.reduce(
+      (s, p) => s + pickValue(p, { year: 2027, teamStrengthRank: dealRanks.get(p.originalTeamId) }),
+      0,
+    )
+    expect(pickTotal).toBeGreaterThanOrEqual(vetValue * 0.4)
+    expect(pickTotal).toBeLessThanOrEqual(vetValue * 1.05)
     expect(deal!.summary).toContain('T2')
   })
 

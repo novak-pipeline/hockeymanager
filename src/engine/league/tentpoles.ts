@@ -15,7 +15,7 @@
 import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
 import { overall } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
-import { executeTrade, playerValue } from './trades'
+import { executeTrade, pickValue, playerValue } from './trades'
 
 /* ────────────────────────────────────────────────────────────────── helpers */
 
@@ -367,6 +367,15 @@ export function runDeadlineDay(args: DeadlineDayArgs): DeadlineDayResult {
   const contenderIds = nhlIds
     .filter((id) => id !== userTeamId && (strengths.get(id) ?? 0) > contenderThreshold)
 
+  // NHL-only strength rank for pick valuation: 1 = strongest (picks last, so its
+  // pick is worth least). `strengths` runs 1 = weakest … N = strongest over ALL
+  // tiers, so sort the NHL set by it descending and index from the top.
+  const nhlStrengthRank = new Map<string, number>(
+    [...nhlIds]
+      .sort((a, b) => (strengths.get(b) ?? 0) - (strengths.get(a) ?? 0))
+      .map((id, i) => [id, i + 1])
+  )
+
   if (sellerIds.length === 0 || contenderIds.length === 0) {
     newsSeeds.push({
       category: 'trade',
@@ -426,16 +435,17 @@ export function runDeadlineDay(args: DeadlineDayArgs): DeadlineDayResult {
       .map((p) => ({ p, v: playerValue(p) }))
       .sort((a, b) => b.v - a.v || (a.p.id < b.p.id ? -1 : 1))
 
-    // Candidate picks from contender
+    // Candidate picks from contender — Perri-curve value on the SAME scale as
+    // playerValue (one currency), using the original club's NHL strength rank so
+    // a weak team's pick (it lands earlier) is worth more. Replaces the old
+    // hardcoded R1≈90 estimate that ran ~3× hotter than the player scale and let
+    // a middling player fetch multiple 1st-round picks.
     const contenderPicks = picks
       .filter((pk) => pk.ownerTeamId === (contenderId as TeamId))
-      .map((pk) => {
-        const rank = strengths.get(pk.originalTeamId as string) ?? totalTeams
-        // Simple pick value estimate: R1 ≈ 90, R2 ≈ 32, R3+ lower
-        const base = pk.round === 1 ? 90 : pk.round === 2 ? 32 : 15
-        const slotBonus = 1 + (rank <= sellerThreshold ? 0.2 : 0)
-        return { pk, v: base * slotBonus }
-      })
+      .map((pk) => ({
+        pk,
+        v: pickValue(pk, { year, teamStrengthRank: nhlStrengthRank.get(pk.originalTeamId as string) }),
+      }))
       .sort((a, b) => b.v - a.v)
 
     // Greedy fill

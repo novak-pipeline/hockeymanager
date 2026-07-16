@@ -1365,7 +1365,9 @@ export interface TradeSideView {
   teamId: string
   teamName: string
   teamAbbr: string
-  players: Array<PlayerBadge & { salary: number; yearsRemaining: number }>
+  /** `value` (optional/additive) is the player's trade value on the shared
+   *  asset-value scale — directly comparable to PickAssetView.value. */
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; value?: number }>
   picks: PickAssetView[]
 }
 
@@ -1432,7 +1434,7 @@ export interface TradePartnerView {
   teamId: string
   teamName: string
   teamAbbr: string
-  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  players: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean; value?: number }>
   picks: PickAssetView[]
   /** Roster cap space ($). Positive = room available. */
   capSpace: number
@@ -1455,7 +1457,7 @@ export interface TradesView {
   incoming: TradeOfferView[]
   /** Every other club's tradeable assets for the proposal builder. */
   partners: TradePartnerView[]
-  myPlayers: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  myPlayers: Array<PlayerBadge & { salary: number; yearsRemaining: number; noTradeClause: boolean; value?: number }>
   myPicks: PickAssetView[]
   /** Trades are frozen outside the regular season (and after the deadline day, if set). */
   deadlineDay: number | null

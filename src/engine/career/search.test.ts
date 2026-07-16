@@ -827,9 +827,12 @@ describe('trade counter-offers (DEPTH 3)', () => {
 
     // #184: proposing no longer returns an instant counter — the GM takes it
     // under advisement ('pending'), and the concrete counter is DELIVERED after
-    // a day or two into the trade centre's incoming offers.
+    // a day or two into the trade centre's incoming offers. Table a near-miss to
+    // each willing partner (one per club) so at least one deliberates into a
+    // concrete counter — a single borderline swap can tip either way, so we don't
+    // hang the assertion on one specific pair.
     let pendingFound = false
-    outer: for (const pid of data.league.teams) {
+    for (const pid of data.league.teams) {
       if (pid === userId) continue
       const partner = data.teams.get(pid)!
       for (const R of partner.roster.map((id) => data.players.get(id)!).filter(Boolean)) {
@@ -848,7 +851,8 @@ describe('trade counter-offers (DEPTH 3)', () => {
           receivePlayerIds: [R.id as string],
           receivePickIds: [] as string[],
         })
-        if (ev.verdict === 'pending') { pendingFound = true; break outer }
+        if (ev.verdict === 'pending') pendingFound = true
+        if (ev.verdict === 'pending') break // one proposal per partner is enough
       }
     }
     expect(pendingFound).toBe(true)
