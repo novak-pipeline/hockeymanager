@@ -33,6 +33,11 @@ files:
   - '!standalone-build'
   - '!installer-out'
   - '!dist'
+  # Dev/agent scaffolding — crucially `.claude/worktrees/` holds full chip clones,
+  # each with its OWN release/win-unpacked build + node_modules (~900MB), which
+  # electron-builder was recursively bundling INTO the app (and signtool then tried
+  # to sign the nested exes). Never ship it.
+  - '!.claude'
   # Mods & facepacks: a PACKAGED build reads these from <userData>/mods, never from
   # inside the app (see src/main/mods.ts), so the bundled copy is dead weight. To use
   # real rosters/faces in the standalone, drop the mods folder in <userData>/mods.
