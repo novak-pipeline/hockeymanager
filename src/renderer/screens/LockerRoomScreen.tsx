@@ -1,8 +1,11 @@
+import type { ComponentType } from 'react'
+import { Handshake, GraduationCap, Zap, type LucideProps } from 'lucide-react'
 import type { LockerRoomView } from '../../worker/protocol'
 import type { RelationshipView } from '../../engine/career/views'
 import { PlayerLink } from '../components/NavContext'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── helpers ── */
@@ -225,10 +228,10 @@ function MoralePanel({ morale }: { morale: number }): JSX.Element {
 
 /* ── Relationship card ── */
 
-const REL_ICON: Record<RelationshipView['kind'], string> = {
-  friendship: '🤝',
-  mentorship: '🎓',
-  feud: '⚡',
+const REL_ICON: Record<RelationshipView['kind'], ComponentType<LucideProps>> = {
+  friendship: Handshake,
+  mentorship: GraduationCap,
+  feud: Zap,
 }
 
 const REL_COLOR: Record<RelationshipView['kind'], string> = {
@@ -245,6 +248,7 @@ const REL_KIND_LABEL: Record<RelationshipView['kind'], string> = {
 
 function RelCard({ rel }: { rel: RelationshipView }): JSX.Element {
   const color = REL_COLOR[rel.kind]
+  const RelIcon = REL_ICON[rel.kind]
   const strength = Math.max(0, Math.min(100, rel.strength))
   return (
     <div
@@ -272,7 +276,7 @@ function RelCard({ rel }: { rel: RelationshipView }): JSX.Element {
           letterSpacing: '0.6px',
         }}
       >
-        <span>{REL_ICON[rel.kind]}</span>
+        <Icon size={14}><RelIcon /></Icon>
         <span>{REL_KIND_LABEL[rel.kind]}</span>
       </div>
       {/* Both player names */}

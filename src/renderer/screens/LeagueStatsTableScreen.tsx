@@ -161,8 +161,8 @@ export function LeagueStatsTableScreen(props: { teamId?: string } = {}): JSX.Ele
               {mode === 'skaters' && <th style={{ width: 32 }}>Pos</th>}
               <th style={{ width: 32, textAlign: 'right' }}>Age</th>
               {cols.map((c) => (
-                <th key={c.key as string} title={c.title} onClick={() => handleSort(c.key as string, c.lowerBetter)}
-                  style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', minWidth: 44, whiteSpace: 'nowrap' }}>
+                <th key={c.key as string} className="sortable num" title={c.title} onClick={() => handleSort(c.key as string, c.lowerBetter)}
+                  style={{ minWidth: 44, whiteSpace: 'nowrap' }}>
                   {c.label}{sortKey === c.key ? (sortAsc ? ' ▲' : ' ▼') : ''}
                 </th>
               ))}

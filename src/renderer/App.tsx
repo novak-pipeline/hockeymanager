@@ -1,4 +1,5 @@
 import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
@@ -537,9 +538,21 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                 <PhoneCallOverlay />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
-                  <ScreenBoundary screen={nav.screen}>
-                    <ScreenRouter screen={nav.screen} params={nav.params} />
-                  </ScreenBoundary>
+                  <MotionConfig reducedMotion="user">
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.div
+                        key={nav.screen}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                      >
+                        <ScreenBoundary screen={nav.screen}>
+                          <ScreenRouter screen={nav.screen} params={nav.params} />
+                        </ScreenBoundary>
+                      </motion.div>
+                    </AnimatePresence>
+                  </MotionConfig>
                 </div>
               </div>
             </div>

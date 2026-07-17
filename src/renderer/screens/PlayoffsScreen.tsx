@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { PlayoffBracketView, SeriesView } from '../../worker/protocol'
 import { useTeamCrestColor } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 export function PlayoffsScreen(): JSX.Element {
@@ -34,12 +36,14 @@ export function PlayoffsScreen(): JSX.Element {
     <section className="stack">
       <ScreenHeader title={`${data.year} Playoffs`}>
         {data.championTeamName && (
-          <span className="chip chip-warn">🏆 {data.championTeamName} — Champions</span>
+          <span className="chip chip-warn"><Icon size={14}><Icons.Trophy /></Icon> {data.championTeamName} — Champions</span>
         )}
       </ScreenHeader>
 
       {data.championTeamName && (
-        <div className="dash-banner">🏆 {data.championTeamName} win the {data.year} championship!</div>
+        <div className="dash-banner anim-scale">
+          <Icon size={18}><Icons.Trophy /></Icon> {data.championTeamName} win the {data.year} championship!
+        </div>
       )}
 
       {!data.userQualified && !data.championTeamName && (
@@ -52,6 +56,7 @@ export function PlayoffsScreen(): JSX.Element {
 
       {/* Bracket — one column per round */}
       <div
+        className="stagger"
         style={{
           display: 'flex',
           gap: 'var(--sp-4)',

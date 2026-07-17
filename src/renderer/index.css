@@ -82,6 +82,47 @@
   --sp-4: 16px;
   --sp-5: 24px;
   --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* ── radius scale ── */
+  --radius-xs: 4px;
+  --radius-pill: 999px;
+
+  /* ── elevation / shadow scale (layered, tuned for the deep-indigo bg) ── */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.30);
+  --shadow-2: 0 2px 8px rgba(0,0,0,0.35);
+  --shadow-3: 0 8px 24px rgba(0,0,0,0.45);
+  --shadow-4: 0 16px 48px rgba(0,0,0,0.55);
+  /* accent glow for hero surfaces */
+  --shadow-accent: 0 6px 28px rgba(var(--accent-rgb), 0.22);
+  /* inset hairline that reads as a crisp top edge on raised cards */
+  --edge-top: inset 0 1px 0 rgba(255,255,255,0.04);
+
+  /* ── type scale (fluid-ish, tuned for a dense management UI) ── */
+  --fs-2xs: 10px;
+  --fs-xs:  11px;
+  --fs-sm:  12px;
+  --fs-md:  13px;
+  --fs-base:14px;
+  --fs-lg:  16px;
+  --fs-xl:  19px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --fs-4xl: 40px;
+  --lh-tight: 1.15;
+  --lh-snug:  1.3;
+  --lh-normal:1.5;
+  --tracking-cap: 0.6px;
+
+  /* ── motion layer ── */
+  --dur-1: 90ms;    /* micro (hover/press) */
+  --dur-2: 160ms;   /* standard transition */
+  --dur-3: 260ms;   /* entrance / larger moves */
+  --dur-4: 420ms;   /* hero / celebratory */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);   /* decel — most UI */
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring:cubic-bezier(0.34, 1.56, 0.64, 1); /* subtle overshoot */
 }
 
 * { box-sizing: border-box; }
@@ -303,6 +344,17 @@ a:hover { text-decoration: underline; }
   padding: 5px 8px;
   border-top: 1px solid rgba(42,34,64,0.6);
   white-space: nowrap;
+}
+
+/* sortable column headers — clear clickable affordance */
+.table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.table th.sortable:hover {
+  color: var(--text);
+  background: var(--bg2);
 }
 
 .table tbody tr {
@@ -1313,7 +1365,7 @@ a:hover { text-decoration: underline; }
 .inbox-preview-row:last-child { border-bottom: none; }
 .inbox-preview-row:hover { background: var(--bg3); }
 .inbox-preview-row.unread .inbox-preview-headline { font-weight: 700; color: var(--text); }
-.inbox-preview-icon { font-size: 14px; flex-shrink: 0; line-height: 1.4; }
+.inbox-preview-icon { flex-shrink: 0; display: flex; align-items: center; margin-top: 1px; }
 .inbox-preview-headline {
   font-size: 12px;
   font-weight: 400;
@@ -1545,3 +1597,188 @@ a:hover { text-decoration: underline; }
 /* #187: player action context-menu items */
 .menu-item:hover:not(:disabled) { background: var(--bg3); }
 .menu-item:disabled { opacity: 0.5; cursor: default; }
+
+/* ═══════════════════════════════════════════════════════════════
+   MOTION LAYER — entrance choreography + micro-interactions.
+   Animate transform/opacity only (compositor-friendly, 60fps).
+   Everything is gated behind prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes ui-fade-in     { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ui-rise-in     { from { opacity: 0; transform: translateY(8px); }  to { opacity: 1; transform: none; } }
+@keyframes ui-rise-in-lg  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes ui-scale-in    { from { opacity: 0; transform: scale(0.96); }      to { opacity: 1; transform: none; } }
+@keyframes ui-slide-in-l  { from { opacity: 0; transform: translateX(-10px); }to { opacity: 1; transform: none; } }
+@keyframes ui-pop         { 0% { transform: scale(0.8); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@keyframes ui-shimmer     { 100% { transform: translateX(100%); } }
+@keyframes ui-meter-grow  { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* one-shot entrance utilities */
+.anim-fade   { animation: ui-fade-in    var(--dur-3) var(--ease-out) both; }
+.anim-rise   { animation: ui-rise-in    var(--dur-3) var(--ease-out) both; }
+.anim-rise-lg{ animation: ui-rise-in-lg var(--dur-4) var(--ease-out) both; }
+.anim-scale  { animation: ui-scale-in   var(--dur-3) var(--ease-out) both; }
+.anim-slide  { animation: ui-slide-in-l var(--dur-3) var(--ease-out) both; }
+.anim-pop    { animation: ui-pop        var(--dur-3) var(--ease-spring) both; }
+
+/* staggered children: set --stagger on a parent; children read --i */
+.stagger > * { animation: ui-rise-in var(--dur-3) var(--ease-out) both; }
+.stagger > *:nth-child(1) { animation-delay: 20ms; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 100ms; }
+.stagger > *:nth-child(4) { animation-delay: 140ms; }
+.stagger > *:nth-child(5) { animation-delay: 180ms; }
+.stagger > *:nth-child(6) { animation-delay: 220ms; }
+.stagger > *:nth-child(7) { animation-delay: 260ms; }
+.stagger > *:nth-child(8) { animation-delay: 300ms; }
+
+/* skeleton shimmer for loading states */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg2);
+  border-radius: var(--radius-sm);
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+  animation: ui-shimmer 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton::after { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PRIMITIVE COMPONENTS — composable building blocks (Card, Stat,
+   Badge, Meter, Sparkline, Icon, Tabs). Screens compose these.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* global panel uplift — crisper elevation + top edge + smooth motion */
+.panel {
+  box-shadow: var(--shadow-2), var(--edge-top);
+  transition: border-color var(--dur-2) var(--ease-out),
+              box-shadow var(--dur-2) var(--ease-out),
+              transform var(--dur-2) var(--ease-out);
+}
+
+/* Card — the flagship surface primitive */
+.card {
+  position: relative;
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2), var(--edge-top);
+}
+.card-pad { padding: var(--sp-4); }
+.card-interactive {
+  cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease-out),
+              box-shadow var(--dur-2) var(--ease-out),
+              transform var(--dur-2) var(--ease-out);
+  will-change: transform;
+}
+.card-interactive:hover {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: var(--shadow-3), var(--shadow-accent);
+  transform: translateY(-2px);
+}
+.card-interactive:active { transform: translateY(0); }
+/* accent rail on the left edge (team/user emphasis) */
+.card-railed { border-left: 3px solid rgb(var(--accent-rgb)); }
+
+/* card header row */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.card-eyebrow {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+
+/* Stat primitive — big scannable number + label + optional delta */
+.ui-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ui-stat-value {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+.ui-stat-value.lg { font-size: var(--fs-4xl); }
+.ui-stat-value.sm { font-size: var(--fs-xl); }
+.ui-stat-label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-cap);
+  color: var(--muted);
+}
+.ui-stat-delta {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: var(--fs-sm); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ui-stat-delta.up   { color: var(--green); }
+.ui-stat-delta.down { color: var(--red); }
+.ui-stat-delta.flat { color: var(--muted); }
+
+/* Badge primitive — sharper, sits alongside legacy .chip */
+.ui-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs); font-weight: 700;
+  line-height: 1.4; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.ui-badge svg { width: 12px; height: 12px; }
+.ui-badge.solid { color: var(--accent-ink); background: rgb(var(--accent-rgb)); }
+.ui-badge.soft  { color: var(--violet-h); background: rgba(var(--accent-rgb),0.14); border-color: rgba(var(--accent-rgb),0.30); }
+.ui-badge.success { color: var(--green); background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.30); }
+.ui-badge.warn    { color: var(--amber); background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.30); }
+.ui-badge.danger  { color: var(--red);   background: rgba(244,63,94,0.12);  border-color: rgba(244,63,94,0.30); }
+.ui-badge.neutral { color: var(--muted); background: var(--bg2); border-color: var(--line); }
+
+/* Meter primitive — animated fill */
+.ui-meter { height: 8px; background: var(--bg3); border-radius: var(--radius-pill); overflow: hidden; }
+.ui-meter-fill {
+  height: 100%; border-radius: var(--radius-pill);
+  background: rgb(var(--accent-rgb));
+  transform-origin: left center;
+  animation: ui-meter-grow var(--dur-4) var(--ease-out) both;
+  transition: width var(--dur-3) var(--ease-out);
+}
+
+/* Icon primitive — lucide/inline SVG sizing + alignment */
+.ui-icon { display: inline-flex; flex-shrink: 0; vertical-align: middle; }
+.ui-icon > svg { display: block; width: 1em; height: 1em; }
+.icon-14 > svg { width: 14px; height: 14px; }
+.icon-16 > svg { width: 16px; height: 16px; }
+.icon-18 > svg { width: 18px; height: 18px; }
+.icon-20 > svg { width: 20px; height: 20px; }
+.icon-24 > svg { width: 24px; height: 24px; }
+
+/* Sparkline wrapper */
+.ui-sparkline { display: block; overflow: visible; }
+.ui-sparkline path { vector-effect: non-scaling-stroke; }
+
+/* leaderboard podium rows — faint warm highlight for the top 3 */
+.table tbody tr.leader-row { background: rgba(250,204,21,0.045); }
+.table tbody tr.leader-row:hover { background: var(--bg3); }

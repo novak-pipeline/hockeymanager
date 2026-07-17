@@ -126,7 +126,7 @@ function FinancesBody(props: { data: FinanceView; onRefetch: () => void }): JSX.
           {d.revenue && (
             <Panel title={`Revenue · ${d.revenue.marketSizeLabel}`}>
               <BySegment rows={d.revenue.lines.map((l) => ({ label: l.source, amount: l.amount }))} total={d.revenue.estimatedRevenue} />
-              <div className="row-between small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <div className="row-between small" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
                 <span className="muted">Estimated total</span>
                 <strong>{fmtMoney(d.revenue.estimatedRevenue)}</strong>
               </div>

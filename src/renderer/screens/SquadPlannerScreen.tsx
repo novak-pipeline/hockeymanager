@@ -243,7 +243,7 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
               </div>
             ))}
           </div>
-          <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8 }}>
+          <div style={{ borderTop: '1px solid var(--line)', marginTop: 8, paddingTop: 8 }}>
             {d.summary.map((s, i) => (
               <div key={i} className="small muted" style={{ marginBottom: 4 }}>• {s}</div>
             ))}

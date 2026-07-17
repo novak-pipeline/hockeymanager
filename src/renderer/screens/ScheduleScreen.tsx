@@ -2,6 +2,7 @@ import type { DashboardView, RivalriesView, ScheduleEntryView, ScheduleView } fr
 import { fmtDate } from '../components/format'
 import { TeamCrest } from '../components/Crest'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Sparkline } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
 
@@ -101,15 +102,28 @@ function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<s
   onOpenBoxScore: (gameId: string) => void
 }): JSX.Element {
   const groups = groupByMonth(props.entries)
-  const played = props.entries.filter((e) => e.result !== null).length
+  const playedEntries = props.entries.filter((e) => e.result !== null)
+  const played = playedEntries.length
   const total = props.entries.length
   const wins = props.entries.filter((e) => e.result?.won).length
   const losses = props.entries.filter((e) => e.result && !e.result.won && e.result.decidedBy === 'regulation').length
   const otl = props.entries.filter((e) => e.result && !e.result.won && e.result.decidedBy !== 'regulation').length
 
+  // Running cumulative goal differential across played games (from-the-user POV).
+  let cum = 0
+  const diffSeries = playedEntries.map((e) => {
+    const r = e.result!
+    const gf = e.home ? r.homeGoals : r.awayGoals
+    const ga = e.home ? r.awayGoals : r.homeGoals
+    cum += gf - ga
+    return cum
+  })
+  const finalDiff = diffSeries.length ? diffSeries[diffSeries.length - 1]! : 0
+  const trendUp = finalDiff >= 0
+
   return (
     <div className="stack">
-      <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+      <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="stat">
           <div className="stat-value">{played}<span className="muted" style={{ fontSize: 16 }}>/{total}</span></div>
           <div className="stat-label">Games played</div>
@@ -118,6 +132,23 @@ function ScheduleBody(props: { entries: ScheduleEntryView[]; rivalTeamIds: Set<s
           <div className="stat">
             <div className="stat-value">{wins}–{losses}–{otl}</div>
             <div className="stat-label">W – L – OTL</div>
+          </div>
+        )}
+        {diffSeries.length > 1 && (
+          <div className="stat">
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span className="stat-value" style={{ color: trendUp ? 'var(--green)' : 'var(--red)' }}>
+                {finalDiff > 0 ? `+${finalDiff}` : finalDiff}
+              </span>
+              <Sparkline
+                data={diffSeries}
+                width={132}
+                height={30}
+                fill
+                color={trendUp ? 'var(--green)' : 'var(--red)'}
+              />
+            </div>
+            <div className="stat-label">Goal differential trend</div>
           </div>
         )}
       </div>

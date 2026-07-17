@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import type { AhlStandingsView, LeagueTeamsView, StandingsView } from '../../worker/protocol'
 import type { StandingRowView } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -189,9 +189,9 @@ function StandingsTable(props: {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <>
+            <Fragment key={row.teamId}>
               {playoffLine !== null && i === playoffLine && (
-                <tr key={`pl-${i}`} style={{ pointerEvents: 'none' }}>
+                <tr style={{ pointerEvents: 'none' }}>
                   <td
                     colSpan={12}
                     style={{
@@ -202,7 +202,7 @@ function StandingsTable(props: {
                   />
                 </tr>
               )}
-              <tr key={row.teamId}>
+              <tr className={row.teamId === userTeamId ? 'is-user' : undefined}>
                 <td className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
                 <td>
                   <span className="row" style={{ gap: 'var(--sp-2)' }}>
@@ -244,7 +244,7 @@ function StandingsTable(props: {
                   <LastFiveDots value={row.lastFive} />
                 </td>
               </tr>
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>

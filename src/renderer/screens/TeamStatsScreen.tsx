@@ -64,8 +64,8 @@ function SkaterTable({ rows }: SkaterTableProps): JSX.Element {
     const active = sort === col
     return (
       <th
-        className={numeric ? 'num' : ''}
-        style={{ cursor: 'pointer', userSelect: 'none', color: active ? 'var(--accent)' : undefined }}
+        className={`sortable${numeric ? ' num' : ''}`}
+        style={{ color: active ? 'var(--accent)' : undefined }}
         onClick={() => toggle(col)}
       >
         {label}{active ? (asc ? ' ▲' : ' ▼') : ''}
@@ -152,8 +152,8 @@ function GoalieTable({ rows }: GoalieTableProps): JSX.Element {
     const active = sort === col
     return (
       <th
-        className={numeric ? 'num' : ''}
-        style={{ cursor: 'pointer', userSelect: 'none', color: active ? 'var(--accent)' : undefined }}
+        className={`sortable${numeric ? ' num' : ''}`}
+        style={{ color: active ? 'var(--accent)' : undefined }}
         onClick={() => toggle(col)}
       >
         {label}{active ? (asc ? ' ▲' : ' ▼') : ''}

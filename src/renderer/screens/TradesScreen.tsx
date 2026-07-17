@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
@@ -17,6 +18,7 @@ import { PlayerFace } from '../components/PlayerFace'
 import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -368,7 +370,7 @@ function EvalPanel(props: {
             marginBottom: 12,
           }}
         >
-          <span style={{ fontSize: 20 }}>✓</span>
+          <Icon size={20} color="var(--success)"><Check /></Icon>
           <span style={{ color: 'var(--success)', fontWeight: 700, fontSize: 15 }}>
             Trade accepted!
           </span>

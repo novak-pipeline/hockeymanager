@@ -458,7 +458,7 @@ function TeamHistoryTab(props: { teamId: string }): JSX.Element {
                   alignItems: 'center',
                   gap: 'var(--sp-3)',
                   padding: 'var(--sp-2) 0',
-                  borderBottom: '1px solid var(--border)',
+                  borderBottom: '1px solid var(--line)',
                 }}
               >
                 <PlayerFace faceId={l.faceId} name={l.name} size={40} />
@@ -516,7 +516,7 @@ function StaffRow(props: { m: StaffView['scouts'][number] }): JSX.Element {
   const attrs = m.attributes
   const hasAttrs = attrs && Object.keys(attrs).length > 0
   return (
-    <div style={{ borderBottom: '1px solid var(--border)' }}>
+    <div style={{ borderBottom: '1px solid var(--line)' }}>
       <button
         type="button"
         onClick={() => hasAttrs && setOpen((o) => !o)}

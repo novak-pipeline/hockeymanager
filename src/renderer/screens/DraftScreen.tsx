@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
+import { Check, Dices } from 'lucide-react'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
 import type { CombineRowView, DraftAdviceView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
@@ -261,7 +263,7 @@ function ClockStrip(props: { data: DraftView }): JSX.Element {
           fontWeight: 700,
         }}
       >
-        ✓ {data.year} Draft complete
+        <Icon size={14}><Check /></Icon> {data.year} Draft complete
       </div>
     )
   }
@@ -332,7 +334,7 @@ function LotteryBanner(props: { lottery: NonNullable<TentpoleView['lottery']> })
       }}
     >
       <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-        <span style={{ fontSize: 18 }}>🎰</span>
+        <Icon size={18} color="var(--amber)"><Dices /></Icon>
         <span
           style={{
             fontWeight: 700,

@@ -262,7 +262,8 @@ function TeamLeagueTable({ teams, userTeamId }: { teams: TeamAnalyticsRow[]; use
             {TEAM_COLS.map((c) => (
               <th
                 key={c.key}
-                style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', minWidth: 72 }}
+                className="sortable num"
+                style={{ minWidth: 72 }}
                 onClick={() => handleSort(c.key)}
                 title={c.lowerBetter ? `${c.label} (lower is better)` : c.label}
               >
@@ -640,7 +641,8 @@ function TeamPlayerTable({
               {cols.map((c) => (
                 <th
                   key={c.key as string}
-                  style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', minWidth: c.width ?? 56 }}
+                  className="sortable num"
+                  style={{ minWidth: c.width ?? 56 }}
                   onClick={() => handleSort(c.key)}
                 >
                   {c.label}{sortIndicator(c.key)}
@@ -721,7 +723,7 @@ function GoalieTable({
               <th>Goalie</th>
               <th style={{ width: 36, textAlign: 'right' }}>GP</th>
               {cols.map((c) => (
-                <th key={c.key as string} style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none', minWidth: 50 }} onClick={() => handleSort(c.key)}>
+                <th key={c.key as string} className="sortable num" style={{ minWidth: 50 }} onClick={() => handleSort(c.key)}>
                   {c.label}{sortKey === c.key ? (sortAsc ? ' ▲' : ' ▼') : ''}
                 </th>
               ))}

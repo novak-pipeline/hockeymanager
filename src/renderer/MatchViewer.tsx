@@ -17,6 +17,8 @@ import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/p
 import type { SpeedSegment } from '../render2d/playbackDirector'
 import { loadKokoro, kokoroState } from './lib/kokoroVoice'
 import type { GoalEvent, StoppageEvent } from '@domain'
+import { Volume2, VolumeX, Mic, Check, Disc } from 'lucide-react'
+import { Icon } from './components/primitives'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -741,7 +743,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             <button className="btn btn-ghost" onClick={handleAnnouncerToggle}
               title={announcerEnabled ? 'Mute commentary' : 'Enable commentary'}
               style={announcerEnabled ? modeActiveStyle : { opacity: 0.5 }}>
-              {announcerEnabled ? '🔊 Cmt' : '🔇 Cmt'}
+              <Icon size={14}>{announcerEnabled ? <Volume2 /> : <VolumeX />}</Icon> Cmt
             </button>
           )}
 
@@ -749,7 +751,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           <button className="btn btn-ghost" onClick={handleSfxToggle}
             title={sfxEnabled ? 'Mute SFX' : 'Enable SFX'}
             style={sfxEnabled ? modeActiveStyle : { opacity: 0.5 }}>
-            {sfxEnabled ? '🔊 SFX' : '🔇 SFX'}
+            <Icon size={14}>{sfxEnabled ? <Volume2 /> : <VolumeX />}</Icon> SFX
           </button>
 
           <button onClick={props.onClose} className="btn">
@@ -772,7 +774,9 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           {phase === 'hero' && (
             <div style={heroOverlayStyle}>
               <div style={{ textAlign: 'center', marginBottom: 24 }}>
-                <div style={{ fontSize: 36, marginBottom: 8 }}>🏒</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                  <Icon color="var(--violet-h)" style={{ fontSize: 36 }}><Disc /></Icon>
+                </div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', letterSpacing: 1 }}>
                   DROP THE PUCK
                 </div>
@@ -940,13 +944,13 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
               onClick={handleKokoroToggle}
               title="Neural TTS voice — downloads ~90 MB on first use; cached after that"
             >
-              🎙 Enhanced voice {kokoroWanted ? '(on)' : '(~90 MB once)'}
+              <Icon size={14}><Mic /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(~90 MB once)'}
             </button>
             {kokoroWanted && kokoroStatus === 'downloading' && kokoroProgress !== null && (
               <span style={{ color: MUTED, fontSize: 11 }}>Downloading… {kokoroProgress}%</span>
             )}
             {kokoroWanted && kokoroStatus === 'ready' && (
-              <span style={{ color: 'var(--green)', fontSize: 11 }}>✓ Neural voice active</span>
+              <span style={{ color: 'var(--green)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Check /></Icon> Neural voice active</span>
             )}
             {kokoroWanted && kokoroStatus === 'failed' && (
               <span style={{ color: 'var(--red)', fontSize: 11 }}>Download failed</span>
