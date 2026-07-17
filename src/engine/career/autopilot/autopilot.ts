@@ -101,6 +101,8 @@ type EventSink = (ev:
   | { type: 'issue'; data: IssueRecord }
   | { type: 'season'; data: SeasonRecord }) => void
 
+type Plan = 'contend' | 'retool' | 'rebuild'
+
 interface Ctx {
   career: Career
   trace: AutopilotTrace
@@ -109,6 +111,10 @@ interface Ctx {
   /** Players we've already tabled a trade offer on — so we don't re-spam the same
    *  target while an offer is pending (proposeTrade returns 'pending' by design). */
   offered: Set<string>
+  /** The GM's multi-year plan this season (contend / retool / rebuild), computed
+   *  once per season and driving every decision the way a real GM's does. */
+  plan: Plan
+  planYear: number
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -243,6 +249,38 @@ function snapshotViews(ctx: Ctx): void {
 
 /* ────────────────────────────── GM policy ────────────────────────────── */
 
+/** Classify the franchise's window from roster quality + age + standing — the
+ *  same read a real GM makes before deciding whether to buy, hold, or tear down. */
+function assessPlan(ctx: Ctx): Plan {
+  const squad = guarded(ctx, 'getSquad', () => ctx.career.getSquad())
+  const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
+  const skaters = (squad?.rows ?? []).filter((p) => p.position !== 'G').sort((a, b) => b.overall - a.overall)
+  const top6 = skaters.slice(0, 6)
+  const coreQ = top6.length ? top6.reduce((s, p) => s + p.overall, 0) / top6.length : 72
+  const coreAge = top6.length ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
+  const cRank = dash?.userTeam.conferenceRank ?? 8
+  let score = 0
+  if (coreQ >= 83) score += 2; else if (coreQ >= 79) score += 1; else if (coreQ < 76) score -= 2
+  if (cRank <= 4) score += 2; else if (cRank <= 8) score += 1; else if (cRank >= 20) score -= 2
+  if (coreAge >= 31) score -= 1              // aging core → lean away from all-in
+  if (coreAge <= 25 && coreQ >= 78) score += 1 // young and good → window opening
+  return score >= 2 ? 'contend' : score <= -2 ? 'rebuild' : 'retool'
+}
+
+/** The plan for the current season, computed once and logged as a GM decision. */
+function getPlan(ctx: Ctx): Plan {
+  if (ctx.planYear === ctx.career.year) return ctx.plan
+  ctx.plan = assessPlan(ctx)
+  ctx.planYear = ctx.career.year
+  const blurb: Record<Plan, string> = {
+    contend: 'the window is open — spend to the cap, buy at the deadline, protect the core',
+    retool: 'stay competitive but selective — keep the core, add cheap upside, no panic moves',
+    rebuild: 'out of the window — sell veterans for futures, hoard picks, give the kids runway',
+  }
+  log(ctx, { kind: 'plan', summary: `Season plan: ${ctx.plan.toUpperCase()}`, drivers: [blurb[ctx.plan]], result: ctx.plan, ok: true })
+  return ctx.plan
+}
+
 function doCaptain(ctx: Ctx): void {
   const squad = guarded(ctx, 'getSquad', () => ctx.career.getSquad())
   if (!squad) return
@@ -332,6 +370,8 @@ function buildPackage(tv: ReturnType<Career['getTrades']>, targetVal: number, ne
 }
 
 function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
+  // Rebuilders don't trade futures for win-now upgrades — they're sellers.
+  if (getPlan(ctx) === 'rebuild') return false
   const tv = guarded(ctx, 'getTrades', () => ctx.career.getTrades())
   if (!tv || !tv.tradingOpen) return false
   noteFeature(ctx, 'trades', `Every partner's roster comes with per-player tradeValue + cap space + posture, and evaluateTradeDraft gives a side-effect-free partner verdict — enough to value a deal. Friction: to price a target I query getTrades then a separate evaluateTradeDraft; the value isn't on the roster screen. Partners seen: ${tv.partners.length}, my cap space ${money(tv.myCapSpace)}.`)
@@ -401,7 +441,11 @@ function reviewIncoming(ctx: Ctx): void {
 function doDeadline(ctx: Ctx): void {
   const dd = guarded(ctx, 'getDeadlineDay', () => ctx.career.getDeadlineDay())
   if (!dd) return
-  const { contending, note } = contention(ctx)
+  const plan = getPlan(ctx)
+  const { contending: inRace, note: raceNote } = contention(ctx)
+  // A contender buys; a rebuilder sells; a retooler follows the race.
+  const contending = plan === 'contend' || (plan === 'retool' && inRace)
+  const note = `${plan}, ${raceNote}`
   if (contending) {
     const tv = guarded(ctx, 'getTrades', () => ctx.career.getTrades())
     const target = [...dd.shopped].sort((a, b) => b.value - a.value).find((s) => s.value <= 60)
@@ -494,8 +538,15 @@ function trySign(ctx: Ctx, remaining: number, salary: number, fn: () => { signed
 function doResign(ctx: Ctx): void {
   const os = guarded(ctx, 'getOffseason', () => ctx.career.getOffseason())
   if (!os || os.stage !== 'resign') return
+  const plan = getPlan(ctx)
+  // Contenders protect the core; retoolers keep good-and-not-old; rebuilders keep
+  // only young keepers and let veterans walk for cap and futures.
+  const wants = (r: { overall: number; age: number }): boolean =>
+    plan === 'contend' ? r.overall >= 70 && r.age <= 36
+      : plan === 'rebuild' ? r.overall >= 74 && r.age <= 27
+        : r.overall >= 74 && r.age <= 33
   let remaining = os.salaryCap - os.capUsed
-  const keep = os.expiring.filter((r) => r.status === 'pending' && r.overall >= 74 && r.age <= 34).sort((a, b) => b.overall - a.overall)
+  const keep = os.expiring.filter((r) => r.status === 'pending' && wants(r)).sort((a, b) => b.overall - a.overall)
   for (const r of keep.slice(0, 10)) {
     if (remaining < 1e6) break
     const res = trySign(ctx, remaining, r.askSalary, () => ctx.career.resignPlayer(r.playerId, r.askSalary, r.askYears), 'resignPlayer')
@@ -510,8 +561,12 @@ function doFreeAgency(ctx: Ctx): void {
   const squad = guarded(ctx, 'getSquad', () => ctx.career.getSquad())
   if (squad && squad.rosterCount >= 23) return
   noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
+  const plan = getPlan(ctx)
   let remaining = hub.capSpace
-  const affordable = hub.rows.filter((r) => !r.pendingOffer && !r.inTalks).sort((a, b) => b.overall - a.overall)
+  const affordable = hub.rows
+    // A rebuilder doesn't hand term/money to win-now vets — only cheap young upside.
+    .filter((r) => !r.pendingOffer && !r.inTalks && (plan !== 'rebuild' || r.age <= 25))
+    .sort((a, b) => b.overall - a.overall)
   for (const fa of affordable.slice(0, 8)) {
     if (remaining < 1e6) break
     if (fa.askSalary > remaining) continue
@@ -580,7 +635,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {},
     summary: { cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false },
   }
-  const ctx: Ctx = { career, trace, seq: 0, offered: new Set() }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1 }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
@@ -627,6 +682,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
 
     const phase: CareerPhase = career.seasonPhase
     if (phase === 'regularSeason') {
+      getPlan(ctx) // set + log the season's contend/retool/rebuild plan (once per year)
       if (dash.day >= 30) snapshotViews(ctx) // one mid-season capture of what the screens serve
       clearMeetings(ctx, dash)
       clearInteractions(ctx)
