@@ -18,18 +18,17 @@ import { dayToDateISO } from '../../engine/career/views'
 import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { CategoryIcon, Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { bumpRefresh } from '../components/store'
 
 /* ── category metadata ── */
-const CAT_ICON: Record<NewsCategory, string> = {
-  result: '⚡', injury: '🩹', trade: '🔄', contract: '📋',
-  draft: '🎯', award: '🏅', league: '🏒', milestone: '⭐', playoffs: '🏆',
-}
 const CAT_COLOR: Record<NewsCategory, string> = {
   result: 'var(--violet-h)', injury: 'var(--red)', trade: 'var(--amber)',
   contract: 'var(--amber)', draft: 'var(--cyan)', award: 'var(--amber)',
   league: 'var(--muted)', milestone: 'var(--amber)', playoffs: 'var(--amber)',
+  scouting: 'var(--cyan)',
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -234,7 +233,7 @@ export function DashboardScreen(): JSX.Element {
 
 
       {/* ── 3-col card grid ── */}
-      <div className="dash-grid">
+      <div className="dash-grid stagger">
 
         {/* ═══ LEFT COLUMN ═══ */}
         <div className="dash-col">
@@ -831,8 +830,8 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
                 borderBottom: '1px solid var(--line)', cursor: 'pointer', minWidth: 0,
               }}
             >
-              <span style={{ fontSize: 13, flexShrink: 0, color: CAT_COLOR[item.category] }}>
-                {CAT_ICON[item.category] ?? '🏒'}
+              <span style={{ display: 'inline-flex', flexShrink: 0, color: CAT_COLOR[item.category] }}>
+                <CategoryIcon category={item.category} size={14} />
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div className="muted" style={{ fontSize: 10 }}>
@@ -952,8 +951,8 @@ function NewsHero({ inbox, arcs, onOpenItem }: {
       }}
     >
       <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 4 }}>
-        <span className="chip chip-accent" style={{ fontSize: 10 }}>
-          {CAT_ICON[story.category]} {story.category.toUpperCase()}
+        <span className="chip chip-accent" style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <CategoryIcon category={story.category} size={11} /> {story.category.toUpperCase()}
         </span>
         <span className="muted" style={{ fontSize: 11 }}>
           {story.press?.byline ?? story.speaker ?? 'Club News'}
@@ -1087,8 +1086,10 @@ function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNo
           <span className="chip chip-violet">Media pick: {d.predictedRank}{getOrdinalSuffix(d.predictedRank)}</span>
         )}
         {d.board && <BoardConfidenceChip board={d.board} onNavigate={() => nav.navigate('board')} />}
-        <span className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 11 }}>
-          {d.injuries.length === 0 ? '✚ Healthy' : `🩹 ${d.injuries.length} injured`}
+        <span className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {d.injuries.length === 0
+            ? (<><Icon size={12}><Icons.Health /></Icon> Healthy</>)
+            : (<><Icon size={12}><Icons.Injury /></Icon> {d.injuries.length} injured</>)}
         </span>
         {customize}
       </div>
