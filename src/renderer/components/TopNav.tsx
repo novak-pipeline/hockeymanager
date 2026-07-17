@@ -3,6 +3,8 @@ import { useShellActions } from './ActionsContext'
 import { Crest } from './Crest'
 import { fmtDate } from './format'
 import { useNav } from './NavContext'
+import { Icon } from './primitives'
+import { Icons } from './icons'
 
 const PHASE_CHIP: Record<DashboardView['phase'], string> = {
   regularSeason: 'chip chip-violet',
@@ -78,8 +80,9 @@ export function TopNav(props: {
             disabled={!nav.canGoBack}
             title={nav.canGoBack ? 'Go back to the previous screen' : 'No previous screen'}
             aria-label="Go back"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
-            ← Back
+            <Icon size={14}><Icons.Back /></Icon> Back
           </button>
           <button className="topnav-util-btn" onClick={props.onSave} disabled={props.busy} title="Save career">
             Save
@@ -110,8 +113,9 @@ export function TopNav(props: {
             onClick={() => nav.navigate('settings')}
             title="Settings"
             aria-label="Settings"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            ⚙
+            <Icon size={16}><Icons.Settings /></Icon>
           </button>
 
           <span className="topnav-version">v{props.engineVersion}</span>
