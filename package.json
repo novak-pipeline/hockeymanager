@@ -21,7 +21,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ui:snap": "electron-vite build && node scripts/dev/ui-snapshot.mjs"
+    "ui:snap": "electron-vite build && node scripts/dev/ui-snapshot.mjs",
+    "autopilot": "AP_RUN=1 npx vitest run src/engine/career/autopilot/run.harness.test.ts --no-file-parallelism",
+    "autopilot:watch": "node scripts/dev/autopilot-watch.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.104.1",
