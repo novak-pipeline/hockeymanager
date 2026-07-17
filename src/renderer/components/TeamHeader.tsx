@@ -131,7 +131,7 @@ export function TeamHeader({ viewedTeamId, userTeamId, currentTab }: TeamHeaderP
         gap: 'var(--sp-2)',
         padding: '6px var(--sp-3)',
         background: 'var(--bg2)',
-        borderBottom: '2px solid var(--team-primary, var(--border))',
+        borderBottom: '2px solid var(--team-primary, var(--line))',
         flexWrap: 'wrap',
       }}
     >
@@ -222,7 +222,7 @@ export function TeamHeader({ viewedTeamId, userTeamId, currentTab }: TeamHeaderP
               top: '100%',
               zIndex: 200,
               background: 'var(--bg2)',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--line)',
               borderRadius: 'var(--radius)',
               minWidth: 220,
               maxHeight: 340,
@@ -275,7 +275,7 @@ export function TeamHeader({ viewedTeamId, userTeamId, currentTab }: TeamHeaderP
                         textTransform: 'uppercase',
                         color: 'var(--muted)',
                         padding: '6px 10px 2px',
-                        borderTop: '1px solid var(--border)',
+                        borderTop: '1px solid var(--line)',
                         marginTop: 4,
                       }}
                     >

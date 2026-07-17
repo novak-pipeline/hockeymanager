@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { Fragment, useState, useMemo } from 'react'
 import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -270,7 +270,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
 
       {/* Top-level NHL / AHL tab switcher — only shown for own team */}
       {!isReadOnly && (
-        <div className="tabs" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="tabs" style={{ borderBottom: '1px solid var(--line)' }}>
           <button
             className={`tab${screenTab === 'nhl' ? ' active' : ''}`}
             onClick={() => setScreenTab('nhl')}
@@ -534,8 +534,8 @@ function AhlSquadPanel({
                 { label: 'Goalies', rows: goalies },
               ].map(({ label, rows }) =>
                 rows.length === 0 ? null : (
-                  <>
-                    <tr key={`hdr-${label}`} style={{ background: 'var(--surface-raised)' }}>
+                  <Fragment key={`grp-${label}`}>
+                    <tr style={{ background: 'var(--bg2)' }}>
                       <td
                         colSpan={9}
                         style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', padding: '6px 8px' }}
@@ -573,7 +573,7 @@ function AhlSquadPanel({
                         </td>
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 )
               )}
             </tbody>
