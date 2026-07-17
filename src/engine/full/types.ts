@@ -162,6 +162,9 @@ export interface Ctx {
   /** Rivalry heat, 0 (ordinary game) → 1 (grudge match): scales the hit and
    *  penalty rates so a rivalry night is visibly chippier. Absent → 0. */
   intensity?: number
+  /** Tonight's fight plan (times + combatant rng), hash-derived per game so the
+   *  main rng stream is untouched. Absent → no fights. */
+  fights?: { times: number[]; next: number; rng: Rng }
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

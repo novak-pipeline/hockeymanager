@@ -21,6 +21,7 @@ import {
   asGameId,
   asPlayerId,
   asTeamId,
+  isEvent,
   type DraftPick,
   type GameResult,
   type GameStream,
@@ -4186,6 +4187,21 @@ export class Career {
     }
     const solo = detectPlayerStory(userLines)
     if (solo) this.pushNews('result', solo.headline, solo.body, { playerId: solo.playerId, teamId: this.userTeamId as string })
+
+    /* ── Gloves off: a fight in your game makes the recap. ── */
+    const combatants = res.stream.filter((e) => isEvent(e, 'penalty') && e.infraction === 'fighting')
+    if (combatants.length >= 2) {
+      const first = this.resolve(combatants[0].player)
+      const second = this.resolve(combatants[1].player)
+      const ours = userRoster.has(combatants[0].player as unknown as string) ? first : second
+      const theirs = ours === first ? second : first
+      this.pushNews(
+        'result',
+        `Gloves off: ${ours.name} answers the bell`,
+        `Tempers boiled over against ${opp.name} — ${ours.name} and ${theirs.name} dropped the gloves and took fighting majors.`,
+        { playerId: ours.id as string, teamId: opp.id as string }
+      )
+    }
 
     /* ── Coach quote: big win (≥3 goal margin, regulation) or bad loss (≥3 goal margin) ── */
     const diff = us - them

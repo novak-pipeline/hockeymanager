@@ -28,6 +28,7 @@ import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
+import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
@@ -136,6 +137,10 @@ class TeamSim {
   /** Multiplier on goals this starter concedes tonight (mean 1.0; <1 = hot, >1 =
    *  leaking) — the "hot goalie / off night" lever, set once per game. */
   goalieNight = 1
+  /** Combatants serving fighting majors: off the ice (their line plays short)
+   *  until the absolute game-clock expiry. No strength-state effect —
+   *  coincidental majors substitute. */
+  fighters: Array<{ id: string; until: number }> = []
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -145,22 +150,31 @@ class TeamSim {
   /** #175: deploy the unit that matches the strength state — the real PP/PK units
    *  during special teams (so PP1 gets the power-play chances → the power-play
    *  goals, as in the full sim), the even-strength lines otherwise. */
-  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev'): OnIce {
+  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev', t = 0): OnIce {
     const lines = this.team.lines
     const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
     if (situation === 'pp' && lines.powerPlayUnits.length > 0) {
       const unit = lines.powerPlayUnits[weightedIndex(rng, lines.powerPlayUnits.map((_, i) => PP_UNIT_WEIGHTS[i] ?? 0.15))]
-      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+      if (unit && unit.length > 0) return { skaters: this.available(unit, t).map((id) => this.resolve(id)), goalie }
     }
     if (situation === 'pk' && lines.penaltyKillUnits.length > 0) {
       const unit = lines.penaltyKillUnits[weightedIndex(rng, lines.penaltyKillUnits.map((_, i) => PK_UNIT_WEIGHTS[i] ?? 0.15))]
-      if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
+      if (unit && unit.length > 0) return { skaters: this.available(unit, t).map((id) => this.resolve(id)), goalie }
     }
     const fwdIdx = weightedIndex(rng, FWD_LINE_WEIGHTS)
     const fwd = lines.forwards[fwdIdx]
     const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
-    const skaters = [...fwd, ...pair].map(this.resolve)
+    const skaters = this.available([...fwd, ...pair], t).map(this.resolve)
     return { skaters, goalie, fwdLine: fwdIdx }
+  }
+
+  /** Drop anyone serving a fighting major — his line skates short. */
+  private available(ids: readonly PlayerId[], t: number): PlayerId[] {
+    if (this.fighters.length === 0) return [...ids]
+    this.fighters = this.fighters.filter((f) => f.until > t)
+    if (this.fighters.length === 0) return [...ids]
+    const out = new Set(this.fighters.map((f) => f.id))
+    return ids.filter((id) => !out.has(id as string))
   }
 
   /** Forward line index with the highest offense (the line worth matching against). */
@@ -215,7 +229,7 @@ class TeamSim {
    * time — even at home a coach doesn't win every matchup). Otherwise the
    * normal rotation rolls.
    */
-  pickMatched(rng: Rng, opp: TeamSim, oppOn: OnIce): OnIce {
+  pickMatched(rng: Rng, opp: TeamSim, oppOn: OnIce, t = 0): OnIce {
     if (oppOn.fwdLine === opp.topLineIdx() && rng.chance(LINE_MATCH_P)) {
       const lines = this.team.lines
       const fwdIdx = this.checkingLineIdx()
@@ -224,10 +238,10 @@ class TeamSim {
       const pair = lines.defensePairs[this.shutdownPairIdx()]
       if (fwd && fwd.length > 0 && pair && pair.length > 0) {
         const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
-        return { skaters: [...fwd, ...pair].map(this.resolve), goalie, fwdLine: fwdIdx }
+        return { skaters: this.available([...fwd, ...pair], t).map(this.resolve), goalie, fwdLine: fwdIdx }
       }
     }
-    return this.pickOnIce(rng, 'ev')
+    return this.pickOnIce(rng, 'ev', t)
   }
 
   /** #175: this team's strength state at game-clock `t` (relative to its opponent). */
@@ -279,6 +293,9 @@ interface Ctx {
   scoringMult?: number
   /** Rivalry heat 0..1 — scales the penalty rate. Absent → 0 (unchanged). */
   intensity?: number
+  /** Tonight's fight plan (times + combatant rng), hash-derived per game so the
+   *  main rng stream is untouched. Absent → no fights. */
+  fights?: { times: number[]; next: number; rng: Rng }
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -487,6 +504,29 @@ function simShift(
   }
 }
 
+/** Gloves off: one combatant per side (the penalty-prone answer the bell),
+ *  five PIM each, and both sit five minutes of game time — their lines skate
+ *  short. Coincidental majors, so the strength state is untouched. Combatants
+ *  come from the hash-derived fight rng, never the game's main stream. */
+function startFight(ctx: Ctx, home: TeamSim, away: TeamSim, period: number, t: number, absT: number, fRng: Rng): void {
+  const pickFighter = (team: TeamSim): Player | null => {
+    const out = new Set(team.fighters.map((f) => f.id))
+    const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
+      .filter((id) => !out.has(id as string))
+    if (ids.length === 0) return null
+    const ps = ids.map(team.resolve)
+    return ps[weightedIndex(fRng, ps.map((p) => 1 + p.composites.penaltyProne))]
+  }
+  const h = pickFighter(home)
+  const a = pickFighter(away)
+  if (!h || !a) return
+  for (const [team, p] of [[home, h], [away, a]] as const) {
+    team.fighters.push({ id: p.id as string, until: absT + FIGHT_MAJOR_SECONDS })
+    stat(ctx, p.id).penaltyMinutes += 5
+    ctx.stream.push({ t, period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
+  }
+}
+
 function creditToi(ctx: Ctx, onIce: OnIce, seconds: number, situation: 'ev' | 'pp' | 'pk' = 'ev'): void {
   for (const p of onIce.skaters) {
     const s = stat(ctx, p.id)
@@ -526,8 +566,14 @@ function simPeriod(
   suddenDeath: boolean,
   threeOnThree = false
 ): boolean {
-  const hOn = home.pickOnIce(ctx.rng)
-  const aOn = away.pickOnIce(ctx.rng)
+  /** Absolute game seconds for period-time `pt` (fight clocks span periods). */
+  const absOf = (pt: number): number =>
+    period <= REGULATION_PERIODS
+      ? (period - 1) * PERIOD_SECONDS + pt
+      : REGULATION_PERIODS * PERIOD_SECONDS + (period - REGULATION_PERIODS - 1) * lengthSeconds + pt
+
+  const hOn = home.pickOnIce(ctx.rng, 'ev', absOf(0))
+  const aOn = away.pickOnIce(ctx.rng, 'ev', absOf(0))
   faceoff(ctx, hOn, aOn, period)
 
   // Teams skate the same direction conventions; home attacks +x on odd periods.
@@ -538,6 +584,13 @@ function simPeriod(
     // power-play shifts (and thus the power-play goals), PK1 the kills.
     const homeSit = home.situationVs(away, t)
     const awaySit = away.situationVs(home, t)
+    const absT = absOf(t)
+    // Tonight's fight, if due: gloves off between whistles at even strength.
+    const fp = ctx.fights
+    if (fp && fp.next < fp.times.length && fp.times[fp.next] <= absT && homeSit === 'ev' && awaySit === 'ev') {
+      fp.next++
+      startFight(ctx, home, away, period, t, absT, fp.rng)
+    }
     // Home last change: a matching home bench sees the away unit FIRST and can
     // answer their top line with its checking line. Gated on the tactic (false
     // by default), so non-matching games draw the rng in the original order and
@@ -545,11 +598,11 @@ function simPeriod(
     let homeUnit: OnIce
     let awayUnit: OnIce
     if (home.team.tactics.lineMatching === true && homeSit === 'ev' && awaySit === 'ev') {
-      awayUnit = away.pickOnIce(ctx.rng, awaySit)
-      homeUnit = home.pickMatched(ctx.rng, away, awayUnit)
+      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT)
+      homeUnit = home.pickMatched(ctx.rng, away, awayUnit, absT)
     } else {
-      homeUnit = home.pickOnIce(ctx.rng, homeSit)
-      awayUnit = away.pickOnIce(ctx.rng, awaySit)
+      homeUnit = home.pickOnIce(ctx.rng, homeSit, absT)
+      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT)
     }
     creditToi(ctx, homeUnit, SHIFT_SECONDS, homeSit)
     creditToi(ctx, awayUnit, SHIFT_SECONDS, awaySit)
@@ -786,7 +839,12 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG, scoringMult: playoffScoringMult(rules), intensity: opts.intensity }
+  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const ctx: Ctx = {
+    rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG,
+    scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
+    ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
+  }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
   // Goalie rotation on a SEPARATE deterministic RNG so the game's shot stream is

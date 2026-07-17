@@ -75,6 +75,7 @@ import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared
 import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
+import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -307,6 +308,9 @@ class TeamSim {
   goalieNight = 1
   /** Whether this side has the last change (set once by fullSimGame). */
   isHome = false
+  /** Combatants serving fighting majors — off the ice until expiry, but no
+   *  strength-state effect (coincidental majors substitute). */
+  fighters: BoxedPenalty[] = []
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -366,6 +370,7 @@ class TeamSim {
   private deployIds(rng: Rng, kind: DeployKind, count: number, opp?: TeamSim): PlayerId[] {
     const lines = this.team.lines
     const boxed = new Set(this.penalties.map((p) => p.playerId))
+    for (const f of this.fighters) boxed.add(f.playerId)
     let base: PlayerId[]
     if (kind === 'pp' || kind === 'pk') {
       const units = kind === 'pp' ? lines.powerPlayUnits : lines.penaltyKillUnits
@@ -511,10 +516,10 @@ class TeamSim {
     return this.penalties.length > 0
   }
 
-  /** Drop minors that have been fully served as of absolute game-clock `absT`. */
+  /** Drop minors (and served fighting majors) as of absolute game-clock `absT`. */
   prunePenalties(absT: number): void {
-    if (this.penalties.length === 0) return
-    this.penalties = this.penalties.filter((p) => p.expiresAt > absT)
+    if (this.penalties.length > 0) this.penalties = this.penalties.filter((p) => p.expiresAt > absT)
+    if (this.fighters.length > 0) this.fighters = this.fighters.filter((p) => p.expiresAt > absT)
   }
 
   clearEarliestPenalty(): void {
@@ -1854,6 +1859,42 @@ function simPeriod(
       beat.breakaway = true
     }
 
+    // 0. Tonight's fight, if due: gloves off at even strength. Coincidental
+    //    majors — no power play, but both combatants sit five minutes and their
+    //    benches shorten. Schedule + combatants come from the hash-derived fight
+    //    rng, so games without a fight replay byte-for-byte.
+    {
+      const fp = ctx.fights
+      if (fp && fp.next < fp.times.length && fp.times[fp.next] <= absNow && !atkSH && !defSH) {
+        fp.next++
+        const pickFighter = (team: TeamSim): Player | null => {
+          const sitting = new Set([...team.penalties, ...team.fighters].map((b) => b.playerId as string))
+          const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
+            .filter((id) => !sitting.has(id as string))
+          if (ids.length === 0) return null
+          const ps = ids.map((id) => team.resolve(id))
+          return ps[weightedIndex(fp.rng, ps.map((p) => 1 + p.composites.penaltyProne))]
+        }
+        const hF = pickFighter(home)
+        const aF = pickFighter(away)
+        if (hF && aF) {
+          for (const [team, p] of [[home, hF], [away, aF]] as const) {
+            team.fighters.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: p.id })
+            stat(ctx, p.id).penaltyMinutes += 5
+            ctx.stream.push({ t: clk.t, period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
+          }
+          ctx.stream.push({ t: clk.t, period, type: 'whistle', pos: { x: puck.x, y: puck.y } })
+          noteBeat('penaltyWhistle')
+          noteStop('penalty')
+          // Fresh units — the combatants head to the box, no strength change.
+          creditShift(clk.t)
+          deployBoth(home.unit.skaters.map((r) => r.pos), away.unit.skaters.map((r) => r.pos))
+          stopPlay({ x: 0, y: puck.y >= 0 ? DOT_Y : -DOT_Y }, 'neutral')
+          continue
+        }
+      }
+    }
+
     // 1. Penalties — rolled for both teams each tick, weighted by proneness.
     //    A minor stops play: faceoff in the offender's end, units redeploy.
     //    aggressiveness (default 0.5→1.0) scales penalty frequency.
@@ -2294,7 +2335,12 @@ export function fullSimGame(
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null, scoringMult: playoffScoringMult(rules), intensity: opts.intensity }
+  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const ctx: Ctx = {
+    rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null,
+    scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
+    ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
+  }
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
