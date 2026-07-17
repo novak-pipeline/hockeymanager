@@ -9,7 +9,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { PressConferenceState, PressTone } from '@engine/story/factSheet'
+import { Mic } from 'lucide-react'
 import { useClient } from '../hooks/useSim'
+import { Icon } from './primitives'
 import { bumpRefresh } from './store'
 import { getPressSettings } from '../lib/press'
 
@@ -136,7 +138,7 @@ export function PressConference(): JSX.Element | null {
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-          <span style={{ fontSize: 20 }}>🎤</span>
+          <Icon size={20} color="var(--violet-h)"><Mic /></Icon>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--violet-h)', textTransform: 'uppercase', letterSpacing: 0.8 }}>
               Press Conference
