@@ -17,7 +17,17 @@
  *    disappears silently and no NHL player is left invisible.
  */
 import { existsSync, readFileSync } from 'node:fs'
+import { gunzipSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
+
+/** Saves are gzip-on-disk (despite the .json name) since 2026-07-15; older saves
+ *  are plain JSON. Detect the gzip magic (0x1f 0x8b) and decompress if present. */
+function readSaveJson(path: string): string {
+  const buf = readFileSync(path)
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b
+    ? gunzipSync(buf).toString('utf8')
+    : buf.toString('utf8')
+}
 import type { PlayerId, SeasonStats } from '@domain'
 import { generateLeague } from '@data/generate'
 import { Career } from './career'
@@ -127,7 +137,7 @@ describe('rollover — no silent vanish', () => {
 
   const SAVE = 'C:/Users/sawic/AppData/Roaming/hockey-manager/saves/autosave.json'
   it.skipIf(!existsSync(SAVE))('real save: a rollover drops no rostered player silently', () => {
-    const career = Career.fromSnapshot(JSON.parse(readFileSync(SAVE, 'utf8'))) as any
+    const career = Career.fromSnapshot(JSON.parse(readSaveJson(SAVE))) as any
     const startYear: number = career.year
 
     // Loading already heals the save (fromSnapshot → reconcileOrphans). No NHL

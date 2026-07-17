@@ -6310,6 +6310,11 @@ export class Career {
           for (const s of [...this.pendingOfferSheets]) this.resolveOneOfferSheet(s)
           this.pendingOfferSheets = []
           os.stage = 'preseason'
+          // Dev camp (early July) is over by the time we reach preseason/training
+          // camp. Clear its pending flag defensively so a dev camp the GM skipped
+          // without opening the screen can't light up the "Development camp is on
+          // the ice" banner during September's training camp.
+          this.devCampPending = false
         }
         return true
       }
@@ -8665,6 +8670,11 @@ export class Career {
       if (claimant) {
         nhlTeam.roster = nhlTeam.roster.filter((id) => id !== pid)
         repairLines(nhlTeam, this.data.players)
+        // Losing a body to a waiver claim can drop the NHL club below the 12F/6D/2G
+        // minimum. Backfill from the AHL immediately (only fires when actually short)
+        // so the GM is never soft-locked into a manual "ask the coach to set the
+        // roster" just to advance past a claim they didn't choose.
+        this.emergencyRecalls()
         if (isUser) {
           this.pushNews(
             'contract',
@@ -9219,21 +9229,36 @@ export class Career {
     if (!sheet) return { ok: false, message: 'No offer sheet for this player.' }
     const player = this.resolve(asPlayerId(playerId))
     const suitor = this.data.teams.get(asTeamId(sheet.fromTeamId))!
+    // The suitor must fit the cap hit AND a roster spot before he can sign — a full
+    // or cap-tight club conforms by farming its weakest bodies. This is guarded so
+    // signPlayer can never throw over-cap out of step(): if the suitor genuinely
+    // can't fit him (cap moved since the sheet was tabled — the crash the user's
+    // real save hit at rollover), the sheet is VOIDED and he stays your RFA rather
+    // than taking down the whole offseason.
+    const suitorFits = (): boolean =>
+      suitor.roster.length < ROSTER_HARD_CAP &&
+      capUsedFor(suitor, this.data.players) + sheet.salary <= suitor.finances.salaryCap
+    for (let guard = 0; !suitorFits() && suitor.affiliateId && guard < 30; guard++) {
+      const ahl = this.data.teams.get(suitor.affiliateId)
+      if (!ahl) break
+      const weakest = [...suitor.roster]
+        .map((id) => this.resolve(id))
+        .filter((p) => p.position !== 'G')
+        .sort((a, b) => ratedOverall(a) - ratedOverall(b))[0]
+      if (!weakest) break
+      suitor.roster = suitor.roster.filter((id) => (id as string) !== (weakest.id as string))
+      ahl.roster.push(weakest.id)
+      repairLines(ahl, this.data.players)
+    }
+    if (!suitorFits()) {
+      this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+      this.pushNews('contract', `${player.name} offer sheet voided`,
+        `${suitor.name} could not fit ${player.name} under the cap — the offer sheet is void and he remains your RFA to re-sign.`, { playerId })
+      return { ok: false, message: `${suitor.name} couldn't fit ${player.name} under the cap — the sheet is void; he stays your RFA.` }
+    }
     // Player leaves the user's org for the rival.
     this.userTeam.roster = this.userTeam.roster.filter((id) => (id as string) !== playerId)
     repairLines(this.userTeam, this.data.players)
-    // A full suitor clears a spot — its weakest body goes to the farm.
-    if (suitor.roster.length >= ROSTER_HARD_CAP && suitor.affiliateId) {
-      const ahl = this.data.teams.get(suitor.affiliateId)
-      if (ahl) {
-        const weakest = [...suitor.roster].sort((a, b) => ratedOverall(this.resolve(a)) - ratedOverall(this.resolve(b)))[0]
-        if (weakest) {
-          suitor.roster = suitor.roster.filter((id) => id !== weakest)
-          ahl.roster.push(weakest)
-          repairLines(ahl, this.data.players)
-        }
-      }
-    }
     signPlayer({ team: suitor, player, salary: sheet.salary, years: sheet.years, year: this.year, players: this.data.players })
     // Compensation: the rival's own picks come to you — one per consecutive draft
     // for repeated rounds (a club has only one of its own 1st per year).
@@ -11929,7 +11954,7 @@ export class Career {
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       staffMeetingDue: this.staffMeetingScene !== null && this.phase === 'regularSeason',
       scoutMeetingDue: this.scoutMeetingScene !== null && this.phase === 'regularSeason',
-      devCampPending: this.devCampPending && this.phase === 'offseason',
+      devCampPending: this.devCampPending && this.phase === 'offseason' && this.offseason?.stage !== 'preseason',
       ...(this.phase === 'offseason' && this.offseason
         ? {
             offseasonStageLabel: (

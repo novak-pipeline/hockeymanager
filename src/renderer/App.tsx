@@ -373,19 +373,33 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('scoutMeeting')
           return
         }
+        // When the GM is attending a beat ON its own screen (camp, dev camp, board
+        // meeting, season review, staff/scout meeting), a Continue press ADVANCES
+        // that sub-flow — the pending checks above already routed you here, so the
+        // #7 calendar preview must NOT intercept it (that detour swallowed the
+        // advance and left camp stuck on Day 1 while the season ticked underneath).
+        const resolvingBeat = !!(
+          dashboard?.campPending || dashboard?.devCampPending ||
+          dashboard?.boardMeetingPending || dashboard?.reviewPending ||
+          dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue
+        )
         // #7 cadence: a Continue press first previews the CALENDAR — what's ahead —
         // so advancing the season is a deliberate two-beat rhythm instead of mashing
         // Continue while reading the dashboard. The next press (from the calendar)
         // actually ticks the day and returns you to the screen you came from.
-        if (nav.screen !== 'calendar') {
+        if (!resolvingBeat && nav.screen !== 'calendar') {
           preAdvanceScreenRef.current = nav.screen
           navigate('calendar')
           return
         }
         void (async () => {
           await run(() => client.continueGame())
-          const back = preAdvanceScreenRef.current
-          navigate(back === 'calendar' ? 'dashboard' : back)
+          // Beat flows stay put — the screen re-renders with the next day/state;
+          // only the normal day-advance returns to where the calendar preview began.
+          if (!resolvingBeat) {
+            const back = preAdvanceScreenRef.current
+            navigate(back === 'calendar' ? 'dashboard' : back)
+          }
         })()
       },
       advanceDays: (days: number) => {
