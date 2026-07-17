@@ -1,8 +1,14 @@
 import { useState } from 'react'
+import type { ComponentType } from 'react'
+import {
+  Trophy, Medal, Star, Flame, Shield, ShieldCheck, Sparkles, Landmark,
+  type LucideProps,
+} from 'lucide-react'
 import type { HistoryView } from '../../worker/protocol'
 import type { AwardRecord, LegendRecord, RecordEntry, SeasonArchive } from '@engine/story/records'
 import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── tab ids ── */
@@ -55,7 +61,7 @@ export function HistoryScreen(): JSX.Element {
         style={{ borderBottom: `1px solid ${GOLD_BORDER}`, paddingBottom: 'var(--sp-3)' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-          <span style={{ fontSize: 22, lineHeight: 1 }}>🏆</span>
+          <Icon size={24} color="var(--amber)"><Trophy /></Icon>
           <div>
             <h1
               className="screen-title"
@@ -366,7 +372,7 @@ function SeasonRow(props: { season: SeasonArchive }): JSX.Element {
       <td>
         {season.championName ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <span style={{ fontSize: 13 }}>🏆</span>
+            <Icon size={14} color="var(--amber)"><Trophy /></Icon>
             <span style={{ color: GOLD, fontWeight: 600 }}>{season.championName}</span>
           </span>
         ) : (
@@ -378,7 +384,7 @@ function SeasonRow(props: { season: SeasonArchive }): JSX.Element {
       <td>
         {season.presidentsTeamName ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <span style={{ fontSize: 11 }}>🥇</span>
+            <Icon size={14} color="var(--cyan)"><Medal /></Icon>
             <span style={{ color: 'var(--cyan)', fontSize: 12 }}>{season.presidentsTeamName}</span>
           </span>
         ) : (
@@ -430,17 +436,17 @@ function LeaderCell(props: { entry: RecordEntry | null }): JSX.Element {
    AWARDS TAB
    ═══════════════════════════════════════════════════════════════ */
 
-const AWARD_ICONS: Record<string, string> = {
-  MVP:           '⭐',
-  'Top Scorer':  '🏒',
-  'Best Goalie': '🥅',
-  'Top Rookie':  '🌟',
-  'Best Defender': '🛡️',
-  Champion:      '🏆',
+const AWARD_ICONS: Record<string, ComponentType<LucideProps>> = {
+  MVP:           Star,
+  'Top Scorer':  Flame,
+  'Best Goalie': Shield,
+  'Top Rookie':  Sparkles,
+  'Best Defender': ShieldCheck,
+  Champion:      Trophy,
 }
 
-function awardIcon(award: string): string {
-  return AWARD_ICONS[award] ?? '🏅'
+function awardIcon(award: string): ComponentType<LucideProps> {
+  return AWARD_ICONS[award] ?? Medal
 }
 
 function AwardsTab(props: { awards: AwardRecord[] }): JSX.Element {
@@ -476,6 +482,7 @@ function AwardsTab(props: { awards: AwardRecord[] }): JSX.Element {
 
 function AwardBoard(props: { awardName: string; entries: AwardRecord[] }): JSX.Element {
   const { awardName, entries } = props
+  const AwardIcon = awardIcon(awardName)
 
   return (
     <Panel>
@@ -490,7 +497,7 @@ function AwardBoard(props: { awardName: string; entries: AwardRecord[] }): JSX.E
           borderBottom: `1px solid ${GOLD_BORDER}`,
         }}
       >
-        <span style={{ fontSize: 20, lineHeight: 1 }}>{awardIcon(awardName)}</span>
+        <Icon size={20} color="var(--amber)"><AwardIcon /></Icon>
         <span
           style={{
             fontSize: 14,
@@ -587,7 +594,7 @@ function LegendsTab(props: { legends: LegendRecord[] }): JSX.Element {
             letterSpacing: 0.8,
           }}
         >
-          <span>🏛</span>
+          <Icon size={14}><Landmark /></Icon>
           <span>{hofCount} Hall of Fame inductee{hofCount !== 1 ? 's' : ''}</span>
         </div>
       )}
@@ -669,7 +676,7 @@ function LegendCard(props: { legend: LegendRecord }): JSX.Element {
               flexShrink: 0,
             }}
           >
-            🏛 HoF
+            <Icon size={14}><Landmark /></Icon> HoF
           </span>
         )}
       </div>

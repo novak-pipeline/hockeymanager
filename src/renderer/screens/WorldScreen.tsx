@@ -5,9 +5,11 @@
  * getCompetitions (League.competitions). Empty when the active DB is NHL-only.
  */
 import { useState } from 'react'
+import { Medal } from 'lucide-react'
 import type { CompetitionNotableView, CompetitionView, NationView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 const TIER_LABEL: Record<CompetitionView['tier'], string> = {
@@ -263,9 +265,9 @@ function InternationalPanel(): JSX.Element {
         <Panel title="World Juniors (U20) — projected">
           <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <div style={{ minWidth: 180 }}>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥇 <strong>{wj.gold ?? '—'}</strong></div>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥈 {wj.silver ?? '—'}</div>
-              <div style={{ fontSize: 13, marginBottom: 8 }}>🥉 {wj.bronze ?? '—'}</div>
+              <div style={{ fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="#facc15"><Medal /></Icon> <strong>{wj.gold ?? '—'}</strong></div>
+              <div style={{ fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="#cbd5e1"><Medal /></Icon> {wj.silver ?? '—'}</div>
+              <div style={{ fontSize: 13, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="#d19a66"><Medal /></Icon> {wj.bronze ?? '—'}</div>
               <div className="muted small">Projected from current U20 pools.</div>
             </div>
             <div style={{ flex: 1, minWidth: 240 }}>

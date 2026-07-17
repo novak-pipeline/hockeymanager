@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { Check, Trophy } from 'lucide-react'
 import type { OffseasonView } from '../../worker/protocol'
 import type { FreeAgentRowView, ResignRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -69,7 +71,7 @@ function StageStepper(props: { stage: OffseasonView['stage']; stageLabel: string
                       : 'var(--muted)',
                 }}
               >
-                {past ? '✓' : i + 1}
+                {past ? <Icon size={14}><Check /></Icon> : i + 1}
               </div>
               <span
                 style={{
@@ -154,7 +156,7 @@ function AwardsPanel(props: { view: OffseasonView }): JSX.Element {
             fontSize: 16,
           }}
         >
-          <span style={{ fontSize: 28 }}>🏆</span>
+          <Icon size={24} color="var(--accent2)"><Trophy /></Icon>
           {view.championTeamName} — {view.year} Champions
         </div>
       )}
