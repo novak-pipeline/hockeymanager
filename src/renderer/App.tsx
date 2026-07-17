@@ -8,6 +8,7 @@ import { MatchViewer } from './MatchViewer'
 import { ActionsContext, type ShellActions } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
 import { PlayerActionMenu } from './components/PlayerActionMenu'
+import { ProcessingOverlay, type ProcessingData } from './components/ProcessingOverlay'
 import { resetNameIndex } from './components/Linkify'
 import { UserTeamContext } from './components/UserTeamContext'
 import { TopNav } from './components/TopNav'
@@ -262,9 +263,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   const [watched, setWatched] = useState<WatchedGame | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
-  // #7 cadence: the screen the GM pressed Continue from, so after the calendar
-  // preview + day advance we return them there instead of stranding on the calendar.
-  const preAdvanceScreenRef = useRef<ScreenId>('dashboard')
+  // FM-style processing overlay: non-null while a normal day-advance is showing
+  // its "what just happened" card (incoming mail + trending story + calendar).
+  const [processing, setProcessing] = useState<ProcessingData | null>(null)
 
   // The shell-level dashboard fetch feeds the top nav; it refetches on every
   // refresh bump like any screen. Errors here are non-fatal.
@@ -318,13 +319,60 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     [maybeAutosave]
   )
 
+  /** FM-style day-advance: pop the processing overlay, tick the sim, then fill it
+   *  with the mail that streamed in, a trending headline, and the month calendar.
+   *  Leaves the GM on whatever screen they were reading. */
+  const advanceWithOverlay = useCallback((): void => {
+    void (async () => {
+      // Snapshot the inbox so we can diff for what arrives on this advance.
+      let beforeIds = new Set<string>()
+      try {
+        const bi = await client.getInbox()
+        if (bi.type === 'inbox') beforeIds = new Set(bi.inbox.items.map((i) => i.id))
+      } catch { /* non-fatal — worst case every item reads as "new" */ }
+
+      setProcessing({ phase: 'running', nextGame: dashboard?.nextGame ?? null, incoming: [], ...(dashboard?.date ? { dateISO: dashboard.date } : {}) })
+      const res = await run(() => client.continueGame())
+      if (res === null) { setProcessing(null); return } // errored (toasted) or busy
+
+      const [inboxR, dashR, calR] = await Promise.all([
+        client.getInbox().catch(() => null),
+        client.getDashboard().catch(() => null),
+        client.getCalendar().catch(() => null),
+      ])
+      const inbox = inboxR && inboxR.type === 'inbox' ? inboxR.inbox : null
+      const dash = dashR && dashR.type === 'dashboard' ? dashR.dashboard : null
+      const cal = calR && calR.type === 'calendar' ? calR.calendar : null
+      const incoming = (inbox?.items ?? []).filter((i) => !beforeIds.has(i.id))
+      // Feature the meatiest fresh story: a bylined press piece first, else the
+      // most salient, else simply the first thing that landed.
+      const trending = incoming.length
+        ? [...incoming].sort((a, b) =>
+            ((b.press ? 100 : 0) + (b.salience ?? 0)) - ((a.press ? 100 : 0) + (a.salience ?? 0)))[0]
+        : null
+
+      setProcessing({
+        phase: 'done',
+        nextGame: dash?.nextGame ?? null,
+        incoming,
+        trending,
+        calendar: cal,
+        ...(dash?.date ? { dateISO: dash.date } : {}),
+        ...(inbox?.teamInfo ? { teamInfo: inbox.teamInfo } : {}),
+      })
+    })()
+  }, [client, dashboard?.nextGame, dashboard?.date, run])
+
   const actions = useMemo<ShellActions>(
     () => ({
       busy,
       continueGame: () => {
+        // Interactive beats route to their own screens; each dismisses the
+        // processing overlay first so it never lingers over a beat screen.
         // On draft day the offseason is parked on the entry draft — Continue
         // cannot sim past it. Route the GM into the Draft screen to conduct it.
         if (dashboard?.draftPending) {
+          setProcessing(null)
           navigate('draft')
           return
         }
@@ -333,6 +381,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         // if you're not already there. (Enforced here, not in the engine, so a
         // headless advance can still roll a season.)
         if (dashboard?.captainsPending) {
+          setProcessing(null)
           if (nav.screen !== 'leadership') navigate('leadership')
           else toast('Name a captain to open the season — pick the C on this screen.')
           return
@@ -340,67 +389,63 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         // Cut day: camp's verdicts await before opening night. Continuing from
         // the camp screen itself lets the coach apply his plan.
         if (dashboard?.campPending && nav.screen !== 'trainingCamp') {
+          setProcessing(null)
           navigate('trainingCamp')
           return
         }
         // Development camp (July): the first Continue after the draft walks you
         // onto the rink. Skipping from there mails the staff report instead.
         if (dashboard?.devCampPending && nav.screen !== 'devCamp') {
+          setProcessing(null)
           navigate('devCamp')
           return
         }
         // Preseason board meeting: the first Continue of the year walks you into
         // the boardroom. Skipping from there sends the AGM (engine-safe defaults).
         if (dashboard?.boardMeetingPending && nav.screen !== 'boardMeeting') {
+          setProcessing(null)
           navigate('boardMeeting')
           return
         }
         // End-of-season review: one Continue press walks you in; continuing
         // FROM the review screen (or anywhere twice) lets it lapse engine-side.
         if (dashboard?.reviewPending && nav.screen !== 'seasonReview') {
+          setProcessing(null)
           navigate('seasonReview')
           return
         }
         // Bi-weekly staff meeting: the coaches convene with live-roster proposals.
         // Skipping (delegate) hands the meeting to the AGM (engine-safe defaults).
         if (dashboard?.staffMeetingDue && nav.screen !== 'staffBriefing') {
+          setProcessing(null)
           navigate('staffBriefing')
           return
         }
         // Monthly scout meeting: the recruitment desk convenes with the board.
         // Skipping (delegate) hands it to the Head of Scouting (safe defaults).
         if (dashboard?.scoutMeetingDue && nav.screen !== 'scoutMeeting') {
+          setProcessing(null)
           navigate('scoutMeeting')
           return
         }
         // When the GM is attending a beat ON its own screen (camp, dev camp, board
         // meeting, season review, staff/scout meeting), a Continue press ADVANCES
-        // that sub-flow — the pending checks above already routed you here, so the
-        // #7 calendar preview must NOT intercept it (that detour swallowed the
-        // advance and left camp stuck on Day 1 while the season ticked underneath).
+        // that sub-flow in place — no processing overlay, no calendar detour (that
+        // detour swallowed the advance and left camp stuck on Day 1).
         const resolvingBeat = !!(
           dashboard?.campPending || dashboard?.devCampPending ||
           dashboard?.boardMeetingPending || dashboard?.reviewPending ||
           dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue
         )
-        // #7 cadence: a Continue press first previews the CALENDAR — what's ahead —
-        // so advancing the season is a deliberate two-beat rhythm instead of mashing
-        // Continue while reading the dashboard. The next press (from the calendar)
-        // actually ticks the day and returns you to the screen you came from.
-        if (!resolvingBeat && nav.screen !== 'calendar') {
-          preAdvanceScreenRef.current = nav.screen
-          navigate('calendar')
+        if (resolvingBeat) {
+          setProcessing(null)
+          void run(() => client.continueGame())
           return
         }
-        void (async () => {
-          await run(() => client.continueGame())
-          // Beat flows stay put — the screen re-renders with the next day/state;
-          // only the normal day-advance returns to where the calendar preview began.
-          if (!resolvingBeat) {
-            const back = preAdvanceScreenRef.current
-            navigate(back === 'calendar' ? 'dashboard' : back)
-          }
-        })()
+        // Normal day-advance: FM-style — pop the processing overlay that streams
+        // the day's incoming mail, a trending headline, and the month calendar
+        // WHILE the sim ticks, then leaves the GM where they were.
+        advanceWithOverlay()
       },
       advanceDays: (days: number) => {
         void run(() => client.advance(days))
@@ -418,7 +463,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, nav.screen, navigate]
+    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -573,6 +618,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         )}
         <PlayerActionMenu />
+        {processing && !watched && (
+          <ProcessingOverlay
+            data={processing}
+            busy={busy}
+            onContinue={actions.continueGame}
+            onClose={() => setProcessing(null)}
+            onOpenMessage={() => { setProcessing(null); navigate('inbox') }}
+          />
+        )}
         </TeamColorsProvider>
       </ActionsContext.Provider>
     </NavContext.Provider>
