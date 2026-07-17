@@ -3,6 +3,8 @@ import type { CalendarEntry, CalendarView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
 import { useNav, type ScreenId } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /**
@@ -334,22 +336,23 @@ function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
 
 /** #146: map a calendar key-date to an icon + (where useful) a screen to jump to.
  *  Targets are always-available screens so a beat marker never dead-ends. */
-function keyDateMeta(label: string): { icon: string; screen?: ScreenId } {
-  if (label.startsWith('Interview')) return { icon: '🎤' }
+type KeyDateIcon = (typeof Icons)[keyof typeof Icons]
+function keyDateMeta(label: string): { Cmp: KeyDateIcon; screen?: ScreenId } {
+  if (label.startsWith('Interview')) return { Cmp: Icons.Interview }
   switch (label) {
-    case 'Free Agency Opens': return { icon: '💰', screen: 'faMarket' }
-    case 'Trade Deadline': return { icon: '🔁', screen: 'trades' }
-    case 'Entry Draft': return { icon: '🎫', screen: 'scoutingDraft' }
-    case 'Scouting Combine': return { icon: '🔍', screen: 'scoutingDraft' }
-    case 'Playoffs Begin': return { icon: '🏆', screen: 'standings' }
-    case 'Regular Season Ends': return { icon: '🏁', screen: 'standings' }
-    case 'Holiday Roster Freeze': return { icon: '❄️', screen: 'squad' }
-    case 'All-Star Break': return { icon: '⭐' }
-    case 'Season Begins': return { icon: '🏒' }
-    case 'Training Camp Opens': return { icon: '🏒', screen: 'practice' }
-    case 'Development Camp': return { icon: '🏒' }
-    case 'Cut Day': return { icon: '✂️', screen: 'squad' }
-    default: return { icon: '📌' }
+    case 'Free Agency Opens': return { Cmp: Icons.Money, screen: 'faMarket' }
+    case 'Trade Deadline': return { Cmp: Icons.Trade, screen: 'trades' }
+    case 'Entry Draft': return { Cmp: Icons.Draft, screen: 'scoutingDraft' }
+    case 'Scouting Combine': return { Cmp: Icons.Scouting, screen: 'scoutingDraft' }
+    case 'Playoffs Begin': return { Cmp: Icons.Playoffs, screen: 'standings' }
+    case 'Regular Season Ends': return { Cmp: Icons.Flag, screen: 'standings' }
+    case 'Holiday Roster Freeze': return { Cmp: Icons.League, screen: 'squad' }
+    case 'All-Star Break': return { Cmp: Icons.Star }
+    case 'Season Begins': return { Cmp: Icons.Play }
+    case 'Training Camp Opens': return { Cmp: Icons.Training, screen: 'practice' }
+    case 'Development Camp': return { Cmp: Icons.DevCamp }
+    case 'Cut Day': return { Cmp: Icons.Cut, screen: 'squad' }
+    default: return { Cmp: Icons.Pin }
   }
 }
 
@@ -357,6 +360,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
   const nav = useNav()
   if (entry.kind === 'keydate') {
     const meta = keyDateMeta(entry.label)
+    const KeyIcon = meta.Cmp
     const clickable = meta.screen !== undefined
     return (
       <span
@@ -369,7 +373,7 @@ function CalendarCell({ entry }: { entry: CalendarEntry }): JSX.Element {
           display: 'inline-flex', alignItems: 'center', gap: 4,
         }}
       >
-        <span aria-hidden style={{ fontSize: 10 }}>{meta.icon}</span>
+        <Icon size={14}><KeyIcon /></Icon>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.label}</span>
       </span>
     )
