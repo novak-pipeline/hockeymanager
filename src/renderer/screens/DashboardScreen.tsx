@@ -1,4 +1,3 @@
-import type { NewsCategory } from '@domain'
 import type {
   BoardSummaryView,
   BoxScoreView,
@@ -14,18 +13,9 @@ import { PlayerLink, useNav } from '../components/NavContext'
 import { fmtDate, fmtMoney } from '../components/format'
 import { TeamCrest } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { CategoryIcon, Icons } from '../components/icons'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
-
-/* ── category metadata ── */
-const CAT_ICON: Record<NewsCategory, string> = {
-  result: '⚡', injury: '🩹', trade: '🔄', contract: '📋',
-  draft: '🎯', award: '🏅', league: '🏒', milestone: '⭐', playoffs: '🏆',
-}
-const CAT_COLOR: Record<NewsCategory, string> = {
-  result: 'var(--violet-h)', injury: 'var(--red)', trade: 'var(--amber)',
-  contract: 'var(--amber)', draft: 'var(--cyan)', award: 'var(--amber)',
-  league: 'var(--muted)', milestone: 'var(--amber)', playoffs: 'var(--amber)',
-}
 
 /* ── helpers ── */
 function resultClass(won: boolean, decidedBy: string): string {
@@ -125,13 +115,13 @@ export function DashboardScreen(): JSX.Element {
       </ScreenHeader>
 
       {d.championTeamName !== null && (
-        <div className="dash-banner">
-          🏆 {d.championTeamName} are the {d.year} champions
+        <div className="dash-banner anim-scale">
+          <Icon size={18}><Icons.Trophy /></Icon> {d.championTeamName} are the {d.year} champions
         </div>
       )}
 
       {/* ── 3-col card grid ── */}
-      <div className="dash-grid">
+      <div className="dash-grid stagger">
 
         {/* ═══ LEFT COLUMN ═══ */}
         <div className="stack">
@@ -157,11 +147,8 @@ export function DashboardScreen(): JSX.Element {
                       className={`inbox-preview-row${item.read ? '' : ' unread'}`}
                       onClick={() => nav.navigate('inbox')}
                     >
-                      <span
-                        className="inbox-preview-icon"
-                        style={{ color: CAT_COLOR[item.category] }}
-                      >
-                        {CAT_ICON[item.category]}
+                      <span className="inbox-preview-icon">
+                        <CategoryIcon category={item.category} size={15} />
                       </span>
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <div className="inbox-preview-headline">{item.headline}</div>
@@ -283,11 +270,11 @@ export function DashboardScreen(): JSX.Element {
                 </div>
                 <div className="row">
                   <button
-                    className="btn btn-primary"
+                    className="btn btn-hero"
                     onClick={actions.watchNext}
                     disabled={actions.busy}
                   >
-                    Watch
+                    <Icon size={16}><Icons.Result /></Icon> Watch
                   </button>
                 </div>
               </div>
@@ -421,7 +408,7 @@ function LastResultHero(props: {
       </div>
       {potm && (
         <div className="potm-block">
-          <span style={{ fontSize: 20 }}>⭐</span>
+          <Icon size={20} color="var(--amber)"><Icons.Star /></Icon>
           <div>
             <div className="potm-label">Player of the match</div>
             <div className="potm-name">{potm.name}</div>
@@ -693,6 +680,9 @@ function StorylinesStrip(props: { arcs: Array<{ kind: string; headline: string }
     >
       <span
         style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -703,6 +693,7 @@ function StorylinesStrip(props: { arcs: Array<{ kind: string; headline: string }
           marginRight: 4,
         }}
       >
+        <Icon size={14} color="var(--orange)"><Icons.Hot /></Icon>
         Storylines
       </span>
       {props.arcs.map((arc, i) => (

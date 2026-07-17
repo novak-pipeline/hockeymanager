@@ -1299,7 +1299,7 @@ a:hover { text-decoration: underline; }
 .inbox-preview-row:last-child { border-bottom: none; }
 .inbox-preview-row:hover { background: var(--bg3); }
 .inbox-preview-row.unread .inbox-preview-headline { font-weight: 700; color: var(--text); }
-.inbox-preview-icon { font-size: 14px; flex-shrink: 0; line-height: 1.4; }
+.inbox-preview-icon { flex-shrink: 0; display: flex; align-items: center; margin-top: 1px; }
 .inbox-preview-headline {
   font-size: 12px;
   font-weight: 400;
