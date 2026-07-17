@@ -5,24 +5,25 @@ import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { CategoryIcon } from '../components/icons'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 
-/** Category metadata: icon character and accent color class. */
+/** Category metadata: accent color class + label. Icons come from CategoryIcon. */
 const CATEGORY_META: Record<
   NewsCategory,
-  { icon: string; colorClass: string; label: string; color: string }
+  { colorClass: string; label: string; color: string }
 > = {
-  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)' },
-  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)' },
-  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)' },
-  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)' },
-  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)' },
-  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)' },
-  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)' },
-  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
-  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
-  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)' },
+  result:    { colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)' },
+  injury:    { colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)' },
+  trade:     { colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)' },
+  contract:  { colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)' },
+  draft:     { colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)' },
+  award:     { colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)' },
+  league:    { colorClass: '',            label: 'League',    color: 'var(--muted)' },
+  milestone: { colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)' },
+  playoffs:  { colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)' },
+  scouting:  { colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)' },
 }
 
 const ALL_CATEGORIES: NewsCategory[] = [
@@ -68,8 +69,6 @@ function TeamCrest(props: { abbr: string; primaryColor: number; size?: number })
 /** Fallback circle when neither player nor team info is available. */
 function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.Element {
   const { category, size = 32 } = props
-  const meta = CATEGORY_META[category]
-  const fontSize = Math.round(size * 0.45)
   return (
     <div
       style={{
@@ -81,11 +80,10 @@ function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.E
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize,
         flexShrink: 0,
       }}
     >
-      {meta.icon}
+      <CategoryIcon category={category} size={Math.round(size * 0.5)} />
     </div>
   )
 }
@@ -292,7 +290,7 @@ export function InboxScreen(): JSX.Element {
               style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
               onClick={() => setCategoryFilter(active ? null : cat)}
             >
-              {meta.icon} {meta.label}
+              <CategoryIcon category={cat} size={12} /> {meta.label}
             </button>
           )
         })}
@@ -609,6 +607,9 @@ function PaneBadge(props: { color: string; children: React.ReactNode }): JSX.Ele
   return (
     <div
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
         fontSize: 10,
         fontWeight: 700,
         textTransform: 'uppercase' as const,
@@ -664,7 +665,7 @@ function ReadingPane(props: {
             <HeroImage item={item} playerInfo={playerInfo} teamInfo={teamInfo} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <PaneBadge color={meta.color}>
-                {meta.icon} {meta.label}
+                <CategoryIcon category={item.category} size={12} /> {meta.label}
               </PaneBadge>
               <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.25, marginBottom: 6 }}>
                 {item.headline}
@@ -752,7 +753,7 @@ function CoachQuotePane(props: {
       <div style={{ padding: 'var(--sp-4)' }}>
         {/* Badge + date */}
         <PaneBadge color={meta.color}>
-          {meta.icon} {meta.label} · PRESS CONFERENCE
+          <CategoryIcon category={item.category} size={12} /> {meta.label} · PRESS CONFERENCE
         </PaneBadge>
         <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-3)' }}>
           {itemDate(item)}
