@@ -7,6 +7,8 @@ import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate } from '../components/format'
 import { dayToDateISO } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { CategoryIcon, Icons } from '../components/icons'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
@@ -14,21 +16,22 @@ import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../e
 import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
 import { speakAs } from '../lib/speak'
 
-/** Category metadata: icon, accent color, label, and FM-style "from" sender. */
+/** Category metadata: accent color, label, and FM-style "from" sender.
+ *  (The category glyph is rendered from the shared <CategoryIcon> vocabulary.) */
 const CATEGORY_META: Record<
   NewsCategory,
-  { icon: string; colorClass: string; label: string; color: string; sender: string }
+  { colorClass: string; label: string; color: string; sender: string }
 > = {
-  result:    { icon: '⚡', colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)', sender: 'Match Report' },
-  injury:    { icon: '🩹', colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)',    sender: 'Medical Staff' },
-  trade:     { icon: '🔄', colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)',  sender: 'Front Office' },
-  contract:  { icon: '📋', colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)',  sender: 'Front Office' },
-  draft:     { icon: '🎯', colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)',   sender: 'Scouting Dept' },
-  award:     { icon: '🏅', colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)',  sender: 'League Office' },
-  league:    { icon: '🏒', colorClass: '',            label: 'League',    color: 'var(--muted)',  sender: 'League Office' },
-  milestone: { icon: '⭐', colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)',  sender: 'Club News' },
-  playoffs:  { icon: '🏆', colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)', sender: 'League Office' },
-  scouting:  { icon: '🔍', colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)',   sender: 'Scouting Dept' },
+  result:    { colorClass: 'chip-accent', label: 'Result',    color: 'var(--violet)', sender: 'Match Report' },
+  injury:    { colorClass: 'chip-danger', label: 'Injury',    color: 'var(--red)',    sender: 'Medical Staff' },
+  trade:     { colorClass: 'chip-warn',   label: 'Trade',     color: 'var(--amber)',  sender: 'Front Office' },
+  contract:  { colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)',  sender: 'Front Office' },
+  draft:     { colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)',   sender: 'Scouting Dept' },
+  award:     { colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)',  sender: 'League Office' },
+  league:    { colorClass: '',            label: 'League',    color: 'var(--muted)',  sender: 'League Office' },
+  milestone: { colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)',  sender: 'Club News' },
+  playoffs:  { colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)', sender: 'League Office' },
+  scouting:  { colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)',   sender: 'Scouting Dept' },
 }
 
 /** FM-style "from" line: a press byline source or coach speaker wins over the
@@ -83,7 +86,6 @@ function TeamCrest(props: { abbr: string; primaryColor: number; size?: number })
 function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.Element {
   const { category, size = 32 } = props
   const meta = CATEGORY_META[category]
-  const fontSize = Math.round(size * 0.45)
   return (
     <div
       style={{
@@ -95,11 +97,10 @@ function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.E
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize,
         flexShrink: 0,
       }}
     >
-      {meta.icon}
+      <CategoryIcon category={category} size={Math.round(size * 0.5)} color={meta.color} />
     </div>
   )
 }
@@ -379,8 +380,9 @@ export function InboxScreen(): JSX.Element {
             onClick={selectNext}
             disabled={ordered.length === 0}
             title="Open the next unread message (Space)"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           >
-            Next unread ▶
+            Next unread <Icon size={14}><Icons.ChevronRight /></Icon>
           </button>
           <button
             className="btn btn-ghost btn-sm"
@@ -411,10 +413,10 @@ export function InboxScreen(): JSX.Element {
             <button
               key={cat}
               className={`chip${active ? ` ${meta.colorClass}` : ''}`}
-              style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+              style={{ cursor: 'pointer', border: 'none', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
               onClick={() => setCategoryFilter(active ? null : cat)}
             >
-              {meta.icon} {meta.label}
+              <CategoryIcon category={cat} size={12} color={meta.color} /> {meta.label}
             </button>
           )
         })}
@@ -554,7 +556,7 @@ function ConcernCard({
         setVoicedByModel(!!line)
         // Show the player's reply, but DON'T auto-speak it — the voice you hear
         // should be the incoming call (their message on pickup), not a read-back
-        // of the resolution. The 🔊 button on the reply lets you hear it if you want.
+        // of the resolution. The speaker button on the reply lets you hear it if you want.
         return
       }
     }
@@ -611,7 +613,9 @@ function ConcernCard({
             <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', ...(voicedByModel ? { color: 'var(--llm-ink)' } : {}) }}>
               “{voiced}”
               {voicedByModel && (
-                <span style={{ fontSize: 9, marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8 }} title="Written by your local AI writer">✨</span>
+                <span title="Written by your local AI writer" style={{ marginLeft: 4 }}>
+                  <Icon size={14} color="var(--llm-ink)" style={{ opacity: 0.8, verticalAlign: 'middle' }}><Icons.Sparkle /></Icon>
+                </span>
               )}
             </div>
             <div className="row" style={{ marginTop: 2, gap: 'var(--sp-2)' }}>
@@ -619,8 +623,9 @@ function ConcernCard({
               <button
                 className="btn btn-sm btn-ghost"
                 title="Hear it again"
+                aria-label="Hear it again"
                 onClick={() => voiced && speakAs('player', voiced, { seed: concern.playerName })}
-              >🔊</button>
+              ><Icon size={14}><Icons.Volume /></Icon></button>
             </div>
           </div>
         </div>
@@ -664,8 +669,9 @@ function ConcernCard({
                 disabled={busy}
                 onClick={() => setTyping(true)}
                 title="Reply in your own words — the local AI reads which response you mean."
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
               >
-                ✍️ Reply in your own words
+                <Icon size={14}><Icons.Signing /></Icon> Reply in your own words
               </button>
             )}
           </div>
@@ -818,7 +824,9 @@ function ReadingPane(props: {
             <HeroImage item={item} playerInfo={playerInfo} teamInfo={teamInfo} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <PaneBadge color={meta.color}>
-                {meta.icon} {meta.label}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <CategoryIcon category={item.category} size={13} color={meta.color} /> {meta.label}
+                </span>
               </PaneBadge>
               <div style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.25, marginBottom: 6 }}>
                 {item.headline}
@@ -908,7 +916,9 @@ function CoachQuotePane(props: {
       <div style={{ padding: 'var(--sp-4)' }}>
         {/* Badge + date */}
         <PaneBadge color={meta.color}>
-          {meta.icon} {meta.label} · PRESS CONFERENCE
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <CategoryIcon category={item.category} size={13} color={meta.color} /> {meta.label} · PRESS CONFERENCE
+          </span>
         </PaneBadge>
         <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-3)' }}>
           {itemDate(item)}
