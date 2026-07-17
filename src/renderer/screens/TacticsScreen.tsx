@@ -24,7 +24,9 @@ import type {
   ShotTargeting,
   PersonalTactics,
 } from '@domain'
+import { X } from 'lucide-react'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { bumpRefresh, toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
@@ -212,7 +214,7 @@ function SynergyBadge({ synergy, lineLabel }: SynergyBadgeProps): JSX.Element {
               style={{ padding: '0 4px', fontSize: 11 }}
               onClick={() => setOpen(false)}
             >
-              ✕
+              <Icon size={14}><X /></Icon>
             </button>
           </div>
           <div
@@ -397,7 +399,7 @@ function PlayerPicker({ slot, current, roster, onSelect, onClose }: PickerProps)
       >
         <div className="row-between">
           <span style={{ fontWeight: 700 }}>Pick {slot}</span>
-          <button className="btn btn-ghost" onClick={onClose} style={{ padding: '2px 8px' }}>✕</button>
+          <button className="btn btn-ghost" onClick={onClose} style={{ padding: '2px 8px' }}><Icon size={14}><X /></Icon></button>
         </div>
         <input
           className="input"
@@ -882,7 +884,7 @@ function PersonalTacticsPanel({ player, pt, onChange, onClose }: PersonalTactics
       >
         <div className="row-between">
           <span style={{ fontWeight: 700, fontSize: 13 }}>Personal Tactics — {player.name}</span>
-          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={onClose}>✕</button>
+          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={onClose}><Icon size={14}><X /></Icon></button>
         </div>
 
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
