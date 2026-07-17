@@ -113,6 +113,9 @@ const PK_SHOT_MULT = 0.75
 // A 6th attacker (goalie pulled) tilts the ice without a penalty.
 const EXTRA_ATTACKER_SHOT_MULT = 1.25
 
+// Home last-change matching: how often a matching home bench answers the
+// opponent's top line with its checking line at even strength.
+const FULL_LINE_MATCH_P = 0.65
 // Goalie pull. The window (seconds of regulation remaining at which a trailing
 // team empties the net) widens with the deficit — you gamble earlier the more
 // you trail — indexed by deficit: down 1 ≈ 1:20, down 2 ≈ 1:40, down 3 ≈ 1:45.
@@ -302,6 +305,8 @@ class TeamSim {
   /** Multiplier on goals this goalie concedes tonight (mean 1.0; <1 = hot, >1 =
    *  leaking) — the "hot goalie / off night" lever, rolled once per game. */
   goalieNight = 1
+  /** Whether this side has the last change (set once by fullSimGame). */
+  isHome = false
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -337,8 +342,8 @@ class TeamSim {
    * the incoming skaters take the outgoing skaters' slot positions, so the
    * change is seamless on screen; otherwise they fan out in their own end.
    */
-  deploy(rng: Rng, kind: DeployKind, count: number, inherit?: XY[]): void {
-    const ids = this.deployIds(rng, kind, count)
+  deploy(rng: Rng, kind: DeployKind, count: number, inherit?: XY[], opp?: TeamSim): void {
+    const ids = this.deployIds(rng, kind, count, opp)
     const slots = SLOTS_BY_COUNT[ids.length] ?? SLOTS_BY_COUNT[5]
     const sign = this.ownSign()
     const skaters: RSkater[] = ids.map((id, i) => ({
@@ -358,7 +363,7 @@ class TeamSim {
   }
 
   /** Choose the player ids for a unit, skipping anyone sitting in the box. */
-  private deployIds(rng: Rng, kind: DeployKind, count: number): PlayerId[] {
+  private deployIds(rng: Rng, kind: DeployKind, count: number, opp?: TeamSim): PlayerId[] {
     const lines = this.team.lines
     const boxed = new Set(this.penalties.map((p) => p.playerId))
     let base: PlayerId[]
@@ -371,8 +376,12 @@ class TeamSim {
     } else if (kind === 'ot') {
       base = this.bestSkaters(count, boxed)
     } else {
-      const fwd = lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
-      const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
+      const matched = this.matchedLine(rng, opp)
+      // A won matchup is a five-man answer: checking line + shutdown pair.
+      const fwd = matched ?? lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
+      const pair = matched
+        ? this.shutdownPair() ?? lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
+        : lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
       base = [...fwd, ...pair]
     }
     const out: PlayerId[] = []
@@ -408,6 +417,84 @@ class TeamSim {
     const picked = candidates.slice(0, n)
     picked.sort((a, b) => (a.position === 'D' ? 1 : 0) - (b.position === 'D' ? 1 : 0))
     return picked.map((p) => p.id)
+  }
+
+  /**
+   * Home last change: when this bench matches lines, the opponent's top line is
+   * currently out at even strength, and the matchup roll lands, answer with the
+   * checking line (best defensive forward unit). Returns null to fall through to
+   * the normal rotation. Gated hard on the tactic (false by default) and on
+   * isHome, so ordinary games consume zero extra rng and replay byte-for-byte.
+   * deployBoth rotates the away bench FIRST when home matches (last change), so
+   * the counter targets the unit actually taking the ice.
+   */
+  private matchedLine(rng: Rng, opp?: TeamSim): PlayerId[] | null {
+    if (!this.isHome || this.team.tactics.lineMatching !== true) return null
+    if (!opp || opp.deployKey !== 'ev:5' || !opp.unit) return null
+    const offense = (p: Player): number => p.composites.scoring * 0.6 + p.composites.playmaking * 0.4
+    const oppFwds = opp.unit.skaters.filter((r) => r.player.position !== 'D')
+    if (oppFwds.length === 0) return null
+    const onIceAvg = oppFwds.reduce((s, r) => s + offense(r.player), 0) / oppFwds.length
+    if (onIceAvg < opp.topLineAvg() - 1) return null // not their big line
+    if (!rng.chance(FULL_LINE_MATCH_P)) return null // even at home you don't win every change
+    const checking = this.checkingLine()
+    return checking && checking.length > 0 ? checking : null
+  }
+
+  private _topLineAvg: number | undefined
+  /** Best forward line's average offense — the bar for "their top line is out". */
+  topLineAvg(): number {
+    if (this._topLineAvg === undefined) {
+      const offense = (p: Player): number => p.composites.scoring * 0.6 + p.composites.playmaking * 0.4
+      let best = 0
+      for (const line of this.team.lines.forwards) {
+        if (line.length === 0) continue
+        const a = line.reduce((s, id) => s + offense(this.resolve(id)), 0) / line.length
+        if (a > best) best = a
+      }
+      this._topLineAvg = best
+    }
+    return this._topLineAvg
+  }
+
+  private _checkingLine: PlayerId[] | null | undefined
+  /** The matchup line: best defensive read among lines that can still hold
+   *  their own (within 6 overall of the best line) — a coach matches with his
+   *  best CREDIBLE checkers, never a badly overmatched fourth line. */
+  private checkingLine(): PlayerId[] | null {
+    if (this._checkingLine === undefined) {
+      const lines = this.team.lines.forwards
+      const ovr = (line: readonly PlayerId[]): number =>
+        line.reduce((s, id) => {
+          const c = this.resolve(id).composites
+          return s + (c.scoring + c.playmaking + c.skating + c.defensiveZone) / 4
+        }, 0) / line.length
+      const populated = lines.filter((l) => l.length > 0)
+      const best = populated.length > 0 ? Math.max(...populated.map(ovr)) : 0
+      this._checkingLine = this.bestDefensiveUnit(populated.filter((l) => ovr(l) >= best - 6))
+    }
+    return this._checkingLine
+  }
+
+  private _shutdownPair: PlayerId[] | null | undefined
+  /** The defense pair with the best defensive read — the shutdown pair. */
+  private shutdownPair(): PlayerId[] | null {
+    if (this._shutdownPair === undefined) {
+      this._shutdownPair = this.bestDefensiveUnit(this.team.lines.defensePairs)
+    }
+    return this._shutdownPair
+  }
+
+  private bestDefensiveUnit(units: readonly (readonly PlayerId[])[]): PlayerId[] | null {
+    const defense = (p: Player): number => p.composites.defensiveZone * 0.6 + p.composites.takeaway * 0.4
+    let best: PlayerId[] | null = null
+    let bestAvg = -1
+    for (const unit of units) {
+      if (unit.length === 0) continue
+      const a = unit.reduce((s, id) => s + defense(this.resolve(id)), 0) / unit.length
+      if (a > bestAvg) { bestAvg = a; best = [...unit] }
+    }
+    return best
   }
 
   private bestExtraAttacker(onIce: PlayerId[], boxed: Set<PlayerId>): PlayerId | null {
@@ -687,7 +774,7 @@ function simPeriod(
   /** Deploy `team` at its desired strength, optionally announcing a lineChange. */
   const deployTeam = (team: TeamSim, opp: TeamSim, inherit?: XY[], announce = true): void => {
     const d = desiredFor(team, opp)
-    team.deploy(rng, d.kind, d.count, inherit)
+    team.deploy(rng, d.kind, d.count, inherit, opp)
     if (announce) {
       noteBeat('lineChange')
       ctx.stream.push({
@@ -1593,9 +1680,21 @@ function simPeriod(
     return mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
   }
 
+  /** Rotate both benches. A matching home bench changes AFTER seeing the away
+   *  unit (last change) so its counter targets the line actually on the ice;
+   *  otherwise the original home-first order keeps default games byte-identical. */
+  const deployBoth = (inheritHome?: XY[], inheritAway?: XY[], announce = true): void => {
+    if (home.team.tactics.lineMatching === true) {
+      deployTeam(away, home, inheritAway, announce)
+      deployTeam(home, away, inheritHome, announce)
+    } else {
+      deployTeam(home, away, inheritHome, announce)
+      deployTeam(away, home, inheritAway, announce)
+    }
+  }
+
   // Opening deployment + faceoff (penalties may carry in from the prior period).
-  deployTeam(home, away, undefined, false)
-  deployTeam(away, home, undefined, false)
+  deployBoth(undefined, undefined, false)
   lineUp(home, CENTER_DOT)
   lineUp(away, CENTER_DOT)
   stopPlay(CENTER_DOT, 'neutral')
@@ -1615,8 +1714,7 @@ function simPeriod(
     // Line changes on the fly — incoming unit inherits slot positions (seamless).
     if (t - lastShift >= SHIFT_SECONDS && !flight) {
       creditShift(t)
-      deployTeam(home, away, home.unit.skaters.map((r) => r.pos))
-      deployTeam(away, home, away.unit.skaters.map((r) => r.pos))
+      deployBoth(home.unit.skaters.map((r) => r.pos), away.unit.skaters.map((r) => r.pos))
     }
     // If the carrier just went to the bench (or the box), the puck is live.
     if (carrier !== null && !possession.unit.skaters.some((r) => r.player.id === carrier)) {
@@ -2200,6 +2298,7 @@ export function fullSimGame(
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
+  homeSim.isHome = true // last change — enables line matching if the bench uses it
   // Roll each starter's nightly sharpness once (stable hash → no RNG-stream cost).
   homeSim.goalieNight = goalieNightFactor(opts.seed, home.lines.goalies[0] as string)
   awaySim.goalieNight = goalieNightFactor(opts.seed, away.lines.goalies[0] as string)

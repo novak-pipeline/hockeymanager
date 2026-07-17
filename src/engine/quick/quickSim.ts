@@ -85,7 +85,15 @@ const PK_UNIT_WEIGHTS = [0.62, 0.38]
 interface OnIce {
   skaters: Player[]
   goalie: Player
+  /** Even-strength forward line index this unit came from (absent on PP/PK). */
+  fwdLine?: number
 }
+
+// Home last-change matching: how often a matching home bench gets its checking
+// line out against the opponent's top line at even strength. Kept modest — real
+// last-change matching is highly visible in deployment but worth only a point
+// or two of win probability, and the quick sim converts it efficiently.
+const LINE_MATCH_P = 0.5
 
 function weightedIndex(rng: Rng, weights: number[]): number {
   const total = weights.reduce((a, b) => a + b, 0)
@@ -148,10 +156,78 @@ class TeamSim {
       const unit = lines.penaltyKillUnits[weightedIndex(rng, lines.penaltyKillUnits.map((_, i) => PK_UNIT_WEIGHTS[i] ?? 0.15))]
       if (unit && unit.length > 0) return { skaters: unit.map((id) => this.resolve(id)), goalie }
     }
-    const fwd = lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
+    const fwdIdx = weightedIndex(rng, FWD_LINE_WEIGHTS)
+    const fwd = lines.forwards[fwdIdx]
     const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
     const skaters = [...fwd, ...pair].map(this.resolve)
-    return { skaters, goalie }
+    return { skaters, goalie, fwdLine: fwdIdx }
+  }
+
+  /** Forward line index with the highest offense (the line worth matching against). */
+  topLineIdx(): number {
+    return this.bestLineIdx((c) => c.scoring * 0.6 + c.playmaking * 0.4)
+  }
+
+  /** The matchup line: best defensive read among lines that can still hold
+   *  their own (within 6 overall of the best line) — a coach matches with his
+   *  best CREDIBLE checkers, never a badly overmatched fourth line. */
+  checkingLineIdx(): number {
+    const lines = this.team.lines.forwards
+    const ovr = (line: readonly PlayerId[]): number =>
+      avg(line.map(this.resolve), (c) => (c.scoring + c.playmaking + c.skating + c.defensiveZone) / 4)
+    const best = Math.max(...lines.filter((l) => l.length > 0).map(ovr))
+    let idx = 0
+    let bestDef = -1
+    lines.forEach((line, i) => {
+      if (line.length === 0 || ovr(line) < best - 6) return
+      const d = avg(line.map(this.resolve), (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
+      if (d > bestDef) { bestDef = d; idx = i }
+    })
+    return idx
+  }
+
+  /** Defense-pair index with the best defensive read — the shutdown pair. */
+  shutdownPairIdx(): number {
+    let best = 0
+    let bestAvg = -1
+    this.team.lines.defensePairs.forEach((pair, i) => {
+      if (pair.length === 0) return
+      const a = avg(pair.map(this.resolve), (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
+      if (a > bestAvg) { bestAvg = a; best = i }
+    })
+    return best
+  }
+
+  private bestLineIdx(score: (c: CompositeRatings) => number): number {
+    let best = 0
+    let bestAvg = -1
+    this.team.lines.forwards.forEach((line, i) => {
+      if (line.length === 0) return
+      const a = avg(line.map(this.resolve), score)
+      if (a > bestAvg) { bestAvg = a; best = i }
+    })
+    return best
+  }
+
+  /**
+   * Home last change: pick this shift's unit KNOWING what the opponent just sent
+   * out. When their top line steps on, the checking line answers (most of the
+   * time — even at home a coach doesn't win every matchup). Otherwise the
+   * normal rotation rolls.
+   */
+  pickMatched(rng: Rng, opp: TeamSim, oppOn: OnIce): OnIce {
+    if (oppOn.fwdLine === opp.topLineIdx() && rng.chance(LINE_MATCH_P)) {
+      const lines = this.team.lines
+      const fwdIdx = this.checkingLineIdx()
+      const fwd = lines.forwards[fwdIdx]
+      // The matchup is a five-man answer: checking line + shutdown pair.
+      const pair = lines.defensePairs[this.shutdownPairIdx()]
+      if (fwd && fwd.length > 0 && pair && pair.length > 0) {
+        const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
+        return { skaters: [...fwd, ...pair].map(this.resolve), goalie, fwdLine: fwdIdx }
+      }
+    }
+    return this.pickOnIce(rng, 'ev')
   }
 
   /** #175: this team's strength state at game-clock `t` (relative to its opponent). */
@@ -462,8 +538,19 @@ function simPeriod(
     // power-play shifts (and thus the power-play goals), PK1 the kills.
     const homeSit = home.situationVs(away, t)
     const awaySit = away.situationVs(home, t)
-    const homeUnit = home.pickOnIce(ctx.rng, homeSit)
-    const awayUnit = away.pickOnIce(ctx.rng, awaySit)
+    // Home last change: a matching home bench sees the away unit FIRST and can
+    // answer their top line with its checking line. Gated on the tactic (false
+    // by default), so non-matching games draw the rng in the original order and
+    // replay byte-for-byte.
+    let homeUnit: OnIce
+    let awayUnit: OnIce
+    if (home.team.tactics.lineMatching === true && homeSit === 'ev' && awaySit === 'ev') {
+      awayUnit = away.pickOnIce(ctx.rng, awaySit)
+      homeUnit = home.pickMatched(ctx.rng, away, awayUnit)
+    } else {
+      homeUnit = home.pickOnIce(ctx.rng, homeSit)
+      awayUnit = away.pickOnIce(ctx.rng, awaySit)
+    }
     creditToi(ctx, homeUnit, SHIFT_SECONDS, homeSit)
     creditToi(ctx, awayUnit, SHIFT_SECONDS, awaySit)
 

@@ -2044,6 +2044,13 @@ export class Career {
       team.tactics = profileToTactics(profile, roster, team.tactics)
       // How well the coach's system suits this roster → small on-ice edge in the sim.
       team.coachFit = coachFit(profile, roster)
+      // The bench's matchup habit (home last change): an imported coach with a
+      // real Line Matching skill runs it; otherwise structured tacticians do.
+      // Read by both sims — a matching HOME bench counters the opposing top line
+      // with its checking line.
+      const lmSkill = ts.headCoach.attributes?.lineMatching
+      team.tactics.lineMatching =
+        lmSkill !== undefined ? lmSkill >= 12 : profile.structure >= 0.55 && profile.tacticsKnowledge >= 0.5
     }
   }
 
