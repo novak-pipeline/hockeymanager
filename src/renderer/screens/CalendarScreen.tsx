@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { CalendarEntry, CalendarView } from '../../worker/protocol'
+import type { CalendarEntry, CalendarView, DashboardView } from '../../worker/protocol'
 import { TeamCrest } from '../components/Crest'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -19,6 +19,12 @@ export function CalendarScreen(): JSX.Element {
     (r) => (r.type === 'calendar' ? r.calendar : null)
   )
 
+  // Today's in-game date (for the "today" cell highlight) comes from the dashboard view.
+  const { data: dashboard } = useScreenData<DashboardView>(
+    () => client.getDashboard(),
+    (r) => (r.type === 'dashboard' ? r.dashboard : null)
+  )
+
   return (
     <section className="stack">
       <ScreenHeader title="Calendar" />
@@ -28,7 +34,7 @@ export function CalendarScreen(): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="No calendar yet."
       />
-      {data && <CalendarBody calendar={data} />}
+      {data && <CalendarBody calendar={data} todayISO={dashboard?.date ?? null} />}
     </section>
   )
 }
@@ -119,7 +125,7 @@ function ResultChip({ entry }: ResultChipProps): JSX.Element | null {
 
 /* ── calendar body ── */
 
-function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
+function CalendarBody({ calendar, todayISO }: { calendar: CalendarView; todayISO: string | null }): JSX.Element {
   const months = monthKeys(calendar.entries)
 
   // Default month: next unplayed game's month, else last game's month.
@@ -253,20 +259,22 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
                       cellDate.getUTCFullYear() === y && cellDate.getUTCMonth() === monthNum
                     const cellEntries = byDate.get(isoDate) ?? []
                     const dayNum = cellDate.getUTCDate()
+                    const isToday = isoDate === todayISO
                     return (
-                      <td key={di} style={cellStyle(inMonth, cellEntries.length > 0)}>
+                      <td key={di} style={cellStyle(inMonth, cellEntries.length > 0, isToday)}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           {/* Day number */}
                           <span
                             style={{
                               fontSize: 11,
-                              color: inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              color: isToday ? 'var(--violet-h)' : inMonth ? 'var(--muted)' : 'rgba(255,255,255,0.15)',
+                              fontWeight: isToday ? 700 : 400,
                               fontVariantNumeric: 'tabular-nums',
                               alignSelf: 'flex-end',
                               lineHeight: 1,
                             }}
                           >
-                            {dayNum}
+                            {isToday ? `${dayNum} · Today` : dayNum}
                           </span>
 
                           {/* Entries */}
@@ -287,14 +295,17 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
   )
 }
 
-function cellStyle(inMonth: boolean, hasEntries: boolean): React.CSSProperties {
+function cellStyle(inMonth: boolean, hasEntries: boolean, isToday = false): React.CSSProperties {
   return {
     verticalAlign: 'top',
     padding: '6px 7px',
     minHeight: 110,
     height: 118,
-    border: '1px solid var(--line)',
-    background: inMonth
+    border: isToday ? '1px solid rgba(var(--accent-rgb),0.7)' : '1px solid var(--line)',
+    boxShadow: isToday ? 'inset 0 0 0 1px rgba(var(--accent-rgb),0.35)' : undefined,
+    background: isToday
+      ? 'rgba(var(--accent-rgb),0.10)'
+      : inMonth
       ? hasEntries ? 'rgba(var(--accent-rgb),0.04)' : 'var(--bg1)'
       : 'var(--bg0)',
   }
