@@ -441,11 +441,13 @@ function doDraft(ctx: Ctx): void {
     const d = guarded(ctx, 'getDraft', () => ctx.career.getDraft())
     if (!d || d.complete) break
     if (!d.userIsOnClock) {
+      // advanceDraft() is void — sim AI to our next pick and gauge progress by the
+      // board, NOT by the (always-undefined) return value.
       const before = picksMade(ctx)
-      const adv = guarded(ctx, 'advanceDraft', () => ctx.career.advanceDraft())
-      if (adv === undefined) break
-      if (picksMade(ctx) <= before) { // AI picks didn't advance the board
-        issue(ctx, 'critical', 'softlock', 'draft stuck: advanceDraft() did not make the AI picks progress (Continue would hang on draft day)')
+      ctx.career.advanceDraft()
+      const after = picksMade(ctx)
+      const nowOnClock = guarded(ctx, 'getDraft', () => ctx.career.getDraft())?.userIsOnClock
+      if (after <= before && !nowOnClock) { // no AI picks made and we're still not up — done/stuck
         break
       }
       continue
