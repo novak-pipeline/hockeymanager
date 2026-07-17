@@ -330,6 +330,7 @@ import {
   type AiAiTradeResult,
 } from '@engine/league/trades'
 import {
+  applyDeploymentMorale,
   applyResultMorale,
   effectiveResolve,
   formDeltaFromGame,
@@ -4109,6 +4110,11 @@ export class Career {
     const away = this.data.teams.get(res.awayTeamId)!
     applyResultMorale({ team: home, players: this.data.players, won: res.homeGoals > res.awayGoals })
     applyResultMorale({ team: away, players: this.data.players, won: res.awayGoals > res.homeGoals })
+    // Role vs. talent: a star buried down the lineup (or healthy-scratched)
+    // sours; a depth player handed a big role gets a lift. Deterministic.
+    for (const t of [home, away]) {
+      applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id) })
+    }
     return played
   }
 

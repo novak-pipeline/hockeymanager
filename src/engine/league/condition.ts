@@ -21,6 +21,7 @@
  */
 import type { CompositeRatings, Injury, InjuryKind, Player, PlayerId, Team } from '@domain'
 import type { GamePlayerStat } from '@engine/shared/outcome'
+import { overall } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -252,6 +253,88 @@ export function applyResultMorale(args: {
     const p = args.players.get(id)
     if (!p) continue
     p.morale = clamp(p.morale + delta, 0, 100)
+  }
+}
+
+/* ────────────────────────── deployment morale ────────────────────────── */
+
+// How role vs. talent moves morale after each game. A player expects to slot
+// where his ability ranks on the roster; one tier of leeway is normal hockey
+// (form, matchups), beyond that it reads as a message from the coach. Ambitious
+// players sour fastest. The drain is sized against MORALE_DRIFT's pull toward
+// 60: a star buried two tiers settles in the low-40s within a couple of weeks
+// (an "unhappy" conversation), a healthy-scratched star sinks toward the 30s —
+// trade-request territory for the ambitious. A depth player given a top-six
+// look gets a modest lift.
+const DEPLOY_TIER_TOLERANCE = 1
+const UNDERUSE_STING_PER_TIER = 0.9
+const SCRATCH_STING = 1.6
+const PROMOTION_LIFT = 0.4
+
+/** 0.55 (content) … 1.5 (driven) from the 1–20 ambition scale; clamped so
+ *  off-scale imported values can't blow the effect up. */
+function ambitionScale(p: Player): number {
+  return clamp(0.5 + p.personality.ambition / 20, 0.5, 1.5)
+}
+
+/**
+ * Apply post-game deployment morale for one club: compare where each healthy
+ * skater PLAYED tonight (line/pair tier, or scratched) with where his ability
+ * ranks on the roster, and nudge morale accordingly. Deliberate shelter is
+ * exempt — players on a rest directive or easing back from injury (rustGames)
+ * know why their minutes are down. Goalies are excluded (the starter/backup
+ * rhythm is its own system). Deterministic; no Rng.
+ */
+export function applyDeploymentMorale(args: {
+  team: Team
+  resolve: (id: PlayerId) => Player
+  /** Whether the player took the ice tonight (toi > 0). */
+  played: (id: PlayerId) => boolean
+}): void {
+  const { team, resolve, played } = args
+  const lines = team.lines
+  if (!lines || !Array.isArray(lines.forwards) || !Array.isArray(lines.defensePairs)) return
+
+  // Deployed tier by id: forward line index / defense pair index (1-based).
+  const deployedTier = new Map<string, number>()
+  lines.forwards.forEach((line, i) => line.forEach((id) => deployedTier.set(id as string, i + 1)))
+  lines.defensePairs.forEach((pair, i) => pair.forEach((id) => deployedTier.set(id as string, i + 1)))
+
+  // Healthy skaters ranked by ability within their position group.
+  const groups: Array<{ perTier: number; maxTier: number; players: Player[] }> = [
+    { perTier: 3, maxTier: 4, players: [] }, // forwards
+    { perTier: 2, maxTier: 3, players: [] }, // defensemen
+  ]
+  for (const id of team.roster) {
+    const p = resolve(id)
+    if (p.position === 'G' || p.injuryStatus !== null) continue
+    groups[p.position === 'D' ? 1 : 0].players.push(p)
+  }
+
+  for (const g of groups) {
+    g.players.sort(
+      (a, b) => overall(b.composites, b.position) - overall(a.composites, a.position) ||
+        ((a.id as string) < (b.id as string) ? -1 : 1)
+    )
+    g.players.forEach((p, idx) => {
+      const expected = Math.min(g.maxTier, Math.floor(idx / g.perTier) + 1)
+      const deployed = deployedTier.get(p.id as string)
+      const sheltered = p.resting === true || (p.rustGames ?? 0) > 0
+      if (deployed === undefined || !played(p.id)) {
+        // Healthy scratch: only stings a player whose talent belongs in the
+        // top six / top four — depth guys rotate in and out all season.
+        if (expected <= 2 && !sheltered) {
+          p.morale = clamp(p.morale - SCRATCH_STING * ambitionScale(p), 0, 100)
+        }
+        return
+      }
+      const gap = deployed - expected
+      if (gap > DEPLOY_TIER_TOLERANCE && !sheltered) {
+        p.morale = clamp(p.morale - UNDERUSE_STING_PER_TIER * (gap - DEPLOY_TIER_TOLERANCE) * ambitionScale(p), 0, 100)
+      } else if (gap < -DEPLOY_TIER_TOLERANCE) {
+        p.morale = clamp(p.morale + PROMOTION_LIFT, 0, 100)
+      }
+    })
   }
 }
 
