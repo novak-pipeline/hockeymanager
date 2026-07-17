@@ -1,0 +1,752 @@
+{
+  "meta": {
+    "seed": 2029,
+    "userTeamId": "t3",
+    "userTeamName": "Florida Panthers",
+    "leagueName": "NHL (EHM import, dev)",
+    "teams": 32,
+    "seasonsRequested": 1,
+    "seasonsPlayed": 1,
+    "source": "imported: NHL (EHM import, dev) (32-team)"
+  },
+  "decisions": [
+    {
+      "seq": 0,
+      "season": 2025,
+      "day": 2,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Aleksander Barkov: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Barkov left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 1,
+      "season": 2025,
+      "day": 7,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 2,
+      "season": 2025,
+      "day": 14,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 1 decision handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 3,
+      "season": 2025,
+      "day": 16,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Sam Reinhart: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Reinhart left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 4,
+      "season": 2025,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 1 decision handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 5,
+      "season": 2025,
+      "day": 30,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Anton Lundell: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Lundell left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 6,
+      "season": 2025,
+      "day": 36,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 7,
+      "season": 2025,
+      "day": 42,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 1 decision handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 8,
+      "season": 2025,
+      "day": 44,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Seth Jones: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Jones left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 9,
+      "season": 2025,
+      "day": 56,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 10,
+      "season": 2025,
+      "day": 58,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Daniil Tarasov: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Tarasov left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 11,
+      "season": 2025,
+      "day": 63,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 12,
+      "season": 2025,
+      "day": 70,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 13,
+      "season": 2025,
+      "day": 72,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Mackie Samoskevich: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Samoskevich left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 14,
+      "season": 2025,
+      "day": 84,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 15,
+      "season": 2025,
+      "day": 86,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Uvis Balinskis: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Balinskis left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 16,
+      "season": 2025,
+      "day": 91,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 17,
+      "season": 2025,
+      "day": 98,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 18,
+      "season": 2025,
+      "day": 100,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Niko Mikkola: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Mikkola left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 19,
+      "season": 2025,
+      "day": 112,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 20,
+      "season": 2025,
+      "day": 114,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Anton Lundell: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Lundell left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 21,
+      "season": 2025,
+      "day": 119,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 22,
+      "season": 2025,
+      "day": 126,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 23,
+      "season": 2025,
+      "day": 129,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Seth Jones: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Jones left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 24,
+      "season": 2025,
+      "day": 138,
+      "phase": "regularSeason",
+      "kind": "deadline-sell",
+      "summary": "Deadline: shopped rental Niko Mikkola (74 OVR, expiring)",
+      "drivers": [
+        "out of it (conf #12, 0% playoff odds)",
+        "selling futures for picks"
+      ],
+      "result": "No club tabled an offer for Niko Mikkola.",
+      "ok": true
+    },
+    {
+      "seq": 25,
+      "season": 2025,
+      "day": 140,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 26,
+      "season": 2025,
+      "day": 143,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Aleksander Barkov: \"Promise to address the room\"",
+      "drivers": [
+        "feud"
+      ],
+      "result": "Barkov left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 27,
+      "season": 2025,
+      "day": 147,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 28,
+      "season": 2025,
+      "day": 154,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 29,
+      "season": 2025,
+      "day": 157,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Tobias Björnfot: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Björnfot left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 30,
+      "season": 2025,
+      "day": 168,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 31,
+      "season": 2025,
+      "day": 171,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Daniil Tarasov: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Tarasov left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 32,
+      "season": 2025,
+      "day": 175,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
+      "drivers": [
+        "recurring scout meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
+    },
+    {
+      "seq": 33,
+      "season": 2025,
+      "day": 182,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 34,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Daxon Rudolph (analyst #8)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 35,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Ryan Lin (analyst #8)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 36,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Caleb Malhotra (analyst #8)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 37,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Levi Harper (analyst #10)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 38,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Markus Ruck (analyst #14)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 39,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Yegor Shilov (analyst #22)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 40,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Cruz Pavao (analyst #32)",
+      "drivers": [
+        "best available on the scouts’ board"
+      ],
+      "result": "selected",
+      "ok": true
+    },
+    {
+      "seq": 41,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Mackie Samoskevich (77 OVR) 6yr @ $6.5M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $6.5M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 42,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Niko Mikkola (74 OVR) 3yr @ $5.0M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $5.0M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 43,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Mackie Samoskevich (77 OVR) 6yr @ $6.5M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $6.5M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 44,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Niko Mikkola (74 OVR) 3yr @ $5.0M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $5.0M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 45,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Mackie Samoskevich (77 OVR) 6yr @ $6.5M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $6.5M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 46,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Niko Mikkola (74 OVR) 3yr @ $5.0M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.6M cap room"
+      ],
+      "result": "skipped — $5.0M doesn't fit $3.6M space",
+      "ok": false
+    },
+    {
+      "seq": 47,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $9.5M×3 for UFA Scott Wedgewood (89 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($2.6M left)"
+      ],
+      "result": "Offer tabled — Scott Wedgewood's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 48,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $10.8M×5 for UFA Nick Schmaltz (88 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($1.3M left)"
+      ],
+      "result": "Offer tabled — Nick Schmaltz's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 49,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $9.8M×3 for UFA Alex Tuch (87 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($2.3M left)"
+      ],
+      "result": "Offer tabled — Alex Tuch's camp decides by free-agency day 6.",
+      "ok": true
+    },
+    {
+      "seq": 50,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $11.9M×7 for UFA Martin Necas (89 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.2M left)"
+      ],
+      "result": "Offer tabled — Martin Necas's camp decides by free-agency day 7.",
+      "ok": true
+    },
+    {
+      "seq": 51,
+      "season": 2025,
+      "day": 212,
+      "phase": "offseason:preseason",
+      "kind": "captain",
+      "summary": "Named Aleksander Barkov (89 OVR) captain",
+      "drivers": [
+        "highest-overall skater",
+        "captains gate blocks the season opener"
+      ],
+      "result": "named",
+      "ok": true
+    }
+  ],
+  "issues": [],
+  "seasons": [
+    {
+      "year": 2025,
+      "madePlayoffs": false,
+      "playoffResult": "Missed",
+      "wonCup": false,
+      "decisions": 34,
+      "trades": 0,
+      "signings": 0,
+      "drafted": 7,
+      "critical": 0,
+      "major": 0,
+      "minor": 0,
+      "rank": 23,
+      "conferenceRank": 12,
+      "record": "36-37-9",
+      "points": 81,
+      "champion": "Montreal Canadiens",
+      "newsSample": [
+        "Lane Hutson wins the Norris Trophy (Best Defenceman)",
+        "Cole Caufield wins the Calder Trophy (Rookie of the Year)",
+        "2025 awards: Jack Eichel takes MVP honours",
+        "Awards night preview: who wins, who gets robbed, and what it says about this league",
+        "Florida Panthers are champions",
+        "Montreal Canadiens win the championship!",
+        "UTA vs MTL: a heated rivalry ignites",
+        "A rivalry is born: MTL vs UTA",
+        "LAK vs SEA: a heated rivalry ignites",
+        "UTA vs MIN: a heated rivalry ignites",
+        "Playoffs begin",
+        "Stanley Cup Finals — and folks, THIS IS WHAT WE PLAY FOR!",
+        "Power rankings: the definitive list, explained",
+        "Anton Lundell on fire — 5-game point streak",
+        "Aleksander Barkov on fire — 5-game point streak",
+        "Cooper Black stole it — 34 saves"
+      ]
+    }
+  ],
+  "summary": {
+    "cups": 0,
+    "bestFinish": "—",
+    "totalTrades": 0,
+    "totalSignings": 0,
+    "totalDrafted": 7,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "endedEarly": false
+  }
+}
