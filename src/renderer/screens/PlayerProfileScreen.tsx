@@ -34,7 +34,9 @@ import type { SquadView } from '../../engine/career/views'
 import { useNav, TeamLink, PlayerLink } from '../components/NavContext'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
+import { CalendarDays, Check, X } from 'lucide-react'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { overallToStars } from '../../engine/ratings/composites'
 import { toast, bumpRefresh } from '../components/store'
@@ -539,7 +541,7 @@ function InterviewPanel({
         {scheduledDate ? (
           <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-2)' }}>
             <span className="chip" style={{ background: 'rgba(108,92,231,0.18)', color: 'var(--violet-h)', fontWeight: 700 }}>
-              🗓 Interview scheduled
+              <Icon size={14}><CalendarDays /></Icon> Interview scheduled
             </span>
             <span className="muted small">{fmtDate(scheduledDate)} — your staff will file a report to your inbox.</span>
           </div>
@@ -708,7 +710,7 @@ function CompareControl({
             ))}
           </select>
           {selected && (
-            <button className="btn btn-ghost btn-sm" onClick={handleClear}>✕</button>
+            <button className="btn btn-ghost btn-sm" onClick={handleClear} title="Clear comparison"><Icon size={14}><X /></Icon></button>
           )}
         </div>
 
@@ -1046,13 +1048,13 @@ function TabProfile({
               <div>
                 <div className="pp-pros-head">Pros</div>
                 {d.scoutVerdict && d.scoutVerdict.pros.length > 0
-                  ? d.scoutVerdict.pros.map((p) => <div key={p} className="pp-pro">✓ {p}</div>)
+                  ? d.scoutVerdict.pros.map((p) => <div key={p} className="pp-pro"><Icon size={14} color="var(--green)"><Check /></Icon> {p}</div>)
                   : <div className="muted small" style={{ padding: '4px 0' }}>—</div>}
               </div>
               <div>
                 <div className="pp-cons-head">Cons</div>
                 {d.scoutVerdict && d.scoutVerdict.cons.length > 0
-                  ? d.scoutVerdict.cons.map((c) => <div key={c} className="pp-con">✕ {c}</div>)
+                  ? d.scoutVerdict.cons.map((c) => <div key={c} className="pp-con"><Icon size={14} color="var(--red)"><X /></Icon> {c}</div>)
                   : <div className="muted small" style={{ padding: '4px 0' }}>—</div>}
               </div>
             </div>
