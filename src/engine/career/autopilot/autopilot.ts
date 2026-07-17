@@ -106,6 +106,9 @@ interface Ctx {
   trace: AutopilotTrace
   seq: number
   onEvent?: EventSink
+  /** Players we've already tabled a trade offer on — so we don't re-spam the same
+   *  target while an offer is pending (proposeTrade returns 'pending' by design). */
+  offered: Set<string>
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -200,6 +203,12 @@ function runSanity(ctx: Ctx): void {
 
 const money = (n: number): string => `$${(n / 1e6).toFixed(1)}M`
 const POS_GROUP = (p: string): 'F' | 'D' | 'G' => (p === 'G' ? 'G' : p === 'D' ? 'D' : 'F')
+/** Deterministic non-negative string hash (for varying choices reproducibly). */
+function stableHash(s: string): number {
+  let h = 2166136261
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) }
+  return (h >>> 0)
+}
 
 /** Record a one-per-feature experience observation (information sufficiency /
  *  friction), tagged so the reporter can group by feature. Deduped by tag. */
@@ -288,8 +297,10 @@ function clearMeetings(ctx: Ctx, dash: ReturnType<Career['getDashboard']>): void
 function clearInteractions(ctx: Ctx): void {
   const inbox = guarded(ctx, 'getInbox', () => ctx.career.getInbox())
   for (const it of (inbox?.interactions ?? []).slice(0, 4)) {
-    const opt = it.options?.[0]
-    if (!opt) continue
+    if (!it.options?.length) continue
+    // Vary the response like a real GM instead of always taking the first option —
+    // deterministic per interaction id so runs stay reproducible.
+    const opt = it.options[stableHash(it.id) % it.options.length]
     const r = ctx.career.respondToInteraction(it.id, opt.id)
     log(ctx, { kind: 'interaction', summary: `Answered ${it.playerName}: "${opt.label}"`, drivers: [it.kind], result: r.ok ? (r.message ?? 'handled') : 'no-op', ok: r.ok })
   }
@@ -347,6 +358,7 @@ function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
   let made = 0
   for (const c of cands.slice(0, 12)) {
     if (made >= 1) break
+    if (ctx.offered.has(c.pid)) continue // already tabled an offer on him — don't re-spam while it's pending
     const pkg = buildPackage(tv, c.val, need)
     if (!pkg) continue
     const proposal = { partnerTeamId: c.partnerId, givePlayerIds: pkg.playerIds, givePickIds: pkg.pickIds, receivePlayerIds: [c.pid], receivePickIds: [] as string[] }
@@ -354,11 +366,13 @@ function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
     if (!draft || draft.partnerVerdict === 'blocked') continue
     if (draft.partnerVerdict === 'accept' || (aggressive && draft.partnerVerdict === 'counter')) {
       const res = guarded(ctx, 'proposeTrade', () => ctx.career.proposeTrade(proposal))
+      ctx.offered.add(c.pid) // whether accepted or slept-on ('pending'), the offer is out — don't re-table it
       const ok = res?.verdict === 'accept'
+      const verb = ok ? 'Acquired' : res?.verdict === 'pending' ? 'Made an offer for' : 'Offered for'
       log(ctx, {
         kind: 'trade',
-        summary: `${ok ? 'Acquired' : 'Offered for'} ${c.name} (${c.ovr} OVR ${need})`,
-        drivers: [`need at ${need} (my tier ~${myFloor} OVR)`, `${c.name} is ${c.ovr} OVR, ${c.years}yr @ ${money(c.salary)}`, `paper value ${draft.net >= 0 ? '+' : ''}${draft.net} my way`, `${c.partnerName}${c.posture ? ` (${c.posture})` : ''} dry-run: ${draft.partnerVerdict}`],
+        summary: `${verb} ${c.name} (${c.ovr} OVR ${need})`,
+        drivers: [`need at ${need} (my tier ~${myFloor} OVR)`, `${c.name} is ${c.ovr} OVR, ${c.years}yr @ ${money(c.salary)}`, `paper value ${draft.net >= 0 ? '+' : ''}${draft.net} my way`, `${c.partnerName}${c.posture ? ` (${c.posture})` : ''} → ${res?.verdict ?? 'error'}`],
         result: res ? `${res.verdict}: ${res.message}` : 'error', ok,
       })
       if (ok) return true
@@ -443,22 +457,23 @@ function doDraft(ctx: Ctx): void {
     // `drafted`); a real UI greys those out — filter them or draftPlayer rejects them.
     const ordered = d.prospects.filter((p) => !p.drafted).sort((a, b) => rankOf(a.playerId) - rankOf(b.playerId))
     if (!ordered.length) { issue(ctx, 'critical', 'draft', 'user on the clock but the board serves NO available (undrafted) prospect'); break }
-    // Try candidates in order until a selection actually REGISTERS on the board.
-    const before = picksMade(ctx)
+    // Try candidates until one is accepted. draftPlayer() is void and authoritative:
+    // if it does NOT throw, the selection registered. (Don't diff board counts — that
+    // reads a rebuilt/memoised board and can false-negative, forcing a needless auto.)
     let landed = false
+    let lastErr = ''
     for (const cand of ordered.slice(0, 12)) {
-      guarded(ctx, 'draftPlayer', () => ctx.career.draftPlayer(cand.playerId))
-      if (picksMade(ctx) > before) {
+      try {
+        ctx.career.draftPlayer(cand.playerId)
         const s = ctx.trace.seasons.at(-1); if (s) s.drafted++
         log(ctx, { kind: 'draft', summary: `Drafted ${cand.name} (analyst #${rankOf(cand.playerId)})`, drivers: ['best available on the scouts’ board'], result: 'selected', ok: true })
         landed = true; break
-      }
+      } catch (e) { lastErr = (e as Error).message }
     }
     if (!landed) {
       noProgress++
       if (noProgress >= 2) {
-        // Real finding: the on-clock pick will not register for ANY board prospect.
-        issue(ctx, 'critical', 'draft', `draftPlayer() accepted none of the top board prospects (e.g. "${ordered[0]?.name}") — the pick never registers, so the draft (and Continue) is dead-locked`, `season ${ctx.career.year} draft`)
+        issue(ctx, 'critical', 'draft', `draftPlayer() rejected every top board prospect (last error: ${lastErr || 'none'}) — the user pick will not register`, `season ${ctx.career.year} draft`)
         break
       }
     } else noProgress = 0
@@ -563,7 +578,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {},
     summary: { cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false },
   }
-  const ctx: Ctx = { career, trace, seq: 0 }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set() }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
