@@ -413,20 +413,55 @@ function doDeadline(ctx: Ctx): void {
   }
 }
 
+/** Count picks already made on the board (the progress signal). */
+function picksMade(ctx: Ctx): number {
+  const d = guarded(ctx, 'getDraft', () => ctx.career.getDraft())
+  return d ? d.board.filter((b) => b.selection).length : -1
+}
+
 function doDraft(ctx: Ctx): void {
   let guard = 0
-  while (guard++ < 500) {
+  let noProgress = 0
+  const MAX = 300 // 224 slots + AI-sim rounds is plenty; a real draft never needs more
+  while (guard++ < MAX) {
     const d = guarded(ctx, 'getDraft', () => ctx.career.getDraft())
     if (!d || d.complete) break
-    if (!d.userIsOnClock) { if (!guarded(ctx, 'advanceDraft', () => ctx.career.advanceDraft())) break; continue }
+    if (!d.userIsOnClock) {
+      const before = picksMade(ctx)
+      const adv = guarded(ctx, 'advanceDraft', () => ctx.career.advanceDraft())
+      if (adv === undefined) break
+      if (picksMade(ctx) <= before) { // AI picks didn't advance the board
+        issue(ctx, 'critical', 'softlock', 'draft stuck: advanceDraft() did not make the AI picks progress (Continue would hang on draft day)')
+        break
+      }
+      continue
+    }
     const ranks = guarded(ctx, 'getDraftRankings', () => ctx.career.getDraftRankings())
-    noteFeature(ctx, 'scouting/draft', `The board serves an analyst ranking, my own scouts' board (re-ranked by what they've actually seen), per-scout boards with individual bias, potential-stars + pNHLer projections, and a fullRankById so off-board prospects still get a slot. Rich fog-of-war. To pick I order available prospects by fullRankById — the on-the-clock view also carries staff advice.`)
+    noteFeature(ctx, 'scouting/draft', `The board serves an analyst ranking, my own scouts' re-ranked board, per-scout boards, potential-stars + pNHLer projections, and a fullRankById so off-board prospects still get a slot. Rich fog-of-war.`)
     const rankOf = (pid: string): number => ranks?.fullRankById[pid] ?? 9999
-    const pick = [...d.prospects].sort((a, b) => rankOf(a.playerId) - rankOf(b.playerId))[0]
-    if (!pick) { issue(ctx, 'major', 'draft', 'on the clock but no available prospect found'); break }
-    guarded(ctx, 'draftPlayer', () => ctx.career.draftPlayer(pick.playerId))
-    const s = ctx.trace.seasons.at(-1); if (s) s.drafted++
-    log(ctx, { kind: 'draft', summary: `Drafted ${pick.name} (analyst #${rankOf(pick.playerId)})`, drivers: ['best available on the scouts’ board'], result: 'selected', ok: true })
+    // The board serves the WHOLE class incl. already-drafted names (flagged
+    // `drafted`); a real UI greys those out — filter them or draftPlayer rejects them.
+    const ordered = d.prospects.filter((p) => !p.drafted).sort((a, b) => rankOf(a.playerId) - rankOf(b.playerId))
+    if (!ordered.length) { issue(ctx, 'critical', 'draft', 'user on the clock but the board serves NO available (undrafted) prospect'); break }
+    // Try candidates in order until a selection actually REGISTERS on the board.
+    const before = picksMade(ctx)
+    let landed = false
+    for (const cand of ordered.slice(0, 12)) {
+      guarded(ctx, 'draftPlayer', () => ctx.career.draftPlayer(cand.playerId))
+      if (picksMade(ctx) > before) {
+        const s = ctx.trace.seasons.at(-1); if (s) s.drafted++
+        log(ctx, { kind: 'draft', summary: `Drafted ${cand.name} (analyst #${rankOf(cand.playerId)})`, drivers: ['best available on the scouts’ board'], result: 'selected', ok: true })
+        landed = true; break
+      }
+    }
+    if (!landed) {
+      noProgress++
+      if (noProgress >= 2) {
+        // Real finding: the on-clock pick will not register for ANY board prospect.
+        issue(ctx, 'critical', 'draft', `draftPlayer() accepted none of the top board prospects (e.g. "${ordered[0]?.name}") — the pick never registers, so the draft (and Continue) is dead-locked`, `season ${ctx.career.year} draft`)
+        break
+      }
+    } else noProgress = 0
   }
 }
 
@@ -555,7 +590,22 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
     if (!dash) { issue(ctx, 'critical', 'softlock', 'getDashboard() failed — cannot read state'); trace.summary.endedEarly = true; trace.summary.endReason = 'dashboard unreadable'; break }
 
-    if (career.draftPending()) { doDraft(ctx); continue }
+    if (career.draftPending()) {
+      doDraft(ctx)
+      // Safety net: if the GM-style draft couldn't complete it, force it via
+      // autoDraft so the campaign never spins. If even that leaves it pending,
+      // it's a genuine engine softlock — record it and abandon the run.
+      if (career.draftPending()) {
+        guarded(ctx, 'autoDraft', () => ctx.career.autoDraft())
+        if (career.draftPending()) {
+          issue(ctx, 'critical', 'softlock', 'draft will not complete even via autoDraft() — hard dead-lock on draft day', `season ${career.year}`)
+          trace.summary.endedEarly = true; trace.summary.endReason = `draft dead-lock ${career.year}`
+          break
+        }
+        log(ctx, { kind: 'draft', summary: 'Auto-completed the rest of the draft', drivers: ['manual picks were not registering — fell back to auto to keep the campaign moving'], result: 'auto', ok: true })
+      }
+      continue
+    }
     if (dash.captainsPending) { doCaptain(ctx); continue }
 
     const phase: CareerPhase = career.seasonPhase
