@@ -284,6 +284,17 @@ a:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
+/* sortable column headers — clear clickable affordance */
+.table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.table th.sortable:hover {
+  color: var(--text);
+  background: var(--bg2);
+}
+
 .table tbody tr {
   transition: background 0.1s ease;
 }

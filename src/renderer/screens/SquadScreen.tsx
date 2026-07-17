@@ -132,8 +132,8 @@ function SortTh({
   const active = current === sortKey
   return (
     <th
-      className={align === 'right' ? 'num' : undefined}
-      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+      className={`sortable${align === 'right' ? ' num' : ''}`}
+      style={{ whiteSpace: 'nowrap' }}
       onClick={() => onSort(sortKey)}
     >
       {label}
