@@ -102,6 +102,32 @@ function LeaderHeader(props: { tab: StatTab }): JSX.Element {
   )
 }
 
+/** Medal palette for the podium (gold / silver / bronze). */
+const MEDAL: Record<number, { ring: string; ink: string; bg: string }> = {
+  0: { ring: '#facc15', ink: '#facc15', bg: 'rgba(250,204,21,0.14)' },
+  1: { ring: '#cbd5e1', ink: '#cbd5e1', bg: 'rgba(203,213,225,0.12)' },
+  2: { ring: '#d19a66', ink: '#d19a66', bg: 'rgba(209,154,102,0.14)' },
+}
+
+function RankBadge(props: { rank: number }): JSX.Element {
+  const medal = MEDAL[props.rank]
+  if (!medal) {
+    return <span className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{props.rank + 1}</span>
+  }
+  return (
+    <span
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 22, borderRadius: '50%',
+        background: medal.bg, color: medal.ink, border: `1px solid ${medal.ring}`,
+        fontSize: 11, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      {props.rank + 1}
+    </span>
+  )
+}
+
 function Leaderboard(props: { rows: LeaderRowView[]; tab: StatTab }): JSX.Element {
   const { rows, tab } = props
   const top10 = rows.slice(0, 10)
@@ -110,21 +136,20 @@ function Leaderboard(props: { rows: LeaderRowView[]; tab: StatTab }): JSX.Elemen
     <div className="table-wrap">
       <table className="table">
         <LeaderHeader tab={tab} />
-        <tbody>
+        <tbody className="stagger">
           {top10.map((row, i) => (
-            <tr key={row.playerId}>
-              <td className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
+            <tr key={row.playerId} className={i < 3 ? 'leader-row' : undefined}>
+              <td><RankBadge rank={i} /></td>
               <td>
                 <span className="row" style={{ gap: 'var(--sp-2)' }}>
                   <span className="muted" style={{ fontSize: 11, minWidth: 26 }}>{row.position}</span>
                   <PlayerLink playerId={row.playerId} name={row.name} />
-                  {i === 0 && <span className="chip chip-warn" style={{ fontSize: 10 }}>Leader</span>}
                 </span>
               </td>
               <td className="muted">{row.teamAbbr}</td>
               <td className="num">{row.gamesPlayed}</td>
               <td className="num">
-                <strong>{formatValue(row.value, tab)}</strong>
+                <strong style={i === 0 ? { color: 'var(--amber)' } : undefined}>{formatValue(row.value, tab)}</strong>
               </td>
             </tr>
           ))}

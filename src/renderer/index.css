@@ -1601,3 +1601,7 @@ a:hover { text-decoration: underline; }
 /* Sparkline wrapper */
 .ui-sparkline { display: block; overflow: visible; }
 .ui-sparkline path { vector-effect: non-scaling-stroke; }
+
+/* leaderboard podium rows — faint warm highlight for the top 3 */
+.table tbody tr.leader-row { background: rgba(250,204,21,0.045); }
+.table tbody tr.leader-row:hover { background: var(--bg3); }
