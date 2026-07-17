@@ -60,11 +60,13 @@ function saveHiddenPanels(s: Set<string>): void {
   }
 }
 
-/** A small "⚙ Customize" popover listing the optional panels with show/hide checkboxes. */
+/** A small "Customize" popover listing the optional panels with show/hide checkboxes. */
 function CustomizeMenu(props: { hidden: Set<string>; onToggle: (key: string) => void }): JSX.Element {
   return (
     <details className="dash-customize" style={{ position: 'relative' }}>
-      <summary className="btn btn-ghost btn-sm" style={{ listStyle: 'none', cursor: 'pointer' }}>⚙ Customize</summary>
+      <summary className="btn btn-ghost btn-sm" style={{ listStyle: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <Icon size={14}><Icons.Settings /></Icon> Customize
+      </summary>
       <div
         style={{
           position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 30,
@@ -157,7 +159,8 @@ export function DashboardScreen(): JSX.Element {
 
       {d.championTeamName !== null && (
         <div className="dash-banner">
-          🏆 {d.championTeamName} are the {d.year} champions
+          <Icon size={20}><Icons.Trophy /></Icon>
+          <span>{d.championTeamName} are the {d.year} champions</span>
         </div>
       )}
 
@@ -167,7 +170,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
           onClick={() => nav.navigate('gmCareer')}
         >
-          🧳 You've been let go. Review the GM job market to catch on with a new club.
+          <Icon size={18}><Icons.Briefcase /></Icon>
+          <span>You've been let go. Review the GM job market to catch on with a new club.</span>
         </button>
       )}
 
@@ -177,7 +181,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
           onClick={() => nav.navigate('trades')}
         >
-          ⏰ DEADLINE DAY — the trade window closes when you continue. Last chance to work the phones.
+          <Icon size={18}><Icons.Deadline /></Icon>
+          <span>DEADLINE DAY — the trade window closes when you continue. Last chance to work the phones.</span>
         </button>
       )}
 
@@ -187,7 +192,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%', background: 'var(--danger, #5a1d1d)' }}
           onClick={() => nav.navigate('trainingCamp')}
         >
-          {'\u2702\ufe0f'} CUT DAY {'\u2014'} camp verdicts are in. Pick your 23 before the opener, or the coach picks for you.
+          <Icon size={18}><Icons.Cut /></Icon>
+          <span>CUT DAY — camp verdicts are in. Pick your 23 before the opener, or the coach picks for you.</span>
         </button>
       )}
 
@@ -197,7 +203,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
           onClick={() => nav.navigate('devCamp')}
         >
-          {'\ud83c\udfd2'} Development camp is on the ice this week {'\u2014'} the org kids, your staff first live reads.
+          <Icon size={18}><Icons.DevCamp /></Icon>
+          <span>Development camp is on the ice this week — the org kids, your staff first live reads.</span>
         </button>
       )}
 
@@ -207,7 +214,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
           onClick={() => nav.navigate('boardMeeting')}
         >
-          🏛 The preseason board meeting is waiting upstairs — the owner wants the season's plan before the opener.
+          <Icon size={18}><Icons.Board /></Icon>
+          <span>The preseason board meeting is waiting upstairs — the owner wants the season's plan before the opener.</span>
         </button>
       )}
 
@@ -217,7 +225,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
           onClick={() => nav.navigate('board')}
         >
-          📞 The owner wants a word — respond on the Club Vision page.
+          <Icon size={18}><Icons.Phone /></Icon>
+          <span>The owner wants a word — respond on the Club Vision page.</span>
         </button>
       )}
 
@@ -227,7 +236,8 @@ export function DashboardScreen(): JSX.Element {
           style={{ cursor: 'pointer', border: 'none', textAlign: 'left', width: '100%' }}
           onClick={() => nav.navigate('waivers')}
         >
-          📋 {d.waiverClaimsAvailable} player{d.waiverClaimsAvailable === 1 ? '' : 's'} on the waiver wire — click to review claims
+          <Icon size={18}><Icons.Waivers /></Icon>
+          <span>{d.waiverClaimsAvailable} player{d.waiverClaimsAvailable === 1 ? '' : 's'} on the waiver wire — click to review claims</span>
         </button>
       )}
 
@@ -338,8 +348,8 @@ export function DashboardScreen(): JSX.Element {
                   )}
                 </div>
                 {d.nextGame.allTime && (
-                  <div className="muted small" title="All-time series record from your club's history">
-                    📜 {d.nextGame.allTime}
+                  <div className="muted small row" style={{ gap: 5, alignItems: 'center' }} title="All-time series record from your club's history">
+                    <Icon size={14}><Icons.History /></Icon> {d.nextGame.allTime}
                   </div>
                 )}
                 {d.nextGame.storyline && (
@@ -503,7 +513,7 @@ function LastResultHero(props: {
       </div>
       {potm && (
         <div className="potm-block">
-          <span style={{ fontSize: 20 }}>⭐</span>
+          <Icon size={20} color="var(--amber)"><Icons.Star /></Icon>
           <div>
             <div className="potm-label">Player of the match</div>
             <div className="potm-name">{potm.name}</div>
@@ -703,8 +713,8 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
             </>
           )}
           {(os.arbitration?.length ?? 0) > 0 && (
-            <span className="chip chip-danger" style={{ fontSize: 11 }}>
-              ⚖ {os.arbitration!.length} arbitration case{os.arbitration!.length === 1 ? '' : 's'} pending
+            <span className="chip chip-danger" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Icon size={14}><Icons.Arbitration /></Icon> {os.arbitration!.length} arbitration case{os.arbitration!.length === 1 ? '' : 's'} pending
             </span>
           )}
         </div>
@@ -863,13 +873,13 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
 }
 
 /* ── kind metadata for the market pulse rows ── */
-const TX_META: Record<string, { icon: string; color: string }> = {
-  signing: { icon: '🖊', color: 'var(--amber)' },
-  trade: { icon: '🔄', color: 'var(--violet-h)' },
-  waiver: { icon: '📋', color: 'var(--muted)' },
-  buyout: { icon: '✂️', color: 'var(--red)' },
-  callup: { icon: '⬆', color: 'var(--cyan)' },
-  senddown: { icon: '⬇', color: 'var(--muted)' },
+const TX_META: Record<string, { Cmp: (typeof Icons)[keyof typeof Icons]; color: string }> = {
+  signing: { Cmp: Icons.Signing, color: 'var(--amber)' },
+  trade: { Cmp: Icons.Trade, color: 'var(--violet-h)' },
+  waiver: { Cmp: Icons.Waivers, color: 'var(--muted)' },
+  buyout: { Cmp: Icons.Cut, color: 'var(--red)' },
+  callup: { Cmp: Icons.Up, color: 'var(--cyan)' },
+  senddown: { Cmp: Icons.Down, color: 'var(--muted)' },
 }
 
 /** Around the league — the July story is the market. Real transactions from
@@ -897,7 +907,8 @@ function MarketPulse({ stageLabel }: { stageLabel?: string }): JSX.Element | nul
           <span className="muted small">{emptyMsg}</span>
         )}
         {items.map((t) => {
-          const meta = TX_META[t.kind] ?? { icon: '🏒', color: 'var(--muted)' }
+          const meta = TX_META[t.kind] ?? { Cmp: Icons.Result, color: 'var(--muted)' }
+          const TxIcon = meta.Cmp
           return (
             <div
               key={t.id}
@@ -906,7 +917,7 @@ function MarketPulse({ stageLabel }: { stageLabel?: string }): JSX.Element | nul
                 padding: '7px 2px', borderBottom: '1px solid var(--line)',
               }}
             >
-              <span style={{ fontSize: 12, flexShrink: 0, color: meta.color, marginTop: 1 }}>{meta.icon}</span>
+              <Icon size={14} color={meta.color} style={{ marginTop: 1 }}><TxIcon /></Icon>
               <span style={{ fontSize: 12.5, lineHeight: 1.45, minWidth: 0 }}>{t.summary}</span>
             </div>
           )
@@ -1192,7 +1203,7 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
             </>
           ) : (
             <>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>📌</span>
+              <Icon size={14} color="var(--violet-h)" style={{ flexShrink: 0 }}><Icons.Pin /></Icon>
               <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600 }}>{e.label}</div>
             </>
           )}
