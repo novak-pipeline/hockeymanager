@@ -6,6 +6,8 @@ import { PlayerLink } from '../components/NavContext'
 import { OverallStars } from '../components/Stars'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { useUiStore, toast } from '../components/store'
@@ -112,8 +114,8 @@ function CondBar({ value }: { value: number }): JSX.Element {
 }
 
 function FormArrow({ value }: { value: number }): JSX.Element {
-  if (value > 1) return <span style={{ color: 'var(--success)' }} title="Form trending up — playing above their level lately">▲</span>
-  if (value < -1) return <span style={{ color: 'var(--danger)' }} title="Form trending down — in a slump">▼</span>
+  if (value > 1) return <span title="Form trending up — playing above their level lately"><Icon size={14} color="var(--success)"><Icons.Up /></Icon></span>
+  if (value < -1) return <span title="Form trending down — in a slump"><Icon size={14} color="var(--danger)"><Icons.Down /></Icon></span>
   return <span style={{ color: 'var(--muted)' }} title="Steady form">—</span>
 }
 
@@ -490,7 +492,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                                       <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }} title="On the trade block">BLOCK</span>
                                     )}
                                     {row.tradeStatus === 'untouchable' && (
-                                      <span className="chip" style={{ marginLeft: 2, fontSize: 9 }} title="Untouchable">🔒</span>
+                                      <span className="chip" style={{ marginLeft: 2, fontSize: 9, display: 'inline-flex', alignItems: 'center' }} title="Untouchable"><Icon size={14}><Icons.Lock /></Icon></span>
                                     )}
                                     {row.contract.noTradeClause && (
                                       <span className="chip chip-warn" style={{ marginLeft: 2, fontSize: 9 }}>NTC</span>

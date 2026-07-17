@@ -15,6 +15,9 @@ import {
   Activity, ShieldCheck, Snowflake, TrendingUp, TrendingDown, Users, Calendar,
   DollarSign, Clipboard, Handshake, Flame, ChevronUp, ChevronDown, ChevronRight,
   Circle, Dot, Bell, Newspaper, LineChart, Stethoscope, Swords, Award,
+  Briefcase, AlarmClock, Scissors, GraduationCap, Landmark, Phone, ClipboardList,
+  ScrollText, Scale, Pin, Settings, PenLine, Mic, Flag, Play, Dumbbell, Lock,
+  Volume2, Sparkles, ArrowLeft,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -53,6 +56,27 @@ export const Icons = {
   Trophy,
   Star,
   AwardRibbon: Award,
+  // Calendar beats, banners & shell actions
+  Briefcase,
+  Deadline: AlarmClock,
+  Cut: Scissors,
+  DevCamp: GraduationCap,
+  Board: Landmark,
+  Phone,
+  Waivers: ClipboardList,
+  History: ScrollText,
+  Arbitration: Scale,
+  Pin,
+  Settings,
+  Signing: PenLine,
+  Interview: Mic,
+  Flag,
+  Play,
+  Training: Dumbbell,
+  Lock,
+  Volume: Volume2,
+  Sparkle: Sparkles,
+  Back: ArrowLeft,
 } as const
 
 /** News-category → icon + accent colour token. Mirrors the app's category palette. */
