@@ -12,6 +12,8 @@ import { useEffect, useState } from 'react'
 import type { StaffMeetingView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { useNav } from '../components/NavContext'
 import { useClient } from '../hooks/useSim'
@@ -95,7 +97,7 @@ export function StaffBriefingScreen(): JSX.Element {
               className="btn btn-sm btn-ghost"
               title="Hear it"
               onClick={() => speakAs('coach', view.opening, { importance: 2 })}
-            >🔊</button>
+            ><Icon size={16}><Icons.Volume /></Icon></button>
           </div>
         </div>
 
@@ -111,7 +113,7 @@ export function StaffBriefingScreen(): JSX.Element {
                     className="btn btn-sm btn-ghost"
                     title="Hear the pitch"
                     onClick={() => speakAs(roleForTitle(p.speaker.title), p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}
-                  >🔊</button>
+                  ><Icon size={16}><Icons.Volume /></Icon></button>
                 </div>
                 <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</span>

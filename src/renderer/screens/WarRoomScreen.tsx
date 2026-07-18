@@ -11,6 +11,8 @@ import type { WorkerResponse } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 
@@ -103,7 +105,7 @@ export function WarRoomScreen(): JSX.Element {
             <div className="stack" style={{ gap: 6 }}>
               {room.suitors.map((s2, i) => (
                 <div key={i} style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-                  📞 <b>{s2.gmName}</b> ({s2.teamAbbr}) <span className="muted">— {s2.gmStyle} —</span> asking about <b>{s2.wantsName}</b>
+                  <Icon size={14}><Icons.Phone /></Icon> <b>{s2.gmName}</b> ({s2.teamAbbr}) <span className="muted">— {s2.gmStyle} —</span> asking about <b>{s2.wantsName}</b>
                 </div>
               ))}
             </div>

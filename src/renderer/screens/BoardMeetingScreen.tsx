@@ -11,6 +11,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { getScene } from '../lib/mods'
 import type { BoardMeetingScene, MeetingLine } from '../../worker/protocol'
 import { PlayerFace } from '../components/PlayerFace'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
@@ -214,8 +216,8 @@ export function BoardMeetingScreen({ variant = 'preseason' }: { variant?: 'prese
                 borderRadius: 'var(--radius-sm)', fontSize: 13.5, lineHeight: 1.6,
               }}
             >
-              <div style={{ fontSize: 10.5, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--accent, #d6a056)', marginBottom: 6 }}>
-                📜 On the record
+              <div style={{ fontSize: 10.5, letterSpacing: 1.2, textTransform: 'uppercase', color: 'var(--accent, #d6a056)', marginBottom: 6, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <Icon size={14}><Icons.History /></Icon> On the record
               </div>
               {closing.summary}
             </div>
