@@ -5,6 +5,7 @@ import type { FreeAgentRowView, OfferSheetRowView, ResignRowView, CampInviteRow 
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
 import { PlayerFace } from '../components/PlayerFace'
@@ -455,7 +456,7 @@ function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => 
     else { if (r.type === 'ok' && r.note) toast(r.note, kind === 'match' ? 'success' : 'info'); props.onRefetch() }
   }
   return (
-    <Panel title="⚠ Offer sheets on your RFAs">
+    <Panel title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="var(--amber)"><Icons.Warning /></Icon> Offer sheets on your RFAs</span>}>
       <div className="muted small" style={{ marginBottom: 8 }}>
         Rival clubs have tendered offer sheets. Match the price to keep your player, or let him walk for the draft-pick compensation.
       </div>

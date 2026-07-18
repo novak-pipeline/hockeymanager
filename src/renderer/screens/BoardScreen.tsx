@@ -8,6 +8,8 @@
 import { useState } from 'react'
 import type { BoardView, OwnerRequestView, ClubDirectionView } from '../../worker/protocol'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
@@ -190,7 +192,7 @@ function OwnerDeskPanel(props: { request: OwnerRequestView; onDone: () => void }
     }
   }
   return (
-    <Panel title={`📞 Owner's Desk — ${request.title}`}>
+    <Panel title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={16}><Icons.Phone /></Icon> Owner's Desk — {request.title}</span>}>
       <div style={{ marginBottom: 10 }}>{request.body}</div>
       <div className="row" style={{ gap: 10 }}>
         <button className="btn btn-primary" disabled={busy} onClick={() => respond(true)}>{request.acceptHint}</button>
@@ -363,14 +365,8 @@ function FiredState(props: { board: BoardView }): JSX.Element {
           textAlign: 'center',
         }}
       >
-        <div
-          style={{
-            fontSize: 40,
-            marginBottom: 'var(--sp-3)',
-            opacity: 0.4,
-          }}
-        >
-          ⬛
+        <div style={{ marginBottom: 'var(--sp-3)', opacity: 0.55 }}>
+          <Icon size={24} color="var(--red)"><Icons.Warning /></Icon>
         </div>
         <div
           style={{
