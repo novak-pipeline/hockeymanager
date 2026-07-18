@@ -13,6 +13,8 @@ import { Backdrop } from './BoardMeetingScreen'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -175,7 +177,7 @@ export function TrainingCampScreen(): JSX.Element {
                 style={{ cursor: 'pointer', border: 'none', fontSize: 12, padding: '5px 12px', opacity: locked ? 0.5 : 1 }}
                 onClick={() => setTab(id)}
               >
-                {locked ? '🔒 ' : ''}{label}{id === 'cuts' && camp.decisions.length > 0 ? ` (${camp.decisions.length})` : ''}
+                {locked && <Icon size={14}><Icons.Lock /></Icon>} {label}{id === 'cuts' && camp.decisions.length > 0 ? ` (${camp.decisions.length})` : ''}
               </button>
             )
           })}
@@ -358,7 +360,7 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
       <div style={{ ...CARD, padding: '10px 14px', fontSize: 13, lineHeight: 1.5 }}>
         The battles have verdicts. Every row defaults to the coach&apos;s plan — overrule him where you disagree.{' '}
-        <b>⚠ Waiver-required players sent down can be claimed by any club, for nothing.</b>{' '}
+        <b style={{ display: 'inline-flex', alignItems: 'center', gap: 4, verticalAlign: 'text-bottom' }}><Icon size={14} color="var(--amber)"><Icons.Warning /></Icon> Waiver-required players sent down can be claimed by any club, for nothing.</b>{' '}
         <span className="muted">PTO invitees either earn a league-minimum deal or return to the open market.</span>
         {nhlDelta !== 0 && <span className="muted"> (Net NHL change: {nhlDelta > 0 ? `+${nhlDelta}` : nhlDelta})</span>}
       </div>
@@ -388,7 +390,7 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
                       ) : (
                         <>
                           <button className={`btn btn-sm${want === 'nhl' ? ' btn-primary' : ''}`} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'nhl' }))}>NHL</button>
-                          <button className={`btn btn-sm${want === 'ahl' ? ' btn-primary' : ''}`} title={d.waiverRequired ? 'He must clear waivers — any club can claim him.' : undefined} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'ahl' }))}>{d.waiverRequired ? 'AHL ⚠' : 'AHL'}</button>
+                          <button className={`btn btn-sm${want === 'ahl' ? ' btn-primary' : ''}`} title={d.waiverRequired ? 'He must clear waivers — any club can claim him.' : undefined} onClick={() => setPlacements((p) => ({ ...p, [d.playerId]: 'ahl' }))}>{d.waiverRequired ? <>AHL <Icon size={14} color="var(--amber)"><Icons.Warning /></Icon></> : 'AHL'}</button>
                         </>
                       )}
                     </div>

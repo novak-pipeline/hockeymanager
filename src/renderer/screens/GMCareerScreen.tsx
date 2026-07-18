@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { GMProfileView, GMJobMarketView, GMRelationshipsView } from '../../worker/protocol'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 
@@ -38,7 +40,7 @@ function JobMarketPanel(props: { market: GMJobMarketView; onRefetch: () => void 
   }
 
   return (
-    <Panel title="⚠ You're a free agent — find your next job">
+    <Panel title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="var(--amber)"><Icons.Warning /></Icon> You're a free agent — find your next job</span>}>
       <div className="muted small" style={{ marginBottom: 8 }}>
         Your reputation is <strong>{market.reputation}</strong> ({market.tier}). Clubs courting you or
         with the seat open will take you; long shots need you to rebuild your name first.
@@ -123,8 +125,8 @@ export function GMCareerScreen(): JSX.Element {
             </div>
             <div>
               <div className="muted small">Honours</div>
-              <div style={{ fontWeight: 600 }}>
-                🏆 {profile.data.cupWins} · {profile.data.playoffApps} playoff berths · {profile.data.presidentsTrophies} Presidents'
+              <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Icon size={16} color="var(--amber)"><Icons.Trophy /></Icon> {profile.data.cupWins} · {profile.data.playoffApps} playoff berths · {profile.data.presidentsTrophies} Presidents'
               </div>
             </div>
           </div>

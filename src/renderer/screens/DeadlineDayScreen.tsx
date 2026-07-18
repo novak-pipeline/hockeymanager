@@ -17,6 +17,8 @@ import type { DeadlineDayView, ShoppedPlayerView, TradeOfferView } from '../../e
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -57,8 +59,8 @@ function OfferCall(props: { offer: TradeOfferView; onAction: () => void }): JSX.
       <div className="row" style={{ gap: 10, alignItems: 'center' }}>
         {headliner && <PlayerFace faceId={headliner.faceId} name={headliner.name} size={44} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>
-            📞 {offer.receive.teamAbbr} want {headliner ? <PlayerLink playerId={headliner.playerId} name={headliner.name} /> : 'a deal'}
+          <div style={{ fontSize: 13, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Icon size={14}><Icons.Phone /></Icon> {offer.receive.teamAbbr} want {headliner ? <PlayerLink playerId={headliner.playerId} name={headliner.name} /> : 'a deal'}
           </div>
           <div className="muted" style={{ fontSize: 11.5 }}>{offer.receive.teamName}</div>
         </div>
@@ -128,8 +130,9 @@ export function DeadlineDayScreen(): JSX.Element {
       <Backdrop scene="war-room">
         {/* urgency header */}
         <div style={{ marginBottom: 'var(--sp-3)' }}>
-          <div style={{ fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--danger, #e05555)', fontWeight: 800 }}>
-            🔴 Trade Deadline · Live — the window closes when you continue
+          <div style={{ fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--danger, #e05555)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', display: 'inline-block', flexShrink: 0 }} />
+            Trade Deadline · Live — the window closes when you continue
           </div>
           <h2 style={{ margin: '2px 0 0', fontSize: 24, fontWeight: 900 }}>Deadline Day</h2>
         </div>
@@ -149,7 +152,7 @@ export function DeadlineDayScreen(): JSX.Element {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,0.9fr)', gap: 'var(--sp-3)', maxWidth: 1040, marginBottom: 'var(--sp-3)' }}>
           {/* YOUR PHONE */}
           <div>
-            <div style={SECTION_LABEL}>📞 Your phone — offers on the desk {dd.incoming.length > 0 && <span className="badge">{dd.incoming.length}</span>}</div>
+            <div style={SECTION_LABEL}><Icon size={14}><Icons.Phone /></Icon> Your phone — offers on the desk {dd.incoming.length > 0 && <span className="badge">{dd.incoming.length}</span>}</div>
             <div className="muted small" style={{ marginBottom: 6, fontStyle: 'italic' }}>{dd.agmName} is fielding the calls.</div>
             <div className="stack" style={{ gap: 8 }}>
               {dd.incoming.length === 0 ? (
@@ -162,7 +165,7 @@ export function DeadlineDayScreen(): JSX.Element {
 
           {/* THE WIRE */}
           <div>
-            <div style={SECTION_LABEL}>📡 The wire — deals around the league</div>
+            <div style={SECTION_LABEL}><Icon size={14}><Icons.Broadcast /></Icon> The wire — deals around the league</div>
             <div className="stack" style={{ gap: 6, maxHeight: 360, overflowY: 'auto' }}>
               {dd.feed.length === 0 ? (
                 <div style={EMPTY_BOX}>Quiet so far. The first deals of the day are coming.</div>
@@ -180,7 +183,7 @@ export function DeadlineDayScreen(): JSX.Element {
 
         {/* THE BLOCK */}
         <div style={{ maxWidth: 1040, marginBottom: 'var(--sp-3)' }}>
-          <div style={SECTION_LABEL}>🧊 The block — who's being shopped, league-wide</div>
+          <div style={SECTION_LABEL}><Icon size={14}><Icons.League /></Icon> The block — who's being shopped, league-wide</div>
           {dd.shopped.length === 0 ? (
             <div style={EMPTY_BOX}>No sellers have put names out yet.</div>
           ) : (
@@ -211,6 +214,7 @@ export function DeadlineDayScreen(): JSX.Element {
 const SECTION_LABEL: React.CSSProperties = {
   fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase',
   color: 'var(--accent, #d6a056)', marginBottom: 6, fontWeight: 700,
+  display: 'flex', alignItems: 'center', gap: 5,
 }
 const EMPTY_BOX: React.CSSProperties = {
   background: CARD_BG, border: PANEL_BORDER, borderRadius: 8,

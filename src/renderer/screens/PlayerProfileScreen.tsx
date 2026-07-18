@@ -38,6 +38,7 @@ import { FlagIcon } from '../components/FlagIcon'
 import { CalendarDays, Check, X } from 'lucide-react'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { overallToStars } from '../../engine/ratings/composites'
 import { toast, bumpRefresh } from '../components/store'
@@ -73,7 +74,7 @@ function ScoutPlayerButton({ playerId, client }: { playerId: string; client: Ret
   }
   return (
     <span style={{ position: 'relative' }}>
-      <button className="btn btn-primary small" onClick={() => void toggle()}>🔍 Scout Player</button>
+      <button className="btn btn-primary small" onClick={() => void toggle()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.Scouting /></Icon> Scout Player</button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 60, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, minWidth: 200, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
           <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>Send a scout to watch him</div>
@@ -1528,7 +1529,12 @@ function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['award
         const tip = dated.length && e.undated ? `${name} — ${dated.join(', ')} (+${e.undated} before your tenure)`
           : dated.length ? `${name} — ${dated.join(', ')}`
           : `${name} — ${e.undated} before your tenure`
-        const icon = name.includes('Gold') ? '🥇' : name.includes('Silver') ? '🥈' : name.includes('Bronze') ? '🥉' : '🏆'
+        const isMedal = name.includes('Gold') || name.includes('Silver') || name.includes('Bronze')
+        const medalColor = name.includes('Gold') ? 'var(--accent, #f5b301)'
+          : name.includes('Silver') ? 'var(--muted)'
+          : name.includes('Bronze') ? '#cd7f32'
+          : 'var(--accent2, #e0b341)'
+        const MedalIcon = isMedal ? Icons.Award : Icons.Trophy
         return (
           <div
             key={name}
@@ -1539,7 +1545,7 @@ function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['award
               cursor: 'help',
             }}
           >
-            <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
+            <Icon size={16} color={medalColor}><MedalIcon /></Icon>
             <span style={{ fontSize: 12, fontWeight: 700 }}>{name}</span>
             {total > 1 && (
               <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{total}</span>
@@ -1787,7 +1793,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
           <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 'var(--sp-3)', paddingTop: 'var(--sp-3)', borderTop: '1px solid var(--line)' }}>
             <span className="muted small" style={{ marginRight: 4 }}>Career highlights:</span>
             {d.careerAchievements.map((m) => (
-              <span key={m} className="chip" style={{ fontSize: 10, color: 'var(--accent, #f5b301)', borderColor: 'var(--accent, #f5b301)' }}>🏅 {m}</span>
+              <span key={m} className="chip" style={{ fontSize: 10, color: 'var(--accent, #f5b301)', borderColor: 'var(--accent, #f5b301)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Icons.Award /></Icon> {m}</span>
             ))}
           </div>
         )}

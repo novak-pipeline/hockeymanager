@@ -11,6 +11,8 @@ import type { FeedView } from '../../worker/protocol'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { TeamCrest } from '../components/Crest'
 import { Linkify } from '../components/Linkify'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useNav } from '../components/NavContext'
 import { Notice, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -192,13 +194,13 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
               >
                 <Linkify text={rewrites[p.id]?.text ?? p.body} />
                 {rewrites[p.id]?.source === 'model' && (
-                  <span style={{ fontSize: 9, marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8 }} title="Written by your local AI writer">✨</span>
+                  <span style={{ marginLeft: 4, color: 'var(--llm-ink)', opacity: 0.8, display: 'inline-flex', verticalAlign: 'middle' }} title="Written by your local AI writer"><Icon size={14}><Icons.Sparkle /></Icon></span>
                 )}
               </div>
               <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
                 {p.engagement && (
                   <>
-                    <span className="muted small">♡ {fmtCount(p.engagement.likes)}</span>
+                    <span className="muted small" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Icons.Heart /></Icon> {fmtCount(p.engagement.likes)}</span>
                     <span className="muted small">⇄ {fmtCount(p.engagement.reposts)}</span>
                   </>
                 )}

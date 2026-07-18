@@ -20,6 +20,8 @@ import type { StaffView, TradesView } from '@engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
+import { Icon } from './primitives'
+import { Icons } from './icons'
 import { speakAs, cancelSpeech } from '../lib/speak'
 import type { VoiceRole } from '../lib/voiceCast'
 
@@ -213,7 +215,9 @@ export function PhoneCallOverlay(): JSX.Element | null {
           </div>
           <div style={{ fontSize: 16, fontWeight: 800, marginTop: 8 }}>{call.callerName}</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            {answered ? `${call.callerRole} · on the line` : `📞 Incoming call · ${call.callerRole}`}
+            {answered
+              ? `${call.callerRole} · on the line`
+              : <><Icon size={14}><Icons.Phone /></Icon> Incoming call · {call.callerRole}</>}
           </div>
         </div>
         {answered ? (
@@ -227,7 +231,7 @@ export function PhoneCallOverlay(): JSX.Element | null {
                 className="btn btn-sm btn-ghost"
                 title="Hear it again"
                 onClick={() => speakAs(call.voice, call.message, { seed: call.callerName })}
-              >🔊</button>
+              ><Icon size={16}><Icons.Volume /></Icon></button>
               <button className="btn btn-sm btn-ghost" onClick={() => hangUp(false)}>Hang up</button>
             </div>
           </>

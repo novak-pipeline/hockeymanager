@@ -14,6 +14,8 @@ import type { ContractOffer, NegotiationView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { useNav } from '../components/NavContext'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient } from '../hooks/useSim'
@@ -297,7 +299,7 @@ export function NegotiationScreen(): JSX.Element {
                       />
                       <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <button className="btn btn-sm" disabled={drafting || !draftText.trim()} onClick={() => void draftFromWords()}>
-                          {drafting ? 'Drafting…' : '✍️ Draft from my words'}
+                          {drafting ? 'Drafting…' : <><Icon size={14}><Icons.Signing /></Icon> Draft from my words</>}
                         </button>
                         {draftEcho && <span className="muted" style={{ fontSize: 11.5 }}>Parsed: <b>{draftEcho}</b> — review &amp; table below.</span>}
                       </div>

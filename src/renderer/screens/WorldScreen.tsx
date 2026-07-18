@@ -8,6 +8,8 @@ import { useState } from 'react'
 import type { CompetitionNotableView, CompetitionView, NationView, WorldJuniorsView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 const TIER_LABEL: Record<CompetitionView['tier'], string> = {
@@ -301,9 +303,9 @@ function InternationalPanel(): JSX.Element {
 /** #48/P5: projected World Juniors medal table + all-tournament team, with the
  *  user's own prospects highlighted — the marquee prospect showcase. */
 function WorldJuniorsPanel({ wj }: { wj: WorldJuniorsView }): JSX.Element {
-  const medal = (n: string | null, label: string, color: string): JSX.Element => (
+  const medal = (n: string | null, color: string): JSX.Element => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ fontSize: 18 }}>{label}</span>
+      <Icon size={18} color={color}><Icons.Award /></Icon>
       <span style={{ fontWeight: 800, color }}>{n ?? '—'}</span>
     </div>
   )
@@ -339,9 +341,9 @@ function WorldJuniorsPanel({ wj }: { wj: WorldJuniorsView }): JSX.Element {
         {/* Medal table + standings */}
         <div>
           <div className="stack" style={{ gap: 4, marginBottom: 10 }}>
-            {medal(wj.gold, '🥇', 'var(--accent, #f5b301)')}
-            {medal(wj.silver, '🥈', 'var(--muted)')}
-            {medal(wj.bronze, '🥉', '#cd7f32')}
+            {medal(wj.gold, 'var(--accent, #f5b301)')}
+            {medal(wj.silver, 'var(--muted)')}
+            {medal(wj.bronze, '#cd7f32')}
           </div>
           <table className="data-table" style={{ width: '100%' }}>
             <thead>

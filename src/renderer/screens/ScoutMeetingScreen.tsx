@@ -14,6 +14,8 @@ import type { ScoutMeetingView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink } from '../components/NavContext'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { useNav } from '../components/NavContext'
 import { useClient } from '../hooks/useSim'
@@ -107,7 +109,7 @@ export function ScoutMeetingScreen(): JSX.Element {
             <div className="muted" style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>
               <b>{view.host.name}</b> · {view.host.title} — “{view.opening}”
             </div>
-            <button className="btn btn-sm btn-ghost" title="Hear it" onClick={() => speakAs('scout', view.opening, { importance: 2 })}>🔊</button>
+            <button className="btn btn-sm btn-ghost" title="Hear it" onClick={() => speakAs('scout', view.opening, { importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
           </div>
         </div>
 
@@ -141,7 +143,7 @@ export function ScoutMeetingScreen(): JSX.Element {
                 <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
                   <span style={{ fontWeight: 700 }}>{p.speaker.name}</span>
                   <span className="muted" style={{ fontSize: 11.5, flex: 1 }}> · {p.speaker.title}</span>
-                  <button className="btn btn-sm btn-ghost" title="Hear the pitch" onClick={() => speakAs('scout', p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}>🔊</button>
+                  <button className="btn btn-sm btn-ghost" title="Hear the pitch" onClick={() => speakAs('scout', p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</div>
                 {p.intro.map((line, i) => (

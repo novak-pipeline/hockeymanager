@@ -10,6 +10,7 @@ import type { AwardRecord, LegendRecord, RecordEntry, SeasonArchive } from '@eng
 import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── tab ids ── */
@@ -761,9 +762,11 @@ function FranchisesTab(props: { franchises: FranchiseHistoryView[] }): JSX.Eleme
                 {f.name}
                 {f.isUser && <span className="chip" style={{ marginLeft: 8, fontSize: 10 }}>Your club</span>}
               </span>
-              {/* one 🏆 per title, up to the leader */}
-              <span title={`${f.championships} championship${f.championships !== 1 ? 's' : ''}`} style={{ letterSpacing: 1 }}>
-                {'🏆'.repeat(Math.min(f.championships, Math.max(1, mostTitles)))}
+              {/* one trophy per title, up to the leader */}
+              <span title={`${f.championships} championship${f.championships !== 1 ? 's' : ''}`} style={{ display: 'inline-flex', gap: 1, alignItems: 'center' }}>
+                {Array.from({ length: Math.min(f.championships, Math.max(1, mostTitles)) }).map((_, i) => (
+                  <Icon key={i} size={14} color={GOLD}><Icons.Trophy /></Icon>
+                ))}
               </span>
               <span style={{ width: 28, textAlign: 'right', fontWeight: 700, color: GOLD }}>{f.championships}</span>
               <span style={{ color: 'var(--muted)', fontSize: 11, width: 140, textAlign: 'right' }}>
