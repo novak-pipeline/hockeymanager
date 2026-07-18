@@ -883,7 +883,7 @@ function SetupHero(props: {
               title="Roll a new random world"
               onClick={() => props.setSeed(randomSeed())}
             >
-              🎲 Randomize
+              Randomize
             </button>
           </div>
         </div>
