@@ -17,6 +17,9 @@ import { PlayerFace } from '../components/PlayerFace'
 import { fmtMoney } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { WorldMap, type WorldMapNation } from '../components/WorldMap'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
+import type { LucideIcon } from 'lucide-react'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -670,14 +673,14 @@ function ScoutingCentreTab({ finds, rosterNeeds, onTriage }: {
         )}
         {finds.length === 0 ? (
           <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>🔍</div>
+            <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Scouting /></Icon></div>
             Your scouts haven't surfaced anyone yet. Point them at youth leagues and the
             draft class under <b>Recruitment Focus</b> — their finds arrive here (and in
             a weekly digest in your inbox).
           </div>
         ) : !current ? (
           <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+            <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--green)"><Icons.Check /></Icon></div>
             You're all caught up — every flagged prospect has been triaged. New finds
             will appear here as your scouts get to know them.
           </div>
@@ -698,7 +701,7 @@ function ScoutingCentreTab({ finds, rosterNeeds, onTriage }: {
             {/* Triage actions */}
             <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
               <button className="btn btn-primary" onClick={() => act('shortlist', current.playerId)}>★ Track him</button>
-              <button className="btn" onClick={() => act('rescout', current.playerId)} title="Send your best-fit scout back for a deeper read">🔍 Take another look</button>
+              <button className="btn" onClick={() => act('rescout', current.playerId)} title="Send your best-fit scout back for a deeper read" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.Scouting /></Icon> Take another look</button>
               <button className="btn btn-ghost" onClick={() => setIdx((i) => i + 1)}>Skip →</button>
               <button className="btn btn-ghost" style={{ color: 'var(--danger, #d8584f)' }} onClick={() => act('pass', current.playerId)}>Pass</button>
               <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => nav.navigate('player', { playerId: current.playerId })}>Full profile →</button>
@@ -765,7 +768,7 @@ function ScoutPickerCell({ playerId, scouts, onPick }: {
 interface FocusDef {
   key: string
   target: ScoutTarget
-  icon: string
+  icon: LucideIcon
   label: string
   desc: string
   /** Nation the focus maps to (drives specialist fit), if any. */
@@ -864,7 +867,7 @@ function FocusCard({ focus, assigned, candidates, onAssign }: {
       <div className="row-between" style={{ alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontSize: 16 }}>{focus.icon}</span>
+            <Icon size={16}><focus.icon /></Icon>
             {focus.nation && <FlagIcon nationality={focus.nation} size={14} />}
             {focus.label}
             <span className="chip" style={{ fontSize: 9 }}>{FOCUS_BAND_LABEL[focus.band]}</span>
@@ -911,10 +914,10 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
 
   // Canonical objectives — always offered even with zero scouts on them.
   const canonical: FocusDef[] = [
-    ...(data.hasDraftClass ? [{ key: 'draftClass', target: { kind: 'draftClass' as const }, icon: '🏒', label: 'Draft Class', desc: "Scout this year's draft-eligible prospects", band: 'youth' as ScoutFocus }] : []),
-    { key: 'nextOpponent', target: { kind: 'nextOpponent' }, icon: '🎯', label: 'Next Opponent', desc: data.nextOpponentName ? `Advance-scout ${data.nextOpponentName}` : 'Advance-scout your next game', band: 'all' },
-    { key: 'ownProspects', target: { kind: 'ownProspects' }, icon: '🏠', label: 'Our Players & Prospects', desc: 'Keep internal reads current for lineup & development calls', band: 'all' },
-    { key: 'freeAgents', target: { kind: 'freeAgents' }, icon: '💼', label: 'Free Agents', desc: 'Track available UFAs/RFAs on the market', band: 'senior' },
+    ...(data.hasDraftClass ? [{ key: 'draftClass', target: { kind: 'draftClass' as const }, icon: Icons.Draft, label: 'Draft Class', desc: "Scout this year's draft-eligible prospects", band: 'youth' as ScoutFocus }] : []),
+    { key: 'nextOpponent', target: { kind: 'nextOpponent' }, icon: Icons.Rivalry, label: 'Next Opponent', desc: data.nextOpponentName ? `Advance-scout ${data.nextOpponentName}` : 'Advance-scout your next game', band: 'all' },
+    { key: 'ownProspects', target: { kind: 'ownProspects' }, icon: Icons.Home, label: 'Our Players & Prospects', desc: 'Keep internal reads current for lineup & development calls', band: 'all' },
+    { key: 'freeAgents', target: { kind: 'freeAgents' }, icon: Icons.Briefcase, label: 'Free Agents', desc: 'Track available UFAs/RFAs on the market', band: 'senior' },
   ]
 
   // Derive a focus for any scout on a nation/league/team not already listed.
@@ -925,7 +928,7 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
     if (s.target.kind === 'nation' || s.target.kind === 'competition' || s.target.kind === 'team' || s.target.kind === 'division' || s.target.kind === 'player') {
       derived.push({
         key, target: s.target,
-        icon: s.target.kind === 'nation' ? '🌍' : s.target.kind === 'player' ? '👤' : '🏆',
+        icon: s.target.kind === 'nation' ? Icons.Globe : s.target.kind === 'player' ? Icons.Person : Icons.Trophy,
         label: s.assignmentLabel, desc: `Deep coverage — ${s.assignmentLabel}`,
         ...(s.focusNation ? { nation: s.focusNation } : {}), band: s.focus,
       })
@@ -941,7 +944,7 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
   const addFocus = (target: ScoutTarget, nation: string | undefined, label: string): void => {
     const key = focusKey(target)
     if (!focuses.some((f) => f.key === key)) {
-      setExtra((prev) => [...prev, { key, target, icon: target.kind === 'nation' ? '🌍' : '🏆', label, desc: `Deep coverage — ${label}`, ...(nation ? { nation } : {}), band: 'all' }])
+      setExtra((prev) => [...prev, { key, target, icon: target.kind === 'nation' ? Icons.Globe : Icons.Trophy, label, desc: `Deep coverage — ${label}`, ...(nation ? { nation } : {}), band: 'all' }])
     }
     setAdding(false)
   }
@@ -958,11 +961,11 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
           </p>
           <button
             className="btn btn-sm"
-            style={{ whiteSpace: 'nowrap' }}
             onClick={onAutoAssign}
             title="Chief Scout auto-assigns every scout: specialists to their region, the rest across the draft class, free agents, next opponent and your own prospects"
+            style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
-            ⚙ Chief Scout: auto-assign all
+            <Icon size={14}><Icons.Settings /></Icon> Chief Scout: auto-assign all
           </button>
         </div>
 

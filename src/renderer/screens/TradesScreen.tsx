@@ -19,6 +19,7 @@ import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -840,10 +841,10 @@ function ProposeTab(props: {
                     className="btn btn-ghost"
                     disabled={busy}
                     onClick={() => void handleShop(shopId)}
-                    style={{ marginTop: 8, width: '100%', fontSize: 12 }}
+                    style={{ marginTop: 8, width: '100%', fontSize: 12, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                     title="Solicit concrete offers for this player from every club that needs him"
                   >
-                    📣 Shop {shopName} around the league
+                    <Icon size={14}><Icons.Megaphone /></Icon> Shop {shopName} around the league
                   </button>
                 )
               })()}
@@ -1109,7 +1110,7 @@ function DealColumn(props: {
             <span className="row" style={{ gap: 5, alignItems: 'center', minWidth: 0 }}>
               {a.kind === 'player'
                 ? <PlayerFace faceId={a.faceId} name={a.name} size={18} />
-                : <span style={{ fontSize: 12 }}>🎟️</span>}
+                : <span style={{ display: 'inline-flex', color: 'var(--muted)' }}><Icon size={14}><Icons.Ticket /></Icon></span>}
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {a.name}
                 {a.viaAbbr && <span className="muted" style={{ fontSize: 10 }}> (via {a.viaAbbr})</span>}
@@ -1164,7 +1165,7 @@ function DealDeskPanel(props: {
 
           {draft.marketVerdict !== 'empty' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10 }}>
-              <span style={{ fontSize: 16, lineHeight: 1 }}>🗒️</span>
+              <span style={{ display: 'inline-flex', color: 'var(--muted)', marginTop: 1 }}><Icon size={16}><Icons.Waivers /></Icon></span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{draft.agmName} · your read</div>
                 <div style={{ fontSize: 13, color: ASSESS_TONE[draft.agmTone], fontWeight: 500 }}>{draft.agmLine}</div>
@@ -1190,7 +1191,7 @@ function DealDeskPanel(props: {
         <div style={{
           borderTop: '1px solid var(--line)', paddingTop: 10, marginTop: 10, display: 'flex', gap: 10, alignItems: 'flex-start',
         }}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>📞</span>
+          <span style={{ display: 'inline-flex', color: 'var(--muted)', marginTop: 1 }}><Icon size={18}><Icons.Phone /></Icon></span>
           <div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 2 }}>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>you gauged their interest</span>
@@ -1215,7 +1216,7 @@ function DealDeskPanel(props: {
           style={{ fontSize: 12, width: '100%', marginTop: 10, borderTop: draft ? '1px solid var(--line)' : undefined }}
           title="Ask the other club how they feel about this package — without officially offering it"
         >
-          {props.gauging ? 'Calling around…' : '📞 Gauge their interest'}
+          {props.gauging ? 'Calling around…' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.Phone /></Icon> Gauge their interest</span>}
         </button>
       )}
     </Panel>
@@ -1542,19 +1543,20 @@ export function TradesScreen(): JSX.Element {
         <>
           {/* segmented tab bar */}
           <div className="tabs">
-            <button className={`tab${tab === 'offers' ? ' active' : ''}`} onClick={() => setTab('offers')}>
-              📨 Offers{incomingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{incomingCount}</span>}
+            <button className={`tab${tab === 'offers' ? ' active' : ''}`} onClick={() => setTab('offers')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon size={14}><Icons.Mail /></Icon> Offers{incomingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{incomingCount}</span>}
             </button>
             <button
               className={`tab${tab === 'build' ? ' active' : ''}`}
               onClick={() => setTab('build')}
               disabled={!data.tradingOpen}
               title={data.tradingOpen ? undefined : 'The deadline has passed — no new deals.'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
-              🛠 Build a Trade
+              <Icon size={14}><Icons.Wrench /></Icon> Build a Trade
             </button>
-            <button className={`tab${tab === 'block' ? ' active' : ''}`} onClick={() => setTab('block')}>
-              🔥 Trade Block{rumorCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{rumorCount}</span>}
+            <button className={`tab${tab === 'block' ? ' active' : ''}`} onClick={() => setTab('block')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon size={14}><Icons.Hot /></Icon> Trade Block{rumorCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{rumorCount}</span>}
             </button>
           </div>
 
