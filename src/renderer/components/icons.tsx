@@ -17,7 +17,8 @@ import {
   Circle, Dot, Bell, Newspaper, LineChart, Stethoscope, Swords, Award,
   Briefcase, AlarmClock, Scissors, GraduationCap, Landmark, Phone, ClipboardList,
   ScrollText, Scale, Pin, Settings, PenLine, Mic, Flag, Play, Dumbbell, Lock,
-  Volume2, Sparkles, ArrowLeft,
+  Volume2, Sparkles, ArrowLeft, AlertTriangle, Globe, Home, Radio, Megaphone,
+  Mail, Ticket, Wrench, Heart, User, CheckCircle2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -77,6 +78,17 @@ export const Icons = {
   Volume: Volume2,
   Sparkle: Sparkles,
   Back: ArrowLeft,
+  Warning: AlertTriangle,
+  Globe,
+  Home,
+  Broadcast: Radio,
+  Megaphone,
+  Mail,
+  Ticket,
+  Wrench,
+  Heart,
+  Person: User,
+  Check: CheckCircle2,
 } as const
 
 /** News-category → icon + accent colour token. Mirrors the app's category palette. */

@@ -12,7 +12,7 @@ export function ScreenHeader(props: { title: string; children?: ReactNode }): JS
 }
 
 export function Panel(props: {
-  title?: string
+  title?: ReactNode
   className?: string
   children: ReactNode
 }): JSX.Element {

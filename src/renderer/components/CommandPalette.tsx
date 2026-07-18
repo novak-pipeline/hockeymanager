@@ -6,6 +6,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PlayerFace } from './PlayerFace'
+import { Icon } from './primitives'
+import { Icons } from './icons'
 import { useClient } from '../hooks/useSim'
 import { useNav, type ScreenId } from './NavContext'
 
@@ -189,7 +191,7 @@ export function CommandPalette(): JSX.Element | null {
             >
               {row.kind === 'player'
                 ? <PlayerFace faceId={row.faceId} name={row.label} size={28} />
-                : <span style={{ width: 28, textAlign: 'center', fontSize: 15 }}>{row.kind === 'team' ? '🛡' : '➜'}</span>}
+                : <span style={{ width: 28, display: 'flex', justifyContent: 'center', color: 'var(--muted)' }}><Icon size={16}>{row.kind === 'team' ? <Icons.Health /> : <Icons.ChevronRight />}</Icon></span>}
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 600, fontSize: 13.5 }}>{row.label}</span>
                 <span className="muted" style={{ marginLeft: 8, fontSize: 11.5 }}>{row.sub}</span>
