@@ -9,6 +9,7 @@
  * Pure renderer: everything here is derived from existing views
  * (getDashboard / getInbox / getCalendar) — no engine or contract change.
  */
+import { useEffect } from 'react'
 import type { NewsItem } from '@domain/news'
 import type { CalendarView, NextGameView } from '@engine/career/views'
 import { Icon } from './primitives'
@@ -85,6 +86,18 @@ export function ProcessingOverlay({
   const ng = data.nextGame
   const trending = data.trending
 
+  // FM-style keyboard flow: Enter rolls to the next day, Esc drops back to your
+  // screen — but only once the day has finished processing (never mid-tick).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (running) return
+      if (e.key === 'Enter') { e.preventDefault(); onContinue() }
+      else if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [running, onContinue, onClose])
+
   // Index calendar entries by date for the mini month grid.
   const byDate = new Map<string, { games: number; keydates: number; won?: boolean | null }>()
   for (const e of data.calendar?.entries ?? []) {
@@ -103,7 +116,7 @@ export function ProcessingOverlay({
         background: 'rgba(3,6,18,0.72)', backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--sp-4)',
       }}
-      onClick={onClose}
+      onClick={() => { if (!running) onClose() }}
     >
       <div
         className="panel"
