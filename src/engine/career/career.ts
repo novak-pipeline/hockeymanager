@@ -335,6 +335,7 @@ import {
   applyResultMorale,
   effectiveResolve,
   formDeltaFromGame,
+  injureNow,
   rollInjuries,
   tickRecovery,
 } from '@engine/league/condition'
@@ -4099,6 +4100,21 @@ export class Career {
       // Earned form: tonight's box score heats up hot hands and cools quiet
       // stars. Deterministic (no Rng), so it doesn't perturb the injury roll.
       player.form = Math.max(-5, Math.min(5, player.form + formDeltaFromGame(player, s)))
+      // In-game departure: the sim saw him go down — the injury is guaranteed
+      // (rollInjuries then skips him, so aggregate volume barely moves).
+      if (s.leftGame && player.injuryStatus === null) {
+        const injury = injureNow(player, dayRng)
+        const teamId = this.teamOf(pid)
+        if (teamId === this.userTeamId) {
+          const games = `${injury.gamesRemaining} game${injury.gamesRemaining === 1 ? '' : 's'}`
+          this.pushNews(
+            'injury',
+            `${player.name} leaves the game — out ${games}`,
+            `${player.name} went down during the game and didn't return: a ${injury.description}. He's expected to miss ${games}.`,
+            { playerId: pid as string, teamId: teamId as string }
+          )
+        }
+      }
     }
     const injuries = rollInjuries({ participants, rng: dayRng })
     for (const inj of injuries) {

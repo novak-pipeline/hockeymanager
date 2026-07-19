@@ -54,6 +54,12 @@ export interface GamePlayerStat {
    * the primary assister. Optional — absent on pre-xG saves; treat missing as 0.
    */
   xA?: number
+  /**
+   * The player went down DURING this game and did not return (in-game injury
+   * departure). The career layer converts this into a real injury with news.
+   * Optional — absent on stats from before this field existed.
+   */
+  leftGame?: boolean
 }
 
 export type DecidedBy = 'regulation' | 'overtime' | 'shootout'

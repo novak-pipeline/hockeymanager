@@ -165,6 +165,9 @@ export interface Ctx {
   /** Tonight's fight plan (times + combatant rng), hash-derived per game so the
    *  main rng stream is untouched. Absent → no fights. */
   fights?: { times: number[]; next: number; rng: Rng }
+  /** Tonight's in-game injury, if the hash roll produced one. `done` once the
+   *  victim has gone down. */
+  injury?: { plan: { atSecond: number; homeSide: boolean }; rng: Rng; done: boolean }
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

@@ -76,6 +76,7 @@ import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
+import { rollInGameInjury, inGameInjuryRngFor, fragilityWeight } from '@engine/shared/inGameInjury'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -310,7 +311,7 @@ class TeamSim {
   isHome = false
   /** Combatants serving fighting majors — off the ice until expiry, but no
    *  strength-state effect (coincidental majors substitute). */
-  fighters: BoxedPenalty[] = []
+  sidelined: BoxedPenalty[] = []
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -370,7 +371,7 @@ class TeamSim {
   private deployIds(rng: Rng, kind: DeployKind, count: number, opp?: TeamSim): PlayerId[] {
     const lines = this.team.lines
     const boxed = new Set(this.penalties.map((p) => p.playerId))
-    for (const f of this.fighters) boxed.add(f.playerId)
+    for (const f of this.sidelined) boxed.add(f.playerId)
     let base: PlayerId[]
     if (kind === 'pp' || kind === 'pk') {
       const units = kind === 'pp' ? lines.powerPlayUnits : lines.penaltyKillUnits
@@ -519,7 +520,7 @@ class TeamSim {
   /** Drop minors (and served fighting majors) as of absolute game-clock `absT`. */
   prunePenalties(absT: number): void {
     if (this.penalties.length > 0) this.penalties = this.penalties.filter((p) => p.expiresAt > absT)
-    if (this.fighters.length > 0) this.fighters = this.fighters.filter((p) => p.expiresAt > absT)
+    if (this.sidelined.length > 0) this.sidelined = this.sidelined.filter((p) => p.expiresAt > absT)
   }
 
   clearEarliestPenalty(): void {
@@ -1859,6 +1860,26 @@ function simPeriod(
       beat.breakaway = true
     }
 
+    // 0a. Tonight's injury, if due: a skater goes down and is done for the
+    //     night — he leaves at the next rotation and his bench plays short.
+    //     Victim from the hash-derived rng; games without one replay unchanged.
+    {
+      const ij = ctx.injury
+      if (ij && !ij.done && ij.plan.atSecond <= absNow) {
+        ij.done = true
+        const team = ij.plan.homeSide ? home : away
+        const sitting = new Set([...team.penalties, ...team.sidelined].map((b) => b.playerId as string))
+        const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
+          .filter((id) => !sitting.has(id as string))
+        if (ids.length > 0) {
+          const ps = ids.map((id) => team.resolve(id))
+          const victim = ps[weightedIndex(ij.rng, ps.map((p) => fragilityWeight(p.ratings.physical.balance)))]
+          team.sidelined.push({ expiresAt: Number.MAX_SAFE_INTEGER, playerId: victim.id })
+          stat(ctx, victim.id).leftGame = true
+        }
+      }
+    }
+
     // 0. Tonight's fight, if due: gloves off at even strength. Coincidental
     //    majors — no power play, but both combatants sit five minutes and their
     //    benches shorten. Schedule + combatants come from the hash-derived fight
@@ -1868,7 +1889,7 @@ function simPeriod(
       if (fp && fp.next < fp.times.length && fp.times[fp.next] <= absNow && !atkSH && !defSH) {
         fp.next++
         const pickFighter = (team: TeamSim): Player | null => {
-          const sitting = new Set([...team.penalties, ...team.fighters].map((b) => b.playerId as string))
+          const sitting = new Set([...team.penalties, ...team.sidelined].map((b) => b.playerId as string))
           const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
             .filter((id) => !sitting.has(id as string))
           if (ids.length === 0) return null
@@ -1879,7 +1900,7 @@ function simPeriod(
         const aF = pickFighter(away)
         if (hF && aF) {
           for (const [team, p] of [[home, hF], [away, aF]] as const) {
-            team.fighters.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: p.id })
+            team.sidelined.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: p.id })
             stat(ctx, p.id).penaltyMinutes += 5
             ctx.stream.push({ t: clk.t, period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
           }
@@ -2336,10 +2357,12 @@ export function fullSimGame(
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
   const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
     rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null,
     scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
+    ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
   }
   const director = new Director(rng)
   const homeSim = new TeamSim(home, resolve)

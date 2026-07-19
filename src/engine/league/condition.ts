@@ -148,6 +148,26 @@ export function rollInjuries(args: {
   return out
 }
 
+/**
+ * Force an injury NOW — for a player who went down during the game (the sim
+ * marked him `leftGame`). Same kind/duration distributions as the post-game
+ * roll, so aggregate injury shape is unchanged; the difference is you saw it
+ * happen. No-op (returns the existing injury) if he's already hurt.
+ */
+export function injureNow(player: Player, rng: Rng): Injury {
+  if (player.injuryStatus !== null) return player.injuryStatus
+  const kind = rollKind(rng)
+  const gamesOut = rollGamesOut(rng, kind)
+  const injury: Injury = {
+    kind,
+    gamesRemaining: gamesOut,
+    description: rng.pick(INJURY_DESCRIPTIONS[kind]),
+    totalGames: gamesOut
+  }
+  player.injuryStatus = injury
+  return injury
+}
+
 /* ────────────────────────── daily tick ────────────────────────── */
 
 const FATIGUE_PER_GAME = 8

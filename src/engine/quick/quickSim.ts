@@ -29,6 +29,7 @@ import { scoreEffectMult } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
+import { rollInGameInjury, inGameInjuryRngFor, fragilityWeight, type InGameInjuryPlan } from '@engine/shared/inGameInjury'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
@@ -137,10 +138,10 @@ class TeamSim {
   /** Multiplier on goals this starter concedes tonight (mean 1.0; <1 = hot, >1 =
    *  leaking) — the "hot goalie / off night" lever, set once per game. */
   goalieNight = 1
-  /** Combatants serving fighting majors: off the ice (their line plays short)
-   *  until the absolute game-clock expiry. No strength-state effect —
-   *  coincidental majors substitute. */
-  fighters: Array<{ id: string; until: number }> = []
+  /** Players off the ice mid-game — fighting majors (5 min) and in-game injury
+   *  departures (rest of the night). Their lines skate short. No strength-state
+   *  effect: majors substitute, and an injury just shortens the bench. */
+  sidelined: Array<{ id: string; until: number }> = []
 
   constructor(team: Team, resolve: (id: PlayerId) => Player) {
     this.team = team
@@ -170,10 +171,10 @@ class TeamSim {
 
   /** Drop anyone serving a fighting major — his line skates short. */
   private available(ids: readonly PlayerId[], t: number): PlayerId[] {
-    if (this.fighters.length === 0) return [...ids]
-    this.fighters = this.fighters.filter((f) => f.until > t)
-    if (this.fighters.length === 0) return [...ids]
-    const out = new Set(this.fighters.map((f) => f.id))
+    if (this.sidelined.length === 0) return [...ids]
+    this.sidelined = this.sidelined.filter((f) => f.until > t)
+    if (this.sidelined.length === 0) return [...ids]
+    const out = new Set(this.sidelined.map((f) => f.id))
     return ids.filter((id) => !out.has(id as string))
   }
 
@@ -296,6 +297,9 @@ interface Ctx {
   /** Tonight's fight plan (times + combatant rng), hash-derived per game so the
    *  main rng stream is untouched. Absent → no fights. */
   fights?: { times: number[]; next: number; rng: Rng }
+  /** Tonight's in-game injury, if the hash roll produced one. `done` once the
+   *  victim has gone down. */
+  injury?: { plan: InGameInjuryPlan; rng: Rng; done: boolean }
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -510,7 +514,7 @@ function simShift(
  *  come from the hash-derived fight rng, never the game's main stream. */
 function startFight(ctx: Ctx, home: TeamSim, away: TeamSim, period: number, t: number, absT: number, fRng: Rng): void {
   const pickFighter = (team: TeamSim): Player | null => {
-    const out = new Set(team.fighters.map((f) => f.id))
+    const out = new Set(team.sidelined.map((f) => f.id))
     const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
       .filter((id) => !out.has(id as string))
     if (ids.length === 0) return null
@@ -521,10 +525,25 @@ function startFight(ctx: Ctx, home: TeamSim, away: TeamSim, period: number, t: n
   const a = pickFighter(away)
   if (!h || !a) return
   for (const [team, p] of [[home, h], [away, a]] as const) {
-    team.fighters.push({ id: p.id as string, until: absT + FIGHT_MAJOR_SECONDS })
+    team.sidelined.push({ id: p.id as string, until: absT + FIGHT_MAJOR_SECONDS })
     stat(ctx, p.id).penaltyMinutes += 5
     ctx.stream.push({ t, period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
   }
+}
+
+/** A skater goes down mid-game and won't return: sidelined for the remainder
+ *  (his line skates short) and flagged `leftGame` so the career layer turns the
+ *  departure into a real injury. Fragile (low-balance) players go down more.
+ *  Victim comes from the hash-derived rng, never the game's main stream. */
+function sidelineInjured(ctx: Ctx, team: TeamSim, iRng: Rng): void {
+  const out = new Set(team.sidelined.map((f) => f.id))
+  const ids = [...team.team.lines.forwards.flat(), ...team.team.lines.defensePairs.flat()]
+    .filter((id) => !out.has(id as string))
+  if (ids.length === 0) return
+  const ps = ids.map(team.resolve)
+  const victim = ps[weightedIndex(iRng, ps.map((p) => fragilityWeight(p.ratings.physical.balance)))]
+  team.sidelined.push({ id: victim.id as string, until: Number.MAX_SAFE_INTEGER })
+  stat(ctx, victim.id).leftGame = true
 }
 
 function creditToi(ctx: Ctx, onIce: OnIce, seconds: number, situation: 'ev' | 'pp' | 'pk' = 'ev'): void {
@@ -590,6 +609,12 @@ function simPeriod(
     if (fp && fp.next < fp.times.length && fp.times[fp.next] <= absT && homeSit === 'ev' && awaySit === 'ev') {
       fp.next++
       startFight(ctx, home, away, period, t, absT, fp.rng)
+    }
+    // Tonight's injury, if due: a player goes down and is done for the night.
+    const ij = ctx.injury
+    if (ij && !ij.done && ij.plan.atSecond <= absT) {
+      ij.done = true
+      sidelineInjured(ctx, ij.plan.homeSide ? home : away, ij.rng)
     }
     // Home last change: a matching home bench sees the away unit FIRST and can
     // answer their top line with its checking line. Gated on the tactic (false
@@ -840,10 +865,12 @@ export function quickSimGame(
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
   const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
     rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG,
     scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
+    ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
   }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
