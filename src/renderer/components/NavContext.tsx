@@ -154,6 +154,8 @@ export interface NavParams {
   scoutId?: string
   /** Inbox deep-link: open this message on arrival (dashboard click-through). */
   newsId?: string
+  /** Match Center deep-link: open this game's box score (Calendar/Schedule). */
+  gameId?: string
 }
 
 export interface NavApi {
