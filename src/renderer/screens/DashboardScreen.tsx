@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { NewsCategory } from '@domain'
 import type {
   BoardSummaryView,
-  CalendarEntry,
   CalendarView,
   BoxScoreView,
   DashboardView,

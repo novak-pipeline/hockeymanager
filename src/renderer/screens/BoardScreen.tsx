@@ -7,7 +7,7 @@
  */
 import { useState } from 'react'
 import type { BoardView, OwnerRequestView, ClubDirectionView } from '../../worker/protocol'
-import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'

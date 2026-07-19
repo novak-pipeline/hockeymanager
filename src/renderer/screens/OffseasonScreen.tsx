@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Trophy } from 'lucide-react'
 import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
-import type { FreeAgentRowView, OfferSheetRowView, ResignRowView, CampInviteRow } from '../../engine/career/views'
+import type { OfferSheetRowView, ResignRowView, CampInviteRow } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'

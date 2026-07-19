@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { PlayoffBracketView, SeriesView } from '../../worker/protocol'
 import { useTeamCrestColor } from '../components/Crest'
-import { Notice, Panel, ScreenHeader } from '../components/ui'
+import { Notice, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'

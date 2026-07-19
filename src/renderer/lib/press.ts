@@ -8,7 +8,7 @@
  * No Anthropic SDK here — all network calls go through the main-process IPC.
  */
 import type { SimClient } from '@worker/client'
-import type { PressPersonaId, PressSheetKind } from '@engine/story/factSheet'
+import type { PressSheetKind } from '@engine/story/factSheet'
 import { renderFallback } from '@engine/story/pressFallback'
 
 /* ────────────────────────── bridge type ────────────────────────── */
