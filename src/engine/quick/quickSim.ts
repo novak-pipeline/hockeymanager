@@ -371,7 +371,9 @@ function simShift(
   let strengthMult = 1
   let goalStrength: GoalStrength = 'ev'
   if (defSH && !atkSH) {
-    strengthMult = PP_SHOT_MULT
+    // PP coaching (attacker's ppEdge) vs the kill (defender's pkEdge, <1 =
+    // strong) bend the power-play shot rate. Absent → 1.0.
+    strengthMult = PP_SHOT_MULT * (attacking.team.ppEdge ?? 1) * (defending.team.pkEdge ?? 1)
     goalStrength = 'pp'
   } else if (atkSH && !defSH) {
     strengthMult = PK_SHOT_MULT

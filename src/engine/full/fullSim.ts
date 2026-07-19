@@ -1831,7 +1831,9 @@ function simPeriod(
     const atkSH = atk.shorthanded()
     const defSH = def.shorthanded()
     let strengthMult = 1
-    if (defSH && !atkSH) strengthMult = PP_SHOT_MULT
+    // On the PP, the attacking bench's PP coaching (ppEdge) and the defending
+    // bench's kill (pkEdge, <1 = strong) both bend the shot rate. Absent → 1.0.
+    if (defSH && !atkSH) strengthMult = PP_SHOT_MULT * (atk.team.ppEdge ?? 1) * (def.team.pkEdge ?? 1)
     else if (atkSH && !defSH) strengthMult = PK_SHOT_MULT
     if (atk.pulled) strengthMult *= EXTRA_ATTACKER_SHOT_MULT
     // Score effects: the trailing team pushes, the leading team protects — the

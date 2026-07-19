@@ -504,6 +504,67 @@ export function coachFitMultiplier(fit: number): number {
   return 1 + v * 0.015
 }
 
+/* ─────────────────────────── special-teams coaching ─────────────────────────── */
+
+/**
+ * What each PP scheme needs from its first unit. The fit term rewards a coach
+ * whose system's formation happens to suit his personnel — and dings one whose
+ * scheme fights them: an umbrella without a point bomber, a 1-3-1 without
+ * seam passers, an overload without cycle hands.
+ */
+function ppFormationMetric(formation: PowerPlayFormation, unit: Player[]): number {
+  if (unit.length === 0) return 50
+  const avg = (pick: (p: Player) => number): number => unit.reduce((s, p) => s + pick(p), 0) / unit.length
+  switch (formation) {
+    case 'umbrella': {
+      // Lives off the one-timer from the top: the best point shot on the unit.
+      return Math.max(...unit.map((p) => p.ratings.technical.slapShot))
+    }
+    case '1-3-1':
+      return avg((p) => p.composites.playmaking)
+    case 'overload':
+      return avg((p) => p.composites.puckControl)
+  }
+}
+
+/**
+ * The club's special-teams coaching edges, precomputed by the career layer onto
+ * the Team (the coachFit pattern) and read by BOTH engines:
+ *
+ *   ppEdge — multiplier on the club's own power-play shot generation. Coach PP
+ *            competence (±6%) plus formation-personnel fit (±3%): did his
+ *            system's scheme land on what his PP1 can actually run?
+ *   pkEdge — multiplier on the OPPONENT's shot rate while this club kills.
+ *            Below 1 = strong kill. Competence only (±6%) — PK formation fit
+ *            is a future refinement.
+ *
+ * Both centered on 1.0 at an average coach, so the league-wide PP% stays on
+ * calibration; only the spread between well- and poorly-coached units grows.
+ */
+export function specialTeamsEdges(
+  profile: CoachProfile,
+  tactics: TeamTactics,
+  ppUnit: Player[]
+): { ppEdge: number; pkEdge: number } {
+  const clampEdge = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
+  let pp = 1 + (profile.ppCompetence - 0.5) * 0.12
+  if (ppUnit.length > 0) {
+    const chosen = ppFormationMetric(tactics.specialTeams.powerPlay, ppUnit)
+    const best = Math.max(
+      ppFormationMetric('umbrella', ppUnit),
+      ppFormationMetric('1-3-1', ppUnit),
+      ppFormationMetric('overload', ppUnit)
+    )
+    // 0 when the coach's scheme is the personnel-optimal one; up to −0.03 when
+    // his system saddles the unit with the wrong look. A great tactician loses
+    // less to a mismatch (he adapts the details).
+    pp -= Math.min(0.03, ((best - chosen) / 25) * 0.03) * (1.3 - 0.6 * profile.tacticsKnowledge)
+  }
+  // Good killers suppress the opposing PP (multiplier on THEIR shot rate).
+  const pk = 1 - (profile.pkCompetence - 0.5) * 0.12
+  return { ppEdge: clampEdge(pp, 0.9, 1.1), pkEdge: clampEdge(pk, 0.9, 1.1) }
+}
+
 /* ─────────────────────────── GM influence (gradual nudges) ─────────────────────────── */
 
 /** Axis shifts a coach makes when he accepts a GM's tactical request. */

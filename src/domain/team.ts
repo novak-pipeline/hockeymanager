@@ -95,6 +95,16 @@ export interface Team {
    * multiplier. Absent = neutral (no effect). Never set by the sim engine itself.
    */
   coachFit?: number
+  /**
+   * Special-teams coaching edges, computed by the career layer from the head
+   * coach's PP/PK competence and how well his chosen PP formation suits the
+   * PP1 personnel. `ppEdge` multiplies this club's own power-play shot
+   * generation (>1 = dangerous PP); `pkEdge` multiplies the OPPONENT's
+   * power-play shot rate while this club kills (<1 = strong kill). Absent =
+   * neutral (1.0). Never set by the sim engine itself.
+   */
+  ppEdge?: number
+  pkEdge?: number
   /** Home arena name from the source DB (display-only). */
   arena?: string
   /** Home arena capacity from the source DB (display-only). */

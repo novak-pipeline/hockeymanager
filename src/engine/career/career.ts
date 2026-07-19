@@ -340,7 +340,7 @@ import {
   tickRecovery,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
-import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection, SYSTEM_FAVORS } from '@engine/league/coachProfile'
+import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection, specialTeamsEdges, SYSTEM_FAVORS } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
@@ -2053,6 +2053,12 @@ export class Career {
       const lmSkill = ts.headCoach.attributes?.lineMatching
       team.tactics.lineMatching =
         lmSkill !== undefined ? lmSkill >= 12 : profile.structure >= 0.55 && profile.tacticsKnowledge >= 0.5
+      // Special-teams coaching: PP/PK competence + formation-personnel fit →
+      // small shot-rate edges both sims read on the power play.
+      const pp1 = (team.lines.powerPlayUnits[0] ?? []).map((id) => this.resolve(id))
+      const stEdges = specialTeamsEdges(profile, team.tactics, pp1)
+      team.ppEdge = stEdges.ppEdge
+      team.pkEdge = stEdges.pkEdge
     }
   }
 
