@@ -126,6 +126,24 @@ export type {
 export type { NewsItem } from '@domain'
 export type { BoardSummaryView } from '@engine/league/board'
 
+// These eleven were REFERENCED by response messages below but never imported —
+// so those messages (waiver wire, league wire, GM profile/job market/relations,
+// mentorship, owner requests, sponsors, fanbase, club direction, compare radar)
+// were silently untyped and worker/renderer could drift apart unchecked.
+import type {
+  ClubDirectionView,
+  CompareRadarView,
+  FanbaseView,
+  GMJobMarketView,
+  GMProfileView,
+  GMRelationshipsView,
+  LeagueWireView,
+  MentorshipView,
+  OwnerRequestView,
+  SponsorsView,
+  WaiverWireRowView,
+} from '@engine/career/views'
+
 export type { ReactionSpec } from '@engine/league/interactions'
 import type { ReactionSpec } from '@engine/league/interactions'
 export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
