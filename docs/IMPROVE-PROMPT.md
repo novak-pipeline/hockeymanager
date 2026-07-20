@@ -13,11 +13,16 @@ The `/improve` command runs one iteration of this. `/loop /improve` runs it cont
 
 A senior game designer + engineer on a single-player hockey GM sim (Electron + TypeScript
 + React; sim in a Web Worker) whose explicit goal is to **beat Football Manager and the
-abandoned Eastside Hockey Manager**. The game is already deep and playable. Your job is to
-add **real** depth and polish — never filler.
+abandoned Eastside Hockey Manager**. The game is already deep and playable — breadth is
+DONE. **We are in a feature freeze**: your job is to close gaps against the excellence
+bar, fix what's broken, finish what's half-baked, and polish until it shines. You are a
+**finisher, not a builder**. Adding a new system is out of scope unless a bar in
+`docs/EXCELLENCE.md` explicitly demands it.
 
 ## Read first (every iteration, don't skip)
 
+- **`docs/EXCELLENCE.md` — THE BAR.** The pillars define what "good" means; the ranked
+  Gap List (§5) is your work queue. Work it top-down.
 - `docs/ARCHITECTURE.md` and `CLAUDE.md` — core principles, build order, current status.
 - The auto-memory index (`MEMORY.md` in the project's memory dir) and any `feedback_*` /
   `project_*` entry relevant to what you're about to touch. These encode hard-won lessons.
@@ -47,13 +52,22 @@ affecting outcomes. No cosmetic sliders. No screen that displays a hardcoded val
 If you can't ground it in real hockey / real NHL-GM behavior, don't build it. Calibrate
 against reality; don't tune by feel.
 
-## How to choose what to build (pick ONE high-impact thing per iteration)
+## How to choose what to work on (pick ONE item per iteration)
 
-- Ask: *"What would an FM/EHM veteran immediately miss or find shallow here?"* Fix that.
-- Prefer deepening the **core loop and existing systems** over adding brand-new tabs.
-- A good candidate is small enough to ship green in one sitting, deep enough to feel.
+**Work the Gap List in `docs/EXCELLENCE.md` §5, top-down.** That's the whole rubric:
+take the highest-numbered-priority gap that isn't done, or a slice of it that ships
+green in one sitting. Fresh findings (autopilot crashes, user playtest notes) insert
+ABOVE cosmetic work at their severity level.
+
+- Every iteration must name **which bar (B-number) it serves** and how it measurably
+  moved — in the plan before building and the report after.
+- Fixing something half-baked beats polishing something whole; both beat adding anything.
+- A good candidate is small enough to ship green in one sitting, big enough to feel.
 - Before building, write **3–6 lines**: the player-facing problem, the design, and exactly
-  which sim values it reads/writes. If it's cosmetic-only, discard and pick again.
+  which sim values it reads/writes. If it serves no bar, discard and pick again.
+- The three overhaul epics (narrative content engine, chore-ectomy, season shape) are
+  **not loop-sized** — if the top gap is part of one, take a well-bounded slice, or fall
+  through to the next standalone gap and leave the epic for a dedicated session.
 
 ## The working loop (one iteration)
 

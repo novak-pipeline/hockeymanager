@@ -5,6 +5,8 @@ A single-player hockey management simulation in the spirit of **Football Manager
 
 **Start here:** read `docs/ARCHITECTURE.md` (full system design) and `docs/DATA-SOURCES.md` (hockey data plan) before doing anything. They contain the agreed design and decisions.
 
+**Current phase (2026-07-22): FEATURE FREEZE — the 1.0 excellence campaign.** `docs/EXCELLENCE.md` is the bar and the ranked Gap List; all improvement work (including the `/improve` loop) closes gaps against it top-down. No new systems until the bars are met.
+
 ---
 
 ## CORE ARCHITECTURE PRINCIPLES (do not violate)
