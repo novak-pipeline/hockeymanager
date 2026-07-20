@@ -323,6 +323,11 @@ export interface PlayerBadge {
    * players only when knowledge >= 50 (scout's read). Omitted when fogged.
    */
   archetype?: ArchetypeInfo
+  /**
+   * Shooting/catching hand. Public info (never fogged) — powers the tactics
+   * board's off-hand placement warning. Optional/additive for save compat.
+   */
+  handedness?: 'L' | 'R'
 }
 
 export interface ContractView {

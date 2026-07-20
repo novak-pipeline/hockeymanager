@@ -159,6 +159,7 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
       position: p.position,
       age: p.age,
       overall: ovr,
+      handedness: p.handedness,
       ...faceIdProp,
       ...(archetype !== undefined ? { archetype } : {}),
     }
@@ -172,6 +173,8 @@ export function badge(p: Player, fog?: FogCtx): PlayerBadge {
     position: p.position,
     age: p.age,
     overall: midOvr,
+    // Handedness is public info (every hockey card lists shoots L/R) — never fogged.
+    handedness: p.handedness,
     ...faceIdProp,
     scouted: { knowledge: Math.round(k), overallLo: lo, overallHi: hi, exact: false },
     ...(archetype !== undefined ? { archetype } : {}),

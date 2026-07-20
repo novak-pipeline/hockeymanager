@@ -112,7 +112,7 @@ export function DevCampScreen(): JSX.Element {
             reads as tiers rather than an undifferentiated scroll */}
         {!(camp.day === 1 && editingInvites) && (() => {
           const rank: Record<string, number> = { A: 0, B: 1, C: 2 }
-          const pts = (p: DevCampView['invitees'][number]) => (p.line ? p.line.g * 2 + p.line.a : -1)
+          const pts = (p: NonNullable<DevCampView>['invitees'][number]) => (p.line ? p.line.g * 2 + p.line.a : -1)
           const sorted = [...camp.invitees].sort(
             (a, b) => (rank[a.grade] ?? 3) - (rank[b.grade] ?? 3) || pts(b) - pts(a) || a.name.localeCompare(b.name)
           )

@@ -172,12 +172,17 @@ function StarRating({ value }: { value: number }): JSX.Element {
  * LD best L-handed, RD best R. Returns a short reason when the player is on his
  * off-hand for that slot (a soft warning, not a block).
  */
-function offHandReason(slot: string, handedness: 'L' | 'R'): string | null {
+/** Flag a player seated on his off side. Matches the engine's seatByHand
+ *  convention (lineup.ts): left shots belong on the LEFT slots, right shots on
+ *  the RIGHT — the wing branch here used to be inverted, which would have
+ *  flagged every properly-seated line. Handedness absent (older views) = no flag. */
+function offHandReason(slot: string, handedness?: 'L' | 'R'): string | null {
+  if (!handedness) return null
   const s = slot.toUpperCase()
-  if (s === 'LW' && handedness === 'L') return 'Off-hand wing (R preferred)'
-  if (s === 'RW' && handedness === 'R') return 'Off-hand wing (L preferred)'
-  if (s === 'LD' && handedness === 'R') return 'Off-side D (L preferred)'
-  if (s === 'RD' && handedness === 'L') return 'Off-side D (R preferred)'
+  if (s === 'LW' && handedness === 'R') return 'Off-wing (L shot preferred)'
+  if (s === 'RW' && handedness === 'L') return 'Off-wing (R shot preferred)'
+  if (s === 'LD' && handedness === 'R') return 'Off-side D (L shot preferred)'
+  if (s === 'RD' && handedness === 'L') return 'Off-side D (R shot preferred)'
   return null
 }
 
