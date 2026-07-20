@@ -234,7 +234,7 @@ import {
   initialPressScheduleState,
   type PressScheduleState,
 } from '@engine/story/pressSchedule'
-import { coachQuote, type CoachSituation, type CoachQuoteFacts } from '@engine/story/coachQuotes'
+import { coachQuote, coachHeadline, type CoachSituation, type CoachQuoteFacts } from '@engine/story/coachQuotes'
 import {
   chemistryModifier,
   developmentModifier,
@@ -1886,11 +1886,15 @@ export class Career {
   private pushCoachQuote(
     situation: CoachSituation,
     facts: CoachQuoteFacts,
-    seed: number,
-    headline: string
+    seed: number
   ): void {
     const coach = this.getTeamStaff(this.userTeamId as string).headCoach
-    const quote = coachQuote(coach, situation, facts, seed)
+    // Both headline and body rotate through their pools via the content-engine
+    // no-repeat ledger: within a season the coach never says the same thing
+    // twice at the podium (EXCELLENCE.md B4.5).
+    const noRepeat = { ledger: this.contentLedger, year: this.year, day: this.currentDay }
+    const headline = coachHeadline(coach, situation, facts, seed, noRepeat)
+    const quote = coachQuote(coach, situation, facts, seed, noRepeat)
     this.pushNews('result', headline, quote, {
       teamId: this.userTeamId as string,
       speaker: coach.name,
@@ -3483,12 +3487,7 @@ export class Career {
     const WIN_STREAK_THRESHOLDS = [5, 10, 15]
     if (WIN_STREAK_THRESHOLDS.includes(this.userWinStreak)) {
       const quoteSeed = this.seed ^ (day * 97)
-      this.pushCoachQuote(
-        'winStreak',
-        { streakCount: this.userWinStreak },
-        quoteSeed,
-        `${this.userWinStreak}-game win streak — Coach speaks`
-      )
+      this.pushCoachQuote('winStreak', { streakCount: this.userWinStreak }, quoteSeed)
     }
 
     /* ── Coach quote: losing streak milestones (3, 5, 7) ── */
@@ -3496,12 +3495,7 @@ export class Career {
     const userLoss = this.losingStreaks.get(this.userTeamId as string) ?? 0
     if (LOSING_STREAK_THRESHOLDS.includes(userLoss)) {
       const quoteSeed = this.seed ^ (day * 113)
-      this.pushCoachQuote(
-        'losingStreak',
-        { streakCount: userLoss },
-        quoteSeed,
-        `${userLoss} in a row — Coach addresses the slump`
-      )
+      this.pushCoachQuote('losingStreak', { streakCount: userLoss }, quoteSeed)
     }
 
     /* ── Coach quote: slumping star (user team skater with 5+ scoreless) ── */
@@ -3513,12 +3507,7 @@ export class Career {
       const p = this.data.players.get(asPlayerId(line.playerId))
       if (!p || p.position === 'G') continue
       const quoteSeed = this.seed ^ Career.pidNum(line.playerId) ^ (day * 7)
-      this.pushCoachQuote(
-        'slumpingStar',
-        { playerName: p.name, streakCount: line.scorelessStreak },
-        quoteSeed,
-        `${p.name} slump (${line.scorelessStreak} games) — Coach speaks`
-      )
+      this.pushCoachQuote('slumpingStar', { playerName: p.name, streakCount: line.scorelessStreak }, quoteSeed)
     }
 
     // Career counting milestones (500 goals, 1000 points, 1000 games …).
@@ -4357,49 +4346,16 @@ export class Career {
     if (diff >= 3 && res.decidedBy === 'regulation') {
       // Big win — coach speaks
       this.userWinStreak++
-      this.pushCoachQuote(
-        'postBigWin',
-        { opponentAbbr: opp.abbreviation, score: `${us}-${them}`, goalDiff: diff },
-        quoteSeed,
-        `${opp.abbreviation}: "${this.coachQuoteHeadline('postBigWin', diff)}"`
-      )
+      this.pushCoachQuote('postBigWin', { opponentAbbr: opp.abbreviation, score: `${us}-${them}`, goalDiff: diff }, quoteSeed)
     } else if (diff <= -3 && res.decidedBy === 'regulation') {
       // Bad loss — coach speaks
       this.userWinStreak = 0
-      this.pushCoachQuote(
-        'postBadLoss',
-        { opponentAbbr: opp.abbreviation, score: `${them}-${us}`, goalDiff: Math.abs(diff) },
-        quoteSeed,
-        `${opp.abbreviation}: "${this.coachQuoteHeadline('postBadLoss', Math.abs(diff))}"`
-      )
+      this.pushCoachQuote('postBadLoss', { opponentAbbr: opp.abbreviation, score: `${them}-${us}`, goalDiff: Math.abs(diff) }, quoteSeed)
     } else if (diff > 0) {
       this.userWinStreak++
     } else {
       this.userWinStreak = 0
     }
-  }
-
-  /** One-line headline for a coach quote item. */
-  private coachQuoteHeadline(situation: CoachSituation, diff: number): string {
-    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
-    const demeanor = coach.demeanor ?? 'calm'
-    if (situation === 'postBigWin') {
-      if (demeanor === 'fiery') return `We were ruthless — Coach after ${diff}-goal win`
-      if (demeanor === 'analytical') return `Underlying numbers looked excellent — Coach postgame`
-      if (demeanor === 'motivator') return `Proud of the group — Coach postgame`
-      if (demeanor === 'pragmatic') return `Two points is all that matters — Coach postgame`
-      return `A pleasing performance — Coach postgame`
-    }
-    if (situation === 'postBadLoss') {
-      if (demeanor === 'fiery') return `Not acceptable — Coach after ${diff}-goal loss`
-      if (demeanor === 'analytical') return `Structural issues to address — Coach postgame`
-      if (demeanor === 'motivator') return `We'll respond — Coach postgame`
-      if (demeanor === 'pragmatic') return `We assess and move on — Coach postgame`
-      return `We'll fix it — Coach postgame`
-    }
-    if (situation === 'winStreak') return `Streak at ${diff} — Coach speaks`
-    if (situation === 'losingStreak') return `Coach addresses losing streak`
-    return `Coach speaks`
   }
 
   /* ────────────────────────── regular-season day loop ────────────────────────── */

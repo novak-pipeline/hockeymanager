@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { coachQuote, type CoachSituation, type CoachQuoteFacts } from './coachQuotes'
+import { coachHeadline, coachQuote, type CoachSituation, type CoachQuoteFacts } from './coachQuotes'
+import type { ContentUse } from '@engine/story/contentEngine'
 import type { StaffMember } from '@engine/league/staff'
 
 function makeCoach(demeanor: StaffMember['demeanor']): StaffMember {
@@ -103,6 +104,38 @@ describe('coachQuote', () => {
         }
       }
     }
+  })
+
+  it('with a no-repeat ledger, the coach never says the same line twice in a season', () => {
+    const coach = makeCoach('fiery')
+    const ledger: ContentUse[] = []
+    const facts: CoachQuoteFacts = { opponentAbbr: 'TOR', goalDiff: 4 }
+    // Five big wins with the SAME seed: without the ledger these would all be
+    // the identical line; with it, the pool rotates through all five variants.
+    const quotes = Array.from({ length: 5 }, (_, day) =>
+      coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2025, day })
+    )
+    expect(new Set(quotes).size).toBe(5)
+    // Sixth quote: pool exhausted — repeats rather than going silent.
+    const sixth = coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2025, day: 6 })
+    expect(quotes).toContain(sixth)
+    // New season: the pool is fresh again.
+    const nextYear = coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2026, day: 1 })
+    expect(nextYear.length).toBeGreaterThan(10)
+  })
+
+  it('headlines rotate through their pool too (the scannable line varies)', () => {
+    const coach = makeCoach('fiery')
+    const ledger: ContentUse[] = []
+    const facts: CoachQuoteFacts = { opponentAbbr: 'TOR', goalDiff: 4 }
+    const heads = Array.from({ length: 3 }, (_, day) =>
+      coachHeadline(coach, 'postBigWin', facts, 999, { ledger, year: 2025, day })
+    )
+    expect(new Set(heads).size).toBe(3)
+    for (const h of heads) expect(h).not.toMatch(/\{[a-z]+\}/)
+    // Streak headlines fill the count and stay token-free.
+    const streakHead = coachHeadline(coach, 'losingStreak', { streakCount: 5 }, 3, { ledger, year: 2025, day: 9 })
+    expect(streakHead).not.toMatch(/\{[a-z]+\}/)
   })
 
   it('falls back to calm when demeanor is undefined', () => {

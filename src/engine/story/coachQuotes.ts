@@ -16,6 +16,7 @@
  */
 
 import type { StaffMember } from '@engine/league/staff'
+import { markUsed, type ContentUse } from '@engine/story/contentEngine'
 
 /* ─────────────────────────── public API ─────────────────────────── */
 
@@ -54,13 +55,147 @@ export function coachQuote(
   coach: StaffMember,
   situation: CoachSituation,
   facts: CoachQuoteFacts,
-  seed: number
+  seed: number,
+  /** Content-engine no-repeat ledger: with it, a line used this season is
+   *  skipped (rotating through the pool before any repeat — EXCELLENCE.md
+   *  B4.5). Without it, behaviour is the original pure hash pick. */
+  noRepeat?: { ledger: ContentUse[]; year: number; day: number }
 ): string {
   const demeanor = coach.demeanor ?? 'calm'
   const pool = QUOTE_POOL[situation][demeanor]
   const idx = stableIndex(seed, situation, pool.length)
-  const template = pool[idx]!
-  return fillTemplate(template, facts)
+  if (!noRepeat) return fillTemplate(pool[idx]!, facts)
+  // Walk forward from the hash pick to the first line unused this season; if
+  // the coach has said all five, the hash pick repeats (LRU-ish via rotation).
+  const usedThisSeason = new Set(
+    noRepeat.ledger.filter((u) => u.year === noRepeat.year).map((u) => u.variantId)
+  )
+  let chosen = idx
+  for (let step = 0; step < pool.length; step++) {
+    const cand = (idx + step) % pool.length
+    if (!usedThisSeason.has(quoteVariantId(situation, demeanor, cand))) {
+      chosen = cand
+      break
+    }
+  }
+  markUsed(noRepeat.ledger, quoteVariantId(situation, demeanor, chosen), noRepeat.year, noRepeat.day)
+  return fillTemplate(pool[chosen]!, facts)
+}
+
+/** Stable ledger key for one authored line. */
+function quoteVariantId(situation: CoachSituation, demeanor: string, idx: number): string {
+  return `coach.${situation}.${demeanor}.${idx}`
+}
+
+/**
+ * Inbox HEADLINE for a coach-quote item — pooled and no-repeat-rotated like
+ * the body, because the headline is what the GM actually scans: one line per
+ * demeanor meant every big win read identically all season.
+ */
+export function coachHeadline(
+  coach: StaffMember,
+  situation: CoachSituation,
+  facts: CoachQuoteFacts,
+  seed: number,
+  noRepeat?: { ledger: ContentUse[]; year: number; day: number }
+): string {
+  const demeanor = coach.demeanor ?? 'calm'
+  const bySituation = HEADLINE_POOL[situation]
+  const pool = Array.isArray(bySituation) ? bySituation : bySituation[demeanor]
+  const key = Array.isArray(bySituation) ? 'any' : demeanor
+  const idx = stableIndex(seed ^ 0x51ed, situation, pool.length)
+  if (!noRepeat) return fillTemplate(pool[idx]!, facts)
+  const usedThisSeason = new Set(
+    noRepeat.ledger.filter((u) => u.year === noRepeat.year).map((u) => u.variantId)
+  )
+  let chosen = idx
+  for (let step = 0; step < pool.length; step++) {
+    const cand = (idx + step) % pool.length
+    if (!usedThisSeason.has(`hl.${situation}.${key}.${cand}`)) {
+      chosen = cand
+      break
+    }
+  }
+  markUsed(noRepeat.ledger, `hl.${situation}.${key}.${chosen}`, noRepeat.year, noRepeat.day)
+  return fillTemplate(pool[chosen]!, facts)
+}
+
+/** Demeanor-keyed for the podium reactions; situation-flat for streak beats. */
+const HEADLINE_POOL: Record<CoachSituation, DemeanorPool | string[]> = {
+  postBigWin: {
+    fiery: [
+      `{opp} routed: "We were ruthless" — Coach after {diff}-goal win`,
+      `Statement made against {opp} — Coach postgame`,
+      `"That's the standard" — Coach after {diff}-goal rout`,
+    ],
+    calm: [
+      `"A pleasing performance" — Coach on the {opp} win`,
+      `Composed and clinical — Coach postgame`,
+      `"The plan, executed" — Coach after beating {opp}`,
+    ],
+    analytical: [
+      `"The underlying numbers were excellent" — Coach postgame`,
+      `Process meets result: Coach on the {diff}-goal win`,
+      `"All four lines generated" — Coach postgame`,
+    ],
+    motivator: [
+      `"Proud of the group" — Coach postgame`,
+      `"That's what belief looks like" — Coach after the {opp} win`,
+      `"Everyone gave me something" — Coach postgame`,
+    ],
+    pragmatic: [
+      `"Two points is all that matters" — Coach postgame`,
+      `Good night, next game — Coach after {opp}`,
+      `"We can't lose our humility" — Coach postgame`,
+    ],
+  },
+  postBadLoss: {
+    fiery: [
+      `"Not acceptable" — Coach after {diff}-goal loss`,
+      `Hard truths in the room — Coach after {opp} defeat`,
+      `"It ends now" — Coach fumes postgame`,
+    ],
+    calm: [
+      `"We'll fix it" — Coach postgame`,
+      `A difficult night, clear heads — Coach on the {opp} loss`,
+      `"We didn't match their level" — Coach's honest read`,
+    ],
+    analytical: [
+      `"Structural issues to address" — Coach postgame`,
+      `"The tape will not be kind" — Coach after {opp}`,
+      `Breakdowns cost us — Coach postgame`,
+    ],
+    motivator: [
+      `"We'll respond" — Coach postgame`,
+      `"Pain is a teacher" — Coach after the {opp} loss`,
+      `"This group will answer" — Coach postgame`,
+    ],
+    pragmatic: [
+      `"We assess and move on" — Coach postgame`,
+      `Beaten tonight, back tomorrow — Coach`,
+      `"No catastrophe, just corrections" — Coach postgame`,
+    ],
+  },
+  winStreak: [
+    `{streak}-game win streak — Coach speaks`,
+    `Streak hits {streak}: "Nobody here is satisfied" — Coach`,
+    `{streak} straight — Coach credits the process`,
+    `Rolling: Coach on the {streak}-game heater`,
+  ],
+  losingStreak: [
+    `{streak} in a row — Coach addresses the slump`,
+    `Coach faces the slide head-on`,
+    `{streak} straight losses: "The answers are on the tape" — Coach`,
+    `A team searching: Coach on the skid`,
+  ],
+  slumpingStar: [
+    `{player} slump ({streak} games) — Coach speaks`,
+    `Coach backs {player} through the drought`,
+    `{streak} games without: Coach on {player}'s dry spell`,
+  ],
+  milestone: [`Coach on {player}'s milestone`],
+  signing: [`Coach welcomes {player}`],
+  tradeAdd: [`Coach on the {player} acquisition`],
 }
 
 /* ─────────────────────────── template filler ─────────────────────────── */
