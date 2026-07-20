@@ -1,9 +1,15 @@
-# Narrative Engine — Overhaul Epic #1 (design doc, awaiting user approval)
+# Narrative Engine — Overhaul Epic #1 (APPROVED, with the living-world mandate)
 
 Serves EXCELLENCE.md bars **B4.5** (no verbatim repeats), **B5.1** (5-character
-test), **B5.2** (30% of beats cite the chronicle), **B5.5** (50 decision
-events). This doc is the taste artifact: approve the model AND the sample
-writing below before implementation starts.
+test), **B5.2** (30% of beats cite the chronicle), **B5.3** (promise receipts),
+**B5.5** (50 decision events), and FM-strength **F3** (receipts).
+
+**User approval 2026-07-22, with one binding caveat:** the world must feel
+ALIVE — narrative beats must trace back to *your actions*. "You put someone on
+the trade block, you should expect to talk to him about it." The engine is
+therefore TWO layers: Layer 0 decides **what happens and who reacts** (the
+causal ecosystem); Layers 1+ decide **how it's said** (the content engine).
+Random flavor with no cause is banned; the best beat is always a consequence.
 
 ## The problem, precisely
 
@@ -13,6 +19,72 @@ promise ledger, personalities, GM personas. The staleness the user feels is
 NOT missing systems — it's that these systems (a) draw from small pools, (b)
 select randomly instead of by specificity, (c) never check what you've already
 seen, and (d) rarely cite memory. The LLM writer papered over none of this.
+
+## Layer 0 — The Living Ledger (actions have witnesses)
+
+This expands the World Chronicle (LW1) from "important events get remembered"
+into a **stakeholder-indexed causal graph**. It is the ecosystem the user asked
+for: the game actively assists the narrative by knowing who was affected by
+what you did, and making them respond in character.
+
+### The loop
+
+```
+GM ACTION (trade-block listing, scratch, demotion, lowball, promise,
+           public criticism, waiver, trade, signing his rival, firing)
+  → recorded as a WorldAction { id, kind, targets, visibility, day }
+  → STAKEHOLDER SCAN: who cares?
+      the player himself · his agent · his friends/linemates (dynamics graph)
+      · room leaders · the coach · beat media · rival GMs · the fanbase
+  → each stakeholder rolls a REACTION POLICY (personality × relationship ×
+    context × visibility):
+      immediate   — he's in your office before practice
+      delayed     — plays flat for two weeks; agent brings it up at the table
+      conditional — only if it LEAKS (quiet vs open shopping already exists)
+      compounding — second offense this season escalates the response
+      residue     — no scene now, but a permanent flag ("he knows he was shopped")
+  → reactions are DELIVERED through Layers 1+ (a variant line, a phone call,
+    or a full decision event) — always with explicit attribution: "because you…"
+  → the reaction itself becomes a chronicle entry linked via causedBy,
+    so callbacks can cite whole chains, not just moments.
+```
+
+### The worked example (the user's own): trade-block listing
+
+You list a 29-year-old alternate captain:
+1. **Day 0** — WorldAction recorded. Visibility = "quiet" (shopped to 3 GMs)
+   or "open" (league-wide availability).
+2. **Day 1–3** — rival GMs with roster need + persona-fit start calling with
+   pitches (LW3 postures — now they call YOU; also closes the autopilot's
+   0-trades friction gap).
+3. **Day 2–5 (conditional)** — open shopping, or a leak roll on quiet
+   shopping, produces the media story: "Sources: {player} available." Once it
+   leaks, HE knows.
+4. **The confrontation** — a decision event, personality-shaped: a proud vet
+   walks into your office ("Eleven years and I find out from a reporter?");
+   an unhappy player is relieved ("Between us — thank you"); a nervous kid's
+   agent calls instead. Your answer sets promises/flags with due dates.
+5. **Residue** — if you pull him off the block and keep him: permanent
+   relationship flag `wasShopped(year)`. It resurfaces at his next
+   negotiation, in his no-trade decisions, in the room if you shop him again.
+6. **Every later beat cites the chain** — "their first meeting since the
+   October listing" — because the graph links it all.
+
+### Rules
+
+- **Every named reaction traces to a cause** a player could state ("he's cold
+  because I scratched him in the playoffs"). If the writers can't fill in the
+  "because you…", the beat doesn't fire.
+- **No omniscience**: stakeholders react only to what they'd plausibly know —
+  visibility and leaks are mechanics, and secrecy is a real choice with a
+  risk dial.
+- **Conservation of drama**: cap concurrent open reaction-threads per club
+  (~3) so consequences land as scenes, not spam; excess collapses into
+  residue flags that surface later.
+- **Reuse, don't rebuild**: the chronicle (LW1), ripples (LW4), dynamics
+  graph, promise ledger, GM personas (LW2), and shopping/postures (LW3) all
+  exist. Layer 0 is the connective tissue that makes them one ecosystem —
+  a WorldAction table + stakeholder scan + reaction scheduler on top.
 
 ## The model (Hades, adapted)
 
@@ -116,9 +188,15 @@ acknowledges what the reader did/knows.
 
 ## Scope & sequencing (each slice ships green alone)
 
+0. **Living Ledger**: WorldAction recording on the ~10 GM actions that matter
+   most (block/shop, scratch, demote, waive, trade, sign, promise, lowball,
+   public criticism, fire), stakeholder scan, reaction scheduler with the five
+   policies, residue flags on relationships. Delivered through EXISTING
+   surfaces first (inbox/phone/interactions) so it ships before the content
+   engine and immediately makes the world feel causal. ~1–2 sessions.
 1. **Engine**: variant store, condition matcher, specificity selection,
    no-repeat ledger (+ save field, additive), callback slot renderer over the
-   chronicle. ~1 session.
+   chronicle — extended to query causal chains ("what did the GM do to X"). ~1 session.
 2. **Retrofit consumers**: route existing pushNews/coach-quote/interaction
    call sites through the engine (their current strings become the seed
    'generic' variants — nothing regresses). ~1 session.
