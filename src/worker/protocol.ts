@@ -109,6 +109,23 @@ export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView
 import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
+// Renderer screens already import these from the protocol barrel, but they were
+// never re-exported here — so those imports silently failed to resolve and the
+// screens lost their view typing. Purely ADDITIVE re-exports (no existing shape
+// is touched), which the frozen-contract rule allows.
+export type {
+  CalendarEntry,
+  BoxScoreGoalieRow,
+  BoxScoreSkaterRow,
+  GoalLogRow,
+  PenaltyLogRow,
+  SeriesView,
+  LeaderRowView,
+  PayrollRowView,
+} from '@engine/career/views'
+export type { NewsItem } from '@domain'
+export type { BoardSummaryView } from '@engine/league/board'
+
 export type { ReactionSpec } from '@engine/league/interactions'
 import type { ReactionSpec } from '@engine/league/interactions'
 export type { FaHubView, FaHubRowView, RfaBoardView, RfaTargetView } from '@engine/career/views'
