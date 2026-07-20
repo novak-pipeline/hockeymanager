@@ -265,6 +265,7 @@ import {
   type PendingLedgerReaction,
   type ResidueFlag,
 } from './livingLedger'
+import type { ContentUse } from '@engine/story/contentEngine'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
@@ -865,6 +866,8 @@ export class Career {
   private ledgerReactions: PendingLedgerReaction[] = []
   private residueFlags: ResidueFlag[] = []
   private ledgerCounter = 0
+  /** Content Engine no-repeat ledger (B4.5): nothing repeats verbatim in a season. */
+  private contentLedger: ContentUse[] = []
   /** Feed Phase A: priors ledger + save-wide novelty memory (THE-FEED.md). */
   private storyPriors: StoryPriors | null = null
   /** The social feed — separate from inbox news so posts never crowd the
@@ -2696,6 +2699,7 @@ export class Career {
       const copy = reactionCopy({
         kind: r.kind, action, player, escalation: r.escalation,
         rng: new Rng(deriveSeed(this.seed, Career.LEDGER_NS, this.year, day, Career.pidNum(r.playerId) + 1)),
+        ledger: this.contentLedger, year: this.year, day,
       })
       switch (r.kind) {
         case 'mediaLeak': {
@@ -17598,6 +17602,7 @@ export class Career {
       ledgerReactions: this.ledgerReactions.map((r) => structuredClone(r)),
       residueFlags: this.residueFlags.map((f) => structuredClone(f)),
       ledgerCounter: this.ledgerCounter,
+      contentLedger: this.contentLedger.map((u) => ({ ...u })),
       interactionCounter: this.interactionCounter,
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
       ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
@@ -17779,6 +17784,7 @@ export class Career {
     if (snapshot.ledgerReactions) career.ledgerReactions = snapshot.ledgerReactions.map((r) => ({ ...r }))
     if (snapshot.residueFlags) career.residueFlags = snapshot.residueFlags.map((f) => ({ ...f }))
     career.ledgerCounter = snapshot.ledgerCounter ?? 0
+    if (snapshot.contentLedger) career.contentLedger = snapshot.contentLedger.map((u) => ({ ...u }))
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
     career.feedCounter = snapshot.feedCounter ?? 0

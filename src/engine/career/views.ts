@@ -2390,6 +2390,8 @@ export interface CareerSnapshot {
   ledgerReactions?: import('./livingLedger').PendingLedgerReaction[]
   residueFlags?: import('./livingLedger').ResidueFlag[]
   ledgerCounter?: number
+  /** Content Engine no-repeat ledger (B4.5). Optional/additive. */
+  contentLedger?: import('@engine/story/contentEngine').ContentUse[]
   /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
   storyPriors?: StoryPriors
   /** Social-feed posts (separate from inbox news). Optional/additive. */
