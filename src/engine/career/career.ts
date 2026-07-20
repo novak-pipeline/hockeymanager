@@ -257,6 +257,14 @@ import {
   type PlayerPromise,
   type ReactionSpec,
 } from '@engine/league/interactions'
+import {
+  scheduleReactions,
+  reactionCopy,
+  type WorldAction,
+  type WorldActionKind,
+  type PendingLedgerReaction,
+  type ResidueFlag,
+} from './livingLedger'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
@@ -852,6 +860,11 @@ export class Career {
   private interactionCounter = 0
   /** LW5 promise ledger: every promise-tone answer becomes a tracked debt. */
   private playerPromises: PlayerPromise[] = []
+  /** Living Ledger (Narrative Engine layer 0): actions have witnesses. */
+  private worldActions: WorldAction[] = []
+  private ledgerReactions: PendingLedgerReaction[] = []
+  private residueFlags: ResidueFlag[] = []
+  private ledgerCounter = 0
   /** Feed Phase A: priors ledger + save-wide novelty memory (THE-FEED.md). */
   private storyPriors: StoryPriors | null = null
   /** The social feed — separate from inbox news so posts never crowd the
@@ -2628,6 +2641,112 @@ export class Career {
 
   private static readonly INTERACTION_NS = 7110
   private static readonly CONSISTENCY_NS = 9311
+  private static readonly LEDGER_NS = 7180
+
+  /* ─────────────── Living Ledger: actions have witnesses ─────────────── */
+
+  /** Record a GM action against a player and schedule the world's in-character
+   *  response (leaks, confrontations, agent calls, room ripples) plus residue.
+   *  Layer 0 of the Narrative Engine — see docs/NARRATIVE-ENGINE.md. */
+  private recordWorldAction(kind: WorldActionKind, playerId: string, visibility: 'quiet' | 'open' = 'quiet'): void {
+    const player = this.data.players.get(asPlayerId(playerId))
+    if (!player) return
+    const action: WorldAction = {
+      id: `wa${this.ledgerCounter++}`,
+      kind,
+      year: this.year,
+      day: this.currentDay,
+      playerId,
+      playerName: player.name,
+      visibility,
+    }
+    this.worldActions.push(action)
+    const openThreads = this.ledgerReactions.filter(
+      (r) => r.kind === 'confrontation' || r.kind === 'agentNote'
+    ).length
+    const { reactions, residue } = scheduleReactions({
+      action,
+      player,
+      rng: new Rng(deriveSeed(this.seed, Career.LEDGER_NS, this.year, this.currentDay, Career.pidNum(playerId))),
+      priorResidue: this.residueFlags.filter((f) => f.playerId === playerId),
+      openThreads,
+      nextId: () => `lr${this.ledgerCounter++}`,
+    })
+    this.ledgerReactions.push(...reactions)
+    this.residueFlags.push(...residue)
+    // Bounded histories — the chronicle keeps the long past; the ledger only
+    // needs enough to drive callbacks and compounding.
+    if (this.worldActions.length > 200) this.worldActions = this.worldActions.slice(-150)
+    if (this.residueFlags.length > 300) this.residueFlags = this.residueFlags.slice(-200)
+  }
+
+  /** Fire the reactions that come due today. Each lands with explicit
+   *  "because you…" attribution: a leak becomes a story HE also reads, a
+   *  confrontation walks into your office as a real interaction, an agent
+   *  note arrives as mail, a room ripple nicks his friends' morale. */
+  private processLedgerReactions(day: number): void {
+    if (this.ledgerReactions.length === 0) return
+    const due = this.ledgerReactions.filter((r) => r.dueDay <= day)
+    if (due.length === 0) return
+    this.ledgerReactions = this.ledgerReactions.filter((r) => r.dueDay > day)
+    for (const r of due) {
+      const action = this.worldActions.find((a) => a.id === r.actionId)
+      const player = this.data.players.get(asPlayerId(r.playerId))
+      if (!action || !player) continue
+      const copy = reactionCopy({
+        kind: r.kind, action, player, escalation: r.escalation,
+        rng: new Rng(deriveSeed(this.seed, Career.LEDGER_NS, this.year, day, Career.pidNum(r.playerId) + 1)),
+      })
+      switch (r.kind) {
+        case 'mediaLeak': {
+          // The story breaks — and now HE knows. Mark residue as known.
+          this.pushNews('trade', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
+          for (const f of this.residueFlags) if (f.actionId === action.id) f.known = true
+          player.morale = Math.max(0, player.morale - 4)
+          break
+        }
+        case 'confrontation': {
+          // He's in your office. Delivered as a real interaction so the
+          // existing response/promise machinery (and its costs) apply.
+          // If he already has an open concern, don't stack scenes — the
+          // grievance folds into residue instead (conservation of drama).
+          if (this.interactions.some((i) => i.playerId === r.playerId && i.status === 'open')) break
+          this.interactions.unshift({
+            id: `i${this.interactionCounter++}`,
+            playerId: r.playerId,
+            teamId: this.userTeamId as string,
+            year: this.year,
+            day,
+            kind: r.escalation > 0 ? 'tradeRequest' : 'unhappy',
+            severity: 'serious',
+            message: copy.message ?? copy.body,
+            options: copy.options ?? [],
+            status: 'open',
+          })
+          this.pushNews('contract', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
+          break
+        }
+        case 'agentNote': {
+          this.pushNews('contract', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
+          player.morale = Math.max(0, player.morale - 2)
+          break
+        }
+        case 'roomRipple': {
+          // The departed man's peers notice how it was done: same-position
+          // veterans and countrymen take the small hit — the room's memory.
+          this.pushNews('contract', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
+          for (const id of this.userTeam.roster) {
+            const mate = this.data.players.get(id)
+            if (!mate) continue
+            if ((player.nationality !== undefined && mate.nationality === player.nationality) || (mate.age >= 28 && mate.position === player.position)) {
+              mate.morale = Math.max(0, mate.morale - 2)
+            }
+          }
+          break
+        }
+      }
+    }
+  }
 
   /** Deterministic per-(player, game) uniform draw in [0,1) for the hidden
    *  consistency rating adjustment. Stable across save/load: it depends only on
@@ -3286,6 +3405,9 @@ export class Career {
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.maybeRaiseInteractions(day)
     this.evaluatePlayerPromises(day)
+    // Living Ledger: leaks break, confrontations walk in, agents call — the
+    // world responding to what the GM did (docs/NARRATIVE-ENGINE.md layer 0).
+    this.processLedgerReactions(day)
 
     /* ── the salience engine: publish today's genuinely interesting stories ── */
     this.runSalience(day)
@@ -7414,6 +7536,15 @@ export class Career {
   }
 
   releasePlayer(playerId: string): void {
+    // Living Ledger: cutting an established veteran ripples through his
+    // friends in the room — record BEFORE release while he's still resolvable
+    // as a roster player. Fringe bodies come and go without a wake.
+    {
+      const p = this.data.players.get(asPlayerId(playerId))
+      if (p && p.age >= 27 && ratedOverall(p) >= 68) {
+        this.recordWorldAction('released', playerId, 'open')
+      }
+    }
     releaseFromTeam({
       team: this.userTeam,
       playerId: asPlayerId(playerId),
@@ -8721,6 +8852,10 @@ export class Career {
     repairLines(ahlTeam, this.data.players)
 
     const cleared = this.requiresWaivers(p)
+    // Living Ledger: demoting a waiver-requiring veteran is a public statement
+    // about his standing — his camp responds. (Exempt kids ride the shuttle
+    // without drama; that's the job.)
+    if (isUser && cleared) this.recordWorldAction('sentDown', playerId, 'open')
     if (isUser) {
       this.pushNews(
         'contract',
@@ -10796,6 +10931,9 @@ export class Career {
       maxOffers: 4,
     })
     for (const o of offers) this.tradeOffers.push(o)
+    // Living Ledger: his name is in other GMs' mouths now. Quiet feelers can
+    // leak — and if they do, expect him in your office (docs/NARRATIVE-ENGINE.md).
+    this.recordWorldAction('shopped', playerId, 'quiet')
     if (offers.length === 0) {
       this.pushNews(
         'trade',
@@ -16787,6 +16925,14 @@ export class Career {
   /** Toggle a player's healthy-scratch status for the next game. */
   toggleScratchPlayer(playerId: string): void {
     this.practiceState = toggleScratch(this.practiceState, playerId)
+    // Living Ledger: a healthy scratch of an established veteran is a message,
+    // and he receives it. (Only on scratch-ON; un-scratching mends nothing.)
+    if (this.isScratchedFor(playerId)) {
+      const p = this.data.players.get(asPlayerId(playerId))
+      if (p && p.injuryStatus === null && p.age >= 28 && ratedOverall(p) >= 72) {
+        this.recordWorldAction('scratched', playerId, 'open')
+      }
+    }
   }
 
   /** Set (or clear) a per-player individual focus override. */
@@ -17448,6 +17594,10 @@ export class Career {
         ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
       ),
       interactions: this.interactions.map((i) => structuredClone(i)),
+      worldActions: this.worldActions.map((a) => structuredClone(a)),
+      ledgerReactions: this.ledgerReactions.map((r) => structuredClone(r)),
+      residueFlags: this.residueFlags.map((f) => structuredClone(f)),
+      ledgerCounter: this.ledgerCounter,
       interactionCounter: this.interactionCounter,
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
       ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
@@ -17625,6 +17775,10 @@ export class Career {
     }
     career.interactionCounter = snapshot.interactionCounter ?? 0
     if (snapshot.playerPromises) career.playerPromises = snapshot.playerPromises.map((pr) => ({ ...pr }))
+    if (snapshot.worldActions) career.worldActions = snapshot.worldActions.map((a) => ({ ...a }))
+    if (snapshot.ledgerReactions) career.ledgerReactions = snapshot.ledgerReactions.map((r) => ({ ...r }))
+    if (snapshot.residueFlags) career.residueFlags = snapshot.residueFlags.map((f) => ({ ...f }))
+    career.ledgerCounter = snapshot.ledgerCounter ?? 0
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
     career.feedCounter = snapshot.feedCounter ?? 0

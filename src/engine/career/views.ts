@@ -2384,6 +2384,12 @@ export interface CareerSnapshot {
   interactionCounter?: number
   /** LW5 promise ledger — tracked debts from promise-tone answers. Optional/additive. */
   playerPromises?: PlayerPromise[]
+  /** Living Ledger (Narrative Engine layer 0): recorded GM actions, scheduled
+   *  in-character reactions, and permanent residue. All optional/additive. */
+  worldActions?: import('./livingLedger').WorldAction[]
+  ledgerReactions?: import('./livingLedger').PendingLedgerReaction[]
+  residueFlags?: import('./livingLedger').ResidueFlag[]
+  ledgerCounter?: number
   /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
   storyPriors?: StoryPriors
   /** Social-feed posts (separate from inbox news). Optional/additive. */
