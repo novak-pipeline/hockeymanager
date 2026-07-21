@@ -368,6 +368,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Keep the foot on the gas. {streak} wins is a number. The next game is the only one that counts.",
       "The boys are playing with swagger right now and that's dangerous — in a good way. Keep feeding the wolf.",
       "We win because we compete harder. {streak} games of that. I'm not letting up on them.",
+      "Everybody's asking when it ends. Wrong question. Ask the other twenty-nine teams how they plan to end it — because we sure won't.",
+      "You know what I told them this morning? Great. Now win tonight. That's the whole speech. Streaks die from admiring themselves.",
+      "I've seen hot runs turn soft when guys start protecting them. Not here. We play every night like we're the ones chasing.",
     ],
     calm: [
       "We're playing well. {streak} wins is a good stretch and the team deserves credit. We stay disciplined.",
@@ -375,6 +378,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "A run like this builds habits. Good habits. We want to make this the expectation, not the exception.",
       "I'm pleased with the process. The results are following the work. That's how it should go.",
       "{streak} games now where we've executed the plan. The group is in a good place.",
+      "The mark of this run isn't the wins — it's that the game plan has barely changed. We're not riding luck. We're repeating ourselves, deliberately.",
+      "I keep the same message on night {streak} as on night one: play our structure, respect the opponent, let the table sort itself out.",
+      "People use the word 'streak' like it's magic. It's not. It's rest, preparation, and players buying what we're selling. All renewable resources.",
     ],
     analytical: [
       "During this {streak}-game run our Corsi is among the best in the league. The underlying game is strong.",
@@ -382,6 +388,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "The power play has contributed in consecutive games — that's a big factor in the streak.",
       "Zone time has been exceptional. When we control the puck we win. Simple as that.",
       "Our defensive-zone coverage has been airtight. That consistency over {streak} games is encouraging.",
+      "Here's the number I watch: high-danger chances against, down 30% across the run. The wins are the shadow — that number is the object.",
+      "Sustainability is the only question worth asking about a streak, and our shooting percentage is NOT inflated. This is real.",
+      "Every one of the {streak} wins had a different top line on the score sheet. Distributed offense doesn't slump all at once — that's the moat.",
     ],
     motivator: [
       "{streak} wins and I genuinely believe the best hockey is still ahead of us. This group is growing.",
@@ -389,6 +398,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "I told them before the season: if they trust each other, they'll surprise people. They're doing it.",
       "The energy in the building, the energy in the room — it's real. This team believes. Keep going.",
       "Each win adds a brick to the wall we're building. {streak} bricks and we're just getting started.",
+      "You know what I love most? The guys on the bench celebrating harder than the guys on the ice. That's a team falling in love with itself, the healthy way.",
+      "Somebody in that room said 'why not us?' about three weeks ago. Nobody laughed. {streak} wins later, nobody's laughing anywhere.",
+      "Streaks are stories teams tell themselves. Ours is simple: nobody gets left behind, nobody skips the hard part. Chapter {streak} tonight.",
     ],
     pragmatic: [
       "We're winning games. That's the goal. We stay focused on the next one and don't overthink it.",
@@ -396,6 +408,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "The streak is a byproduct of preparation. We prepare the same way every game. That won't change.",
       "People want to talk about the streak. I just want to talk about the next game.",
       "Good stretch. Means nothing if we drop the next one. Full attention on preparation.",
+      "Streaks buy you standings points and nothing else. We'll bank the points and skip the poetry.",
+      "You know when I'll get excited about {streak} wins? When it's sixteen of them in May and June.",
+      "The league doesn't hand out anything for a hot month. Ask me about this run again at the deadline — if it still matters, I'll have more to say.",
     ],
   },
 
@@ -407,6 +422,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "We need some guys to stand up in that room. Enough analysis. We need some fire and we need it tonight.",
       "This is a crisis of compete, not a crisis of talent. I will not let this group quit on itself.",
       "I've been coaching long enough to know when a team needs a wake-up call. They got one today.",
+      "Practice today was not pleasant, and it was not supposed to be. Comfort is how you get to {streak} — discomfort is how you get out.",
+      "Somebody leaked that the room is 'tense.' Good. It should be tense. Relaxed teams lose {streak} in a row and sleep fine. Not here.",
+      "I don't need heroes tomorrow. I need twelve forwards who win their wall battles. Do the ugly thing first and the pretty thing comes back.",
     ],
     calm: [
       "{streak} losses is a difficult stretch, but I've been through these before. We address it methodically.",
@@ -414,6 +432,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "The answers are on the tape. They always are. We focus on the controllables and we get back to work.",
       "This group has the capability to turn this around. I've seen it. We stay the course with adjustments.",
       "Adversity reveals character. I'm watching how this team responds and I'll have a better read on that.",
+      "The worst thing I could do right now is rip up a system the players believe in because of {streak} bad results. We refine; we don't reinvent.",
+      "I've shortened practice, not lengthened it. Tired teams in a skid press harder and think slower. Fresh legs make brave plays.",
+      "There's a difference between losing and being lost. Watch our last two third periods — this team is not lost. The results will catch up.",
     ],
     analytical: [
       "Over this {streak}-game run our shot quality against has doubled. We need to close passing lanes faster.",
@@ -421,6 +442,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "I've mapped out the sequence failures. Our transition defense has been the root cause. We address it today.",
       "The data is clear: we're getting outworked on puck battles in the defensive zone. That's a culture fix.",
       "Our 5v5 possession numbers have dropped sharply. We're spending too much time in our own end.",
+      "Strip the emotion out and the skid is two problems: entry defense and second-save recovery. Two problems is a Tuesday, not a crisis.",
+      "Our underlying numbers during the {streak} games are better than the results — which sounds like an excuse until you realize it tells us exactly what NOT to change.",
+      "I showed the group ten clips this morning. Same structural error in seven of them. When the mistake is that repeatable, so is the fix.",
     ],
     motivator: [
       "{streak} losses doesn't change what I know about this group. We've got the people. We get back up.",
@@ -428,6 +452,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Every one of us in that room owns a piece of this. And every one of us will fix it together.",
       "I genuinely believe in these players. That's not a line — it's why I'm not throwing them under the bus.",
       "Winning streaks end. Losing streaks end. Our job is to end this one with the next game.",
+      "I stood in front of them today and read out what people are saying about us. Then I said: 'They might be right about yesterday. They know nothing about tomorrow.'",
+      "The easiest thing in sport is to splinter during a skid. This room refuses to. That, more than any tactic, is why I know we're coming out of it.",
+      "Careers are made in stretches like this one. Somebody in that room is about to become a leader. I'm looking forward to finding out who.",
     ],
     pragmatic: [
       "{streak} in a row is not ideal. We make adjustments and put it behind us. That's the job.",
@@ -435,6 +462,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Every team goes through stretches like this. How you respond is what separates organizations.",
       "I've identified the tactical areas to address. We make those corrections and get back to winning hockey.",
       "We're still very much in the picture. {streak} losses isn't a death sentence. It's a challenge.",
+      "Every season has a stretch you'd rather forget. Ours is now. Better November than April.",
+      "No, I'm not going to blow up the lines because of {streak} results. Panic is a decision, and I'm declining to make it.",
+      "The math is boring: play .500 hockey the rest of the way and we're in the conversation. Skids feel apocalyptic. They rarely are.",
     ],
   },
 
