@@ -249,6 +249,14 @@ const LEAK_POOL: ContentVariant[] = [
   { id: 'leak.quiet.threegm', conditions: { visibility: 'quiet' },
     text: `Whispers around the league: {name}'s name is out there`,
     text2: `Three general managers heard {name}'s name from you this week. By Thursday a fourth had heard it from one of them, and he tells reporters things. That is how quiet ends.` },
+  // Chronicle-callback variants: when provenance exists these OUTRANK the plain
+  // lines (extra condition = higher specificity) and cite real history.
+  { id: 'leak.quiet.provenance', conditions: { visibility: 'quiet', hasProvenance: true },
+    text: `Sources: {name} available — quietly`,
+    text2: `You shopped {name}{callback: — {cb.phrase} —} to a handful of front offices, and one of them talked. Whatever story you planned to tell him, a beat writer is telling it first.` },
+  { id: 'leak.open.provenance', conditions: { visibility: 'open', hasProvenance: true },
+    text: `{name} on the market, and everyone knows it`,
+    text2: `The league got the memo by lunch: {name}{callback: — {cb.phrase} —} can be had. Openness has its price, and the first installment is that he read it too.` },
 ]
 
 /** What he says at your door. Escalation gates the repeat scene; personality
@@ -304,6 +312,9 @@ export function reactionCopy(args: {
   ledger?: ContentUse[]
   year?: number
   day?: number
+  /** Chronicle callback slots ({cb.*}). When present, provenance-citing
+   *  variants become eligible and outrank the generic lines. */
+  callback?: Record<string, string>
 }): ReactionCopy {
   const { kind, action, player, escalation, rng } = args
   const ledger = args.ledger ?? []
@@ -321,6 +332,7 @@ export function reactionCopy(args: {
     loyalty: p.loyalty,
     ambition: p.ambition,
     morale: player.morale,
+    hasProvenance: args.callback !== undefined,
   }
   const pick = (pool: ContentVariant[]): ContentVariant => {
     const v = selectVariant({ pool, ctx, rng, ledger, year })
@@ -334,7 +346,10 @@ export function reactionCopy(args: {
   switch (kind) {
     case 'mediaLeak': {
       const v = pick(LEAK_POOL)
-      return { headline: renderTemplate(v.text, slots), body: renderTemplate(v.text2 ?? '', slots) }
+      return {
+        headline: renderTemplate(v.text, slots, args.callback),
+        body: renderTemplate(v.text2 ?? '', slots, args.callback),
+      }
     }
     case 'confrontation': {
       const v = pick(CONFRONT_POOL)

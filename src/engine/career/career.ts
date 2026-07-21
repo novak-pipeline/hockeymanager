@@ -2693,6 +2693,25 @@ export class Career {
     if (this.residueFlags.length > 300) this.residueFlags = this.residueFlags.slice(-200)
   }
 
+  /** How YOU came to own this player, as a citable phrase ("the man you
+   *  traded for in 2024") — the chronicle-callback slot for ledger copy.
+   *  Null when there's no history worth citing; the template block vanishes. */
+  private provenancePhraseFor(playerId: string): string | null {
+    const prov = chronicleProvenanceOf(this.chronicle, playerId)
+    if (!prov) return null
+    const mine = [...prov.acquisitions].reverse().find((a) => a.teamId === (this.userTeamId as string))
+    if (mine) {
+      if (mine.via === 'trade') return `the man you traded for in ${mine.year}`
+      if (mine.via === 'signing') return `your ${mine.year} free-agent signing`
+      if (mine.via === 'waiver') return `the waiver claim you fought for in ${mine.year}`
+      if (mine.via === 'draft') return `a name this organisation called at the ${mine.year} draft`
+    }
+    if (prov.draftedBy === (this.userTeamId as string) && prov.draftYear !== undefined) {
+      return `a name this organisation called at the ${prov.draftYear} draft`
+    }
+    return null
+  }
+
   /** Fire the reactions that come due today. Each lands with explicit
    *  "because you…" attribution: a leak becomes a story HE also reads, a
    *  confrontation walks into your office as a real interaction, an agent
@@ -2706,10 +2725,15 @@ export class Career {
       const action = this.worldActions.find((a) => a.id === r.actionId)
       const player = this.data.players.get(asPlayerId(r.playerId))
       if (!action || !player) continue
+      // Chronicle callback: how did YOU come to own this man? Citing it in the
+      // leak ("the man you traded a rival for in 2024") is the signature move —
+      // and it costs nothing when there's no history, the block just vanishes.
+      const cb = this.provenancePhraseFor(r.playerId)
       const copy = reactionCopy({
         kind: r.kind, action, player, escalation: r.escalation,
         rng: new Rng(deriveSeed(this.seed, Career.LEDGER_NS, this.year, day, Career.pidNum(r.playerId) + 1)),
         ledger: this.contentLedger, year: this.year, day,
+        ...(cb ? { callback: { phrase: cb } } : {}),
       })
       switch (r.kind) {
         case 'mediaLeak': {

@@ -85,6 +85,20 @@ describe('livingLedger — pure scheduler', () => {
     expect(residue.some((f) => f.kind === 'wasShopped')).toBe(true)
   })
 
+  it('a leak with provenance cites real history; without it, the block vanishes', () => {
+    const { c } = makeCareer()
+    const player = c.data.players.get(c.userTeam.roster[0])!
+    const action = actionFor(player.id as string, player.name, 'shopped', 'quiet')
+    const withCb = reactionCopy({
+      kind: 'mediaLeak', action, player, escalation: 0, rng: new Rng(4),
+      callback: { phrase: 'the man you traded for in 2024' },
+    })
+    expect(withCb.body).toContain('the man you traded for in 2024')
+    const without = reactionCopy({ kind: 'mediaLeak', action, player, escalation: 0, rng: new Rng(4) })
+    expect(without.body).not.toContain('{')
+    expect(without.body).not.toContain('traded for in')
+  })
+
   it('demoting a vet draws the agent call; copy carries the attribution', () => {
     const { c } = makeCareer()
     const player = c.data.players.get(c.userTeam.roster[0])!
