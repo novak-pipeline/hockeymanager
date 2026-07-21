@@ -2786,7 +2786,10 @@ export class Career {
     if (teamId !== (this.userTeamId as string)) return
     const team = this.data.teams.get(asTeamId(teamId))
     if (!team) return
-    const m = streakMilestone(team.name, next)
+    const m = streakMilestone(team.name, next, {
+      rng: new Rng(deriveSeed(this.seed, 9285, this.year, this.currentDay, Math.abs(next))),
+      ledger: this.contentLedger, year: this.year, day: this.currentDay,
+    })
     if (m) this.pushNews('league', m.headline, m.body, { teamId })
   }
 

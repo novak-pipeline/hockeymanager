@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { Rng } from '@engine/shared/rng'
+import type { ContentUse } from '@engine/story/contentEngine'
 import { streakMilestone } from './ambientNews'
 
 describe('ambientNews — streakMilestone', () => {
@@ -26,5 +28,19 @@ describe('ambientNews — streakMilestone', () => {
     expect(streakMilestone('X', 8)).not.toBeNull()
     expect(streakMilestone('X', 10)).not.toBeNull()
     expect(streakMilestone('X', -12)).not.toBeNull()
+  })
+
+  it('with a ledger, one long run reads differently at 6, 8, and 10 games', () => {
+    const ledger: ContentUse[] = []
+    const at = (n: number, day: number) =>
+      streakMilestone('Pittsburgh', n, { rng: new Rng(5), ledger, year: 2025, day })!
+    const six = at(6, 10)
+    const eight = at(8, 14)
+    const ten = at(10, 18)
+    // Three milestones on the same heater: three different stories…
+    expect(new Set([six.headline, eight.headline, ten.headline]).size).toBe(3)
+    // …and double digits always escalates to the history-chasing variant.
+    expect(ten.headline).toContain('history')
+    for (const m of [six, eight, ten]) expect(m.headline).not.toMatch(/\{[a-z]+\}/)
   })
 })
