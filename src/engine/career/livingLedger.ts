@@ -176,6 +176,40 @@ function residueFor(kind: WorldActionKind): ResidueKind {
   }
 }
 
+/* ────────────────── residue at the negotiation table ────────────────── */
+
+/**
+ * What the world's memory costs you when this player's camp sits down.
+ * Known residue (he KNOWS he was shopped/scratched/demoted, this year or
+ * last) hardens the open: the ask climbs ~4% per grudge (capped at two) and
+ * patience shortens — and the agent says why, so the receipt is explicit.
+ */
+export function grudgeContext(
+  flags: ResidueFlag[],
+  playerId: string,
+  year: number
+): { askMult: number; patienceHit: number; lines: string[] } {
+  const grudges = flags.filter(
+    (f) => f.playerId === playerId && f.known && f.year >= year - 1
+  )
+  if (grudges.length === 0) return { askMult: 1, patienceHit: 0, lines: [] }
+  const seen = new Set<ResidueKind>()
+  const lines: string[] = []
+  for (const g of grudges) {
+    if (seen.has(g.kind)) continue
+    seen.add(g.kind)
+    if (g.kind === 'wasShopped') {
+      lines.push(`Before we talk numbers: my client knows his name was on the block in ${g.year}. He stayed professional about it. It is, however, context for everything that follows.`)
+    } else if (g.kind === 'wasScratched') {
+      lines.push(`We both remember the healthy scratches. He answered them on the ice — but a player of his standing doesn't forget watching from the press box, and neither do I.`)
+    } else if (g.kind === 'wasDemoted') {
+      lines.push(`You put him through waivers in ${g.year}. He cleared, he reported, he produced. Today the invoice for that week arrives.`)
+    }
+  }
+  const n = Math.min(grudges.length, 2)
+  return { askMult: 1 + n * 0.04, patienceHit: n * 8, lines }
+}
+
 /* ─────────────────────── reaction copy (the product) ─────────────────────── */
 /* Written to the NARRATIVE-ENGINE.md standard: specific, in-character,
  * economical, consequence-aware — and served through the Content Engine:

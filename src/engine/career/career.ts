@@ -260,6 +260,7 @@ import {
 import {
   scheduleReactions,
   reactionCopy,
+  grudgeContext,
   type WorldAction,
   type WorldActionKind,
   type PendingLedgerReaction,
@@ -10124,13 +10125,21 @@ export class Career {
     // A free agent still on the market softens his ask the longer he waits, so a
     // GM can hold out on a player who is overpricing himself. Only in the FA window.
     const faDecay = kind === 'freeAgent' ? faAskDecay(this.offseason?.faDay ?? 0) : 1
+    // Living Ledger: what you did to this man follows him to the table. Known
+    // residue (shopped/scratched/demoted, this year or last) hardens the ask,
+    // shortens patience, and the agent SAYS why — the receipt is explicit.
+    const grudge = grudgeContext(this.residueFlags, playerId, this.year)
     const state = openNegotiation({
       player,
       year: this.year,
       kind,
-      marketHeat: (1 + heat * 0.08) * faDecay,
+      marketHeat: (1 + heat * 0.08) * faDecay * grudge.askMult,
       rapportTilt: rapportTilt(this.agentRapport, agentFor(player).name),
     })
+    if (grudge.patienceHit > 0) {
+      state.patience = Math.max(15, state.patience - grudge.patienceHit)
+      state.revealedHints.push(...grudge.lines)
+    }
     // A camp burned earlier this summer (paused/walked re-sign talks) opens colder.
     if (existing && (existing.status === 'paused' || existing.status === 'walked')) {
       state.patience = Math.max(20, state.patience - 20)

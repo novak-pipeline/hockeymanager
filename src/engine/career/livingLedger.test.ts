@@ -11,7 +11,7 @@ import { asPlayerId } from '@domain'
 import { generateLeague } from '@data/generate'
 import { Rng } from '@engine/shared/rng'
 import { Career } from './career'
-import { scheduleReactions, reactionCopy, MAX_OPEN_THREADS, type WorldAction } from './livingLedger'
+import { grudgeContext, scheduleReactions, reactionCopy, MAX_OPEN_THREADS, type ResidueFlag, type WorldAction } from './livingLedger'
 
 function makeCareer(seed = 77): { career: Career; c: any } {
   const data = generateLeague({ seed })
@@ -114,6 +114,33 @@ describe('livingLedger — pure scheduler', () => {
     expect(again.message).toContain('already')
     // Every confrontation offers the full response set (promise…dismissive).
     expect(hot.options?.map((o) => o.tone)).toEqual(['promise', 'supportive', 'firm', 'dismissive'])
+  })
+})
+
+describe('livingLedger — grudges at the negotiation table', () => {
+  const flag = (kind: ResidueFlag['kind'], known: boolean, year: number): ResidueFlag =>
+    ({ playerId: 'p1', kind, known, year, day: 10, actionId: 'wa1' })
+
+  it('known residue hardens the ask, shortens patience, and the agent says why', () => {
+    const g = grudgeContext([flag('wasShopped', true, 2025)], 'p1', 2025)
+    expect(g.askMult).toBeCloseTo(1.04)
+    expect(g.patienceHit).toBe(8)
+    expect(g.lines[0]).toContain('on the block in 2025')
+  })
+
+  it('what he never learned costs nothing; ancient history is forgiven', () => {
+    expect(grudgeContext([flag('wasShopped', false, 2025)], 'p1', 2025).askMult).toBe(1)
+    expect(grudgeContext([flag('wasShopped', true, 2022)], 'p1', 2025).askMult).toBe(1)
+    expect(grudgeContext([flag('wasShopped', true, 2025)], 'OTHER', 2025).askMult).toBe(1)
+  })
+
+  it('grudges stack to a cap, one line per kind', () => {
+    const g = grudgeContext(
+      [flag('wasShopped', true, 2025), flag('wasScratched', true, 2024), flag('wasShopped', true, 2024)],
+      'p1', 2025
+    )
+    expect(g.askMult).toBeCloseTo(1.08) // capped at two grudges
+    expect(g.lines).toHaveLength(2)     // shopped line once, scratched line once
   })
 })
 
