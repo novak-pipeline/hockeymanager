@@ -193,9 +193,21 @@ const HEADLINE_POOL: Record<CoachSituation, DemeanorPool | string[]> = {
     `Coach backs {player} through the drought`,
     `{streak} games without: Coach on {player}'s dry spell`,
   ],
-  milestone: [`Coach on {player}'s milestone`],
-  signing: [`Coach welcomes {player}`],
-  tradeAdd: [`Coach on the {player} acquisition`],
+  milestone: [
+    `Coach on {player}'s milestone night`,
+    `"{player} earned every bit of it" — Coach`,
+    `A number worth stopping for: Coach salutes {player}`,
+  ],
+  signing: [
+    `Coach welcomes {player}`,
+    `"Exactly what we asked for" — Coach on the {player} signing`,
+    `New face, clear role: Coach on adding {player}`,
+  ],
+  tradeAdd: [
+    `Coach on the {player} acquisition`,
+    `"He makes us harder to play against" — Coach on {player}`,
+    `The bench boss got his wish: Coach on landing {player}`,
+  ],
 }
 
 /* ─────────────────────────── template filler ─────────────────────────── */

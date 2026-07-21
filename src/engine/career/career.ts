@@ -2214,6 +2214,11 @@ export class Career {
           headline,
           `${p.name} (${p.position}${teamAbbr ? `, ${teamAbbr}` : ''}) hit ${n.toLocaleString()} ${noun}s for his career.${flavour}`,
           { playerId: pid })
+        // Your own player crossing a MAJOR line gets the coach at the podium —
+        // an authored pool that sat dark until now. Minor milestones stay news-only.
+        if (isOwn && isMajor) {
+          this.pushCoachQuote('milestone', { playerName: p.name }, this.seed ^ Career.pidNum(pid) ^ (n * 17))
+        }
       }
     }
   }
@@ -9600,6 +9605,11 @@ export class Career {
     this.faPool = this.faPool.filter((f) => (f as string) !== playerId)
     this.lockerArrival(this.userTeamId, id)
     repairLines(this.userTeam, this.data.players)
+    // A signing the fanbase actually notices gets the coach on record (the
+    // 'signing' pool sat authored-but-dark). Depth adds stay news-only.
+    if (ratedOverall(player) >= 74 || salary >= 3_000_000) {
+      this.pushCoachQuote('signing', { playerName: player.name }, this.seed ^ Career.pidNum(playerId) ^ (this.year * 7))
+    }
     // World Chronicle: your signings are part of your permanent record.
     recordAcquisition(this.chronicle, {
       playerId, teamId: this.userTeamId as string, year: this.year, via: 'signing',
@@ -11774,6 +11784,20 @@ export class Career {
         playerId: pid as string, teamId: args.teamAId as string, year: this.year,
         via: 'trade', fromTeamId: args.teamBId as string, eventId: ev.id,
       })
+    }
+    // The coach weighs in when YOUR trade lands a real player (the 'tradeAdd'
+    // pool sat authored-but-dark). Quote once, on the best incoming piece —
+    // pick-only deals and depth swaps pass in silence.
+    if (userInvolved) {
+      const incomingIds =
+        (args.teamAId as string) === (this.userTeamId as string) ? args.bGivesPlayerIds : args.aGivesPlayerIds
+      const best = incomingIds
+        .map((pid) => this.data.players.get(asPlayerId(pid as string)))
+        .filter((p): p is Player => !!p && ratedOverall(p) >= 74)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+      if (best) {
+        this.pushCoachQuote('tradeAdd', { playerName: best.name }, this.seed ^ Career.pidNum(best.id as string) ^ (this.year * 11))
+      }
     }
   }
 
