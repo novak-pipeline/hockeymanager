@@ -110,15 +110,15 @@ describe('coachQuote', () => {
     const coach = makeCoach('fiery')
     const ledger: ContentUse[] = []
     const facts: CoachQuoteFacts = { opponentAbbr: 'TOR', goalDiff: 4 }
-    // Five big wins with the SAME seed: without the ledger these would all be
-    // the identical line; with it, the pool rotates through all five variants.
-    const quotes = Array.from({ length: 5 }, (_, day) =>
+    // Eight big wins with the SAME seed: without the ledger these would all be
+    // the identical line; with it, the pool rotates through all eight variants.
+    const quotes = Array.from({ length: 8 }, (_, day) =>
       coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2025, day })
     )
-    expect(new Set(quotes).size).toBe(5)
-    // Sixth quote: pool exhausted — repeats rather than going silent.
-    const sixth = coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2025, day: 6 })
-    expect(quotes).toContain(sixth)
+    expect(new Set(quotes).size).toBe(8)
+    // Ninth quote: pool exhausted — repeats rather than going silent.
+    const ninth = coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2025, day: 9 })
+    expect(quotes).toContain(ninth)
     // New season: the pool is fresh again.
     const nextYear = coachQuote(coach, 'postBigWin', facts, 12345, { ledger, year: 2026, day: 1 })
     expect(nextYear.length).toBeGreaterThan(10)

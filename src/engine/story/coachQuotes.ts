@@ -260,6 +260,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "{diff} goals — and it could've been more. We were ruthless. I want that edge to stay with us.",
       "We owed {opp} nothing and gave them nothing. That's the mentality we need to carry into every rink in this league.",
       "Nobody outworks us when we're locked in like that. I don't care who we play next — bring them on.",
+      "You saw the first shift — we hit everything that moved and the game bent to us from there. That's not luck. That's intent.",
+      "I've been asking for sixty minutes of teeth. Tonight I got sixty-two, because the boys didn't stop when it was decided. Love it.",
+      "{opp} wanted a track meet and we made it an alley. You pick the fight you can win. We picked right.",
     ],
     calm: [
       "A pleasing performance. We executed the game plan with real discipline and the results followed.",
@@ -267,6 +270,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "I was pleased with the structure today. Both ends of the ice were organized and we made it difficult for {opp}.",
       "The {score} result was fair. We controlled large stretches, and when we needed to tighten up we did.",
       "Good hockey tonight. Everyone contributed. We'll review the tape and look to replicate the good things.",
+      "I liked our patience most of all. We didn't force anything, and when {opp} cracked we were positioned to take everything they gave us.",
+      "Wins like this are quiet wins — no drama, no heroics, just details done properly for sixty minutes. Those travel well.",
+      "We asked the fourth line to set a tone and they did. When your depth leads, nights like this follow.",
     ],
     analytical: [
       "Our shot attempts at 5v5 were significantly above our season average — that's the underlying number I care about most.",
@@ -274,6 +280,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "The penalty kill was excellent — holding {opp} to zero on the power play was a decisive factor.",
       "Our zone exits were clean and our transition game created most of the danger. That's process producing results.",
       "I'll point to our neutral-zone play. We won a high percentage of those battles and it showed in our zone time.",
+      "Look at the shot map: everything from the slot, almost nothing conceded from the middle. When the game is played in the right places, the score takes care of itself.",
+      "We denied {opp}'s controlled entries all night and forced them to dump. Take away the blue line and you take away their offense — that was the whole plan.",
+      "Faceoffs, forecheck retrievals, second touches — we won the small-number battles, and the big number followed. That's how this works.",
     ],
     motivator: [
       "I couldn't be prouder of how this group showed up tonight. That's what belief in each other looks like.",
@@ -281,6 +290,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "When we play together and trust the system, we're a hard team to beat. Nights like this prove it.",
       "This group refused to let off the gas. That's character. That's heart. Carry it with you.",
       "Winning like that builds confidence. I want the guys to enjoy it tonight, because we've earned it.",
+      "The bench was the best part. Every goal, twenty guys on their feet for each other. You can't coach that in — but you can build a room where it grows.",
+      "Somebody asked me if this was a statement. It's better than a statement — it's evidence. This group is becoming what it believes it is.",
+      "Nights like tonight are why you play. I told them: remember this feeling, bottle it, and bring it to the next building.",
     ],
     pragmatic: [
       "We got the two points, which is all that matters. We'll move on and prepare for the next one.",
@@ -288,6 +300,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "{opp} had some dangerous sequences. We need to stay sharp — there are no easy nights in this league.",
       "The scoreboard looked good. The tape will tell me more. We can't lose our humility.",
       "Good result. The schedule doesn't give you time to dwell — we're back at it shortly.",
+      "Big margin, sure. I promise you {opp} will be a different animal next time — file the win and forget the score.",
+      "We executed, they didn't, and the league table gives the same two points either way. On to recovery.",
+      "I'd rather win ugly than lose pretty, and tonight we happened to do both halves of the winning part. Moving on.",
     ],
   },
 
@@ -299,6 +314,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "I won't sugarcoat it. We were outworked, outcompeted, and out-everything. I'm furious and I should be.",
       "Some guys out there tonight need to look themselves in the mirror. Hard truths. That's my job to say it.",
       "We gave {opp} the game. Mistakes that had no business happening at this level. It ends now.",
+      "Don't ask me about systems. Systems didn't lose that game — battles did. We lost the wall, we lost the net-front, we lost the fifty-fifties. All of it.",
+      "The first ten minutes told you everything. They were ready and we were still stretching. That's on the room, and I let the room hear it.",
+      "I don't do moral victories and I don't do 'we'll flush it.' You don't flush {diff} goals. You wear it until you fix it.",
     ],
     calm: [
       "A difficult night. We didn't execute the way we prepared to, but I'm not going to panic. We'll fix it.",
@@ -306,6 +324,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "We respect {opp} — they played well. We didn't match their level. That's an honest assessment.",
       "Not our best work. These nights happen. The key is how we respond in the next one.",
       "We'll regroup, watch the tape without emotion, and put together a better performance next time.",
+      "I'm going to resist the urge to say much tonight. The players know. Sometimes the quietest room is the one that learned the most.",
+      "There's a version of this press conference where I throw people under the bus. You won't get it. We win as a group and we lose as one.",
+      "The margin flatters {opp} a little — but only a little. We earned most of what happened to us tonight.",
     ],
     analytical: [
       "Our defensive-zone breakdowns in the second period cost us the game. That's clear on the tape.",
@@ -313,6 +334,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Shot quality against was too high. Our coverage at the back post was inconsistent throughout.",
       "We turned the puck over in transition {diff} times more than our season average. Those margins matter.",
       "Structurally we were a step slow. I've already identified the areas to address before the next game.",
+      "Strip out the empty-netter and the story is still the same: they generated from the middle, we generated from the perimeter. That gap IS the score.",
+      "Our forecheck retrieval rate fell off a cliff in the second period, and every goal against traces back to it. One fixable number.",
+      "I'm less worried than the scoreline suggests. The expected-goals gap was narrow — but 'close on paper' doesn't pay the bills, so we correct it anyway.",
     ],
     motivator: [
       "I believe in this group. Tonight wasn't us at our best, but I've seen what this team is capable of.",
@@ -320,6 +344,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Nobody in that room should feel good about that result. Good. Use it. Channel it the right way.",
       "We've bounced back before and we will again. This group has the character — I've seen it.",
       "One game doesn't define us. How we respond defines us. I'll be watching closely.",
+      "I looked around that room after the horn and I didn't see quit — I saw anger. Good. Anger is fuel if you point it the right way.",
+      "Every team I've ever loved got embarrassed once on the way to becoming itself. Tonight was our once. Watch what we do with it.",
+      "I'll take the blame for this one publicly, and privately the room knows the standard. That's the deal between us — and it works.",
     ],
     pragmatic: [
       "We got beat tonight. {opp} was the better team. We regroup and move on.",
@@ -327,6 +354,9 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Not much to say other than we need to be better. We will be.",
       "I'm not in the business of over-reacting. We'll look at the tape and correct the mistakes.",
       "We lost. We assess it, fix what we can, and get back to work. That's the job.",
+      "Eighty-two of these. You're going to take a few beatings. The teams that go anywhere are the ones that keep the beatings boring — correct, don't combust.",
+      "{opp} played a good game and we played a bad one. It happens roughly ten times a season to everyone. The trick is not letting one become three.",
+      "No speeches tonight. Video at ten tomorrow, practice at eleven, and the schedule gives us a chance to fix the taste in our mouths within the week.",
     ],
   },
 
