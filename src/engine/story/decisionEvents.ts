@@ -79,6 +79,7 @@ export const DECISION_CTX_KEYS = [
   'potential',
   'inMinors',
   'formerlyShopped',
+  'formerlyDismissed',
   'deadlineWeek',
   'savePct',
 ] as const
@@ -288,8 +289,9 @@ DECISION_EVENTS.push(
     conditions: { minLosingStreak: 5, minMediaHeat: 60 },
     weight: 3,
     scene:
-      `The owner's office called before the tickets report even reached you. Attendance is sliding, the season-ticket ` +
-      `renewal window opens in three weeks, and he wants "something to announce." Not a plan — an announcement.`,
+      `The owner's office called before the tickets report even reached you. Attendance is sliding, the renewal window ` +
+      `opens in three weeks, and he wants "something to announce." Not a plan — an announcement. He said one name ` +
+      `unprompted: {last}. Twenty minutes later {last} is at your door, because somebody in that building talks.`,
     options: [
       {
         id: 'make-a-move',
@@ -386,6 +388,146 @@ DECISION_EVENTS.push(
         label: `Be straight: the club is going younger`,
         effects: { morale: -6, roomRespect: 10, residue: 'wasShopped' },
         outcome: `No theatre, no false hope. He thanked you for it, meant it, and started thinking about where he goes next — which is exactly what you just told him to do.`,
+      },
+    ],
+  },
+)
+
+/* ── wave 3: the room's politics, the aging contract, the tanking question ── */
+
+DECISION_EVENTS.push(
+  {
+    id: 'ev.room.dismissed-leader-returns',
+    conditions: { formerlyDismissed: true, minImportance: 68 },
+    weight: 5,
+    scene:
+      `{last} has not brought you a room problem since the last time he did. He is bringing you one now, and he ` +
+      `prefaced it: "I know how this went before. I'm telling you anyway, because somebody has to."`,
+    options: [
+      {
+        id: 'listen-properly',
+        label: `Hear him out fully this time`,
+        effects: { morale: 12, roomMorale: 6, roomRespect: 8, promise: 'iceTime' },
+        outcome: `You let him finish, and you acted on it. A man who was done bringing you things is, provisionally, not done. Provisionally.`,
+      },
+      {
+        id: 'polite-nothing',
+        label: `Thank him, do nothing`,
+        effects: { morale: -8, roomMorale: -4, residue: 'wasDismissed' },
+        outcome: `The second time is the one that sticks. He will not be back a third time, and the room will learn why from him rather than from you.`,
+      },
+      {
+        id: 'own-it',
+        label: `Admit you got it wrong last time`,
+        effects: { morale: 10, roomRespect: 12, roomMorale: 4, leakChance: 0.25 },
+        outcome: `An apology from a GM is currency precisely because it is rare. You have spent some. If this gets repeated outside the room, it reads as weakness to people who weren't in it.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.contract.aging-vet-final-year',
+    conditions: { minAge: 33, minGamesPlayed: 600, contractYearsRemaining: 1 },
+    weight: 4,
+    scene:
+      `{last} is {age}, in the last year of his deal, and asked the question directly: "Do I finish here, or do I start ` +
+      `making other plans? I'm not asking for a number today. I'm asking whether there's a conversation to have."`,
+    options: [
+      {
+        id: 'finish-here',
+        label: `"You finish here."`,
+        effects: { morale: 16, roomMorale: 8, roomRespect: 6, promise: 'newDeal' },
+        outcome: `You promised a {age}-year-old his ending. If the decline comes faster than the sentiment, you will be choosing between your word and your cap sheet in public.`,
+      },
+      {
+        id: 'earn-it',
+        label: `"Play like you have been and we'll talk in March."`,
+        effects: { morale: -4, roomRespect: 4, promise: 'iceTime' },
+        outcome: `Honest and conditional — which he heard as conditional. He'll play the season auditioning, and everyone who watches him closely will notice.`,
+      },
+      {
+        id: 'make-plans',
+        label: `"Make other plans."`,
+        effects: { morale: -16, roomMorale: -8, residue: 'wasShopped', leakChance: 0.4 },
+        outcome: `Brutal, clean, and correct if the roster math says so. He thanked you flatly and told his agent that night. The room will hear his version.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.room.kid-takes-the-vets-minutes',
+    conditions: { maxAge: 23, minPotential: 84, minRoomTension: 50 },
+    weight: 4,
+    scene:
+      `Your coach wants {last} on the top power-play unit. Those minutes currently belong to a veteran who has been ` +
+      `here longer than you have, is playing fine, and will notice within one game.`,
+    options: [
+      {
+        id: 'promote-kid',
+        label: `Give the kid the minutes`,
+        effects: { morale: 12, roomMorale: -6, roomRespect: -3, promise: 'iceTime' },
+        outcome: `The right hockey call, made at a cost you'll pay in the room rather than on the scoresheet. And you've now promised the kid what you took from someone else.`,
+      },
+      {
+        id: 'keep-vet',
+        label: `Leave the unit alone`,
+        effects: { morale: -10, roomMorale: 4, residue: 'wasScratched' },
+        outcome: `Seniority held. The kid did not argue, which is worse than arguing — he simply started counting, and his camp counts with him.`,
+      },
+      {
+        id: 'split-it',
+        label: `Split the unit and let form decide`,
+        effects: { morale: -4, roomMorale: -3, roomRespect: 5 },
+        outcome: `Nobody is insulted and nobody is settled. Competition is honest management and an uncomfortable month for two players who now share a job.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.crease.backup-wants-a-job',
+    conditions: { position: 'G', minGamesPlayed: 100, maxImportance: 74 },
+    weight: 3,
+    scene:
+      `{last} asked for ten minutes and used three. "I'm {age}. I've been a good soldier behind him here. Somewhere out ` +
+      `there is a team that needs a starter, and I'd like your blessing to go find it before I'm too old to be one."`,
+    options: [
+      {
+        id: 'help-him',
+        label: `Promise to find him a landing spot`,
+        effects: { morale: 14, roomRespect: 10, promise: 'exploreTrade' },
+        outcome: `You agreed to trade a useful goaltender for his benefit rather than yours. The room noticed. So did your depth chart, which is now a problem for March.`,
+      },
+      {
+        id: 'need-you',
+        label: `"I need you here. We're not deep enough."`,
+        effects: { morale: -10, roomMorale: 2, residue: 'wasDismissed' },
+        outcome: `True, and he knows it's true, and it doesn't help. You bought a season of competent backup goaltending with a season of a man's ambition.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.media.the-tanking-question',
+    conditions: { minLosingStreak: 6, minMediaHeat: 80 },
+    weight: 5,
+    scene:
+      `The question came on the record, from someone who has covered this club for twenty years: "Are you trying to win ` +
+      `these games?" You gave an answer. {last} read it on the bus, and he is now in your office holding his phone: ` +
+      `"The guys want to know what that means. I told them I'd ask you instead of guessing."`,
+    options: [
+      {
+        id: 'deny-hard',
+        label: `"We try to win every night."`,
+        effects: { roomMorale: 6, roomRespect: 4, promise: 'iceTime' },
+        outcome: `The only sayable answer, and now the lineup card has to agree with it. Every young scratch and every veteran sitting becomes evidence against your own quote.`,
+      },
+      {
+        id: 'admit-rebuild',
+        label: `Be honest about the rebuild`,
+        effects: { roomMorale: -10, roomRespect: 8, leakChance: 0.7 },
+        outcome: `You told the truth to a room that would rather not compete under it. The fans get clarity, the players get confirmation that this year is not for them, and both remember who said it.`,
+      },
+      {
+        id: 'deflect',
+        label: `Deflect to "process" and end the availability`,
+        effects: { roomMorale: -4, roomRespect: -6, leakChance: 0.4 },
+        outcome: `Nobody believed it, including you. The column writes itself, and the room reads the same evasion the reporters did.`,
       },
     ],
   },

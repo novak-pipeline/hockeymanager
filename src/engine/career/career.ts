@@ -2879,6 +2879,10 @@ export class Career {
         formerlyShopped: this.residueFlags.some(
           (f) => f.playerId === (p.id as string) && f.kind === 'wasShopped' && f.known
         ),
+        // A leader you waved off once will approach differently the next time.
+        formerlyDismissed: this.residueFlags.some(
+          (f) => f.playerId === (p.id as string) && f.kind === 'wasDismissed' && f.known
+        ),
         deadlineWeek,
         // Season save % as a whole number; non-goalies sit at 100 so the
         // crease dilemma can never latch onto a skater.

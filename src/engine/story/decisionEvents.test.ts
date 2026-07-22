@@ -36,6 +36,17 @@ describe('decisionEvents — library integrity', () => {
     }
   })
 
+  it('every scene is ABOUT its subject — it is delivered as a meeting with him', () => {
+    // The runner attaches each dilemma to a specific player and announces it as
+    // "{name} is waiting in your office". A scene that never mentions him (an
+    // owner phone call, a press-conference question) reads as a non-sequitur
+    // staged as a private meeting.
+    for (const e of DECISION_EVENTS) {
+      const namesHim = e.scene.includes('{name}') || e.scene.includes('{last}')
+      expect(namesHim, `${e.id} never references its subject player`).toBe(true)
+    }
+  })
+
   it('every event has a unique id and at least two options', () => {
     const ids = DECISION_EVENTS.map((e) => e.id)
     expect(new Set(ids).size).toBe(ids.length)
