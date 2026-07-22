@@ -266,7 +266,8 @@ import {
   type PendingLedgerReaction,
   type ResidueFlag,
 } from './livingLedger'
-import type { ContentUse } from '@engine/story/contentEngine'
+import { markUsed, renderTemplate, type ContentCtx, type ContentUse } from '@engine/story/contentEngine'
+import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionEffects } from '@engine/story/decisionEvents'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
@@ -2818,6 +2819,129 @@ export class Career {
     if (m) this.pushNews('league', m.headline, m.body, { teamId })
   }
 
+  /* ──────────────── decision events (Narrative Engine layer 2) ──────────────── */
+
+  private static readonly DECISION_NS = 7190
+  /** Quiet days between dilemmas — a crossroads should feel like an occasion. */
+  private static readonly DECISION_COOLDOWN_DAYS = 21
+  private lastDecisionDay = -999
+
+  /**
+   * Scan for an authored dilemma worth raising today and deliver it through the
+   * interaction machinery (docs/NARRATIVE-ENGINE.md). Rate-limited hard: one
+   * per three weeks, never stacked on an open concern, and silent when nothing
+   * genuinely applies — a crossroads that fires on a quiet Tuesday is noise.
+   */
+  private maybeRaiseDecisionEvent(day: number): void {
+    if (this.phase !== 'regularSeason') return
+    if (day - this.lastDecisionDay < Career.DECISION_COOLDOWN_DAYS) return
+    if (this.interactions.some((i) => i.status === 'open')) return
+
+    const roster = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p)
+    if (roster.length === 0) return
+
+    const lr = this.lockerRooms.get(this.userTeamId)
+    const roomTension = lr ? 100 - lr.roomMorale : 40
+    const losingStreak = Math.abs(Math.min(0, this.teamStreaks.get(this.userTeamId as string) ?? 0))
+    const captainId = this.userTeam.captainId as string | undefined
+    const rng = new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day))
+
+    // Evaluate candidates subject-first: the event library's conditions read a
+    // per-PLAYER context, so each roster man is a possible protagonist. Stable
+    // order (roster order) keeps this deterministic.
+    for (const p of roster) {
+      const careerGp = p.stats.reduce((n, s) => n + s.gamesPlayed, 0)
+      const ctx: ContentCtx = {
+        age: p.age,
+        gamesPlayed: careerGp,
+        scratched: this.isScratchedFor(p.id as string),
+        isLeader: (p.id as string) === captainId,
+        roomTension,
+        losingStreak,
+        mediaHeat: Math.min(100, losingStreak * 14),
+        nursingInjury: p.injuryStatus !== null,
+        importance: ratedOverall(p),
+        contractYearsRemaining: p.contract.yearsRemaining,
+      }
+      const ev = pickDecisionEvent({
+        ctx, rng,
+        used: this.contentLedger.map((u) => ({ variantId: u.variantId, year: u.year })),
+        year: this.year,
+      })
+      if (!ev) continue
+
+      const slots = decisionSlots(p, careerGp, this.userTeam.name)
+      this.interactions.unshift({
+        id: `i${this.interactionCounter++}`,
+        playerId: p.id as string,
+        teamId: this.userTeamId as string,
+        year: this.year,
+        day,
+        kind: 'unhappy',
+        severity: 'serious',
+        message: renderTemplate(ev.scene, slots),
+        options: ev.options.map((o) => ({ id: o.id, label: o.label, tone: 'firm' as const })),
+        status: 'open',
+      })
+      this.decisionEventFor.set(`i${this.interactionCounter - 1}`, ev.id)
+      markUsed(this.contentLedger, ev.id, this.year, day)
+      this.lastDecisionDay = day
+      this.pushNews('contract', `${p.name} is waiting in your office`,
+        renderTemplate(ev.scene, slots), { playerId: p.id as string, teamId: this.userTeamId as string })
+      return // one dilemma at a time
+    }
+  }
+
+  /** interactionId → decision-event id, so the response applies authored effects. */
+  private decisionEventFor = new Map<string, string>()
+
+  /** Apply an authored option's effects: morale, the room, promises, residue,
+   *  and the leak roll. Every one is a lever the sim already honours. */
+  private applyDecisionEffects(
+    interaction: PlayerInteraction,
+    player: Player,
+    chosen: { id: string; outcome: string; effects: DecisionEffects }
+  ): void {
+    const e = chosen.effects
+    const day = this.currentDay
+    if (e.morale) player.morale = Math.max(0, Math.min(100, player.morale + e.morale))
+    const lr = this.lockerRooms.get(this.userTeamId)
+    if (lr && (e.roomMorale || e.roomRespect)) {
+      lr.roomMorale = Math.max(0, Math.min(100, lr.roomMorale + (e.roomMorale ?? 0) + (e.roomRespect ?? 0) * 0.5))
+    }
+    if (e.promise) {
+      const cur = player.stats.find((s) => s.season === this.year)
+      this.playerPromises.push({
+        id: `pp${this.interactionCounter++}`,
+        playerId: player.id as string,
+        kind: e.promise,
+        text: chosen.outcome,
+        year: this.year,
+        day,
+        ...(cur ? { baselineGp: cur.gamesPlayed } : {}),
+        baselineYears: player.contract.yearsRemaining,
+        status: 'open',
+      })
+    }
+    if (e.residue) {
+      this.residueFlags.push({
+        playerId: player.id as string, kind: e.residue,
+        year: this.year, day, actionId: `dec:${chosen.id}`, known: true,
+      })
+    }
+    if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
+      this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
+        `What was said behind your office door did not stay there. ${chosen.outcome}`,
+        { playerId: player.id as string, teamId: this.userTeamId as string })
+    }
+    interaction.status = 'resolved'
+    interaction.chosenOptionId = chosen.id
+    interaction.outcome = chosen.outcome
+    interaction.resolvedDay = day
+  }
+
   /** The user's GM state, lazily created for old saves that predate the GM career. */
   private ensureGM(): GMState {
     if (!this.gmStateInternal) {
@@ -2932,6 +3056,19 @@ export class Career {
 
     const player = this.data.players.get(asPlayerId(interaction.playerId))
     if (!player) return { ok: false, message: 'Player not found.' }
+
+    // Authored dilemma? Its options carry hand-written effects and a receipt,
+    // so they bypass the generic tone model entirely (Narrative Engine L2).
+    const decisionId = this.decisionEventFor.get(interactionId)
+    if (decisionId) {
+      const ev = DECISION_EVENTS.find((e) => e.id === decisionId)
+      const chosen = ev?.options.find((o) => o.id === optionId)
+      if (ev && chosen) {
+        this.applyDecisionEffects(interaction, player, chosen)
+        this.decisionEventFor.delete(interactionId)
+        return { ok: true, message: chosen.outcome }
+      }
+    }
 
     const result = applyInteractionResponse({ interaction, option, player })
     // A JSON-safe descriptor of the resolution so the renderer can voice the
@@ -3445,6 +3582,7 @@ export class Career {
 
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.maybeRaiseInteractions(day)
+    this.maybeRaiseDecisionEvent(day)
     this.evaluatePlayerPromises(day)
     // Living Ledger: leaks break, confrontations walk in, agents call — the
     // world responding to what the GM did (docs/NARRATIVE-ENGINE.md layer 0).

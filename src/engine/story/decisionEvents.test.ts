@@ -105,6 +105,38 @@ describe('decisionEvents — trigger selection', () => {
     expect(pickDecisionEvent({ ctx: quiet, rng: new Rng(1), used: [], year: 2025 })).toBeNull()
   })
 
+  it('career integration: a dilemma raises as an answerable interaction and its effects land', async () => {
+    const { generateLeague } = await import('@data/generate')
+    const { Career } = await import('@engine/career/career')
+    const data = generateLeague({ seed: 31 })
+    const userId = data.league.teams[0]!
+    const c = new Career(data, 31, userId) as unknown as Record<string, any>
+
+    // Force the worked example: a long-serving vet, scratched, off cooldown.
+    const vet = c.data.players.get(c.userTeam.roster[0])!
+    vet.age = 34
+    vet.stats = [{ season: 2024, gamesPlayed: 800, ev: { timeOnIce: 0 }, pp: { timeOnIce: 0 }, pk: { timeOnIce: 0 } }]
+    c.practiceState = { ...c.practiceState, scratched: [vet.id as string] }
+    c.lastDecisionDay = -999
+    c.interactions = []
+    c.maybeRaiseDecisionEvent(40)
+
+    const open = c.interactions.filter((i: any) => i.status === 'open')
+    expect(open.length, 'a dilemma should have been raised').toBe(1)
+    expect(open[0].message).toContain(vet.name)
+    expect(open[0].options.length).toBeGreaterThanOrEqual(2)
+
+    // Answering the "door's behind you" option must actually cost him morale
+    // AND leave permanent residue the world remembers.
+    const before = vet.morale
+    const res = c.respondToInteraction(open[0].id, 'door')
+    expect(res.ok).toBe(true)
+    expect(res.message.length).toBeGreaterThan(40) // the receipt
+    expect(vet.morale).toBeLessThan(before)
+    expect(c.residueFlags.some((f: any) => f.playerId === (vet.id as string) && f.kind === 'wasScratched')).toBe(true)
+    expect(c.interactions[0].status).toBe('resolved')
+  })
+
   it('selection is deterministic for a given seed', () => {
     const ctx = { age: 34, gamesPlayed: 900, scratched: true, isLeader: false, roomTension: 10 }
     const a = pickDecisionEvent({ ctx, rng: new Rng(7), used: [], year: 2025 })?.id
