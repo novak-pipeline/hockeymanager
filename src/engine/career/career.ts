@@ -17776,6 +17776,8 @@ export class Career {
       residueFlags: this.residueFlags.map((f) => structuredClone(f)),
       ledgerCounter: this.ledgerCounter,
       contentLedger: this.contentLedger.map((u) => ({ ...u })),
+      decisionEventFor: [...this.decisionEventFor.entries()],
+      lastDecisionDay: this.lastDecisionDay,
       interactionCounter: this.interactionCounter,
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
       ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
@@ -17958,6 +17960,8 @@ export class Career {
     if (snapshot.residueFlags) career.residueFlags = snapshot.residueFlags.map((f) => ({ ...f }))
     career.ledgerCounter = snapshot.ledgerCounter ?? 0
     if (snapshot.contentLedger) career.contentLedger = snapshot.contentLedger.map((u) => ({ ...u }))
+    if (snapshot.decisionEventFor) career.decisionEventFor = new Map(snapshot.decisionEventFor)
+    career.lastDecisionDay = snapshot.lastDecisionDay ?? -999
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
     career.feedCounter = snapshot.feedCounter ?? 0

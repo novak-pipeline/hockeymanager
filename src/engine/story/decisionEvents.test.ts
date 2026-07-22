@@ -150,6 +150,41 @@ describe('decisionEvents — trigger selection', () => {
     expect(c.interactions[0].status).toBe('resolved')
   })
 
+  it('a dilemma saved mid-scene keeps its AUTHORED effects after load', async () => {
+    // Without persistence the interactionId→event map is lost, and answering a
+    // restored dilemma silently degrades to the generic tone model: the receipt
+    // and the residue both vanish. This is that regression, pinned.
+    const { generateLeague } = await import('@data/generate')
+    const { Career } = await import('@engine/career/career')
+    const data = generateLeague({ seed: 44 })
+    const userId = data.league.teams[0]!
+    const c = new Career(data, 44, userId) as unknown as Record<string, any>
+
+    const vet = c.data.players.get(c.userTeam.roster[0])!
+    vet.age = 34
+    vet.stats = [{ season: 2024, gamesPlayed: 800, ev: { timeOnIce: 0 }, pp: { timeOnIce: 0 }, pk: { timeOnIce: 0 } }]
+    c.practiceState = { ...c.practiceState, scratched: [vet.id as string] }
+    c.lastDecisionDay = -999
+    c.interactions = []
+    c.maybeRaiseDecisionEvent(40)
+    const raised = c.interactions.find((i: any) => i.status === 'open')
+    expect(raised, 'a dilemma should have been raised').toBeDefined()
+
+    // Save and reload BEFORE answering.
+    const snap = (c as any).exportSnapshot('t', 'now')
+    const restored = Career.fromSnapshot(structuredClone(snap)) as unknown as Record<string, any>
+    expect(restored.decisionEventFor.get(raised.id)).toBe('ev.room.healthy-scratch-vet')
+    expect(restored.lastDecisionDay).toBe(40)
+
+    const rVet = restored.data.players.get(vet.id)!
+    const before = rVet.morale
+    const res = restored.respondToInteraction(raised.id, 'door')
+    expect(res.ok).toBe(true)
+    expect(res.message.length).toBeGreaterThan(40) // the AUTHORED receipt survived
+    expect(rVet.morale).toBeLessThan(before)
+    expect(restored.residueFlags.some((f: any) => f.playerId === (vet.id as string) && f.kind === 'wasScratched')).toBe(true)
+  })
+
   it('selection is deterministic for a given seed', () => {
     const ctx = { age: 34, gamesPlayed: 900, scratched: true, isLeader: false, roomTension: 10 }
     const a = pickDecisionEvent({ ctx, rng: new Rng(7), used: [], year: 2025 })?.id

@@ -2392,6 +2392,11 @@ export interface CareerSnapshot {
   ledgerCounter?: number
   /** Content Engine no-repeat ledger (B4.5). Optional/additive. */
   contentLedger?: import('@engine/story/contentEngine').ContentUse[]
+  /** Open decision events: interactionId → event id, so a dilemma saved
+   *  mid-scene still applies its AUTHORED effects on load rather than
+   *  silently falling back to the generic tone model. Optional/additive. */
+  decisionEventFor?: Array<[string, string]>
+  lastDecisionDay?: number
   /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
   storyPriors?: StoryPriors
   /** Social-feed posts (separate from inbox news). Optional/additive. */
