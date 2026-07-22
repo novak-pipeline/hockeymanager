@@ -222,6 +222,177 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       },
     ],
   },
+  {
+    id: 'ev.goalie.pulled-again',
+    conditions: { position: 'G', maxSavePct: 0.888, minGamesPlayed: 20 },
+    weight: 2,
+    scene:
+      `{last} caught you in the hallway, still in his gear. "Third time this month you've pulled me. ` +
+      `I can wear that — but I need to know if you're pulling the goalie or pulling ME."`,
+    options: [
+      {
+        id: 'starter',
+        label: `"You're my starter. I'll stop pulling you."`,
+        effects: { morale: 12, promise: 'iceTime', roomRespect: -3 },
+        outcome: `He straightened up. You have also just told your coach he can't make an in-game decision — and the room will notice the first night it costs you.`,
+      },
+      {
+        id: 'earn-it',
+        label: `"You're pulled when you're beaten. Same as anyone."`,
+        effects: { morale: -6, roomRespect: 7 },
+        outcome: `He didn't like it. Every skater who heard about it liked it a great deal — nobody gets a different rulebook.`,
+      },
+      {
+        id: 'tandem',
+        label: `"We're going to a tandem for a while."`,
+        effects: { morale: -10, roomMorale: 3, leakChance: 0.3, residue: 'wasDemoted' },
+        outcome: `Honest, defensible, and the end of his run as the guy. His camp will remember which season that started.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.media.trade-block-question',
+    conditions: { formerlyShopped: true, minMediaHeat: 55 },
+    weight: 3,
+    scene:
+      `The beat writer skips the warm-up. "We hear {name} was available. Is he in your plans, or is he a rental ` +
+      `for somebody else?" The recorder is already running.`,
+    options: [
+      {
+        id: 'deny',
+        label: `"He's not going anywhere."`,
+        effects: { morale: 8, promise: 'iceTime', roomRespect: -5, leakChance: 0.45 },
+        outcome: `He'll read that tonight and believe it. So will every GM you were negotiating with — and one of them knows better.`,
+      },
+      {
+        id: 'honest',
+        label: `"I listen on everybody. That's the job."`,
+        effects: { morale: -9, roomRespect: 8, residue: 'wasShopped' },
+        outcome: `The room respects a GM who doesn't insult them. {last} still had to explain it to his kids.`,
+      },
+      {
+        id: 'nocomment',
+        label: `"I don't discuss internal conversations."`,
+        effects: { morale: -4, roomMorale: -3, leakChance: 0.55 },
+        outcome: `A non-answer is an answer. By morning somebody with better sourcing than you filled in the blank.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.injury.play-through-it',
+    conditions: { nursingInjury: true, minImportance: 70 },
+    weight: 3,
+    scene:
+      `The physio's report says {last} sits two weeks. {last} says he's playing. "It's a playoff race. ` +
+      `I've played through worse and you know it."`,
+    options: [
+      {
+        id: 'let-him',
+        label: `Let him play — you need the points`,
+        effects: { morale: 8, roomRespect: 5, roomMorale: -2 },
+        outcome: `He dressed. Your medical staff logged their objection in writing, the way people do when they expect to be asked later.`,
+      },
+      {
+        id: 'sit-him',
+        label: `Sit him. The season is longer than one game.`,
+        effects: { morale: -10, roomMorale: 4, promise: 'iceTime' },
+        outcome: `He was furious, and he was protected. You now owe him the minutes when he's right again — he'll be counting.`,
+      },
+      {
+        id: 'defer',
+        label: `Leave it to the medical staff`,
+        effects: { morale: -3, roomRespect: -6 },
+        outcome: `You didn't decide, so somebody else did. The room noticed the man who signs the cheques didn't want his name on it.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.owner.streak-ultimatum',
+    conditions: { minLosingStreak: 6, minMediaHeat: 60 },
+    weight: 4,
+    scene:
+      `The owner called at seven in the morning, which is never good. Six straight, and he named {name} twice ` +
+      `without being asked. "I'm not telling you how to do your job — but I want to hear that somebody is ` +
+      `accountable, and I want to hear it today."`,
+    options: [
+      {
+        id: 'coach',
+        label: `Put the coach on notice publicly`,
+        effects: { roomMorale: -8, roomRespect: -6, leakChance: 0.6, residue: 'wasDismissed' },
+        outcome: `The owner is satisfied. Your coach read it at the same moment the players did, and the room now knows how you handle pressure.`,
+      },
+      {
+        id: 'own-it',
+        label: `"It's on me. I built this roster."`,
+        // Costs standing with the owner rather than the room, so it reads as a
+        // real trade rather than the obviously-correct answer.
+        effects: { roomMorale: 6, roomRespect: 10, leakChance: 0.35 },
+        outcome: `You spent your own credit to buy the room some air. The quote ran by lunchtime, and there is a finite amount of that credit — the owner keeps a tally.`,
+      },
+      {
+        id: 'shake',
+        label: `Promise changes to the lineup`,
+        effects: { roomMorale: -4, roomRespect: -2, promise: 'exploreTrade' },
+        outcome: `You bought a week. Every player in that room spent the afternoon working out whether they were "changes".`,
+      },
+    ],
+  },
+  {
+    id: 'ev.deadline.rental-honesty',
+    conditions: { deadlineWeek: true, maxContractYearsRemaining: 1, minImportance: 60 },
+    weight: 4,
+    scene:
+      `Two days out. {name} is on an expiring deal, playing the best hockey of his life, and he has just asked the ` +
+      `only question that matters: "Am I finishing the year here?"`,
+    options: [
+      {
+        id: 'commit',
+        label: `"You finish it here. My word."`,
+        effects: { morale: 14, promise: 'newDeal', roomRespect: 4 },
+        outcome: `He believed you completely, which is the problem — you just took your best trade chip off the market with a sentence.`,
+      },
+      {
+        id: 'honest',
+        label: `"I can't promise that. You've earned honesty."`,
+        effects: { morale: -7, roomRespect: 9, residue: 'wasShopped' },
+        outcome: `He thanked you, which somehow made it worse. He played the next two nights like a man auditioning, because he was.`,
+      },
+      {
+        id: 'dodge',
+        label: `"Let's talk after the deadline."`,
+        effects: { morale: -11, roomMorale: -4, leakChance: 0.4 },
+        outcome: `Everyone in the room translated that instantly. So did he.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.minors.buried-veteran',
+    conditions: { inMinors: true, minAge: 28, minGamesPlayed: 300 },
+    weight: 2,
+    scene:
+      `Six weeks in the minors and he is too good for it. {name} isn't asking for a call-up. "Just release me. ` +
+      `Let me go be useful somewhere. I'm not doing this for another year."`,
+    options: [
+      {
+        id: 'recall',
+        label: `Bring him up`,
+        effects: { morale: 12, promise: 'iceTime', roomMorale: -4 },
+        outcome: `A younger player just lost his spot to a man you'd written off. You'd better be right about the hockey.`,
+      },
+      {
+        id: 'release',
+        label: `Let him go, with thanks`,
+        effects: { morale: 5, roomRespect: 7, residue: 'wasDismissed' },
+        outcome: `You did the decent thing and lost the depth. Every veteran in your system heard this org lets a man leave with his dignity.`,
+      },
+      {
+        id: 'keep',
+        label: `"I need the insurance. You stay."`,
+        effects: { morale: -14, roomRespect: -7, leakChance: 0.4 },
+        outcome: `Legally airtight. He'll spend the season as the most expensive available reminder that you can be held somewhere you don't want to be.`,
+      },
+    ],
+  },
 ]
 
 /**

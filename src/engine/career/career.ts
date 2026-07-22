@@ -4703,10 +4703,21 @@ export class Career {
 
       for (const grp of ['G', 'D', 'F'] as const) {
         while (healthyCount(nhl.roster, grp) < NEED[grp] && nhl.roster.length < CEILING) {
-          const cand = ahl.roster
+          const pool = ahl.roster
             .map((id) => this.data.players.get(id))
             .filter((p): p is Player => !!p && p.injuryStatus === null && grpOf(p) === grp)
-            .sort((a, b) => ratedOverall(b) - ratedOverall(a) || (a.id < b.id ? -1 : 1))[0]
+            .sort((a, b) => ratedOverall(b) - ratedOverall(a) || (a.id < b.id ? -1 : 1))
+          // Cap-aware recall (B7.3): this used to take the BEST body regardless
+          // of price, so injury runs stacked salary with no ceiling at all.
+          // Prefer the best man who actually FITS the cap; if nobody fits, take
+          // the cheapest and eat the overage — icing a legal lineup outranks the
+          // cap sheet, which is how emergency conditions work in the real NHL.
+          const capRoom = nhl.finances.salaryCap - capUsedFor(nhl, this.data.players)
+          const cand =
+            pool.find((p) => p.contract.salary <= capRoom) ??
+            [...pool].sort(
+              (a, b) => a.contract.salary - b.contract.salary || (a.id < b.id ? -1 : 1)
+            )[0]
           if (!cand) break // no healthy AHL body at this position — repairLines copes
           ahl.roster = ahl.roster.filter((id) => id !== cand.id)
           nhl.roster.push(cand.id)
@@ -4728,6 +4739,28 @@ export class Career {
         if (!send) break // only waiver-requiring/needed bodies remain — GM must act
         nhl.roster = nhl.roster.filter((id) => id !== send.id)
         ahl.roster.push(send.id)
+      }
+
+      // The loop above only moves WAIVER-EXEMPT bodies, so a club whose surplus
+      // is all veterans just sits over the limit — and an AI club has no GM to
+      // act, so it ratchets there permanently (the autopilot flags it as
+      // "roster size 28 outside 18-26"). Above the LEGAL maximum that is not a
+      // judgement call, so AI clubs conform even if it costs waiver exposure.
+      // The user's club is left alone: silently exposing his veteran to waivers
+      // is his decision, and userLineupShortfall() already prompts him.
+      // (Root cause is the missing IR model — injured players still count
+      // against the roster here; see the LTIR/CBA epic.)
+      if (nhlId !== this.userTeamId) {
+        while (nhl.roster.length > MAX_ROSTER_SIZE) {
+          const send = nhl.roster
+            .map((id) => this.data.players.get(id))
+            .filter((p): p is Player => !!p && p.injuryStatus === null)
+            .filter((p) => healthyCount(nhl.roster, grpOf(p)) > NEED[grpOf(p)])
+            .sort((a, b) => ratedOverall(a) - ratedOverall(b) || (a.id < b.id ? -1 : 1))[0]
+          if (!send) break // genuinely can't conform — every healthy body is needed
+          nhl.roster = nhl.roster.filter((id) => id !== send.id)
+          ahl.roster.push(send.id)
+        }
       }
     }
     // Number any mid-season arrivals (recalls, trade/waiver adds) who lack a
@@ -7661,6 +7694,13 @@ export class Career {
     const capUsed = this.userCapUsed()
     if (capUsed + this.userDeadCap + c.salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'The award does not fit under your cap — clear space or walk away.' }
+    }
+    // Cap space isn't the only limit signPlayer enforces. Without this the
+    // automatic "unanswered awards bind the club" pass throws on a full roster
+    // and abandons the offseason. Refusing here is already handled: the caller
+    // walks any award it couldn't accept.
+    if (!this.userTeam.roster.includes(asPlayerId(playerId)) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
+      return { ok: false, message: `Your roster is full at ${MAX_ROSTER_SIZE} — clear a spot or walk away.` }
     }
     signPlayer({ team: this.userTeam, player: p, salary: c.salary, years: c.years, year: this.year, players: this.data.players })
     this.faPool = this.faPool.filter((id) => (id as string) !== playerId)
