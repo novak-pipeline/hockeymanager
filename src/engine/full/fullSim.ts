@@ -72,7 +72,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
-import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { scoreEffectMult, benchTilt, tiltedWeights } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
@@ -347,8 +347,8 @@ class TeamSim {
    * the incoming skaters take the outgoing skaters' slot positions, so the
    * change is seamless on screen; otherwise they fan out in their own end.
    */
-  deploy(rng: Rng, kind: DeployKind, count: number, inherit?: XY[], opp?: TeamSim): void {
-    const ids = this.deployIds(rng, kind, count, opp)
+  deploy(rng: Rng, kind: DeployKind, count: number, inherit?: XY[], opp?: TeamSim, tilt = 0): void {
+    const ids = this.deployIds(rng, kind, count, opp, tilt)
     const slots = SLOTS_BY_COUNT[ids.length] ?? SLOTS_BY_COUNT[5]
     const sign = this.ownSign()
     const skaters: RSkater[] = ids.map((id, i) => ({
@@ -368,7 +368,7 @@ class TeamSim {
   }
 
   /** Choose the player ids for a unit, skipping anyone sitting in the box. */
-  private deployIds(rng: Rng, kind: DeployKind, count: number, opp?: TeamSim): PlayerId[] {
+  private deployIds(rng: Rng, kind: DeployKind, count: number, opp?: TeamSim, tilt = 0): PlayerId[] {
     const lines = this.team.lines
     const boxed = new Set(this.penalties.map((p) => p.playerId))
     for (const f of this.sidelined) boxed.add(f.playerId)
@@ -384,10 +384,13 @@ class TeamSim {
     } else {
       const matched = this.matchedLine(rng, opp)
       // A won matchup is a five-man answer: checking line + shutdown pair.
-      const fwd = matched ?? lines.forwards[weightedIndex(rng, FWD_LINE_WEIGHTS)]
+      // Otherwise the rotation rolls — tilted late in a tight game (bench
+      // shortens toward the top lines) or a blowout (depth rolls). tilt 0 →
+      // the exact base weights, byte-identical.
+      const fwd = matched ?? lines.forwards[weightedIndex(rng, tiltedWeights(FWD_LINE_WEIGHTS, tilt))]
       const pair = matched
         ? this.shutdownPair() ?? lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
-        : lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
+        : lines.defensePairs[weightedIndex(rng, tiltedWeights(DEF_PAIR_WEIGHTS, tilt))]
       base = [...fwd, ...pair]
     }
     const out: PlayerId[] = []
@@ -780,7 +783,9 @@ function simPeriod(
   /** Deploy `team` at its desired strength, optionally announcing a lineChange. */
   const deployTeam = (team: TeamSim, opp: TeamSim, inherit?: XY[], announce = true): void => {
     const d = desiredFor(team, opp)
-    team.deploy(rng, d.kind, d.count, inherit, opp)
+    // Bench shortening: score + clock tilt this side's even-strength rotation.
+    const tilt = benchTilt(team.goals - opp.goals, (period - 1 + clk.t / lengthSeconds) / 3)
+    team.deploy(rng, d.kind, d.count, inherit, opp, tilt)
     if (announce) {
       noteBeat('lineChange')
       ctx.stream.push({
@@ -1322,7 +1327,7 @@ function simPeriod(
   }
 
   /** Rim/chip the puck out of the defensive zone under forecheck pressure. */
-  const clearPuck = (atk: TeamSim, a: number, shorthanded: boolean): void => {
+  const clearPuck = (_atk: TeamSim, a: number, shorthanded: boolean): void => {
     if (shorthanded) {
       // A PK clear goes the length of the ice — legal while shorthanded.
       const to: XY = { x: a * 0.8, y: rng.float(-0.5, 0.5) }

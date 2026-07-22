@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import type { Player, PlayerId, Team } from '@domain'
 import { asPlayerId, asTeamId, isEvent } from '@domain'
-import { scoreEffectMult } from './scoreEffects'
+import { scoreEffectMult, benchTilt, tiltedWeights } from './scoreEffects'
 import { fullSimGame } from '@engine/full/fullSim'
 
 describe('scoreEffectMult', () => {
@@ -42,6 +42,38 @@ describe('scoreEffectMult', () => {
     const push = scoreEffectMult(-1, 1) - 1
     const clamp = 1 - scoreEffectMult(1, 1)
     expect(push).toBeGreaterThan(clamp)
+  })
+})
+
+describe('benchTilt / tiltedWeights — shortening the bench', () => {
+  it('rolls lines normally through two periods, whatever the score', () => {
+    expect(benchTilt(-2, 0.5)).toBe(0)
+    expect(benchTilt(4, 0.66)).toBe(0)
+  })
+
+  it('shortens in a late tight game, rolls depth in a late blowout lead', () => {
+    expect(benchTilt(-1, 1)).toBeGreaterThan(0.2) // chasing by one at the horn
+    expect(benchTilt(0, 0.95)).toBeGreaterThan(0) // tied late counts too
+    expect(benchTilt(4, 1)).toBeLessThan(0) // up four: rest the stars
+    expect(benchTilt(-4, 1)).toBe(0) // buried: nothing to chase with
+    expect(benchTilt(1, 1)).toBe(0) // narrow lead: normal rotation
+    // Urgency grows through the third.
+    expect(benchTilt(-1, 1)).toBeGreaterThan(benchTilt(-1, 0.75))
+  })
+
+  it('tilts usage toward the top of the lineup when shortening, bottom when resting', () => {
+    const base = [0.34, 0.28, 0.22, 0.16]
+    const share = (w: number[], i: number): number => w[i] / w.reduce((a, b) => a + b, 0)
+    const short = tiltedWeights(base, 0.3)
+    expect(share(short, 0)).toBeGreaterThan(0.4) // top line eats
+    expect(share(short, 3)).toBeLessThan(0.12) // fourth line watches
+    const rest = tiltedWeights(base, -0.22)
+    expect(share(rest, 0)).toBeLessThan(share(base, 0)) // stars sit a bit
+    expect(share(rest, 3)).toBeGreaterThan(share(base, 3)) // depth rolls
+    // tilt 0 → exact base, so ordinary deployments replay byte-for-byte.
+    expect(tiltedWeights(base, 0)).toEqual(base)
+    // Weights stay positive (a sampler must never see zero/negative mass).
+    for (const w of [...short, ...rest]) expect(w).toBeGreaterThan(0)
   })
 })
 

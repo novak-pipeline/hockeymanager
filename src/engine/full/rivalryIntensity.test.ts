@@ -36,10 +36,12 @@ describe('rivalry intensity in the full sim', () => {
     const heated = rates(fullSimGame, 1)
     expect(heated.hits).toBeGreaterThan(calm.hits * 1.1) // clearly more bodychecks
     expect(heated.pens).toBeGreaterThan(calm.pens * 1.1) // clearly more penalties
-    // Scoring barely moves — the extra penalties feed some PP but it's a chippier
-    // game, not a track meet.
-    expect(heated.goals).toBeGreaterThan(calm.goals * 0.9)
-    expect(heated.goals).toBeLessThan(calm.goals * 1.15)
+    // Scoring dips a little at full heat — fights sideline skaters for five
+    // minutes at 3x the rate and the extra penalties chop the flow (measured
+    // ~0.93x over 300 games) — but a grudge match must stay a hockey game,
+    // never a shootout and never a 0-0 slog.
+    expect(heated.goals).toBeGreaterThan(calm.goals * 0.82)
+    expect(heated.goals).toBeLessThan(calm.goals * 1.12)
   }, 60000)
 })
 

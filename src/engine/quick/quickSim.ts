@@ -25,7 +25,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import { type GameRules, playoffScoringMult } from '@engine/shared/rules'
 import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
-import { scoreEffectMult } from '@engine/shared/scoreEffects'
+import { scoreEffectMult, benchTilt, tiltedWeights } from '@engine/shared/scoreEffects'
 import { goalieNightFactor } from '@engine/shared/goalieNight'
 import { shootoutOrder, shootoutSkill, shootoutGoalChance } from '@engine/shared/shootout'
 import { rollFightPlan, fightRngFor, FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
@@ -151,7 +151,7 @@ class TeamSim {
   /** #175: deploy the unit that matches the strength state — the real PP/PK units
    *  during special teams (so PP1 gets the power-play chances → the power-play
    *  goals, as in the full sim), the even-strength lines otherwise. */
-  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev', t = 0): OnIce {
+  pickOnIce(rng: Rng, situation: 'ev' | 'pp' | 'pk' = 'ev', t = 0, tilt = 0): OnIce {
     const lines = this.team.lines
     const goalie = this.resolve(this.startingGoalie ?? lines.goalies[0])
     if (situation === 'pp' && lines.powerPlayUnits.length > 0) {
@@ -162,11 +162,29 @@ class TeamSim {
       const unit = lines.penaltyKillUnits[weightedIndex(rng, lines.penaltyKillUnits.map((_, i) => PK_UNIT_WEIGHTS[i] ?? 0.15))]
       if (unit && unit.length > 0) return { skaters: this.available(unit, t).map((id) => this.resolve(id)), goalie }
     }
-    const fwdIdx = weightedIndex(rng, FWD_LINE_WEIGHTS)
-    const fwd = lines.forwards[fwdIdx]
-    const pair = lines.defensePairs[weightedIndex(rng, DEF_PAIR_WEIGHTS)]
-    const skaters = this.available([...fwd, ...pair], t).map(this.resolve)
+    // Late tight game: the bench shortens (top lines eat extra shifts); up big,
+    // the depth rolls. tilt 0 → the exact base weights, byte-identical.
+    const fwdIdx = weightedIndex(rng, tiltedWeights(FWD_LINE_WEIGHTS, tilt))
+    const fwd = lines.forwards[fwdIdx] ?? []
+    const pair = lines.defensePairs[weightedIndex(rng, tiltedWeights(DEF_PAIR_WEIGHTS, tilt))] ?? []
+    let skaters = this.available([...fwd, ...pair], t).map(this.resolve)
+    // A depleted roster (injuries stacked, a collapsed tank team, a line the
+    // GM emptied) can leave the drawn line with nobody on it. A real club
+    // always ices SOMEBODY, so fall back to any available skater — and do it
+    // WITHOUT drawing rng, so healthy teams never reach this branch and replay
+    // byte-for-byte. Without it, an empty line crashes the sim (pickShooter
+    // returns undefined and the caller reads .id).
+    if (skaters.length === 0) skaters = this.anyAvailableSkaters(t)
     return { skaters, goalie, fwdLine: fwdIdx }
+  }
+
+  /** Emergency bench scrape: up to five available non-goalies from the roster,
+   *  in roster order. Deterministic and rng-free by design. */
+  private anyAvailableSkaters(t: number): Player[] {
+    return this.available(this.team.roster, t)
+      .map(this.resolve)
+      .filter((p) => p !== undefined && p.position !== 'G')
+      .slice(0, 5)
   }
 
   /** Drop anyone serving a fighting major — his line skates short. */
@@ -230,7 +248,7 @@ class TeamSim {
    * time — even at home a coach doesn't win every matchup). Otherwise the
    * normal rotation rolls.
    */
-  pickMatched(rng: Rng, opp: TeamSim, oppOn: OnIce, t = 0): OnIce {
+  pickMatched(rng: Rng, opp: TeamSim, oppOn: OnIce, t = 0, tilt = 0): OnIce {
     if (oppOn.fwdLine === opp.topLineIdx() && rng.chance(LINE_MATCH_P)) {
       const lines = this.team.lines
       const fwdIdx = this.checkingLineIdx()
@@ -242,7 +260,7 @@ class TeamSim {
         return { skaters: this.available([...fwd, ...pair], t).map(this.resolve), goalie, fwdLine: fwdIdx }
       }
     }
-    return this.pickOnIce(rng, 'ev', t)
+    return this.pickOnIce(rng, 'ev', t, tilt)
   }
 
   /** #175: this team's strength state at game-clock `t` (relative to its opponent). */
@@ -321,7 +339,11 @@ const D_GOAL_BIAS = 0.5
 const D_ASSIST_BIAS = 0.6
 
 /** Weighted pick of a shooter from the on-ice forwards/D by scoring instinct. */
-function pickShooter(rng: Rng, skaters: Player[]): Player {
+/** Undefined when nobody is on the ice — callers MUST guard before reading
+ *  `.id`. (Typing this as `Player` while it could return undefined is what
+ *  turned a depleted roster into a season-ending crash.) */
+function pickShooter(rng: Rng, skaters: Player[]): Player | undefined {
+  if (skaters.length === 0) return undefined
   const weights = skaters.map((p) => {
     const base = 1 + p.composites.scoring + p.composites.playmaking * 0.4
     return p.position === 'D' ? base * D_GOAL_BIAS : base
@@ -403,6 +425,7 @@ function simShift(
 
   for (let s = 0; s < shots; s++) {
     const shooter = pickShooter(rng, atk.skaters)
+    if (!shooter) continue // nobody on the ice to take it — no shot, no crash
     const tShot = t + rng.float(0, SHIFT_SECONDS)
     const danger = Math.max(
       0,
@@ -496,7 +519,12 @@ function simShift(
   // with more trips to the box on a rivalry night.
   const proneness = avg(atk.skaters, (c) => c.penaltyProne) / LEAGUE_AVG
   if (rng.chance(PENALTY_CHANCE_PER_SHIFT * proneness * (1 + (ctx.intensity ?? 0) * 0.3))) {
-    const offender = atk.skaters[weightedIndex(rng, atk.skaters.map((p) => 1 + p.composites.penaltyProne))]
+    const offender = atk.skaters.length > 0
+      ? atk.skaters[weightedIndex(rng, atk.skaters.map((p) => 1 + p.composites.penaltyProne))]
+      : undefined
+    // Nobody on the ice to take the penalty. Thin world/junior rosters hit this
+    // routinely, and it was the last unguarded `.id` read in the shift loop.
+    if (!offender) return
     attacking.penaltyBoxUntil.push(t + PENALTY_SECONDS)
     stat(ctx, offender.id).penaltyMinutes += 2
     ctx.stream.push({
@@ -560,6 +588,10 @@ function creditToi(ctx: Ctx, onIce: OnIce, seconds: number, situation: 'ev' | 'p
 }
 
 function faceoff(ctx: Ctx, hOn: OnIce, aOn: OnIce, period: number): void {
+  // A faceoff needs a centre on each side. With nobody to send out (thin
+  // world/junior rosters) the seedless reduce below throws, so skip the draw
+  // rather than crash the game. Full benches are untouched.
+  if (hOn.skaters.length === 0 || aOn.skaters.length === 0) return
   const hC = hOn.skaters.reduce((best, p) =>
     p.composites.faceoffWin > best.composites.faceoffWin ? p : best
   )
@@ -622,14 +654,18 @@ function simPeriod(
     // answer their top line with its checking line. Gated on the tactic (false
     // by default), so non-matching games draw the rng in the original order and
     // replay byte-for-byte.
+    // Shortening the bench: the score + clock tilt each side's rotation.
+    const progress = (period - 1 + t / lengthSeconds) / 3
+    const homeTilt = benchTilt(home.goals - away.goals, progress)
+    const awayTilt = benchTilt(away.goals - home.goals, progress)
     let homeUnit: OnIce
     let awayUnit: OnIce
     if (home.team.tactics.lineMatching === true && homeSit === 'ev' && awaySit === 'ev') {
-      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT)
-      homeUnit = home.pickMatched(ctx.rng, away, awayUnit, absT)
+      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT, awayTilt)
+      homeUnit = home.pickMatched(ctx.rng, away, awayUnit, absT, homeTilt)
     } else {
-      homeUnit = home.pickOnIce(ctx.rng, homeSit, absT)
-      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT)
+      homeUnit = home.pickOnIce(ctx.rng, homeSit, absT, homeTilt)
+      awayUnit = away.pickOnIce(ctx.rng, awaySit, absT, awayTilt)
     }
     creditToi(ctx, homeUnit, SHIFT_SECONDS, homeSit)
     creditToi(ctx, awayUnit, SHIFT_SECONDS, awaySit)
@@ -726,6 +762,7 @@ function simEmptyNetPhase(
   if (rng.chance(0.35)) {
     // Leading team scores EN.
     const scorer = pickShooter(rng, leadingOn.skaters)
+    if (!scorer) return // empty bench: no empty-net goal rather than a crash
     const assists = pickAssists(rng, leadingOn.skaters, scorer)
     leading.goals++
     stat(ctx, scorer.id).goals++
@@ -747,6 +784,7 @@ function simEmptyNetPhase(
   } else if (rng.chance(0.18)) {
     // Trailing team ties it (rare but happens).
     const scorer = pickShooter(rng, trailingOn.skaters)
+    if (!scorer) return // empty bench: no tying goal rather than a crash
     const assists = pickAssists(rng, trailingOn.skaters, scorer)
     trailing.goals++
     stat(ctx, scorer.id).goals++

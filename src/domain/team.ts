@@ -5,10 +5,25 @@ import type { TeamTactics } from './tactics'
  * Deployment of a roster into lines. Stored as player ids referencing the
  * team's roster; the engine resolves them to Player objects at sim time.
  */
+/**
+ * KNOWN TYPE/RUNTIME MISMATCH — read before "fixing" a tsc error about these.
+ *
+ * `forwards` and `defensePairs` are declared as fixed-length tuples, but at
+ * runtime a line can be SHORT OR EMPTY: repairLines, thin world/junior rosters,
+ * and mid-season roster churn all produce them. Because the tuple type makes
+ * `line.length` the literal `3` (or `2`), TypeScript reports every
+ * `line.length === 0` guard in the sim engines as TS2367 "no overlap".
+ *
+ * Those guards are LOAD-BEARING — empty lines caused three separate quick-sim
+ * crashes (shot, penalty and faceoff paths) that killed whole seasons. Do not
+ * delete them to silence the compiler. The real fix is to widen these to
+ * `PlayerId[][]` so the type tells the truth, which ripples through lineup,
+ * tactics and both sims and so is deliberately deferred under the 1.0 freeze.
+ */
 export interface Lines {
-  /** 4 forward lines, each [LW, C, RW]. */
+  /** 4 forward lines, each [LW, C, RW] — may be short/empty at runtime, see above. */
   forwards: [PlayerId, PlayerId, PlayerId][]
-  /** 3 defense pairs, each [LD, RD]. */
+  /** 3 defense pairs, each [LD, RD] — may be short/empty at runtime, see above. */
   defensePairs: [PlayerId, PlayerId][]
   /** [starter, backup]. */
   goalies: [PlayerId, PlayerId]

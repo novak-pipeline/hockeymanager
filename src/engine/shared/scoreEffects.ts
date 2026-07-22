@@ -44,3 +44,34 @@ export function scoreEffectMult(lead: number, progress: number): number {
   const perGoal = margin < 0 ? PER_GOAL_PUSH : PER_GOAL_PROTECT
   return 1 - margin * perGoal * timeWeight
 }
+
+/* ────────────────────────── shortening the bench ────────────────────────── */
+
+/**
+ * How hard a coach tilts his even-strength rotation given the score and clock.
+ * Zero through two periods (normal rolls). In the third: chasing or protecting
+ * a tight game, he SHORTENS the bench — the top of the lineup eats the extra
+ * shifts, the fourth line watches; up big, he ROLLS the depth and rests the
+ * stars for garbage time. Positive = lean on the top lines, negative = lean on
+ * the bottom, magnitude grows as the clock runs down.
+ */
+export function benchTilt(lead: number, progress: number): number {
+  const p = clamp01(progress)
+  if (p < 2 / 3) return 0
+  const urgency = Math.min(1, (p - 2 / 3) * 3)
+  if (lead >= -2 && lead <= 0) return 0.3 * urgency // tight game: shorten
+  if (lead >= 3) return -0.22 * urgency // blowout lead: roll the depth
+  return 0
+}
+
+/**
+ * Apply a bench tilt to a line/pair usage-weight vector: positive tilt shifts
+ * weight toward the front (top units), negative toward the back. Relative
+ * weights only — callers feed a weighted sampler, so no normalization needed.
+ * tilt 0 returns the base unchanged (byte-identical deployments).
+ */
+export function tiltedWeights(base: readonly number[], tilt: number): number[] {
+  if (tilt === 0 || base.length < 2) return [...base]
+  const mid = (base.length - 1) / 2
+  return base.map((w, i) => w * (1 + tilt * ((mid - i) / mid)))
+}
