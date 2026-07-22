@@ -38,7 +38,7 @@ const TWO_WAY_THRESHOLD = 1_100_000
 const NTC_MIN_SALARY = 4_500_000
 const NTC_MIN_YEARS = 3
 /** Hard roster ceiling enforced by signPlayer. */
-const MAX_ROSTER_SIZE = 26
+export const MAX_ROSTER_SIZE = 26
 /** Salary floor — the minimum payroll a club is expected to ice (~74% of the
  *  $88M ceiling, mirroring the NHL's lower limit). AI clubs spend up to it in
  *  free agency; the UI flags a user club that sits below it. */

@@ -129,6 +129,21 @@ function issue(ctx: Ctx, severity: IssueRecord['severity'], category: string, me
   ctx.onEvent?.({ type: 'issue', data: rec })
 }
 
+/** The first few stack frames of a thrown error, trimmed to project files —
+ *  enough to name the function and line without dumping node internals. */
+function firstFrames(e: unknown, n = 4): string {
+  const stack = (e as Error)?.stack
+  if (typeof stack !== 'string') return ''
+  const frames = stack
+    .split('\n')
+    .slice(1)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('at ') && l.includes('src'))
+    .slice(0, n)
+    .map((l) => l.replace(/^at /, '').replace(/^.*[\\/]src[\\/]/, 'src/'))
+  return frames.length > 0 ? ` [${frames.join(' <- ')}]` : ''
+}
+
 function safeDay(ctx: Ctx): number {
   try { return ctx.career.getDashboard().day } catch { return -1 }
 }
@@ -700,10 +715,12 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     let advanced = false
     try { advanced = ctx.career.step() }
     catch (e) {
-      issue(ctx, 'critical', 'throw', `step() threw: ${(e as Error).message}`, `at ${beforeKey}`)
+      // Capture WHERE, not just what: a bare message ("reading 'id'") is what let
+      // a season-ending crash survive an earlier autopilot session undiagnosed.
+      issue(ctx, 'critical', 'throw', `step() threw: ${(e as Error).message}${firstFrames(e)}`, `at ${beforeKey}`)
       maintainRoster(ctx)
       try { advanced = ctx.career.step() }
-      catch (e2) { issue(ctx, 'critical', 'softlock', `step() threw again after recovery: ${(e2 as Error).message} — season abandoned`, `at ${beforeKey}`); trace.summary.endedEarly = true; trace.summary.endReason = `step threw: ${(e2 as Error).message}`; break }
+      catch (e2) { issue(ctx, 'critical', 'softlock', `step() threw again after recovery: ${(e2 as Error).message}${firstFrames(e2)} — season abandoned`, `at ${beforeKey}`); trace.summary.endedEarly = true; trace.summary.endReason = `step threw: ${(e2 as Error).message}${firstFrames(e2)}`; break }
     }
 
     if (hardGuard % 25 === 0) runSanity(ctx)

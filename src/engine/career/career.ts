@@ -27,6 +27,7 @@ import {
   type GameStream,
   type NewsCategory,
   type NewsItem,
+  type GameEvent,
   type OffseasonState,
   type Player,
   type PlayerId,
@@ -296,6 +297,7 @@ import {
   capUsedFor,
   contractStatus,
   initialPicks,
+  MAX_ROSTER_SIZE,
   offerAcceptable,
   processExpiries,
   signPlayer,
@@ -429,7 +431,7 @@ import {
   type TeamPracticeState,
   type PracticeFocus,
 } from '@engine/league/practice'
-import { deserializeLeagueData, deserializeMap, serializeLeagueData, serializeMap } from './serialize'
+import { deserializeLeagueData, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
 import { buildScoutVerdict } from './scoutVerdict'
@@ -503,8 +505,6 @@ import {
   type DevCampState,
   type TrainingCampState,
   type TrainingCampView,
-  type CampSkaterLine,
-  type CampGoalieLine,
   type CampReport,
   type MedicalView,
   type MedicalRow,
@@ -1515,7 +1515,7 @@ export class Career {
     const staff = this.getTeamStaff(this.userTeamId as string)
     const P = (dp: DraftProspect): Player => this.resolve(dp.playerId)
     const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
-      pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+      pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F'
     const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
     // Advice is driven by YOUR SCOUTS' read, not the public consensus, so it can
@@ -3852,7 +3852,7 @@ export class Career {
   }
 
   /** Build the extended scheduled-report fact args from current league state. */
-  private scheduledReportArgs(kind: PressSheetKind): ScheduledReportArgs {
+  private scheduledReportArgs(_kind: PressSheetKind): ScheduledReportArgs {
     const base = this.pressFactArgs()
     const sorted = sortStandings([...this.standings.values()])
 
@@ -4520,7 +4520,12 @@ export class Career {
     if (solo) this.pushNews('result', solo.headline, solo.body, { playerId: solo.playerId, teamId: this.userTeamId as string })
 
     /* ── Gloves off: a fight in your game makes the recap. ── */
-    const combatants = res.stream.filter((e) => isEvent(e, 'penalty') && e.infraction === 'fighting')
+    // The `&&` collapses isEvent's type predicate back to boolean, so annotate
+    // the callback to keep the narrowing — otherwise `.player` below is untyped.
+    const combatants = res.stream.filter(
+      (e): e is Extract<GameEvent, { type: 'penalty' }> =>
+        isEvent(e, 'penalty') && e.infraction === 'fighting'
+    )
     if (combatants.length >= 2) {
       const first = this.resolve(combatants[0].player)
       const second = this.resolve(combatants[1].player)
@@ -4600,7 +4605,7 @@ export class Career {
       return p ? ratedOverall(p) : -1
     }
     const isFwd = (p: Player): boolean => p.position === 'C' || p.position === 'W'
-    const isDef = (p: Player): boolean => p.position === 'D' || p.position === 'LD' || p.position === 'RD'
+    const isDef = (p: Player): boolean => p.position === 'D'
 
     const dressed = new Set<string>()
     for (const line of team.lines.forwards) for (const id of line) if (id) dressed.add(id as string)
@@ -4683,7 +4688,7 @@ export class Career {
     const NEED: Record<'F' | 'D' | 'G', number> = { F: 12, D: 6, G: 2 }
     const CEILING = 28
     const grpOf = (p: Player): 'F' | 'D' | 'G' =>
-      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+      p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
 
     for (const nhlId of this.data.league.teams) {
       const nhl = this.data.teams.get(nhlId)
@@ -4736,7 +4741,7 @@ export class Career {
    *  because {@link emergencyRecalls} will pull those bodies up before puck drop. */
   private userLineupShortfall(): string | null {
     const grpOf = (p: Player): 'F' | 'D' | 'G' =>
-      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+      p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
     const nhl = this.userTeam
     const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
     const healthy = (roster: PlayerId[], grp: 'F' | 'D' | 'G'): number =>
@@ -6490,7 +6495,7 @@ export class Career {
             playerId: s.playerId as string, teamId: s.teamId as string,
             year: this.year, via: 'signing',
           })
-          if (p.overall >= 75) {
+          if (ratedOverall(p) >= 75) {
             const t = this.data.teams.get(s.teamId)!
             chronicleEvent(this.chronicle, {
               year: this.year, day: 0, kind: 'signing',
@@ -6544,7 +6549,7 @@ export class Career {
         for (const s of res.signings) {
           const p = this.resolve(s.playerId)
           const t = this.data.teams.get(s.teamId)!
-          if (p.overall >= 78) {
+          if (ratedOverall(p) >= 78) {
             // Marquee UFA — a real headline that belongs in the front-office mail,
             // not just the ticker. Deliberately worded "land" (not "signs with"):
             // the inbox curation strips generic depth-signing noise, and a summer's
@@ -6559,8 +6564,8 @@ export class Career {
           }
           // Mid-tier depth: keep the churny format (surfaces in the Feed/ticker,
           // filtered out of the inbox so it doesn't bury the real headlines).
-          if (p.overall < 72 && marketDay > 2) continue
-          if (marketDay <= 2 && p.overall < 70) continue
+          if (ratedOverall(p) < 72 && marketDay > 2) continue
+          if (marketDay <= 2 && ratedOverall(p) < 70) continue
           this.pushNews(
             'contract',
             `${p.name} signs with ${t.abbreviation}`,
@@ -6852,7 +6857,7 @@ export class Career {
     const p = this.data.players.get(asPlayerId(prospect.playerId as string))
     if (!p) return 0
     const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
-      pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+      pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F'
     const team = this.data.teams.get(teamId)
     if (!team) return 0
     const ids = [...team.roster]
@@ -7758,7 +7763,7 @@ export class Career {
    * gets a SUGGESTION in the inbox instead (he keeps manual roster control).
    */
   private posGroup(pos: Position): 'F' | 'D' | 'G' {
-    return pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+    return pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F'
   }
 
   /** The overall of the org's weakest NHL regular at a position group — the bar a
@@ -7808,7 +7813,15 @@ export class Career {
           const nhlReady = p.age < 20 && ovr >= 72 && ovr >= this.orgNhlBar(org, grp)
           if (p.age >= 20 || nhlReady) {
             const ahl = org.affiliateId ? this.data.teams.get(org.affiliateId) : undefined
-            const dest = nhlReady ? org : ahl
+            let dest = nhlReady ? org : ahl
+            // A full NHL roster can't absorb him no matter how good he looks —
+            // this push bypasses signPlayer's limit, and an over-size roster
+            // (28 of a legal 26) is what the autopilot flags at d0. Bump him to
+            // the farm instead. Deliberately NOT stranding him in junior when
+            // the farm is also full: an over-size AHL roster is harmless, but a
+            // graduating GOALIE left in junior can't be recalled, and the club
+            // is then unable to ice a legal lineup at all.
+            if (dest === org && org.roster.length >= MAX_ROSTER_SIZE) dest = ahl
             if (!dest) { stay.push(pid); continue }
             p.contract = elc()
             dest.roster.push(pid)
@@ -7817,8 +7830,11 @@ export class Career {
             if (p.rightsTeamId === this.userTeamId) {
               this.pushNews(
                 'contract',
-                nhlReady ? `${p.name} makes the NHL out of camp` : `${p.name} turns pro`,
-                nhlReady
+                // Key the story off where he ACTUALLY reported, not off whether
+                // he looked ready — a prospect bumped to the farm by a full
+                // roster must not get a "makes the NHL" headline.
+                dest === org ? `${p.name} makes the NHL out of camp` : `${p.name} turns pro`,
+                dest === org
                   ? `${p.name} (${p.position}, ${p.age}) was too good to send back to junior — he's signed his entry-level deal and cracked the NHL roster.`
                   : `${p.name} (${p.position}, ${p.age}) has signed his entry-level contract and reports to ${dest.name}.`,
                 { playerId: pid as string }
@@ -8091,7 +8107,7 @@ export class Career {
     if (invitees.length === 0) return null
     const cast: DevCampView['cast'] = []
     if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
-    if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
+    if (staff.assistantGM) cast.push({ name: staff.assistantGM.name, title: 'Assistant GM', ...(staff.assistantGM.faceId !== undefined ? { faceId: staff.assistantGM.faceId } : {}) })
     const day = this.devCampState?.day ?? 1
     const lineOf = new Map(this.devCampState?.lines ?? [])
     // Bucket-appropriate read variants, picked deterministically per player so
@@ -8260,7 +8276,7 @@ export class Career {
     const staff = this.getTeamStaff(this.userTeamId as string)
     const cast: TrainingCampView['cast'] = []
     if (staff.headCoach) cast.push({ name: staff.headCoach.name, title: 'Head Coach', ...(staff.headCoach.faceId !== undefined ? { faceId: staff.headCoach.faceId } : {}) })
-    if (staff.agm) cast.push({ name: staff.agm.name, title: 'Assistant GM', ...(staff.agm.faceId !== undefined ? { faceId: staff.agm.faceId } : {}) })
+    if (staff.assistantGM) cast.push({ name: staff.assistantGM.name, title: 'Assistant GM', ...(staff.assistantGM.faceId !== undefined ? { faceId: staff.assistantGM.faceId } : {}) })
     const c = this.trainingCamp
     return {
       decisions: c.decisions.map((d) => ({ ...d })),
@@ -8815,7 +8831,7 @@ export class Career {
     if (!nhl || !ahl) return { promoted: [], demoted: [] }
 
     const grp = (p: Player): 'F' | 'D' | 'G' =>
-      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+      p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
     const resolveAll = (ids: PlayerId[]): Player[] =>
       ids.map((id) => this.data.players.get(id)).filter((p): p is Player => p !== undefined)
 
@@ -10101,6 +10117,14 @@ export class Career {
             `${player.name} was ready to take your offer, but your cap sheet no longer fits the deal, so it lapses.`, { playerId: pid })
           continue
         }
+        // Cap space isn't the only limit — signPlayer also refuses a full roster,
+        // and an unguarded throw here abandons the whole offseason. Lapse the
+        // offer the same way a cap squeeze does.
+        if (!this.userTeam.roster.includes(asPlayerId(pid)) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
+          this.pushNews('contract', `${player.name} would sign — but you have no roster spot`,
+            `${player.name} was ready to take your offer, but your roster is full at ${MAX_ROSTER_SIZE}. The offer lapses unless you clear a spot.`, { playerId: pid })
+          continue
+        }
         signPlayer({ team: this.userTeam, player, salary: offer.salary, years: offer.years, year: this.year, players: this.data.players })
         this.faPool = this.faPool.filter((f) => (f as string) !== pid)
         this.lockerArrival(this.userTeamId, asPlayerId(pid))
@@ -10126,7 +10150,7 @@ export class Career {
    *  not fabricated rival bids: 'leading' = clear front-runner, 'competitive' =
    *  fair money a hot market could still snipe, 'trailing' = below his ask. */
   private faOfferStanding(
-    player: Player,
+    _player: Player,
     offer: { salary: number; years: number },
     ask: { salary: number; years: number },
     rivalCount: number,
@@ -10534,7 +10558,7 @@ export class Career {
    */
   assessTrade(proposal: TradeProposal): TradeAssessmentView {
     const staff = this.getTeamStaff(this.userTeamId as string)
-    const agmName = staff.agm?.name ?? 'Assistant GM'
+    const agmName = staff.assistantGM?.name ?? 'Assistant GM'
     const year = this.year
     const givePlayers = proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id)))
     const receivePlayers = proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id)))
@@ -11353,7 +11377,7 @@ export class Career {
     const team = this.data.teams.get(teamId)!
     const top6 = team.roster
       .map((id) => this.resolve(id))
-      .sort((a, b) => b.overall - a.overall)
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a))
       .slice(0, 6)
     const coreAge = top6.length > 0 ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
     return deriveClubPosture({ coreAge, strengthRank, teamCount: teams.length })
@@ -11366,7 +11390,7 @@ export class Career {
     const staff = this.getTeamStaff(this.userTeamId as string)
     const posture = this.clubPostureFor(this.userTeamId)
     const team = this.userTeam
-    const top6 = team.roster.map((id) => this.resolve(id)).sort((a, b) => b.overall - a.overall).slice(0, 6)
+    const top6 = team.roster.map((id) => this.resolve(id)).sort((a, b) => ratedOverall(b) - ratedOverall(a)).slice(0, 6)
     const coreAge = top6.length > 0 ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
     // Best U23s across the org (NHL + farm + rights-held), for the AGM's pitch.
     const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
@@ -11374,14 +11398,14 @@ export class Career {
     const prospects = youngIds
       .map((id) => this.resolve(id))
       .filter((p) => p.age <= 23)
-      .sort((a, b) => (b.potential ? 1 : 0) - (a.potential ? 1 : 0) || b.overall - a.overall)
+      .sort((a, b) => (b.potential ? 1 : 0) - (a.potential ? 1 : 0) || ratedOverall(b) - ratedOverall(a))
       .slice(0, 3)
       .map((p) => p.name)
     const coachProfile = staff.headCoach?.profile
     // Defensive: some generated staffs miss a member — the meeting still holds.
     const owner = staff.owner ?? { id: 'owner', name: 'The Owner' }
     const coach = staff.headCoach ?? { id: 'coach', name: 'The Head Coach' }
-    const agm = staff.agm ?? { id: 'agm', name: 'Your Assistant GM' }
+    const agm = staff.assistantGM ?? { id: 'agm', name: 'Your Assistant GM' }
     return {
       year: this.year,
       teamName: team.name,
@@ -11733,7 +11757,7 @@ export class Career {
         ? `Space to work with: $${(space / 1e6).toFixed(2)}M after $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap.`
         : `Space to work with: $${(space / 1e6).toFixed(2)}M.`,
       coachLine: `If we add anywhere, add to ${need}. Don't bring me a project — bring me someone who plays TONIGHT.`,
-      agmName: staff.agm?.name ?? 'Your Assistant GM',
+      agmName: staff.assistantGM?.name ?? 'Your Assistant GM',
       buying,
       // Only offers where you'd move one of YOUR players — the real "calls".
       incoming: this.tradeOffers.filter((o) => o.userGivesPlayerIds.length > 0).map((o) => this.offerView(o)),
@@ -11824,7 +11848,7 @@ export class Career {
       targets,
       suitors,
       cast: [
-        { id: 'agm', name: staff.agm?.name ?? 'Your Assistant GM', title: 'Assistant GM', ...(staff.agm?.faceId ? { faceId: staff.agm.faceId } : {}) },
+        { id: 'agm', name: staff.assistantGM?.name ?? 'Your Assistant GM', title: 'Assistant GM', ...(staff.assistantGM?.faceId ? { faceId: staff.assistantGM.faceId } : {}) },
         { id: 'coach', name: staff.headCoach?.name ?? 'The Head Coach', title: 'Head Coach', ...(staff.headCoach?.faceId ? { faceId: staff.headCoach.faceId } : {}) },
       ],
     }
@@ -11903,7 +11927,7 @@ export class Career {
               (t.details?.assetsIn ?? []).some((a) => {
                 if (a.kind !== 'player' || !a.playerId) return false
                 const p = this.data.players.get(asPlayerId(a.playerId))
-                return p !== undefined && p.overall >= 80
+                return p !== undefined && ratedOverall(p) >= 80
               })
           )
           break
@@ -12774,7 +12798,6 @@ export class Career {
       this.interviews.set(item.playerId, asked)
       addKnowledge(this.scouting, item.playerId, 10)
 
-      const first = player.name.split(' ')[0] ?? player.name
       const reveals = answers.map((a) => a.reveal)
       const summary = reveals.length > 0
         ? `Reads: ${reveals.join(', ')}.`
@@ -15130,39 +15153,6 @@ export class Career {
     return { ok: true }
   }
 
-  /** Resolve a scout's assignment scope to the player ids it covers. */
-  private resolveScopeIds(target: ScoutTarget): string[] {
-    const comps = this.scoutingCompetitions()
-    const rostersOf = (teamIds: Iterable<string>): string[] => {
-      const out: string[] = []
-      for (const tid of teamIds) { const t = this.data.teams.get(tid as TeamId); if (t) for (const id of t.roster) out.push(id as string) }
-      return out
-    }
-    switch (target.kind) {
-      case 'team': return rostersOf([target.teamId])
-      case 'division': {
-        const ids: string[] = []
-        for (const [tid, t] of this.data.teams) if ((t as { divisionId?: string }).divisionId === target.divisionId) ids.push(...rostersOf([tid as string]))
-        return ids
-      }
-      case 'competition': { const c = comps.find((x) => x.id === target.competitionId); return c ? rostersOf(c.teamIds) : [] }
-      case 'nation': { const set = new Set<string>(); for (const c of comps) if (c.nation === target.nation) for (const t of c.teamIds) set.add(t); return rostersOf(set) }
-      case 'player': return [target.playerId]
-      case 'nextOpponent': { const opp = this.nextOpponentTeamId(); return opp ? rostersOf([opp]) : [] }
-      case 'draftClass': return [...this.allDraftProspectIds()]
-      case 'freeAgents': return [...this.currentFaIds()]
-      case 'ownProspects': {
-        const u = this.userTeamId as string
-        const ahl = this.userTeam.affiliateId as string | undefined
-        const ids = new Set<string>(rostersOf(ahl ? [u, ahl] : [u]))
-        for (const p of this.data.players.values()) {
-          if ((p.rightsTeamId as unknown as string | undefined) === u) ids.add(p.id as string)
-        }
-        return [...ids]
-      }
-      default: return []
-    }
-  }
 
   /** Full profile for one of the club's scouts (attributes, assignment, intel). */
   getScoutProfile(scoutId: string): import('./views').ScoutProfileView | null {
@@ -15641,7 +15631,7 @@ export class Career {
     for (const id of this.userTeam.roster) {
       const p = this.data.players.get(id)
       if (!p || ratedOverall(p) < 68) continue
-      const g = p.position === 'G' ? 'G' : (p.position === 'D' || p.position === 'LD' || p.position === 'RD') ? 'D' : p.position === 'C' ? 'C' : 'W'
+      const g = p.position === 'G' ? 'G' : (p.position === 'D') ? 'D' : p.position === 'C' ? 'C' : 'W'
       if (g === group) quality++
     }
     if (quality < target - 1) return 'urgent'
@@ -16111,7 +16101,7 @@ export class Career {
       const attendance = 0.72 + (fi / 100) * 0.32
       const priceMult = this.ticketPricing === 'premium' ? 1.16 : this.ticketPricing === 'value' ? 0.88 : 1
       const scaleGate = attendance * priceMult
-      const rebuild = (source: string, amount: number): number => Math.round(amount * scaleGate)
+      const rebuild = (_source: string, amount: number): number => Math.round(amount * scaleGate)
       let est = 0
       view.revenue.lines = view.revenue.lines.map((l) => {
         // Gate + merch move with the building; broadcast + sponsorship are fixed.
