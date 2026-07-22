@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { Rng } from '@engine/shared/rng'
 import { isEligible } from './contentEngine'
-import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionOption } from './decisionEvents'
+import { DECISION_CTX_KEYS, DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionOption } from './decisionEvents'
 
 /** Does this option cost the GM anything at all? */
 function hasCost(o: DecisionOption): boolean {
@@ -23,6 +23,19 @@ function hasCost(o: DecisionOption): boolean {
 }
 
 describe('decisionEvents — library integrity', () => {
+  it('no event can condition on a key the runner never populates (dead-content guard)', () => {
+    // A missing ctx key silently fails min/max and equality alike, so such an
+    // event would never fire and nothing would error — authored content sitting
+    // dark. This test is the reason that class of bug can't ship.
+    const known = new Set<string>(DECISION_CTX_KEYS)
+    for (const e of DECISION_EVENTS) {
+      for (const key of Object.keys(e.conditions ?? {})) {
+        const base = /^(min|max)[A-Z]/.test(key) ? key[3].toLowerCase() + key.slice(4) : key
+        expect(known.has(base), `${e.id} conditions on unknown ctx key "${base}"`).toBe(true)
+      }
+    }
+  })
+
   it('every event has a unique id and at least two options', () => {
     const ids = DECISION_EVENTS.map((e) => e.id)
     expect(new Set(ids).size).toBe(ids.length)

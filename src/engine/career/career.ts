@@ -2837,9 +2837,15 @@ export class Career {
     if (day - this.lastDecisionDay < Career.DECISION_COOLDOWN_DAYS) return
     if (this.interactions.some((i) => i.status === 'open')) return
 
-    const roster = this.userTeam.roster
-      .map((id) => this.data.players.get(id))
-      .filter((p): p is Player => !!p)
+    // Scan the NHL club AND the farm: a prospect's call-up dilemma only exists
+    // for a man who is currently in the minors.
+    const nhlIds = this.userTeam.roster
+    const ahlId = this.userTeam.affiliateId
+    const ahlIds = ahlId ? (this.data.teams.get(ahlId)?.roster ?? []) : []
+    const roster: Array<{ p: Player; inMinors: boolean }> = [
+      ...nhlIds.map((id) => ({ p: this.data.players.get(id), inMinors: false })),
+      ...ahlIds.map((id) => ({ p: this.data.players.get(id), inMinors: true })),
+    ].filter((r): r is { p: Player; inMinors: boolean } => !!r.p)
     if (roster.length === 0) return
 
     const lr = this.lockerRooms.get(this.userTeamId)
@@ -2851,8 +2857,10 @@ export class Career {
     // Evaluate candidates subject-first: the event library's conditions read a
     // per-PLAYER context, so each roster man is a possible protagonist. Stable
     // order (roster order) keeps this deterministic.
-    for (const p of roster) {
+    const deadlineWeek = this.deadlineDay > 0 && day >= this.deadlineDay - 7 && day <= this.deadlineDay
+    for (const { p, inMinors } of roster) {
       const careerGp = p.stats.reduce((n, s) => n + s.gamesPlayed, 0)
+      const gt = this.totals.get(p.id)
       const ctx: ContentCtx = {
         age: p.age,
         gamesPlayed: careerGp,
@@ -2864,6 +2872,17 @@ export class Career {
         nursingInjury: p.injuryStatus !== null,
         importance: ratedOverall(p),
         contractYearsRemaining: p.contract.yearsRemaining,
+        position: p.position,
+        potential: ratedPotential(p),
+        inMinors,
+        // "He knows he was shopped" — the Living Ledger's memory is a trigger.
+        formerlyShopped: this.residueFlags.some(
+          (f) => f.playerId === (p.id as string) && f.kind === 'wasShopped' && f.known
+        ),
+        deadlineWeek,
+        // Season save % as a whole number; non-goalies sit at 100 so the
+        // crease dilemma can never latch onto a skater.
+        savePct: gt && gt.shotsAgainst > 0 ? Math.round((gt.saves / gt.shotsAgainst) * 100) : 100,
       }
       const ev = pickDecisionEvent({
         ctx, rng,
