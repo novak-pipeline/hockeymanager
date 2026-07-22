@@ -57,7 +57,7 @@ export interface PendingLedgerReaction {
   escalation: number
 }
 
-export type ResidueKind = 'wasShopped' | 'wasScratched' | 'wasDemoted'
+export type ResidueKind = 'wasShopped' | 'wasScratched' | 'wasDemoted' | 'wasDismissed'
 
 /** What the world permanently remembers about what you did to a man. */
 export interface ResidueFlag {
@@ -204,6 +204,8 @@ export function grudgeContext(
       lines.push(`We both remember the healthy scratches. He answered them on the ice — but a player of his standing doesn't forget watching from the press box, and neither do I.`)
     } else if (g.kind === 'wasDemoted') {
       lines.push(`You put him through waivers in ${g.year}. He cleared, he reported, he produced. Today the invoice for that week arrives.`)
+    } else if (g.kind === 'wasDismissed') {
+      lines.push(`He came to you in ${g.year} with something that mattered to him and left that office with nothing. He is a professional, so he never said it publicly. He said it to me.`)
     }
   }
   const n = Math.min(grudges.length, 2)
