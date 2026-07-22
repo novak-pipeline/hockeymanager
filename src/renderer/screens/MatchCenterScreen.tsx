@@ -376,7 +376,6 @@ function SkaterTable(props: {
 
 function SkaterRow(props: { row: BoxScoreSkaterRow }): JSX.Element {
   const r = props.row
-  const pts = r.goals + r.assists
   return (
     <tr>
       <td>

@@ -1057,7 +1057,7 @@ const INTEREST_TONE: Record<TradeInterestView['lean'], { color: string; label: s
 /** A two-sided value gauge: how the package's value splits between what you give
  *  up (left) and what you get back (right). A rough read of who's winning the
  *  deal on paper — the AGM's line above says what to make of it. */
-function ValueBalance({ give, receive }: { give: number; receive: number }): JSX.Element {
+function ValueBalance({ give }: { give: number; receive: number }): JSX.Element {
   const givePct = Math.round(give * 100)
   const receivePct = 100 - givePct
   // Green when we're getting the better of it, amber/red when we're overpaying.

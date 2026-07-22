@@ -4,8 +4,6 @@ import {
   type MatchView,
   generateCommentary,
   type CommentaryLine,
-  buildHighlights,
-  type HighlightSegment,
 } from '@render2d'
 import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
@@ -24,8 +22,6 @@ import { Icon } from './components/primitives'
 
 const MUTED = 'var(--muted)'
 const PANEL = 'var(--bg1)'
-const ACCENT = 'var(--violet)'
-const ACCENT_H = 'var(--violet-h)'
 
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
 const LS_RENDERER = 'hockeyMatchRenderer'
@@ -184,7 +180,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const [camPreset, setCamPreset]       = useState<CameraPreset>('broadcast')
   const [err, setErr]                   = useState<string | null>(null)
 
-  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('full')
+  const [, setPlaybackMode] = useState<PlaybackMode>('full')
   const [nudge, setNudge]               = useState<number>(1)
 
   // Goal banner: { text, absT } so we can match the exact event

@@ -275,7 +275,6 @@ function TeamLeagueTable({ teams, userTeamId }: { teams: TeamAnalyticsRow[]; use
         <tbody>
           {sorted.map((row, idx) => {
             const isUser = row.teamId === userTeamId
-            const pctile = row[col.pctileKey] as number
             return (
               <tr key={row.teamId} className={isUser ? 'is-user' : ''}>
                 <td className="num" style={{ color: 'var(--muted)', fontSize: 11 }}>{idx + 1}</td>
@@ -791,8 +790,6 @@ function CategoryOffense({ hub, onPlayerClick }: { hub: TeamDataHubView; onPlaye
   const n = allTeams.length
 
   const skaters = hub.players.filter((p) => p.position !== 'G')
-  const scorers = [...skaters].sort((a, b) => b.goalsPer60 - a.goalsPer60)
-  const shooters = [...skaters].sort((a, b) => b.shootingPct - a.shootingPct)
 
   const offCols: PlayerColDef[] = [
     { key: 'goalsPer60',  label: 'G/60',    format: (r) => r.goalsPer60.toFixed(2) },
