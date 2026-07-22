@@ -884,7 +884,6 @@ const PRESSER_NATIONAL: TentpoleTemplateFn[] = [
 
 const PRESSER_HOMER: TentpoleTemplateFn[] = [
   (sheet) => {
-    const t = sheet.team
     const special = sheet.special.slice(0, 2)
     const headline = `GM presser: I liked what I heard — here's why`
     const lede = `Our GM stepped up. Took questions. And I've gotta say, I came away more confident in this club, not less.`
@@ -944,7 +943,6 @@ function userRankingBlurb(s: ScheduledReportFactSheet): string {
 const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
   (sheet) => {
     const s = asScheduled(sheet)
-    const t = sheet.team
     const headline = `Preseason power rankings: who's built to contend`
     const lede = `HARBOR CITY — A new season, a blank slate. Before a single puck is dropped, here is where every club in the league stands — and why.`
     const tableStr = rankingsSection(s, 8)
@@ -958,7 +956,6 @@ const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
   },
   (sheet) => {
     const s = asScheduled(sheet)
-    const t = sheet.team
     const headline = `Power rankings refresh: the league's pecking order after the early going`
     const lede = `HARBOR CITY — Enough games are in the books to know who's for real and who isn't. Here is the updated order.`
     const tableStr = rankingsSection(s, 8)
@@ -1110,7 +1107,6 @@ const MONTHLY_REPORT_BEAT: TentpoleTemplateFn[] = [
   (sheet) => {
     const s = asScheduled(sheet)
     const t = sheet.team
-    const monthStr = s.monthLabel || 'This month'
     const { wins, losses } = recentRecord(sheet)
     const headline = `Quarter-pole report card: the league after the first stretch`
     const lede = `HARBOR CITY — We are well into the season now. Patterns are forming. The ${t.name} have settled at ${recordStr(sheet)} through the early going, going ${wins}–${losses} in their most recent stretch.`

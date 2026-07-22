@@ -446,7 +446,12 @@ function buildSurpriseLines(
     const actual = finalStandings.find((t) => t.teamId === entry.teamId)
     if (actual === undefined) continue
     const diff = entry.predictedRank - actual.rank
-    if (Math.abs(diff) < 5) continue
+    // Three bands: a near-exact call is its own story ("right on the money"),
+    // a big miss either way is the headline, and the mushy 2–4 middle isn't
+    // worth a line. TEAM_RECAP_MATCH used to be unreachable — every team
+    // inside 5 was skipped, so the pool never shipped a word.
+    const nailedIt = Math.abs(diff) <= 1
+    if (!nailedIt && Math.abs(diff) < 5) continue
 
     const vars: Record<string, string> = {
       name: actual.name,
@@ -455,7 +460,9 @@ function buildSurpriseLines(
     }
 
     let template: string
-    if (diff >= 5) {
+    if (nailedIt) {
+      template = rng.pick(TEAM_RECAP_MATCH)
+    } else if (diff >= 5) {
       template = rng.pick(TEAM_RECAP_OVER)
     } else {
       template = rng.pick(TEAM_RECAP_UNDER)

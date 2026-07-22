@@ -435,7 +435,7 @@ export function computeRisk(
   // Upside note — position-aware ("top-four" is a defenceman's term; a forward
   // tops out "top-six", a goalie as a "starter").
   const highCeil = player.position === 'G' ? 'starting-goaltender upside'
-    : player.position === 'D' || player.position === 'LD' || player.position === 'RD' ? 'top-pairing upside'
+    : player.position === 'D' ? 'top-pairing upside'
     : 'top-six upside'
   let upsideNote: string
   if (trueTier === 'Star' || potStars >= 5) {
@@ -581,7 +581,7 @@ function watchedGameLine(scout: StaffMember, player: Player, ppg: number, estIdx
     return `${date} · .${Math.round(sv * 1000)} SV, ${ga} GA — ${qual}`
   }
 
-  const isD = player.position === 'D' || player.position === 'LD' || player.position === 'RD'
+  const isD = player.position === 'D'
   const lean = estIdx > trueIdx ? 0.5 : estIdx < trueIdx ? -0.4 : 0
   const pts = Math.max(0, Math.round(ppg + lean + (hash01(key) * 2 - 1)))
   const goals = pts > 0 ? Math.min(pts, Math.round(pts * (isD ? 0.25 : 0.42) + hash01(key + ':g') * 0.45)) : 0

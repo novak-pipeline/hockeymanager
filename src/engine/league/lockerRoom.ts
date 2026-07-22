@@ -172,16 +172,6 @@ function getInfluence(state: LockerRoomState, playerId: string): number {
   return 0
 }
 
-function setInfluence(state: LockerRoomState, playerId: string, value: number): void {
-  const clamped = clamp(value, 0, 100)
-  for (const entry of state.influence) {
-    if (entry[0] === playerId) {
-      entry[1] = clamped
-      return
-    }
-  }
-  state.influence.push([playerId, clamped])
-}
 
 function findRelationship(
   state: LockerRoomState,

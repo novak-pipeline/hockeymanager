@@ -48,13 +48,14 @@ function polyPoints(pts: [number, number][]): string {
 export interface RadarChartProps {
   /** Primary player radar. */
   radar: RadarView
-  /** Optional compare overlay (different colour). */
-  compareRadar?: RadarView
+  /** Optional compare overlay (different colour). Explicit `| undefined` so a
+   *  call site can pass a maybe-absent compare player directly. */
+  compareRadar?: RadarView | undefined
   /** Name of the compare player, shown in legend. */
-  compareName?: string
+  compareName?: string | undefined
   /** Name of the primary player, shown in legend if compare present. */
-  primaryName?: string
-  size?: number
+  primaryName?: string | undefined
+  size?: number | undefined
   /**
    * When false, axis value numbers are hidden (rough visual only — labels kept).
    * Defaults to true to preserve existing behaviour for other callers.

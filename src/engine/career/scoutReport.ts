@@ -598,12 +598,20 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
       if (ph) clauses.push(ph)
     }
 
-    // Defence
+    // Defence — a defenceman gets the blue-line pool (his own-zone play is the
+    // headline of any report on him); forwards get the generic checking read.
+    // The negative branch used to skip defencemen entirely, so the one weakness
+    // that matters most on a D went unmentioned; DEF_ZONE_PHRASES covers it.
+    const isD = player.position === 'D'
     if (checking >= 65) {
-      const ph = pickPhrase(CHECKING_PHRASES.positive, pid, 'check')
+      const ph = isD
+        ? pickPhrase(DEF_ZONE_PHRASES.positive, pid, 'dzone')
+        : pickPhrase(CHECKING_PHRASES.positive, pid, 'check')
       if (ph) clauses.push(ph)
-    } else if (checking < 42 && highKnow && player.position !== 'D') {
-      const ph = pickPhrase(CHECKING_PHRASES.negative, pid, 'checkn')
+    } else if (checking < 42 && highKnow) {
+      const ph = isD
+        ? pickPhrase(DEF_ZONE_PHRASES.negative, pid, 'dzonen')
+        : pickPhrase(CHECKING_PHRASES.negative, pid, 'checkn')
       if (ph) clauses.push(ph)
     }
 

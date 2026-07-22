@@ -7,7 +7,6 @@ import type {
   DashboardView,
   InboxView,
   StandingRowView,
-  TentpoleView,
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, TeamLink, useNav } from '../components/NavContext'
@@ -113,11 +112,6 @@ export function DashboardScreen(): JSX.Element {
   const { data: boxScore } = useScreenData<BoxScoreView | null>(
     () => client.getLastBoxScore(),
     (r) => (r.type === 'boxScore' ? r.boxScore : null)
-  )
-
-  const { data: tentpoles } = useScreenData<TentpoleView>(
-    () => client.getTentpoles(),
-    (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
   )
 
   const [hiddenPanels, setHiddenPanels] = useState<Set<string>>(() => loadHiddenPanels())

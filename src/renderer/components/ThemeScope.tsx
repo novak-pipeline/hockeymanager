@@ -153,10 +153,14 @@ export function useGlobalTeamTheme(teamId: string): CSSProperties | undefined {
 }
 
 interface ThemeScopeProps {
-  colors?: { primary: number; secondary: number }
+  // Explicit `| undefined` on the optionals: callers pass `colors={team?.colors}`,
+  // which under exactOptionalPropertyTypes is "present but undefined" rather than
+  // absent. This component already renders children directly when colors is
+  // missing, so undefined and omitted mean the same thing.
+  colors?: { primary: number; secondary: number } | undefined
   children: ReactNode
-  style?: CSSProperties
-  className?: string
+  style?: CSSProperties | undefined
+  className?: string | undefined
 }
 
 /**

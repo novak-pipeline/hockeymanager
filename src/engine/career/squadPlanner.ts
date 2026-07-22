@@ -85,9 +85,8 @@ function groupOf(p: Player): PosGroup {
   if (pos === 'G') return 'G'
   if (pos === 'D') return p.handedness === 'R' ? 'RD' : 'LD'
   if (pos === 'C') return 'C'
-  if (pos === 'LW') return 'LW'
-  if (pos === 'RW') return 'RW'
-  // Generic wing fallback by handedness.
+  // Position is C|W|D|G — there is no LW/RW to match, so every winger is split
+  // by handedness here. (Dead `pos === 'LW'`/`'RW'` branches removed.)
   return p.handedness === 'R' ? 'RW' : 'LW'
 }
 

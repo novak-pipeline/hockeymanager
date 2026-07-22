@@ -199,21 +199,12 @@ const AGM_SPECIALTIES = [
 
 /* ─────────────────────────── demeanor derivation ─────────────────────────── */
 
-type Demeanor = NonNullable<StaffMember['demeanor']>
-
 /**
  * Derive a stable demeanor from rating + judgment.
  * High rating + high judgment → analytical; high rating + low judgment → fiery;
  * low rating + high judgment → pragmatic; high judgment + mid rating → motivator;
  * default → calm.
  */
-function deriveDemeanor(rating: number, judgment: number): Demeanor {
-  if (rating >= 72 && judgment >= 72) return 'analytical'
-  if (rating >= 70 && judgment < 55) return 'fiery'
-  if (rating < 55 && judgment >= 68) return 'pragmatic'
-  if (judgment >= 68 && rating >= 58) return 'motivator'
-  return 'calm'
-}
 
 export interface GenerateStaffArgs {
   rng: Rng
@@ -580,7 +571,7 @@ const CATEGORY_SALT: Record<CategoryLabel, number> = {
  *     and current contract salary (salary = proxy for public reputation).
  */
 export function buildAgmReport(args: BuildAgmReportArgs): AgmReport {
-  const { roster, agm, rng } = args
+  const { roster, agm } = args
 
   // ── 1. Compute judged values for every roster player ──────────────────────
   interface RosterEntry {

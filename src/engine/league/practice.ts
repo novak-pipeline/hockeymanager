@@ -21,7 +21,7 @@
  *   into lineup.ts directly; the caller threads the set through.
  */
 
-import type { Player, PlayerId, Position } from '@domain'
+import type { Player } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 
 /* ────────────────────────── focus type ────────────────────────── */
@@ -264,12 +264,14 @@ const FOCUS_PRIMARY_COMPOSITE: Record<PracticeFocus, CompositeDimension | null> 
 export function suggestPlayerFocus(p: Player): PracticeFocus {
   if (p.position === 'G') return 'goaltending'
   const c = p.composites
-  const candidates: Array<{ focus: PracticeFocus; value: number }> = [
-    { focus: 'offense', value: c.scoring },
-    { focus: 'defense', value: c.defensiveZone },
-    { focus: 'skating', value: c.skating },
-    { focus: 'physical', value: c.hitting },
-  ]
+  // Drive the candidates off FOCUS_PRIMARY_COMPOSITE so the focus→composite
+  // mapping lives in exactly one place; this list used to duplicate it inline.
+  // Order is preserved (sort is stable), so ties break as they always did.
+  const SKATER_FOCI = ['offense', 'defense', 'skating', 'physical'] as const
+  const candidates: Array<{ focus: PracticeFocus; value: number }> = SKATER_FOCI.map((focus) => ({
+    focus,
+    value: c[FOCUS_PRIMARY_COMPOSITE[focus]!],
+  }))
   candidates.sort((a, b) => a.value - b.value) // weakest first
   const weakest = candidates[0]!
   // If even his weakest area is strong, keep him balanced rather than over-drilling.

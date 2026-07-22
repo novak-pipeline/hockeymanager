@@ -216,9 +216,9 @@ export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean
   // Tiers per hole: (1) unused, right position; (2) double-shift, right position;
   // (3) unused, wrong position; (4) double-shift, anyone; (5) emergency goalie.
   const isFwd = (p: Player): boolean =>
-    p.position !== 'G' && p.position !== 'D' && p.position !== 'LD' && p.position !== 'RD'
+    p.position !== 'G' && p.position !== 'D'
   const isDef = (p: Player): boolean =>
-    p.position === 'D' || p.position === 'LD' || p.position === 'RD'
+    p.position === 'D'
 
   let unused = healthySkaters.filter((p) => !used.has(p.id))
   for (const s of holes) {

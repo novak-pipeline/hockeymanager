@@ -122,7 +122,7 @@ export interface ClassifyResult {
  * Fully deterministic — no Rng involved.
  */
 export function classifyArchetype(player: Player): ClassifyResult {
-  const { composites: c, ratings: raw, position, role } = player
+  const { composites: c, ratings: raw, position } = player
 
   /* ── goalies ── */
   if (position === 'G') {

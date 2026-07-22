@@ -202,11 +202,6 @@ function ownerVoice(demeanor: string | undefined, rng: Rng): {
 
 /* ────────────────────────── scene builder ────────────────────────── */
 
-const MANDATE_RANK: Record<Mandate, number> = {
-  cupOrBust: 0, contend: 1, makePlayoffs: 2, competeRespectably: 3,
-  developYouth: 4, rebuild: 5, cutCosts: 6,
-}
-
 /** One notch softer than the current mandate (for the ask-patience path). */
 function softerMandate(m: Mandate): { mandate: Mandate; text: string } | null {
   switch (m) {

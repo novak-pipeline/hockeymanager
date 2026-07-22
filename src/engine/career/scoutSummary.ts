@@ -166,7 +166,7 @@ function projectionParagraph(a: ScoutSummaryArgs, confidence: ScoutSummary['conf
   return `Our scouts project him as ${role}. ${conf}.${risk}${comp}${draft}`
 }
 
-function productionColour(ppg: number, draftLabel: string | undefined, pid: string, scoringRank?: number): string {
+function productionColour(ppg: number, _draftLabel: string | undefined, pid: string, scoringRank?: number): string {
   // Finishing near the top of his league trumps the raw rate — a scoring leader is
   // never "unspectacular", even at a modest points-per-game.
   if (scoringRank !== undefined && scoringRank <= 3) return pick(['Leading his league in scoring is a real feather in his cap.', 'You can\'t ignore production at the very top of the league.'], pid + ':prod')

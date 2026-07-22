@@ -20,7 +20,7 @@
  */
 
 import type { Player } from '@domain'
-import type { LockerRoomState, Relationship } from '@engine/league/lockerRoom'
+import type { LockerRoomState } from '@engine/league/lockerRoom'
 import { knowledgeOf } from '@engine/league/scouting'
 import type { ScoutingState } from '@domain/scouting'
 

@@ -450,7 +450,6 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
 
   const newsSeeds: NewsSeed[] = []
   let verdict: Verdict
-  const n_est = state.targetRank * 2  // rough estimate; actual n not required here
 
   switch (state.mandate) {
     case 'cupOrBust': {

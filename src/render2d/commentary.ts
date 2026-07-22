@@ -53,7 +53,7 @@ function strHash(s: string): number {
 
 const PERIOD_LEN = 1200
 
-function clockStr(period: number, t: number): string {
+function clockStr(_period: number, t: number): string {
   const remaining = Math.max(0, PERIOD_LEN - t)
   const mm = Math.floor(remaining / 60)
   const ss = remaining % 60

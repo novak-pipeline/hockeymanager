@@ -19,7 +19,6 @@ import {
   normYtoWorld,
   springStep,
   snapSpring,
-  angleSpringStep,
   clampTurnRate,
   jerseyNumber,
   extractCues,
@@ -62,7 +61,6 @@ const GOALIE_TORSO_W = 2.1
 const PLAYER_FOLLOW_HL = 0.08
 const CAMERA_FOLLOW_HL = 0.45   // broadcast/follow spring half-life (~0.45 s)
 const CAMERA_OVERHEAD_HL = 1.5  // overhead: very heavy damping — stable wide shot
-const ANGLE_FOLLOW_HL = 0.12
 
 // ── Play-focus smoother ─────────────────────────────────────────────────────
 // EMA time constant for the play-focus layer (seconds).

@@ -61,10 +61,16 @@ function Avatar({
 /* ── main component ── */
 
 interface PlayerFaceProps {
-  faceId?: string
+  // Explicit `| undefined` on each optional: under exactOptionalPropertyTypes a
+  // bare `?:` means "absent, or a string — never explicitly undefined", but the
+  // idiomatic React call site is `faceId={player.faceId}` where the value is
+  // often undefined. Passing undefined is equivalent to omitting it here (faceId
+  // is null-checked, size defaults), so accept it rather than force every caller
+  // into a conditional spread.
+  faceId?: string | undefined
   name: string
-  teamColor?: number
-  size?: number
+  teamColor?: number | undefined
+  size?: number | undefined
 }
 
 /**
