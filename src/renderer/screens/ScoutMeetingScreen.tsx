@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import type { ScoutMeetingView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
+import { Linkify } from '../components/Linkify'
 import { PlayerLink } from '../components/NavContext'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
@@ -107,7 +108,7 @@ export function ScoutMeetingScreen(): JSX.Element {
           <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 800 }}>The recruitment room</h2>
           <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
             <div className="muted" style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>
-              <b>{view.host.name}</b> · {view.host.title} — “{view.opening}”
+              <b>{view.host.name}</b> · {view.host.title} — “<Linkify text={view.opening} />”
             </div>
             <button className="btn btn-sm btn-ghost" title="Hear it" onClick={() => speakAs('scout', view.opening, { importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
           </div>
@@ -147,7 +148,7 @@ export function ScoutMeetingScreen(): JSX.Element {
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</div>
                 {p.intro.map((line, i) => (
-                  <div key={i} style={{ fontSize: 13, lineHeight: 1.55, fontStyle: 'italic', color: 'var(--text)' }}>“{line}”</div>
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.55, fontStyle: 'italic', color: 'var(--text)' }}>“<Linkify text={line} />”</div>
                 ))}
                 <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 4 }}>
                   {p.options.map((o) => {

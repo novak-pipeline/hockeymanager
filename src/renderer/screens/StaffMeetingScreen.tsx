@@ -14,6 +14,7 @@ import type { StaffMeetingSummaryView } from '../../worker/protocol'
 import { Panel, ScreenHeader } from '../components/ui'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink } from '../components/NavContext'
+import { Linkify } from '../components/Linkify'
 import { toast } from '../components/store'
 import { useClient } from '../hooks/useSim'
 
@@ -197,7 +198,7 @@ export function StaffMeetingScreen(): JSX.Element {
               <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
                 {discussion.speaker} · {discussion.speakerRole}
               </div>
-              {discussion.opinion}
+              <Linkify text={discussion.opinion} />
             </div>
           )}
         </Panel>

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getScene } from '../lib/mods'
 import type { BoardMeetingScene, MeetingLine } from '../../worker/protocol'
 import { PlayerFace } from '../components/PlayerFace'
+import { Linkify } from '../components/Linkify'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
@@ -91,7 +92,7 @@ function SpeechRow({ line, cast }: { line: MeetingLine; cast: BoardMeetingScene[
             boxShadow: '0 2px 12px rgba(0,0,0,0.45)',
           }}
         >
-          {line.text}
+          <Linkify text={line.text} />
         </div>
       </div>
     </div>
