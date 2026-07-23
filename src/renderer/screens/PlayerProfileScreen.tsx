@@ -47,6 +47,31 @@ import { RadarChart } from '../components/RadarChart'
 import { ThemeScope } from '../components/ThemeScope'
 
 /* ── Scout this player: send a scout straight from the profile ───────────────── */
+/** Playtest #23: add the player to the scouting shortlist straight from his
+ *  profile (the same list the Scouting Centre's "save for later" feeds). */
+function ShortlistButton(
+  { playerId, name, client }: { playerId: string; name: string; client: ReturnType<typeof useClient> },
+): JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  async function add(): Promise<void> {
+    if (busy || done) return
+    setBusy(true)
+    try {
+      const res = await client.shortlistProspect(playerId)
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast(`${name} added to your shortlist.`, 'success'); setDone(true) }
+    } finally { setBusy(false) }
+  }
+  return (
+    <button className="btn small" disabled={busy || done} onClick={() => void add()}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      title="Track this player on your scouting shortlist">
+      <Icon size={14}><Icons.Star /></Icon> {done ? 'Shortlisted' : 'Shortlist'}
+    </button>
+  )
+}
+
 function ScoutPlayerButton({ playerId, client }: { playerId: string; client: ReturnType<typeof useClient> }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [scouts, setScouts] = useState<Array<{ scoutId: string; name: string; rating: number }>>([])
@@ -2019,8 +2044,9 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
 
   return (
     <div className="stack">
-      {/* Scout-this-player action */}
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
+      {/* Scout-this-player + shortlist actions */}
+      <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+        <ShortlistButton playerId={d.playerId} name={d.name} client={client} />
         <ScoutPlayerButton playerId={d.playerId} client={client} />
       </div>
       {/* The FM-style "Overall Report" (recommendation + Pros/Cons) lives on the
