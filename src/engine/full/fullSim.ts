@@ -995,6 +995,24 @@ function simPeriod(
     // Credit shooter's xG from the empirical surface value (already computed above).
     sStat.xg = (sStat.xg ?? 0) + xg
 
+    // Expected primary assist (xA): credit the chance CREATED, on every shot,
+    // to the most likely setup man on the ice (highest playmaking, ≠ shooter).
+    // Chosen deterministically — no rng draw — so the event stream stays
+    // byte-identical. xA used to accrue only on GOALS, which made it ≈ real
+    // assists (sparse) while xG accrued on every shot, collapsing the Data Hub
+    // scatter to the low-creation edge. Now both axes are "expected per chance".
+    {
+      let feeder: (typeof atk.unit.skaters)[number] | null = null
+      for (const r of atk.unit.skaters) {
+        if (r.player.id === shooterSk.player.id) continue
+        if (!feeder || r.player.composites.playmaking > feeder.player.composites.playmaking) feeder = r
+      }
+      if (feeder) {
+        const fStat = stat(ctx, feeder.player.id)
+        fStat.xA = (fStat.xA ?? 0) + xg
+      }
+    }
+
     const goalie = def.unit.goalie
     const netEmpty = def.pulled
     // No goalie stats accrue against an empty net (NHL convention).
@@ -1030,11 +1048,6 @@ function simPeriod(
         if (gs !== 'pp') {
           for (const r of atk.unit.skaters) stat(ctx, r.player.id).plusMinus += 1
           for (const r of def.unit.skaters) stat(ctx, r.player.id).plusMinus -= 1
-        }
-        // Credit the primary assister (first in list) xA = shooter's xG value.
-        if (assists.length > 0) {
-          const primaryA = stat(ctx, assists[0])
-          primaryA.xA = (primaryA.xA ?? 0) + xg
         }
         // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91

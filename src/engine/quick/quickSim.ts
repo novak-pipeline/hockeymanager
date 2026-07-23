@@ -449,6 +449,22 @@ function simShift(
     const shotXgApprox = LEAGUE_AVG_XG_PER_SHOT * (0.7 + danger * 0.6)
     shooterStat.xg = (shooterStat.xg ?? 0) + shotXgApprox
 
+    // Expected primary assist (xA): credit the chance CREATED, on every shot, to
+    // the most likely setup man on the ice (highest playmaking, ≠ shooter),
+    // chosen deterministically (no rng draw → byte-identical stream). Mirrors the
+    // full sim; crediting xA only on GOALS collapsed the Data Hub scatter.
+    {
+      let feeder: Player | null = null
+      for (const sk of atk.skaters) {
+        if (sk.id === shooter.id) continue
+        if (!feeder || sk.composites.playmaking > feeder.composites.playmaking) feeder = sk
+      }
+      if (feeder) {
+        const fStat = stat(ctx, feeder.id)
+        fStat.xA = (fStat.xA ?? 0) + shotXgApprox
+      }
+    }
+
     const goalie = def.goalie
     const goalieStat = stat(ctx, goalie.id)
     goalieStat.shotsAgainst++
@@ -485,11 +501,6 @@ function simShift(
       if (goalStrength !== 'pp') {
         for (const sk of atk.skaters) stat(ctx, sk.id).plusMinus += 1
         for (const sk of def.skaters) stat(ctx, sk.id).plusMinus -= 1
-      }
-      // Credit the primary assister xA = shooter's xG for this shot.
-      if (assists.length > 0) {
-        const primaryA = stat(ctx, assists[0].id)
-        primaryA.xA = (primaryA.xA ?? 0) + shotXgApprox
       }
       ctx.stream.push({
         t: tShot,
