@@ -9,7 +9,7 @@
  * is fetched once and cached for the session.
  */
 import { useEffect, useState, type ReactNode } from 'react'
-import { PlayerLink } from './NavContext'
+import { PlayerLink, TeamLink } from './NavContext'
 import { useClient } from '../hooks/useSim'
 import type { SimClient } from '../../worker/client'
 
@@ -75,7 +75,13 @@ export function Linkify({ text, className }: { text: string; className?: string 
     const id = index.get(clean.toLowerCase())
     if (!id) continue
     if (start > last) nodes.push(text.slice(last, start))
-    nodes.push(<PlayerLink key={key++} playerId={id} name={clean} />)
+    // Team names are tagged `team:<id>` in the index (see getNameIndex) so a
+    // club link routes to the squad screen; everything else is a player.
+    if (id.startsWith('team:')) {
+      nodes.push(<TeamLink key={key++} teamId={id.slice(5)} name={clean} />)
+    } else {
+      nodes.push(<PlayerLink key={key++} playerId={id} name={clean} />)
+    }
     if (clean.length < raw.length) nodes.push(raw.slice(clean.length))
     last = start + raw.length
   }

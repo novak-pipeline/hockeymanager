@@ -15128,6 +15128,10 @@ export class Career {
   getNameIndex(): Array<[string, string]> {
     const out: Array<[string, string]> = []
     for (const p of this.data.players.values()) out.push([p.id as string, p.name])
+    // Playtest #22: teams too, so club names in inbox/news prose become links.
+    // Tagged with a `team:` id prefix (the tuple shape is unchanged) so the
+    // renderer can route them to TeamLink instead of PlayerLink.
+    for (const t of this.data.teams.values()) out.push([`team:${t.id as string}`, t.name])
     return out
   }
 
