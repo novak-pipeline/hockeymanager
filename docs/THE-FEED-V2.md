@@ -107,12 +107,15 @@ keyed by `cardType`, reusing DataHub/standings view builders. This is the
 5. **FEED-V2-5 Interactivity** — threads/reactions/mute (optional).
 6. **FEED-V2-6 Draft broadcast** (#151).
 
-## Open questions for the user
-- **Scope of player voices**: all players, or only your club + notable names
-  league-wide? (Recommend: your club always + league stars, to avoid noise.)
-- **Tone**: how real-social should it read — emoji, hashtags, snark — vs
-  buttoned-up? (Recommend: real-social but tasteful; personality-scaled.)
-- **Surfacing**: dashboard panel + Inbox subtab enough, or a full top-level
-  Feed screen in the sidebar?
-- **Start slice**: FEED-V2-1 (voices) is the recommended first build — it's the
-  single change that most makes it "fun to browse."
+## User decisions (locked 2026-07-23)
+- **Scope of player voices**: the user's club + league stars only. ✔
+- **Grounding**: player posts should trace to real interactions — *"like from
+  phone calls or meetings."* The Living Ledger (WorldActions, residue) and the
+  meeting/interaction systems are first-class post sources: shop a player and
+  he subtweets; a resolved concern earns a grateful post; a promise kept gets
+  acknowledged. This is the living-world rule applied to the feed.
+- **Tone**: real social — emoji and snark welcome, scaled by personality. ✔
+- **Surfacing**: UNDECIDED. Build slices 1–3 behind the existing Inbox subtab;
+  present surfacing options (dashboard Trending panel vs sidebar entry vs both)
+  with screenshots once the feed has real content to show.
+- **Start slice**: FEED-V2-1 (voices).
