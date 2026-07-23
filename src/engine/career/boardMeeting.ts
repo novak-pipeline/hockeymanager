@@ -168,8 +168,8 @@ function ownerVoice(demeanor: string | undefined, rng: Rng): {
           `${m} I think that's fair to ask, and I'll back you while you chase it.`,
           `My ask this season: ${m} Nothing you can't handle.`,
         ]),
-        onExceeded: (a, p) => `Everyone had us ${ord(p)}. You brought home ${ord(a)}. That didn't go unnoticed.`,
-        onMissed: (a, p) => `We hoped for ${ord(p)} and got ${ord(a)}. I'm not panicking — but I am paying attention.`,
+        onExceeded: (a, p) => `The pundits projected us ${ord(p)} in the league last season; we finished ${ord(a)}. That overachievement didn't go unnoticed.`,
+        onMissed: (a, p) => `We were projected ${ord(p)} last season and finished ${ord(a)}. I'm not panicking — but I am paying attention.`,
       }
     case 'motivator':
       return {
