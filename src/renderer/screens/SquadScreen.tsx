@@ -158,6 +158,20 @@ function SortTh({
   )
 }
 
+/** Lightweight sortable header for the AHL table (its own local sort keys). */
+function AhlSortTh<K extends string>(
+  { label, k, cur, asc, onSort, align = 'left' }:
+  { label: string; k: K; cur: K | null; asc: boolean; onSort: (k: K) => void; align?: 'left' | 'right' },
+): JSX.Element {
+  const active = cur === k
+  return (
+    <th className={`sortable${align === 'right' ? ' num' : ''}`} style={{ whiteSpace: 'nowrap' }} onClick={() => onSort(k)}>
+      {label}
+      {active && <span style={{ marginLeft: 3, color: 'var(--accent)' }}>{asc ? '↑' : '↓'}</span>}
+    </th>
+  )
+}
+
 function SkaterCols({ row }: { row: SquadRowView }): JSX.Element {
   const s = row.skater
   if (!s) return <td colSpan={7} className="muted">—</td>
@@ -600,6 +614,34 @@ function AhlSquadPanel({
   error: string | null
   onCallUp: (playerId: string) => Promise<void>
 }): JSX.Element {
+  // Playtest #21: the AHL table couldn't sort at all. Sort WITHIN each position
+  // group (F/D/G) so the grouping stays but each section is orderable.
+  type AhlSort = 'name' | 'age' | 'overall' | 'condition' | 'salary' | 'gp'
+  const [sortKey, setSortKey] = useState<AhlSort | null>(null)
+  const [sortAsc, setSortAsc] = useState(false)
+  const onSort = (k: AhlSort): void => {
+    if (sortKey === k) setSortAsc((a) => !a)
+    else { setSortKey(k); setSortAsc(k === 'name' || k === 'age') } // text/age default ascending
+  }
+  const sortAhl = <T extends AhlSquadView['rows']>(rows: T): T => {
+    if (!sortKey) return rows
+    const val = (r: T[number]): number | string => {
+      switch (sortKey) {
+        case 'name': return r.name.toLowerCase()
+        case 'age': return r.age
+        case 'overall': return r.overall
+        case 'condition': return r.condition
+        case 'salary': return r.contract.salary
+        case 'gp': return r.skater?.gamesPlayed ?? r.goalie?.gamesPlayed ?? 0
+      }
+    }
+    const dir = sortAsc ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const va = val(a), vb = val(b)
+      return (va < vb ? -1 : va > vb ? 1 : 0) * dir
+    }) as T
+  }
+
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading…</Notice>
   if (!data || !data.hasAffiliate) {
@@ -624,14 +666,14 @@ function AhlSquadPanel({
           <table className="table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th className="num">Age</th>
+                <AhlSortTh label="Name" k="name" cur={sortKey} asc={sortAsc} onSort={onSort} />
+                <AhlSortTh label="Age" k="age" cur={sortKey} asc={sortAsc} onSort={onSort} align="right" />
                 <th>Pos</th>
-                <th className="num">OVR</th>
-                <th className="num">Cond</th>
+                <AhlSortTh label="Ability" k="overall" cur={sortKey} asc={sortAsc} onSort={onSort} align="right" />
+                <AhlSortTh label="Cond" k="condition" cur={sortKey} asc={sortAsc} onSort={onSort} align="right" />
                 <th>Inj</th>
-                <th className="num">Contract</th>
-                <th className="num">AHL GP</th>
+                <AhlSortTh label="Contract" k="salary" cur={sortKey} asc={sortAsc} onSort={onSort} align="right" />
+                <AhlSortTh label="AHL GP" k="gp" cur={sortKey} asc={sortAsc} onSort={onSort} align="right" />
                 <th style={{ width: 80 }}>Action</th>
               </tr>
             </thead>
@@ -644,9 +686,9 @@ function AhlSquadPanel({
                 </tr>
               )}
               {[
-                { label: 'Forwards', rows: forwards },
-                { label: 'Defence', rows: defense },
-                { label: 'Goalies', rows: goalies },
+                { label: 'Forwards', rows: sortAhl(forwards) },
+                { label: 'Defence', rows: sortAhl(defense) },
+                { label: 'Goalies', rows: sortAhl(goalies) },
               ].map(({ label, rows }) =>
                 rows.length === 0 ? null : (
                   <Fragment key={`grp-${label}`}>
