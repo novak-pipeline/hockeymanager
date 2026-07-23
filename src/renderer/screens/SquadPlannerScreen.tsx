@@ -9,6 +9,7 @@ import type { RoleBoardRow } from '../../engine/career/views'
 import type { SquadStatus } from '../../domain/player'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
+import { OverallStars } from '../components/Stars'
 import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -77,7 +78,7 @@ function RolesTab(): JSX.Element {
         </td>
         <td className="muted">{r.position}</td>
         <td className="num muted">{r.age}</td>
-        <td className="num">{r.overall}</td>
+        <td className="num"><OverallStars value={r.overall} /></td>
         <td>
           <select className="select" style={{ fontSize: 12 }} value={r.squadStatus ?? ''} disabled={busy}
             onChange={(e) => void setRole(r.playerId, e.target.value === '' ? null : (e.target.value as SquadStatus))}>
@@ -111,7 +112,7 @@ function RolesTab(): JSX.Element {
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Player</th><th>Pos</th><th className="num">Age</th><th className="num">OVR</th><th>Role</th><th>Suggested</th></tr>
+            <tr><th>Player</th><th>Pos</th><th className="num">Age</th><th className="num">Ability</th><th>Role</th><th>Suggested</th></tr>
           </thead>
           <tbody>{view.rows.map((r) => <Row key={r.playerId} r={r} />)}</tbody>
         </table>

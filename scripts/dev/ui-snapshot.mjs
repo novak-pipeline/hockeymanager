@@ -285,8 +285,22 @@ try {
   }
 
   // ── walk the sidebar ──
+  // The FM-style processing overlay is modal and sits over the sidebar; dismiss
+  // any open one first (it only appears now on eventful days) so the nav clicks
+  // aren't swallowed by the backdrop.
+  const dismissOverlay = async () => {
+    for (let i = 0; i < 4; i++) {
+      const close = win.locator('button:has-text("Close")')
+      if (await close.count().catch(() => 0)) {
+        await close.first().click({ timeout: 1500 }).catch(() => {})
+        await win.waitForTimeout(200)
+      } else break
+    }
+  }
+  await dismissOverlay()
   for (const [label, slug] of SIDEBAR_STOPS) {
     try {
+      await dismissOverlay()
       await win.click(`text="${label}"`, { timeout: 4000 })
       await win.waitForTimeout(500)
       await snap(win, slug)

@@ -351,6 +351,13 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             ((b.press ? 100 : 0) + (b.salience ?? 0)) - ((a.press ? 100 : 0) + (a.salience ?? 0)))[0]
         : null
 
+      // Playtest #2 / bar B2.1: a quiet day isn't worth a stop. When nothing new
+      // landed in the inbox, close the overlay automatically instead of making
+      // the GM dismiss a "nothing happened" panel every single day — that manual
+      // Close on every quiet advance is what made simming feel cumbersome. The
+      // overlay now only HOLDS when there's actual mail/story to read.
+      if (incoming.length === 0) { setProcessing(null); return }
+
       setProcessing({
         phase: 'done',
         nextGame: dash?.nextGame ?? null,
