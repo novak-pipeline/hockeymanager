@@ -2396,6 +2396,9 @@ export interface CareerSnapshot {
    *  mid-scene still applies its AUTHORED effects on load rather than
    *  silently falling back to the generic tone model. Optional/additive. */
   decisionEventFor?: Array<[string, string]>
+  /** Playtest #14: prospect call-ups the GM declined, keyed to the season he
+   *  said it, so staff stop re-pitching the same kid. Optional/additive. */
+  declinedCallups?: Array<[string, number]>
   lastDecisionDay?: number
   /** Feed Phase A: priors ledger + novelty memory. Optional/additive. */
   storyPriors?: StoryPriors

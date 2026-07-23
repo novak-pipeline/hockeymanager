@@ -2919,6 +2919,11 @@ export class Career {
 
   /** interactionId → decision-event id, so the response applies authored effects. */
   private decisionEventFor = new Map<string, string>()
+  /** Playtest #14: prospects the GM has told the AGM to leave in the minors, keyed
+   *  to the season he said it. A "no, leave him down" holds for the rest of that
+   *  season instead of the staff re-pitching the same kid every fortnight. Next
+   *  season it's fair game again — the case may genuinely have changed. */
+  private declinedCallups = new Map<string, number>()
 
   /** Apply an authored option's effects: morale, the room, promises, residue,
    *  and the leak roll. Every one is a lever the sim already honours. */
@@ -7100,7 +7105,7 @@ export class Career {
    * on load (so an existing broken save is healed). Deterministic: every choice
    * is a threshold on age/ability, no randomness.
    */
-  private reconcileOrphans(): void {
+  private reconcileOrphans(silent = false): void {
     // Everyone already accounted for: on a roster, a listed free agent, or a
     // current draft-eligible prospect. Anyone else in the map is an orphan.
     const rostered = new Set<string>()
@@ -7193,16 +7198,23 @@ export class Career {
         })),
         year: this.year,
       })
-      this.pushSeeds(rr.newsSeeds)
-      const announced = new Set(rr.newsSeeds.map((s) => s.playerId).filter((x): x is string => !!x))
-      const rest = entries.filter(({ p }) => !announced.has(p.id as string))
-      if (rest.length > 0) {
-        const names = rest.slice(0, 6).map(({ p }) => p.name)
-        this.pushNews(
-          'league',
-          `${rest.length} veteran${rest.length > 1 ? 's' : ''} call it a career`,
-          `${names.join(', ')}${rest.length > names.length ? `, and ${rest.length - names.length} others` : ''} have retired from professional hockey.`,
-        )
+      // When healing a save on LOAD (silent), record the retirement to the
+      // records/HoF ledger — the paper trail must exist — but do NOT push it as
+      // fresh inbox news: these players didn't retire "today" (a mid-season
+      // date), they were already gone; announcing it on Nov 11 was the bug.
+      // At rollover (offseason), announce as usual.
+      if (!silent) {
+        this.pushSeeds(rr.newsSeeds)
+        const announced = new Set(rr.newsSeeds.map((s) => s.playerId).filter((x): x is string => !!x))
+        const rest = entries.filter(({ p }) => !announced.has(p.id as string))
+        if (rest.length > 0) {
+          const names = rest.slice(0, 6).map(({ p }) => p.name)
+          this.pushNews(
+            'league',
+            `${rest.length} veteran${rest.length > 1 ? 's' : ''} call it a career`,
+            `${names.join(', ')}${rest.length > names.length ? `, and ${rest.length - names.length} others` : ''} have retired from professional hockey.`,
+          )
+        }
       }
       for (const { p } of entries) {
         const home = lastProTeamOf(p)
@@ -13336,6 +13348,9 @@ export class Career {
     for (const id of ahl.roster) {
       const p = this.data.players.get(id)
       if (!p || p.position === 'G' || used.has(p.id as string)) continue
+      // Playtest #14: a prospect the GM already declined to promote this season
+      // stays off the agenda — no re-pitching the same kid every meeting.
+      if (this.declinedCallups.get(p.id as string) === this.year) continue
       if (best === null || ratedOverall(p) > ratedOverall(best)) best = p
     }
     if (best && ratedOverall(best) >= bar + 3) {
@@ -13590,6 +13605,13 @@ export class Career {
       const optId = choices[p.id] ?? p.defaultOptionId
       const opt = p.options.find((o) => o.id === optId)
       if (!opt) continue
+      // Playtest #14: if this proposal offered a call-up and the GM picked
+      // something other than it, remember the "no" so the staff stops
+      // re-pitching the same prospect for the rest of the season.
+      const callUpOpt = p.options.find((o) => o.action.type === 'callUp')
+      if (callUpOpt && opt.action.type !== 'callUp' && callUpOpt.action.type === 'callUp') {
+        this.declinedCallups.set(callUpOpt.action.playerId, this.year)
+      }
       const r = this.applyStaffAction(opt.action)
       if (r) receipts.push(r)
     }
@@ -17811,6 +17833,7 @@ export class Career {
       ledgerCounter: this.ledgerCounter,
       contentLedger: this.contentLedger.map((u) => ({ ...u })),
       decisionEventFor: [...this.decisionEventFor.entries()],
+      declinedCallups: [...this.declinedCallups.entries()],
       lastDecisionDay: this.lastDecisionDay,
       interactionCounter: this.interactionCounter,
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
@@ -17995,6 +18018,7 @@ export class Career {
     career.ledgerCounter = snapshot.ledgerCounter ?? 0
     if (snapshot.contentLedger) career.contentLedger = snapshot.contentLedger.map((u) => ({ ...u }))
     if (snapshot.decisionEventFor) career.decisionEventFor = new Map(snapshot.decisionEventFor)
+    if (snapshot.declinedCallups) career.declinedCallups = new Map(snapshot.declinedCallups)
     career.lastDecisionDay = snapshot.lastDecisionDay ?? -999
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
@@ -18206,7 +18230,9 @@ export class Career {
     // Heal any save that already lost a player to limbo: restore dropped
     // contracts to their clubs, retire (announced) the plainly-finished, and
     // list the rest as free agents. Idempotent on a healthy save (a no-op).
-    career.reconcileOrphans()
+    // Silent: any retirement here is reconciliation of a pre-existing orphan,
+    // not an event that happened on the save's current (mid-season) date.
+    career.reconcileOrphans(true)
     return career
   }
 }
