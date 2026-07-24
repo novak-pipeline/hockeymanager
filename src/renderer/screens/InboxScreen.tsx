@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { NewsCategory } from '@domain'
+import { isBreakingNews, type NewsCategory } from '@domain'
 import type { InboxView, NewsItem } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Linkify } from '../components/Linkify'
@@ -169,6 +169,34 @@ function itemDate(item: NewsItem): string {
   return fmtDate(item.dateISO ?? dayToDateISO(item.year, item.day))
 }
 
+/**
+ * Playtest #13: the BREAKING tag — big or rare stories (salience above the
+ * bar, or a first-ever story pattern) look different at a glance. `compact`
+ * is the inline list-row variant; the default sits in the reading pane.
+ */
+export function BreakingTag({ compact }: { compact?: boolean }): JSX.Element {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        fontSize: compact ? 8.5 : 10,
+        fontWeight: 800,
+        letterSpacing: 1,
+        lineHeight: compact ? '12px' : '16px',
+        color: 'var(--red)',
+        border: '1px solid rgba(244,63,94,0.55)',
+        background: 'rgba(244,63,94,0.10)',
+        borderRadius: 3,
+        padding: compact ? '0 4px' : '0 6px',
+        verticalAlign: 'middle',
+        flexShrink: 0,
+      }}
+    >
+      BREAKING
+    </span>
+  )
+}
+
 export function InboxScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
@@ -289,6 +317,7 @@ export function InboxScreen(): JSX.Element {
   function renderRow(item: NewsItem): JSX.Element {
     const meta = CATEGORY_META[item.category]
     const isSelected = selected?.id === item.id
+    const breaking = isBreakingNews(item)
     return (
       <button
         key={item.id}
@@ -306,7 +335,7 @@ export function InboxScreen(): JSX.Element {
             : item.read
             ? 'transparent'
             : 'rgba(var(--accent-rgb),0.04)',
-          borderLeft: `3px solid ${isSelected ? 'var(--accent)' : item.read ? 'transparent' : meta.color}`,
+          borderLeft: `3px solid ${isSelected ? 'var(--accent)' : breaking ? 'var(--red)' : item.read ? 'transparent' : meta.color}`,
           color: 'var(--text)',
           textAlign: 'left',
           cursor: 'pointer',
@@ -332,6 +361,7 @@ export function InboxScreen(): JSX.Element {
               color: item.read ? 'var(--muted)' : 'var(--text)',
             }}
           >
+            {breaking && <span style={{ marginRight: 5 }}><BreakingTag compact /></span>}
             {item.headline}
           </div>
           <div
@@ -808,6 +838,7 @@ function ReadingPane(props: {
   }
 
   const meta = CATEGORY_META[item.category]
+  const breaking = isBreakingNews(item)
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
 
   return (
@@ -815,7 +846,11 @@ function ReadingPane(props: {
       className="panel"
       style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}
     >
-      <PaneAccentBar gradient={`linear-gradient(90deg, ${meta.color}, ${meta.color}88)`} />
+      <PaneAccentBar
+        gradient={breaking
+          ? 'linear-gradient(90deg, var(--red), var(--amber))'
+          : `linear-gradient(90deg, ${meta.color}, ${meta.color}88)`}
+      />
 
       <div style={{ padding: 'var(--sp-4)' }}>
         <div className="stack" style={{ gap: 'var(--sp-3)' }}>
@@ -825,6 +860,7 @@ function ReadingPane(props: {
             <div style={{ flex: 1, minWidth: 0 }}>
               <PaneBadge color={meta.color}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  {breaking && <BreakingTag />}
                   <CategoryIcon category={item.category} size={13} color={meta.color} /> {meta.label}
                 </span>
               </PaneBadge>
@@ -1010,10 +1046,15 @@ function PressArticlePane(props: {
     : [press.byline, '']
 
   const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
+  const breaking = isBreakingNews(item)
 
   return (
     <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
-      <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--cyan))" />
+      <PaneAccentBar
+        gradient={breaking
+          ? 'linear-gradient(90deg, var(--red), var(--amber))'
+          : 'linear-gradient(90deg, var(--violet), var(--cyan))'}
+      />
 
       <div style={{ padding: 'var(--sp-4)' }}>
         {/* Masthead row: kind badge + author + date | hero image */}
@@ -1028,7 +1069,10 @@ function PressArticlePane(props: {
         >
           <div>
             <PaneBadge color="var(--violet-h)">
-              {press.kind.toUpperCase().replace(/-/g, ' ')}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                {breaking && <BreakingTag />}
+                {press.kind.toUpperCase().replace(/-/g, ' ')}
+              </span>
             </PaneBadge>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
               {outletAuthor}

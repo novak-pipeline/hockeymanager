@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
+import { isBreakingNews } from '@domain'
 import { playerValue } from '@engine/league/trades'
 import { Career } from './career'
 
@@ -328,9 +329,11 @@ describe('Feed Phase A (salience engine)', () => {
     for (const p of feed.posts) perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2)
     // Curation floor: with no follows, only floor-clearing (70+) posts may
-    // have mirrored into the inbox.
+    // have mirrored into the inbox — and any feed-channel story that survives
+    // the inbox curation must be BREAKING (playtest #13: big or rare only).
     for (const n of c.getInbox().items) {
       if (n.channel !== undefined) expect(n.salience).toBeGreaterThanOrEqual(70)
+      if (n.channel === 'feed') expect(isBreakingNews(n)).toBe(true)
     }
 
     // Round-trip: priors, novelty memory, and the posts all survive.
@@ -338,6 +341,23 @@ describe('Feed Phase A (salience engine)', () => {
     expect(snap.storyPriors?.preseasonRanks.length).toBe(data.league.teams.length)
     const c2 = Career.fromSnapshot(snap)
     expect(c2.getFeed().posts).toEqual(feed.posts)
+  })
+
+  it('#13: breaking/rare feed stories reach the inbox; routine chatter stays out', () => {
+    const data = generateLeague({ seed: 103 })
+    const c = new Career(data, 103, data.league.teams[0]) as any
+    // Feed-channel items about OTHER clubs (none reference the user team), so
+    // only the breaking/rare/followed rules decide inbox visibility.
+    c.pushNews('league', '@puckmodel', 'routine floor-clearing take', { channel: 'feed', authorId: 'stats', salience: 72 })
+    c.pushNews('league', '@MercerHockey', 'a genuinely huge story', { channel: 'feed', authorId: 'insider', salience: 84 })
+    c.pushNews('league', '@CarverNotes', 'a first-ever story pattern', { channel: 'feed', authorId: 'analyst', salience: 71, rare: true })
+    const bodies = () => c.getInbox().items.map((n: { body: string }) => n.body)
+    expect(bodies()).not.toContain('routine floor-clearing take')
+    expect(bodies()).toContain('a genuinely huge story')
+    expect(bodies()).toContain('a first-ever story pattern')
+    // Following the author restores the Phase B mirror for routine posts.
+    c.toggleFollowAuthor('stats')
+    expect(bodies()).toContain('routine floor-clearing take')
   })
 
   it('follows toggle, persist, and gate the inbox mirror', () => {

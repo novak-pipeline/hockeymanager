@@ -22,6 +22,7 @@ import {
   asPlayerId,
   asTeamId,
   isEvent,
+  isBreakingNews,
   type DraftPick,
   type GameResult,
   type GameStream,
@@ -1725,6 +1726,7 @@ export class Career {
       authorId?: string
       salience?: number
       engagement?: { likes: number; reposts: number }
+      rare?: boolean
     } = {}
   ): void {
     const item: NewsItem = {
@@ -1745,6 +1747,7 @@ export class Career {
       ...(refs.authorId !== undefined ? { authorId: refs.authorId } : {}),
       ...(refs.salience !== undefined ? { salience: refs.salience } : {}),
       ...(refs.engagement !== undefined ? { engagement: refs.engagement } : {}),
+      ...(refs.rare !== undefined ? { rare: refs.rare } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -2271,7 +2274,7 @@ export class Career {
     this.pushNews('milestone',
       `${p.name} breaks the all-time single-season ${kind} record`,
       `${p.name} is up to ${seasonTotal} ${label}s — passing ${rec.playerName}'s ${rec.value} from ${rec.year} for the most in a single season in league history. A record that stood for years, gone. History, made.`,
-      { playerId: pid })
+      { playerId: pid, salience: 95 })
   }
 
   /** Current-season per-player lines for the records module. */
@@ -3248,6 +3251,11 @@ export class Career {
     const counts = new Map(priors.noveltyCounts)
     const rng = this.rngFor(9800, day)
     const selected = selectPosts(candidates, counts, rng)
+    // Playtest #13: a story pattern firing for the FIRST time in this save is
+    // rare by definition — read the ledger BEFORE incrementing it below.
+    const rareKeys = new Set(
+      selected.filter((p) => (counts.get(noveltyClassOf(p.key)) ?? 0) === 0).map((p) => p.key)
+    )
     for (const post of selected) {
       counts.set(post.key, (counts.get(post.key) ?? 0) + 1)
       const cls = noveltyClassOf(post.key)
@@ -3267,6 +3275,7 @@ export class Career {
         authorId: post.authorId,
         salience: Math.round(post.score),
         engagement: engagementFor(post.score, rng),
+        ...(rareKeys.has(post.key) ? { rare: true } : {}),
       })
     }
     if (this.feedPosts.length > 400) this.feedPosts.length = 400
@@ -3281,6 +3290,7 @@ export class Career {
         channel: post.channel,
         authorId: post.authorId,
         salience: Math.round(post.score),
+        ...(rareKeys.has(post.key) ? { rare: true } : {}),
       })
     }
     priors.noveltyCounts = [...counts.entries()]
@@ -5069,7 +5079,7 @@ export class Career {
         'DEADLINE DAY — the window closes tonight',
         'This is it: the last hours of the trade window. Every GM in the league is on the phone. ' +
         'Make your calls — when you continue, the deadline passes and the roster you have is the roster you ride.',
-        { teamId: this.userTeamId as string }
+        { teamId: this.userTeamId as string, salience: 88 }
       )
       return true
     }
@@ -16211,7 +16221,14 @@ export class Career {
     const ROSTER_CHURN =
       /turns pro|makes the NHL out of camp|heads overseas|signs with|clears waivers|is loaned|reassigned to|re-signings around the league/i
     return this.news.filter((n) => {
-      if (n.channel === 'feed') return false // feed posts belong to the Feed
+      // Feed posts belong to the Feed — EXCEPT breaking/rare stories (playtest
+      // #13: a league-shaking headline must never slip past the GM's desk) and
+      // accounts the GM chose to follow (Phase B curation).
+      if (
+        n.channel === 'feed' &&
+        !isBreakingNews(n) &&
+        !(n.authorId !== undefined && this.followedFeedAuthors.includes(n.authorId))
+      ) return false
       if (involvesUser(n)) return true
       if ((n.category === 'league' || n.category === 'trade') && AMBIENT_NOISE.test(n.headline)) return false
       if ((n.category === 'contract' || n.category === 'league' || n.category === 'trade') && ROSTER_CHURN.test(n.headline)) return false

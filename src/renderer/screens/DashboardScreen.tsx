@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { NewsCategory } from '@domain'
+import { isBreakingNews, type NewsCategory } from '@domain'
 import type {
   BoardSummaryView,
   CalendarView,
@@ -847,6 +847,19 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
                     color: item.read ? 'var(--muted)' : 'var(--text)',
                   }}
                 >
+                  {/* Playtest #13: big/rare stories carry the BREAKING mark here too */}
+                  {isBreakingNews(item) && (
+                    <span
+                      style={{
+                        display: 'inline-block', fontSize: 8.5, fontWeight: 800, letterSpacing: 1,
+                        lineHeight: '12px', color: 'var(--red)', border: '1px solid rgba(244,63,94,0.55)',
+                        background: 'rgba(244,63,94,0.10)', borderRadius: 3, padding: '0 4px',
+                        marginRight: 5, verticalAlign: 'middle',
+                      }}
+                    >
+                      BREAKING
+                    </span>
+                  )}
                   {item.headline}
                 </div>
               </span>

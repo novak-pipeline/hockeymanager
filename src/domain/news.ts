@@ -60,4 +60,26 @@ export interface NewsItem {
   authorId?: string
   salience?: number
   engagement?: { likes: number; reposts: number }
+  /**
+   * True when this story's novelty pattern fired for the FIRST time in the
+   * save (storyPriors.noveltyCounts) — a first-ever kind of story is rare by
+   * definition and gets the breaking treatment even below the salience bar.
+   * Additive/optional for save compat.
+   */
+  rare?: boolean
+}
+
+/**
+ * Playtest #13: inbox items at/above this salience get the BREAKING visual
+ * treatment. Chosen from the actual distribution, not by feel: the inbox
+ * floor for feed stories is 70 (INBOX_IMPORTANCE_FLOOR), the hardcoded big
+ * beats (blockbuster trade column, playoff clinch/elimination, record break)
+ * sit at 85–95, and detector scores cap at ~92 — so 80 separates the top of
+ * the distribution from routine floor-clearing chatter.
+ */
+export const BREAKING_SALIENCE = 80
+
+/** Big or rare: high-salience, or the first-ever firing of a story pattern. */
+export function isBreakingNews(item: Pick<NewsItem, 'salience' | 'rare'>): boolean {
+  return item.rare === true || (item.salience ?? 0) >= BREAKING_SALIENCE
 }
