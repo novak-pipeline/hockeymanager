@@ -314,10 +314,14 @@ function PlayerScatter({
   players,
   userTeamAbbrs,
   onPlayerClick,
+  width = 480,
+  height = 340,
 }: {
   players: PlayerAnalyticsRow[]
   userTeamAbbrs: Set<string>
   onPlayerClick: (playerId: string) => void
+  width?: number
+  height?: number
 }): JSX.Element {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; row: PlayerAnalyticsRow } | null>(null)
 
@@ -325,8 +329,8 @@ function PlayerScatter({
     return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 'var(--sp-3)' }}>No player data yet — play some games first.</div>
   }
 
-  const W = 480
-  const H = 340
+  const W = width
+  const H = height
   const PAD = { top: 24, right: 24, bottom: 40, left: 48 }
   const plotW = W - PAD.left - PAD.right
   const plotH = H - PAD.top - PAD.bottom
@@ -395,30 +399,61 @@ function PlayerScatter({
         })}
         <text x={PAD.left + plotW / 2} y={H - 4} textAnchor="middle" fontSize={9} fontWeight={600} fill="var(--muted)" fontFamily="inherit">xA/60 (Shot Creation)</text>
         <text x={12} y={PAD.top + plotH / 2} textAnchor="middle" fontSize={9} fontWeight={600} fill="var(--muted)" fontFamily="inherit" transform={`rotate(-90, 12, ${PAD.top + plotH / 2})`}>xG/60 (Shot Quality)</text>
-        {players.map((p) => {
-          const isUser = userTeamAbbrs.has(p.teamAbbr)
-          const sx = toSvgX(p.xAPer60)
-          const sy = toSvgY(p.xgPer60)
-          return (
-            <g key={p.playerId}>
-              <circle
-                cx={sx} cy={sy} r={isUser ? 5.5 : 4}
-                fill={isUser ? 'var(--violet)' : 'var(--bg3)'}
-                stroke={isUser ? 'var(--violet-h)' : 'var(--line)'}
-                strokeWidth={isUser ? 1.5 : 1}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setTooltip({ x: sx, y: sy, row: p })}
-                onMouseLeave={() => setTooltip(null)}
-                onClick={() => onPlayerClick(p.playerId)}
-              />
-              {isUser && (
-                <text x={sx + 7} y={sy + 4} fontSize={8} fontWeight={700} fill="var(--violet-h)" fontFamily="inherit" style={{ pointerEvents: 'none' }}>
-                  {p.name.split(' ').pop()}
-                </text>
-              )}
-            </g>
-          )
-        })}
+        {(() => {
+          // Decluster: a dot landing on top of an already-placed one is nudged
+          // outward on a small spiral until it finds clear ice, so stacked
+          // players stay individually visible and hoverable. Deterministic
+          // (order-stable, no rng) so the chart never jitters between renders.
+          const placed: Array<{ x: number; y: number }> = []
+          const minX = PAD.left + 3
+          const maxX = PAD.left + plotW - 3
+          const minY = PAD.top + 3
+          const maxY = PAD.top + plotH - 3
+          const collides = (px: number, py: number): boolean =>
+            placed.some((q) => (q.x - px) * (q.x - px) + (q.y - py) * (q.y - py) < 30)
+          return players.map((p) => {
+            const isUser = userTeamAbbrs.has(p.teamAbbr)
+            let sx = toSvgX(p.xAPer60)
+            let sy = toSvgY(p.xgPer60)
+            if (collides(sx, sy)) {
+              outer: for (let ring = 1; ring <= 5; ring++) {
+                for (let k = 0; k < ring * 6; k++) {
+                  const a = (2 * Math.PI * k) / (ring * 6)
+                  const nx = Math.min(maxX, Math.max(minX, sx + Math.cos(a) * ring * 5.5))
+                  const ny = Math.min(maxY, Math.max(minY, sy + Math.sin(a) * ring * 5.5))
+                  if (!collides(nx, ny)) { sx = nx; sy = ny; break outer }
+                }
+              }
+            }
+            placed.push({ x: sx, y: sy })
+            return (
+              <g key={p.playerId}>
+                <circle
+                  cx={sx} cy={sy} r={isUser ? 5.5 : 4}
+                  fill={isUser ? 'var(--violet)' : 'var(--bg3)'}
+                  fillOpacity={isUser ? 1 : 0.8}
+                  stroke={isUser ? 'var(--violet-h)' : 'var(--line)'}
+                  strokeWidth={isUser ? 1.5 : 1}
+                  style={{ pointerEvents: 'none' }}
+                />
+                {isUser && (
+                  <text x={sx + 7} y={sy + 4} fontSize={8} fontWeight={700} fill="var(--violet-h)" fontFamily="inherit" style={{ pointerEvents: 'none' }}>
+                    {p.name.split(' ').pop()}
+                  </text>
+                )}
+                {/* oversized invisible hit target — the visible dot is too small to hover/click comfortably */}
+                <circle
+                  cx={sx} cy={sy} r={9}
+                  fill="transparent"
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setTooltip({ x: sx, y: sy, row: p })}
+                  onMouseLeave={() => setTooltip(null)}
+                  onClick={() => onPlayerClick(p.playerId)}
+                />
+              </g>
+            )
+          })
+        })()}
         {tooltip && (
           <g>
             <rect x={Math.min(tooltip.x + 8, W - 130)} y={Math.max(tooltip.y - 36, PAD.top)} width={122} height={44} fill="var(--bg1)" stroke="var(--line)" rx={4} />
@@ -435,6 +470,87 @@ function PlayerScatter({
         )}
       </svg>
     </div>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   5b. ScatterPanel — the scatter card with a click-to-expand modal
+   ═══════════════════════════════════════════════════════════════════ */
+
+function ScatterPanel({
+  players,
+  userTeamAbbrs,
+  onPlayerClick,
+  note,
+}: {
+  players: PlayerAnalyticsRow[]
+  userTeamAbbrs: Set<string>
+  onPlayerClick: (playerId: string) => void
+  note: string
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+
+  // Esc closes the expanded chart.
+  useEffect(() => {
+    if (!expanded) return
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setExpanded(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [expanded])
+
+  return (
+    <Panel title="Expected Attacking Output — Forwards (xA/60 × xG/60)">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)' }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{note}</div>
+        {players.length > 0 && (
+          <button className="btn" style={{ flexShrink: 0, fontSize: 11, padding: '3px 10px' }} onClick={() => setExpanded(true)}>
+            Expand
+          </button>
+        )}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <PlayerScatter players={players} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
+      </div>
+      {expanded && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 7000,
+            background: 'rgba(3,6,18,0.72)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--sp-4)',
+          }}
+          onClick={() => setExpanded(false)}
+        >
+          <div
+            className="panel"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(1140px, 96vw)', maxHeight: '94vh', overflow: 'auto',
+              background: 'var(--bg1)', borderRadius: 'var(--radius-lg, 14px)',
+              boxShadow: 'var(--shadow-2, 0 24px 60px rgba(0,0,0,0.5))',
+              padding: 'var(--sp-4)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sp-2)' }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Expected Attacking Output — Forwards (xA/60 × xG/60)</div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setExpanded(false)}
+                title="Close (Esc)"
+                style={{ width: 30, height: 30, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, fontSize: 18, lineHeight: 1 }}
+              >
+                &times;
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 'var(--sp-2)' }}>{note}</div>
+            <div style={{ overflowX: 'auto' }}>
+              <PlayerScatter players={players} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} width={1060} height={640} />
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
   )
 }
 
@@ -763,14 +879,12 @@ function CategoryOverview({ hub, onPlayerClick }: { hub: TeamDataHubView; onPlay
   return (
     <div className="stack">
       <TeamProfilePanel row={hub.team} />
-      <Panel title="Expected Attacking Output — Forwards (xA/60 × xG/60)">
-        <div style={{ marginBottom: 'var(--sp-2)', fontSize: 11, color: 'var(--muted)' }}>
-          Click any dot to open the player profile. Hover for details. Quadrant lines at league median.
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <PlayerScatter players={forwards} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
-        </div>
-      </Panel>
+      <ScatterPanel
+        players={forwards}
+        userTeamAbbrs={userTeamAbbrs}
+        onPlayerClick={onPlayerClick}
+        note="Click any dot to open the player profile. Hover for details. Quadrant lines at league median."
+      />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-4)' }}>
         <PlayerLeaderTable rows={hub.players} label="xG/60" format={(r) => r.xgPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
         <PlayerLeaderTable rows={xaLeaders} label="xA/60" format={(r) => r.xAPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
@@ -998,15 +1112,12 @@ function LeagueScopeBody({
       <Panel title="League Team Analytics — click a column header to sort">
         <TeamLeagueTable teams={hub.allTeams} userTeamId={hub.userTeam.teamId} />
       </Panel>
-      <Panel title="Expected Attacking Output — Forwards (xA/60 × xG/60)">
-        <div style={{ marginBottom: 'var(--sp-2)', fontSize: 11, color: 'var(--muted)' }}>
-          Violet dots = your players. Click any dot to open the player profile. Hover for details.
-          Quadrant lines at league median.
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <PlayerScatter players={hub.xgLeaders} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
-        </div>
-      </Panel>
+      <ScatterPanel
+        players={hub.xgLeaders}
+        userTeamAbbrs={userTeamAbbrs}
+        onPlayerClick={onPlayerClick}
+        note="Violet dots = your players. Click any dot to open the player profile. Hover for details. Quadrant lines at league median."
+      />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-4)' }}>
         <PlayerLeaderTable rows={hub.xgLeaders} label="xG/60" format={(r) => r.xgPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
         <PlayerLeaderTable rows={xaLeaders} label="xA/60" format={(r) => r.xAPer60.toFixed(2)} userTeamAbbrs={userTeamAbbrs} onPlayerClick={onPlayerClick} />
