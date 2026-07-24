@@ -11,7 +11,8 @@
  */
 import { useEffect } from 'react'
 import type { NewsItem } from '@domain/news'
-import type { CalendarView, NextGameView } from '@engine/career/views'
+import type { CalendarEntry, CalendarView, NextGameView } from '@engine/career/views'
+import { TeamCrest } from './Crest'
 import { Icon } from './primitives'
 import { CategoryIcon, Icons } from './icons'
 
@@ -98,12 +99,14 @@ export function ProcessingOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [running, onContinue, onClose])
 
-  // Index calendar entries by date for the mini month grid.
-  const byDate = new Map<string, { games: number; keydates: number; won?: boolean | null }>()
+  // Index calendar entries by date for the mini month grid — full entries, so
+  // the cells can carry the same reads as the real Calendar screen (opponent
+  // crest, W/OTL/L tint, key-date labels).
+  const byDate = new Map<string, { games: Array<Extract<CalendarEntry, { kind: 'game' }>>; keydates: string[] }>()
   for (const e of data.calendar?.entries ?? []) {
-    const slot = byDate.get(e.dateISO) ?? { games: 0, keydates: 0 }
-    if (e.kind === 'game') { slot.games++; if (e.result) slot.won = e.result.won }
-    else slot.keydates++
+    const slot = byDate.get(e.dateISO) ?? { games: [], keydates: [] }
+    if (e.kind === 'game') slot.games.push(e)
+    else slot.keydates.push(e.label)
     byDate.set(e.dateISO, slot)
   }
   const todayISO = data.dateISO ?? data.calendar?.todayISO
@@ -248,25 +251,67 @@ export function ProcessingOverlay({
                   if (!cell) return <div key={`e${i}`} />
                   const info = byDate.get(cell.iso)
                   const isToday = cell.iso === todayISO
+                  const game = info?.games[0]
+                  const r = game?.result ?? null
+                  // W / W·OT / OTL / L — same read as the real calendar's chip.
+                  const resultLabel = r
+                    ? r.won
+                      ? r.decidedBy === 'regulation' ? 'W' : r.decidedBy === 'overtime' ? 'W·OT' : 'W·SO'
+                      : r.decidedBy === 'regulation' ? 'L' : 'OTL'
+                    : null
+                  const resultColor = r
+                    ? r.won ? 'var(--green, #4ade80)' : r.decidedBy === 'regulation' ? 'var(--red, #f87171)' : 'var(--amber, #fbbf24)'
+                    : 'var(--cyan, #38bdf8)'
+                  // Cell tint: played days carry the W/L verdict, upcoming game
+                  // days a cool wash, the next fixture a highlighted ring.
+                  const bg = isToday
+                    ? 'var(--violet-h, #7c5ce7)'
+                    : r
+                      ? r.won ? 'rgba(74,222,128,0.10)' : r.decidedBy === 'regulation' ? 'rgba(248,113,113,0.10)' : 'rgba(251,191,36,0.10)'
+                      : game ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.03)'
+                  const border = isToday
+                    ? '1px solid transparent'
+                    : game?.isNext
+                      ? '1px solid rgba(56,189,248,0.55)'
+                      : '1px solid var(--border, rgba(255,255,255,0.06))'
+                  const gameTitle = game
+                    ? `${game.home ? 'vs' : '@'} ${game.opponentName}${r ? ` — ${resultLabel} ${r.homeGoals}–${r.awayGoals}` : game.isNext ? ' — next match' : ''}`
+                    : null
+                  const title = [gameTitle, ...(info?.keydates ?? [])].filter(Boolean).join(' · ')
                   return (
                     <div
                       key={cell.iso}
+                      title={title || undefined}
                       style={{
-                        minHeight: 40, borderRadius: 6, padding: '4px 5px',
-                        background: isToday ? 'var(--violet-h, #7c5ce7)' : 'rgba(255,255,255,0.03)',
-                        border: isToday ? 'none' : '1px solid var(--border, rgba(255,255,255,0.06))',
+                        minHeight: 44, borderRadius: 6, padding: '3px 4px',
+                        background: bg, border,
                         color: isToday ? '#fff' : 'inherit',
+                        cursor: title ? 'help' : 'default',
                       }}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 700, opacity: isToday ? 1 : 0.85 }}>{cell.day}</div>
-                      {info && (
-                        <div style={{ display: 'flex', gap: 3, marginTop: 3, flexWrap: 'wrap' }}>
-                          {info.games > 0 && (
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: isToday ? '#fff' : info.won === true ? 'var(--green, #4ade80)' : info.won === false ? 'var(--red, #f87171)' : 'var(--cyan, #38bdf8)' }} />
-                          )}
-                          {info.keydates > 0 && (
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: isToday ? 'rgba(255,255,255,0.7)' : 'var(--amber, #fbbf24)' }} />
-                          )}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, opacity: isToday ? 1 : 0.8 }}>{cell.day}</span>
+                        {info && info.keydates.length > 0 && (
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', flex: '0 0 auto', background: isToday ? 'rgba(255,255,255,0.8)' : 'var(--amber, #fbbf24)' }} />
+                        )}
+                      </div>
+                      {game && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 2, minWidth: 0 }}>
+                          <TeamCrest
+                            teamId={game.opponentAbbr}
+                            abbr={game.opponentAbbr.slice(0, 2)}
+                            style={{
+                              width: 15, height: 15, flex: '0 0 auto', borderRadius: 3,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 6, fontWeight: 800,
+                            }}
+                          />
+                          <span style={{ fontSize: 8.5, fontWeight: 700, opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            {game.home ? '' : '@'}{game.opponentAbbr}
+                          </span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, marginLeft: 'auto', flex: '0 0 auto', color: isToday ? '#fff' : resultColor }}>
+                            {resultLabel ?? (game.isNext ? 'Next' : '')}
+                          </span>
                         </div>
                       )}
                     </div>
