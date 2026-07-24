@@ -285,34 +285,15 @@ export function DashboardScreen(): JSX.Element {
             onOpenItem={(id) => nav.navigate('inbox', { newsId: id })}
           />
 
-          {/* Last result — right under the headline, always above the fold */}
-          {d.phase !== 'offseason' && d.lastResult && (
-            <LastResultHero
-              result={d.lastResult}
-              boxScore={boxScore ?? null}
-              onBoxScore={() => nav.navigate('matchcenter')}
-            />
-          )}
-
-          {/* The Week Ahead — the agenda, in every phase */}
-          <WeekAhead
-            d={d}
-            calendar={calendar ?? null}
-            onOpenCalendar={() => nav.navigate('calendar')}
-            onOpenOffseason={() => nav.navigate('offseason')}
-            onWatch={actions.watchNext}
-            busy={actions.busy}
-          />
-
-          {/* Offseason: the working desk (market / expiring) — the center grower */}
-          {d.phase === 'offseason' && <SummerDesk onOpen={() => nav.navigate('offseason')} />}
-
-          {/* Next game — the center grower in season */}
+          {/* Next game — sized to content, right under the headline in season.
+              (#8: this was the column's grower at the BOTTOM, and once the
+              column overgrew the fold it was the panel that got cut off — now
+              it always renders whole and the agenda below absorbs the slack.) */}
           {d.phase !== 'offseason' && (
-          <Panel title="Next game" className="dash-fill">
+          <Panel title="Next game">
             {d.nextGame ? (
               <div className="stack" style={{ gap: 'var(--sp-2)' }}>
-                <div className="scoreline" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="scoreline" style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
                   <span className="muted" style={{ fontSize: 14 }}>{d.nextGame.home ? 'vs' : '@'}</span>
                   <TeamCrest
                     className="crest"
@@ -366,11 +347,37 @@ export function DashboardScreen(): JSX.Element {
           </Panel>
           )}
 
+          {/* The Week Ahead — the agenda, in every phase. In season it is the
+              column's grower and sits LAST: the fixed panels above it always
+              render whole (#8), and the agenda absorbs the slack and scrolls. */}
+          <WeekAhead
+            d={d}
+            calendar={calendar ?? null}
+            onOpenCalendar={() => nav.navigate('calendar')}
+            onOpenOffseason={() => nav.navigate('offseason')}
+            onWatch={actions.watchNext}
+            busy={actions.busy}
+            fill={d.phase !== 'offseason'}
+          />
+
+          {/* Offseason: the working desk (market / expiring) — the center grower */}
+          {d.phase === 'offseason' && <SummerDesk onOpen={() => nav.navigate('offseason')} />}
 
         </div>
 
         {/* ═══ RIGHT COLUMN ═══ */}
         <div className="dash-col">
+
+          {/* Last result — moved here from the center column (#8): the right
+              column has the slack in season, and the center column must fit
+              news + agenda + next game inside the one-screen viewport. */}
+          {d.phase !== 'offseason' && d.lastResult && (
+            <LastResultHero
+              result={d.lastResult}
+              boxScore={boxScore ?? null}
+              onBoxScore={() => nav.navigate('matchcenter')}
+            />
+          )}
 
           {/* Top scorers — points once the season runs; your projected core in summer */}
           {shown('topScorers') && (
@@ -1117,13 +1124,15 @@ function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNo
 /** The Week Ahead — the dashboard centerpiece. A vertical agenda derived from
  *  the calendar: today highlighted, then everything coming — games, summer
  *  beats, decisions. Continue visibly walks down this list. */
-function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy }: {
+function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy, fill = false }: {
   d: DashboardView
   calendar: CalendarView | null
   onOpenCalendar: () => void
   onOpenOffseason: () => void
   onWatch: () => void
   busy: boolean
+  /** True = act as the column's grower (#8): absorb slack, scroll the agenda. */
+  fill?: boolean
 }): JSX.Element {
   const nav = useNav()
   const offseason = d.phase === 'offseason'
@@ -1160,12 +1169,12 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   }
 
   return (
-    <Panel title="The Week Ahead">
+    <Panel title="The Week Ahead" {...(fill ? { className: 'dash-fill dash-fill-tight' } : {})}>
       {/* today — the highlighted head of the agenda */}
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '7px 10px',
-          borderRadius: 8, marginBottom: 2,
+          borderRadius: 8, marginBottom: 2, flexShrink: 0,
           background: 'rgba(var(--accent-rgb, 108,92,231), 0.13)',
           border: '1px solid rgba(var(--accent-rgb, 108,92,231), 0.45)',
         }}
@@ -1188,7 +1197,10 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
         ) : null}
       </div>
 
-      {/* the coming days */}
+      {/* the coming days — inside a scroll region when this panel is the
+          column's grower, so a squeezed column shortens the agenda instead of
+          cutting off the panels below it (#8) */}
+      <div {...(fill ? { className: 'dash-scroll' } : {})}>
       {upcoming.map((e, i) => (
         <div key={i} style={rowStyle}>
           {dateCell(e.dateISO)}
@@ -1218,8 +1230,9 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
       {upcoming.length === 0 && (
         <div className="muted small" style={{ padding: '8px 10px' }}>A quiet stretch — the calendar has the full picture.</div>
       )}
+      </div>
 
-      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={onOpenCalendar}>
+      <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6, flexShrink: 0 }} onClick={onOpenCalendar}>
         Full calendar →
       </button>
     </Panel>

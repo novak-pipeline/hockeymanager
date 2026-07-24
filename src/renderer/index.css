@@ -1034,6 +1034,16 @@ a:hover { text-decoration: underline; }
   overflow-y: auto;
   padding: var(--sp-5);
 }
+/* The screen-transition wrapper (the framer-motion div between the pane and
+   each screen) must pass the pane's bounded height down — otherwise
+   .dash-viewport's height:100% resolves against an auto-height box and the
+   dashboard's one-screen contract silently breaks (#8: the in-season
+   dashboard grew past the fold and the next-game panel was cut off).
+   Screens taller than the pane still scroll: their content overflows this
+   fixed-height wrapper and .shell-main scrolls the overflow. */
+.shell-main > * {
+  height: 100%;
+}
 
 /* ── old .screen kept as alias ── */
 
@@ -1218,6 +1228,12 @@ a:hover { text-decoration: underline; }
   min-height: 140px;
   display: flex;
   flex-direction: column;
+}
+/* A grower that may be squeezed hard by fixed siblings (the in-season Week
+   Ahead): allow it smaller than the standard floor so the column never
+   overflows the viewport (#8). */
+.dash-col > .dash-fill.dash-fill-tight {
+  min-height: 96px;
 }
 .dash-scroll {
   flex: 1 1 0;

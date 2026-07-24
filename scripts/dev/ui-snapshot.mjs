@@ -49,6 +49,12 @@ async function advanceOnce(win) {
   // Gate-screen resolvers FIRST — the dashboard "Continue" only *routes into* a
   // gate (camp, board meeting), so if we're already on a gate screen we must click
   // its own button. Then the generic advance. Exact labels from the renderer.
+  //
+  // Each selector tries EVERY match (last first), not just match #0: when the
+  // processing overlay holds an eventful day, the topbar "Continue — …" is the
+  // first match but sits UNDER the overlay backdrop, so clicking it times out —
+  // the overlay's own Continue (a later match) is the button that advances.
+  // This was the free-agency stall: eventful FA days always hold the overlay.
   for (const sel of [
     'button:has-text("set the roster")',      // cut day: coach sets the 23
     'button:has-text("Break camp")',
@@ -65,7 +71,16 @@ async function advanceOnce(win) {
     'button:has-text("Skip")',
     'button:has-text("Dismiss")',
   ]) {
-    try { await win.click(sel, { timeout: 1200 }); return true } catch { /* try next */ }
+    const loc = win.locator(sel)
+    const n = Math.min(await loc.count().catch(() => 0), 3)
+    for (let k = n - 1; k >= 0; k--) {
+      const el = loc.nth(k)
+      try {
+        if (!(await el.isEnabled().catch(() => false))) continue
+        await el.click({ timeout: 1200 })
+        return true
+      } catch { /* covered/detached — try the next match */ }
+    }
   }
   return false
 }
