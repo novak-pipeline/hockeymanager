@@ -15412,7 +15412,11 @@ export class Career {
               const y = this.currentDay === 0 ? this.year : this.year + 1
               return [
                 { dateISO: `${y}-07-01`, label: 'Free Agency Opens' },
-                { dateISO: `${y}-07-08`, label: 'Development Camp' },
+                // Dev camp fires as a beat at the re-sign stage, which the summer
+                // clock dates July 1 (takeover and normal path alike) — the marker
+                // must sit on the same day or the calendar re-announces a camp
+                // the GM already ran (playtest #3).
+                { dateISO: `${y}-07-01`, label: 'Development Camp' },
                 { dateISO: `${y}-09-15`, label: 'Training Camp Opens' },
                 { dateISO: `${y}-09-28`, label: 'Cut Day' },
               ]
