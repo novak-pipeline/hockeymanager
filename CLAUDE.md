@@ -42,9 +42,15 @@ Timeline estimate (focused sessions): watchable v1 prototype ~1–2 weeks; deep 
 Playable v1 (June 2026). Build order #1–#7 all have first implementations:
 - Engines: calibrated full-fidelity tick engine (real 5v4 PP, 3v3 OT, goalie pulls, playoff multi-OT) + quick-sim; shared GameEvent stream.
 - Career: full year cycle — regular season → best-of-7 playoffs → offseason (awards, development/aging, retirements, 2-round entry draft, re-signing, free agency) → season rollover. Injuries/fatigue/morale/form, salary cap, AI trades with pick assets.
-- UI: FM-style dark shell (sidebar + topbar + continue), 14 screens (dashboard, squad, player profile, tactics/line editor, schedule, standings, stats, trades, draft, offseason, finances, inbox, playoffs, match center). Worker protocol v2 in `src/worker/protocol.ts`.
+- UI: FM-style dark shell (sidebar + topbar + continue), 31 screens across the FM nav sections — overview (dashboard, staff meeting, inbox), team (squad, squad planner, dynamics, tactics), development (data hub, staff, training, medical, dev centre), competition (schedule/match centre, competitions, world, scouting, transfers) and club (info, vision/board, finances). Sidebar layout lives in `src/renderer/components/navConfig.ts`. Worker protocol v2 in `src/worker/protocol.ts`.
 - Renderers: 2D PixiJS and 3D three.js (procedural rink/players, broadcast cameras, event cues) behind one `MatchRenderer` contract; toggle in MatchViewer.
 - Save/load: JSON snapshots via Electron IPC (`src/main/saves.ts`, versioned `CareerSnapshot`). SQLite dropped in favor of JSON saves (supply-chain: no native postinstall deps).
-- 261 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
+- 1511 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
 
-Known tuning debt: generated payrolls can exceed the cap (displayed honestly); plus/minus and PK stat splits are placeholders; 3D uses procedural primitives pending Blender glTF assets.
+Known tuning debt, most important first:
+1. **Competitive balance is badly out of calibration.** A simmed season leaves the best team around 54-4 with a +250 goal differential and the worst around 10-49 (measured across seeds 2026/7/99, 16 teams, 60 games). The NHL's best-ever team is +107 over 82 games. League-average goals/game is on target — it is the *spread* that is roughly 3× too wide, because `quickSim`'s rate model multiplies offense/LEAGUE_AVG by LEAGUE_AVG/defense and then compounds that with the finishing and goalie terms. This distorts standings, playoff races, awards and every counting stat.
+2. Generated payrolls can exceed the cap (displayed honestly).
+3. PK stat splits are placeholders (`pk: { goals: 0, ... }` in archived season stats); AHL squad rows carry games played but no stat line.
+4. 3D uses procedural primitives pending Blender glTF assets.
+
+Plus/minus is real as of July 2026 — see `creditPlusMinus` in `src/engine/shared/outcome.ts` (NHL rules: no credit on power-play goals, skaters only, shootout excluded), credited by both engines and merged into season totals.

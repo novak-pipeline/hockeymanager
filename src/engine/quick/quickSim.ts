@@ -24,7 +24,7 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -278,6 +278,12 @@ function simShift(
         const primaryA = stat(ctx, assists[0].id)
         primaryA.xA = (primaryA.xA ?? 0) + shotXgApprox
       }
+      creditPlusMinus(
+        goalStrength,
+        atk.skaters.map((p) => p.id),
+        def.skaters.map((p) => p.id),
+        (id) => stat(ctx, id)
+      )
       ctx.stream.push({
         t: tShot,
         period,
@@ -450,6 +456,12 @@ function simEmptyNetPhase(
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
     stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
+    creditPlusMinus(
+      'en',
+      leadingOn.skaters.map((p) => p.id),
+      trailingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,
@@ -468,6 +480,14 @@ function simEmptyNetPhase(
     for (const a of assists) stat(ctx, a.id).assists++
     stat(ctx, leadingOn.goalie.id).shotsAgainst++
     stat(ctx, leadingOn.goalie.id).goalsAgainst++
+    // The trailing side scores 6-on-5 with its own net empty: even strength for
+    // scoring purposes, so both sides take the swing.
+    creditPlusMinus(
+      'ev',
+      trailingOn.skaters.map((p) => p.id),
+      leadingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,

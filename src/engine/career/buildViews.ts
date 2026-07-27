@@ -188,7 +188,7 @@ function skaterLine(ctx: ViewCtx, id: PlayerId): SkaterSeasonLine {
     goals: t?.goals ?? 0,
     assists: t?.assists ?? 0,
     points: (t?.goals ?? 0) + (t?.assists ?? 0),
-    plusMinus: 0,
+    plusMinus: t?.plusMinus ?? 0,
     penaltyMinutes: t?.penaltyMinutes ?? 0,
     shots: t?.shots ?? 0,
     toiPerGame: games > 0 ? Math.round((t?.toi ?? 0) / games) : 0,
@@ -1792,7 +1792,7 @@ export function buildTeamDataHubView(
           goalsPer60: per60(s.goals),
           shootingPct: Math.round(shootPct * 1000) / 1000,
           finishing,
-          plusMinus: 0, // GamePlayerStat doesn't accumulate +/- directly
+          plusMinus: s.plusMinus ?? 0,
           ppGoals: ppG,
           ppAssists: ppA,
           ppPoints: ppG + ppA,

@@ -24,7 +24,7 @@ Electron · TypeScript (strict) · React · Web Worker sim · PixiJS · three.js
 npm install        # downloads deps incl. the Electron binary (~150 MB) — needs internet
 npm run dev        # launch the Electron app with HMR
 npm run typecheck  # tsc --noEmit
-npm test           # vitest (900+ tests)
+npm test           # vitest (1500+ tests)
 npm run build      # headless production build (good smoke test if dev won't open a window)
 ```
 
@@ -41,11 +41,8 @@ Architecture and design decisions live in [`docs/ARCHITECTURE.md`](docs/ARCHITEC
 
 ## Status
 
-Playable. 900+ tests green. Active areas: 3D visual fidelity (procedural primitives pending authored models) and match-camera polish.
+Playable. 1500+ tests green. Active areas: league competitive balance (the quick-sim strength spread is currently too wide — see `CLAUDE.md`), 3D visual fidelity (procedural primitives pending authored models) and match-camera polish.
 
 ---
 
 *Clean-room project: no code copied from ZenGM or other engines; reference games were studied for design only.*
-
-
-test

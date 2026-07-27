@@ -8,7 +8,7 @@
  * produced it — so the user's watched game and the background games stay
  * perfectly consistent.
  */
-import type { GameStream, PlayerId, TeamId } from '@domain'
+import type { GameStream, GoalStrength, PlayerId, TeamId } from '@domain'
 
 export interface GamePlayerStat {
   playerId: PlayerId
@@ -43,6 +43,11 @@ export interface GamePlayerStat {
    * the primary assister. Optional — absent on pre-xG saves; treat missing as 0.
    */
   xA?: number
+  /**
+   * NHL plus/minus. Optional — absent on stats serialized before this field
+   * was added; treat missing as 0. Skaters only (see `creditPlusMinus`).
+   */
+  plusMinus?: number
 }
 
 export type DecidedBy = 'regulation' | 'overtime' | 'shootout'
@@ -75,6 +80,38 @@ export function emptyStat(playerId: PlayerId): GamePlayerStat {
     xg: 0,
     xgAgainst: 0,
     xA: 0,
+    plusMinus: 0,
+  }
+}
+
+/**
+ * Credit NHL plus/minus for one goal.
+ *
+ * The rule (NHL Rule 82 / official scoring): a skater on the ice for an
+ * even-strength, shorthanded, or empty-net goal is +1 for the scoring side and
+ * −1 for the side that conceded. Power-play goals award neither plus nor minus
+ * — that is the whole reason a PP specialist's +/- doesn't balloon. Goalies are
+ * excluded (the NHL no longer carries goalie +/-), so callers pass skaters only.
+ *
+ * Shootout "goals" are not player goals at all and must never reach this
+ * function; both engines emit them outside the scoring path.
+ *
+ * Pure: it mutates only the stat objects handed back by `stat`.
+ */
+export function creditPlusMinus(
+  strength: GoalStrength,
+  scoringOnIce: readonly PlayerId[],
+  concedingOnIce: readonly PlayerId[],
+  stat: (id: PlayerId) => GamePlayerStat
+): void {
+  if (strength === 'pp') return
+  for (const id of scoringOnIce) {
+    const s = stat(id)
+    s.plusMinus = (s.plusMinus ?? 0) + 1
+  }
+  for (const id of concedingOnIce) {
+    const s = stat(id)
+    s.plusMinus = (s.plusMinus ?? 0) - 1
   }
 }
 
@@ -103,5 +140,6 @@ export function mergePlayerStats(
     if (s.xg !== undefined) t.xg = (t.xg ?? 0) + s.xg
     if (s.xgAgainst !== undefined) t.xgAgainst = (t.xgAgainst ?? 0) + s.xgAgainst
     if (s.xA !== undefined) t.xA = (t.xA ?? 0) + s.xA
+    if (s.plusMinus !== undefined) t.plusMinus = (t.plusMinus ?? 0) + s.plusMinus
   }
 }

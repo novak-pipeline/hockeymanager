@@ -71,7 +71,7 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -890,6 +890,12 @@ function simPeriod(
           const primaryA = stat(ctx, assists[0])
           primaryA.xA = (primaryA.xA ?? 0) + xg
         }
+        creditPlusMinus(
+          gs,
+          atk.unit.skaters.map((r) => r.player.id),
+          def.unit.skaters.map((r) => r.player.id),
+          (id) => stat(ctx, id)
+        )
         // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91
         puck.y = 0
