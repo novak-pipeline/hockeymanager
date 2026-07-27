@@ -77,6 +77,32 @@ function weightedRole(rng: Rng, roles: PlayerRole[], weights: number[]): PlayerR
 
 const clampRating = (v: number): number => Math.round(v < 1 ? 1 : v > 99 ? 99 : v)
 
+/**
+ * Spread of team baseline caliber — how far apart contenders and cellar
+ * dwellers are built.
+ *
+ * This is a competitive-balance dial, not a flavour knob, and it is the single
+ * biggest driver of how the standings look. Each player is drawn at
+ * normal(teamCaliber, 8), so the *player* talent distribution barely moves when
+ * this changes (league-wide player sd goes from √(2.5²+8²)=8.4 to √(5²+8²)=9.4);
+ * what changes is how much talent is stacked on the same team.
+ *
+ * At sd 5 the best team finished around 54-4 with a +250 goal differential and
+ * the worst around 10-49 — nothing like a real league, because in the NHL the
+ * draft and the cap keep every team's top nine within a few points of each
+ * other. At 2.5 a simmed season lands on the NHL bands (best ≈119 pts / +105,
+ * worst ≈55 pts / −101 per 82 games), while still giving the league real
+ * contenders and real basement teams.
+ *
+ * NHL only. The AHL keeps its own wider spread: its rosters are the prospect
+ * pool, and the draft-outcome model in `draftCalibration.test.ts` is calibrated
+ * against that distribution — narrowing it pushed the top-10 NHLer rate from a
+ * realistic 60% to 90%.
+ *
+ * `competitiveBalance.test.ts` holds this honest — retune there, with data.
+ */
+const TEAM_CALIBER_SPREAD = 2.5
+
 /** One attribute drawn around a player's caliber. */
 const attr = (rng: Rng, caliber: number, spread = 7): number =>
   clampRating(rng.normal(caliber, spread))
@@ -563,7 +589,7 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
 
     // Each team gets a caliber baseline so the league has contenders & cellar
     // dwellers rather than 16 identical rosters.
-    const teamCaliber = clampRating(rng.normal(55, 5))
+    const teamCaliber = clampRating(rng.normal(55, TEAM_CALIBER_SPREAD))
 
     const roster: Player[] = []
     // Forwards: ~⅓ centers, rest wingers.

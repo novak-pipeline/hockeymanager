@@ -25,6 +25,7 @@ import type {
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
 import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { CALIBRATION_TARGETS } from '@calibrate/index'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -33,11 +34,31 @@ const REGULATION_PERIODS = 3
 const SHIFT_SECONDS = 40
 const OT_SECONDS = 300
 
-// League-average targets the coefficients aim at (calibration will refine).
-const SHOTS_PER_TEAM_PER_GAME = 30
+// League-average targets the coefficients aim at, read from the NHL-derived
+// calibration data rather than hardcoded.
+const SHOTS_PER_TEAM_PER_GAME = CALIBRATION_TARGETS.perTeamPerGame.shotsOnGoal
 const SHIFTS_PER_GAME = (PERIOD_SECONDS * REGULATION_PERIODS) / SHIFT_SECONDS
-const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME
-const BASE_SHOT_CONVERSION = 0.095 // ~ league shooting %
+
+/**
+ * Per-shift rate and per-shot conversion are NOT simply the league averages.
+ *
+ * Both get multiplied by ratio terms built from the on-ice units — shot rate by
+ * (offense/50)·(50/defense), conversion by the shooter's finishing and the
+ * danger draw. Those ratios do not average to 1 across a league: E[x/50 · 50/y]
+ * exceeds 1 whenever x and y vary (Jensen), and the danger and finishing terms
+ * add their own positive bias. Feeding in the raw league average therefore
+ * overshoots — measured at 31.5 shots and 11.3 sh% against targets of 30.0 and
+ * 10.2%.
+ *
+ * These two constants divide that bias back out. They are calibration outputs,
+ * measured by `quickSim.calibration.test.ts`, not free parameters: if the rate
+ * model changes, re-measure and update them, and that test will hold the result
+ * to within 10% of the NHL targets.
+ */
+const SHOT_RATE_BIAS = 1.05
+const CONVERSION_BIAS = 1.206
+const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME / SHOT_RATE_BIAS
+const BASE_SHOT_CONVERSION = CALIBRATION_TARGETS.shooting.shootingPct / CONVERSION_BIAS
 const PENALTY_CHANCE_PER_SHIFT = 0.045
 const PENALTY_SECONDS = 120
 const PP_SHOT_MULT = 1.6

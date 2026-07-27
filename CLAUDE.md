@@ -47,9 +47,16 @@ Playable v1 (June 2026). Build order #1–#7 all have first implementations:
 - Save/load: JSON snapshots via Electron IPC (`src/main/saves.ts`, versioned `CareerSnapshot`). SQLite dropped in favor of JSON saves (supply-chain: no native postinstall deps).
 - 1511 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
 
+Two calibration gates now guard the league world, and both must stay green:
+`src/engine/quick/competitiveBalance.test.ts` (standings spread) and
+`src/engine/quick/quickSim.calibration.test.ts` (rates vs `calibrate/targets.json`).
+The full engine's equivalent is `src/engine/full/calibration.test.ts`. Retune
+with data from those tests — the dials are `TEAM_CALIBER_SPREAD` in
+`src/data/generate.ts` and `SHOT_RATE_BIAS` / `CONVERSION_BIAS` in `quickSim.ts`.
+
 Known tuning debt, most important first:
-1. **Competitive balance is badly out of calibration.** A simmed season leaves the best team around 54-4 with a +250 goal differential and the worst around 10-49 (measured across seeds 2026/7/99, 16 teams, 60 games). The NHL's best-ever team is +107 over 82 games. League-average goals/game is on target — it is the *spread* that is roughly 3× too wide, because `quickSim`'s rate model multiplies offense/LEAGUE_AVG by LEAGUE_AVG/defense and then compounds that with the finishing and goalie terms. This distorts standings, playoff races, awards and every counting stat.
-2. Generated payrolls can exceed the cap (displayed honestly).
+1. **Payrolls are not anchored to the cap.** Generated teams now start 29-66M under an 88M ceiling; real clubs sit within a few million of it, so cap management — a core mechanic — is currently trivial. The cause is the salary curve in `makeContract` (`0.7 + ((ovr-45)/45)^2.2 × 11` millions), which is not calibrated against the cap. Note this cannot be fixed by scaling alone: 1.85× would put stars above the 20%-of-cap maximum, so the curve's shape needs work, not just its height.
+2. **The draft-outcome base rates drifted** when the team-caliber spread narrowed: top-10 picks now become NHLers 80% of the time, against 60% when `draftCalibration.test.ts` was tuned in June. Real-world is roughly 70%, so the truth sits between the two — worth re-centring the prospect model deliberately rather than leaving it where it landed.
 3. PK stat splits are placeholders (`pk: { goals: 0, ... }` in archived season stats); AHL squad rows carry games played but no stat line.
 4. 3D uses procedural primitives pending Blender glTF assets.
 

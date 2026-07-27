@@ -41,7 +41,7 @@ Architecture and design decisions live in [`docs/ARCHITECTURE.md`](docs/ARCHITEC
 
 ## Status
 
-Playable. 1500+ tests green. Active areas: league competitive balance (the quick-sim strength spread is currently too wide — see `CLAUDE.md`), 3D visual fidelity (procedural primitives pending authored models) and match-camera polish.
+Playable. 1500+ tests green. Active areas: salary-cap realism (generated payrolls sit well under the cap — see `CLAUDE.md`), 3D visual fidelity (procedural primitives pending authored models) and match-camera polish.
 
 ---
 
