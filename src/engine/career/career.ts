@@ -13067,6 +13067,7 @@ export class Career {
       name: m?.name ?? title,
       title,
       ...(m?.faceId !== undefined ? { faceId: m.faceId } : {}),
+      ...(m?.demeanor !== undefined ? { demeanor: m.demeanor } : {}),
     })
     return {
       headCoach: sp(ts.headCoach, 'hc', 'Head Coach'),
@@ -13535,6 +13536,7 @@ export class Career {
       name: s.name,
       title: i === 0 ? 'Head of Scouting' : 'Scout',
       ...(s.faceId !== undefined ? { faceId: s.faceId } : {}),
+      ...(s.demeanor !== undefined ? { demeanor: s.demeanor } : {}),
     }))
     if (cast.length === 0) cast.push({ id: 'hs', name: 'Head of Scouting', title: 'Head of Scouting' })
     return { cast, hostId: cast[0]!.id }

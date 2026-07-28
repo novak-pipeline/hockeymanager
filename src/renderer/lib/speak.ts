@@ -8,7 +8,7 @@
  */
 import { Announcer } from './announcer'
 import { getKokoroEngine, kokoroState, loadKokoro } from './kokoroVoice'
-import { voiceFor, type VoiceRole, type VoiceTraits } from './voiceCast'
+import { castFor, type VoiceRole, type VoiceTraits } from './voiceCast'
 
 let _ann: Announcer | null = null
 let _neuralPreferred = false // switched the announcer over to neural once it's ready
@@ -75,7 +75,30 @@ function announcer(): Announcer {
   return _ann
 }
 
-/** Speak `text` in the voice cast for `role` (matched to the person via traits). */
+/** Autoplay scene dialogue (meetings, calls, replies) — default: ON. The GM
+ *  asked for the room to just talk, not for a speaker button to hunt down. */
+const LS_AUTOPLAY = 'hockey.voice.autoplay'
+export function isAutoplayEnabled(): boolean {
+  try { return localStorage.getItem(LS_AUTOPLAY) !== 'false' } catch { return true }
+}
+export function setAutoplayEnabled(on: boolean): void {
+  try { localStorage.setItem(LS_AUTOPLAY, on ? 'true' : 'false') } catch { /* ignore */ }
+  if (!on) cancelSpeech()
+}
+
+/** Master voice switch (persisted by the Announcer) — for the Settings toggle. */
+export function isVoiceEnabled(): boolean {
+  return announcer().isEnabled
+}
+export function setVoiceEnabled(on: boolean): void {
+  const a = announcer()
+  if (on) a.enable()
+  else a.disable()
+}
+
+/** Speak `text` in the voice cast for `role` (matched to the person via traits).
+ *  Interrupts anything already speaking — a click means "this line, now" — so
+ *  utterances never overlap. */
 export function speakAs(
   role: VoiceRole,
   text: string,
@@ -83,16 +106,64 @@ export function speakAs(
 ): void {
   const a = announcer()
   if (!a.isEnabled) return
+  _sceneEpoch++ // a manual line supersedes any running scene
+  a.cancel()
+  const cast = castFor(role, opts?.seed, opts?.traits)
   a.speakLine({
     text,
     speech: text,
     importance: opts?.importance ?? 2,
-    voice: voiceFor(role, opts?.seed, opts?.traits),
+    voice: cast.voice,
+    rate: cast.rate,
   })
+}
+
+/** One line of an autoplayed scene (a meeting, a call, a briefing). */
+export interface SceneLine {
+  role: VoiceRole
+  text: string
+  seed?: string
+  traits?: VoiceTraits
+  importance?: 1 | 2 | 3
+}
+
+let _sceneEpoch = 0
+/** Pause between speakers so a meeting reads as turns, not a wall of sound. */
+const SCENE_GAP_MS = 400
+
+/**
+ * Autoplay a scene: speak each line in its speaker's cast voice, strictly one
+ * at a time (the next line starts only when the previous finishes — never
+ * overlapping). A later scene, a manual speakAs() click, or cancelSpeech()
+ * supersedes the rest of the sequence. No-op when voice or autoplay is off.
+ */
+export function speakScene(lines: SceneLine[]): void {
+  const a = announcer()
+  if (!a.isEnabled || !isAutoplayEnabled() || lines.length === 0) return
+  const epoch = ++_sceneEpoch
+  a.cancel()
+  const playNext = (i: number): void => {
+    if (epoch !== _sceneEpoch || i >= lines.length) return
+    const l = lines[i]!
+    const cast = castFor(l.role, l.seed, l.traits)
+    a.speakLine({
+      text: l.text,
+      speech: l.text,
+      importance: l.importance ?? 2,
+      voice: cast.voice,
+      rate: cast.rate,
+      onDone: () => {
+        if (epoch !== _sceneEpoch) return
+        window.setTimeout(() => playNext(i + 1), SCENE_GAP_MS)
+      },
+    })
+  }
+  playNext(0)
 }
 
 /** Stop any in-progress speech (call on unmount / when leaving a scene). */
 export function cancelSpeech(): void {
+  _sceneEpoch++
   _ann?.cancel()
 }
 

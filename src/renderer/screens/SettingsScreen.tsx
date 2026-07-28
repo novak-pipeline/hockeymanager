@@ -19,8 +19,12 @@ import {
   type KokoroLoadState,
   type VoiceQuality,
 } from '../lib/kokoroVoice'
-import { voiceFor } from '../lib/voiceCast'
-import { isAutoNeuralEnabled, setAutoNeuralEnabled } from '../lib/speak'
+import { castFor } from '../lib/voiceCast'
+import {
+  isAutoNeuralEnabled, setAutoNeuralEnabled,
+  isVoiceEnabled, setVoiceEnabled,
+  isAutoplayEnabled, setAutoplayEnabled,
+} from '../lib/speak'
 
 type KeyStatus = 'unknown' | 'present' | 'absent' | 'saving' | 'testing'
 
@@ -261,6 +265,8 @@ function VoicePanel(): JSX.Element {
   const [pct, setPct] = useState(0)
   const [errMsg, setErrMsg] = useState('')
   const [autoNeural, setAutoNeural] = useState<boolean>(isAutoNeuralEnabled())
+  const [voiceOn, setVoiceOn] = useState<boolean>(isVoiceEnabled())
+  const [autoplay, setAutoplay] = useState<boolean>(isAutoplayEnabled())
 
   async function download(): Promise<void> {
     if (state === 'downloading' || state === 'ready') return
@@ -284,7 +290,8 @@ function VoicePanel(): JSX.Element {
       coach: "I want us harder on the forecheck tonight. No easy exits.",
       physio: "He's day to day. I'd rest him and not risk it.",
     }
-    if (eng) eng.speak({ text: lines[role]!, speech: lines[role]!, importance: 2, voice: voiceFor(role) })
+    const cast = castFor(role)
+    if (eng) eng.speak({ text: lines[role]!, speech: lines[role]!, importance: 2, voice: cast.voice, rate: cast.rate })
   }
 
   const QUAL: Array<{ v: VoiceQuality; label: string; note: string }> = [
@@ -300,6 +307,23 @@ function VoicePanel(): JSX.Element {
         download themselves in the background (no button to hunt for) and run fully local and
         offline after that; the system voice covers the gap until then.
       </div>
+      <label className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 8, cursor: 'pointer', fontSize: 12.5 }}>
+        <input
+          type="checkbox"
+          checked={voiceOn}
+          onChange={(e) => { const on = e.target.checked; setVoiceEnabled(on); setVoiceOn(on) }}
+        />
+        <span>Voices on <span className="muted">(master switch — commentary, meetings, calls)</span></span>
+      </label>
+      <label className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 8, cursor: 'pointer', fontSize: 12.5, opacity: voiceOn ? 1 : 0.5 }}>
+        <input
+          type="checkbox"
+          checked={autoplay}
+          disabled={!voiceOn}
+          onChange={(e) => { const on = e.target.checked; setAutoplayEnabled(on); setAutoplay(on) }}
+        />
+        <span>Autoplay scene dialogue <span className="muted">(meetings and replies speak on their own; off = click the speaker button)</span></span>
+      </label>
       <label className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12, cursor: 'pointer', fontSize: 12.5 }}>
         <input
           type="checkbox"

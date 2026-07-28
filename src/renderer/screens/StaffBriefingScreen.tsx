@@ -18,8 +18,15 @@ import { Notice } from '../components/ui'
 import { useNav } from '../components/NavContext'
 import { useClient } from '../hooks/useSim'
 import { bumpRefresh, toast } from '../components/store'
-import { speakAs, cancelSpeech } from '../lib/speak'
-import type { VoiceRole } from '../lib/voiceCast'
+import { speakAs, speakScene, cancelSpeech } from '../lib/speak'
+import type { VoiceRole, VoiceTraits } from '../lib/voiceCast'
+
+/** Voice traits for a meeting speaker: personality from their staff profile.
+ *  (Staff gender isn't modelled; the physio role is cast female by signature.) */
+function traitsFor(role: VoiceRole, demeanor?: VoiceTraits['demeanor']): VoiceTraits | undefined {
+  if (!demeanor) return undefined
+  return { gender: role === 'physio' ? 'F' : 'M', demeanor }
+}
 
 /** Map a staff title to the voice role that should speak for them. */
 function roleForTitle(title: string): VoiceRole {
@@ -54,6 +61,25 @@ export function StaffBriefingScreen(): JSX.Element {
 
   // Stop any in-progress speech when leaving the room.
   useEffect(() => () => cancelSpeech(), [])
+
+  // The room talks on its own: coach opens, then each proposer makes their
+  // pitch in turn (autoplay setting; the buttons stay for replays).
+  useEffect(() => {
+    if (!view) return
+    speakScene([
+      { role: 'coach' as VoiceRole, text: view.opening },
+      ...view.proposals.map((p) => {
+        const role = roleForTitle(p.speaker.title)
+        const traits = traitsFor(role, p.speaker.demeanor)
+        return {
+          role,
+          text: p.intro.join(' '),
+          seed: p.speaker.name,
+          ...(traits ? { traits } : {}),
+        }
+      }),
+    ])
+  }, [view])
 
   async function resolve(kind: 'submit' | 'delegate'): Promise<void> {
     if (busy) return
@@ -112,7 +138,11 @@ export function StaffBriefingScreen(): JSX.Element {
                   <button
                     className="btn btn-sm btn-ghost"
                     title="Hear the pitch"
-                    onClick={() => speakAs(roleForTitle(p.speaker.title), p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}
+                    onClick={() => {
+                      const role = roleForTitle(p.speaker.title)
+                      const traits = traitsFor(role, p.speaker.demeanor)
+                      speakAs(role, p.intro.join(' '), { seed: p.speaker.name, importance: 2, ...(traits ? { traits } : {}) })
+                    }}
                   ><Icon size={16}><Icons.Volume /></Icon></button>
                 </div>
                 <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
