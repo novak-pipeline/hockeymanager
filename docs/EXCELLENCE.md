@@ -170,11 +170,11 @@ Evidence: user playtests (camp softlock class, "training is a chore",
 reason to engage; that is friction evidence), code audit (441+330 tsc, cap gap).
 
 **P0 — Trust (the floor)**
-1. Beat-gate sweep: every pending/blocking state states its need + one-click resolve/delegate (extinct the camp-softlock class). *(B2.2)*
-2. Extend autopilot to 10 seasons nightly; fix every crash/softlock found. *(B4.1)*
-3. tsc burn-down: web 441→0, node 330→0; then the gate is law. *(B7.1)*
-4. In-season cap compliance (known filed gap — emergencyRecalls stacks salary uncapped). *(B7.3)*
-5. Release trust: code-signing/SmartScreen, dev-freeze fix, voices in packaged build. *(B1.4)*
+1. **[OPEN]** Beat-gate sweep: every pending/blocking state states its need + one-click resolve/delegate (extinct the camp-softlock class). *(B2.2)*
+2. **[CLOSED 2026-07-27]** Extend autopilot to 10 seasons nightly; fix every crash/softlock found. *(B4.1)* — 10/10 green on seeds 2029 and 777 after five crash fixes; cross-validated on a second seed because one passing seed is weak evidence.
+3. **[IN PROGRESS]** tsc burn-down: web 441→**219**, node 330→**174**; then the gate is law. *(B7.1)* — treat as a bug hunt, not cleanup: it has so far surfaced league-wide PP%/PK% misattribution, dead physio/shutout/history-flag reads, and two dead content pools.
+4. **[PARTIAL]** In-season cap compliance (known filed gap — emergencyRecalls stacks salary uncapped). *(B7.3)*
+5. **[BLOCKED — user]** Release trust: code-signing/SmartScreen, dev-freeze fix, voices in packaged build. *(B1.4)*
 
 **P1 — The loop feels great**
 6. **Chore-ectomy of training/practice**: weekly nag → monthly plan + exception events ("Malkin wants extra PP reps — allow it?"); visible payoff receipts. *(B2.4)*
@@ -190,7 +190,7 @@ reason to engage; that is friction evidence), code audit (441+330 tsc, cap gap).
 **P3 — Season shape**
 13. Deadline day war-room to the B3.2 bar (clock, incoming calls, live wire).
 14. Playoff presentation ×2 (stakes framing, elimination dread, handshake, bespoke cup scene). *(B3.3)*
-15. Match-night ritual: pregame keys + postgame receipts, in simmed form too. *(B6.1–B6.2)*
+15. **[CLOSED 2026-07-28]** Match-night ritual: pregame keys + postgame receipts, in simmed form too. *(B6.1–B6.2)*
 16. Thanksgiving benchmark + season-act tonal shifts. *(B3.1)*
 
 **P4 — Dynasty**
