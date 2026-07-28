@@ -1583,7 +1583,14 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   for (const [, team] of teams) {
     for (const id of team.roster) abbrOf.set(id as string, team.abbreviation)
   }
-  const scoutedPlayers: import('./views').ScoutedPlayerRow[] = []
+  // PERF: two passes. The first computes only what the RANKING needs (stars +
+  // target score) for every known player; the expensive per-row extras
+  // (playerValue — the trade-AI valuation — badge fields, draft labels) are
+  // built in the second pass for just the 300 rows that survive the cut.
+  // Byte-identical to the single-pass version: none of the deferred fields
+  // participate in the sort.
+  type ScoutedCand = { pid: string; p: Player; k: number; cur: number; pot: number; rec: 'A+' | 'A' | 'B' | 'C' | 'D'; targetScore: number }
+  const scoutedCands: ScoutedCand[] = []
   for (const [pid, k] of scouting.knowledge) {
     if (k < 15) continue
     if (ownRoster.has(pid as string)) continue // your own players aren't acquisition targets
@@ -1611,34 +1618,36 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       : targetScore >= 3.2 ? 'B'
       : targetScore >= 2.2 ? 'C'
       : 'D'
-    scoutedPlayers.push({
-      playerId: pid as string,
-      name: p.name,
-      position: p.position,
-      age: p.age,
-      teamAbbr: abbrOf.get(pid as string) ?? 'FA',
-      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
-      currentStars: cur,
-      potentialStars: pot,
-      knowledge: Math.round(k),
-      rec,
-      targetScore: Math.round(targetScore * 100) / 100,
-      salary: p.contract.salary,
-      // Market value on the trade AI's own asset-value currency — shown only once
-      // we have a real read (fog-of-war), so an unknown player doesn't leak a value.
-      tradeValue: k >= 40 ? Math.round(playerValue(p)) : 0,
-      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-      draftEligible: draftProspectIds.has(pid as string),
-      ...(ctx.draftRankById?.[pid as string] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid as string]) } : {}),
-    })
+    // The row (and the sort) publish the ROUNDED score — rank on the same value.
+    scoutedCands.push({ pid: pid as string, p, k, cur, pot, rec, targetScore: Math.round(targetScore * 100) / 100 })
   }
   // Best targets first — young, high-upside, acquirable.
-  scoutedPlayers.sort((a, b) =>
+  scoutedCands.sort((a, b) =>
     b.targetScore - a.targetScore ||
-    b.potentialStars - a.potentialStars ||
-    b.currentStars - a.currentStars,
+    b.pot - a.pot ||
+    b.cur - a.cur,
   )
-  scoutedPlayers.splice(300)
+  scoutedCands.splice(300)
+  const scoutedPlayers: import('./views').ScoutedPlayerRow[] = scoutedCands.map(({ pid, p, k, cur, pot, rec, targetScore }) => ({
+    playerId: pid,
+    name: p.name,
+    position: p.position,
+    age: p.age,
+    teamAbbr: abbrOf.get(pid) ?? 'FA',
+    ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+    currentStars: cur,
+    potentialStars: pot,
+    knowledge: Math.round(k),
+    rec,
+    targetScore,
+    salary: p.contract.salary,
+    // Market value on the trade AI's own asset-value currency — shown only once
+    // we have a real read (fog-of-war), so an unknown player doesn't leak a value.
+    tradeValue: k >= 40 ? Math.round(playerValue(p)) : 0,
+    ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+    draftEligible: draftProspectIds.has(pid),
+    ...(ctx.draftRankById?.[pid] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid]) } : {}),
+  }))
 
   return {
     scouts,

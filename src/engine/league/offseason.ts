@@ -41,7 +41,7 @@ import {
   type TeamId
 } from '@domain'
 import { FIRST_NAMES, LAST_NAMES } from '@data'
-import { computeComposites, overall } from '@engine/ratings/composites'
+import { computeComposites, invalidatePotentialRating, overall } from '@engine/ratings/composites'
 import { analystEdge } from '@engine/league/draftRankings'
 import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
 import type { Rng } from '@engine/shared/rng'
@@ -209,6 +209,7 @@ function driftYouthCeiling(
       g[k] = Math.max(1, Math.min(99, g[k] + delta))
     }
   }
+  invalidatePotentialRating(p.potential)
   if (p.basePotential !== undefined) {
     p.basePotential = Math.max(curOvr, Math.min(99, Math.round(p.basePotential + delta)))
   }

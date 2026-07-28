@@ -7,7 +7,7 @@
  * the GM hire and release scouts.
  */
 import { useState } from 'react'
-import type { ScoutingView } from '../../worker/protocol'
+import type { ScoutingView, WorkerResponse } from '../../worker/protocol'
 import type {
   ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutFindView,
 } from '../../engine/career/views'
@@ -23,7 +23,7 @@ import type { LucideIcon } from 'lucide-react'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
-import { bumpRefresh } from '../components/store'
+import { bumpRefresh, useUiStore } from '../components/store'
 
 /** Clickable scout name → his profile page. */
 function ScoutLink({ scoutId, name }: { scoutId: string; name: string }): JSX.Element {
@@ -1052,6 +1052,9 @@ function NewFocusDropdown({ data, onPick }: {
 
 export type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage'
 
+/** Last scouting response, valid for the ui-store `version` it was fetched at. */
+let scoutingViewCache: { version: number; res: WorkerResponse } | null = null
+
 const TAB_TITLE: Record<FmTab, string> = {
   overview: 'Scouting — Overview',
   centre: 'Scouting Centre',
@@ -1063,7 +1066,19 @@ const TAB_TITLE: Record<FmTab, string> = {
 export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
   const client = useClient()
   const { data, loading, error, refetch } = useScreenData<ScoutingView>(
-    () => client.getScouting(),
+    async () => {
+      // All five sidebar tabs render from this one view, and switching tabs
+      // remounts the screen (App keys the route wrapper by nav.screen) — so
+      // without a cache every tab click re-asked the worker to rebuild the
+      // whole scouting world. `version` is the global refresh bus: it bumps on
+      // any world mutation (continue/advance/assignments/trades), so a hit can
+      // only return exactly what an identical refetch would.
+      const version = useUiStore.getState().version
+      if (scoutingViewCache && scoutingViewCache.version === version) return scoutingViewCache.res
+      const res = await client.getScouting()
+      if (res.type === 'scouting') scoutingViewCache = { version, res }
+      return res
+    },
     (r) => (r.type === 'scouting' ? r.scouting : null)
   )
 

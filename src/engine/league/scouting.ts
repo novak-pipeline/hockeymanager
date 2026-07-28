@@ -16,23 +16,52 @@ import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 
 /* ────────────────────────── small helpers ────────────────────────── */
 
+type ScoutEntry = [string, number]
+
+/**
+ * Lazy O(1) lookup index over a serialized `[playerId, value]` entry array
+ * (`state.knowledge` / `state.judgment`). The linear scans here were O(n) per
+ * lookup, and view builders call them per player — on an imported 11k-player
+ * world that made every Scouting tab an O(n²) rebuild (~2.5s per request).
+ *
+ * Safe because of how the arrays are actually used: they are only ever
+ * (a) replaced wholesale (save/load — new array identity → new index),
+ * (b) grown by push (the length check catches growth from outside writers), or
+ * (c) value-mutated in place (`entry[1] = x` — the index holds live entry
+ * references, so updates are visible without invalidation).
+ * Purely a speed structure: reads stay identical to the scan (first match wins).
+ */
+const entryIndex = new WeakMap<ScoutEntry[], { atLength: number; map: Map<string, ScoutEntry> }>()
+
+function indexFor(arr: ScoutEntry[]): { atLength: number; map: Map<string, ScoutEntry> } {
+  let idx = entryIndex.get(arr)
+  if (!idx || idx.atLength !== arr.length) {
+    const map = new Map<string, ScoutEntry>()
+    for (const entry of arr) if (!map.has(entry[0])) map.set(entry[0], entry)
+    idx = { atLength: arr.length, map }
+    entryIndex.set(arr, idx)
+  }
+  return idx
+}
+
 /** Read knowledge for a player from the serialized entry array. */
 export function knowledgeOf(state: ScoutingState, playerId: string): number {
-  for (const [id, k] of state.knowledge) {
-    if (id === playerId) return k
-  }
-  return 0
+  const entry = indexFor(state.knowledge).map.get(playerId)
+  return entry ? entry[1] : 0
 }
 
 function setKnowledge(state: ScoutingState, playerId: string, value: number): void {
   const clamped = Math.max(0, Math.min(100, value))
-  for (const entry of state.knowledge) {
-    if (entry[0] === playerId) {
-      entry[1] = clamped
-      return
-    }
+  const idx = indexFor(state.knowledge)
+  const entry = idx.map.get(playerId)
+  if (entry) {
+    entry[1] = clamped
+    return
   }
-  state.knowledge.push([playerId, clamped])
+  const fresh: ScoutEntry = [playerId, clamped]
+  state.knowledge.push(fresh)
+  idx.map.set(playerId, fresh)
+  idx.atLength = state.knowledge.length
 }
 
 /**
@@ -48,16 +77,19 @@ export function addKnowledge(state: ScoutingState, playerId: string, delta: numb
 /** Best judgment (0–100) of any scout who has watched a player; 0 if none. */
 export function judgmentOf(state: ScoutingState, playerId: string): number {
   if (!state.judgment) return 0
-  for (const [id, j] of state.judgment) if (id === playerId) return j
-  return 0
+  const entry = indexFor(state.judgment).map.get(playerId)
+  return entry ? entry[1] : 0
 }
 
 function recordJudgment(state: ScoutingState, playerId: string, j: number): void {
   if (!state.judgment) state.judgment = []
-  for (const entry of state.judgment) {
-    if (entry[0] === playerId) { if (j > entry[1]) entry[1] = j; return }
-  }
-  state.judgment.push([playerId, j])
+  const idx = indexFor(state.judgment)
+  const entry = idx.map.get(playerId)
+  if (entry) { if (j > entry[1]) entry[1] = j; return }
+  const fresh: ScoutEntry = [playerId, j]
+  state.judgment.push(fresh)
+  idx.map.set(playerId, fresh)
+  idx.atLength = state.judgment.length
 }
 
 /** Read accuracy 0–1 for masking: blends the best scout's judgment with a neutral
