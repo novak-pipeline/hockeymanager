@@ -9471,6 +9471,27 @@ export class Career {
       }
     }
 
+    // Gap #4 — in-season cap compliance. A deliberate recall used to check only
+    // that the AHL club kept its minimums: nothing stopped a GM recalling body
+    // after body straight past the 23-man limit and through the ceiling. The
+    // roster limit and the cap are both real, so refuse and say which one bit.
+    //
+    // This does NOT risk stranding a club without a legal lineup: the emergency
+    // recall pass runs on every advance, does its own roster work rather than
+    // coming through here, and deliberately eats an overage when that is the only
+    // way to ice a team. This guard governs the GM's discretionary moves.
+    if (nhlTeam.roster.length >= MAX_ROSTER_SIZE) {
+      return { ok: false, reason: `The NHL roster is full at ${MAX_ROSTER_SIZE} — send someone down first.` }
+    }
+    const deadCap = nhlTeam.id === this.userTeamId ? this.userDeadCap : 0
+    const capRoom = nhlTeam.finances.salaryCap - capUsedFor(nhlTeam, this.data.players) - deadCap
+    if (p.contract.salary > capRoom) {
+      return {
+        ok: false,
+        reason: `No cap room for ${p.name} — his $${(p.contract.salary / 1e6).toFixed(2)}M needs $${((p.contract.salary - capRoom) / 1e6).toFixed(2)}M more space.`,
+      }
+    }
+
     // Move the player.
     ahlTeam.roster = ahlTeam.roster.filter((id) => id !== pid)
     nhlTeam.roster.push(pid)
