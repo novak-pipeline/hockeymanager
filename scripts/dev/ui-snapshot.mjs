@@ -42,39 +42,70 @@ const SIDEBAR_STOPS = [
 const consoleErrors = []
 let shot = 0
 
+/**
+ * Buttons that move the game on, most-specific first. ORDER MATTERS twice over:
+ *
+ *  1. The processing overlay is MODAL — while it's open its backdrop swallows
+ *     every click aimed at the topbar Continue, so Playwright times out on the
+ *     actionability check. (That is what used to wedge this harness in free
+ *     agency at ~day 4 and stop it ever seeing a regular-season screen.) The
+ *     overlay's own buttons therefore come first, targeted by aria-label so they
+ *     are distinguishable from the topbar's identically-named Continue.
+ *  2. Buttons that RESOLVE a gate must precede ones that merely navigate.
+ *     "It's cut day — set the roster" only does setTab('cuts')
+ *     (TrainingCampScreen.tsx:160), so trying it first made the walk click it
+ *     forever and never leave camp. "Break camp with this roster" is the real
+ *     resolver, and it only exists once that tab is open: resolve, then reveal.
+ */
+const ADVANCE_SELECTORS = [
+  'button[aria-label="Play the game"]',            // P6 pregame match-day frame
+  'button[aria-label="Continue to the next day"]', // processing overlay
+  'button:has-text("Break camp")',                 // cut day: commit the 23 (RESOLVES)
+  'button:has-text("To opening night")',
+  'button:has-text("opening night")',
+  'button:has-text("set the roster")',             // cut day: opens the cuts tab (nav only)
+  'button:has-text("Send the AGM")',               // preseason board meeting: delegate
+  'button:has-text("Run the scrimmage")',           // dev-camp beats
+  'button:has-text("Hear the final reads")',
+  'button:has-text("Send the staff")',
+  'button:has-text("Delegate")',
+  'button:has-text("Advance to Day")',             // camp week, in-screen day walk
+  'button:has-text("Continue")',                   // dashboard advance / route into a gate
+  'button:has-text("Sim day")',                    // topbar fallback
+  'button:has-text("Proceed")',
+  'button:has-text("Skip")',
+  'button:has-text("Dismiss")',
+]
+
 /** Advance the game by one step, tolerating whichever gate is up (a plain
  *  Continue, a staff/board meeting that must be delegated, a deadline hold, …).
- *  Returns true if something was clicked. */
+ *  Returns true if something was clicked.
+ *
+ *  PROBE, don't guess: `count()` resolves instantly, whereas a `click()` on a
+ *  missing selector burns its whole timeout. Walking ~17 selectors by click cost
+ *  ~14s on an ordinary dashboard day, which made a 200-day walk take hours and
+ *  look like a hang. Find the present button first, then click only that one. */
 async function advanceOnce(win) {
-  // Gate-screen resolvers FIRST — the dashboard "Continue" only *routes into* a
-  // gate (camp, board meeting), so if we're already on a gate screen we must click
-  // its own button. Then the generic advance. Exact labels from the renderer.
-  for (const sel of [
-    'button:has-text("set the roster")',      // cut day: coach sets the 23
-    'button:has-text("Break camp")',
-    'button:has-text("To opening night")',
-    'button:has-text("opening night")',
-    'button:has-text("Send the AGM")',        // preseason board meeting: delegate
-    'button:has-text("Run the scrimmage")',   // dev-camp beats
-    'button:has-text("Hear the final reads")',
-    'button:has-text("Send the staff")',
-    'button:has-text("Delegate")',
-    'button:has-text("Continue")',            // dashboard advance / route into a gate
-    'button:has-text("Sim day")',             // topbar fallback
-    'button:has-text("Proceed")',
-    'button:has-text("Skip")',
-    'button:has-text("Dismiss")',
-  ]) {
-    try { await win.click(sel, { timeout: 1200 }); return true } catch { /* try next */ }
+  for (const sel of ADVANCE_SELECTORS) {
+    const n = await win.locator(sel).count().catch(() => 0)
+    if (n === 0) continue
+    try {
+      await win.locator(sel).first().click({ timeout: 2500 })
+      return true
+    } catch { /* present but not clickable (covered/disabled) — try the next */ }
   }
   return false
 }
 
-/** Read the user club's games-played from the topbar record ("12-8-3 · …"). */
+/** Read the user club's games-played from the topbar record ("12–8–3 · …").
+ *  NOTE: the topbar renders EN DASHES (U+2013), not hyphens — a hyphen-only
+ *  regex silently returned 0 forever, which killed both the `gp >= 40` exit and
+ *  the stall detection in the mid-season loop below (it reported "mid-season
+ *  reached at ~0 GP" every run). Match either separator. */
 async function gamesPlayed(win) {
   return win
     .evaluate(() => {
-      const m = document.body.innerText.match(/\b(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\b/)
+      const m = document.body.innerText.match(/\b(\d+)\s*[-–—]\s*(\d+)\s*[-–—]\s*(\d+)\b/)
       return m ? Number(m[1]) + Number(m[2]) + Number(m[3]) : 0
     })
     .catch(() => 0)
@@ -126,6 +157,18 @@ win.on('console', (msg) => {
 try {
   // ── setup → team pick → shell ──
   await win.waitForSelector('text=Generate league', { timeout: 30000 })
+  // PIN THE WORLD SEED. The setup screen randomises it by default, so every run
+  // produced a different league and the walk's outcome (does it wedge? does the
+  // user club even play on the day we stop?) was a coin flip — which makes a
+  // screenshot diff useless and a failure impossible to reproduce. Override with
+  // UI_SNAP_SEED=<n> to photograph a different world.
+  const seed = process.env.UI_SNAP_SEED ?? '424242'
+  try {
+    await win.fill('#seed-input', seed, { timeout: 4000 })
+    console.log(`  ▶ world seed pinned to ${seed}`)
+  } catch {
+    console.log('  ⚠ could not pin the seed — this run is not reproducible')
+  }
   await snap(win, 'setup')
   await win.click('text=Generate league')
   await win.waitForSelector('.team-card', { timeout: 60000 })
@@ -161,12 +204,8 @@ try {
 
   // ── advance into early free agency (the frenzy window, days 1–3) ──
   for (let i = 0; i < 3; i++) {
-    try {
-      await win.click('button:has-text("Continue")', { timeout: 5000 })
-      await win.waitForTimeout(600)
-    } catch {
-      break // a modal/meeting screen holds the button — fine, photograph as-is
-    }
+    if (!(await advanceOnce(win))) break // a modal/meeting holds it — photograph as-is
+    await win.waitForTimeout(600)
   }
 
   // ── the negotiation room: open talks while the market is still stocked ──
@@ -202,19 +241,15 @@ try {
 
   // ── advance a few more days so the rest of the screens have content ──
   for (let i = 0; i < 5; i++) {
-    try {
-      await win.click('button:has-text("Continue")', { timeout: 5000 })
-      await win.waitForTimeout(600)
-    } catch {
-      break
-    }
+    if (!(await advanceOnce(win))) break
+    await win.waitForTimeout(600)
   }
 
   // ── drive to training camp (Sept) and photograph its beat-by-beat week ──
   try {
     let reached = false
-    for (let i = 0; i < 80 && !reached; i++) {
-      await win.click('button:has-text("Continue")', { timeout: 6000 })
+    for (let i = 0; i < 120 && !reached; i++) {
+      if (!(await advanceOnce(win))) { await win.waitForTimeout(400); if (!(await advanceOnce(win))) break }
       await win.waitForTimeout(400)
       // Camp gate routes onto the camp screen; detect its header.
       reached = await win.locator('text=Camp is on the ice').count().then((n) => n > 0).catch(() => false)
@@ -230,8 +265,10 @@ try {
           await snap(win, slug)
         } catch { /* tab missing — skip */ }
       }
-      // Walk the week day by day via the in-screen advance button.
+      // Walk the week day by day via the in-screen advance button. Bail on a
+      // dead page rather than grinding out eight timeouts.
       for (let d = 0; d < 8; d++) {
+        if (win.isClosed()) break
         const atCut = await win.locator('button:has-text("set the roster")').count().then((n) => n > 0).catch(() => false)
         if (atCut) break
         try {
@@ -242,18 +279,26 @@ try {
       // Mid/late-week: the box score + reports have filled in.
       try { await win.click('button:has-text("Scrimmage Stats")', { timeout: 4000 }); await win.waitForTimeout(300); await snap(win, 'camp-scrimmage-filled') } catch {}
       try { await win.click('button:has-text("Coach Reports")', { timeout: 4000 }); await win.waitForTimeout(300); await snap(win, 'camp-reports-filed') } catch {}
-      // Cut day: the roster calls are live.
+      // Cut day: the roster calls are live. NB "Cut Day" is an AMBIGUOUS
+      // substring — it matches both the tab ("Cut Day (11)") and the header CTA
+      // ("It's cut day — set the roster", :has-text is case-insensitive), which
+      // tripped Playwright's strict mode and skipped this whole block. Anchor on
+      // the tab's own shape instead.
       try {
-        await win.click('button:has-text("Cut Day")', { timeout: 3000 })
+        // Case-SENSITIVE regex on the "(n)" counter: the header CTA reads
+        // "It's cut day — …" (lowercase, no counter) so it can't collide.
+        await win.locator('button:text-matches("Cut Day \\\\(\\\\d+\\\\)")').first().click({ timeout: 3000 })
         await win.waitForTimeout(300)
         await snap(win, 'camp-cutday')
         await win.click('button:has-text("Break camp")', { timeout: 4000 })
         await win.waitForTimeout(500)
         await win.click('button:has-text("opening night")', { timeout: 4000 })
         await win.waitForTimeout(400)
-      } catch { /* leave as-is */ }
+      } catch (e) {
+        console.log(`  ⚠ cut-day block skipped (${e.message?.split('\n')[0]})`)
+      }
     } else {
-      console.log('  ⚠ training camp not reached in 80 presses — skipped')
+      console.log('  ⚠ training camp not reached in 120 presses — skipped')
     }
   } catch (e) {
     console.log(`  ⚠ training camp not reachable — skipped (${e.message?.split('\n')[0]})`)
@@ -282,6 +327,33 @@ try {
     console.log(`  ▶ mid-season reached at ~${await gamesPlayed(win)} GP`)
   } catch (e) {
     console.log(`  ⚠ mid-season advance incomplete — ${e.message?.split('\n')[0]}`)
+  }
+
+  // ── P6 match night: photograph the pregame match-day frame and, one press
+  //    later, the postgame receipts. Both live in the processing overlay, so
+  //    press Continue until the frame's own button ("play the game") appears. ──
+  try {
+    let atPregame = false
+    for (let i = 0; i < 12 && !atPregame; i++) {
+      atPregame = await win
+        .locator('button:has-text("play the game")')
+        .count()
+        .then((n) => n > 0)
+        .catch(() => false)
+      if (atPregame) break
+      if (!(await advanceOnce(win))) break
+      await win.waitForTimeout(350)
+    }
+    if (atPregame) {
+      await snap(win, 'matchday-pregame')
+      await win.click('button:has-text("play the game")', { timeout: 5000 })
+      await win.waitForTimeout(1200)
+      await snap(win, 'matchday-postgame')
+    } else {
+      console.log('  ⚠ match-day frame not reached — skipped')
+    }
+  } catch (e) {
+    console.log(`  ⚠ match night frames not reachable — skipped (${e.message?.split('\n')[0]})`)
   }
 
   // ── walk the sidebar ──
