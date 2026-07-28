@@ -42,6 +42,19 @@ const SIDEBAR_STOPS = [
 const consoleErrors = []
 let shot = 0
 
+/** Press Continue, overlay-aware. The FM-style processing overlay is modal: its
+ *  backdrop swallows clicks aimed at the topbar, so when it's up we must press
+ *  ITS Continue (which advances the day just the same). The overlay's button is
+ *  labelled exactly "Continue"; the topbar's always carries a suffix
+ *  ("Continue — free agency day 5"), so text-is tells them apart.
+ *  Returns true if something was clicked. */
+async function pressContinue(win) {
+  for (const sel of ['button:text-is("Continue")', 'button:has-text("Continue")']) {
+    try { await win.click(sel, { timeout: 2500 }); return true } catch { /* try next */ }
+  }
+  return false
+}
+
 /** Advance the game by one step, tolerating whichever gate is up (a plain
  *  Continue, a staff/board meeting that must be delegated, a deadline hold, …).
  *  Returns true if something was clicked. */
@@ -59,6 +72,7 @@ async function advanceOnce(win) {
     'button:has-text("Hear the final reads")',
     'button:has-text("Send the staff")',
     'button:has-text("Delegate")',
+    'button:text-is("Continue")',             // processing overlay (modal) advance
     'button:has-text("Continue")',            // dashboard advance / route into a gate
     'button:has-text("Sim day")',             // topbar fallback
     'button:has-text("Proceed")',
@@ -174,12 +188,8 @@ try {
 
   // ── advance into early free agency (the frenzy window, days 1–3) ──
   for (let i = 0; i < 3; i++) {
-    try {
-      await win.click('button:has-text("Continue")', { timeout: 5000 })
-      await win.waitForTimeout(600)
-    } catch {
-      break // a modal/meeting screen holds the button — fine, photograph as-is
-    }
+    if (!(await pressContinue(win))) break // a modal/meeting holds it — photograph as-is
+    await win.waitForTimeout(600)
   }
 
   // ── the negotiation room: open talks while the market is still stocked ──
@@ -215,19 +225,15 @@ try {
 
   // ── advance a few more days so the rest of the screens have content ──
   for (let i = 0; i < 5; i++) {
-    try {
-      await win.click('button:has-text("Continue")', { timeout: 5000 })
-      await win.waitForTimeout(600)
-    } catch {
-      break
-    }
+    if (!(await pressContinue(win))) break
+    await win.waitForTimeout(600)
   }
 
   // ── drive to training camp (Sept) and photograph its beat-by-beat week ──
   try {
     let reached = false
-    for (let i = 0; i < 80 && !reached; i++) {
-      await win.click('button:has-text("Continue")', { timeout: 6000 })
+    for (let i = 0; i < 120 && !reached; i++) {
+      if (!(await pressContinue(win))) break
       await win.waitForTimeout(400)
       // Camp gate routes onto the camp screen; detect its header.
       reached = await win.locator('text=Camp is on the ice').count().then((n) => n > 0).catch(() => false)
@@ -236,6 +242,17 @@ try {
     if (reached) {
       // Day 1 (camp opens): overview + the empty/early tabs.
       await snap(win, 'camp-day1-overview')
+      // Playtest #5: the September calendar should show camp week with Cut Day
+      // and the board meeting on SEPARATE days.
+      try {
+        await win.click('text="Schedule"', { timeout: 4000 })
+        await win.waitForTimeout(600)
+        await snap(win, 'preseason-calendar')
+        await win.click('text="Home"', { timeout: 4000 })
+        await win.waitForTimeout(400)
+        await pressContinue(win) // back onto the camp screen
+        await win.waitForTimeout(500)
+      } catch { /* calendar detour failed — camp flow continues */ }
       for (const [tab, slug] of [['Camp Schedule', 'camp-schedule'], ['Scrimmage Stats', 'camp-scrimmage-empty'], ['Coach Reports', 'camp-reports-early']]) {
         try {
           await win.click(`button:has-text("${tab}")`, { timeout: 4000 })

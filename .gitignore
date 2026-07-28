@@ -29,6 +29,8 @@ EHM.Editor*
 # committed deliberately under the renderer's asset path, not from this scratch dir.
 3D assets/
 scripts/dev/ui-snaps/
+scripts/dev/ui-snaps-*/
+scripts/dev/preseason-beats/
 
 # electron-builder packaging output
 release/
