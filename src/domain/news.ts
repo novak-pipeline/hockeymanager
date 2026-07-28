@@ -67,6 +67,26 @@ export interface NewsItem {
    * Additive/optional for save compat.
    */
   rare?: boolean
+  /**
+   * Present on the weekly scout-digest briefing (playtest #10): the flagged
+   * prospects still awaiting the GM's call, as structured refs the inbox
+   * renders as real triage cards (track / another look / pass) instead of
+   * prose. Additive/optional for save compat.
+   */
+  prospects?: DigestProspectRef[]
+}
+
+/** A prospect card embedded in the weekly scout digest (playtest #10). */
+export interface DigestProspectRef {
+  playerId: string
+  name: string
+  age: number
+  position: string
+  teamAbbr: string
+  grade: 'A+' | 'A' | 'B' | 'C'
+  reason: string
+  scoutName: string
+  faceId?: string
 }
 
 /**

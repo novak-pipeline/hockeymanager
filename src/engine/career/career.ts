@@ -23,6 +23,7 @@ import {
   asTeamId,
   isEvent,
   isBreakingNews,
+  type DigestProspectRef,
   type DraftPick,
   type GameResult,
   type GameStream,
@@ -1034,6 +1035,15 @@ export class Career {
   /** The convened recurring scout meeting awaiting the GM (blocking, with a
    *  delegate-to-Head-of-Scouting escape). Null when none is pending. Serialized. */
   private scoutMeetingScene: ScoutMeetingScene | null = null
+  /** Playtest #10: the weekly scout digest holds the day until the GM triages
+   *  (or delegates) — a soft gate like the meetings; simming past lets the
+   *  scouts keep working the queue. Serialized additively. */
+  private scoutDigestPending = false
+  /** Inbox id of the gating digest, so Continue can deep-link straight to it. */
+  private scoutDigestNewsId: string | null = null
+  /** Prospects already presented in a gated digest — the same untriaged queue
+   *  never re-holds the sim week after week; only a NEW find re-arms the gate. */
+  private scoutDigestShown: string[] = []
   private pressCounter = 0
   /** Season-long schedule of recurring media reports (Task #39). */
   private pressScheduleState: PressScheduleState = initialPressScheduleState()
@@ -1727,8 +1737,9 @@ export class Career {
       salience?: number
       engagement?: { likes: number; reposts: number }
       rare?: boolean
+      prospects?: DigestProspectRef[]
     } = {}
-  ): void {
+  ): NewsItem {
     // Off the match-day clock (summer stages, camp week, the preseason board
     // meeting) news carry their fiction date, so beats land on distinct days.
     const beatISO = this.phase === 'offseason' ? this.offseasonDateISO() : this.preseasonDateISO()
@@ -1751,9 +1762,11 @@ export class Career {
       ...(refs.salience !== undefined ? { salience: refs.salience } : {}),
       ...(refs.engagement !== undefined ? { engagement: refs.engagement } : {}),
       ...(refs.rare !== undefined ? { rare: refs.rare } : {}),
+      ...(refs.prospects !== undefined ? { prospects: refs.prospects } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
+    return item
   }
 
   /**
@@ -5065,6 +5078,9 @@ export class Career {
     if (this.staffMeetingScene !== null) this.autoDelegateStaffMeeting()
     // Same for a pending scout meeting simmed past: the Head of Scouting runs it.
     if (this.scoutMeetingScene !== null) this.autoDelegateScoutMeeting()
+    // Playtest #10: simming past a held scout digest lets the scouts keep the
+    // queue — the delegate default, so the gate can never softlock.
+    if (this.scoutDigestPending) this.resolveScoutDigest()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     // Deadline day pauses the sim like draft day: the FIRST continue that would
     // cross the deadline is held — one last chance to work the phones — and the
@@ -12418,6 +12434,10 @@ export class Career {
       boardMeetingPending: this.boardMeetingYear !== null && this.phase === 'regularSeason',
       staffMeetingDue: this.staffMeetingScene !== null && this.phase === 'regularSeason',
       scoutMeetingDue: this.scoutMeetingScene !== null && this.phase === 'regularSeason',
+      scoutDigestPending: this.scoutDigestPending && this.phase === 'regularSeason',
+      ...(this.scoutDigestPending && this.scoutDigestNewsId !== null
+        ? { scoutDigestNewsId: this.scoutDigestNewsId }
+        : {}),
       devCampPending: this.devCampPending && this.phase === 'offseason' && this.offseason?.stage !== 'preseason',
       ...(this.phase === 'offseason' && this.offseason
         ? {
@@ -13592,9 +13612,16 @@ export class Career {
     const { cast, hostId } = this.scoutMeetingCast()
     const view = this.getScouting()
 
+    // Playtest #10: the meeting must be dynamic, not redundant — a prospect the
+    // GM already triaged (tracked to the shortlist, or passed on) is completed
+    // work, and the agenda never re-does it.
+    const shortlisted = new Set(this.scouting.shortlist ?? [])
+    const dismissed = new Set(this.scouting.dismissed ?? [])
+    const triaged = (playerId: string): boolean => shortlisted.has(playerId) || dismissed.has(playerId)
+
     // Risers / fallers: where OUR board (getDraftRankings scoutBoard) sits above or
     // below the public consensus, restricted to prospects our staff has actually
-    // seen (so it's a real opinion, not fog).
+    // seen (so it's a real opinion, not fog) — and not already triaged by hand.
     const board = this.getDraftRankings().scoutBoard
     const toLine = (r: typeof board[number]): ScoutBoardLine => ({
       playerId: r.playerId,
@@ -13602,8 +13629,8 @@ export class Career {
       position: r.position,
       note: `${r.movement > 0 ? '+' : ''}${r.movement} vs consensus`,
     })
-    const risers = board.filter((r) => r.seen && r.verdict === 'higher').slice(0, 4).map(toLine)
-    const fallers = board.filter((r) => r.seen && r.verdict === 'lower').slice(0, 3).map(toLine)
+    const risers = board.filter((r) => r.seen && r.verdict === 'higher' && !triaged(r.playerId)).slice(0, 4).map(toLine)
+    const fallers = board.filter((r) => r.seen && r.verdict === 'lower' && !triaged(r.playerId)).slice(0, 3).map(toLine)
 
     // Coverage gaps: position groups the roster is thin at, plus any region with no
     // scout on it (a nation we know nothing about).
@@ -13614,10 +13641,9 @@ export class Career {
       .sort((a, b) => a.avgKnowledge - b.avgKnowledge)
     for (const n of uncovered.slice(0, 2)) gaps.push(`no eyes in ${n.label}`)
 
-    // Trackable finds: flagged prospects the GM hasn't shortlisted yet, best first.
-    const shortlisted = new Set(this.scouting.shortlist ?? [])
+    // Trackable finds: flagged prospects the GM hasn't triaged yet, best first.
     const trackable: TrackableFind[] = view.recommendations
-      .filter((r) => !shortlisted.has(r.playerId))
+      .filter((r) => !triaged(r.playerId))
       .slice(0, 4)
       .map((r) => ({ playerId: r.playerId, name: r.name, position: r.position, grade: r.grade, reason: r.reason }))
 
@@ -15000,7 +15026,13 @@ export class Career {
 
   /** Weekly scout digest: one inbox summary of what the department worked on and
    *  who it flagged this week — so finds arrive as a briefing, not a per-player
-   *  news drip. Fires on the weekly cadence from the daily advance pass. */
+   *  news drip. Fires on the weekly cadence from the daily advance pass.
+   *
+   *  Playtest #10: the digest now carries the REAL prospect cards (structured
+   *  refs the inbox renders with track / another-look / pass actions), and when
+   *  it presents a find the GM hasn't seen in a digest before, it HOLDS the next
+   *  day until he interacts — with a "let the scouts decide" delegate so it can
+   *  never softlock (simming past auto-resolves, meetings-style). */
   private emitScoutDigest(day: number): void {
     const st = this.scouting
     const recs = st.recommendations ?? []
@@ -15018,9 +15050,65 @@ export class Career {
     // Where the department is deployed — the distinct assignment labels.
     const labels = [...new Set(scouts.map((s) => s.assignmentLabel).filter(Boolean))].slice(0, 3)
     const working = labels.length ? ` The department is out on ${labels.join(', ')}.` : ''
-    const untriaged = recs.filter((r) => !(st.shortlist ?? []).includes(r.playerId)).length
-    const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call in the Scouting Centre.`
-    this.pushNews('scouting', `Weekly scouting digest`, body, { press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutDigest' } })
+    // The untriaged queue: flagged prospects the GM hasn't tracked or passed on.
+    // (Passed prospects leave `recommendations` at dismissal; the filter is a
+    // save-compat belt-and-braces.)
+    const shortlisted = new Set(st.shortlist ?? [])
+    const dismissed = new Set(st.dismissed ?? [])
+    const untriagedRecs = recs.filter((r) => !shortlisted.has(r.playerId) && !dismissed.has(r.playerId))
+    const untriaged = untriagedRecs.length
+    // The embedded cards: best-graded untriaged prospects, capped so the mail
+    // stays a briefing rather than the whole Scouting Centre.
+    const cards: DigestProspectRef[] = [...untriagedRecs]
+      .sort((a, b) => gradeRank[a.grade] - gradeRank[b.grade])
+      .slice(0, 4)
+      .map((r) => {
+        const p = this.data.players.get(asPlayerId(r.playerId))
+        const team = p ? [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId)) : undefined
+        return {
+          playerId: r.playerId,
+          name: p?.name ?? 'a prospect',
+          age: p?.age ?? 0,
+          position: p?.position ?? '—',
+          teamAbbr: team?.abbreviation ?? 'FA',
+          grade: r.grade,
+          reason: r.reason,
+          scoutName: r.scoutName,
+          ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      })
+    const callToAction = cards.length
+      ? ` Their cards are attached — make the calls here, or leave the queue to us.`
+      : ` Nothing awaits your call in the Scouting Centre.`
+    const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call.${callToAction}`
+    const item = this.pushNews('scouting', `Weekly scouting digest`, body, {
+      press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutDigest' },
+      ...(cards.length > 0 ? { prospects: cards } : {}),
+    })
+    // Hold the day only when the digest presents a find the GM hasn't been
+    // shown in a digest before — the same untriaged queue never nags weekly.
+    const shown = new Set(this.scoutDigestShown)
+    const hasNew = cards.some((c) => !shown.has(c.playerId))
+    if (cards.length > 0 && hasNew) {
+      this.scoutDigestPending = true
+      this.scoutDigestNewsId = item.id
+      for (const c of cards) shown.add(c.playerId)
+      this.scoutDigestShown = [...shown]
+      // Bound the ledger: only untriaged prospects can re-arm the gate, so
+      // pruning ancient entries costs at most one extra hold much later.
+      if (this.scoutDigestShown.length > 400) {
+        this.scoutDigestShown = this.scoutDigestShown.slice(-300)
+      }
+    }
+  }
+
+  /** Playtest #10: release the scout-digest hold. Called when the GM interacts
+   *  with a digest card (any triage action) or explicitly leaves the queue to
+   *  the scouts; simming past has the same effect (soft gate, never a lock). */
+  resolveScoutDigest(): { ok: boolean } {
+    this.scoutDigestPending = false
+    this.scoutDigestNewsId = null
+    return { ok: true }
   }
 
   /** Decide whether a freshly-known player is worth flagging — primarily youth
@@ -16302,6 +16390,7 @@ export class Career {
     for (const item of items) {
       if (item.playerId) playerIds.add(item.playerId)
       if (item.teamId) teamIds.add(item.teamId)
+      for (const pr of item.prospects ?? []) playerIds.add(pr.playerId)
     }
 
     const playerInfo: Record<string, { name: string; faceId?: string }> = {}
@@ -16340,7 +16429,23 @@ export class Career {
         options: i.options.map((o) => ({ id: o.id, label: o.label })),
       }
     })
-    return { items, unread, playerInfo, teamInfo, ...(interactions.length > 0 ? { interactions } : {}) }
+    // Playtest #10: current triage state, so embedded digest cards reflect the
+    // GM's calls (tracked / passed) even when re-reading an old briefing.
+    const prospectTriage = items.some((i) => (i.prospects?.length ?? 0) > 0)
+      ? {
+          shortlisted: [...(this.scouting.shortlist ?? [])],
+          dismissed: [...(this.scouting.dismissed ?? [])],
+        }
+      : undefined
+
+    return {
+      items,
+      unread,
+      playerInfo,
+      teamInfo,
+      ...(interactions.length > 0 ? { interactions } : {}),
+      ...(prospectTriage !== undefined ? { prospectTriage } : {}),
+    }
   }
 
   /** Record a played user game's box score for later viewing (bounded). */
@@ -17924,6 +18029,9 @@ export class Career {
       agentRapport: structuredClone(this.agentRapport),
       ...(this.staffMeetingScene ? { staffMeetingScene: structuredClone(this.staffMeetingScene) } : {}),
       ...(this.scoutMeetingScene ? { scoutMeetingScene: structuredClone(this.scoutMeetingScene) } : {}),
+      scoutDigestPending: this.scoutDigestPending,
+      ...(this.scoutDigestNewsId !== null ? { scoutDigestNewsId: this.scoutDigestNewsId } : {}),
+      scoutDigestShown: [...this.scoutDigestShown],
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
@@ -18109,6 +18217,9 @@ export class Career {
     career.agentRapport = normalizeAgentRapport(snapshot.agentRapport)
     if (snapshot.staffMeetingScene) career.staffMeetingScene = snapshot.staffMeetingScene as StaffMeetingScene
     if (snapshot.scoutMeetingScene) career.scoutMeetingScene = snapshot.scoutMeetingScene as ScoutMeetingScene
+    career.scoutDigestPending = snapshot.scoutDigestPending ?? false
+    career.scoutDigestNewsId = snapshot.scoutDigestNewsId ?? null
+    career.scoutDigestShown = [...(snapshot.scoutDigestShown ?? [])]
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))

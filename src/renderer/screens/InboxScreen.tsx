@@ -9,7 +9,7 @@ import { dayToDateISO } from '../../engine/career/views'
 import { Notice, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { CategoryIcon, Icons } from '../components/icons'
-import { toast } from '../components/store'
+import { bumpRefresh, toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
@@ -495,6 +495,8 @@ export function InboxScreen(): JSX.Element {
               playerInfo={data.playerInfo}
               teamInfo={data.teamInfo}
               navigate={nav.navigate}
+              prospectTriage={data.prospectTriage}
+              onTriageChanged={refetch}
             />
           </div>
         ) : (
@@ -817,8 +819,22 @@ function ReadingPane(props: {
   playerInfo?: InboxView['playerInfo']
   teamInfo?: InboxView['teamInfo']
   navigate: ReturnType<typeof useNav>['navigate']
+  prospectTriage?: InboxView['prospectTriage'] | undefined
+  onTriageChanged?: (() => void) | undefined
 }): JSX.Element {
   const { item, playerInfo, teamInfo, navigate } = props
+
+  // Playtest #10: the weekly scout digest carries REAL prospect cards — the
+  // same triage calls as the Scouting Centre, right in the mail.
+  if (item.prospects && item.prospects.length > 0) {
+    return (
+      <ScoutDigestPane
+        item={item}
+        triage={props.prospectTriage}
+        onChanged={props.onTriageChanged}
+      />
+    )
+  }
 
   // Press articles render as a newspaper-style layout.
   if (item.press) {
@@ -1157,6 +1173,167 @@ function PressArticlePane(props: {
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* ── Playtest #10: the interactive scout digest ─────────────────────────────── */
+
+const DIGEST_GRADE_COLOR: Record<string, string> = {
+  'A+': 'var(--success)',
+  A: 'rgba(52,211,153,0.85)',
+  B: 'var(--accent2)',
+  C: 'var(--amber, #f59e0b)',
+}
+
+/**
+ * The weekly scout digest as a working surface: the flagged prospects arrive as
+ * REAL triage cards (the Scouting Centre's own calls — track / another look /
+ * pass), and while the digest is holding the day, any interaction — or the
+ * explicit "leave the queue to the scouts" delegate — releases the sim.
+ */
+function ScoutDigestPane({ item, triage, onChanged }: {
+  item: NewsItem
+  triage?: InboxView['prospectTriage'] | undefined
+  onChanged?: (() => void) | undefined
+}): JSX.Element {
+  const client = useClient()
+  const nav = useNav()
+  const [busy, setBusy] = useState<string | null>(null)
+  const shortlisted = new Set(triage?.shortlisted ?? [])
+  const dismissed = new Set(triage?.dismissed ?? [])
+  const byline = item.press?.byline ?? 'Head of Scouting — Recruitment'
+  const bodyParagraphs = item.body.split('\n').filter((p) => p.trim().length > 0)
+
+  async function act(action: 'shortlist' | 'pass' | 'rescout', playerId: string): Promise<void> {
+    if (busy) return
+    setBusy(playerId)
+    const res =
+      action === 'shortlist' ? await client.shortlistProspect(playerId)
+      : action === 'pass' ? await client.dismissProspect(playerId)
+      : await client.rescoutProspect(playerId)
+    // Any triage call counts as engaging with the briefing — release the hold.
+    await client.resolveScoutDigest()
+    setBusy(null)
+    if (res.type === 'error') {
+      toast(res.message ?? 'Could not do that.', 'error')
+      return
+    }
+    if (action === 'rescout') toast('A scout is heading back for a deeper read.', 'info')
+    onChanged?.()
+    bumpRefresh()
+  }
+
+  async function leaveToScouts(): Promise<void> {
+    await client.resolveScoutDigest()
+    toast('The scouts keep working the queue.', 'info')
+    onChanged?.()
+    bumpRefresh()
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
+      <PaneAccentBar gradient="linear-gradient(90deg, var(--cyan), var(--violet))" />
+
+      <div style={{ padding: 'var(--sp-4)' }}>
+        {/* Masthead */}
+        <PaneBadge color="var(--cyan)">
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <CategoryIcon category="scouting" size={13} color="var(--cyan)" /> SCOUTING BRIEFING
+          </span>
+        </PaneBadge>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 2 }}>{byline}</div>
+        <div className="muted" style={{ fontSize: 11, marginBottom: 'var(--sp-3)' }}>{itemDate(item)}</div>
+
+        <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1.25, marginBottom: 'var(--sp-3)' }}>
+          {item.headline}
+        </div>
+
+        {bodyParagraphs.map((para, i) => (
+          <p key={i} style={{ margin: 0, marginBottom: 'var(--sp-3)', fontSize: 13, lineHeight: 1.7, maxWidth: '62ch' }}>
+            <Linkify text={para} />
+          </p>
+        ))}
+
+        {/* The prospect cards — the department's queue, actionable in place */}
+        <div className="stack" style={{ gap: 'var(--sp-3)', marginTop: 'var(--sp-2)' }}>
+          {(item.prospects ?? []).map((pr) => {
+            const tracked = shortlisted.has(pr.playerId)
+            const passed = dismissed.has(pr.playerId)
+            const settled = tracked || passed
+            return (
+              <div
+                key={pr.playerId}
+                className="panel"
+                style={{
+                  background: 'var(--bg2)',
+                  padding: 'var(--sp-3)',
+                  display: 'flex',
+                  gap: 'var(--sp-3)',
+                  opacity: passed ? 0.55 : 1,
+                }}
+              >
+                <PlayerFace faceId={pr.faceId} name={pr.name} size={52} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>
+                        <PlayerLink playerId={pr.playerId} name={pr.name} />
+                      </div>
+                      <div className="muted small">
+                        {pr.age} · {pr.position} · {pr.teamAbbr} · flagged by {pr.scoutName}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                      {tracked && <span className="chip chip-success" style={{ fontSize: 10 }}>Tracked</span>}
+                      {passed && <span className="chip" style={{ fontSize: 10 }}>Passed</span>}
+                      <span style={{ fontWeight: 800, fontSize: 20, color: DIGEST_GRADE_COLOR[pr.grade] ?? 'var(--text)' }}>
+                        {pr.grade}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, lineHeight: 1.5, marginTop: 4 }}>{pr.reason}</div>
+                  {!settled && (
+                    <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-2)' }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={busy !== null}
+                        onClick={() => void act('shortlist', pr.playerId)}
+                      >★ Track him</button>
+                      <button
+                        className="btn btn-sm"
+                        disabled={busy !== null}
+                        title="Send your best-fit scout back for a deeper read"
+                        onClick={() => void act('rescout', pr.playerId)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      ><Icon size={14}><Icons.Scouting /></Icon> Another look</button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        disabled={busy !== null}
+                        style={{ color: 'var(--danger, #d8584f)' }}
+                        onClick={() => void act('pass', pr.playerId)}
+                      >Pass</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Footer: the delegate escape + the deeper surface */}
+        <div
+          className="row"
+          style={{ borderTop: '1px solid var(--line)', marginTop: 'var(--sp-4)', paddingTop: 'var(--sp-3)', gap: 'var(--sp-2)', flexWrap: 'wrap' }}
+        >
+          <button className="btn btn-ghost" onClick={() => void leaveToScouts()}>
+            Leave the queue to the scouts
+          </button>
+          <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => nav.navigate('scouting')}>
+            Open Scouting Centre →
+          </button>
+        </div>
       </div>
     </div>
   )

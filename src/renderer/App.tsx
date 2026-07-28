@@ -435,6 +435,14 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('scoutMeeting')
           return
         }
+        // Weekly scout digest with fresh finds (playtest #10): Continue walks
+        // you into the briefing — its prospect cards want a call. Continuing
+        // from the inbox delegates ("the scouts keep the queue", engine-side).
+        if (dashboard?.scoutDigestPending && nav.screen !== 'inbox') {
+          setProcessing(null)
+          navigate('inbox', dashboard.scoutDigestNewsId ? { newsId: dashboard.scoutDigestNewsId } : {})
+          return
+        }
         // When the GM is attending a beat ON its own screen (camp, dev camp, board
         // meeting, season review, staff/scout meeting), a Continue press ADVANCES
         // that sub-flow in place — no processing overlay, no calendar detour (that
@@ -442,7 +450,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         const resolvingBeat = !!(
           dashboard?.campPending || dashboard?.devCampPending ||
           dashboard?.boardMeetingPending || dashboard?.reviewPending ||
-          dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue
+          dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue ||
+          dashboard?.scoutDigestPending
         )
         if (resolvingBeat) {
           setProcessing(null)
@@ -470,7 +479,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, nav.screen, navigate]
+    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, dashboard?.scoutDigestPending, dashboard?.scoutDigestNewsId, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is

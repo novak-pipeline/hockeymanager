@@ -458,6 +458,11 @@ export interface DashboardView {
   staffMeetingDue?: boolean
   /** A convened recurring scout meeting is waiting (blocking gate). Optional/additive. */
   scoutMeetingDue?: boolean
+  /** Playtest #10: the weekly scout digest holds the day until the GM triages
+   *  its prospect cards (or delegates to the scouts). Soft gate. Optional/additive. */
+  scoutDigestPending?: boolean
+  /** Inbox id of the gating digest, for deep-linking Continue → inbox. */
+  scoutDigestNewsId?: string
   /** Offseason: human stage label for headers ('Free agency — day 3'). Optional/additive. */
   offseasonStageLabel?: string
   /** M3: development camp is on the calendar — Continue walks you in. Optional/additive. */
@@ -2245,6 +2250,12 @@ export interface InboxView {
    * Optional for backward compat.
    */
   teamInfo?: Record<string, { abbreviation: string; primaryColor: number }>
+  /**
+   * Playtest #10: the GM's current prospect-triage state, so digest cards can
+   * reflect tracked/passed status when re-read. Present only when some item
+   * carries embedded prospect cards. Optional/additive.
+   */
+  prospectTriage?: { shortlisted: string[]; dismissed: string[] }
 }
 
 /* ────────────────────────── snapshot (save format) ────────────────────────── */
@@ -2415,6 +2426,12 @@ export interface CareerSnapshot {
   staffMeetingScene?: unknown
   /** A pending convened scout meeting (JSON-safe scene). Optional/additive. */
   scoutMeetingScene?: unknown
+  /** Playtest #10: the weekly scout digest is holding the day. Optional/additive. */
+  scoutDigestPending?: boolean
+  /** Inbox id of the gating digest (deep-link target). Optional/additive. */
+  scoutDigestNewsId?: string
+  /** Prospects already presented in a gated digest (no weekly re-nag). Optional/additive. */
+  scoutDigestShown?: string[]
   /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
   faShortlist?: string[]
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */

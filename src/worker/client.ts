@@ -711,6 +711,10 @@ export class SimClient {
   rescoutProspect(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'rescoutProspect', playerId })
   }
+  /** Playtest #10: release the scout-digest hold (interacted or delegated). */
+  resolveScoutDigest(): Promise<WorkerResponse> {
+    return this.send({ type: 'resolveScoutDigest' })
+  }
 
   /* ── story layer ── */
 

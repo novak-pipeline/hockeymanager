@@ -415,6 +415,8 @@ export type WorkerRequestBody =
   | { type: 'unshortlistProspect'; playerId: string }
   | { type: 'dismissProspect'; playerId: string }
   | { type: 'rescoutProspect'; playerId: string }
+  /** Playtest #10: release the scout-digest hold (GM interacted or delegated). */
+  | { type: 'resolveScoutDigest' }
   /** Global search for the command palette (players + teams by name). */
   | { type: 'searchAll'; query: string }
   /** [id, name] index of every player, for linkifying names in prose. */
