@@ -17412,7 +17412,6 @@ export class Career {
       preseason: 'Preseason',
     }
     const team = this.userTeam
-    const roster = team.roster.map((id) => this.resolve(id))
     const capUsed = capUsedFor(team, this.data.players) + this.userDeadCap
     const awards =
       os.stage === 'awards' || os.stage === 'draft' ? this.computeAwards() : null

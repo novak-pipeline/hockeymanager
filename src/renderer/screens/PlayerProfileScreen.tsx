@@ -1460,50 +1460,6 @@ function PositionRink({ positions }: { positions: Array<{ pos: string; level: st
   )
 }
 
-/** Season-by-season stat table (skater or goalie columns). */
-function SeasonStatsTable({ seasons, isGoalie }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean }): JSX.Element {
-  if (seasons.length === 0) return <span className="muted small">No games recorded.</span>
-  return (
-    <div className="table-wrap">
-      <table className="table" style={{ fontSize: 12 }}>
-        <thead>
-          {isGoalie ? (
-            <tr><th>Season</th><th>Tm</th><th className="num">GP</th><th className="num">W</th><th className="num">L</th><th className="num">SV%</th><th className="num">GAA</th><th className="num">SO</th></tr>
-          ) : (
-            <tr><th>Season</th><th>Tm</th><th className="num">GP</th><th className="num">G</th><th className="num">A</th><th className="num">P</th><th className="num">±</th><th className="num">TOI</th></tr>
-          )}
-        </thead>
-        <tbody>
-          {seasons.map((s, i) => {
-            const yr = `${s.year}–${(s.year + 1) % 100}`
-            if (isGoalie) {
-              const g = s.goalie
-              return (
-                <tr key={i}>
-                  <td>{yr}</td><td className="muted">{s.teamAbbr}{s.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
-                  <td className="num">{g?.gamesPlayed ?? '—'}</td><td className="num">{g?.wins ?? '—'}</td><td className="num">{g?.losses ?? '—'}</td>
-                  <td className="num">{g ? `.${Math.round(g.savePct * 1000)}` : '—'}</td>
-                  <td className="num">{g ? g.goalsAgainstAverage.toFixed(2) : '—'}</td><td className="num">{g?.shutouts ?? '—'}</td>
-                </tr>
-              )
-            }
-            const sk = s.skater
-            return (
-              <tr key={i}>
-                <td>{yr}</td><td className="muted">{s.teamAbbr}{s.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
-                <td className="num">{sk?.gamesPlayed ?? '—'}</td><td className="num">{sk?.goals ?? '—'}</td><td className="num">{sk?.assists ?? '—'}</td>
-                <td className="num"><strong>{sk?.points ?? '—'}</strong></td>
-                <td className="num">{sk ? (sk.plusMinus > 0 ? `+${sk.plusMinus}` : sk.plusMinus) : '—'}</td>
-                <td className="num">{sk ? fmtToi(sk.toiPerGame) : '—'}</td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 /** Career totals summed from the season lines. */
 function CareerTotals({ seasons, isGoalie, avgRating }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean; avgRating?: number }): JSX.Element {
   const ratingCell: Array<readonly [string, number | string]> =

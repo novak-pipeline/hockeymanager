@@ -14,7 +14,6 @@
  */
 
 import {
-  asGameId,
   asLeagueId,
   asPlayerId,
   asTeamId,
@@ -1125,6 +1124,12 @@ const emptyStanding = (teamId: TeamId): Standing => ({
   wins: 0,
   losses: 0,
   overtimeLosses: 0,
+  // ROW was added with the NHL realism pass but never reached this constructor,
+  // so a career STARTED from an imported database began with it undefined —
+  // `standing.regulationOtWins++` then produced NaN for the whole season and took
+  // the ROW column and its tiebreaker with it. The load-time backfill only ever
+  // covered saves, so a fresh imported game was the one path left broken.
+  regulationOtWins: 0,
   points: 0,
   goalsFor: 0,
   goalsAgainst: 0
@@ -1532,7 +1537,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   )
   const underageProspects: Player[] = []
 
-  for (const { teamId: nhlTeamId, modTeam, roster: nhlRoster } of nhlTeamSpecs) {
+  for (const { teamId: nhlTeamId, modTeam } of nhlTeamSpecs) {
     const nhlTeam = teams.get(nhlTeamId)!
     const ahlTeamId = asTeamId(`ahl-mt${ahlTeamNum++}`)
     ahlTeamIds.push(ahlTeamId)

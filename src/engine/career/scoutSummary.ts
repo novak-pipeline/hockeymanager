@@ -140,14 +140,14 @@ export function buildScoutSummary(a: ScoutSummaryArgs): ScoutSummary {
   }
 
   /* 4 — projection / verdict */
-  paras.push(projectionParagraph(a, confidence, first, pid))
+  paras.push(projectionParagraph(a, confidence, first))
 
   return { confidence, paragraphs: paras }
 }
 
 /* ────────────────────────── prose helpers ────────────────────────── */
 
-function projectionParagraph(a: ScoutSummaryArgs, confidence: ScoutSummary['confidence'], first: string, pid: string): string {
+function projectionParagraph(a: ScoutSummaryArgs, confidence: ScoutSummary['confidence'], first: string): string {
   const role = a.ceilingRole ?? 'a useful pro'
   const conf =
     confidence === 'high' ? 'Our staff is confident in this read'

@@ -240,7 +240,6 @@ function TeamLeagueTable({ teams, userTeamId }: { teams: TeamAnalyticsRow[]; use
     else { setSortKey(key); setSortAsc(false) }
   }
 
-  const col = TEAM_COLS.find((c) => c.key === sortKey) ?? TEAM_COLS[2]!
   const sorted = [...teams].sort((a, b) => {
     const diff = (a[sortKey] as number) - (b[sortKey] as number)
     return sortAsc ? diff : -diff

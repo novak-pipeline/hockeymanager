@@ -214,7 +214,6 @@ export function buildSequenceTargets(games: GameData[]): SequenceTargets {
   }
 
   const gamesN = games.length
-  const stoppageTotal = acc.stoppageOffside + acc.stoppageIcing + acc.stoppageGoalieFreeze + acc.stoppageOther
   const zoneTotal = acc.ozSeconds + acc.nzSeconds + acc.dzSeconds || 1
 
   // faceoffZoneMix from home-team perspective:
@@ -277,9 +276,6 @@ function processGameSequences(game: GameData, acc: SequenceAccum): void {
   // Last shot time per team (for rebound detection)
   const lastShotTime: Record<number, number> = { [homeTeamId]: -999, [awayTeamId]: -999 }
 
-  // Zone-time tracking: previous event time/zone per team
-  let prevTimeSec = 0
-  let prevPeriod = 0
 
   // Last stoppage/faceoff clock (for gap between stoppages)
   let lastStoppageSec: number | null = null

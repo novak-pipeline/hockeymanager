@@ -288,6 +288,25 @@ describe('validateModDatabase — invalid input', () => {
 /* ─────────────────────────── loadModDatabase ─────────────────────────── */
 
 describe('loadModDatabase', () => {
+  it('seeds every standing with a numeric ROW so tiebreakers never go NaN', () => {
+    // The vanilla generator set regulationOtWins; the mod importer did not, and
+    // the load-time backfill only covers SAVES. So a career started fresh from an
+    // imported database incremented `undefined` and carried NaN through the ROW
+    // column and its tiebreaker all season — a break only imported leagues saw,
+    // which is why a vanilla-only suite never caught it.
+    const data = loadModDatabase(validateModDatabase(makeFixtureMod(4)), { seed: 42 })
+    const standings = [...data.league.season.standings, ...data.league.ahlStandings]
+    expect(standings.length).toBeGreaterThan(0)
+    for (const s of standings) {
+      expect(typeof s.regulationOtWins).toBe('number')
+      expect(Number.isNaN(s.regulationOtWins)).toBe(false)
+    }
+    // The increment the season loop actually performs must stay a number.
+    const first = standings[0]!
+    first.regulationOtWins++
+    expect(first.regulationOtWins).toBe(1)
+  })
+
   it('produces sim-able LeagueData (quickSimGame runs without throwing)', () => {
     const db = validateModDatabase(makeFixtureMod(4))
     const data = loadModDatabase(db, { seed: 42 })

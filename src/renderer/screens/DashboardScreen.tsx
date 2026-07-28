@@ -1134,7 +1134,6 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   /** True = act as the column's grower (#8): absorb slack, scroll the agenda. */
   fill?: boolean
 }): JSX.Element {
-  const nav = useNav()
   const offseason = d.phase === 'offseason'
   const todayISO = calendar?.todayISO ?? d.date ?? ''
 
