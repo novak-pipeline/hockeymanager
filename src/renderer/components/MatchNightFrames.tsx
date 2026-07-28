@@ -20,6 +20,18 @@ const label: CSSProperties = {
 
 /* ────────────────────────── pregame (B6.1) ────────────────────────── */
 
+/**
+ * "Viktor Crosby" → "V. Crosby". Surname alone is standard lineup shorthand but
+ * it collapses distinct players: a generated (or real) league happily fields
+ * three different Crosbys, and the card then read "L2 Crosby … L3 Crosby ·
+ * Crosby", which looks like a bug. The initial disambiguates in the same width.
+ */
+function shortName(full: string): string {
+  const parts = full.trim().split(/\s+/)
+  if (parts.length < 2) return full
+  return `${parts[0]![0]}. ${parts[parts.length - 1]}`
+}
+
 function LinesColumn({ side, align }: { side: MatchDayPreviewView['user']; align: 'left' | 'right' }): JSX.Element {
   const ta = align === 'left' ? 'left' : 'right'
   return (
@@ -31,13 +43,13 @@ function LinesColumn({ side, align }: { side: MatchDayPreviewView['user']; align
         {side.forwardLines.map((l, i) => (
           <div key={`f${i}`} style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             <span className="muted" style={{ fontWeight: 700, marginRight: 4 }}>L{i + 1}</span>
-            {l.map((n) => n.split(' ').slice(-1)[0]).join(' · ')}
+            {l.map(shortName).join(' · ')}
           </div>
         ))}
         {side.defensePairs.map((l, i) => (
           <div key={`d${i}`} style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             <span className="muted" style={{ fontWeight: 700, marginRight: 4 }}>D{i + 1}</span>
-            {l.map((n) => n.split(' ').slice(-1)[0]).join(' · ')}
+            {l.map(shortName).join(' · ')}
           </div>
         ))}
         {side.starter && (
@@ -118,8 +130,8 @@ export function PregameFrame({
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', marginTop: 'auto', paddingTop: 'var(--sp-1)' }}>
         <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-        <button className="btn btn-ghost" onClick={onWatch} disabled={busy}>Watch live</button>
-        <button className="btn btn-primary" onClick={onPlay} disabled={busy}>
+        <button className="btn btn-ghost" aria-label="Watch the game live" onClick={onWatch} disabled={busy}>Watch live</button>
+        <button className="btn btn-primary" aria-label="Play the game" onClick={onPlay} disabled={busy}>
           {busy ? 'Processing…' : 'Continue — play the game'}
         </button>
       </div>
@@ -135,9 +147,19 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0])
 }
 
-function periodLabels(count: number): string[] {
+/**
+ * Column headers for the period breakdown: 1, 2, 3, then overtimes, and — when
+ * the game went to a shootout — a final "SO" column for the decider (the engine
+ * appends it so the row actually sums to the final score).
+ */
+function periodLabels(count: number, shootout: boolean): string[] {
+  const otCount = shootout ? count - 4 : count - 3 // columns that are true OTs
   const out: string[] = []
-  for (let i = 1; i <= count; i++) out.push(i <= 3 ? String(i) : count === 4 ? 'OT' : `OT${i - 3}`)
+  for (let i = 1; i <= count; i++) {
+    if (i <= 3) out.push(String(i))
+    else if (shootout && i === count) out.push('SO')
+    else out.push(otCount === 1 ? 'OT' : `OT${i - 3}`)
+  }
   return out
 }
 
@@ -150,7 +172,7 @@ export function PostgameFrame({
 }): JSX.Element {
   const r = receipt
   const suffix = r.decidedBy === 'overtime' ? ' (OT)' : r.decidedBy === 'shootout' ? ' (SO)' : ''
-  const cols = periodLabels(r.homeByPeriod.length)
+  const cols = periodLabels(r.homeByPeriod.length, r.decidedBy === 'shootout')
   const starGlyph = ['★', '★★', '★★★']
   return (
     <div className="card" style={{ padding: 'var(--sp-4)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
@@ -250,7 +272,7 @@ export function PostgameFrame({
       {/* top grades */}
       {r.grades.length > 0 && (
         <div className="muted" style={{ fontSize: 11.5 }}>
-          Grades: {r.grades.slice(0, 5).map((g) => `${g.name.split(' ').slice(-1)[0]} ${g.rating.toFixed(1)}`).join(' · ')}
+          Grades: {r.grades.slice(0, 5).map((g) => `${shortName(g.name)} ${g.rating.toFixed(1)}`).join(' · ')}
         </div>
       )}
 

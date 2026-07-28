@@ -824,6 +824,9 @@ const ELC_MAX_SALARY = 950_000
 const ELC_MAX_TERM = 3
 /** Rolling per-game ratings window (last N games stored). */
 const RATINGS_WINDOW = 10
+/** Seconds in a regulation period — mirrors quickSim's PERIOD_SECONDS. Used only
+ *  to turn a stream event's ABSOLUTE `t` into time within its period for prose. */
+const PERIOD_SECONDS_NHL = 1200
 /** Calendar days between recurring staff-meeting prompts. */
 const STAFF_MEETING_INTERVAL = 14
 /** Calendar days between recurring scout-meeting prompts (monthly, rarer than staff). */
@@ -4993,11 +4996,21 @@ export class Career {
         else awayByPeriod[idx]!++
         tpGoals.push({
           period: ev.period,
-          t: ev.t,
+          // Stream `t` is ABSOLUTE game seconds; the turning-point prose wants
+          // time WITHIN the period ("18:30 of period 3", not "58:30").
+          t: ev.period <= 3 ? ev.t - (ev.period - 1) * PERIOD_SECONDS_NHL : ev.t,
           scorerName: this.resolve(ev.scorer).name,
           byUser: userRoster.has(ev.scorer as unknown as string),
         })
       }
+    }
+    // A shootout decider is NOT a stream goal, but it DOES count in the final
+    // score — without its own column the period row visibly failed to add up
+    // (1+4+0 = 5 next to a total of 6). NHL box scores give it an "SO" column.
+    if (res.decidedBy === 'shootout') {
+      const homeWon = res.homeGoals > res.awayGoals
+      homeByPeriod.push(homeWon ? 1 : 0)
+      awayByPeriod.push(homeWon ? 0 : 1)
     }
 
     // Three stars + user grades from the SAME game ratings the squad screen uses.

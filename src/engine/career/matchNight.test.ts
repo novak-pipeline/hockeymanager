@@ -168,6 +168,22 @@ describe('threeStars', () => {
     expect(stars[1]!.statLine).toContain('.939')
     expect(stars[2]!.statLine).toBe('2 A')
   })
+
+  it('breaks a saturated-rating tie on points, then GOALS (the scale caps at 9.5)', () => {
+    const at = (over: Partial<Parameters<typeof threeStars>[0][number]>) => ({
+      playerId: 'x', name: 'X', teamAbbr: 'AAA', isGoalie: false,
+      goals: 0, assists: 0, shots: 0, saves: 0, shotsAgainst: 0, rating: 9.5, ...over,
+    })
+    const stars = threeStars([
+      at({ playerId: 'oneG', name: 'One Goal', goals: 1, assists: 2 }),   // 3 pts
+      at({ playerId: 'twoG', name: 'Two Goals', goals: 2, assists: 1 }),  // 3 pts, more goals
+      at({ playerId: 'twoP', name: 'Two Points', goals: 1, assists: 1 }), // 2 pts
+      at({ playerId: 'zero', name: 'No Points' }),
+    ])
+    // All four tie at the 9.5 ceiling, so points then goals must decide.
+    expect(stars.map((s) => s.playerId)).toEqual(['twoG', 'oneG', 'twoP'])
+    expect(stars[0]!.statLine).toBe('2 G, 1 A')
+  })
 })
 
 describe('detectPersistentMoment', () => {
@@ -330,15 +346,66 @@ describe('Career — match night end to end', () => {
       if (r.homeGoals + r.awayGoals === 0) continue // 0–0 into a shootout: no goal to cite
       expect(r.turningPoint).not.toBeNull()
       const tp = r.turningPoint!
-      // The cited goal must appear in the box score's goal log — same scorer,
-      // same period, same clock. The receipt cannot invent a moment.
-      const match = bs.goals.find(
-        (g) => g.scorer === tp.scorerName && g.period === tp.period && g.clock === tp.clock
-      )
-      expect(match, `turning point ${tp.scorerName} P${tp.period} ${tp.clock} not in the goal log`).toBeDefined()
+      // The cited goal must be a goal that really happened: same scorer, same
+      // period, present in the box score's goal log. The receipt cannot invent
+      // a moment. (Clocks are NOT compared — the goal log prints ABSOLUTE game
+      // time while the receipt prints time within the period; see below.)
+      const match = bs.goals.find((g) => g.scorer === tp.scorerName && g.period === tp.period)
+      expect(match, `turning point ${tp.scorerName} P${tp.period} not in the goal log`).toBeDefined()
+      // A regulation clock must be a real period time — never past 20:00.
+      if (tp.period <= 3) {
+        const [mm, ss] = tp.clock.split(':').map(Number)
+        expect(mm! * 60 + ss!).toBeLessThanOrEqual(20 * 60)
+      }
       checked++
     }
     expect(checked).toBeGreaterThan(0)
+  })
+
+  it('period breakdown always sums to the final score — INCLUDING a shootout', () => {
+    // Shootouts are the trap: the decider counts in the score but is not a goal
+    // in the stream, so a naive breakdown showed 1+4+0=5 beside a total of 6.
+    let seenShootout = false
+    let seenOvertime = false
+    let checkedGames = 0
+    for (const seed of [5150, 777, 909, 2468, 1234, 4242]) {
+      const data = generateLeague({ seed })
+      const userId = data.league.teams[0]!
+      const career = new Career(data, seed, userId)
+      for (let guard = 0; guard < 120; guard++) {
+        if (career.getMatchDayPreview() === null) {
+          if (!career.advanceDay()) break
+          continue
+        }
+        if (!career.advanceDay()) break
+        const r = career.getPostgameReceipt()
+        if (!r) continue
+        checkedGames++
+        expect(
+          r.homeByPeriod.reduce((a, b) => a + b, 0),
+          `home breakdown ${r.homeByPeriod.join('+')} vs ${r.homeGoals} (${r.decidedBy})`
+        ).toBe(r.homeGoals)
+        expect(
+          r.awayByPeriod.reduce((a, b) => a + b, 0),
+          `away breakdown ${r.awayByPeriod.join('+')} vs ${r.awayGoals} (${r.decidedBy})`
+        ).toBe(r.awayGoals)
+        if (r.decidedBy === 'shootout') {
+          seenShootout = true
+          // The appended SO column holds exactly the one decider, for the winner.
+          const soHome = r.homeByPeriod[r.homeByPeriod.length - 1]!
+          const soAway = r.awayByPeriod[r.awayByPeriod.length - 1]!
+          expect(soHome + soAway).toBe(1)
+          expect(r.homeGoals > r.awayGoals ? soHome : soAway).toBe(1)
+        }
+        if (r.decidedBy === 'overtime') seenOvertime = true
+        if (seenShootout && seenOvertime && checkedGames > 40) break
+      }
+      if (seenShootout && seenOvertime) break
+    }
+    expect(checkedGames).toBeGreaterThan(10)
+    // A season of hockey must produce both, or this test proved nothing.
+    expect(seenShootout, 'no shootout sampled — the SO column went unverified').toBe(true)
+    expect(seenOvertime, 'no overtime sampled').toBe(true)
   })
 
   it('rotates the coach postgame word — no verbatim repeat across a season', () => {

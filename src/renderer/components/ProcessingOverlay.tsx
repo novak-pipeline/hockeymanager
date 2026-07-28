@@ -364,7 +364,9 @@ export function ProcessingOverlay({
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', marginTop: 'auto', paddingTop: 'var(--sp-2)' }}>
             <button className="btn btn-ghost" onClick={onClose} disabled={running}>Close</button>
-            <button className="btn btn-primary" onClick={onContinue} disabled={running}>
+            {/* aria-label distinguishes THIS Continue from the topbar's — the
+                overlay is modal, so it's the only one clickable while open. */}
+            <button className="btn btn-primary" aria-label="Continue to the next day" onClick={onContinue} disabled={running}>
               {running ? 'Processing…' : 'Continue'} <Icon size={14}><Icons.ChevronRight /></Icon>
             </button>
           </div>

@@ -187,7 +187,15 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
 
 export interface TurningPointGoal {
   period: number
-  /** Seconds elapsed within the period. */
+  /**
+   * Seconds elapsed WITHIN the period (0–1200 in regulation).
+   *
+   * NB the GameEvent stream carries `t` as ABSOLUTE game seconds
+   * (quickSim.ts absOf()), despite the older comment on GameEvent claiming
+   * otherwise — a 3rd-period goal arrives as ~3500, not ~500. The career layer
+   * converts before calling, so the prose here can say "18:30 of period 3"
+   * instead of the nonsensical "58:30 into period 3".
+   */
   t: number
   scorerName: string
   byUser: boolean
@@ -239,8 +247,7 @@ export function findTurningPoint(
     const before = us - them // user-perspective diff before this goal
     if (g.byUser) us++
     else them++
-    const after = us - them
-    // Transition weight, from the scoring side's perspective.
+    // Transition weight, from the SCORING side's perspective.
     const diffBefore = g.byUser ? before : -before
     let w: number
     if (diffBefore === 0) w = 3 // broke a tie
@@ -256,7 +263,6 @@ export function findTurningPoint(
       bestScore = score
       best = i
     }
-    void after
   }
 
   const g = goals[best]!
@@ -268,20 +274,34 @@ export function findTurningPoint(
     else t++
   }
   const scoringSideDiff = g.byUser ? u - t : t - u
-  const where = g.period >= 4 ? 'in overtime' : `${clockOf(g.t)} into period ${g.period}`
+  const where = g.period >= 4 ? 'in overtime' : `at ${clockOf(g.t)} of period ${g.period}`
+  // The same goal reads differently from your bench than from theirs, so the
+  // phrasing is written from the GM's chair: ours is a swing, theirs is a wound.
+  const ours = g.byUser
   const phrase =
     g.period >= 4
-      ? `${g.scorerName} ended it in overtime.`
+      ? ours
+        ? `${g.scorerName} ended it in overtime — yours.`
+        : `${g.scorerName} ended it in overtime. One point, not two.`
       : best === gwgIndex && scoringSideDiff === 0
-        ? `${g.scorerName}'s go-ahead goal ${where} broke the ${u}–${t} tie — the goal that decided it.`
+        ? ours
+          ? `${g.scorerName}'s go-ahead goal ${where} broke the ${u}–${t} tie — the goal that won it.`
+          : `${g.scorerName} broke the ${u}–${t} tie ${where}, and you never got it back.`
         : scoringSideDiff === 0
-          ? `${g.scorerName} broke the ${u}–${t} tie ${where}.`
+          ? ours
+            ? `${g.scorerName} broke the ${u}–${t} tie ${where}.`
+            : `${g.scorerName} broke the ${u}–${t} tie ${where} — against the run of play or not, it hurt.`
           : scoringSideDiff === -1
-            ? `${g.scorerName}'s equalizer ${where} flipped the night.`
+            ? ours
+              ? `${g.scorerName}'s equalizer ${where} ${won ? 'flipped the night' : 'got you level, but it did not last'}.`
+              : `${g.scorerName} pulled them level ${where}${won ? ' — a scare you survived' : ', and the night turned there'}.`
             : scoringSideDiff < -1
-              ? `${g.scorerName} started the pushback ${where}, down ${Math.abs(scoringSideDiff)}.`
-              : `${g.scorerName}'s insurance goal ${where} put it out of reach.`
-  void won
+              ? ours
+                ? `${g.scorerName} started the pushback ${where}, down ${Math.abs(scoringSideDiff)}.`
+                : `${g.scorerName} got them within ${Math.abs(scoringSideDiff) - 1} ${where}, and the lead stopped feeling safe.`
+              : ours
+                ? `${g.scorerName}'s insurance goal ${where} put it out of reach.`
+                : `${g.scorerName}'s goal ${where} put it out of reach.`
   return { period: g.period, clock: clockOf(g.t), scorerName: g.scorerName, text: phrase }
 }
 
@@ -313,13 +333,23 @@ function statLineOf(l: RatedGameLine): string {
   return parts.join(', ')
 }
 
-/** Rank every participant by game rating (points as tiebreak) → three stars. */
+/**
+ * Rank every participant by game rating → three stars.
+ *
+ * The rating scale saturates at 9.5 (playerRating.ts), so on a big night several
+ * players genuinely tie at the ceiling and the tiebreaks do the real ordering:
+ * points first, then GOALS (2G-1A is a bigger night than 1G-2A at equal points),
+ * then saves for a goalie who tied on an empty scoresheet, then name for
+ * determinism.
+ */
 export function threeStars(lines: RatedGameLine[]): ThreeStarView[] {
   return [...lines]
     .sort(
       (a, b) =>
         b.rating - a.rating ||
         b.goals + b.assists - (a.goals + a.assists) ||
+        b.goals - a.goals ||
+        b.saves - a.saves ||
         a.name.localeCompare(b.name)
     )
     .slice(0, 3)
