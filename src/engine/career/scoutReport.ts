@@ -497,7 +497,38 @@ function pickPhrase(phrases: string[], pid: string, seed: string): string | null
   return stablePick(phrases, pid, seed)
 }
 
+/** One observation with its slant — the prose paragraph and the find-card
+ *  pros/cons are both assembled from the same clause stream. */
+interface TonedClause { text: string; tone: 'pro' | 'con' }
+
+/**
+ * Compact pros/cons for a scouting-centre find card: the same phrase pools,
+ * thresholds and fog-hedging as the profile prose, split by slant instead of
+ * joined into a paragraph. `seedExtra` (e.g. the flagging scout's id) varies
+ * WHICH phrase a given scout reaches for — two scouts describe the same player
+ * in their own words — while staying fully deterministic.
+ */
+export function reportProsCons(
+  player: Player,
+  knowledge: number,
+  seedExtra = '',
+  maxPros = 3,
+  maxCons = 2,
+): { pros: string[]; cons: string[] } {
+  const clauses = collectClauses(player, knowledge, player.id as string, seedExtra)
+  const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+  return {
+    pros: clauses.filter((c) => c.tone === 'pro').slice(0, maxPros).map((c) => cap(c.text)),
+    cons: clauses.filter((c) => c.tone === 'con').slice(0, maxCons).map((c) => cap(c.text)),
+  }
+}
+
 function buildProse(player: Player, knowledge: number, pid: string): string {
+  const clauses = collectClauses(player, knowledge, pid).map((c) => c.text)
+  return assembleProse(player, knowledge, clauses)
+}
+
+function collectClauses(player: Player, knowledge: number, pid: string, seedExtra = ''): TonedClause[] {
   const c = player.composites as unknown as Record<string, number>
   const t = player.ratings.technical as unknown as Record<string, number>
   const m = player.ratings.mental as unknown as Record<string, number>
@@ -518,9 +549,12 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
   // Prefix hedges for uncertain reads
   const lookLike = lowKnow ? 'looks like ' : medKnow ? 'appears to be ' : ''
   const could = lowKnow ? 'could ' : ''
-  const _ = (s: string) => s // identity passthrough
 
-  const clauses: string[] = []
+  const clauses: TonedClause[] = []
+  const pro = (text: string): void => { clauses.push({ text, tone: 'pro' }) }
+  const con = (text: string): void => { clauses.push({ text, tone: 'con' }) }
+  // seedExtra shifts WHICH phrase is picked (per-scout voice), not WHETHER.
+  const pick = (phrases: string[], seed: string): string | null => pickPhrase(phrases, pid, seed + seedExtra)
 
   if (isGoalie) {
     // Goalie-specific prose
@@ -530,23 +564,23 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
 
     if (highKnow || reflexes >= 70) {
       if (reflexes >= 70) {
-        const ph = pickPhrase(GOALIE_REFLEXES_PHRASES.positive, pid, 'reflex')
-        if (ph) clauses.push(`${lookLike}${ph}`)
+        const ph = pick(GOALIE_REFLEXES_PHRASES.positive, 'reflex')
+        if (ph) pro(`${lookLike}${ph}`)
       }
     }
     if (posG >= 65) {
-      const ph = pickPhrase(GOALIE_POSITIONING_PHRASES.positive, pid, 'posG')
-      if (ph) clauses.push(ph)
+      const ph = pick(GOALIE_POSITIONING_PHRASES.positive, 'posG')
+      if (ph) pro(ph)
     } else if (posG < 45 && (highKnow || !medKnow)) {
-      const ph = pickPhrase(GOALIE_POSITIONING_PHRASES.negative, pid, 'posGn')
-      if (ph) clauses.push(ph)
+      const ph = pick(GOALIE_POSITIONING_PHRASES.negative, 'posGn')
+      if (ph) con(ph)
     }
     if (rebounds >= 65) {
-      const ph = pickPhrase(GOALIE_REBOUND_PHRASES.positive, pid, 'reb')
-      if (ph) clauses.push(ph)
+      const ph = pick(GOALIE_REBOUND_PHRASES.positive, 'reb')
+      if (ph) pro(ph)
     } else if (rebounds < 42) {
-      const ph = pickPhrase(GOALIE_REBOUND_PHRASES.negative, pid, 'rebn')
-      if (ph) clauses.push(ph)
+      const ph = pick(GOALIE_REBOUND_PHRASES.negative, 'rebn')
+      if (ph) con(ph)
     }
   } else {
     // Skater-specific prose
@@ -562,40 +596,40 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
 
     // Skating (always commentated if notable)
     if (skating >= 68) {
-      const ph = pickPhrase(SKATING_PHRASES.positive, pid, 'skate')
-      if (ph) clauses.push(`${lookLike}${ph}`)
+      const ph = pick(SKATING_PHRASES.positive, 'skate')
+      if (ph) pro(`${lookLike}${ph}`)
     } else if (skating < 40 && (highKnow || !lowKnow)) {
-      const ph = pickPhrase(SKATING_PHRASES.negative, pid, 'skaten')
-      if (ph) clauses.push(ph)
+      const ph = pick(SKATING_PHRASES.negative, 'skaten')
+      if (ph) con(ph)
     }
 
     // Shot — only if notable
     if (wristShot >= 68) {
-      const ph = pickPhrase(WRIST_SHOT_PHRASES.positive, pid, 'wrist')
-      if (ph) clauses.push(ph)
+      const ph = pick(WRIST_SHOT_PHRASES.positive, 'wrist')
+      if (ph) pro(ph)
     }
     if (slapShot >= 70 && player.position === 'D') {
-      const ph = pickPhrase(SLAP_SHOT_PHRASES.positive, pid, 'slap')
-      if (ph) clauses.push(ph)
+      const ph = pick(SLAP_SHOT_PHRASES.positive, 'slap')
+      if (ph) pro(ph)
     }
 
     // Scoring
     if (scoring >= 70) {
-      const ph = pickPhrase(SCORING_PHRASES.positive, pid, 'score')
-      if (ph) clauses.push(`${could}${ph}`)
+      const ph = pick(SCORING_PHRASES.positive, 'score')
+      if (ph) pro(`${could}${ph}`)
     } else if (scoring < 40 && (highKnow || !lowKnow) && player.position !== 'D') {
-      const ph = pickPhrase(SCORING_PHRASES.negative, pid, 'scoren')
-      if (ph) clauses.push(ph)
+      const ph = pick(SCORING_PHRASES.negative, 'scoren')
+      if (ph) con(ph)
     }
 
     // Passing / vision
     if (passing >= 68) {
-      const ph = pickPhrase(PASSING_PHRASES.positive, pid, 'pass')
-      if (ph) clauses.push(ph)
+      const ph = pick(PASSING_PHRASES.positive, 'pass')
+      if (ph) pro(ph)
     }
     if (vision >= 70) {
-      const ph = pickPhrase(VISION_PHRASES.positive, pid, 'vision')
-      if (ph) clauses.push(ph)
+      const ph = pick(VISION_PHRASES.positive, 'vision')
+      if (ph) pro(ph)
     }
 
     // Defence — a defenceman gets the blue-line pool (his own-zone play is the
@@ -605,33 +639,33 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
     const isD = player.position === 'D'
     if (checking >= 65) {
       const ph = isD
-        ? pickPhrase(DEF_ZONE_PHRASES.positive, pid, 'dzone')
-        : pickPhrase(CHECKING_PHRASES.positive, pid, 'check')
-      if (ph) clauses.push(ph)
+        ? pick(DEF_ZONE_PHRASES.positive, 'dzone')
+        : pick(CHECKING_PHRASES.positive, 'check')
+      if (ph) pro(ph)
     } else if (checking < 42 && highKnow) {
       const ph = isD
-        ? pickPhrase(DEF_ZONE_PHRASES.negative, pid, 'dzonen')
-        : pickPhrase(CHECKING_PHRASES.negative, pid, 'checkn')
-      if (ph) clauses.push(ph)
+        ? pick(DEF_ZONE_PHRASES.negative, 'dzonen')
+        : pick(CHECKING_PHRASES.negative, 'checkn')
+      if (ph) con(ph)
     }
 
     // Physicality
     if (hitting >= 70) {
-      const ph = pickPhrase(HITTING_PHRASES.positive, pid, 'hit')
-      if (ph) clauses.push(ph)
+      const ph = pick(HITTING_PHRASES.positive, 'hit')
+      if (ph) pro(ph)
     }
     if (strength >= 72) {
-      const ph = pickPhrase(STRENGTH_PHRASES.positive, pid, 'str')
-      if (ph) clauses.push(ph)
+      const ph = pick(STRENGTH_PHRASES.positive, 'str')
+      if (ph) pro(ph)
     }
 
     // Composure attribute
     if (composure >= 70 && (highKnow || !lowKnow)) {
-      const ph = pickPhrase(COMPOSURE_PHRASES.positive, pid, 'comp')
-      if (ph) clauses.push(ph)
+      const ph = pick(COMPOSURE_PHRASES.positive, 'comp')
+      if (ph) pro(ph)
     } else if (composure < 40 && highKnow) {
-      const ph = pickPhrase(COMPOSURE_PHRASES.negative, pid, 'compn')
-      if (ph) clauses.push(ph)
+      const ph = pick(COMPOSURE_PHRASES.negative, 'compn')
+      if (ph) con(ph)
     }
   }
 
@@ -645,33 +679,37 @@ function buildProse(player: Player, knowledge: number, pid: string): string {
       : (pers['determination'] ?? 10)
 
     if (determination >= 15) {
-      clauses.push(stablePick(DETERMINATION_HIGH, pid, 'det'))
+      pro(stablePick(DETERMINATION_HIGH, pid, 'det' + seedExtra))
     }
 
     const professionalism = pers['professionalism'] ?? 10
     if (professionalism >= 16 && highKnow) {
-      clauses.push(stablePick(PROFESSIONALISM_HIGH, pid, 'prof'))
+      pro(stablePick(PROFESSIONALISM_HIGH, pid, 'prof' + seedExtra))
     }
 
     const loyalty = pers['loyalty'] ?? 10
     if (loyalty >= 17 && (highKnow || !medKnow)) {
-      clauses.push(stablePick(LOYALTY_HIGH, pid, 'loy'))
+      pro(stablePick(LOYALTY_HIGH, pid, 'loy' + seedExtra))
     }
 
     if (flair >= 16) {
-      clauses.push(stablePick(FLAIR_HIGH, pid, 'flair'))
+      pro(stablePick(FLAIR_HIGH, pid, 'flair' + seedExtra))
     }
 
     if (aggression >= 16) {
-      clauses.push(stablePick(AGGRESSION_HIGH, pid, 'agg'))
+      pro(stablePick(AGGRESSION_HIGH, pid, 'agg' + seedExtra))
     }
 
     const pressure = (player as unknown as Record<string, number | undefined>)['pressure'] ?? 10
     if (pressure >= 16 && highKnow) {
-      clauses.push(stablePick(COMPOSURE_PERS_HIGH, pid, 'pres'))
+      pro(stablePick(COMPOSURE_PERS_HIGH, pid, 'pres' + seedExtra))
     }
   }
 
+  return clauses
+}
+
+function assembleProse(player: Player, knowledge: number, clauses: string[]): string {
   // ── Assemble ──
   if (clauses.length === 0) {
     if (knowledge < 25) {

@@ -2607,6 +2607,14 @@ export interface ScoutFindView {
   draftLabel?: string
   /** True when the GM has tracked him — he sits on the shortlist, not the queue. */
   shortlisted?: boolean
+  /** WHY the scout graded him this way — standout strengths, in the scout's own
+   *  words (fog-hedged; fewer at low knowledge). Additive, playtest #17. */
+  pros?: string[]
+  /** The flip side — flagged holes in his game (often empty at low knowledge). */
+  cons?: string[]
+  /** 1–2 notes judging him against the USER'S squad: roster friction, runway to
+   *  minutes, coach-system fit. Speak in roles/depth, never hidden numbers. */
+  fitNotes?: Array<{ tone: 'plus' | 'minus' | 'note'; text: string }>
 }
 
 /** A scope option for the assignment dropdowns. */
@@ -2731,6 +2739,9 @@ export interface ScoutingView {
   activeScouts: number
   /** Scouts the surfaced recommendations came from + the finds themselves. */
   recommendations: ScoutFindView[]
+  /** How many flagged prospects the GM has passed on all-time — lets the Centre
+   *  close the triage stack with a real tally. Additive, playtest #17. */
+  dismissedCount?: number
   /** Position groups your roster is currently thin at (e.g. ['Defense','Centre']). */
   rosterNeeds: string[]
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
