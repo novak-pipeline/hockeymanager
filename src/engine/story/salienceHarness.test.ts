@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
+import { DAILY_POST_BUDGET } from '@engine/story/salience'
+import { VOICE_DAILY_CAP } from '@engine/story/voices'
 
 describe('salience harness — one full season', () => {
   it('produces a healthy feed distribution', () => {
@@ -24,13 +26,26 @@ describe('salience harness — one full season', () => {
     const posts = feed.posts
 
     // Volume: a season should produce a real feed, but never a firehose.
+    // FEED-V2-1 added player/GM voices, so the ceiling covers both streams.
     expect(posts.length).toBeGreaterThanOrEqual(4)
-    expect(posts.length).toBeLessThanOrEqual(130)
+    expect(posts.length).toBeLessThanOrEqual(400)
 
-    // Budget: never more than 2 posts on any single day.
+    // Budget: the two streams carry SEPARATE caps — the pundit class still
+    // gets at most DAILY_POST_BUDGET a day, voices at most VOICE_DAILY_CAP,
+    // and no day may exceed the two of them combined.
+    const kindOf = (p: { authorId?: string }): string => feed.authors[p.authorId!]?.kind ?? 'wire'
+    const isVoice = (p: { authorId?: string }): boolean => kindOf(p) === 'player' || kindOf(p) === 'gm'
+    const punditPerDay = new Map<number, number>()
+    const voicePerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
-    for (const p of posts) perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
-    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2)
+    for (const p of posts) {
+      perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
+      const bucket = isVoice(p) ? voicePerDay : punditPerDay
+      bucket.set(p.day, (bucket.get(p.day) ?? 0) + 1)
+    }
+    for (const n of punditPerDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET)
+    for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
+    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
 
     // No detector class may own the feed outright once several contribute.
     const byAuthor = new Map<string, number>()

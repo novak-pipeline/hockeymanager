@@ -26,8 +26,9 @@ export interface FeedAuthor {
   id: string
   name: string
   handle: string
-  /** Voice: insider = terse facts, analyst = takes, stats = numbers, wire = official. */
-  kind: 'insider' | 'analyst' | 'stats' | 'wire'
+  /** Voice: insider = terse facts, analyst = takes, stats = numbers, wire = official.
+   *  FEED-V2-1 adds dynamic voices: player = the men themselves, gm = front offices. */
+  kind: 'insider' | 'analyst' | 'stats' | 'wire' | 'player' | 'gm'
   outlet: string
 }
 
@@ -88,8 +89,8 @@ export interface SalienceCtx {
   preseasonRanks: Map<string, number>
   /** Signed win(+)/loss(-) streak per teamId. */
   streaks: Map<string, number>
-  /** teamId -> display info. */
-  teams: Map<string, { name: string; abbreviation: string }>
+  /** teamId -> display info. City is optional/additive (voice posts cite it). */
+  teams: Map<string, { name: string; abbreviation: string; city?: string }>
   userTeamId: string
   teamsInLeague: number
   /** NHL skater season lines (the prior is his rating — deviation = story). */

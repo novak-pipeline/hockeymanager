@@ -39,6 +39,8 @@ const VOICE: Record<FeedAuthor['kind'], string> = {
   analyst: 'a columnist with a sharp take grounded in the numbers',
   stats: 'a numbers-forward analytics account — lead with the figure',
   wire: 'an official league wire — dry, factual, neutral',
+  player: 'an NHL player posting on his own account — first person, casual, emoji welcome, never corporate',
+  gm: 'a team general manager speaking for the front office — confident PR, measured, on the record',
 }
 
 const MAX_WORDS = 55

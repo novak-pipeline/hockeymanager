@@ -2416,6 +2416,11 @@ export interface CareerSnapshot {
   /** Social-feed posts (separate from inbox news). Optional/additive. */
   feedPosts?: NewsItem[]
   feedCounter?: number
+  /** FEED-V2-1: real events awaiting their player/GM voice post on the next
+   *  story tick. Optional/additive. */
+  pendingVoiceEvents?: import('@engine/story/voices').VoiceEvent[]
+  /** FEED-V2-1: the voices' own per-man no-repeat ledger. Optional/additive. */
+  voiceLedger?: import('@engine/story/contentEngine').ContentUse[]
   /** Followed feed accounts (Phase B curation). Optional/additive. */
   followedFeedAuthors?: string[]
   /** DEPTH 1: open/paused contract negotiation sessions by playerId. Optional/additive. */

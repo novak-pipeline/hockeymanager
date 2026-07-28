@@ -139,9 +139,18 @@ import {
   selectPosts,
   shouldReachInbox,
   PLAYER_CHECKPOINT_DAYS,
+  type FeedAuthor,
   type SalienceCtx,
   type StoryPriors,
 } from '@engine/story/salience'
+import {
+  buildVoicePosts,
+  detectGmMoments,
+  gmAuthorFor,
+  playerAuthorFor,
+  type VoiceEvent,
+  type VoiceSubject,
+} from '@engine/story/voices'
 import {
   buildGmPersona,
   deriveClubPosture,
@@ -881,6 +890,16 @@ export class Career {
   /** Phase B curation: accounts the GM follows — their posts reach the inbox
    *  (as do any posts above the importance floor, follows or not). */
   private followedFeedAuthors: string[] = []
+  /** FEED-V2-1 voices: real events queued where they happen (a milestone, a
+   *  call-up, a leak he read about himself); published as player/GM posts on
+   *  the next story tick. Persisted so a save between the event and the tick
+   *  never swallows a reaction. */
+  private pendingVoiceEvents: VoiceEvent[] = []
+  /** Voices keep their OWN no-repeat ledger: keys are per-man, so a league's
+   *  worth of them would evict the shared contentLedger's memory of leaks,
+   *  dilemmas and agent calls (it's bounded) and those systems would start
+   *  repeating themselves. */
+  private voiceLedger: ContentUse[] = []
   /** DEPTH 1: live contract-negotiation sessions, keyed by playerId. Sessions
    *  are per-offseason; stale ones are dropped when eligibility lapses. */
   private negotiations = new Map<string, NegotiationState>()
@@ -2235,6 +2254,14 @@ export class Career {
           headline,
           `${p.name} (${p.position}${teamAbbr ? `, ${teamAbbr}` : ''}) hit ${n.toLocaleString()} ${noun}s for his career.${flavour}`,
           { playerId: pid })
+        // The man himself posts (FEED-V2-1). A MAJOR milestone is relevant
+        // whoever crossed it — that's the "league leaders" half of the scope
+        // rule; minor ones ride the normal club/star filter.
+        this.queueVoice({
+          kind: 'milestone', playerId: pid,
+          numbers: { n, stat: `${noun}s` },
+          ...(isMajor ? { relevant: true } : {}),
+        })
         // Your own player crossing a MAJOR line gets the coach at the podium —
         // an authored pool that sat dark until now. Minor milestones stay news-only.
         if (isOwn && isMajor) {
@@ -2707,6 +2734,11 @@ export class Career {
     })
     this.ledgerReactions.push(...reactions)
     this.residueFlags.push(...residue)
+    // FEED-V2-1: a healthy scratch a fiery or checked-out man can't swallow
+    // becomes a vague-post on the feed. The pros eat it in silence.
+    if (kind === 'scratched' && (player.personality.temperament < 45 || player.personality.loyalty < 40)) {
+      this.queueVoice({ kind: 'scratchGripe', playerId, relevant: true })
+    }
     // Bounded histories — the chronicle keeps the long past; the ledger only
     // needs enough to drive callbacks and compounding.
     if (this.worldActions.length > 200) this.worldActions = this.worldActions.slice(-150)
@@ -2761,6 +2793,8 @@ export class Career {
           this.pushNews('trade', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
           for (const f of this.residueFlags) if (f.actionId === action.id) f.known = true
           player.morale = Math.max(0, player.morale - 4)
+          // FEED-V2-1: he read the report like everyone else — the subtweet.
+          this.queueVoice({ kind: 'shopSubtweet', playerId: r.playerId, relevant: true })
           break
         }
         case 'confrontation': {
@@ -3124,6 +3158,11 @@ export class Career {
 
     // Apply morale to the player.
     player.morale = Math.max(0, Math.min(100, player.morale + result.moraleDelta))
+    // FEED-V2-1: a concern that left your office resolved for the better earns
+    // a grateful post — the meeting itself becomes feed canon.
+    if (result.moraleDelta > 0) {
+      this.queueVoice({ kind: 'meetingGood', playerId: interaction.playerId, relevant: true })
+    }
 
     // Ripple to the room mood.
     const lr = this.lockerRooms.get(asTeamId(interaction.teamId))
@@ -3195,9 +3234,9 @@ export class Career {
     const standings = sortStandings([...this.standings.values()])
     const currentRanks = new Map<string, number>()
     standings.forEach((s, i) => currentRanks.set(s.teamId as string, i + 1))
-    const teams = new Map<string, { name: string; abbreviation: string }>()
+    const teams = new Map<string, { name: string; abbreviation: string; city?: string }>()
     for (const t of this.data.teams.values()) {
-      teams.set(t.id as string, { name: t.name, abbreviation: t.abbreviation })
+      teams.set(t.id as string, { name: t.name, abbreviation: t.abbreviation, city: t.city })
     }
     // Team-level facts for the playoff-race detector (cheap — one per club).
     const teamPoints = new Map<string, number>()
@@ -3262,7 +3301,16 @@ export class Career {
       ctx.skaters = skaters
       ctx.goalies = goalies
     }
-    const candidates = DETECTORS.flatMap((d) => d(ctx))
+    // FEED-V2-1: GM voices read straight off league state (a skid hits a band,
+    // the deadline window opens) and compete through the same novelty gate.
+    const gmMoments = detectGmMoments({
+      ctx,
+      personaFor: (teamId) => this.gmPersonaFor(asTeamId(teamId)),
+      deadlineDay: this.deadlineDay,
+      ledger: this.voiceLedger,
+      rng: this.rngFor(9801, day),
+    })
+    const candidates = [...DETECTORS.flatMap((d) => d(ctx)), ...gmMoments]
     if (candidates.length === 0) return
     const counts = new Map(priors.noveltyCounts)
     const rng = this.rngFor(9800, day)
@@ -3272,11 +3320,18 @@ export class Career {
     const rareKeys = new Set(
       selected.filter((p) => (counts.get(noveltyClassOf(p.key)) ?? 0) === 0).map((p) => p.key)
     )
+    const published: typeof selected = []
     for (const post of selected) {
       counts.set(post.key, (counts.get(post.key) ?? 0) + 1)
       const cls = noveltyClassOf(post.key)
       counts.set(cls, (counts.get(cls) ?? 0) + 1)
-      const author = FEED_AUTHORS[post.authorId]
+      // The timeline never shows the same sentence twice in a season. Detector
+      // text usually varies by its own numbers, but a front-office statement
+      // ("we're not making panic moves") carries no slots — two clubs would
+      // otherwise post it word for word and give the templates away.
+      if (this.feedTextUsedThisSeason(post.text)) continue
+      published.push(post)
+      const author = this.feedAuthorFor(post.authorId)
       this.feedPosts.unshift({
         id: `fp${this.feedCounter++}`,
         day,
@@ -3297,9 +3352,9 @@ export class Career {
     if (this.feedPosts.length > 400) this.feedPosts.length = 400
     // Phase B curation: followed authors and floor-clearing stories ALSO
     // reach the inbox — the feed is browseable, the inbox is guaranteed.
-    for (const post of selected) {
+    for (const post of published) {
       if (!shouldReachInbox(post, this.followedFeedAuthors)) continue
-      const author = FEED_AUTHORS[post.authorId]
+      const author = this.feedAuthorFor(post.authorId)
       this.pushNews('league', `@${author?.handle ?? post.authorId}`, post.text, {
         ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
         ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
@@ -3310,6 +3365,178 @@ export class Career {
       })
     }
     priors.noveltyCounts = [...counts.entries()]
+  }
+
+  /* ────────────────────── the voices (FEED-V2-1) ────────────────────── */
+
+  /** Queue a real event for a player/GM voice post on the next story tick.
+   *  Day/year stamp from the current clock; bounded so a wild day can't grow
+   *  the save. */
+  private queueVoice(ev: Omit<VoiceEvent, 'day' | 'year'>): void {
+    this.pendingVoiceEvents.push({ ...ev, day: this.voiceClock(), year: this.year })
+    if (this.pendingVoiceEvents.length > 60) {
+      this.pendingVoiceEvents = this.pendingVoiceEvents.slice(-40)
+    }
+  }
+
+  /** The clock voice events are stamped and aged against. `currentDay` freezes
+   *  through the summer, so free agency uses its own advancing faDay — queue
+   *  and publish must read the SAME clock or July signings would age out
+   *  unpublished. */
+  private voiceClock(): number {
+    if (this.phase === 'offseason' && this.offseason?.stage === 'freeAgency') {
+      return this.offseason.faDay
+    }
+    return this.currentDay
+  }
+
+  /** The man behind a playerId, as the voices module needs him — or null if
+   *  he isn't on an NHL roster (the farm tweets in FEED-V2-2, not today). */
+  private voiceSubjectFor(playerId: string): VoiceSubject | null {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return null
+    const teamId = this.teamOf(asPlayerId(playerId))
+    if (!teamId) return null
+    const team = this.data.teams.get(teamId)
+    if (!team || team.tier === 'ahl' || team.tier === 'world') return null
+    return {
+      player: p,
+      teamId: teamId as string,
+      teamName: team.name,
+      abbr: team.abbreviation,
+      city: team.city,
+      isUserClub: (teamId as string) === (this.userTeamId as string),
+      isStar: ratedOverall(p) >= 82,
+    }
+  }
+
+  /** Author directory entry for any feed authorId — the 4 pundits, a player
+   *  (`p:<id>`), or a front office (`gm:<teamId>`). */
+  private feedAuthorFor(authorId: string): FeedAuthor | undefined {
+    const builtin = FEED_AUTHORS[authorId]
+    if (builtin) return builtin
+    if (authorId.startsWith('p:')) {
+      const pid = authorId.slice(2)
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) return undefined
+      const teamId = this.teamOf(asPlayerId(pid))
+      const abbr = teamId ? this.data.teams.get(teamId)?.abbreviation : undefined
+      return playerAuthorFor(p, abbr)
+    }
+    if (authorId.startsWith('gm:')) {
+      const teamId = authorId.slice(3)
+      const team = this.data.teams.get(asTeamId(teamId))
+      if (!team) return undefined
+      return gmAuthorFor(this.gmPersonaFor(asTeamId(teamId)), team)
+    }
+    return undefined
+  }
+
+  /** Publish the queued voice events as feed posts. Stale events (older than
+   *  ~10 days, or from a previous season) age out silently — a goodbye post a
+   *  month late reads as a bug, not a voice. */
+  private runVoices(day: number): void {
+    if (this.pendingVoiceEvents.length === 0) return
+    // Stale events age out silently: a goodbye post a month late reads as a
+    // bug, not a voice. A clock that went BACKWARDS means the phase changed
+    // (season → summer, or the reverse) and the moment has passed with it.
+    const events = this.pendingVoiceEvents.filter(
+      (e) => e.year === this.year && day >= e.day && day - e.day <= 10
+    )
+    this.pendingVoiceEvents = []
+    if (events.length === 0) return
+    const rng = this.rngFor(9802, day)
+    const posts = buildVoicePosts({
+      events,
+      resolve: (pid) => this.voiceSubjectFor(pid),
+      resolveGm: (teamId) => {
+        const team = this.data.teams.get(asTeamId(teamId))
+        if (!team) return null
+        return {
+          persona: this.gmPersonaFor(asTeamId(teamId)),
+          teamId,
+          teamName: team.name,
+          abbr: team.abbreviation,
+          city: team.city,
+        }
+      },
+      rng,
+      ledger: this.voiceLedger,
+      year: this.year,
+      day,
+    })
+    // Two guards on the way to the timeline. Nobody posts every other day, and
+    // no sentence ever appears twice — the seam that would give the templates
+    // away. Both are checked against the persisted feed, so they survive load.
+    const recentByAuthor = new Map<string, number>()
+    const recentTexts = new Set<string>()
+    for (const p of this.feedPosts) {
+      if (p.year !== this.year) continue
+      recentTexts.add(p.body)
+      if (p.authorId && !recentByAuthor.has(p.authorId)) recentByAuthor.set(p.authorId, p.day)
+    }
+    for (const post of posts) {
+      const lastPosted = recentByAuthor.get(post.authorId)
+      if (lastPosted !== undefined && day - lastPosted < Career.VOICE_QUIET_DAYS) continue
+      if (recentTexts.has(post.text)) continue
+      recentByAuthor.set(post.authorId, day)
+      recentTexts.add(post.text)
+      this.feedPosts.unshift({
+        id: `fp${this.feedCounter++}`,
+        day,
+        year: this.year,
+        category: 'league',
+        headline: `@${post.handle}`,
+        body: post.text,
+        read: true, // voices are feed flavour — the underlying event already mailed the GM
+        ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
+        ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
+        channel: post.channel,
+        authorId: post.authorId,
+        salience: Math.round(post.score),
+        engagement: engagementFor(post.score, rng),
+      })
+    }
+    if (this.feedPosts.length > 400) this.feedPosts.length = 400
+  }
+
+  /** Days a voice stays quiet after posting. Real people don't narrate every
+   *  shift; a man who tweets after every game is a bot, not a character. */
+  private static readonly VOICE_QUIET_DAYS = 12
+
+  /** Has this exact sentence already run on the feed this season? */
+  private feedTextUsedThisSeason(text: string): boolean {
+    for (const p of this.feedPosts) {
+      if (p.year === this.year && p.body === text) return true
+    }
+    return false
+  }
+
+  /** League-wide per-game voice triggers: a hat trick anywhere, the first NHL
+   *  goal ever. Scope (user club always, elsewhere only stars) is enforced at
+   *  publish time by the voices module. */
+  private emitVoiceGameEvents(outcomes: GameOutcome[]): void {
+    for (const res of outcomes) {
+      for (const [pid, s] of res.playerStats) {
+        if (s.goals <= 0) continue
+        const p = this.data.players.get(pid)
+        if (!p || p.position === 'G') continue
+        // Apply the scope rule HERE as well as at publish: these two triggers
+        // scan all 32 clubs every game day, and letting the whole league into
+        // a bounded queue would evict the user's own men before they're read.
+        const subject = this.voiceSubjectFor(pid as string)
+        if (!subject || (!subject.isUserClub && !subject.isStar)) continue
+        if (s.goals >= 3) {
+          this.queueVoice({ kind: 'hatTrick', playerId: pid as string, numbers: { goals: s.goals } })
+        }
+        // careerTotalsOf includes today's tallies once applied: his career
+        // goals equalling tonight's haul means tonight held his first.
+        const tot = this.careerTotalsOf(pid)
+        if (tot.goals === s.goals || tot.goals === 0) {
+          this.queueVoice({ kind: 'firstNhlGoal', playerId: pid as string })
+        }
+      }
+    }
   }
 
   /** Follow/unfollow a feed account. Followed posts land in the inbox. */
@@ -3324,11 +3551,31 @@ export class Career {
     return { following: true }
   }
 
-  /** The social feed, newest first, plus the author directory. */
+  /** The social feed, newest first, plus the author directory. The directory
+   *  covers the 4 pundits plus every player/GM voice present in the stream
+   *  (FEED-V2-1), resolved live so names and jerseys never drift. */
   getFeed(): FeedView {
+    const authors: Record<string, FeedAuthor> = { ...FEED_AUTHORS }
+    for (const p of this.feedPosts) {
+      if (!p.authorId || authors[p.authorId]) continue
+      const a = this.feedAuthorFor(p.authorId)
+      if (a) { authors[p.authorId] = a; continue }
+      // The man has left the world (retired, released into history) but his
+      // post is still on the timeline. Rebuild a minimal account from the
+      // handle the post was published under, so old posts never degrade to a
+      // raw id — a feed that forgets who said something is worse than none.
+      if (p.authorId.startsWith('p:') || p.authorId.startsWith('gm:')) {
+        const handle = p.headline.startsWith('@') ? p.headline.slice(1) : p.authorId
+        authors[p.authorId] = {
+          id: p.authorId, name: handle, handle,
+          kind: p.authorId.startsWith('gm:') ? 'gm' : 'player',
+          outlet: 'former',
+        }
+      }
+    }
     return {
       posts: this.feedPosts.map((p) => ({ ...p })),
-      authors: FEED_AUTHORS,
+      authors,
       following: [...this.followedFeedAuthors],
     }
   }
@@ -3643,6 +3890,9 @@ export class Career {
     this.processLedgerReactions(day)
 
     /* ── the salience engine: publish today's genuinely interesting stories ── */
+    // Voices first: the men react to what happened to THEM before the pundit
+    // class weighs in (FEED-V2-1).
+    this.runVoices(day)
     this.runSalience(day)
 
     /* ── trade rumor mill + the deadline-day flurry ── */
@@ -3737,6 +3987,8 @@ export class Career {
 
     // Career counting milestones (500 goals, 1000 points, 1000 games …).
     this.emitCareerMilestones(outcomes)
+    // Voice triggers riding the same box scores: hat tricks, first NHL goals.
+    this.emitVoiceGameEvents(outcomes)
     // In-season chase/break of the all-time single-season record.
     this.emitRecordWatch(day, outcomes)
   }
@@ -4844,6 +5096,8 @@ export class Career {
         `${p.name} is cleared and available for selection. He's been out a while, so expect him to need ${ret.rustGames} game${ret.rustGames === 1 ? '' : 's'} to shake off the rust and round back into form.`,
         { playerId: ret.id as string, teamId: this.userTeamId as string }
       )
+      // He posts about being back (FEED-V2-1).
+      this.queueVoice({ kind: 'injuryReturn', playerId: ret.id as string, numbers: { rust: ret.rustGames }, relevant: true })
     }
     // #171: load management — a rested player who's back to full freshness comes
     // off the shelf automatically, with a note to the GM's desk.
@@ -6522,6 +6776,10 @@ export class Career {
       }
       case 'freeAgency': {
         os.faDay++
+        // FEED-V2-1: the summer has a voice too. Yesterday's signings post now,
+        // on free agency's own advancing clock (so the daily cap still binds —
+        // the regular-season story tick doesn't run out here).
+        this.runVoices(os.faDay)
         // #167: resolve the GM's standing offers first — his money gets first
         // look each day before the AI market moves.
         this.resolveFaOffers()
@@ -9033,6 +9291,8 @@ export class Career {
         summary: `${nhlTeam.abbreviation} recalls ${p.name} from ${ahlTeam.abbreviation}.`,
       })
       this.transactionLedger = txResult.ledger
+      // The kid posts about the call (FEED-V2-1) — pure joy, scaled to who he is.
+      this.queueVoice({ kind: 'callup', playerId: playerId, numbers: { ahl: ahlTeam.abbreviation }, relevant: true })
     }
 
     return { ok: true }
@@ -9734,6 +9994,7 @@ export class Career {
         `${player.name} stays for $${(salary / 1e6).toFixed(2)}M × ${years} years.`,
         { playerId }
       )
+      this.queueVoice({ kind: 'signed', playerId, numbers: { years }, relevant: true })
       /* ── Wave 4: record transaction ── */
       {
         const txResult = recordTransaction(this.transactionLedger, {
@@ -9921,6 +10182,7 @@ export class Career {
       `Welcome aboard: $${(salary / 1e6).toFixed(2)}M × ${years} years.`,
       { playerId }
     )
+    this.queueVoice({ kind: 'signed', playerId, numbers: { years }, relevant: true })
     /* ── Coach quote: signing welcome ── */
     {
       const quoteSeed = this.seed ^ Career.pidNum(playerId)
@@ -10622,6 +10884,8 @@ export class Career {
       summary: `${this.userTeam.abbreviation} ${kind === 'resign' ? 're-signs' : 'signs FA'} ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}).`,
     })
     this.transactionLedger = txResult.ledger
+    // FEED-V2-1: pen hits paper, the man posts about it.
+    this.queueVoice({ kind: 'signed', playerId, numbers: { years: offer.years }, relevant: true })
   }
 
   /* ────────────────────────── trades ────────────────────────── */
@@ -12094,6 +12358,48 @@ export class Career {
         playerId: pid as string, teamId: args.teamAId as string, year: this.year,
         via: 'trade', fromTeamId: args.teamBId as string, eventId: ev.id,
       })
+    }
+    // FEED-V2-1 voices: every moved man may post his goodbye/hello (the scope
+    // filter keeps non-star bystander deals quiet), and an AI front office
+    // announces its headline acquisition in its GM's own register.
+    {
+      const cityOf = (id: TeamId): string => this.data.teams.get(id)?.city ?? this.data.teams.get(id)?.name ?? ''
+      const moved: Array<{ pid: string; from: TeamId; to: TeamId }> = [
+        ...args.aGivesPlayerIds.map((pid) => ({ pid: pid as string, from: args.teamAId, to: args.teamBId })),
+        ...args.bGivesPlayerIds.map((pid) => ({ pid: pid as string, from: args.teamBId, to: args.teamAId })),
+      ]
+      for (const m of moved) {
+        const fromUser = (m.from as string) === (this.userTeamId as string)
+        const toUser = (m.to as string) === (this.userTeamId as string)
+        this.queueVoice({
+          kind: 'traded', playerId: m.pid,
+          numbers: {
+            fromCity: cityOf(m.from), fromAbbr: abbr(m.from),
+            toCity: cityOf(m.to), toAbbr: abbr(m.to),
+          },
+          fromUser, toUser,
+          ...(fromUser || toUser ? { relevant: true } : {}),
+        })
+      }
+      for (const side of [
+        { team: args.teamAId, incoming: args.bGivesPlayerIds },
+        { team: args.teamBId, incoming: args.aGivesPlayerIds },
+      ]) {
+        if ((side.team as string) === (this.userTeamId as string)) continue // the user IS his own front office
+        const best = side.incoming
+          .map((pid) => this.data.players.get(asPlayerId(pid as string)))
+          .filter((p): p is Player => !!p && ratedOverall(p) >= 74)
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+        if (!best) continue
+        // Same noise discipline as player voices: a rival GM's podium moment
+        // is feed-worthy when YOU were in the deal or he landed a genuine star.
+        if (!userInvolved && ratedOverall(best) < 82) continue
+        this.queueVoice({
+          kind: 'gmTrade', teamId: side.team as string, playerId: best.id as string,
+          numbers: { playerName: best.name },
+          ...(userInvolved ? { relevant: true } : {}),
+        })
+      }
     }
     // The coach weighs in when YOUR trade lands a real player (the 'tradeAdd'
     // pool sat authored-but-dark). Quote once, on the best incoming piece —
@@ -14780,6 +15086,16 @@ export class Career {
         `It's official — the ${team.name} have mathematically secured a place in the playoffs. The regular-season job is done; now the real tournament begins.`,
         { teamId: this.userTeamId as string, salience: 90 }
       )
+      // The room celebrates on the feed (FEED-V2-1): the best player and, if
+      // the roster has one, a kid living his first clinch.
+      const roster = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.position !== 'G' && p.injuryStatus === null)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+      const top = roster[0]
+      const kid = roster.find((p) => p.age <= 22 && p !== top)
+      if (top) this.queueVoice({ kind: 'clinch', playerId: top.id as string, relevant: true })
+      if (kid) this.queueVoice({ kind: 'clinch', playerId: kid.id as string, relevant: true })
     } else {
       this.pushNews(
         'playoffs',
@@ -18030,6 +18346,8 @@ export class Career {
       playerPromises: this.playerPromises.map((pr) => ({ ...pr })),
       ...(this.storyPriors ? { storyPriors: structuredClone(this.storyPriors) } : {}),
       feedPosts: this.feedPosts.map((p) => ({ ...p })),
+      pendingVoiceEvents: structuredClone(this.pendingVoiceEvents),
+      voiceLedger: this.voiceLedger.map((u) => ({ ...u })),
       feedCounter: this.feedCounter,
       followedFeedAuthors: [...this.followedFeedAuthors],
       negotiations: [...this.negotiations.entries()].map(
@@ -18216,6 +18534,8 @@ export class Career {
     career.lastDecisionDay = snapshot.lastDecisionDay ?? -999
     if (snapshot.storyPriors) career.storyPriors = structuredClone(snapshot.storyPriors)
     if (snapshot.feedPosts) career.feedPosts = snapshot.feedPosts.map((p) => ({ ...p }))
+    if (snapshot.pendingVoiceEvents) career.pendingVoiceEvents = structuredClone(snapshot.pendingVoiceEvents)
+    if (snapshot.voiceLedger) career.voiceLedger = snapshot.voiceLedger.map((u) => ({ ...u }))
     career.feedCounter = snapshot.feedCounter ?? 0
     if (snapshot.followedFeedAuthors) career.followedFeedAuthors = [...snapshot.followedFeedAuthors]
     if (snapshot.negotiations) {
