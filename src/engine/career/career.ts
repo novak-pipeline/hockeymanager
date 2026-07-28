@@ -12987,12 +12987,28 @@ export class Career {
           return (this.trainingCamp.campDay ?? 1) >= 8 ? 'Continue — cut day' : 'Continue — training camp'
         }
         if (this.currentDay === 0 && this.boardMeetingYear !== null) return 'Continue — board meeting'
+        // Review outranks the in-season gates but NOT camp/boardroom — the same
+        // order the shell routes them in. Getting this backwards would name a
+        // beat the GM doesn't actually land on, which is the bug being fixed.
+        if (this.reviewFacts !== null) return 'Continue — end-of-season review'
+        // The IN-SEASON gates have to name themselves too, and in the order the
+        // shell actually routes them. They used to fall through to the match-day
+        // label, so the button promised "Continue to Nov 12" and then dropped the
+        // GM into a staff meeting — a beat arriving unannounced is the same
+        // broken trust as one with no way out.
+        if (this.deadlineHold) return 'Continue — trade deadline'
+        if (this.staffMeetingScene !== null) return 'Continue — staff meeting'
+        if (this.scoutMeetingScene !== null) return 'Continue — scout meeting'
+        if (this.scoutDigestPending) return 'Continue — scouting report'
         const next = this.matchDays.find((d) => d > this.currentDay)
         if (next === undefined) return 'Continue to playoffs'
         const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         const [, m, d] = dayToDateISO(this.year, next).split('-')
         return `Continue to ${MONTHS[parseInt(m ?? '1', 10) - 1]} ${parseInt(d ?? '1', 10)}`
       }
+      // Same gate, the other side of the calendar: the review holds through the
+      // playoffs and into the summer, so it names itself there too.
+      if (this.reviewFacts !== null) return 'Continue — end-of-season review'
       if (this.phase === 'playoffs') return 'Continue — next playoff games'
       // Dev camp is gated ahead of the market: while it's pending, the first
       // Continue walks you into camp (not free agency), so say so — otherwise the
