@@ -2,6 +2,7 @@ import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, use
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
+import { shouldHoldOverlay } from '@renderer/lib/cadence'
 import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
@@ -379,13 +380,19 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             ((b.press ? 100 : 0) + (b.salience ?? 0)) - ((a.press ? 100 : 0) + (a.salience ?? 0)))[0]
         : null
 
-      // Playtest #2 / bar B2.1: a quiet day isn't worth a stop. When nothing new
-      // landed in the inbox, close the overlay automatically instead of making
-      // the GM dismiss a "nothing happened" panel every single day — that manual
-      // Close on every quiet advance is what made simming feel cumbersome. The
-      // overlay now only HOLDS when there's actual mail/story to read — or when
-      // a user game just finished (its receipts are always worth the stop).
-      if (incoming.length === 0 && !receipt) { setProcessing(null); return }
+      // Gap #7 / bar B2.1 — classify the interruption: decision, story, or silent.
+      // "Any mail at all" was too low a bar. Measured over 60 advances of a real
+      // season the overlay held on 57, and 18 of those stops were ambient league
+      // churn ALONE — other clubs' roster moves, nothing to do with your team.
+      // That is neither a decision nor a story, so it belongs in the inbox and
+      // not in front of the Continue button.
+      //
+      // A stop is earned by: a postgame receipt; anything touching your own club
+      // (every category except the league-wide bucket); a bylined press piece; a
+      // first-of-its-kind story; or one the salience engine rates highly. Note
+      // salience is set on very few items, so it widens the net rather than
+      // defining it — league churn is filtered by category, not by score.
+      if (!shouldHoldOverlay(incoming, !!receipt)) { setProcessing(null); return }
 
       setProcessing({
         phase: 'done',
