@@ -15313,15 +15313,53 @@ export class Career {
     const sig = (x: number): number => 1 / (1 + Math.exp(-x))
     const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
 
+    // Calibrated against the engine itself, not an outside prior: bucketing every
+    // inter-team matchup by strength gap and quick-simming each one repeatedly
+    // gives a home-win curve whose logit slope implies a divisor near 11. The old
+    // 8 made a roster edge far more decisive than the sim actually plays it, which
+    // is why a 32-team league had clubs pinned at 100% and 0% on opening day.
+    const RATING_SCALE = 11
+    const HOME_EDGE = 0.18
+    // A forecast that ignores the season so far isn't a forecast. A club sitting
+    // 8-4 has told us something its preseason roster rating did not, so blend the
+    // rating prior with observed points% in logit space, weighting the record by
+    // games played against a ~25-game regression constant. Without this the banked
+    // points were the ONLY trace of a hot start and the projection stayed flat.
+    const REGRESSION_GAMES = 25
+    const meanStrength =
+      teamIds.reduce((sum, t) => sum + (strength.get(t) ?? 55), 0) / Math.max(1, teamIds.length)
+    /** Rating implied by the roster prior blended with results to date. */
+    const rated = new Map<TeamId, number>()
+    for (const t of teamIds) {
+      const gp = gamesPlayed.get(t) ?? 0
+      const prior = ((strength.get(t) ?? 55) - meanStrength) / RATING_SCALE
+      let blended = prior
+      if (gp > 0) {
+        // Points% clamped off the rails so a 4-0 start doesn't imply certainty.
+        const ptsPct = Math.min(0.9, Math.max(0.1, (basePts.get(t) ?? 0) / (2 * gp)))
+        const observed = Math.log(ptsPct / (1 - ptsPct))
+        blended = (prior * REGRESSION_GAMES + observed * gp) / (REGRESSION_GAMES + gp)
+      }
+      rated.set(t, blended * RATING_SCALE + meanStrength)
+    }
+    // The rating is an estimate, not a fact. Redrawing each club's true strength
+    // once per simulation gives the forecast the spread a real one has; without
+    // it, 600 coin-flip seasons collapse onto the prior and the league reads
+    // 100%/0% before a puck drops.
+    const RATING_SIGMA = 2.5
+
     const playoffCount = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
     const ptsTotal = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
 
     for (let s = 0; s < N; s++) {
       const pts = new Map<TeamId, number>(basePts)
+      const trueStrength = new Map<TeamId, number>(
+        teamIds.map((t) => [t, (rated.get(t) ?? meanStrength) + rng.normal(0, RATING_SIGMA)])
+      )
       for (const g of remaining) {
-        const sh = strength.get(g.homeTeamId) ?? 55
-        const sa = strength.get(g.awayTeamId) ?? 55
-        const pHome = sig((sh - sa) / 8 + 0.18) // home-ice edge
+        const sh = trueStrength.get(g.homeTeamId) ?? meanStrength
+        const sa = trueStrength.get(g.awayTeamId) ?? meanStrength
+        const pHome = sig((sh - sa) / RATING_SCALE + HOME_EDGE)
         const otGame = rng.chance(0.23) // ~NHL share of games past regulation
         if (rng.chance(pHome)) {
           pts.set(g.homeTeamId, (pts.get(g.homeTeamId) ?? 0) + 2)
