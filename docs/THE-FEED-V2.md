@@ -97,8 +97,7 @@ keyed by `cardType`, reusing DataHub/standings view builders. This is the
 - The feed never gates Continue and never obligates the inbox.
 
 ## Proposed build order (one slice at a time, each shippable + verified in-app)
-1. **FEED-V2-1 Voices** — player + GM author kinds + personality-flavored
-   post detectors. Biggest visible change; makes the timeline feel human.
+1. **FEED-V2-1 Voices** — ✅ SHIPPED (2026-07-27). See "What slice 1 shipped".
 2. **FEED-V2-2 Density** — ambient detectors + split novelty gate; the feed is
    alive every game day. Verify: no inbox re-flood.
 3. **FEED-V2-3 Cards** — `FeedCard` renderer + `sparkline`/`standings`/
@@ -119,3 +118,44 @@ keyed by `cardType`, reusing DataHub/standings view builders. This is the
   present surfacing options (dashboard Trending panel vs sidebar entry vs both)
   with screenshots once the feed has real content to show.
 - **Start slice**: FEED-V2-1 (voices).
+
+## What slice 1 shipped (`src/engine/story/voices.ts`)
+
+- **Two new author kinds** on `FeedAuthor` (`player`, `gm`) with authors built
+  live from world state — a handle from the real name + jersey (`@TDahl91`), a
+  GM handle from surname + club (`@WebbRLW`). `getFeed()` resolves the
+  directory from the posts in the stream, so names/numbers never drift.
+- **Eleven player triggers, all traced to a real event** at the site where it
+  happens: career milestone, hat trick, first NHL goal, call-up, trade
+  (either direction), signing, playoff clinch, injury return, healthy-scratch
+  gripe, **shopped-and-leaked subtweet**, and **"we talked and I'm good"
+  after a concern resolves in the GM's office**. The last two are the Living
+  Ledger and the interaction system wearing a social face — the user's own
+  phone calls and meetings come back at him on the timeline.
+- **Three GM triggers**: an acquisition announcement (rival front offices
+  only — the user IS his own front office), a vote of confidence when an AI
+  club's skid hits 6/8/10, and deadline posturing from the clearest buyers and
+  sellers. All keyed to the LW2 persona axes.
+- **Copy**: 14 authored pools, 8+ variants each, personality-keyed through the
+  Content Engine (cocky sniper ≠ quiet vet ≠ rookie ≠ grinder), emoji register
+  and straight register in every pool, every pool with an unconditional
+  fallback so no personality goes silent.
+- **Scope (the locked rule)**: user's club always; other clubs only through
+  stars (`ratedOverall >= 82`) or a major league-wide milestone. Enforced at
+  BOTH the queue site and publish so the bounded queue can't be flooded by the
+  other 31 clubs.
+- **Noise discipline**: voices carry their own daily cap (4) separate from the
+  pundit budget (2); a man goes quiet for 12 days after posting; and no exact
+  sentence ever appears twice in a season — on either stream.
+- **Save-safe**: `pendingVoiceEvents` + a per-man `voiceLedger` are additive
+  snapshot fields, so an event queued before a save still posts after the load.
+  Free agency publishes on its own `faDay` clock (`currentDay` freezes in the
+  summer), so July 1 signings actually reach the feed.
+- **Surfacing unchanged** — still the Inbox → The Feed subtab, per the
+  undecided decision above. Player/GM voices are deliberately NOT followable;
+  the follow chips stay the four pundits.
+- Tests: `src/engine/story/voices.test.ts` (18) — library integrity (dead
+  ctx-key guard, 8+ per pool, fallback + keyed coverage, slot-clean render,
+  both registers present), behaviour (fires/traces/scope/personality/no-repeat/
+  cap/determinism), and career integration (call-up round trip, scratch gripe
+  fires only for the fiery, leak → subtweet, save/load).

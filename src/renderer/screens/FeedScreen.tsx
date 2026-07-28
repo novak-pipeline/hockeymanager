@@ -24,7 +24,13 @@ const KIND_BADGE: Record<string, string> = {
   analyst: 'Analyst',
   stats: 'Model',
   wire: 'Wire',
+  player: 'Player',
+  gm: 'Front Office',
 }
+
+/** Only the pundit accounts are followable — player/GM voices appear in the
+ *  stream when they have something real to say (FEED-V2-1). */
+const FOLLOWABLE = new Set(['insider', 'analyst', 'stats', 'wire'])
 
 export function FeedScreen(): JSX.Element {
   const client = useClient()
@@ -117,7 +123,7 @@ function FeedBody({ feed, filter, onTeam, onFollow }: {
       <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>
         Accounts
       </span>
-      {Object.values(feed.authors).map((a) => {
+      {Object.values(feed.authors).filter((a) => FOLLOWABLE.has(a.kind)).map((a) => {
         const isFollowing = following.includes(a.id)
         return (
           <button

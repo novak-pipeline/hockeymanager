@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { playerValue } from '@engine/league/trades'
+import { DAILY_POST_BUDGET } from '@engine/story/salience'
+import { VOICE_DAILY_CAP } from '@engine/story/voices'
 import { Career } from './career'
 
 describe('dev-camp invite editor (#182)', () => {
@@ -324,9 +326,21 @@ describe('Feed Phase A (salience engine)', () => {
       expect(p.engagement!.likes).toBeGreaterThan(0)
       expect(p.body.length).toBeGreaterThan(20)
     }
+    // Two streams, two caps (FEED-V2-1): pundits keep DAILY_POST_BUDGET a day,
+    // player/GM voices keep VOICE_DAILY_CAP, and no day exceeds the sum.
+    const kindOf = (p: { authorId?: string }): string => feed.authors[p.authorId!]?.kind ?? 'wire'
+    const punditPerDay = new Map<number, number>()
+    const voicePerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
-    for (const p of feed.posts) perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
-    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2)
+    for (const p of feed.posts) {
+      perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
+      const k = kindOf(p)
+      const bucket = k === 'player' || k === 'gm' ? voicePerDay : punditPerDay
+      bucket.set(p.day, (bucket.get(p.day) ?? 0) + 1)
+    }
+    for (const n of punditPerDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET)
+    for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
+    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
     // Curation floor: with no follows, only floor-clearing (70+) posts may
     // have mirrored into the inbox.
     for (const n of c.getInbox().items) {
