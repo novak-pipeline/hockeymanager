@@ -24,7 +24,8 @@ import {
 import type { PersonalityReadView } from '@engine/career/personalityRead'
 import { personalityArchetype } from '@engine/career/personalityType'
 import { buildScoutVerdict } from '@engine/career/scoutVerdict'
-import { buildScoutReport } from '@engine/career/scoutReport'
+import { buildScoutReport, reportProsCons } from '@engine/career/scoutReport'
+import { buildSquadFitNotes } from '@engine/career/scoutFit'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import type { StaffMember } from '@engine/league/staff'
 import { contractStatus, requiresWaivers, CAP_FLOOR } from '@engine/league/contracts'
@@ -1521,11 +1522,27 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   const teamAbbrOf = new Map<string, string>()
   for (const [, team] of teams) for (const id of team.roster) teamAbbrOf.set(id as string, team.abbreviation)
   const shortlistSet = new Set(scouting.shortlist ?? [])
+  // The user's squad, fully known — every find is judged against it (playtest #17).
+  const userTeam = teams.get(ctx.userTeamId)
+  const userRosterPlayers: Player[] = (userTeam?.roster ?? [])
+    .map((id) => players.get(id))
+    .filter((p): p is Player => p !== undefined)
   const recommendations: import('./views').ScoutFindView[] = []
   for (const r of scouting.recommendations ?? []) {
     const p = players.get(r.playerId as PlayerId)
     if (!p) continue
     const recK = knowledgeOf(scouting, r.playerId)
+    const potStars = overallToStars(scoutedCeilingK(p, recK, accFor(r.playerId)))
+    // WHY the grade: the flagging scout's own pros/cons (his id seeds the voice),
+    // plus 1–2 notes weighing the find against OUR roster and coach's system.
+    const { pros, cons } = reportProsCons(p, recK, r.scoutId ?? r.scoutName)
+    const fitNotes = buildSquadFitNotes({
+      prospect: p,
+      potentialStars: potStars,
+      userRoster: userRosterPlayers,
+      ...(userTeam ? { tactics: userTeam.tactics } : {}),
+      currentYear: ctx.year,
+    })
     recommendations.push({
       ...badge(p),
       age: p.age,
@@ -1533,7 +1550,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       teamAbbr: teamAbbrOf.get(r.playerId) ?? 'FA',
       ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
       currentStars: overallToStars(ratedOverall(p)),
-      potentialStars: overallToStars(scoutedCeilingK(p, recK, accFor(r.playerId))),
+      potentialStars: potStars,
       knowledge: Math.round(recK),
       grade: r.grade,
       reason: r.reason,
@@ -1541,6 +1558,9 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       foundDate: r.foundDate,
       fitsNeed: needGroups.has(groupOf(p.position)),
       draftEligible: draftProspectIds.has(r.playerId),
+      pros,
+      cons,
+      fitNotes,
       ...(shortlistSet.has(r.playerId) ? { shortlisted: true } : {}),
       ...(ctx.draftRankById?.[r.playerId] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[r.playerId]) } : {}),
     })
@@ -1661,6 +1681,7 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     worldKnowledge,
     activeScouts,
     recommendations,
+    dismissedCount: (scouting.dismissed ?? []).length,
     rosterNeeds,
     hasDraftClass: draftProspectIds.size > 0,
     leagueCoverage,

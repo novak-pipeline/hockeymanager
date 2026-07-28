@@ -42,6 +42,15 @@ export interface PositionDepth {
   rank?: number
   /** Number of teams ranked against (league size). */
   outOf?: number
+  /** Inputs behind the verdict, so it shows its work (playtest #16). */
+  /** NHL-calibre bodies in the group (everyday-NHL-player bar or better). */
+  nhlCalibre?: number
+  /** League median NHL-calibre count at this group, when league context is supplied. */
+  leagueMedian?: number
+  /** The group's best player (the anchor the depth sits behind). */
+  topName?: string
+  /** Plain-English derivation, e.g. "2 NHL-calibre centers led by Dahl — league median is 4." */
+  detail?: string
 }
 
 export interface SquadPlannerView {
@@ -80,6 +89,10 @@ function stageOf(p: Player): CareerStage {
 }
 
 /** Map a player to a position group, using handedness to split D and wings. */
+export function posGroupOf(p: Player): PosGroup {
+  return groupOf(p)
+}
+
 function groupOf(p: Player): PosGroup {
   const pos = p.position
   if (pos === 'G') return 'G'
@@ -172,8 +185,28 @@ export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView
   // supplied (a position is "Strong" because you're better stocked than rival
   // clubs, not because you cleared an arbitrary headcount), else by headcount.
   const league = args.leagueRosters && args.leagueRosters.length > 1 ? args.leagueRosters : null
+
+  // "NHL-calibre" = a dependable everyday player (the Core band, ovr ≥ 60) —
+  // the same bar the profile's projection tiers use. Counting bodies above it is
+  // how the verdict SHOWS ITS WORK: "2 NHL-calibre centers behind Dahl; the
+  // league median is 4" is a reason, "Thin" alone is not. (Playtest #16.)
+  const NHL_CALIBRE = 60
+  const calibreCount = (roster: Player[], group: PosGroup): number =>
+    roster.filter((p) => groupOf(p) === group && ratedOverall(p) >= NHL_CALIBRE).length
+  const median = (xs: number[]): number => {
+    const s = [...xs].sort((a, b) => a - b)
+    const mid = Math.floor(s.length / 2)
+    return s.length % 2 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2)
+  }
+
   const depth: PositionDepth[] = groups.map((group) => {
     const count = players.filter((p) => p.group === group).length
+    const nhlCalibre = calibreCount(args.roster, group)
+    const top = args.roster
+      .filter((p) => groupOf(p) === group)
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+    const topName = top?.name
+    const groupWord = GROUP_LABEL[group].toLowerCase()
 
     if (league) {
       const mine = groupStrength(args.roster, group)
@@ -183,13 +216,25 @@ export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView
       const outOf = all.length
       // Fraction of the league you outrank (1 = top, 0 = bottom).
       const pct = outOf > 1 ? (outOf - rank) / (outOf - 1) : 1
+      const leagueMedian = median(league.map((r) => calibreCount(r, group)))
       let verdict: PositionDepth['verdict']
       let note: string
       if (pct >= 0.66) { verdict = 'Strong'; note = `Among the league's best here (${ordinal(rank)} of ${outOf}).` }
       else if (pct >= 0.4) { verdict = 'Adequate'; note = `Around league average (${ordinal(rank)} of ${outOf}).` }
       else if (pct >= 0.15) { verdict = 'Thin'; note = `Below the league standard (${ordinal(rank)} of ${outOf}).` }
       else { verdict = 'Critical'; note = `One of the weakest in the league (${ordinal(rank)} of ${outOf}).` }
-      return { group, label: GROUP_LABEL[group], count, verdict, note, rank, outOf }
+      const detail =
+        nhlCalibre === 0
+          ? `No NHL-calibre ${groupWord} on the roster — the league median is ${leagueMedian}.`
+          : nhlCalibre === 1 && topName !== undefined
+            ? `Only ${topName} rates as NHL-calibre here — the league median is ${leagueMedian}.`
+            : topName !== undefined
+              ? `${nhlCalibre} NHL-calibre ${groupWord} led by ${topName} — the league median is ${leagueMedian}.`
+              : `${nhlCalibre} NHL-calibre ${groupWord} — the league median is ${leagueMedian}.`
+      return {
+        group, label: GROUP_LABEL[group], count, verdict, note, rank, outOf,
+        nhlCalibre, leagueMedian, detail, ...(topName !== undefined ? { topName } : {}),
+      }
     }
 
     const target = TARGET_DEPTH[group]
@@ -199,7 +244,14 @@ export function buildSquadPlanner(args: BuildSquadPlannerArgs): SquadPlannerView
     else if (count >= target) { verdict = 'Adequate'; note = 'Covered, but little margin for injury.' }
     else if (count >= target - 1) { verdict = 'Thin'; note = 'Short of ideal depth — an injury would bite.' }
     else { verdict = 'Critical'; note = 'Badly under-stocked; address in the market.' }
-    return { group, label: GROUP_LABEL[group], count, verdict, note }
+    const detail =
+      nhlCalibre === 0
+        ? `No NHL-calibre ${groupWord} on the roster (${count} of a target ${target} bodies).`
+        : `${nhlCalibre} NHL-calibre ${groupWord}${topName !== undefined ? ` led by ${topName}` : ''} (${count} of a target ${target} bodies).`
+    return {
+      group, label: GROUP_LABEL[group], count, verdict, note,
+      nhlCalibre, detail, ...(topName !== undefined ? { topName } : {}),
+    }
   })
 
   // Summary lines.

@@ -58,6 +58,38 @@ describe('scouting center — report delivery', () => {
   })
 })
 
+describe('scouting center — finds explain themselves (#17)', () => {
+  it('surfaced finds carry pros, squad-fit notes, and the view carries the pass tally', () => {
+    const { c } = newCareer(77)
+    let guard = 0
+    while (c.phase === 'regularSeason' && guard++ < 160) {
+      c.step()
+      if ((c.getScouting().recommendations ?? []).length > 0) break
+    }
+    const view = c.getScouting()
+    const recs = view.recommendations ?? []
+    expect(recs.length).toBeGreaterThan(0)
+    for (const f of recs) {
+      // The WHY behind the grade: pros are the scout's own observations…
+      expect(Array.isArray(f.pros)).toBe(true)
+      expect(Array.isArray(f.cons)).toBe(true)
+      // …and every find is judged against OUR squad (at least the depth read).
+      expect(Array.isArray(f.fitNotes)).toBe(true)
+      expect(f.fitNotes.length).toBeGreaterThan(0)
+      expect(f.fitNotes.length).toBeLessThanOrEqual(2)
+      for (const n of f.fitNotes) {
+        expect(['plus', 'minus', 'note']).toContain(n.tone)
+        expect(n.text.length).toBeGreaterThan(10)
+      }
+    }
+    // The board tally the Centre closes with: passing on a find moves it.
+    const before = view.dismissedCount ?? 0
+    c.dismissProspect(recs[0].playerId)
+    const after = c.getScouting().dismissedCount ?? 0
+    expect(after).toBe(before + 1)
+  })
+})
+
 describe('scouting center — scout meeting', () => {
   it('schedules a recurring scout meeting that fires and mutates sim state (#3)', () => {
     const { c } = newCareer(2031)

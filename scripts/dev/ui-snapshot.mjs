@@ -55,10 +55,26 @@ async function pressContinue(win) {
   return false
 }
 
+/** The FM-style processing overlay is modal and covers the topbar Continue. It
+ *  auto-closes on a quiet day but HOLDS whenever mail arrived — which in the
+ *  free-agency frenzy is every day, so leaving it up wedged the whole walk. */
+async function dismissOverlay(win) {
+  for (let i = 0; i < 4; i++) {
+    const close = win.locator('button:has-text("Close")')
+    if (await close.count().catch(() => 0)) {
+      await close.first().click({ timeout: 1500 }).catch(() => {})
+      await win.waitForTimeout(200)
+    } else break
+  }
+}
+
 /** Advance the game by one step, tolerating whichever gate is up (a plain
  *  Continue, a staff/board meeting that must be delegated, a deadline hold, …).
  *  Returns true if something was clicked. */
 async function advanceOnce(win) {
+  // Clear a held processing overlay first — otherwise every click below lands on
+  // its backdrop and times out.
+  await dismissOverlay(win)
   // Gate-screen resolvers FIRST — the dashboard "Continue" only *routes into* a
   // gate (camp, board meeting), so if we're already on a gate screen we must click
   // its own button. Then the generic advance. Exact labels from the renderer.
@@ -332,6 +348,15 @@ try {
       if (!(await advanceOnce(win))) { await win.waitForTimeout(400); if (!(await advanceOnce(win))) break }
       await win.waitForTimeout(280)
     }
+    // The scouting department needs WEEKS of coverage before finds cross the
+    // discovery threshold, so the Centre isn't photographed on an empty board.
+    // "+7d" advances a week per click — far fewer clicks than day-by-day.
+    for (let w = 0; w < 8; w++) {
+      await dismissOverlay(win)
+      try { await win.click('button:has-text("+7d")', { timeout: 3000 }) } catch { break }
+      await win.waitForTimeout(1200)
+    }
+    await dismissOverlay(win)
     await snap(win, 'midseason-dashboard')
     console.log(`  ▶ mid-season reached at ~${await gamesPlayed(win)} GP`)
   } catch (e) {
@@ -342,19 +367,10 @@ try {
   // The FM-style processing overlay is modal and sits over the sidebar; dismiss
   // any open one first (it only appears now on eventful days) so the nav clicks
   // aren't swallowed by the backdrop.
-  const dismissOverlay = async () => {
-    for (let i = 0; i < 4; i++) {
-      const close = win.locator('button:has-text("Close")')
-      if (await close.count().catch(() => 0)) {
-        await close.first().click({ timeout: 1500 }).catch(() => {})
-        await win.waitForTimeout(200)
-      } else break
-    }
-  }
-  await dismissOverlay()
+  await dismissOverlay(win)
   for (const [label, slug] of SIDEBAR_STOPS) {
     try {
-      await dismissOverlay()
+      await dismissOverlay(win)
       await win.click(`text="${label}"`, { timeout: 4000 })
       await win.waitForTimeout(500)
       await snap(win, slug)
@@ -369,6 +385,15 @@ try {
           await win.waitForTimeout(400)
           await snap(win, 'trades-block')
         } catch { /* tabs not present (deadline passed) — skip */ }
+      }
+      // On Scouting, also photograph the Centre (triage cards now carry the
+      // scout's pros/cons + squad-fit notes, and the stack has an end state — #17).
+      if (slug === 'scouting') {
+        try {
+          await win.locator('text="Scouting Centre"').first().click({ timeout: 3000 })
+          await win.waitForTimeout(600)
+          await snap(win, 'scouting-centre')
+        } catch { /* subnav not present — skip */ }
       }
       // On the Roster Planner, also photograph the Roles tab (bulk squad-status
       // board — auto-assigns on first open).

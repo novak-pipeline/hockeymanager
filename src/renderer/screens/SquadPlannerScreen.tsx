@@ -223,8 +223,19 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
                     <td>{dp.label}</td>
                     <td className="num muted">{dp.count}</td>
                     <td className="num muted">{dp.rank != null && dp.outOf != null ? `${dp.rank} / ${dp.outOf}` : '—'}</td>
-                    <td style={{ color: verdictColor(dp.verdict), fontWeight: 700, fontSize: 12 }}>{dp.verdict}</td>
-                    <td className="small muted">{dp.note}</td>
+                    <td style={{ color: verdictColor(dp.verdict), fontWeight: 700, fontSize: 12 }}
+                      title="Judged on your best players at the position vs every other club — the note spells out the inputs">
+                      {dp.verdict}
+                    </td>
+                    <td className="small muted">
+                      {dp.note}
+                      {dp.detail && (
+                        <div style={{ marginTop: 2, color: 'var(--text)' }}
+                          title="NHL-calibre = a dependable everyday NHL player by our staff's read">
+                          {dp.detail}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
