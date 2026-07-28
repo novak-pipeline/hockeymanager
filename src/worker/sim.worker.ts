@@ -535,6 +535,9 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) return { id: req.id, type: 'error', message: 'No scout available to send.' }
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     }
+    case 'resolveScoutDigest':
+      must().resolveScoutDigest()
+      return { id: req.id, type: 'ok' }
 
     /* ── story layer ── */
     case 'getHistory':

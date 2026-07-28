@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
+import type { NewsItem } from '@domain'
 import { Career } from './career'
-import type { NewsItem } from './views'
 
 /**
  * Scouting-center fixes (rerun):
@@ -106,5 +106,108 @@ describe('scouting center — scout meeting', () => {
     expect(res.applied.length).toBeGreaterThan(0)
     const afterCount = (c.scouting.shortlist ?? []).length
     expect(afterCount).toBeGreaterThan(beforeCount)
+  })
+})
+
+describe('scout digest interaction (#10)', () => {
+  /** Two non-user-org players to seed as flagged prospects. */
+  function seedRecs(data: ReturnType<typeof generateLeague>, c: any, n: number): string[] {
+    const otherTid = data.league.teams.find((t: string) => t !== c.userTeamId)!
+    const roster = data.teams.get(otherTid)!.roster as string[]
+    const pids = roster.slice(0, n)
+    c.scouting.recommendations = pids.map((playerId: string, i: number) => ({
+      playerId,
+      scoutName: 'Test Scout',
+      foundDate: '2026-01-01',
+      reason: `High-upside prospect #${i + 1}.`,
+      grade: 'A',
+    }))
+    return pids
+  }
+
+  it('carries real prospect cards, holds the day, and the delegate always releases it', () => {
+    const { data, c } = newCareer(2031)
+    const [p1] = seedRecs(data, c, 1)
+    c.emitScoutDigest(7)
+
+    // The digest mail carries the structured card for the untriaged prospect.
+    const digest = c.getInbox().items.find((n: NewsItem) => n.headline === 'Weekly scouting digest')
+    expect(digest).toBeTruthy()
+    expect((digest!.prospects ?? []).map((p: { playerId: string }) => p.playerId)).toContain(p1)
+    // The inbox view exposes the live triage state for the cards.
+    expect(c.getInbox().prospectTriage).toBeTruthy()
+
+    // The gate is armed and deep-links to exactly this mail.
+    const dash = c.getDashboard()
+    expect(dash.scoutDigestPending).toBe(true)
+    expect(dash.scoutDigestNewsId).toBe(digest!.id)
+
+    // The hold survives save/load.
+    const snap = c.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
+    expect(Career.fromSnapshot(snap).getDashboard().scoutDigestPending).toBe(true)
+
+    // The delegate ("leave the queue to the scouts") is always available.
+    expect(c.resolveScoutDigest()).toEqual({ ok: true })
+    expect(c.getDashboard().scoutDigestPending).toBe(false)
+  })
+
+  it('the same untriaged queue never re-holds; a NEW find re-arms; sim-past auto-delegates', () => {
+    const { data, c } = newCareer(2031)
+    const pids = seedRecs(data, c, 2)
+    c.scouting.recommendations = c.scouting.recommendations.slice(0, 1) // start with one
+    c.emitScoutDigest(7)
+    expect(c.getDashboard().scoutDigestPending).toBe(true)
+    c.resolveScoutDigest()
+
+    // Week two, identical queue: no re-nag.
+    c.emitScoutDigest(14)
+    expect(c.getDashboard().scoutDigestPending).toBe(false)
+
+    // A genuinely new find re-arms the gate.
+    c.scouting.recommendations.push({
+      playerId: pids[1],
+      scoutName: 'Test Scout',
+      foundDate: '2026-01-08',
+      reason: 'A late riser.',
+      grade: 'A',
+    })
+    c.emitScoutDigest(21)
+    expect(c.getDashboard().scoutDigestPending).toBe(true)
+
+    // Simming past auto-delegates (the camp-softlock class stays extinct): the
+    // HELD digest is released by the advance. If pending is true afterwards it
+    // can only be a FRESH digest (new finds on a new day), never the old hold.
+    const heldId = c.scoutDigestNewsId
+    expect(c.advanceDay()).toBe(true)
+    expect(c.scoutDigestPending === false || c.scoutDigestNewsId !== heldId).toBe(true)
+  })
+
+  it('triaged prospects vanish from the digest cards and the scout-meeting agenda (#10 interplay)', () => {
+    const { data, c } = newCareer(2031)
+    const [p1, p2, p3] = seedRecs(data, c, 3)
+
+    // Track one, pass one — completed work.
+    c.shortlistProspect(p1)
+    c.dismissProspect(p2)
+
+    // The next digest only carries the untriaged prospect.
+    c.emitScoutDigest(7)
+    const digest = c.getInbox().items.find((n: NewsItem) => n.headline === 'Weekly scouting digest')
+    const cardIds = (digest!.prospects ?? []).map((p: { playerId: string }) => p.playerId)
+    expect(cardIds).toContain(p3)
+    expect(cardIds).not.toContain(p1)
+    expect(cardIds).not.toContain(p2)
+
+    // The scout meeting never re-does completed work: no track proposal, riser
+    // or faller line for a prospect the GM already triaged.
+    const input = c.buildScoutMeetingInput(28)
+    expect(input).toBeTruthy()
+    const agendaIds = [
+      ...input.trackable.map((t: { playerId: string }) => t.playerId),
+      ...input.risers.map((r: { playerId: string }) => r.playerId),
+      ...input.fallers.map((r: { playerId: string }) => r.playerId),
+    ]
+    expect(agendaIds).not.toContain(p1)
+    expect(agendaIds).not.toContain(p2)
   })
 })
