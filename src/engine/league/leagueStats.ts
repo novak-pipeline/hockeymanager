@@ -89,8 +89,19 @@ export function accumulateSpecialTeams(args: {
   outcome: GameOutcome
   homeTeamId: string
   awayTeamId: string
+  /**
+   * Ids on the HOME bench for this game. Required, not optional: event streams
+   * carry a bare player id (`PlayerRef` is `PlayerId` — there is no team tag on
+   * the event), so the only way to attribute a penalty or a power-play goal to a
+   * side is to look the player up. This used to read a `.team` field that no sim
+   * has ever emitted, which silently charged every penalty and credited every
+   * power-play goal to the away team.
+   */
+  homePlayerIds: readonly string[]
 }): SpecialTeamsEntries {
   const { existing, outcome, homeTeamId, awayTeamId } = args
+  const homeSide = new Set<string>(args.homePlayerIds)
+  const sideOf = (playerId: string): string => (homeSide.has(playerId) ? homeTeamId : awayTeamId)
 
   // Rebuild into a working Map.
   const map = new Map<string, SpecialTeamsAccumFull>(
@@ -102,19 +113,17 @@ export function accumulateSpecialTeams(args: {
     return map.get(id)!
   }
 
-  // Determine which team a PlayerRef belongs to.
-  // The stream carries team tags on each event via the PlayerRef.team field.
-  // For penalty events we identify the penalised team from the player's team
-  // reference; for goal events the scorer's team reference tells us who scored.
+  // Which side a player is on comes from the roster, not the event — see the
+  // note on `homePlayerIds` above.
   for (const ev of outcome.stream) {
     if (ev.type === 'penalty') {
       // The player who took the penalty is shorthanded; the other team gets a PP.
-      const penalisedTeamId = ev.player.team === 'home' ? homeTeamId : awayTeamId
+      const penalisedTeamId = sideOf(ev.player as string)
       const beneficiaryTeamId = penalisedTeamId === homeTeamId ? awayTeamId : homeTeamId
       get(penalisedTeamId).shTimes += 1
       get(beneficiaryTeamId).ppOpp += 1
     } else if (ev.type === 'goal' && ev.strength === 'pp') {
-      const scoringTeamId = ev.scorer.team === 'home' ? homeTeamId : awayTeamId
+      const scoringTeamId = sideOf(ev.scorer as string)
       const penalisedTeamId = scoringTeamId === homeTeamId ? awayTeamId : homeTeamId
       get(scoringTeamId).ppGoals += 1
       // Track that the penalised (shorthanded) team conceded a PP goal.

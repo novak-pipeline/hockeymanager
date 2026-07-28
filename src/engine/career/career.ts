@@ -1626,9 +1626,11 @@ export class Career {
       const l = this.prospectSeasonLine(p)
       if (!l || l.gp <= 0) return ''
       const lg = clubInfo.get(p.id as string)?.leagueAbbr
+      // The line's flag is `isHistory`; the old `seasonIsHistory` read was always
+      // undefined, so a last-year stat line was presented as current form.
       return p.position === 'G'
-        ? `${l.gp} games in the ${lg ?? 'his league'}${l.seasonIsHistory ? ' last year' : ''}`
-        : `${l.g}-${l.a}-${l.pts} in ${l.gp} ${lg ? lg + ' ' : ''}games${l.seasonIsHistory ? ' last year' : ''}`
+        ? `${l.gp} games in the ${lg ?? 'his league'}${l.isHistory ? ' last year' : ''}`
+        : `${l.g}-${l.a}-${l.pts} in ${l.gp} ${lg ? lg + ' ' : ''}games${l.isHistory ? ' last year' : ''}`
     }
     const compStr = (p: Player): string => {
       const c = buildNhlComp(p, knowOf(p.id as string))
@@ -4663,6 +4665,7 @@ export class Career {
       outcome: res,
       homeTeamId: res.homeTeamId as string,
       awayTeamId: res.awayTeamId as string,
+      homePlayerIds: (this.data.teams.get(res.homeTeamId)?.roster ?? []).map((id) => id as string),
     })
 
     /* ── Wave 4: rivalry registration (league-wide) ── */
@@ -9123,10 +9126,13 @@ export class Career {
       }
       if (want === 'nhl') {
         const res = this.callUp(d.playerId)
-        notes.push(res.ok ? `${d.name} makes the team out of camp.` : `${d.name} could not be recalled: ${res.message ?? 'roster rules'}.`)
+        // The failure branch carries `reason`, not `message` — reading the wrong
+        // field meant every camp assignment that bounced told the GM only
+        // "roster rules" instead of which rule stopped it.
+        notes.push(res.ok ? `${d.name} makes the team out of camp.` : `${d.name} could not be recalled: ${res.reason || 'roster rules'}.`)
       } else {
         const res = this.sendDown(d.playerId)
-        if (!res.ok) notes.push(`${d.name} could not be sent down: ${res.message ?? 'roster rules'}.`)
+        if (!res.ok) notes.push(`${d.name} could not be sent down: ${res.reason || 'roster rules'}.`)
         else if (res.note) notes.push(res.note)
         else notes.push(`${d.name} is assigned to the farm.`)
       }
@@ -13234,7 +13240,9 @@ export class Career {
           gamesPlayed: g, wins: 0, losses: 0,
           savePct: sa > 0 ? (t?.saves ?? 0) / sa : 0,
           goalsAgainstAverage: g > 0 ? (t?.goalsAgainst ?? 0) / g : 0,
-          shutouts: t?.shutouts ?? 0, saves: t?.saves ?? 0, shotsAgainst: sa,
+          // Shutouts live in the per-season `shutouts` map, not on the scoring
+          // accumulator — reading them off `t` always produced 0.
+          shutouts: this.shutouts.get(pid) ?? 0, saves: t?.saves ?? 0, shotsAgainst: sa,
         }
         profile.seasons[0].skater = null
       } else {
@@ -15169,13 +15177,23 @@ export class Career {
     // Most at-risk / injured first.
     rows.sort((a, b) => b.risk - a.risk)
     // #171: the head physio (best-rated) — the staff behind the recoveries.
+    // `physiotherapy` is a per-discipline attribute living under `attributes`,
+    // not on the staff member, so reading it off the member always fell through
+    // to the generic rating and an imported physio's actual specialism never
+    // counted. The discipline runs 1–20 while `rating` (and the Medical Center's
+    // colour thresholds) run 40–90, so map it into that space rather than mixing
+    // the two scales in one comparison.
+    const physioSkill = (s: { rating: number; attributes?: { physiotherapy?: number } }): number => {
+      const disc = s.attributes?.physiotherapy
+      return disc !== undefined ? Math.round(40 + (disc / 20) * 50) : s.rating
+    }
     const physio = [...this.getTeamStaff(this.userTeamId as string).physios]
-      .sort((a, b) => (b.physiotherapy ?? b.rating) - (a.physiotherapy ?? a.rating))[0]
+      .sort((a, b) => physioSkill(b) - physioSkill(a))[0]
     return {
       teamName: team?.name ?? 'Team',
       injuredCount,
       gamesToReturnTotal,
-      ...(physio ? { physioName: physio.name, physioRating: physio.physiotherapy ?? physio.rating } : {}),
+      ...(physio ? { physioName: physio.name, physioRating: physioSkill(physio) } : {}),
       // #157: total LTIR cap relief currently in effect.
       ltirRelief: this.userLtirRelief(),
       rows,

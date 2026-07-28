@@ -2536,6 +2536,14 @@ export interface CareerSnapshot {
   scoutDigestShown?: string[]
   /** DEPTH 2: free agents the GM is tracking. Optional/additive. */
   faShortlist?: string[]
+  /** The three async pending queues (#167 FA offers, #183 offer sheets, #184
+   *  trades). They were already written and read by the snapshot code but never
+   *  declared here, so the type claimed a save carried less than it does — the
+   *  kind of lie that gets a queue dropped by a later migration that trusts it.
+   *  Optional/additive. */
+  faPendingOffers?: Array<{ playerId: string; salary: number; years: number; decideDay: number }>
+  pendingOfferSheets?: Array<{ playerId: string; ownerTeamId: string; salary: number; years: number; decideDay: number }>
+  pendingTrades?: Array<{ proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number; daysLeft: number }>
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
   /** Scheduled (not-yet-resolved) interviews. Optional/additive. */

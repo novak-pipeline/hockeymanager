@@ -13,6 +13,7 @@ import {
   type SpecialTeamsEntries,
 } from './leagueStats'
 import type { GameOutcome } from '@engine/shared/outcome'
+import type { PlayerId } from '@domain/ids'
 import type { ScheduledGame } from '@domain'
 
 /* ────────────────────────── helpers ────────────────────────── */
@@ -38,18 +39,29 @@ function penaltyEvent(team: 'home' | 'away', t = 100) {
     type: 'penalty' as const,
     t,
     period: 1,
-    player: { id: 'p1', team },
+    player: skater(team),
     infraction: 'hooking',
     minutes: 2,
   }
 }
+
+/** Ids on each bench. Events carry a BARE player id — there is no team tag on a
+ *  GameEvent — so these tests have to name real per-side players and hand the
+ *  home roster to the accumulator, exactly as the career layer does. The old
+ *  helpers emitted `{ id, team }` objects that no sim has ever produced, which
+ *  is why a broken `.team` lookup passed its tests for years. */
+const HOME_IDS = ['h1', 'h2'] as const
+const skater = (side: 'home' | 'away'): PlayerId =>
+  (side === 'home' ? 'h1' : 'a1') as PlayerId
+const scorerOf = (side: 'home' | 'away'): PlayerId =>
+  (side === 'home' ? 'h2' : 'a2') as PlayerId
 
 function ppGoalEvent(scoringTeam: 'home' | 'away', t = 200) {
   return {
     type: 'goal' as const,
     t,
     period: 1,
-    scorer: { id: 'p2', team: scoringTeam },
+    scorer: scorerOf(scoringTeam),
     assists: [],
     strength: 'pp' as const,
     pos: { x: 0, y: 0 },
@@ -61,7 +73,7 @@ function evGoalEvent(scoringTeam: 'home' | 'away', t = 200) {
     type: 'goal' as const,
     t,
     period: 1,
-    scorer: { id: 'p2', team: scoringTeam },
+    scorer: scorerOf(scoringTeam),
     assists: [],
     strength: 'ev' as const,
     pos: { x: 0, y: 0 },
@@ -80,6 +92,7 @@ describe('accumulateSpecialTeams', () => {
       outcome,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
     const map = new Map(result)
     expect(map.get(HOME)?.ppOpp).toBe(1)
@@ -100,6 +113,7 @@ describe('accumulateSpecialTeams', () => {
       outcome,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
     const map = new Map(result)
     expect(map.get(HOME)?.ppGoals).toBe(1)
@@ -119,6 +133,7 @@ describe('accumulateSpecialTeams', () => {
       outcome,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
     const map = new Map(result)
     expect(map.get(HOME)?.shTimes).toBe(1)
@@ -135,6 +150,7 @@ describe('accumulateSpecialTeams', () => {
       outcome,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
     const map = new Map(result)
     expect(map.get(HOME)?.ppGoals ?? 0).toBe(0)
@@ -150,6 +166,7 @@ describe('accumulateSpecialTeams', () => {
       outcome: outcome1,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
 
     // Game 2: away takes penalty, home kills it
@@ -161,6 +178,7 @@ describe('accumulateSpecialTeams', () => {
       outcome: outcome2,
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
 
     const map = new Map(after2)
@@ -186,6 +204,7 @@ describe('accumulateSpecialTeams', () => {
       outcome: makeOutcome({ stream: [penaltyEvent('home')] }),
       homeTeamId: HOME,
       awayTeamId: AWAY,
+      homePlayerIds: [...HOME_IDS],
     })
     expect(JSON.stringify(existing)).toBe(original)
   })
@@ -277,8 +296,8 @@ describe('special teams pipeline (accumulate + finalize)', () => {
       ],
     })
 
-    const after1 = accumulateSpecialTeams({ existing: [], outcome: gameA, homeTeamId: HOME, awayTeamId: AWAY })
-    const after2 = accumulateSpecialTeams({ existing: after1, outcome: gameB, homeTeamId: HOME, awayTeamId: AWAY })
+    const after1 = accumulateSpecialTeams({ existing: [], outcome: gameA, homeTeamId: HOME, awayTeamId: AWAY, homePlayerIds: [...HOME_IDS] })
+    const after2 = accumulateSpecialTeams({ existing: after1, outcome: gameB, homeTeamId: HOME, awayTeamId: AWAY, homePlayerIds: [...HOME_IDS] })
     const final = finalizeSpecialTeams(after2)
     const homeRow = final.find((r) => r.teamId === HOME)!
     const awayRow = final.find((r) => r.teamId === AWAY)!
