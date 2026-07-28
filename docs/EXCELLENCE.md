@@ -178,7 +178,7 @@ reason to engage; that is friction evidence), code audit (441+330 tsc, cap gap).
 
 **P1 — The loop feels great**
 6. **Chore-ectomy of training/practice**: weekly nag → monthly plan + exception events ("Malkin wants extra PP reps — allow it?"); visible payoff receipts. *(B2.4)*
-7. Continue-cadence audit: classify every interruption decision/story/silent; kill everything else. Processing overlay = the delivery vehicle. *(B2.1)*
+7. **[CLOSED 2026-07-28]** Continue-cadence audit: classify every interruption decision/story/silent; kill everything else. Processing overlay = the delivery vehicle. *(B2.1)* — decisions = the nine beat gates (Gap #1); mail classified in lib/cadence.ts. Measured 57/60 advances holding -> 45/60 by dropping ambient league churn to silent-tier.
 8. **Market engagement friction** (the autopilot 0/0 finding): AI GMs proactively pitch you (they have personas — use them), market temperature visible, counters scaffolded to one click. *(B3.2 feeds this)*
 
 **P2 — Stale → alive (the first overhaul epic)**
