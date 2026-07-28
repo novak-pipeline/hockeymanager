@@ -2176,6 +2176,103 @@ export interface BoxScoreView {
   awayGoalies: BoxScoreGoalieRow[]
 }
 
+/* ────────────────────────── match night (P6 B6.1/B6.2) ────────────────────────── */
+
+/** One "key to the game" on the pregame frame — a real delta, with the numbers. */
+export interface MatchKeyView {
+  title: string
+  detail: string
+}
+
+/** One club's side of the pregame lineup card. */
+export interface MatchLineupSideView {
+  teamId: string
+  teamAbbr: string
+  record: string
+  /** Projected forward lines (names), L1 first. */
+  forwardLines: string[][]
+  /** Projected defense pairs (names), top pair first. */
+  defensePairs: string[][]
+  /** Projected starter and his season line (".914 · 12-6-2"), null if none dressed. */
+  starter: { name: string; seasonLine: string } | null
+}
+
+/**
+ * The compact match-day frame shown by Continue when the next day to sim has a
+ * user game (B6.1, simmed-game path). Response to 'getMatchDayPreview'.
+ */
+export interface MatchDayPreviewView {
+  day: number
+  date: string
+  home: boolean
+  playoff: boolean
+  opponentTeamId: string
+  opponentName: string
+  opponentAbbr: string
+  opponentRank: number
+  rivalryLabel: string | null
+  /** All-time series line from the World Chronicle, when history exists. */
+  allTime: string | null
+  /** Pregame storyline (revenge game etc.) from the chronicle. */
+  storyline: string | null
+  /** 2–3 keys to the game derived from real state deltas. */
+  keys: MatchKeyView[]
+  user: MatchLineupSideView
+  opponent: MatchLineupSideView
+}
+
+export interface ThreeStarView {
+  playerId: string
+  name: string
+  teamAbbr: string
+  /** "2 G, 1 A" / "31 sv on 33". */
+  statLine: string
+  /** Game rating 0–10. */
+  rating: number
+}
+
+export interface TurningPointView {
+  period: number
+  clock: string
+  scorerName: string
+  /** Human line: "Period 3, 14:22 — Smith's go-ahead goal broke the 2–2 tie." */
+  text: string
+}
+
+/**
+ * Postgame receipts (B6.2): the result presented properly after a simmed or
+ * watched user game. Response to 'getPostgameReceipt'; null when the latest
+ * advance didn't play a user game.
+ */
+export interface PostgameReceiptView {
+  day: number
+  date: string
+  /** Schedule game id (deep-link to the match center box score). */
+  gameId: string
+  playoff: boolean
+  won: boolean
+  decidedBy: GameResult['decidedBy']
+  userHome: boolean
+  homeAbbr: string
+  awayAbbr: string
+  homeGoals: number
+  awayGoals: number
+  /** Goals per period, index 0 = P1; OT appended. */
+  homeByPeriod: number[]
+  awayByPeriod: number[]
+  homeShots: number
+  awayShots: number
+  /** Three stars of the game, first star first (both clubs eligible). */
+  stars: ThreeStarView[]
+  /** User club's player grades (game ratings), best first. */
+  grades: Array<{ playerId: string; name: string; rating: number }>
+  turningPoint: TurningPointView | null
+  /** Coach's postgame word, in his own demeanor. */
+  quote: { speaker: string; text: string } | null
+  /** B6.3: the persistent storyline written to the chronicle tonight, if any. */
+  storyline: string | null
+}
+
 /* ────────────────────────── AHL farm system views ────────────────────────── */
 
 /**

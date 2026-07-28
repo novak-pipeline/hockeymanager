@@ -32,6 +32,9 @@ export type ChronicleEventKind =
   | 'promise'
   | 'retirement'
   | 'debut'
+  /** B6.3: a persistent match-night moment (first NHL goal handled as
+   *  'milestone'; this covers goalie steals, rivalry scraps, …). */
+  | 'gameMoment'
 
 /** One side of a trade / a draft asset — enough to reconstruct the deal later. */
 export interface ChronicleAsset {
@@ -79,6 +82,9 @@ export interface ChronicleEvent {
     count?: number
     /** promise: verdict once evaluated ('met' | 'missed'). */
     resolved?: string
+    /** gameMoment/milestone: which match-night moment this was
+     *  ('firstGoal' | 'goalieSteal' | 'rivalScrap') — B6.3 dedupe + queries. */
+    moment?: string
   }
   /** True when the user's club was involved (fast filter for "your history"). */
   userInvolved: boolean

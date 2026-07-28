@@ -319,11 +319,34 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     [maybeAutosave]
   )
 
+  /** B6.1: which match day the pregame frame was already shown for — the next
+   *  Continue on that day plays the game instead of re-showing the frame. */
+  const pregameShownRef = useRef<number | null>(null)
+
   /** FM-style day-advance: pop the processing overlay, tick the sim, then fill it
    *  with the mail that streamed in, a trending headline, and the month calendar.
-   *  Leaves the GM on whatever screen they were reading. */
+   *  Leaves the GM on whatever screen they were reading. A day with a user game
+   *  gets the match-day frame first (B6.1) and postgame receipts after (B6.2). */
   const advanceWithOverlay = useCallback((): void => {
     void (async () => {
+      // B6.1: when the NEXT day to sim has a user game, stop on the match-day
+      // frame first — opponent, storyline, keys, lines. One stop per game day:
+      // the following Continue (same day) rolls into the sim.
+      try {
+        const pv = await client.getMatchDayPreview()
+        if (pv.type === 'matchDayPreview' && pv.preview && pregameShownRef.current !== pv.preview.day) {
+          pregameShownRef.current = pv.preview.day
+          setProcessing({
+            phase: 'pregame',
+            pregame: pv.preview,
+            nextGame: dashboard?.nextGame ?? null,
+            incoming: [],
+            ...(dashboard?.date ? { dateISO: dashboard.date } : {}),
+          })
+          return
+        }
+      } catch { /* preview unavailable — fall through to the plain advance */ }
+
       // Snapshot the inbox so we can diff for what arrives on this advance.
       let beforeIds = new Set<string>()
       try {
@@ -335,14 +358,19 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       const res = await run(() => client.continueGame())
       if (res === null) { setProcessing(null); return } // errored (toasted) or busy
 
-      const [inboxR, dashR, calR] = await Promise.all([
+      const [inboxR, dashR, calR, recR] = await Promise.all([
         client.getInbox().catch(() => null),
         client.getDashboard().catch(() => null),
         client.getCalendar().catch(() => null),
+        client.getPostgameReceipt().catch(() => null),
       ])
       const inbox = inboxR && inboxR.type === 'inbox' ? inboxR.inbox : null
       const dash = dashR && dashR.type === 'dashboard' ? dashR.dashboard : null
       const cal = calR && calR.type === 'calendar' ? calR.calendar : null
+      // B6.2: receipts are only presented for the game THIS advance played.
+      const receiptRaw = recR && recR.type === 'postgameReceipt' ? recR.receipt : null
+      const receipt = receiptRaw && dash && receiptRaw.day === dash.day ? receiptRaw : null
+      if (receipt) pregameShownRef.current = null
       const incoming = (inbox?.items ?? []).filter((i) => !beforeIds.has(i.id))
       // Feature the meatiest fresh story: a bylined press piece first, else the
       // most salient, else simply the first thing that landed.
@@ -355,8 +383,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // landed in the inbox, close the overlay automatically instead of making
       // the GM dismiss a "nothing happened" panel every single day — that manual
       // Close on every quiet advance is what made simming feel cumbersome. The
-      // overlay now only HOLDS when there's actual mail/story to read.
-      if (incoming.length === 0) { setProcessing(null); return }
+      // overlay now only HOLDS when there's actual mail/story to read — or when
+      // a user game just finished (its receipts are always worth the stop).
+      if (incoming.length === 0 && !receipt) { setProcessing(null); return }
 
       setProcessing({
         phase: 'done',
@@ -364,6 +393,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         incoming,
         trending,
         calendar: cal,
+        receipt,
         ...(dash?.date ? { dateISO: dash.date } : {}),
         ...(inbox?.teamInfo ? { teamInfo: inbox.teamInfo } : {}),
       })
@@ -641,6 +671,11 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             onContinue={actions.continueGame}
             onClose={() => setProcessing(null)}
             onOpenMessage={() => { setProcessing(null); navigate('inbox') }}
+            onWatch={() => { setProcessing(null); actions.watchNext() }}
+            onOpenBoxScore={(gameId) => {
+              setProcessing(null)
+              navigate('matchcenter', gameId ? { gameId } : {})
+            }}
           />
         )}
         </TeamColorsProvider>

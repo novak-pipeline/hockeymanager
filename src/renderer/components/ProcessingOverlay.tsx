@@ -11,13 +11,15 @@
  */
 import { useEffect } from 'react'
 import type { NewsItem } from '@domain/news'
-import type { CalendarEntry, CalendarView, NextGameView } from '@engine/career/views'
+import type { CalendarEntry, CalendarView, MatchDayPreviewView, NextGameView, PostgameReceiptView } from '@engine/career/views'
 import { TeamCrest } from './Crest'
 import { Icon } from './primitives'
 import { CategoryIcon, Icons } from './icons'
+import { PostgameFrame, PregameFrame } from './MatchNightFrames'
 
 export interface ProcessingData {
-  phase: 'running' | 'done'
+  /** 'pregame' = the B6.1 match-day frame, shown BEFORE the day sims. */
+  phase: 'running' | 'done' | 'pregame'
   /** ISO of the (new) current in-world day. */
   dateISO?: string
   nextGame: NextGameView | null
@@ -27,6 +29,10 @@ export interface ProcessingData {
   trending?: NewsItem | null
   calendar?: CalendarView | null
   teamInfo?: Record<string, { abbreviation: string; primaryColor: number }>
+  /** B6.1: the match-day frame data (phase 'pregame' only). */
+  pregame?: MatchDayPreviewView | null
+  /** B6.2: postgame receipts when this advance played a user game. */
+  receipt?: PostgameReceiptView | null
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat', 'Sun']
@@ -75,12 +81,18 @@ export function ProcessingOverlay({
   onContinue,
   onClose,
   onOpenMessage,
+  onWatch,
+  onOpenBoxScore,
   busy,
 }: {
   data: ProcessingData
   onContinue: () => void
   onClose: () => void
   onOpenMessage: (item: NewsItem) => void
+  /** B6.1: watch the game live instead of simming it (pregame frame). */
+  onWatch?: () => void
+  /** B6.2: deep-link to the match center box score (postgame receipts). */
+  onOpenBoxScore?: (gameId: string) => void
   busy: boolean
 }): JSX.Element {
   const running = data.phase === 'running' || busy
@@ -121,6 +133,28 @@ export function ProcessingOverlay({
       }}
       onClick={() => { if (!running) onClose() }}
     >
+      {/* ── B6.1: the match-day frame replaces the generic overlay on a game day ── */}
+      {data.phase === 'pregame' && data.pregame ? (
+        <div
+          className="panel"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: 'min(760px, 94vw)', maxHeight: '88vh', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+            border: '1px solid var(--violet-border, rgba(124,92,231,0.4))',
+            background: 'var(--bg1)', borderRadius: 'var(--radius-lg, 14px)',
+            boxShadow: 'var(--shadow-2, 0 24px 60px rgba(0,0,0,0.5))',
+          }}
+        >
+          <PregameFrame
+            preview={data.pregame}
+            busy={busy}
+            onPlay={onContinue}
+            onWatch={onWatch ?? onContinue}
+            onClose={onClose}
+          />
+        </div>
+      ) : (
       <div
         className="panel"
         onClick={(e) => e.stopPropagation()}
@@ -216,7 +250,14 @@ export function ProcessingOverlay({
             &times;
           </button>
 
-          {trending ? (
+          {/* B6.2: a played user game presents its receipts front and center;
+              the trending card covers every other eventful day. */}
+          {data.receipt ? (
+            <PostgameFrame
+              receipt={data.receipt}
+              onOpenBoxScore={() => onOpenBoxScore?.(data.receipt!.gameId)}
+            />
+          ) : trending ? (
             <div className="card" style={{ padding: 'var(--sp-4)' }}>
               <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--violet-h, #b9a7ff)', fontWeight: 800, marginBottom: 8 }}>
                 Trending
@@ -329,6 +370,7 @@ export function ProcessingOverlay({
           </div>
         </div>
       </div>
+      )}
       <style>{`@keyframes ovspin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
