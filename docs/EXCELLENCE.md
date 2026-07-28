@@ -173,7 +173,7 @@ reason to engage; that is friction evidence), code audit (441+330 tsc, cap gap).
 1. **[CLOSED 2026-07-28]** Beat-gate sweep: every pending/blocking state states its need + one-click resolve/delegate (extinct the camp-softlock class). *(B2.2)* — **states its need: DONE.** All nine gates now name themselves on the Continue button in the shell'''s own routing order (career.ts continueLabel, pinned by continueLabel.test.ts); five in-season ones used to route the GM somewhere the button never mentioned. **resolve/delegate: DONE.** All nine audited one by one; eight already had an escape (auto-resolve on a second Continue, or "let the AGM / Head of Scouting handle it"). The captaincy had none — it blocked Continue outright until the GM found the C button — so `nameCaptainByCoach()` + a "Let the coach name him" button now closes it. **Gap CLOSED 2026-07-28.**
 2. **[CLOSED 2026-07-27]** Extend autopilot to 10 seasons nightly; fix every crash/softlock found. *(B4.1)* — 10/10 green on seeds 2029 and 777 after five crash fixes; cross-validated on a second seed because one passing seed is weak evidence.
 3. **[IN PROGRESS]** tsc burn-down: web 441→**209**, node 330→**167**; then the gate is law. *(B7.1)* — treat as a bug hunt, not cleanup: it has so far surfaced league-wide PP%/PK% misattribution, dead physio/shutout/history-flag reads, and two dead content pools.
-4. **[PARTIAL]** In-season cap compliance (known filed gap — emergencyRecalls stacks salary uncapped). *(B7.3)*
+4. **[CLOSED 2026-07-28]** In-season cap compliance (known filed gap — emergencyRecalls stacks salary uncapped). *(B7.3)*
 5. **[BLOCKED — user]** Release trust: code-signing/SmartScreen, dev-freeze fix, voices in packaged build. *(B1.4)*
 
 **P1 — The loop feels great**
