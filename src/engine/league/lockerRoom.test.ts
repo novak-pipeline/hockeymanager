@@ -581,6 +581,28 @@ describe('onPlayerArrived', () => {
 
     expect(newArrivalInfluence).toBeLessThanOrEqual(incumbentInfluence)
   })
+
+  it('records the arrival year when given, and departure clears it', () => {
+    const existing = [makePlayer(), makePlayer()]
+    const state = initLockerRoom({ roster: existing, year: 2025, rng: new Rng(1) })
+    const newPlayer = makePlayer('C', {}, { age: 27 })
+
+    onPlayerArrived(state, newPlayer, new Rng(2), 2026)
+    expect(state.arrivals).toEqual([[newPlayer.id, 2026]])
+
+    // Re-arrival (re-sign) dedupes, updating the year in place.
+    onPlayerArrived(state, newPlayer, new Rng(3), 2027)
+    expect(state.arrivals).toEqual([[newPlayer.id, 2027]])
+
+    onPlayerDeparted(state, newPlayer.id as unknown as string, new Rng(4), newPlayer.name)
+    expect(state.arrivals).toEqual([])
+  })
+
+  it('omitting the year leaves the arrivals ledger untouched (old-save path)', () => {
+    const state = initLockerRoom({ roster: [makePlayer(), makePlayer()], year: 2025, rng: new Rng(1) })
+    onPlayerArrived(state, makePlayer(), new Rng(2))
+    expect(state.arrivals).toBeUndefined()
+  })
 })
 
 /* ──────────────────────── developmentModifier ──────────────────────── */

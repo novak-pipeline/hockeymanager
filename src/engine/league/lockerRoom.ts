@@ -56,6 +56,13 @@ export interface LockerRoomState {
   familiarity: Array<[string, number]>
   /** Overall room mood, 0–100. */
   roomMorale: number
+  /**
+   * [playerId, year] — the season each player JOINED this club mid-career
+   * (trade/signing/recall). Absent for founding-roster players and on
+   * pre-existing saves; the Dynamics turnover drivers treat missing entries as
+   * settled tenure. Optional/additive — save-safe.
+   */
+  arrivals?: Array<[string, number]>
 }
 
 /* ─────────────────────── news-seed type ─────────────────────── */
@@ -341,7 +348,9 @@ export function initLockerRoom(args: {
 
 /* ─────────────────────── tick ─────────────────────── */
 
-const FAMILIARITY_GAIN_PER_GAME = 2
+/** Familiarity points gained per game played together — exported so the
+ *  Dynamics view can convert familiarity back into "games together". */
+export const FAMILIARITY_GAIN_PER_GAME = 2
 const FAMILIARITY_DECAY = 0.5
 const FEUD_ESCALATION_RATE = 4
 const MENTORSHIP_GROWTH_RATE = 3
@@ -639,6 +648,11 @@ export function onPlayerDeparted(
     (r) => r.a !== playerId && r.b !== playerId
   )
 
+  // Remove from the arrivals ledger
+  if (state.arrivals) {
+    state.arrivals = state.arrivals.filter(([id]) => id !== playerId)
+  }
+
   return { newsSeeds, leadershipCrisis }
 }
 
@@ -697,7 +711,10 @@ export function electCaptain(
 export function onPlayerArrived(
   state: LockerRoomState,
   player: Player,
-  _rng: Rng
+  _rng: Rng,
+  /** Season the player joined; recorded so Dynamics can cite real roster
+   *  turnover ("9 new faces this summer"). Optional/additive. */
+  year?: number
 ): void {
   // Remove any stale entry first (re-signing a player)
   state.influence = state.influence.filter(([id]) => id !== player.id)
@@ -706,6 +723,14 @@ export function onPlayerArrived(
   const base = computeInfluence(player)
   const arrivedInfluence = clamp(Math.round(base * 0.75), 1, 100)
   state.influence.push([player.id, arrivedInfluence])
+
+  // Record the arrival year (dedupe on re-sign)
+  if (year !== undefined) {
+    if (!state.arrivals) state.arrivals = []
+    const existing = state.arrivals.find(([id]) => id === player.id)
+    if (existing) existing[1] = year
+    else state.arrivals.push([player.id as unknown as string, year])
+  }
 
   // Familiarity starts at 0 for all pairs (already absent from the array is fine,
   // but we explicitly do nothing — getFamiliarity returns 0 for missing keys)

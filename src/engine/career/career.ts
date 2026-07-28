@@ -2601,7 +2601,7 @@ export class Career {
     if (!lr) return
     const p = this.data.players.get(playerId)
     if (!p) return
-    onPlayerArrived(lr, p, this.rngFor(7108, this.currentDay, Career.pidNum(playerId as string)))
+    onPlayerArrived(lr, p, this.rngFor(7108, this.currentDay, Career.pidNum(playerId as string)), this.year)
   }
 
   /** Tick one team's locker room after a match day. */
@@ -14205,6 +14205,13 @@ export class Career {
       lockerRoom: lr,
       headCoachName: coach.name,
       ...(coach.faceId !== undefined ? { headCoachFaceId: coach.faceId } : {}),
+      // Playtest #20: live-world facts so the bars can explain themselves and
+      // social groups can slice by current lines.
+      facts: {
+        year: this.year,
+        teamStreak: this.teamStreaks.get(teamId) ?? 0,
+        ...(team ? { lines: team.lines } : {}),
+      },
     })
     // LW5: the user club's dynamics page carries the promise ledger — your
     // word, in writing, with the receipts.

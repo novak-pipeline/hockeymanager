@@ -2801,7 +2801,7 @@ export interface RelationshipView {
   label: string
 }
 
-export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/dynamics'
+export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar, DynamicsSocialGroup } from '@engine/career/dynamics'
 
 /** One row in the Medical Center risk table. */
 export interface MedicalRow {
