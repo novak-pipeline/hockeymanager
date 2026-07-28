@@ -26,7 +26,7 @@ import {
   type Position,
   type RawAttributes,
 } from '@domain'
-import { computeComposites, overall } from '@engine/ratings/composites'
+import { computeComposites, invalidatePotentialRating, overall } from '@engine/ratings/composites'
 import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
 import type { Rng } from '@engine/shared/rng'
 
@@ -242,6 +242,7 @@ function inSeasonCeilingDrift(p: Player, perfRatio: number, rng: Rng): number {
       g[k] = Math.max(1, Math.min(99, g[k] + delta))
     }
   }
+  invalidatePotentialRating(p.potential)
   if (p.basePotential !== undefined) {
     const curOvr = overall(p.composites, p.position)
     p.basePotential = Math.max(curOvr, Math.min(99, p.basePotential + delta))

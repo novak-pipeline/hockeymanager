@@ -232,6 +232,34 @@ export function ratedOverall(p: {
 }
 
 /**
+ * Memo for `ratedPotential` — the docstring contract on `computeComposites`
+ * ("cache the result … recompute only when raw attributes change") applied to
+ * the POTENTIAL side. Ratings composites live on `Player.composites`, but the
+ * potential overall was recomputed from scratch on every call — and view
+ * builders call it per player, which made the Scouting screens crawl on big
+ * imported worlds.
+ *
+ * Keyed by the potential object's identity (save/load and player creation make
+ * fresh objects → fresh cache). Role/position/basePotential are stamped and
+ * compared on read, so those changes self-invalidate. The ONLY in-place
+ * mutators of a potential object are the two ceiling-drift passes
+ * (`inSeasonCeilingDrift`, `driftYouthCeiling`) — both call
+ * `invalidatePotentialRating` after writing. Purely a speed structure: a hit
+ * returns exactly what the recompute would.
+ */
+const potentialRatingCache = new WeakMap<RawAttributes, {
+  role: PlayerRole
+  position: Position
+  basePotential: number | undefined
+  value: number
+}>()
+
+/** Drop the cached potential overall for a potential object mutated in place. */
+export function invalidatePotentialRating(potential: RawAttributes): void {
+  potentialRatingCache.delete(potential)
+}
+
+/**
  * Authoritative potential rating (0–100). Anchors to the source-DB
  * `basePotential` (ceiling) when present; else derives from potential composites.
  */
@@ -241,9 +269,14 @@ export function ratedPotential(p: {
   position: Position
   basePotential?: number
 }): number {
+  const hit = potentialRatingCache.get(p.potential)
+  if (hit && hit.role === p.role && hit.position === p.position && hit.basePotential === p.basePotential) {
+    return hit.value
+  }
   const computed = overall(computeComposites(p.potential, p.role, p.position), p.position)
-  if (p.basePotential === undefined) return computed
-  return Math.round(0.7 * p.basePotential + 0.3 * computed)
+  const value = p.basePotential === undefined ? computed : Math.round(0.7 * p.basePotential + 0.3 * computed)
+  potentialRatingCache.set(p.potential, { role: p.role, position: p.position, basePotential: p.basePotential, value })
+  return value
 }
 
 /**
