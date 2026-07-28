@@ -1804,6 +1804,20 @@ a:hover { text-decoration: underline; }
 .icon-20 > svg { width: 20px; height: 20px; }
 .icon-24 > svg { width: 24px; height: 24px; }
 
+/* Playtest #1 — the icons read as muddy grey blobs ("worse than emojis").
+ * lucide is drawn on a 24px grid with a 2px stroke. Render that same artwork at
+ * 14px without thinning the stroke and it scales to a ~3.4px equivalent: the
+ * counters close up, the joints blob, and every glyph collapses toward the same
+ * grey smudge — which is precisely the legibility emoji had and these lost.
+ * Thin the stroke as the box shrinks so the ink-to-space ratio stays constant.
+ * One place, because every screen consumes `Icon`/`CategoryIcon`. */
+.ui-icon > svg { stroke-width: 1.75; }
+.icon-14 > svg { stroke-width: 1.45; }
+.icon-16 > svg { stroke-width: 1.6; }
+.icon-18 > svg { stroke-width: 1.7; }
+.icon-20 > svg { stroke-width: 1.8; }
+.icon-24 > svg { stroke-width: 2; }
+
 /* Sparkline wrapper */
 .ui-sparkline { display: block; overflow: visible; }
 .ui-sparkline path { vector-effect: non-scaling-stroke; }

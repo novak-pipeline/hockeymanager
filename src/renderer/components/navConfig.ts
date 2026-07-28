@@ -3,7 +3,7 @@ import type { ScreenId } from './NavContext'
 
 /** Icon keys resolved to line-art SVGs by <NavIcon>. */
 export type IconKey =
-  | 'home' | 'inbox' | 'squad' | 'squadPlanner' | 'dynamics' | 'tactics'
+  | 'home' | 'inbox' | 'feed' | 'squad' | 'squadPlanner' | 'dynamics' | 'tactics'
   | 'dataHub' | 'staff' | 'training' | 'medical' | 'devCenter'
   | 'schedule' | 'competitions' | 'world' | 'scouting' | 'transfers'
   | 'clubInfo' | 'clubVision' | 'finances' | 'match'
@@ -41,8 +41,13 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
   return [
     { id: 'home', label: 'Home', icon: 'home', section: 'overview', screen: 'dashboard', match: ['dashboard', 'staffMeeting'],
       subTabs: [{ id: 'dashboard', label: 'Overview' }, { id: 'staffMeeting', label: 'Staff Meeting' }] },
-    { id: 'inbox', label: 'Inbox', icon: 'inbox', section: 'overview', screen: 'inbox', match: ['inbox', 'feed'], badge: 'unread',
-      subTabs: [{ id: 'inbox', label: 'Inbox' }, { id: 'feed', label: 'The Feed' }] },
+    { id: 'inbox', label: 'Inbox', icon: 'inbox', section: 'overview', screen: 'inbox', match: ['inbox'], badge: 'unread' },
+    // Playtest #9 — the Feed used to be a SUB-TAB of the Inbox, which framed it
+    // as exactly the thing it must not be: a second inbox. It isn't your mail;
+    // it's the league talking, and you browse it because you want to, not
+    // because something is owed a reply. Its own destination, no unread badge —
+    // a badge would re-impose the obligation the tab placement implied.
+    { id: 'feed', label: 'The Feed', icon: 'feed', section: 'overview', screen: 'feed', match: ['feed'] },
     { id: 'squad', label: 'Roster', icon: 'squad', section: 'team', screen: 'squad', match: ['squad', 'teamStats', 'report'],
       subTabs: [{ id: 'squad', label: 'Roster' }, { id: 'teamStats', label: 'Statistics' }, { id: 'report', label: 'Report' }] },
     { id: 'planner', label: 'Roster Planner', icon: 'squadPlanner', section: 'team', screen: 'teamPlanner', match: ['teamPlanner'] },

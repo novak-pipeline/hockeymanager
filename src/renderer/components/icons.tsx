@@ -110,6 +110,21 @@ export function categoryColor(category: NewsCategory): string {
   return CATEGORY_ICON[category]?.color ?? 'var(--muted)'
 }
 
+/**
+ * Stroke weight for a given pixel size (playtest #1). lucide's artwork is drawn
+ * on a 24px grid at stroke 2; keeping that stroke while shrinking the box scales
+ * it to ~3.4px at 14px, which closes the counters and turns every glyph into the
+ * same grey smudge. Thinning with size holds the ink-to-space ratio steady so a
+ * 14px icon stays as readable as a 24px one. Mirrors the .icon-* CSS rules.
+ */
+function strokeFor(size: number): number {
+  if (size <= 14) return 1.45
+  if (size <= 16) return 1.6
+  if (size <= 18) return 1.7
+  if (size <= 20) return 1.8
+  return 2
+}
+
 /** Renders the semantic icon for a news category at the given pixel size. */
 export function CategoryIcon(props: { category: NewsCategory; size?: number; color?: string }): JSX.Element {
   const meta = CATEGORY_ICON[props.category] ?? CATEGORY_ICON.league
@@ -117,7 +132,7 @@ export function CategoryIcon(props: { category: NewsCategory; size?: number; col
   const s = props.size ?? 16
   return (
     <span className="ui-icon" style={{ color: props.color ?? meta.color }}>
-      <Cmp width={s} height={s} strokeWidth={2} />
+      <Cmp width={s} height={s} strokeWidth={strokeFor(s)} />
     </span>
   )
 }

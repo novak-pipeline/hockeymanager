@@ -4,6 +4,7 @@ import type { IconKey } from './navConfig'
 const PATHS: Record<IconKey, JSX.Element> = {
   home: <><path d="M3 11l9-7 9 7" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></>,
   inbox: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>,
+  feed: <><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h8A2.5 2.5 0 0 1 16 6.5v4A2.5 2.5 0 0 1 13.5 13H8l-3.5 3v-3A2.5 2.5 0 0 1 3 10.5z" /><path d="M18.5 9H19a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-.5v2.5L15 17" /></>,
   squad: <><circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.3" /><path d="M3 19c0-3 2.5-5 5-5s5 2 5 5" /><path d="M14.5 19c0-2.2 1.4-3.6 3.2-3.6S21 16.8 21 19" /></>,
   squadPlanner: <><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="9" x2="9" y2="21" /></>,
   dynamics: <><circle cx="6" cy="7" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="12" cy="17" r="2" /><path d="M7.6 8.4l3 7M16.4 8.4l-3 7M8 7h8" /></>,
