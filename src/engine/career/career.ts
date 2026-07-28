@@ -706,6 +706,25 @@ export interface ManagerView {
  * weights the best players more heavily and folds goaltending in at ~a quarter,
  * which is roughly its real influence on results.
  */
+/**
+ * The clubs that can actually trade: the top-league members, not the whole world.
+ *
+ * `data.teams` holds every club the database knows — on the imported NHL set
+ * that is 460 of them, of which 32 are NHL, 32 are AHL affiliates and 396 are
+ * junior and European sides. Handing that map to a partner-selection routine
+ * means ~93% of the clubs picked cannot assemble a trade at all, so the work is
+ * done and thrown away. Measured on the imported league: 0.3% of days produced
+ * an AI offer against 4.0% when the pool is the league.
+ */
+export function leagueTeamsOnly(data: LeagueData): Map<TeamId, Team> {
+  const out = new Map<TeamId, Team>()
+  for (const tid of data.league.teams) {
+    const t = data.teams.get(tid)
+    if (t) out.set(tid, t)
+  }
+  return out
+}
+
 export function teamStrengthRating(roster: Player[]): number {
   const skaters = roster
     .filter((p) => p.position !== 'G')
@@ -5451,10 +5470,18 @@ export class Career {
       const ranks = this.strengthRanks()
       const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
         this.clubPostureFor(tid, ranks).posture
+      // Gap #8 — only NHL clubs can call. `data.teams` holds the whole world:
+      // on the imported database that is 460 clubs, of which 32 are NHL, 32 are
+      // AHL affiliates and 396 are junior/European sides. Handing all of them to
+      // the generator meant ~93% of calls came from a club with no tradeable
+      // roster and no picks, so the offer was assembled, found wanting, and
+      // silently dropped. Measured end to end: 0.3% of days produced an offer
+      // against 4.0% when the pool is the league — the reason the phone never
+      // rang all season, and the "0 trades" the autopilot reported.
       const offers = generateAiOffers({
         day,
         userTeamId: this.userTeamId,
-        teams: this.data.teams,
+        teams: leagueTeamsOnly(this.data),
         players: this.data.players,
         picks: this.picks,
         rng: this.rngFor(7002, day),
