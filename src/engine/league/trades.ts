@@ -1110,7 +1110,7 @@ export function generateAiOffers(args: {
 
   // Target one of the user's best few players at the need group. NTC players
   // would veto the move and injured players don't get shopped for.
-  const targets = user.roster
+  const shoppable = user.roster
     .map((id) => players.get(id))
     .filter(
       (p): p is Player =>
@@ -1120,9 +1120,22 @@ export function generateAiOffers(args: {
         p.injuryStatus === null
     )
     .map((player) => ({ player, value: playerValue(player) }))
-    .filter((t) => t.value >= MIN_SHOP_VALUE)
     .sort((x, y) => y.value - x.value || (x.player.id < y.player.id ? -1 : 1))
-    .slice(0, 3)
+
+  // The shop floor is absolute, and on a weak league nobody clears it. Measured
+  // on the vanilla generated league: MIN_SHOP_VALUE (8, ≈ a depth NHLer) sits
+  // ABOVE the 90th percentile of player value — median 1.0, p90 7.1 — and a
+  // typical roster peaks around 2.7, so target selection returned empty every
+  // time and the AI never called about anyone. Real GMs still trade in a weak
+  // league; they just trade its best players.
+  //
+  // So the bar is the league's own: the fixed floor normally, or this roster's
+  // top man when nobody reaches it. `MIN_TRADEABLE` keeps genuine replacement
+  // level out of it, so a roster of nobodies still draws no calls.
+  const MIN_TRADEABLE = 0.5
+  const best = shoppable[0]?.value ?? 0
+  const floor = best >= MIN_SHOP_VALUE ? MIN_SHOP_VALUE : Math.max(MIN_TRADEABLE, best)
+  const targets = shoppable.filter((t) => t.value >= floor).slice(0, 3)
   if (targets.length === 0) return []
   const target = rng.pick(targets)
 
