@@ -101,7 +101,7 @@ export type { PlayerInteractionView, InteractionOptionView } from '@engine/caree
 export type { InterviewView, InterviewAnswerView } from '@engine/career/views'
 export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
 import type { TeamLegendsView } from '@engine/career/views'
-export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '@engine/career/views'
+export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar, DynamicsSocialGroup } from '@engine/career/views'
 import type { TeamDynamicsView } from '@engine/career/views'
 export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'

@@ -2,7 +2,7 @@
  * DynamicsScreen — FM-style squad dynamics: cohesion/atmosphere/leadership,
  * a hierarchy pyramid, social groups, and a happiness grid. Read-only.
  */
-import type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar } from '../../worker/protocol'
+import type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar, DynamicsSocialGroup } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -24,6 +24,16 @@ function StatBar({ title, bar }: { title: string; bar: DynamicsBar }): JSX.Eleme
       <div className="meter" style={{ height: 6 }}>
         <div className="meter-fill" style={{ width: `${bar.value}%`, background: color }} />
       </div>
+      {(bar.drivers ?? []).length > 0 && (
+        <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none' }}>
+          {bar.drivers!.map((d, i) => (
+            <li key={i} className="muted small" style={{ fontSize: 11, lineHeight: 1.45, display: 'flex', gap: 6 }}>
+              <span style={{ color, flexShrink: 0 }}>•</span>
+              <span>{d}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -68,6 +78,26 @@ function SocialGroup({ title, players }: { title: string; players: DynamicsPlaye
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {players.map((p) => <PlayerChip key={p.playerId} p={p} />)}
       </div>
+    </div>
+  )
+}
+
+/** Playtest #20: a rich social-group card — who, their standing in the room,
+ *  and the sim effect the group actually rides. */
+function SocialGroupCard({ g }: { g: DynamicsSocialGroup }): JSX.Element {
+  return (
+    <div className="panel" style={{ padding: 'var(--sp-3) var(--sp-4)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <div className="field-label" style={{ marginBottom: 0 }}>{g.title} · {g.members.length}</div>
+        <span className="small" style={{ color: moraleColor(g.avgMorale), fontWeight: 700, fontSize: 11 }}>
+          {moraleWord(g.avgMorale)}
+        </span>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+        {g.members.map((p) => <PlayerChip key={p.playerId} p={p} />)}
+      </div>
+      <div className="muted small" style={{ fontSize: 11, fontStyle: 'italic', lineHeight: 1.45 }}>{g.note}</div>
+      <div className="small" style={{ fontSize: 11, lineHeight: 1.45, marginTop: 2 }}>{g.effect}</div>
     </div>
   )
 }
@@ -165,13 +195,19 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
         </div>
       </Panel>
 
-      {/* Social groups */}
+      {/* Social groups — rich partition when the engine provides it (playtest #20) */}
       <Panel title="Social Groups">
-        <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-          <SocialGroup title="Core Social Group" players={d.socialGroups.core} />
-          <SocialGroup title={d.socialGroups.secondaryLabel ?? 'Secondary Social Group'} players={d.socialGroups.secondary} />
-          <SocialGroup title="Others" players={d.socialGroups.other} />
-        </div>
+        {(d.socialGroups.groups ?? []).length > 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--sp-3)' }}>
+            {d.socialGroups.groups!.map((g) => <SocialGroupCard key={g.key} g={g} />)}
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+            <SocialGroup title="Core Social Group" players={d.socialGroups.core} />
+            <SocialGroup title={d.socialGroups.secondaryLabel ?? 'Secondary Social Group'} players={d.socialGroups.secondary} />
+            <SocialGroup title="Others" players={d.socialGroups.other} />
+          </div>
+        )}
       </Panel>
 
       {/* Happiness grid */}
