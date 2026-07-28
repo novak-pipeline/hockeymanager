@@ -203,6 +203,14 @@ export class SimClient {
     return this.send({ type: 'getLastBoxScore' })
   }
 
+  getMatchDayPreview(): Promise<WorkerResponse> {
+    return this.send({ type: 'getMatchDayPreview' })
+  }
+
+  getPostgameReceipt(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPostgameReceipt' })
+  }
+
   /* ── mutations ── */
 
   setLines(lines: LinesUpdate): Promise<WorkerResponse> {

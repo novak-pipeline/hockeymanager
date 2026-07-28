@@ -38,6 +38,7 @@ import {
   type TradeStatus,
   type SeriesGameResult,
   type Standing,
+  type Team,
   type TeamId,
   type TeamTactics,
 } from '@domain'
@@ -190,6 +191,15 @@ import {
   type SeasonLine,
 } from '@engine/story/records'
 import { detectGameStory, detectPlayerStory, type PlayerGameLine } from '@engine/story/gameStory'
+import {
+  buildMatchKeys,
+  detectPersistentMoment,
+  findTurningPoint,
+  threeStars,
+  type MatchKeySide,
+  type RatedGameLine,
+  type TurningPointGoal,
+} from './matchNight'
 import { FIRST_NAMES, LAST_NAMES } from '@data/names'
 import {
   buildPreseasonOdds,
@@ -471,6 +481,9 @@ import {
   type AhlStandingsView,
   type BoardView,
   type BoxScoreView,
+  type MatchDayPreviewView,
+  type MatchLineupSideView,
+  type PostgameReceiptView,
   type CalendarView,
   type ClubInfoView,
   type CareerPhase,
@@ -920,6 +933,9 @@ export class Career {
   private offerCounter = 0
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
+  /** B6.2: the latest user game presented as postgame receipts (transient —
+   *  consumed by the processing overlay right after the advance). */
+  private lastReceipt: PostgameReceiptView | null = null
   /** Box scores for every played user game this season (calendar click-through). */
   private boxScoreHistory: Array<[string, BoxScoreView]> = []
   private readonly resignStatus = new Map<PlayerId, ResignStatus>()
@@ -1889,7 +1905,7 @@ export class Career {
     situation: CoachSituation,
     facts: CoachQuoteFacts,
     seed: number
-  ): void {
+  ): { speaker: string; text: string } {
     const coach = this.getTeamStaff(this.userTeamId as string).headCoach
     // Both headline and body rotate through their pools via the content-engine
     // no-repeat ledger: within a season the coach never says the same thing
@@ -1902,6 +1918,7 @@ export class Career {
       speaker: coach.name,
       ...(coach.faceId !== undefined ? { speakerFaceId: coach.faceId } : {}),
     })
+    return { speaker: coach.name, text: quote }
   }
 
   /* ────────────────────────── story layer plumbing ────────────────────────── */
@@ -4250,31 +4267,7 @@ export class Career {
       if (!p) continue
       const pid_str = pid as string
 
-      let rating: number
-      if (p.position === 'G') {
-        rating = goalieGameRating({
-          saves: s.saves,
-          shotsAgainst: s.shotsAgainst,
-          goalsAgainst: s.goalsAgainst,
-          toi: s.toi,
-        })
-      } else {
-        rating = gameRating({
-          position: p.position,
-          goals: s.goals,
-          assists: s.assists,
-          shots: s.shots,
-          hits: s.hits,
-          blockedShots: s.blockedShots,
-          takeaways: s.takeaways,
-          giveaways: s.giveaways,
-          plusMinus: s.plusMinus,
-          toi: s.toi,
-        })
-      }
-
-      // Hidden consistency reshapes the spread of his game ratings (no-op when absent).
-      rating = applyConsistency(rating, p.consistency, this.consistencyNoise(pid_str))
+      const rating = this.gameRatingOf(p, s)
 
       const existing = this.playerRatings.get(pid_str) ?? []
       existing.push(rating)
@@ -4286,6 +4279,34 @@ export class Career {
       acc.n += 1
       this.seasonRatingTotals.set(pid_str, acc)
     }
+  }
+
+  /** One player's game rating for tonight — the exact rating the rolling
+   *  window and season Avr are built from (consistency reshaping included),
+   *  so the postgame receipts grade with the same numbers the squad screen shows. */
+  private gameRatingOf(p: Player, s: GamePlayerStat): number {
+    const raw =
+      p.position === 'G'
+        ? goalieGameRating({
+            saves: s.saves,
+            shotsAgainst: s.shotsAgainst,
+            goalsAgainst: s.goalsAgainst,
+            toi: s.toi,
+          })
+        : gameRating({
+            position: p.position,
+            goals: s.goals,
+            assists: s.assists,
+            shots: s.shots,
+            hits: s.hits,
+            blockedShots: s.blockedShots,
+            takeaways: s.takeaways,
+            giveaways: s.giveaways,
+            plusMinus: s.plusMinus,
+            toi: s.toi,
+          })
+    // Hidden consistency reshapes the spread of his game ratings (no-op when absent).
+    return applyConsistency(raw, p.consistency, this.consistencyNoise(p.id as string))
   }
 
   private creditExtraStats(res: GameOutcome): void {
@@ -4355,7 +4376,7 @@ export class Career {
     }
     this.creditExtraStats(res)
     if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
-      this.recordUserResultNews(game.day, res)
+      this.recordUserResultNews(game.day, res, game.id as string, false)
     }
 
     /* ── Wave 4: special teams accumulation ── */
@@ -4467,7 +4488,7 @@ export class Career {
     return null
   }
 
-  private recordUserResultNews(day: number, res: GameOutcome): void {
+  private recordUserResultNews(day: number, res: GameOutcome, gameId = '', playoff = false): void {
     const home = this.data.teams.get(res.homeTeamId)!
     const away = this.data.teams.get(res.awayTeamId)!
     const userIsHome = res.homeTeamId === this.userTeamId
@@ -4490,7 +4511,7 @@ export class Career {
     const goalByUser: boolean[] = []
     let userShots = 0
     let oppShots = 0
-    let goalie: { name: string; saves: number; shotsAgainst: number; goalsAgainst: number } | undefined
+    let goalie: { playerId: string; name: string; saves: number; shotsAgainst: number; goalsAgainst: number } | undefined
     for (const ev of res.stream) {
       if (ev.type === 'goal') goalByUser.push(userRoster.has(ev.scorer as unknown as string))
     }
@@ -4499,7 +4520,7 @@ export class Career {
       if (mine) userShots += s.shots
       else oppShots += s.shots
       if (mine && s.shotsAgainst > 0 && this.resolve(pid).position === 'G' && (!goalie || s.shotsAgainst > goalie.shotsAgainst)) {
-        goalie = { name: this.resolve(pid).name, saves: s.saves, shotsAgainst: s.shotsAgainst, goalsAgainst: s.goalsAgainst }
+        goalie = { playerId: pid as string, name: this.resolve(pid).name, saves: s.saves, shotsAgainst: s.shotsAgainst, goalsAgainst: s.goalsAgainst }
       }
     }
     const beat = detectGameStory({ goalByUser, won: us > them, goalie, userShots, oppShots })
@@ -4531,11 +4552,13 @@ export class Career {
       (e): e is Extract<GameEvent, { type: 'penalty' }> =>
         isEvent(e, 'penalty') && e.infraction === 'fighting'
     )
+    let fight: { ourId: string; ourName: string; theirName: string } | null = null
     if (combatants.length >= 2) {
       const first = this.resolve(combatants[0].player)
       const second = this.resolve(combatants[1].player)
       const ours = userRoster.has(combatants[0].player as unknown as string) ? first : second
       const theirs = ours === first ? second : first
+      fight = { ourId: ours.id as string, ourName: ours.name, theirName: theirs.name }
       this.pushNews(
         'result',
         `Gloves off: ${ours.name} answers the bell`,
@@ -4544,22 +4567,194 @@ export class Career {
       )
     }
 
-    /* ── Coach quote: big win (≥3 goal margin, regulation) or bad loss (≥3 goal margin) ── */
+    /* ── Coach at the podium: every game gets a word (B6.2). A big win/bad loss
+     *    (≥3 in regulation) also lands in the inbox, as before; the ordinary
+     *    night's quote lives on the postgame receipts only — no nightly spam. ── */
     const diff = us - them
     const quoteSeed = this.seed ^ (day * 31)
+    let quote: { speaker: string; text: string } | null = null
     if (diff >= 3 && res.decidedBy === 'regulation') {
-      // Big win — coach speaks
       this.userWinStreak++
-      this.pushCoachQuote('postBigWin', { opponentAbbr: opp.abbreviation, score: `${us}-${them}`, goalDiff: diff }, quoteSeed)
+      quote = this.pushCoachQuote('postBigWin', { opponentAbbr: opp.abbreviation, score: `${us}-${them}`, goalDiff: diff }, quoteSeed)
     } else if (diff <= -3 && res.decidedBy === 'regulation') {
-      // Bad loss — coach speaks
       this.userWinStreak = 0
-      this.pushCoachQuote('postBadLoss', { opponentAbbr: opp.abbreviation, score: `${them}-${us}`, goalDiff: Math.abs(diff) }, quoteSeed)
-    } else if (diff > 0) {
-      this.userWinStreak++
+      quote = this.pushCoachQuote('postBadLoss', { opponentAbbr: opp.abbreviation, score: `${them}-${us}`, goalDiff: Math.abs(diff) }, quoteSeed)
     } else {
-      this.userWinStreak = 0
+      if (diff > 0) this.userWinStreak++
+      else this.userWinStreak = 0
+      const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+      const noRepeat = { ledger: this.contentLedger, year: this.year, day: this.currentDay }
+      quote = {
+        speaker: coach.name,
+        text: coachQuote(
+          coach,
+          us > them ? 'postWin' : 'postLoss',
+          { opponentAbbr: opp.abbreviation, score: us > them ? `${us}-${them}` : `${them}-${us}`, goalDiff: Math.abs(diff) },
+          quoteSeed,
+          noRepeat
+        ),
+      }
     }
+
+    /* ── B6.3: one PERSISTENT storyline per game where something notable
+     *    happened — written into the World Chronicle so later beats cite it. ── */
+    const firstGoalScorers: Array<{ playerId: string; name: string; age: number }> = []
+    for (const [pid, s] of res.playerStats) {
+      if (s.goals <= 0 || !userRoster.has(pid as unknown as string)) continue
+      const p = this.resolve(pid)
+      const seasonGoals = this.totals.get(pid)?.goals ?? 0
+      // Regular-season totals already include tonight; playoff stats never merge in.
+      const priorSeason = playoff ? seasonGoals : Math.max(0, seasonGoals - s.goals)
+      const priorCareer = p.stats.reduce(
+        (sum, line) => sum + (line.league === 'ahl' ? 0 : line.ev.goals + line.pp.goals + line.pk.goals),
+        0
+      )
+      const alreadyChronicled = this.chronicle.events.some(
+        (e) => e.details?.moment === 'firstGoal' && e.playerIds.includes(pid as string)
+      )
+      if (priorSeason + priorCareer === 0 && !alreadyChronicled) {
+        firstGoalScorers.push({ playerId: pid as string, name: p.name, age: p.age })
+      }
+    }
+    const rivalHeat = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+    const moment = detectPersistentMoment({
+      won: us > them,
+      oppAbbr: opp.abbreviation,
+      rivalry: rivalHeat.factor > 0,
+      firstGoalScorers,
+      goalie: goalie ? { playerId: goalie.playerId, name: goalie.name, saves: goalie.saves, shotsAgainst: goalie.shotsAgainst } : null,
+      fight,
+    })
+    if (moment) {
+      chronicleEvent(this.chronicle, {
+        year: this.year,
+        day,
+        kind: moment.kind === 'firstGoal' ? 'milestone' : 'gameMoment',
+        teamIds: [this.userTeamId as string, opp.id as string],
+        playerIds: moment.playerIds,
+        headline: moment.headline,
+        details: { moment: moment.kind },
+        userInvolved: true,
+      })
+      // A first NHL goal is an inbox moment in its own right.
+      if (moment.kind === 'firstGoal') {
+        this.pushNews('result', moment.headline, moment.storyline, {
+          playerId: moment.playerIds[0]!,
+          teamId: this.userTeamId as string,
+        })
+      }
+    }
+
+    /* ── B6.2: assemble the postgame receipts the overlay presents. ── */
+    this.lastReceipt = this.buildPostgameReceipt({
+      day, res, gameId, playoff, home, away, userIsHome, userRoster, quote,
+      storyline: moment?.storyline ?? null,
+    })
+  }
+
+  /** Build the B6.2 postgame receipts for a finished user game: period
+   *  breakdown, three stars + grades (real game ratings), the turning point
+   *  picked from the goals that actually happened, and the coach's word. */
+  private buildPostgameReceipt(args: {
+    day: number
+    res: GameOutcome
+    gameId: string
+    playoff: boolean
+    home: Team
+    away: Team
+    userIsHome: boolean
+    userRoster: Set<string>
+    quote: { speaker: string; text: string } | null
+    storyline: string | null
+  }): PostgameReceiptView {
+    const { day, res, home, away, userIsHome, userRoster } = args
+    const us = userIsHome ? res.homeGoals : res.awayGoals
+    const them = userIsHome ? res.awayGoals : res.homeGoals
+
+    // Period breakdown + shots, straight from the stream (buildBoxScore's rules).
+    const periods = Math.max(
+      3,
+      res.stream.reduce((m, ev) => (ev.type === 'goal' ? Math.max(m, ev.period) : m), 3)
+    )
+    const homeByPeriod = new Array<number>(periods).fill(0)
+    const awayByPeriod = new Array<number>(periods).fill(0)
+    let homeShots = 0
+    let awayShots = 0
+    const homeIds = new Set(home.roster.map((id) => id as string))
+    const tpGoals: TurningPointGoal[] = []
+    for (const ev of res.stream) {
+      if (isEvent(ev, 'shot')) {
+        if (homeIds.has(ev.shooter as string)) homeShots++
+        else awayShots++
+      } else if (isEvent(ev, 'goal')) {
+        const onHome = homeIds.has(ev.scorer as string)
+        const idx = Math.min(ev.period, periods) - 1
+        if (onHome) homeByPeriod[idx]!++
+        else awayByPeriod[idx]!++
+        tpGoals.push({
+          period: ev.period,
+          t: ev.t,
+          scorerName: this.resolve(ev.scorer).name,
+          byUser: userRoster.has(ev.scorer as unknown as string),
+        })
+      }
+    }
+
+    // Three stars + user grades from the SAME game ratings the squad screen uses.
+    const rated: RatedGameLine[] = []
+    const grades: Array<{ playerId: string; name: string; rating: number }> = []
+    for (const [pid, s] of res.playerStats) {
+      if (s.toi <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const rating = this.gameRatingOf(p, s)
+      const mine = userRoster.has(pid as unknown as string)
+      rated.push({
+        playerId: pid as string,
+        name: p.name,
+        teamAbbr: mine
+          ? (userIsHome ? home : away).abbreviation
+          : (userIsHome ? away : home).abbreviation,
+        isGoalie: p.position === 'G',
+        goals: s.goals,
+        assists: s.assists,
+        shots: s.shots,
+        saves: s.saves,
+        shotsAgainst: s.shotsAgainst,
+        rating,
+      })
+      if (mine) grades.push({ playerId: pid as string, name: p.name, rating: Math.round(rating * 10) / 10 })
+    }
+    grades.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
+
+    return {
+      day,
+      date: dayToDateISO(this.year, day),
+      gameId: args.gameId,
+      playoff: args.playoff,
+      won: us > them,
+      decidedBy: res.decidedBy,
+      userHome: userIsHome,
+      homeAbbr: home.abbreviation,
+      awayAbbr: away.abbreviation,
+      homeGoals: res.homeGoals,
+      awayGoals: res.awayGoals,
+      homeByPeriod,
+      awayByPeriod,
+      homeShots,
+      awayShots,
+      stars: threeStars(rated),
+      grades,
+      turningPoint: findTurningPoint(tpGoals, us > them, res.decidedBy),
+      quote: args.quote,
+      storyline: args.storyline,
+    }
+  }
+
+  /** B6.2: the latest user game's postgame receipts (null when the most recent
+   *  advance didn't play a user game). Transient — not part of the save. */
+  getPostgameReceipt(): PostgameReceiptView | null {
+    return this.lastReceipt
   }
 
   /* ────────────────────────── regular-season day loop ────────────────────────── */
@@ -5603,7 +5798,7 @@ export class Career {
         }
       }
       if (isUser) {
-        this.recordUserResultNews(day, res)
+        this.recordUserResultNews(day, res, `${g.seriesId}-g${g.gameNumber}`, true)
         this.lastBoxScore = buildBoxScore(res, home, away, this.resolve)
         this.recordBoxScore(`${g.seriesId}-g${g.gameNumber}`, this.lastBoxScore)
         if (watchUser) watched = this.buildWatched(g.homeTeamId, g.awayTeamId, res.stream)
@@ -7335,6 +7530,7 @@ export class Career {
     this.shAssists.clear()
     this.tradeOffers = []
     this.lastBoxScore = null
+    this.lastReceipt = null
     this.resignStatus.clear()
     // Unsigned players stay unsigned into the new season — the market never
     // resets to empty. Drop only those who found a roster; keep the rest.
@@ -12146,6 +12342,192 @@ export class Career {
     }
   }
 
+  /** LW4 ripple: a revenge-game storyline — someone on the other bench used to
+   *  be yours (traded away or walked in free agency, within the last 3 years). */
+  private revengeLine(oppId: TeamId): string | null {
+    const opp = this.data.teams.get(oppId)
+    if (!opp) return null
+    for (const pid of opp.roster) {
+      const prov = this.chronicle.provenance.find(([id]) => id === (pid as string))?.[1]
+      if (!prov) continue
+      // Find the move that took him OUT of your organisation.
+      for (let i = prov.acquisitions.length - 1; i >= 0; i--) {
+        const a = prov.acquisitions[i]!
+        if (this.year - a.year > 3) break
+        const cameFromUs = a.fromTeamId === (this.userTeamId as string)
+        const leftUsInFa = a.via === 'signing' && i > 0 && prov.acquisitions[i - 1]!.teamId === (this.userTeamId as string)
+        if (cameFromUs || leftUsInFa) {
+          const p = this.data.players.get(pid)
+          if (!p) break
+          return cameFromUs
+            ? `📖 ${p.name} faces the club that traded him ${a.year === this.year ? 'this season' : `in ${a.year}`}.`
+            : `📖 ${p.name} returns — he walked from your organisation in ${a.year} free agency.`
+        }
+      }
+    }
+    return null
+  }
+
+  /** World Chronicle: the all-time series line vs an opponent ("Leads 12–5 · 1–1 in playoffs"). */
+  private allTimeVs(oppId: TeamId): string | null {
+    const h = chronicleHeadToHead(this.chronicle, this.userTeamId as string, oppId as string)
+    if (!h || h.wins + h.losses === 0) return null
+    const lead = h.wins > h.losses ? 'You lead' : h.wins < h.losses ? 'They lead' : 'Series tied'
+    const nums = h.wins > h.losses ? `${h.wins}–${h.losses}` : `${h.losses}–${h.wins}`
+    const series = h.seriesWins + h.seriesLosses > 0 ? ` · playoff series ${h.seriesWins}–${h.seriesLosses}` : ''
+    return `${lead} all-time ${h.wins === h.losses ? `${h.wins}–${h.losses}` : nums}${series}`
+  }
+
+  /** One club's side of the pregame lineup card: projected lines + starter. */
+  private matchLineupSide(team: Team): MatchLineupSideView {
+    const nameOf = (id: PlayerId | null | undefined): string | null => {
+      if (!id) return null
+      return this.data.players.get(id)?.name ?? null
+    }
+    const st = this.standings.get(team.id)
+    const starterId = team.lines.goalies[0]
+    let starter: MatchLineupSideView['starter'] = null
+    if (starterId) {
+      const p = this.data.players.get(starterId)
+      if (p) {
+        const t = this.totals.get(starterId)
+        const svPct = t && t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : null
+        const w = this.goalieWins.get(starterId) ?? 0
+        const l = this.goalieLosses.get(starterId) ?? 0
+        starter = {
+          name: p.name,
+          seasonLine: svPct !== null ? `.${Math.round(svPct * 1000).toString().padStart(3, '0')} · ${w}-${l}` : 'first start',
+        }
+      }
+    }
+    return {
+      teamId: team.id as string,
+      teamAbbr: team.abbreviation,
+      record: st ? `${st.wins}-${st.losses}-${st.overtimeLosses}` : '0-0-0',
+      forwardLines: team.lines.forwards.map((l) => l.map(nameOf).filter((n): n is string => n !== null)),
+      defensePairs: team.lines.defensePairs.map((l) => l.map(nameOf).filter((n): n is string => n !== null)),
+      starter,
+    }
+  }
+
+  /** Recent game-rating average over a goalie's last starts (null before 3). */
+  private goalieRecentForm(id: PlayerId): number | null {
+    const window = this.playerRatings.get(id as string) ?? []
+    if (window.length < 3) return null
+    const last = window.slice(-5)
+    return last.reduce((s, r) => s + r, 0) / last.length
+  }
+
+  /**
+   * B6.1: the compact match-day frame — non-null exactly when the NEXT day to
+   * sim plays a user game (regular season or playoffs). Everything cited is a
+   * real season number: records, special-teams percentages, form, streaks.
+   */
+  getMatchDayPreview(): MatchDayPreviewView | null {
+    let day: number | null = null
+    let oppId: TeamId | null = null
+    let home = false
+    let playoff = false
+    if (this.phase === 'regularSeason') {
+      const nextDay = this.matchDays.find((d) => d > this.currentDay)
+      if (nextDay === undefined) return null
+      const g = this.data.league.schedule.find(
+        (x) => x.day === nextDay && (x.homeTeamId === this.userTeamId || x.awayTeamId === this.userTeamId)
+      )
+      if (!g) return null
+      day = nextDay
+      home = g.homeTeamId === this.userTeamId
+      oppId = home ? g.awayTeamId : g.homeTeamId
+    } else if (this.phase === 'playoffs' && this.playoffs) {
+      const pending = pendingGames(this.playoffs).find(
+        (x) => x.homeTeamId === this.userTeamId || x.awayTeamId === this.userTeamId
+      )
+      if (!pending) return null
+      day = this.currentDay + 1
+      home = pending.homeTeamId === this.userTeamId
+      oppId = home ? pending.awayTeamId : pending.homeTeamId
+      playoff = true
+    } else {
+      return null
+    }
+    const opp = this.data.teams.get(oppId)
+    if (!opp) return null
+    const user = this.userTeam
+    const sorted = this.ctx().standingsSorted
+
+    const stx = finalizeSpecialTeams(this.specialTeams)
+    const sideOf = (team: Team): MatchKeySide => {
+      const st = this.standings.get(team.id)
+      const sp = stx.find((t) => t.teamId === (team.id as string))
+      return {
+        abbr: team.abbreviation,
+        gamesPlayed: st?.gamesPlayed ?? 0,
+        goalsFor: st?.goalsFor ?? 0,
+        goalsAgainst: st?.goalsAgainst ?? 0,
+        ppPct: sp?.ppPct ?? 0,
+        ppOpportunities: sp?.ppOpportunities ?? 0,
+        pkPct: sp?.pkPct ?? 0,
+        timesShorthanded: sp?.timesShorthanded ?? 0,
+        streak: this.teamStreaks.get(team.id as string) ?? 0,
+      }
+    }
+
+    // The opponent's most dangerous scorer right now: points, form-weighted.
+    let hot: { name: string; goals: number; assists: number; form: number } | null = null
+    let hotScore = -1
+    for (const pid of opp.roster) {
+      const p = this.data.players.get(pid)
+      const t = this.totals.get(pid)
+      if (!p || p.position === 'G') continue
+      const pts = (t?.goals ?? 0) + (t?.assists ?? 0)
+      const score = pts + Math.max(0, p.form) * 2
+      if (pts > 0 && score > hotScore) {
+        hotScore = score
+        hot = { name: p.name, goals: t?.goals ?? 0, assists: t?.assists ?? 0, form: p.form }
+      }
+    }
+
+    const goalieKeyOf = (
+      team: Team
+    ): { name: string; svPct: number; shotsFaced: number; last5Avg: number | null } | null => {
+      const id = team.lines.goalies[0]
+      if (!id) return null
+      const p = this.data.players.get(id)
+      const t = this.totals.get(id)
+      if (!p || !t || t.shotsAgainst <= 0) return null
+      return {
+        name: p.name,
+        svPct: t.saves / t.shotsAgainst,
+        shotsFaced: t.shotsAgainst,
+        last5Avg: this.goalieRecentForm(id),
+      }
+    }
+
+    return {
+      day,
+      date: dayToDateISO(this.year, day),
+      home,
+      playoff,
+      opponentTeamId: opp.id as string,
+      opponentName: opp.name,
+      opponentAbbr: opp.abbreviation,
+      opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+      rivalryLabel: gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string).label,
+      allTime: this.allTimeVs(opp.id),
+      storyline: this.revengeLine(opp.id),
+      keys: buildMatchKeys({
+        user: sideOf(user),
+        opp: sideOf(opp),
+        oppHotScorer: hot,
+        userGoalie: goalieKeyOf(user),
+        oppGoalie: goalieKeyOf(opp),
+        home,
+      }),
+      user: this.matchLineupSide(user),
+      opponent: this.matchLineupSide(opp),
+    }
+  }
+
   getDashboard(): DashboardView {
     const ctx = this.ctx()
     const sorted = ctx.standingsSorted
@@ -12163,40 +12545,8 @@ export class Career {
     const nextSched = this.data.league.schedule.find(
       (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
     )
-    // LW4 ripple: a revenge-game storyline — someone on the other bench used to
-    // be yours (traded away or walked in free agency, within the last 3 years).
-    const revengeLine = (oppId: TeamId): string | null => {
-      const opp = this.data.teams.get(oppId)
-      if (!opp) return null
-      for (const pid of opp.roster) {
-        const prov = this.chronicle.provenance.find(([id]) => id === (pid as string))?.[1]
-        if (!prov) continue
-        // Find the move that took him OUT of your organisation.
-        for (let i = prov.acquisitions.length - 1; i >= 0; i--) {
-          const a = prov.acquisitions[i]!
-          if (this.year - a.year > 3) break
-          const cameFromUs = a.fromTeamId === (this.userTeamId as string)
-          const leftUsInFa = a.via === 'signing' && i > 0 && prov.acquisitions[i - 1]!.teamId === (this.userTeamId as string)
-          if (cameFromUs || leftUsInFa) {
-            const p = this.data.players.get(pid)
-            if (!p) break
-            return cameFromUs
-              ? `📖 ${p.name} faces the club that traded him ${a.year === this.year ? 'this season' : `in ${a.year}`}.`
-              : `📖 ${p.name} returns — he walked from your organisation in ${a.year} free agency.`
-          }
-        }
-      }
-      return null
-    }
-    // World Chronicle: the all-time series line vs an opponent ("Leads 12–5 · 1–1 in playoffs").
-    const allTimeVs = (oppId: TeamId): string | null => {
-      const h = chronicleHeadToHead(this.chronicle, this.userTeamId as string, oppId as string)
-      if (!h || h.wins + h.losses === 0) return null
-      const lead = h.wins > h.losses ? 'You lead' : h.wins < h.losses ? 'They lead' : 'Series tied'
-      const nums = h.wins > h.losses ? `${h.wins}–${h.losses}` : `${h.losses}–${h.wins}`
-      const series = h.seriesWins + h.seriesLosses > 0 ? ` · playoff series ${h.seriesWins}–${h.seriesLosses}` : ''
-      return `${lead} all-time ${h.wins === h.losses ? `${h.wins}–${h.losses}` : nums}${series}`
-    }
+    const revengeLine = (oppId: TeamId): string | null => this.revengeLine(oppId)
+    const allTimeVs = (oppId: TeamId): string | null => this.allTimeVs(oppId)
     let nextGame: DashboardView['nextGame'] = null
     if (this.phase === 'regularSeason' && nextSched) {
       const home = nextSched.homeTeamId === this.userTeamId
@@ -16284,6 +16634,17 @@ export class Career {
 
   getLastBoxScore(): BoxScoreView | null {
     return this.lastBoxScore
+  }
+
+  /** Last completed match day (0 = season not started). */
+  getDay(): number {
+    return this.currentDay
+  }
+
+  /** B6.3: how many persistent match-night moments the chronicle holds. Lets a
+   *  harness assert "at most one per game" without reaching into the state. */
+  getChronicleMomentCount(): number {
+    return this.chronicle.events.filter((e) => e.details?.moment !== undefined).length
   }
 
   private pickAsset(p: DraftPick): PickAssetView {

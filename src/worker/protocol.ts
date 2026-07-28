@@ -25,6 +25,8 @@ export type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  MatchDayPreviewView,
+  PostgameReceiptView,
   ClubInfoView,
   CalendarView,
   CareerPhase,
@@ -177,6 +179,8 @@ import type {
   AhlStandingsView,
   BoardView,
   BoxScoreView,
+  MatchDayPreviewView,
+  PostgameReceiptView,
   ClubInfoView,
   CalendarView,
   CareerSnapshot,
@@ -332,6 +336,10 @@ export type WorkerRequestBody =
   | { type: 'getOffseason' }
   /** Box score of the most recently played user game, if any. */
   | { type: 'getLastBoxScore' }
+  /** B6.1: the compact match-day frame when the next day to sim has a user game. */
+  | { type: 'getMatchDayPreview' }
+  /** B6.2: postgame receipts for the latest user game (score, stars, turning point). */
+  | { type: 'getPostgameReceipt' }
   /* ── mutations ── */
   | { type: 'setLines'; lines: LinesUpdate }
   | { type: 'setTactics'; tactics: TeamTactics }
@@ -603,6 +611,10 @@ export type WorkerResponse = { id: number } & (
   | { type: 'playoffs'; playoffs: PlayoffBracketView | null }
   | { type: 'offseason'; offseason: OffseasonView | null }
   | { type: 'boxScore'; boxScore: BoxScoreView | null }
+  /** B6.1: null when the next day to sim has no user game. */
+  | { type: 'matchDayPreview'; preview: MatchDayPreviewView | null }
+  /** B6.2: null when the latest advance didn't play a user game. */
+  | { type: 'postgameReceipt'; receipt: PostgameReceiptView | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Your assistant GM's live read as you build a package (advice, not an answer). */
