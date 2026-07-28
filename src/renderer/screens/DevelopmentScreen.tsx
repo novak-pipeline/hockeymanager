@@ -81,6 +81,9 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
   if (!data) return <Notice kind="info">No development data.</Notice>
   const d = data
+  // The U23 progress rows carry season ability change; index them so the
+  // prospects table can show each man's payoff beside his focus.
+  const growthById = new Map(d.progress.map((g) => [g.playerId, g.overallDelta]))
 
   return (
     <section className="stack">
@@ -123,6 +126,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                 <th>Potential</th>
                 <th>Projection</th>
                 <th>Dev focus</th>
+                <th className="num" title="Ability gained or lost so far this season — the payoff, shown next to the lever that drives it">Season</th>
                 <th>Development</th>
               </tr>
             </thead>
@@ -155,11 +159,23 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                       {FOCUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </td>
+                  <td className="num">
+                    {(() => {
+                      // Gap #6 payoff receipt: this growth was already computed for
+                      // the U23 Progress tab — one click away from the focus control
+                      // that drives it, so a GM set a focus and never saw whether it
+                      // paid. Same view object, joined by id; no engine change.
+                      const g = growthById.get(r.playerId)
+                      if (g === undefined) return <span className="muted">—</span>
+                      const color = g > 0 ? 'var(--success)' : g < 0 ? 'var(--danger)' : 'var(--muted)'
+                      return <span style={{ color, fontWeight: 600 }}>{g > 0 ? `+${g}` : g === 0 ? '–' : g}</span>
+                    })()}
+                  </td>
                   <td className="small muted">{r.note}</td>
                 </tr>
               ))}
               {d.rows.length === 0 && (
-                <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No prospects in the system.</td></tr>
+                <tr><td colSpan={10} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No prospects in the system.</td></tr>
               )}
             </tbody>
           </table>
