@@ -1727,11 +1727,14 @@ export class Career {
       engagement?: { likes: number; reposts: number }
     } = {}
   ): void {
+    // Off the match-day clock (summer stages, camp week, the preseason board
+    // meeting) news carry their fiction date, so beats land on distinct days.
+    const beatISO = this.phase === 'offseason' ? this.offseasonDateISO() : this.preseasonDateISO()
     const item: NewsItem = {
       id: `n${this.newsCounter++}`,
       day: this.currentDay,
       year: this.year,
-      ...(this.phase === 'offseason' ? { dateISO: this.offseasonDateISO() } : {}),
+      ...(beatISO !== null ? { dateISO: beatISO } : {}),
       category,
       headline,
       body,
@@ -5037,6 +5040,11 @@ export class Career {
         return true
       }
       this.autoResolveTrainingCamp()
+      // Cut day and the boardroom are SEQUENTIAL beats (playtest #5): the press
+      // that resolves the cuts is consumed here, so the preseason board meeting
+      // greets the NEXT Continue (Sep 23 on the fiction clock) instead of being
+      // swallowed by the same one.
+      if (this.boardMeetingYear !== null) return true
     }
     // Season Rhythm M1: simming past the preseason board meeting sends the AGM
     // in your place (safe defaults, a news item, and the meeting is gone).
@@ -5364,8 +5372,9 @@ export class Career {
       }
     }
     // Construction-era mail (welcome, mandate, season-begins) was stamped
-    // before the phase flip — it all belongs to July 1 of the start summer.
-    for (const n of this.news) if (!n.dateISO) n.dateISO = `${this.year}-07-01`
+    // before the phase flip — it ALL belongs to July 1 of the start summer,
+    // whatever clock (or none) stamped it during construction.
+    for (const n of this.news) n.dateISO = `${this.year}-07-01`
     // Development camp opens in early July — your first beat as GM.
     // (Only armed when the org actually has kids to skate.)
     this.devCampPending = this.devCampInvitees().invitees.length > 0
@@ -8642,17 +8651,19 @@ export class Career {
         else notes.push(`${d.name} is assigned to the farm.`)
       }
     }
-    camp.resolved = true
     const team = this.data.teams.get(this.userTeamId)
     const ahl = team?.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
     if (team) repairLines(team, this.data.players)
     if (ahl) repairLines(ahl, this.data.players)
+    // Push the mail BEFORE marking the camp resolved so it is stamped with cut
+    // day (Sep 22) on the fiction clock, not the board meeting's morning after.
     this.pushNews(
       'contract',
       'Camp breaks — the roster is set',
       `Cut day is done:\n\n• ${notes.join('\n• ')}\n\nOpening night is next. This is your team now.`,
       { teamId: this.userTeamId as string }
     )
+    camp.resolved = true
     return { ok: true, notes }
   }
 
@@ -12146,6 +12157,23 @@ export class Career {
     }
   }
 
+  /** The pre-opening stretch of a season (phase already regularSeason, no day
+   *  played yet) has its own fiction clock: training camp runs Sep 15–22 (camp
+   *  day 8 = final cuts) and the preseason board meeting sits on Sep 23 — the
+   *  morning after camp breaks. Null once the season is underway or in any
+   *  other phase, so callers fall back to the match-day clock. This keeps cut
+   *  day and the boardroom on DISTINCT calendar days (playtest #5). */
+  private preseasonDateISO(): string | null {
+    if (this.phase !== 'regularSeason' || this.currentDay > 0) return null
+    const camp = this.trainingCamp
+    if (camp && !camp.resolved) {
+      const day = Math.min(8, Math.max(1, camp.campDay ?? 1))
+      return `${this.year}-09-${String(14 + day).padStart(2, '0')}`
+    }
+    if (this.boardMeetingYear !== null) return `${this.year}-09-23`
+    return null
+  }
+
   getDashboard(): DashboardView {
     const ctx = this.ctx()
     const sorted = ctx.standingsSorted
@@ -12265,6 +12293,12 @@ export class Career {
 
     const continueLabel = (() => {
       if (this.phase === 'regularSeason') {
+        // Pre-opening beats name themselves (beat-gate law, B2.2): camp week,
+        // cut day, then the boardroom — before the button names match days.
+        if (this.trainingCamp && !this.trainingCamp.resolved) {
+          return (this.trainingCamp.campDay ?? 1) >= 8 ? 'Continue — cut day' : 'Continue — training camp'
+        }
+        if (this.currentDay === 0 && this.boardMeetingYear !== null) return 'Continue — board meeting'
         const next = this.matchDays.find((d) => d > this.currentDay)
         if (next === undefined) return 'Continue to playoffs'
         const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -12364,7 +12398,10 @@ export class Career {
       phase: this.phase,
       day: this.currentDay,
       totalDays: this.matchDays[this.matchDays.length - 1] ?? 0,
-      date: this.phase === 'offseason' ? this.offseasonDateISO() : dayToDateISO(this.year, Math.max(1, this.currentDay)),
+      date:
+        this.phase === 'offseason'
+          ? this.offseasonDateISO()
+          : this.preseasonDateISO() ?? dayToDateISO(this.year, Math.max(1, this.currentDay)),
       continueLabel,
       draftPending: this.draftPending(),
       captainsPending: this.captainsPending(),
@@ -15418,15 +15455,30 @@ export class Career {
                 // the GM already ran (playtest #3).
                 { dateISO: `${y}-07-01`, label: 'Development Camp' },
                 { dateISO: `${y}-09-15`, label: 'Training Camp Opens' },
-                { dateISO: `${y}-09-28`, label: 'Cut Day' },
+                // Camp week is Sep 15–22 (day 8 = final cuts); the boardroom
+                // follows the morning after camp breaks (playtest #5).
+                { dateISO: `${y}-09-22`, label: 'Cut Day' },
+                { dateISO: `${y}-09-23`, label: 'Preseason Board Meeting' },
               ]
             })(),
           }
         : {
-            todayISO: dayToDateISO(this.year, this.currentDay),
-            // Mark the recurring bi-weekly staff meetings so the GM sees them coming.
+            // Before day 1 the fiction clock owns "today" (camp week Sep 15–22,
+            // board meeting Sep 23) so the pre-opening beats read as real days.
+            todayISO: this.preseasonDateISO() ?? dayToDateISO(this.year, this.currentDay),
             extraKeyDates: (() => {
               const out: Array<{ dateISO: string; label: string }> = []
+              // Pre-opening beats still ahead of (or under) the GM get their marks.
+              if (this.currentDay === 0) {
+                if (this.trainingCamp) {
+                  out.push({ dateISO: `${this.year}-09-15`, label: 'Training Camp Opens' })
+                  out.push({ dateISO: `${this.year}-09-22`, label: 'Cut Day' })
+                }
+                if (this.boardMeetingYear !== null) {
+                  out.push({ dateISO: `${this.year}-09-23`, label: 'Preseason Board Meeting' })
+                }
+              }
+              // Mark the recurring bi-weekly staff meetings so the GM sees them coming.
               for (let d = STAFF_MEETING_INTERVAL; d <= lastMatchDay; d += STAFF_MEETING_INTERVAL) {
                 out.push({ dateISO: dayToDateISO(this.year, d), label: 'Staff Meeting' })
               }

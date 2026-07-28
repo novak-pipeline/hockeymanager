@@ -159,6 +159,19 @@ try {
     console.log('  ⚠ dev camp flow not reachable — skipped')
   }
 
+  // ── the summer calendar (playtest #3): photograph Schedule right after the
+  //    dev-camp beat so the Development Camp key-date can be checked against
+  //    when the camp actually ran. ──
+  try {
+    await win.click('text="Schedule"', { timeout: 4000 })
+    await win.waitForTimeout(600)
+    await snap(win, 'offseason-calendar')
+    await win.click('text="Home"', { timeout: 4000 })
+    await win.waitForTimeout(400)
+  } catch {
+    console.log('  ⚠ offseason calendar not reachable — skipped')
+  }
+
   // ── advance into early free agency (the frenzy window, days 1–3) ──
   for (let i = 0; i < 3; i++) {
     try {
@@ -252,6 +265,15 @@ try {
         await win.click('button:has-text("opening night")', { timeout: 4000 })
         await win.waitForTimeout(400)
       } catch { /* leave as-is */ }
+      // Playtest #5: the NEXT Continue after camp breaks should be the preseason
+      // board meeting on its OWN day (Sep 23) — photograph the boardroom.
+      try {
+        await win.click('button:has-text("Continue")', { timeout: 4000 })
+        await win.waitForSelector('button:has-text("Send the AGM")', { timeout: 6000 })
+        await snap(win, 'board-meeting')
+      } catch {
+        console.log('  ⚠ board meeting after camp not reached — check beat order')
+      }
     } else {
       console.log('  ⚠ training camp not reached in 80 presses — skipped')
     }

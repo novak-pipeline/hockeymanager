@@ -313,9 +313,9 @@ describe('Career — full year cycle', () => {
     expect(squad.rows.length).toBeGreaterThanOrEqual(18)
 
     // The new season opens with training camp — a beat-by-beat week that gates
-    // opening night. Walk it; no games are simmed until the camp resolves (the
-    // final Continue past cut day hands the coach the clipboard AND plays the
-    // opener).
+    // opening night. Walk it; no games are simmed until the camp resolves. The
+    // press past cut day hands the coach the clipboard but is CONSUMED there:
+    // cut day and the preseason board meeting are sequential beats (playtest #5).
     expect(career.getTrainingCamp()).not.toBeNull()
     expect(career.view().userTeam.standing.gamesPlayed).toBe(0)
     let campGuard = 0
@@ -323,8 +323,11 @@ describe('Career — full year cycle', () => {
       expect(career.advanceDay()).toBe(true)
     }
     expect(career.getTrainingCamp()).toBeNull() // camp resolved
+    expect(career.view().userTeam.standing.gamesPlayed).toBe(0) // …but no game yet
 
-    // And the next season actually played.
+    // The NEXT advance meets the board meeting (AGM defaults when simmed past)
+    // and then the season actually plays.
+    expect(career.advanceDay()).toBe(true)
     expect(career.view().userTeam.standing.gamesPlayed).toBeGreaterThanOrEqual(1)
   })
 
@@ -720,7 +723,9 @@ describe('Career — story layer', () => {
     expect(restored.advanceDay()).toBe(true)
   })
 
-  it('reaches the deadline and curates trade-rumour chatter out of the inbox', () => {
+  // Sims ~120 match days to reach the deadline — ~30s+ on slower machines, so
+  // it carries an explicit timeout instead of racing vitest's 30s default.
+  it('reaches the deadline and curates trade-rumour chatter out of the inbox', { timeout: 120_000 }, () => {
     // The deadline machinery must run, and league-wide trade-RUMOUR chatter
     // ("Trade talk heats up: X close to leaving Y") about other clubs must be
     // curated OUT of the desk inbox — it's ambient noise that belongs to the
@@ -1941,7 +1946,9 @@ describe('Career — wider-world quick-sim', () => {
     expect(data.players.get(pid)!.contract.yearsRemaining).toBeGreaterThan(0)
   })
 
-  it('graduates drafted prospects into the org once they age out of junior', () => {
+  // Three full seasons of sim — runs ~30s+ on slower machines, so it carries an
+  // explicit timeout instead of racing vitest's 30s default.
+  it('graduates drafted prospects into the org once they age out of junior', { timeout: 120_000 }, () => {
     // Mint at 18 → drafted at 19 (offseason ages +1), then a second season ages
     // them to 20 ⇒ they sign their ELC and graduate to the org's farm.
     const { data, amateurIds } = withJuniorProspects(205, 18)
