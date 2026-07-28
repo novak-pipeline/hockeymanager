@@ -30,6 +30,8 @@ export interface MeetingSpeaker {
   /** "Owner", "Head Coach", "Assistant GM"… */
   title: string
   faceId?: string
+  /** Personality hint for voice casting + tone. Optional/additive. */
+  demeanor?: 'fiery' | 'calm' | 'analytical' | 'motivator' | 'pragmatic'
 }
 
 export interface MeetingLine {

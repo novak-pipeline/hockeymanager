@@ -18,6 +18,7 @@
  */
 
 import type { VoiceEngine, SpeakLine } from './announcer'
+import { CAST_VOICES } from './voiceCast'
 
 // ── Minimal local type for RawAudio ────────────────────────────────────────
 // Avoids importing the full @huggingface/transformers type tree.
@@ -161,7 +162,42 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
     device: 'wasm',
   })) as KokoroTTSLike
 
+  // Warm the per-voice style files in the background (fire-and-forget). Without
+  // this, kokoro-js fetches voices/<id>.bin from Hugging Face the FIRST time each
+  // voice speaks — so a flaky network or offline session meant some characters
+  // were simply silent ("some of the voices don't work"). Prefetching into the
+  // same Cache-API cache kokoro-js reads makes every cast voice ready + offline.
+  void prefetchVoiceData()
+
   return new KokoroVoiceEngine(tts)
+}
+
+// ── Voice-style prefetch ───────────────────────────────────────────────────
+
+const VOICE_BIN_URL = (id: string): string =>
+  `https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/${id}.bin`
+
+/** Fetch every castable voice's style file into kokoro-js's own 'kokoro-voices'
+ *  cache so first utterances never depend on the network. Best-effort: failures
+ *  only log — the speak-time fallback chain still guarantees audible lines. */
+export async function prefetchVoiceData(voices: readonly string[] = CAST_VOICES): Promise<void> {
+  let cache: Cache | null = null
+  try {
+    cache = await caches.open('kokoro-voices')
+  } catch {
+    return // Cache API unavailable — per-session in-memory caching still applies
+  }
+  for (const id of voices) {
+    const url = VOICE_BIN_URL(id)
+    try {
+      if (await cache.match(url)) continue
+      const res = await fetch(url)
+      if (res.ok) await cache.put(url, res)
+      else console.warn(`[voice] prefetch ${id}: HTTP ${res.status}`)
+    } catch (e) {
+      console.warn(`[voice] prefetch ${id} failed:`, (e as Error)?.message ?? e)
+    }
+  }
 }
 
 // ── KokoroVoiceEngine ──────────────────────────────────────────────────────
@@ -202,16 +238,26 @@ class KokoroVoiceEngine implements VoiceEngine {
   private _currentSource: AudioBufferSourceNode | null = null
   private _pending: SpeakLine | null = null // max 1 pending item
   private _busy = false
+  /** Bumped on cancel() — a synthesis already in flight checks it before
+   *  playback, so a cancelled line can never start speaking late (overlap). */
+  private _epoch = 0
+  private _fallback: VoiceEngine | null = null
 
   constructor(tts: KokoroTTSLike) {
     this._tts = tts
   }
 
+  /** Engine to hand a line to when neural synthesis fails (never-silent). */
+  setFallback(engine: VoiceEngine | null): void {
+    this._fallback = engine
+  }
+
   speak(line: SpeakLine): void {
     if (this._busy) {
       // Drop low-importance lines when busy; keep the most important pending
-      if (line.importance === 1) return
-      if (this._pending && this._pending.importance >= line.importance) return
+      if (line.importance === 1) { line.onDone?.(); return }
+      if (this._pending && this._pending.importance >= line.importance) { line.onDone?.(); return }
+      this._pending?.onDone?.() // the replaced line is finished as far as callers care
       this._pending = line
       return
     }
@@ -219,6 +265,7 @@ class KokoroVoiceEngine implements VoiceEngine {
   }
 
   cancel(): void {
+    this._epoch++
     this._pending = null
     try { this._currentSource?.stop() } catch { /* already stopped */ }
     this._currentSource = null
@@ -241,19 +288,33 @@ class KokoroVoiceEngine implements VoiceEngine {
 
   private async _play(line: SpeakLine): Promise<void> {
     this._busy = true
+    const epoch = this._epoch
+    let handedOff = false
     try {
-      const voice = line.voice ?? SPORTS_VOICE
-      const key = `${voice}|${line.speech}`
-      let raw = cacheGet(key)
+      const rate = line.rate ?? 1.08
+      // Never-silent: if the cast voice fails to synthesise (its style file
+      // couldn't be fetched, bad weights, …), retry once on the default voice,
+      // and if neural is truly down hand the line to the system engine.
+      let raw = await this._synth(line.speech, line.voice ?? SPORTS_VOICE, rate)
+      if (!raw && line.voice && line.voice !== SPORTS_VOICE) {
+        console.warn(`[kokoro] voice "${line.voice}" failed — retrying with ${SPORTS_VOICE}`)
+        raw = await this._synth(line.speech, SPORTS_VOICE, rate)
+      }
+      if (this._epoch !== epoch) return // cancelled while synthesising — stay quiet
       if (!raw) {
-        raw = await this._tts.generate(line.speech, { voice, speed: 1.08 })
-        cacheSet(key, raw)
+        if (this._fallback) {
+          console.warn('[kokoro] synthesis failed — falling back to system voice')
+          handedOff = true
+          this._fallback.speak(line)
+        }
+        return
       }
 
       const ctx = this._audioCtx()
       if (ctx.state === 'suspended') {
         try { await ctx.resume() } catch { /* ignore */ }
       }
+      if (this._epoch !== epoch) return
 
       const audioBuf = ctx.createBuffer(1, raw.audio.length, raw.sampling_rate)
       audioBuf.getChannelData(0).set(raw.audio)
@@ -272,6 +333,7 @@ class KokoroVoiceEngine implements VoiceEngine {
     } finally {
       this._currentSource = null
       this._busy = false
+      if (!handedOff) line.onDone?.() // the fallback engine reports completion itself
 
       // Drain the single-item pending queue
       if (this._pending) {
@@ -279,6 +341,21 @@ class KokoroVoiceEngine implements VoiceEngine {
         this._pending = null
         void this._play(next)
       }
+    }
+  }
+
+  /** Synthesise (with LRU cache); returns null instead of throwing. */
+  private async _synth(speech: string, voice: string, rate: number): Promise<RawAudioLike | null> {
+    const key = `${voice}|${rate}|${speech}`
+    const hit = cacheGet(key)
+    if (hit) return hit
+    try {
+      const raw = await this._tts.generate(speech, { voice, speed: rate })
+      cacheSet(key, raw)
+      return raw
+    } catch (err) {
+      console.warn(`[kokoro] synth failed (${voice}):`, (err as Error)?.message ?? err)
+      return null
     }
   }
 }

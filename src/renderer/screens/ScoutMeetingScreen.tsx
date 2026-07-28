@@ -21,7 +21,7 @@ import { Notice } from '../components/ui'
 import { useNav } from '../components/NavContext'
 import { useClient } from '../hooks/useSim'
 import { bumpRefresh, toast } from '../components/store'
-import { speakAs, cancelSpeech } from '../lib/speak'
+import { speakAs, speakScene, cancelSpeech } from '../lib/speak'
 
 function BoardList({ title, rows, tone }: {
   title: string
@@ -72,6 +72,21 @@ export function ScoutMeetingScreen(): JSX.Element {
 
   useEffect(() => () => cancelSpeech(), [])
 
+  // The recruitment room talks on its own: the host opens, then each scout
+  // makes their pitch in turn (autoplay setting; the buttons stay for replays).
+  useEffect(() => {
+    if (!view) return
+    speakScene([
+      { role: 'scout', text: view.opening, seed: view.host.name },
+      ...view.proposals.map((p) => ({
+        role: 'scout' as const,
+        text: p.intro.join(' '),
+        seed: p.speaker.name,
+        ...(p.speaker.demeanor ? { traits: { gender: 'M' as const, demeanor: p.speaker.demeanor } } : {}),
+      })),
+    ])
+  }, [view])
+
   async function resolve(kind: 'submit' | 'delegate'): Promise<void> {
     if (busy) return
     setBusy(true)
@@ -110,7 +125,7 @@ export function ScoutMeetingScreen(): JSX.Element {
             <div className="muted" style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>
               <b>{view.host.name}</b> · {view.host.title} — “<Linkify text={view.opening} />”
             </div>
-            <button className="btn btn-sm btn-ghost" title="Hear it" onClick={() => speakAs('scout', view.opening, { importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
+            <button className="btn btn-sm btn-ghost" title="Hear it" onClick={() => speakAs('scout', view.opening, { seed: view.host.name, importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
           </div>
         </div>
 
@@ -144,7 +159,7 @@ export function ScoutMeetingScreen(): JSX.Element {
                 <div className="row" style={{ gap: 6, alignItems: 'baseline' }}>
                   <span style={{ fontWeight: 700 }}>{p.speaker.name}</span>
                   <span className="muted" style={{ fontSize: 11.5, flex: 1 }}> · {p.speaker.title}</span>
-                  <button className="btn btn-sm btn-ghost" title="Hear the pitch" onClick={() => speakAs('scout', p.intro.join(' '), { seed: p.speaker.name, importance: 2 })}><Icon size={16}><Icons.Volume /></Icon></button>
+                  <button className="btn btn-sm btn-ghost" title="Hear the pitch" onClick={() => speakAs('scout', p.intro.join(' '), { seed: p.speaker.name, importance: 2, ...(p.speaker.demeanor ? { traits: { gender: 'M' as const, demeanor: p.speaker.demeanor } } : {}) })}><Icon size={16}><Icons.Volume /></Icon></button>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>{p.title}</div>
                 {p.intro.map((line, i) => (

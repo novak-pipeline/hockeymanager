@@ -36,6 +36,11 @@ export interface SpeakLine {
   /** Optional Kokoro voice id for per-character casting (see voiceCast.ts). The
    *  system Web-Speech engine ignores this; Kokoro reads it. */
   voice?: string
+  /** Optional delivery-rate multiplier (Kokoro `speed`; see castFor()). */
+  rate?: number
+  /** Called once the line is finished with — spoken to the end, dropped, or
+   *  cancelled. Lets callers sequence dialogue without overlap. */
+  onDone?: () => void
 }
 
 // ── VoiceEngine interface ───────────────────────────────────────────────────
@@ -45,6 +50,8 @@ export interface VoiceEngine {
   cancel(): void
   readonly ready: boolean
   readonly name: string
+  /** Optional: engine to delegate to when this one fails to produce audio. */
+  setFallback?(engine: VoiceEngine | null): void
 }
 
 // ── localStorage helpers ───────────────────────────────────────────────────
@@ -154,8 +161,8 @@ class SystemVoiceEngine implements VoiceEngine {
   }
 
   speak(line: SpeakLine): void {
-    if (!this._available) return
-    if (this._queue >= MAX_QUEUE && line.importance === 1) return
+    if (!this._available) { line.onDone?.(); return }
+    if (this._queue >= MAX_QUEUE && line.importance === 1) { line.onDone?.(); return }
 
     this._queue++
 
@@ -175,8 +182,13 @@ class SystemVoiceEngine implements VoiceEngine {
     utt.lang = this._voiceCache?.lang ?? 'en-US'
     if (this._voiceCache) utt.voice = this._voiceCache
 
+    let settled = false
     const decrement = () => {
       this._queue = Math.max(0, this._queue - 1)
+      if (!settled) {
+        settled = true
+        line.onDone?.()
+      }
     }
     utt.onend = decrement
     utt.onerror = decrement
@@ -265,6 +277,9 @@ export class Announcer {
    */
   attachKokoro(engine: VoiceEngine): void {
     this.kokoroEngine = engine
+    // Never-silent: a neural line whose synthesis fails falls through to the
+    // always-available system voice instead of dying quietly.
+    engine.setFallback?.(this.systemEngine)
   }
 
   /**
@@ -276,6 +291,7 @@ export class Announcer {
     if (kind === 'kokoro') {
       if (engine) {
         this.kokoroEngine = engine
+        engine.setFallback?.(this.systemEngine)
       } else if (!this.kokoroEngine) {
         // No engine provided and none cached; stay on system
         return
@@ -292,7 +308,7 @@ export class Announcer {
    * Speak a line (new typed form).
    */
   speakLine(line: SpeakLine): void {
-    if (!this.available || !this.enabled) return
+    if (!this.available || !this.enabled) { line.onDone?.(); return }
     this._activeEngine().speak(line)
   }
 

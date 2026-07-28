@@ -14,7 +14,7 @@ import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
 import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
-import { speakAs } from '../lib/speak'
+import { speakAs, speakScene } from '../lib/speak'
 
 /** Category metadata: accent color, label, and FM-style "from" sender.
  *  (The category glyph is rendered from the shared <CategoryIcon> vocabulary.) */
@@ -545,6 +545,12 @@ function ConcernCard({
   const [voiced, setVoiced] = useState<string | null>(null)
   // Whether that reply came from the local AI writer (color it) vs the template.
   const [voicedByModel, setVoicedByModel] = useState(false)
+
+  // The player speaks his reply as soon as it lands (autoplay setting; the
+  // replay button stays).
+  useEffect(() => {
+    if (voiced) speakScene([{ role: 'player', text: voiced, seed: concern.playerName }])
+  }, [voiced, concern.playerName])
 
   useEffect(() => {
     let live = true
