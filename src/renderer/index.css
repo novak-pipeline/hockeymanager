@@ -1235,6 +1235,19 @@ a:hover { text-decoration: underline; }
 .dash-col > .dash-fill.dash-fill-tight {
   min-height: 96px;
 }
+
+/* A content-sized panel that is nonetheless allowed to GIVE UP height when its
+   column is over-full — the offseason Week Ahead, which sits above the summer
+   desk (the grower). Without this the desk shrank to its floor and the column
+   still overflowed, clipping the desk (#8, offseason case). Shrinks only when
+   needed; its list scrolls internally rather than the panel being cut. */
+.dash-col > .dash-shrink {
+  flex: 0 1 auto;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .dash-scroll {
   flex: 1 1 0;
   min-height: 0;

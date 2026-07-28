@@ -1169,7 +1169,7 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
   }
 
   return (
-    <Panel title="The Week Ahead" {...(fill ? { className: 'dash-fill dash-fill-tight' } : {})}>
+    <Panel title="The Week Ahead" className={fill ? 'dash-fill dash-fill-tight' : 'dash-shrink'}>
       {/* today — the highlighted head of the agenda */}
       <div
         style={{
@@ -1197,10 +1197,11 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
         ) : null}
       </div>
 
-      {/* the coming days — inside a scroll region when this panel is the
-          column's grower, so a squeezed column shortens the agenda instead of
-          cutting off the panels below it (#8) */}
-      <div {...(fill ? { className: 'dash-scroll' } : {})}>
+      {/* the coming days — always in a scroll region, so whether this panel is
+          the column's grower (in season) or merely shrinkable (offseason, where
+          the summer desk grows), a squeezed column shortens the AGENDA instead
+          of cutting off the panels below it (#8) */}
+      <div className="dash-scroll">
       {upcoming.map((e, i) => (
         <div key={i} style={rowStyle}>
           {dateCell(e.dateISO)}
