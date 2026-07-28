@@ -17940,6 +17940,34 @@ export class Career {
   }
 
   /**
+   * Hand the C to the head coach (beat-gate law, B2.2). The captaincy was the one
+   * blocking beat with no delegate: every other gate either auto-resolves or has a
+   * "let the staff handle it", but this one blocked Continue outright until the GM
+   * found the C button on the Leadership screen. A GM who didn't know that had a
+   * Continue button which only ever toasted at him.
+   *
+   * The coach takes the eligible skater the room already follows — highest
+   * leadership, ties to the more experienced man — which is the same ordering the
+   * Leadership board presents.
+   */
+  nameCaptainByCoach(): { ok: boolean; message?: string; playerId?: string; name?: string } {
+    const team = this.userTeam
+    const candidates = team.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.position !== 'G' && isCaptainEligible(p))
+    if (candidates.length === 0) {
+      return { ok: false, message: 'Nobody on the roster is eligible to wear the C.' }
+    }
+    candidates.sort((a, b) =>
+      this.leadershipDisplay(b) - this.leadershipDisplay(a) || b.age - a.age || (a.id < b.id ? -1 : 1)
+    )
+    const pick = candidates[0]!
+    const res = this.setCaptain(pick.id as string)
+    if (!res.ok) return res
+    return { ok: true, playerId: pick.id as string, name: pick.name }
+  }
+
+  /**
    * #189: toggle a player's alternate-captain (A) status. Enforces the NHL letter
    * cap (2 alternates with a captain, 3 without) and never lets the captain also
    * hold an A. Returns a message when the request can't be honoured.

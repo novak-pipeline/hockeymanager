@@ -74,3 +74,40 @@ describe('continueLabel — every gate names itself', () => {
     expect(career.getDashboard().continueLabel).toBe('Continue — scouting report')
   })
 })
+
+describe('the captaincy gate has a one-click escape (B2.2)', () => {
+  it('the coach names an eligible skater and the gate clears', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const team = data.teams.get(data.league.teams[3]!)!
+    delete team.captainId
+
+    // `captainsPending()` is scoped to the preseason stage, so assert on the
+    // completeness predicate it wraps — that is the condition the gate holds on.
+    const gate = career as unknown as { captainsSetupComplete(): boolean }
+    expect(gate.captainsSetupComplete()).toBe(false)
+    const res = career.nameCaptainByCoach()
+    expect(res.ok).toBe(true)
+    expect(res.name).toBeTruthy()
+    // He must be a real, eligible skater on the roster — not a goalie, not a ghost.
+    const picked = data.players.get(team.captainId!)!
+    expect(picked.position).not.toBe('G')
+    expect(team.roster).toContain(team.captainId)
+    // And the blocking beat is actually gone, which is the whole point.
+    expect(gate.captainsSetupComplete()).toBe(true)
+  })
+
+  it('picks the leader the room follows, not just anyone', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const team = data.teams.get(data.league.teams[3]!)!
+    delete team.captainId
+    career.nameCaptainByCoach()
+    const chosen = data.players.get(team.captainId!)!
+    const skaters = team.roster.map((id) => data.players.get(id)!).filter((p) => p.position !== 'G')
+    const best = Math.max(...skaters.map((p) => p.leadership ?? 0))
+    // Not a strict argmax assertion — eligibility filters some out — but the
+    // coach must not hand the C to a bottom-of-the-room player.
+    expect(chosen.leadership ?? 0).toBeGreaterThanOrEqual(best * 0.6)
+  })
+})

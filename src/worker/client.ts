@@ -366,6 +366,11 @@ export class SimClient {
     return this.send({ type: 'setCaptain', playerId })
   }
 
+  /** Beat-gate escape: let the head coach name the captain (B2.2). */
+  nameCaptainByCoach(): Promise<WorkerResponse> {
+    return this.send({ type: 'nameCaptainByCoach' })
+  }
+
   toggleAlternate(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'toggleAlternate', playerId })
   }

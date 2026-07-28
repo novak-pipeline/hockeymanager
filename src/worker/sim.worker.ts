@@ -236,6 +236,14 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().setCaptain(req.playerId)
       return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }
     }
+    case 'nameCaptainByCoach': {
+      const r = must().nameCaptainByCoach()
+      const msg = r.ok ? `${r.name} takes the C — the coach's call.` : r.message
+      return {
+        id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok,
+        ...(msg !== undefined ? { message: msg } : {}),
+      }
+    }
     case 'toggleAlternate': {
       const r = must().toggleAlternate(req.playerId)
       return { id: req.id, type: 'leadership', leadership: must().getLeadership(), ok: r.ok, message: r.message }

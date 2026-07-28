@@ -308,6 +308,7 @@ export type WorkerRequestBody =
   | { type: 'getLeadership' }
   | { type: 'getMediaCircuit' }
   | { type: 'setCaptain'; playerId: string | null }
+  | { type: 'nameCaptainByCoach' }
   | { type: 'toggleAlternate'; playerId: string }
   | { type: 'setJerseyNumber'; playerId: string; number: number | null }
   /** #186: no-trade-clause waive negotiation. */

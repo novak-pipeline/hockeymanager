@@ -48,6 +48,16 @@ export function LeadershipScreen(): JSX.Element {
     if (busy) return; setBusy(true)
     try { apply(await client.setCaptain(playerId)) } finally { setBusy(false) }
   }
+  /** Beat-gate escape (B2.2): the captaincy is a BLOCKING beat, so it needs a
+   *  one-click way out for a GM who'd rather the coach decide. */
+  async function letCoachDecide(): Promise<void> {
+    if (busy) return; setBusy(true)
+    try {
+      const res = await client.nameCaptainByCoach()
+      apply(res)
+      if (res.type === 'leadership' && res.ok !== false && res.message) toast(res.message, 'success')
+    } finally { setBusy(false) }
+  }
   async function toggleAlt(playerId: string): Promise<void> {
     if (busy) return; setBusy(true)
     try { apply(await client.toggleAlternate(playerId)) } finally { setBusy(false) }
@@ -67,8 +77,15 @@ export function LeadershipScreen(): JSX.Element {
       <ScreenHeader title="Leadership Group & Sweater Numbers" />
       {noCaptain && (
         <Notice kind="warn">
-          Name a captain before the season opens — the room needs a leader in the letter. Alternates
-          and numbers are up to you; the C is the one call you have to make.
+          <div>
+            Name a captain before the season opens — the room needs a leader in the letter. Alternates
+            and numbers are up to you; the C is the one call you have to make.
+          </div>
+          <button className="btn btn-sm" style={{ marginTop: 8 }} disabled={busy}
+            onClick={() => void letCoachDecide()}
+            title="The coach gives the C to the eligible skater the room already follows">
+            Let the coach name him
+          </button>
         </Notice>
       )}
       {!lead ? (
