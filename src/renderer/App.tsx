@@ -1,5 +1,5 @@
 import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
+import { motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { shouldHoldOverlay } from '@renderer/lib/cadence'
@@ -651,19 +651,29 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <MotionConfig reducedMotion="user">
-                    <AnimatePresence mode="wait" initial={false}>
-                      <motion.div
-                        key={nav.screen}
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                      >
-                        <ScreenBoundary screen={nav.screen}>
-                          <ScreenRouter screen={nav.screen} params={nav.params} />
-                        </ScreenBoundary>
-                      </motion.div>
-                    </AnimatePresence>
+                    {/* SHIP-BLOCKER FIX: this used to be an AnimatePresence with
+                      * mode="wait" and an exit animation. Under StrictMode's
+                      * double-mount (React 19 + framer-motion 12) the exit never
+                      * completed, and mode="wait" holds the incoming child until
+                      * it does — so the sidebar highlighted the new destination,
+                      * the shell knew the screen had changed, and the OLD screen
+                      * stayed on the glass. Every destination in the app was
+                      * unreachable; only the dashboard ever rendered.
+                      *
+                      * A screen swap must not depend on an animation finishing.
+                      * Keying a plain motion.div gives the same entrance polish —
+                      * React unmounts the old subtree the moment the key changes —
+                      * with no exit to deadlock on. */}
+                    <motion.div
+                      key={nav.screen}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <ScreenBoundary screen={nav.screen}>
+                        <ScreenRouter screen={nav.screen} params={nav.params} />
+                      </ScreenBoundary>
+                    </motion.div>
                   </MotionConfig>
                 </div>
               </div>
