@@ -172,6 +172,24 @@ function PracticePlanPanel({ plan }: { plan: PracticePlanView }): JSX.Element {
               : 'Lighter load keeps the team fresh for the games that count.'}
           </div>
         </div>
+
+        {/* #154: who the regimen actually reaches. The lever audit found the
+            focus pointed only at the NHL club — the group with the least room
+            left to grow — so who it covers is now part of the receipt. */}
+        {plan.reach && (
+          <div>
+            <div className="muted small" style={{ marginBottom: 6 }}>Who it reaches</div>
+            <div style={{ fontWeight: 700 }}>
+              {plan.reach.developing} developing{' '}
+              <span className="muted" style={{ fontWeight: 400 }}>of {plan.reach.players}</span>
+            </div>
+            <div className="muted small" style={{ marginTop: 4 }}>
+              {plan.reach.label} — those {plan.reach.developing} have{' '}
+              <strong>{plan.reach.headroom.toFixed(1)}</strong> rating points left to their ceiling on
+              average. Training only moves players with room to grow.
+            </div>
+          </div>
+        )}
       </div>
     </Panel>
   )

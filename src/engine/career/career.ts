@@ -44,7 +44,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
+import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -5098,7 +5098,96 @@ export class Career {
       if (isUser && this.lineManagementMode === 'fillGaps') continue
       this.autoUpgradeLines(team)
     }
+    // #154 (lever audit): a healthy scratch must actually scratch. The Team
+    // screen's scratch toggle wrote practiceState.scratched, which only the
+    // squad view and the morale tick ever read — the player kept his line and
+    // played the game. A control that visibly does nothing is the exact defect
+    // this audit exists to kill, so the scratch is now enforced on the ice.
+    this.enforceUserScratches()
     this.refreshCoachFit()
+  }
+
+  /**
+   * Take every healthy scratch off the user's lines and put the best available
+   * replacement of the same group in his slot.
+   *
+   * Deliberately conservative: a scratch is only honoured when a legal, healthy,
+   * un-scratched replacement of the same position group exists. Dressing 11
+   * forwards because the GM scratched more men than he has depth for would be a
+   * worse lie than ignoring the toggle. Goalies swap the depth order instead of
+   * being replaced (there are only two).
+   */
+  private enforceUserScratches(): void {
+    if (this.practiceState.scratched.length === 0) return
+    const scratched = new Set(this.practiceState.scratched)
+    const team = this.userTeam
+    const isFwd = (p: Player): boolean => p.position === 'C' || p.position === 'W'
+    const isDef = (p: Player): boolean => p.position === 'D'
+
+    const dressed = new Set<string>()
+    for (const line of team.lines.forwards) for (const id of line) if (id) dressed.add(id as string)
+    for (const pair of team.lines.defensePairs) for (const id of pair) if (id) dressed.add(id as string)
+
+    const swapOut = (slots: PlayerId[][], pred: (p: Player) => boolean): void => {
+      const bench = (): Player[] =>
+        team.roster
+          .map((id) => this.data.players.get(id))
+          .filter(
+            (p): p is Player =>
+              !!p &&
+              p.injuryStatus === null &&
+              !p.resting &&
+              pred(p) &&
+              !dressed.has(p.id as string) &&
+              !scratched.has(p.id as string),
+          )
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+      for (let r = 0; r < slots.length; r++) {
+        const row = slots[r]
+        if (!row) continue
+        for (let c = 0; c < row.length; c++) {
+          const cur = row[c]
+          if (!cur || !scratched.has(cur as string)) continue
+          const replacement = bench()[0]
+          if (!replacement) return // no legal body left — dress him rather than ice a short line
+          row[c] = replacement.id
+          dressed.add(replacement.id as string)
+          dressed.delete(cur as string)
+        }
+      }
+    }
+
+    swapOut(team.lines.forwards, isFwd)
+    swapOut(team.lines.defensePairs, isDef)
+
+    // A man off the even-strength lines must also be off the special teams —
+    // repairLines only rebuilds a unit that is illegal by health or roster, so
+    // without this a scratch would still take a power-play shift.
+    const fixUnits = (units: PlayerId[][], score: (p: Player) => number): void => {
+      for (const unit of units) {
+        for (let i = 0; i < unit.length; i++) {
+          const cur = unit[i]
+          if (!cur || !scratched.has(cur as string)) continue
+          const inUnit = new Set(unit.map((x) => x as string))
+          const replacement = [...dressed]
+            .filter((id) => !inUnit.has(id) && !scratched.has(id))
+            .map((id) => this.data.players.get(id as PlayerId))
+            .filter((p): p is Player => !!p)
+            .sort((a, b) => score(b) - score(a))[0]
+          if (!replacement) continue
+          unit[i] = replacement.id
+        }
+      }
+    }
+    fixUnits(team.lines.powerPlayUnits, (p) => p.composites.scoring + p.composites.playmaking)
+    fixUnits(team.lines.penaltyKillUnits, (p) => p.composites.defensiveZone + p.composites.takeaway)
+
+    // A scratched starter hands the net to the other goalie.
+    const [g1, g2] = team.lines.goalies
+    if (g1 && g2 && scratched.has(g1 as string) && !scratched.has(g2 as string)) {
+      team.lines.goalies = [g2, g1] as Team['lines']['goalies']
+    }
+    repairLines(team, this.data.players)
   }
 
   /** How the user's lines are managed each matchday: 'coach' auto-adjusts to
@@ -13669,6 +13758,16 @@ export class Career {
   }
 
   /** NHL roster + AHL-affiliate player ids (the user's whole organisation). */
+  /** True when this player is inside the user's pro organisation: the NHL club
+   *  or its AHL affiliate. The team practice regimen covers both (#154). */
+  private inUserOrg(id: PlayerId): boolean {
+    const tid = this.teamOf(id)
+    if (tid === undefined) return false
+    if ((tid as string) === (this.userTeamId as string)) return true
+    const affId = this.userTeam.affiliateId
+    return affId !== undefined && (tid as string) === (affId as string)
+  }
+
   private ownOrgIds(): Set<string> {
     const ids = new Set<string>(this.userTeam.roster.map((id) => id as string))
     const affId = this.userTeam.affiliateId
@@ -17764,9 +17863,17 @@ export class Career {
     if (!p) return undefined
     // #174: an explicit individual development plan follows the prospect wherever
     // he plays (AHL / junior), so a Dev-Center focus actually shapes his growth.
-    // The TEAM practice regimen still only touches the NHL club.
+    //
+    // #154 (lever audit): the TEAM regimen now covers the whole PRO ORGANISATION
+    // — the NHL club AND its AHL affiliate — because it used to reach only the
+    // one group with nothing left to learn. Measured: U23 skaters on the NHL
+    // roster carry ~2.2 overall points of room to their ceiling and grow ~0.27
+    // a season, so a focus moved its targeted composite by +0.07 — invisible.
+    // The affiliate's U23s carry ~11 points of room and grow ~2.7 a season, where
+    // the same focus is worth ~+0.5. An NHL club's development staff runs its
+    // farm team's program in real life; now it does here too.
     const explicit = this.practiceState.perPlayerFocus.find(([pid]) => pid === (id as string))?.[1]
-    if (!explicit && this.teamOf(id) !== this.userTeamId) return undefined
+    if (!explicit && !this.inUserOrg(id)) return undefined
     const focus = explicit ?? effectiveFocus(this.practiceState, id as string)
     if (focus === 'balanced') return undefined // neutral baseline — byte-identical
     const { attributeBias } = practiceDevModifier(focus, p)
@@ -18175,6 +18282,39 @@ export class Career {
       coachMult: Math.round(coachMult * 100),
       coachTier,
       opportunityCostPct: focus === 'balanced' ? 0 : Math.round(UNTARGETED_FOCUS_DRAG * 100),
+      reach: this.practiceReach(),
+    }
+  }
+
+  /**
+   * #154: who the team regimen reaches and how much room they have left.
+   *
+   * The audit found the focus pointed only at the NHL roster, whose U23s carry
+   * ~2 overall points of headroom — so the lever could not move anything. It now
+   * covers the affiliate as well, and this is the receipt for that: the GM can
+   * see the developing bodies his training decision is actually shaping.
+   */
+  private practiceReach(): NonNullable<NonNullable<PracticeView['plan']>['reach']> {
+    const affId = this.userTeam.affiliateId
+    const ahl = affId !== undefined ? this.data.teams.get(affId) : undefined
+    const ids = [...this.userTeam.roster, ...(ahl?.roster ?? [])]
+    let developing = 0
+    let headroom = 0
+    for (const id of ids) {
+      const p = this.data.players.get(id)
+      if (!p || p.age >= 24) continue
+      const room =
+        overall(computeComposites(p.potential, p.role, p.position), p.position) -
+        overall(p.composites, p.position)
+      if (room < 1) continue
+      developing++
+      headroom += room
+    }
+    return {
+      players: ids.length,
+      developing,
+      headroom: developing > 0 ? Math.round((headroom / developing) * 10) / 10 : 0,
+      label: ahl ? `${this.userTeam.name} + ${ahl.name} (AHL)` : this.userTeam.name,
     }
   }
 

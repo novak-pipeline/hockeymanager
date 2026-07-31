@@ -67,26 +67,24 @@ export interface SpecialTeamsTactics {
  * Per-player personal tactics instructions (EHM Additional Options).
  * All optional; absent = no override (use team defaults).
  *
- * These are SETABLE INTENT — they are stored and displayed but only a subset
- * is wired into the engine (clearly marked below). The rest influence future
- * sim depth without changing current calibrated output.
+ * DEAD AS OF THE #154 LEVER AUDIT. No engine file reads `tactics.personalTactics`
+ * — not one field of it, including the two below that a stale comment used to
+ * label "ENGINE-WIRED". `leverStaticAudit.test.ts` proves this every run.
+ *
+ * The type is kept (saves and mods carry it) but MUST NOT be surfaced as a
+ * control until it is wired and measured. Shipping a slider that does nothing is
+ * the single failure that dragged our closest competitor to a Mixed rating.
  */
 export interface PersonalTactics {
-  /** Bias toward shooting more / passing more (−1 = pass more, 0 = default, +1 = shoot more). */
+  /** DEAD — unread. Bias toward shooting more / passing more (−1 pass, +1 shoot). */
   shootVsPass?: -1 | 0 | 1
-  /** Whether this player engages in fights. */
+  /** DEAD — unread. Whether this player engages in fights. */
   fighting?: 'will-fight' | 'avoid' | 'default'
-  /**
-   * Carry the puck or dump it in on zone entries.
-   * ENGINE-WIRED: shifts entry carry/dump split for this player.
-   */
+  /** DEAD — unread. Carry the puck or dump it in on zone entries. */
   entryStyle?: 'carry' | 'dump' | 'default'
-  /**
-   * Whether this player joins the rush or holds back.
-   * ENGINE-WIRED: affects rush-join probability in counter-attacks.
-   */
+  /** DEAD — unread. Whether this player joins the rush or holds back. */
   rushJoin?: 'join' | 'sit-back' | 'default'
-  /** Shadow a specific opponent — playerId of the target. */
+  /** DEAD — unread. Shadow a specific opponent — playerId of the target. */
   shadowTarget?: string
 }
 
@@ -101,9 +99,10 @@ export interface TeamTactics {
   // ── EHM-depth fields (all optional; defaults = today's effective behaviour) ──
 
   /**
-   * Mentality: how aggressively the team pushes offense vs. sits back.
-   * 0 = very defensive, 0.5 = balanced (DEFAULT), 1 = all-out attack.
-   * Setable intent only — influences future coaching/style systems.
+   * DEAD (#154) — no engine file reads this. Mentality: how aggressively the
+   * team pushes offense vs. sits back. 0 = very defensive, 0.5 = balanced,
+   * 1 = all-out attack. Do not surface as a control until it is wired AND
+   * measured by the lever harness.
    */
   mentality?: number
 
@@ -115,9 +114,8 @@ export interface TeamTactics {
   aggressiveness?: number
 
   /**
-   * Backchecking: how hard forwards skate back defensively.
-   * 0 = float, 0.5 = normal (DEFAULT), 1 = hard back.
-   * Setable intent — influences defensive formation depth in future.
+   * DEAD (#154) — no engine file reads this. Backchecking: how hard forwards
+   * skate back defensively. 0 = float, 0.5 = normal, 1 = hard back.
    */
   backchecking?: number
 
@@ -143,9 +141,8 @@ export interface TeamTactics {
   hitting?: number
 
   /**
-   * Tempo: overall pace of play at the team strategy level.
-   * 0 = slow-it-down, 0.5 = normal (DEFAULT), 1 = up-tempo.
-   * Setable intent (fine-grained tempo already in TempoSettings.pace).
+   * DEAD (#154) — no engine file reads this. Overall pace of play at the team
+   * strategy level. The engine's real pace lever is TempoSettings.pace.
    */
   tempoStyle?: number
 
@@ -170,38 +167,49 @@ export interface TeamTactics {
    */
   dumping?: number
 
-  // ── Positional systems (setable intent, displayed in UI) ──
+  // ── Positional systems — ALL DEAD (#154) ──
+  //
+  // The lever audit walked every field of this interface against the engine
+  // sources. None of the nine below is read anywhere: they are labels a coach
+  // profile writes and the staff-meeting screen displays, and they change no
+  // outcome. `leverStaticAudit.test.ts` fails the build if that stops being
+  // true in either direction, and docs/LEVER-AUDIT.md carries the reasoning.
+  //
+  // They are retained (saves, mods and the coach-profile display carry them)
+  // but MUST NOT become GM-facing controls until they are wired and their real
+  // effect is measured. See docs/LESSONS-ESPORTS-MANAGER.md for what happens to
+  // a management game that ships decorative tactics.
 
-  /** Breakout system. Default: 'wheel'. */
+  /** DEAD — unread. Breakout system. Default: 'wheel'. */
   breakout?: BreakoutSystem
 
-  /** Neutral-zone offensive system. Default: 'controlled'. */
+  /** DEAD — unread. Neutral-zone offensive system. Default: 'controlled'. */
   nzOffensive?: NzOffensiveSystem
 
-  /** Neutral-zone defensive system. Default: 'standard'. */
+  /** DEAD — unread. Neutral-zone defensive system. Default: 'standard'. */
   nzDefensive?: NzDefensiveSystem
 
-  /** Zone-entry preference. Default: 'mixed'. */
+  /** DEAD — unread. Zone-entry preference. Default: 'mixed'. */
   ozEntry?: OzEntry
 
-  /** Forecheck variant (maps to existing ForecheckSystem but with EHM labels). */
+  /** DEAD — unread. Forecheck variant (EHM labels for ForecheckSystem). */
   forecheckVariant?: ForecheckVariant
 
-  /** Defensive-zone structure. Default: 'contain'. */
+  /** DEAD — unread. Defensive-zone structure. Default: 'contain'. */
   dZoneStructure?: DZoneStructure
 
-  /** Offensive-zone faceoff play. Default: 'standard'. */
+  /** DEAD — unread. Offensive-zone faceoff play. Default: 'standard'. */
   offensiveFaceoff?: FaceoffPlay
 
-  /** Defensive-zone faceoff play. Default: 'standard'. */
+  /** DEAD — unread. Defensive-zone faceoff play. Default: 'standard'. */
   defensiveFaceoff?: FaceoffPlay
 
-  /** Shot targeting. Default: 'mixed'. */
+  /** DEAD — unread. Shot targeting. Default: 'mixed'. */
   shotTargeting?: ShotTargeting
 
   /**
-   * Per-player personal tactics. Keys are playerIds.
-   * Absent player = no personal instruction (use team defaults).
+   * DEAD (#154) — unread by the engine. Per-player personal tactics, keyed by
+   * playerId. See the PersonalTactics docstring above.
    */
   personalTactics?: Record<string, PersonalTactics>
 }

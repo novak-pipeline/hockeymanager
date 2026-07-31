@@ -786,6 +786,92 @@ function SystemInfoBar({ summary }: { summary: StaffMeetingSummaryView }): JSX.E
   )
 }
 
+/* ── #154: what the board is worth, in standings points ── */
+
+/**
+ * The receipt. Every figure here is a lever the audit measured against tens of
+ * thousands of simulated games (docs/LEVER-AUDIT.md), read against the club's
+ * own players. The GM should never have to wonder whether moving a winger up a
+ * line did anything — this says what it was worth.
+ */
+function LeverReceiptBar({ receipts }: { receipts: NonNullable<TacticsView['receipts']> }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const { deployment: d, powerPlay: pp, penaltyKill: pk, goalie: g, condition: c } = receipts
+  const total = receipts.totalPointsLost
+
+  const tone = total < 2 ? 'var(--success)' : total < 8 ? 'var(--amber, #f59e0b)' : 'var(--danger)'
+  const pts = (n: number): string => `${n.toFixed(1)} pts`
+
+  const rows: Array<{ label: string; detail: string; lost: number }> = [
+    {
+      label: 'Line order',
+      detail: `${d.weighted.toFixed(1)} ice-time-weighted rating · best available order ${d.best.toFixed(1)}`,
+      lost: d.pointsLost,
+    },
+    { label: 'Power play 1', detail: `unit rates ${pp.current.toFixed(1)} · best available ${pp.best.toFixed(1)}`, lost: pp.pointsLost },
+    { label: 'Penalty kill 1', detail: `unit rates ${pk.current.toFixed(1)} · best available ${pk.best.toFixed(1)}`, lost: pk.pointsLost },
+    { label: 'Starting goalie', detail: `starter rates ${g.current.toFixed(1)} · other man ${g.best.toFixed(1)}`, lost: g.pointsLost },
+    { label: 'Fresh legs', detail: `roster carrying ${c.fatigue.toFixed(1)} fatigue`, lost: c.fatiguePointsLost },
+    { label: 'Room morale', detail: `roster morale ${c.morale}`, lost: c.moralePointsLost },
+  ]
+
+  return (
+    <div style={{ position: 'relative' }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <div
+        className="row"
+        style={{
+          gap: 12, alignItems: 'center', flexWrap: 'wrap', cursor: 'help',
+          padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-sm)',
+        }}
+      >
+        <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          What this board is worth
+        </span>
+        <span style={{ fontWeight: 700, color: tone }}>
+          {total < 2 ? 'Nothing left on the table' : `≈ ${pts(total)} on the table`}
+        </span>
+        <span style={{ color: 'var(--accent)', fontSize: 11, opacity: 0.8 }}>ⓘ</span>
+        <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
+          line order <strong style={{ color: d.efficiency > 0.95 ? 'var(--success)' : 'var(--text)' }}>
+            {Math.round(d.efficiency * 100)}%
+          </strong> of the best arrangement
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50,
+            width: 'min(520px, 92vw)', background: 'var(--bg1)', border: '1px solid var(--accent)',
+            borderRadius: 'var(--radius)', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', padding: 'var(--sp-4)',
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent)', marginBottom: 6 }}>
+            Standings points your current setup is giving away
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '4px 10px', fontSize: 12 }}>
+            {rows.map((r) => (
+              <Fragment key={r.label}>
+                <span style={{ fontWeight: 600 }}>{r.label}</span>
+                <span className="muted">{r.detail}</span>
+                <span style={{ fontWeight: 700, color: r.lost < 0.5 ? 'var(--success)' : r.lost < 3 ? 'var(--text)' : 'var(--danger)' }}>
+                  {r.lost < 0.5 ? '✓' : `−${r.lost.toFixed(1)}`}
+                </span>
+              </Fragment>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 'var(--sp-3)', opacity: 0.75, lineHeight: 1.5 }}>
+            Estimated across a full 82-game season. Each lever’s best-to-worst span was measured over
+            40,000 simulated games with identical rosters on both benches; your club is placed on that
+            span. Move a player and watch the number change.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── main component ── */
 
 export function TacticsScreen(): JSX.Element {
@@ -1071,6 +1157,7 @@ export function TacticsScreen(): JSX.Element {
       {loading && !data && <Notice kind="info">Loading…</Notice>}
 
       {coachSummary && <SystemInfoBar summary={coachSummary} />}
+      {data?.receipts && <LeverReceiptBar receipts={data.receipts} />}
 
       {data && lines && (
         <>

@@ -41,6 +41,7 @@ import {
   teamStyleFit,
 } from '@engine/league/archetypes'
 import { deploymentProfile } from '@engine/league/deployment'
+import { leverReceipts } from '@engine/league/leverReceipts'
 import { playerValue } from '@engine/league/trades'
 import type {
   ArchetypeInfo,
@@ -1094,7 +1095,10 @@ export function buildTacticsView(ctx: ViewCtx): TacticsView {
   const fitResult = styleMatch(roster, team.tactics)
   const styleFit = { fit: fitResult.fit, advice: fitResult.advice }
 
-  return { tactics: team.tactics, lines, lineSynergies, pairSynergies, coachSuggestion, styleFit }
+  // ── #154: what this board is worth, in standings points ──
+  const receipts = leverReceipts(team, (id) => ctx.players.get(id))
+
+  return { tactics: team.tactics, lines, lineSynergies, pairSynergies, coachSuggestion, styleFit, receipts }
 }
 
 /* ────────────────────────── schedule / stats / finances ────────────────────────── */
