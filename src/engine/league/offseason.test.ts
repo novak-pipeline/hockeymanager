@@ -21,7 +21,9 @@ import {
   developPlayers,
   expectedPointsFor,
   generateDraftClass,
-  processRetirements
+  processRetirements,
+  retirementProbability,
+  type RetirementForm
 } from './offseason'
 
 /* ────────────────────────── fixtures ────────────────────────── */
@@ -613,6 +615,7 @@ function makeTrue<T>(x: T): T { return JSON.parse(JSON.stringify(x)) as T }
 interface RetireOpts {
   current?: number
   yearsRemaining?: number
+  form?: RetirementForm
 }
 
 function retirementFreq(age: number, trials: number, opts: RetireOpts = {}): number {
@@ -629,7 +632,8 @@ function retirementFreq(age: number, trials: number, opts: RetireOpts = {}): num
       players: new Map([[p.id, p]]),
       teams: new Map([[team.id, team]]),
       year: 2026,
-      rng: new Rng(9000 + s)
+      rng: new Rng(9000 + s),
+      ...(opts.form ? { form: () => opts.form } : {})
     })
     if (retired.length > 0) count++
   }
@@ -637,14 +641,14 @@ function retirementFreq(age: number, trials: number, opts: RetireOpts = {}): num
 }
 
 describe('processRetirements', () => {
-  it('ramps probability from rare at 33 to near-certain at 40', () => {
+  it('ramps probability from rare at 33 to likely — but never certain — at 40', () => {
     const f33 = retirementFreq(33, 300)
     const f36 = retirementFreq(36, 300)
     const f40 = retirementFreq(40, 300)
     expect(f33).toBeLessThan(0.12)
-    expect(f36).toBeGreaterThan(0.08)
+    expect(f36).toBeGreaterThan(0.05)
     expect(f36).toBeLessThan(0.45)
-    expect(f40).toBeGreaterThan(0.8)
+    expect(f40).toBeGreaterThan(0.2)
     expect(f33).toBeLessThan(f36)
     expect(f36).toBeLessThan(f40)
   })
@@ -655,12 +659,13 @@ describe('processRetirements', () => {
     expect(fringe).toBeGreaterThan(star + 0.1)
   })
 
-  it('never retires under-33s or players signed 2+ years before 38', () => {
+  it('never retires under-33s, and barely touches a veteran signed 2+ years', () => {
     // A replacement-level (60) 32-year-old is above the washout band — he stays.
     expect(retirementFreq(32, 100)).toBe(0)
-    expect(retirementFreq(35, 100, { yearsRemaining: 3 })).toBe(0)
-    // 38+ can walk away from a live contract.
-    expect(retirementFreq(38, 150, { yearsRemaining: 3 })).toBeGreaterThan(0.2)
+    // A live multi-year deal is a strong reason to keep playing, not a shield:
+    // rare at 35, but a real possibility once he is genuinely old.
+    expect(retirementFreq(35, 400, { yearsRemaining: 3 })).toBeLessThan(0.06)
+    expect(retirementFreq(38, 150, { yearsRemaining: 3 })).toBeGreaterThan(0.02)
   })
 
   it('washes fringe 28-32 players out of the league (sub-replacement tweeners)', () => {
@@ -678,7 +683,8 @@ describe('processRetirements', () => {
   })
 
   it('removes retirees from the roster but keeps them in the players map', () => {
-    const oldster = testPlayer({ id: 'old', age: 41, current: 40 })
+    // 45 and sub-replacement: the one profile where retirement is near-certain.
+    const oldster = testPlayer({ id: 'old', age: 45, current: 40 })
     const kid = testPlayer({ id: 'kid', age: 25 })
     const team = testTeam('t0', [oldster.id, kid.id])
     const players = new Map<PlayerId, Player>([
@@ -694,6 +700,120 @@ describe('processRetirements', () => {
     expect(retired).toEqual([oldster.id])
     expect(team.roster).toEqual([kid.id])
     expect(players.has(oldster.id)).toBe(true)
+  })
+})
+
+/**
+ * Regression (playtest F1): the franchise player who retired every single year.
+ *
+ * The old curve hit 0.95 at 40 and floored at 0.90 past it, and modulated on
+ * nothing but overall — so the league's best veterans hung them up on the same
+ * schedule in every save and nobody in the world ever reached 41. Retirement has
+ * to be a chance that rises with age, moved by what the player is still doing.
+ */
+describe('retirement is a probability, not a schedule', () => {
+  /** Full-time, top-line, producing exactly what his rating says he should. */
+  const productive = (ovr: number): RetirementForm => ({
+    gamesPlayed: 76,
+    points: expectedPointsFor(ovr, 'C', 'twoWay') * 76,
+    toiPerGame: 1150
+  })
+
+  it('lets a 39-year-old star who is still producing play on', () => {
+    // The old model: 0.75 base minus a token star discount ≈ 0.69 every year.
+    const p = retirementProbability({
+      age: 39,
+      ovr: 84,
+      position: 'C',
+      role: 'twoWay',
+      yearsRemaining: 2,
+      form: productive(84)
+    })
+    expect(p).toBeLessThan(0.15)
+  })
+
+  it('is never a certainty before the mid-40s, however finished a player looks', () => {
+    // Worst case at every age: sub-replacement, unsigned, hurt, barely playing.
+    const worst = (age: number): number =>
+      retirementProbability({
+        age,
+        ovr: 35,
+        position: 'C',
+        role: 'twoWay',
+        yearsRemaining: 0,
+        form: { gamesPlayed: 0 },
+        injuryGamesRemaining: 40,
+        injuryProneness: 90
+      })
+    expect(worst(38)).toBeLessThan(0.6)
+    expect(worst(40)).toBeLessThan(0.75) // high at 40…
+    expect(worst(41)).toBeLessThan(0.9) // …still not certain at 41
+    expect(worst(44)).toBeGreaterThan(0.9) // near-certain only in the mid-40s
+  })
+
+  it('keeps climbing with age, monotonically, for the same player', () => {
+    const at = (age: number): number =>
+      retirementProbability({ age, ovr: 70, position: 'C', role: 'twoWay', yearsRemaining: 1, form: productive(70) })
+    for (let age = 34; age <= 44; age++) expect(at(age)).toBeGreaterThan(at(age - 1))
+    expect(at(33)).toBeLessThan(0.02)
+  })
+
+  it('reads more than age — ice time, production, health and contract all move it', () => {
+    const base = { age: 37, ovr: 70, position: 'C' as const, role: 'twoWay' as const, yearsRemaining: 1 }
+    const healthy = retirementProbability({ ...base, form: productive(70) })
+
+    // Half a season missed (at the same per-game rate).
+    expect(retirementProbability({
+      ...base,
+      form: { gamesPlayed: 30, points: expectedPointsFor(70, 'C', 'twoWay') * 30, toiPerGame: 1150 }
+    })).toBeGreaterThan(healthy)
+    // Down to fourth-line minutes.
+    expect(retirementProbability({ ...base, form: { ...productive(70), toiPerGame: 480 } }))
+      .toBeGreaterThan(healthy)
+    // Producing at half his expected rate.
+    expect(retirementProbability({ ...base, form: { ...productive(70), points: expectedPointsFor(70, 'C', 'twoWay') * 38 } }))
+      .toBeGreaterThan(healthy)
+    // Nobody has signed him.
+    expect(retirementProbability({ ...base, yearsRemaining: 0, form: productive(70) }))
+      .toBeGreaterThan(healthy)
+    // A long-term injury on the books.
+    expect(retirementProbability({ ...base, form: productive(70), injuryGamesRemaining: 40 }))
+      .toBeGreaterThan(healthy)
+  })
+
+  it('gives a franchise core a real chance to reach 41 — the old curve gave none', () => {
+    // 200 franchise forwards, age 36, on rolling one-year deals, producing to
+    // their rating. Run them forward six summers and count who is still playing.
+    const players = new Map<PlayerId, Player>()
+    for (let i = 0; i < 200; i++) {
+      players.set(asPlayerId(`s${i}`), testPlayer({ id: `s${i}`, age: 36, current: 82, yearsRemaining: 1 }))
+    }
+    const team = testTeam('t0', [...players.keys()])
+    const teams = new Map([[team.id, team]])
+
+    const activeAt: Record<number, number> = {}
+    for (let year = 0; year < 7; year++) {
+      for (const p of players.values()) {
+        if (p.retiredYear === undefined) p.contract.yearsRemaining = 1
+      }
+      processRetirements({
+        players,
+        teams,
+        year: 2026 + year,
+        rng: new Rng(4242 + year),
+        form: () => productive(82)
+      })
+      for (const p of players.values()) if (p.retiredYear === undefined) p.age += 1
+      const age = 37 + year
+      activeAt[age] = [...players.values()].filter((p) => p.retiredYear === undefined).length
+    }
+
+    // Most of a franchise core is still playing at 38–39…
+    expect(activeAt[39]! / 200).toBeGreaterThan(0.5)
+    // …a real minority reaches 41 (the old model: exactly zero, every seed)…
+    expect(activeAt[41]! / 200).toBeGreaterThan(0.15)
+    // …but it is a tail, not the norm: they are not immortal either.
+    expect(activeAt[43]! / 200).toBeLessThan(0.35)
   })
 })
 
