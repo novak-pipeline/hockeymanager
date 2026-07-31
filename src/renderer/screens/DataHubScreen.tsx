@@ -603,7 +603,7 @@ function PlayerLeaderTable({
               )
             })}
             {rows.length === 0 && (
-              <tr><td colSpan={5} style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--sp-3)' }}>No data yet.</td></tr>
+              <tr><td colSpan={5} style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--sp-3)' }}>Nothing to rank yet — this table fills in once games have been played.</td></tr>
             )}
           </tbody>
         </table>
@@ -783,7 +783,7 @@ function TeamPlayerTable({
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={4 + cols.length} style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--sp-3)' }}>No data yet.</td></tr>
+              <tr><td colSpan={4 + cols.length} style={{ color: 'var(--muted)', textAlign: 'center', padding: 'var(--sp-3)' }}>Nothing to rank yet — this table fills in once games have been played.</td></tr>
             )}
           </tbody>
         </table>

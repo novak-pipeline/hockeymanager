@@ -11,7 +11,7 @@ import type {
 } from '../../engine/career/views'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { toast } from '../components/store'
-import { moraleColor, moraleWord } from '../components/format'
+import { moraleColor, moraleWord, rosterFitWord } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink } from '../components/NavContext'
@@ -748,8 +748,8 @@ function SystemInfoBar({ summary }: { summary: StaffMeetingSummaryView }): JSX.E
         <span className="muted small">
           {summary.forecheckName} · {summary.dZoneName} D-zone · {summary.paceName}
         </span>
-        <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
-          roster fit <strong style={{ color: fitC }}>{summary.rosterFit}/100</strong>
+        <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }} title={`Roster fit ${summary.rosterFit}/100`}>
+          roster fit <strong style={{ color: fitC }}>{rosterFitWord(summary.rosterFit)}</strong>
         </span>
       </div>
 

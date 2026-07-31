@@ -8,6 +8,7 @@ import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
+import { Dropdown } from '../components/Dropdown'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { useUiStore, toast } from '../components/store'
@@ -19,6 +20,14 @@ type SortKey =
   | 'condition' | 'morale' | 'form'
   | 'salary' | 'years'
   | 'gp' | 'g' | 'a' | 'pts' | 'plusMinus' | 'pim' | 'toi'
+
+/** #81 column sets behind the "View:" switcher. */
+type ColView = 'general' | 'contract' | 'stats'
+const COL_VIEWS: ReadonlyArray<{ value: ColView; label: string }> = [
+  { value: 'general', label: 'General' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'stats', label: 'Statistics' },
+]
 
 const POS_TABS: { label: string; value: PosFilter }[] = [
   { label: 'All', value: 'ALL' },
@@ -229,7 +238,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('line')
   const [sortAsc, setSortAsc] = useState(true)
-  const [colView, setColView] = useState<'general' | 'contract' | 'stats'>('general')
+  const [colView, setColView] = useState<ColView>('general')
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -419,14 +428,20 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                     )}
                   </button>
                 ))}
-                <label className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 4 }}>
+                {/* Playtest G1: this was a native <select>, and it was inert —
+                  * its OS-level popup gets torn down by the screen's re-renders,
+                  * so every column set but General was unreachable. <Dropdown> is
+                  * in-DOM and survives them. */}
+                <span className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 4 }}>
                   View:
-                  <select className="select" value={colView} onChange={(e) => setColView(e.target.value as 'general' | 'contract' | 'stats')} style={{ fontSize: 12 }}>
-                    <option value="general">General</option>
-                    <option value="contract">Contract</option>
-                    <option value="stats">Statistics</option>
-                  </select>
-                </label>
+                  <Dropdown
+                    small
+                    value={colView}
+                    onChange={setColView}
+                    options={COL_VIEWS}
+                    title="Switch the column set"
+                  />
+                </span>
                 <span className="muted small" style={{ alignSelf: 'center', paddingRight: 8 }}>
                   {filtered.length} player{filtered.length !== 1 ? 's' : ''}
                 </span>
@@ -443,9 +458,9 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         <SortTh label="Role" sortKey="line" {...sharedSortProps} title="Depth role / assigned line" />
                         {colView === 'general' && (
                           <>
-                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Overall ability (0–100)" />
-                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition / fitness (0–100)" />
-                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale (0–100)" />
+                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Ability, as your staff grade him (5 stars = elite)" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition — how fresh he is right now" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale — how happy he is at the club" />
                             <th title="Recent form trend">Form</th>
                             <th title="Injury status">Inj</th>
                           </>
@@ -453,7 +468,11 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         {colView === 'contract' && (
                           <>
                             <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" title="Annual cap hit" />
-                            <th className="num" title="Years remaining on the contract">Years</th>
+                            {/* `years` was already a SortKey with a working case in
+                              * sortRows() — it just had no header wired to it, so the
+                              * sort shipped unreachable and the column read as an inert
+                              * click target next to five sortable neighbours. */}
+                            <SortTh label="Years" sortKey="years" {...sharedSortProps} align="right" title="Years remaining on the contract" />
                             <th className="num" title="Season the contract expires">Expires</th>
                             <th title="No-trade / no-movement clauses">Clauses</th>
                           </>

@@ -321,7 +321,7 @@ function ReportTab(): JSX.Element {
               </div>
             ))}
             {data.categoryBests.length === 0 && (
-              <span className="muted small">No data yet.</span>
+              <span className="muted small">No club records set yet — they start accruing once games are played.</span>
             )}
           </div>
         </Panel>

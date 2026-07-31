@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import type { ScoutingView, CoachMarketView } from '../../worker/protocol'
 import type { ScoutMarketRow } from '../../engine/career/views'
-import { fmtMoney } from '../components/format'
+import { fmtMoney, rosterFitWord } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { PlayerFace } from '../components/PlayerFace'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -42,7 +42,12 @@ function CoachMarketPanel({
           <div className="small">
             <span style={{ color: 'var(--accent)' }}>{market.currentSystemLabel}</span>
             <span className="muted"> · roster fit </span>
-            <span style={{ color: fitColor(market.currentRosterFit), fontWeight: 700 }}>{market.currentRosterFit}/100</span>
+            <span
+              style={{ color: fitColor(market.currentRosterFit), fontWeight: 700 }}
+              title={`Roster fit ${market.currentRosterFit}/100`}
+            >
+              {rosterFitWord(market.currentRosterFit)}
+            </span>
           </div>
         </div>
         <button className="btn btn-sm" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }} disabled={busy} onClick={onFire}>
@@ -74,8 +79,8 @@ function CoachMarketPanel({
                   <div className="muted" style={{ fontSize: 11 }}>{c.fitBlurb}</div>
                 </td>
                 <td className="num">{c.rating}</td>
-                <td className="num" style={{ color: fitColor(c.rosterFit), fontWeight: 700 }}>
-                  {c.fitLabel} · {c.rosterFit}
+                <td className="num" style={{ color: fitColor(c.rosterFit), fontWeight: 700 }} title={`Roster fit ${c.rosterFit}/100`}>
+                  {c.fitLabel}
                 </td>
                 <td className="num">
                   <button className="btn btn-ghost small" disabled={busy} onClick={() => onHire(c.coachId)}>Hire</button>

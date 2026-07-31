@@ -91,7 +91,7 @@ function PlayerChip(props: {
 }): JSX.Element {
   return (
     <div
-      title={props.value !== undefined ? `Trade value: ${props.value}` : undefined}
+      title={props.value !== undefined ? `Trade value: ${props.value.toFixed(1)}` : undefined}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -109,8 +109,10 @@ function PlayerChip(props: {
       <span style={{ color: 'var(--muted)' }}>
         {fmtMoney(props.salary)} / {props.yearsRemaining}yr
       </span>
+      {/* Was the raw float — a chip could read "· 22.913478562". Every other value
+          read in this screen is one decimal; this one had been missed. */}
       {props.value !== undefined && (
-        <span style={{ color: 'var(--muted)', fontSize: 10 }}>· {props.value}</span>
+        <span style={{ color: 'var(--muted)', fontSize: 10 }}>· {props.value.toFixed(1)}</span>
       )}
       {props.noTradeClause && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
     </div>

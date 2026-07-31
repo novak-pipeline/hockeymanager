@@ -296,7 +296,7 @@ function CoverageTable({ title, rows }: { title: string; rows: ScoutCoverageRow[
   return (
     <Panel title={title}>
       {rows.length === 0 ? (
-        <p className="muted small">No data yet.</p>
+        <p className="muted small">Your scouts have not filed from anywhere yet — assign them and coverage builds week by week.</p>
       ) : (
         <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
           <table className="table">

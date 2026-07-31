@@ -1778,6 +1778,7 @@ export class Career {
       shGoals: this.shGoals,
       shAssists: this.shAssists,
       standingsSorted: sortStandings([...this.standings.values()]),
+      salaryCap: this.userTeam.finances.salaryCap,
     }
   }
 

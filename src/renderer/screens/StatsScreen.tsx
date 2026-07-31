@@ -72,7 +72,7 @@ function StatsBody(props: {
 
       <Panel title={`${TAB_LABELS[tab]} Leaders`}>
         {rows.length === 0 ? (
-          <span className="muted">No data yet.</span>
+          <span className="muted">No games have been played yet — leaders fill in once the season is under way.</span>
         ) : (
           <Leaderboard rows={rows} tab={tab} />
         )}
