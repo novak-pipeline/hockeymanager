@@ -751,8 +751,19 @@ function detectBreakoutBust(
 
 /* ─────────────────────────── detector: milestone watch ─────────────────────────── */
 
-/** Milestone numbers we watch for (goals, points). */
-const MILESTONE_NUMBERS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 50, 150, 250, 350]
+/**
+ * The ladders are MARQUEE ONLY, and they match the career layer's rung for rung
+ * (Career.GOAL_MILES / POINT_MILES / GAME_MILES). Two consequences, both
+ * deliberate: a chase we start is a chase the game finishes with a headline,
+ * and "reaches 50 career points" — a number a depth forward passes in his
+ * second year — never reaches anyone's inbox again.
+ *
+ * Careers are now counted from a player's REAL record, imported seasons and
+ * all, so these rungs are crossed by the men who have actually earned them.
+ */
+const GOAL_MILESTONES = [100, 200, 300, 400, 500, 600, 700, 800]
+/** Points accumulate ~2.5× faster than goals, so the points ladder is coarser. */
+const POINT_MILESTONES = [500, 1000, 1250, 1500, 1750, 2000]
 /** Games-played is a coarser, marquee-only ladder (ironman markers) — a 100th
  *  game isn't news, but a 500th / 1000th is. */
 const GAMES_MILESTONES = [500, 1000, 1500]
@@ -760,7 +771,7 @@ const MILESTONE_APPROACH_WINDOW = 10
 
 function nearestMilestone(
   current: number,
-  numbers: number[] = MILESTONE_NUMBERS,
+  numbers: number[] = GOAL_MILESTONES,
   window = MILESTONE_APPROACH_WINDOW,
 ): number | null {
   for (const m of [...numbers].sort((a, b) => a - b)) {
@@ -789,8 +800,8 @@ function detectMilestone(
 
     // Goals milestone.
     const goalMilestone = nearestMilestone(ct.goals)
-    // Points milestone.
-    const pointsMilestone = nearestMilestone(ct.points)
+    // Points milestone (its own, coarser ladder).
+    const pointsMilestone = nearestMilestone(ct.points, POINT_MILESTONES)
     // Games-played milestone (ironman markers) — coarser ladder.
     const gamesMilestone = nearestMilestone(ct.gamesPlayed, GAMES_MILESTONES)
 
@@ -811,30 +822,20 @@ function detectMilestone(
       const anyMilestoneArc = state.arcs.find(matchesMilestone)
 
       if (currentVal >= milestone) {
-        // Hit the milestone — resolve existing arc or create+resolve.
+        // Hit the milestone — resolve the arc. The CROSSING itself is announced
+        // by the career layer (Career.emitCareerMilestones), which shares these
+        // rungs and applies the scope rule — your own men at every tier, the
+        // rest of the league only for the historic ones. Announcing it here too
+        // put the same milestone in the inbox twice.
         if (existingArc) {
           const summary = `Reached ${milestone} career ${stat}`
           addBeat(existingArc, inputs.day, inputs.year, summary)
           existingArc.status = 'resolved'
           existingArc.resolution = summary
           existingArc.tension = 100
-          seeds.push({
-            category: 'milestone',
-            headline: `${name} reaches ${milestone} career ${stat}!`,
-            body: `${name} has now recorded ${currentVal} career ${stat}, crossing the ${milestone} mark in a storied career.`,
-            playerId: pl.playerId,
-            teamId: pl.teamId,
-          })
         } else if (currentVal - milestone < 5 && !anyMilestoneArc) {
-          // Just crossed it this week with no prior arc — fire once, then drop a
-          // resolved marker so the same milestone can't re-announce next game.
-          seeds.push({
-            category: 'milestone',
-            headline: `${name} reaches ${milestone} career ${stat}`,
-            body: `${name} has now recorded ${currentVal} career ${stat}, crossing the ${milestone} mark.`,
-            playerId: pl.playerId,
-            teamId: pl.teamId,
-          })
+          // Just crossed it with no prior arc — drop a resolved marker so a
+          // chase can't start for a milestone already behind him.
           state.counter += 1
           state.arcs.push({
             id: makeId(state.counter),

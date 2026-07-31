@@ -261,7 +261,7 @@ describe('archiveSeason — single-season boards', () => {
 /* ────────────────────────── archiveSeason — record-breaking news ────────────────────────── */
 
 describe('archiveSeason — record-breaking news seeds', () => {
-  it('emits news when a top-3 record is broken', () => {
+  it('stays SILENT when a man merely cracks the top 3 (C4: that is not a record)', () => {
     const state = emptyRecords()
     // Fill top-3 first
     archiveWith(state, 2001, [
@@ -269,12 +269,45 @@ describe('archiveSeason — record-breaking news seeds', () => {
       skaterLine({ playerId: 'p2', name: 'B', goals: 48 }),
       skaterLine({ playerId: 'p3', name: 'C', goals: 45 }),
     ])
-    // Now a player betters the 3rd-place mark
+    // Now a player betters the 3rd-place mark — a fine season, not a record.
     const result = archiveWith(state, 2002, [
       skaterLine({ playerId: 'p4', name: 'D', goals: 46 }),
     ])
+    expect(result.newsSeeds.filter((n) => n.headline.includes('goal'))).toHaveLength(0)
+    // …but the board still records him, third all-time (50, 48, 46, 45).
+    expect(state.singleSeason.goals[2]!.playerId).toBe('p4')
+  })
+
+  it('a season cannot break its OWN marks — the book is judged as it stood in September', () => {
+    const state = emptyRecords()
+    archiveWith(state, 2001, [
+      skaterLine({ playerId: 'p1', name: 'A', goals: 60 }),
+      skaterLine({ playerId: 'p2', name: 'B', goals: 55 }),
+      skaterLine({ playerId: 'p3', name: 'C', goals: 50 }),
+    ])
+    // Four men clear the old 60-goal mark in the same year. That is ONE record
+    // falling, to the best of them — not four "record broken" headlines as each
+    // line was folded into a board the previous line had just raised.
+    const result = archiveWith(state, 2002, [
+      skaterLine({ playerId: 'q1', name: 'D', goals: 62 }),
+      skaterLine({ playerId: 'q2', name: 'E', goals: 65 }),
+      skaterLine({ playerId: 'q3', name: 'F', goals: 71 }),
+      skaterLine({ playerId: 'q4', name: 'G', goals: 64 }),
+    ])
     const goalNews = result.newsSeeds.filter((n) => n.headline.includes('goal'))
     expect(goalNews).toHaveLength(1)
+    expect(goalNews[0]!.playerId).toBe('q3')
+    expect(goalNews[0]!.body).toContain('60') // the mark he actually took down
+  })
+
+  it('stays SILENT while the record book is still being written', () => {
+    const state = emptyRecords()
+    // The league's very first two seasons: leaders, but no record to break yet.
+    const first = archiveWith(state, 2001, [skaterLine({ playerId: 'p1', name: 'A', goals: 50 })])
+    const second = archiveWith(state, 2002, [skaterLine({ playerId: 'p2', name: 'B', goals: 61 })])
+    expect(first.newsSeeds.filter((n) => n.headline.includes('goal'))).toHaveLength(0)
+    expect(second.newsSeeds.filter((n) => n.headline.includes('goal'))).toHaveLength(0)
+    expect(state.singleSeason.goals[0]!.value).toBe(61)
   })
 
   it('does NOT emit news for a value below top-3', () => {
@@ -304,18 +337,18 @@ describe('archiveSeason — record-breaking news seeds', () => {
     expect(news.headline).toMatch(/all-time league record/)
   })
 
-  it('mentions "top-3 league mark" for 2nd or 3rd-place breaks', () => {
+  it('never speaks of a "top-3 league mark" — only the record itself', () => {
     const state = emptyRecords()
     archiveWith(state, 2001, [
       skaterLine({ playerId: 'p1', name: 'A', goals: 60 }),
       skaterLine({ playerId: 'p2', name: 'B', goals: 55 }),
       skaterLine({ playerId: 'p3', name: 'C', goals: 50 }),
     ])
-    const result = archiveWith(state, 2002, [
-      skaterLine({ playerId: 'p4', name: 'D', goals: 52 }),
-    ])
-    const news = result.newsSeeds.find((n) => n.headline.includes('goal'))!
-    expect(news.headline).toMatch(/top-3 league mark/)
+    const second = archiveWith(state, 2002, [skaterLine({ playerId: 'p4', name: 'D', goals: 52 })])
+    const third = archiveWith(state, 2003, [skaterLine({ playerId: 'p5', name: 'E', goals: 66 })])
+    expect(second.newsSeeds).toHaveLength(0)
+    expect(third.newsSeeds.map((n) => n.headline).join(' ')).not.toMatch(/top-3/)
+    expect(third.newsSeeds.find((n) => n.headline.includes('goal'))!.headline).toMatch(/all-time league record/)
   })
 
   it('news seed has correct category and playerId', () => {
@@ -326,7 +359,7 @@ describe('archiveSeason — record-breaking news seeds', () => {
       skaterLine({ playerId: 'p3', name: 'C', goals: 45 }),
     ])
     const result = archiveWith(state, 2002, [
-      skaterLine({ playerId: 'p4', name: 'D', goals: 52 }),
+      skaterLine({ playerId: 'p4', name: 'D', goals: 62 }),
     ])
     const news = result.newsSeeds.find((n) => n.headline.includes('goal'))!
     expect(news.category).toBe('milestone')
@@ -428,13 +461,13 @@ describe('recordWatch', () => {
 
   it('emits ONE alert when a player is on pace to break an all-time record', () => {
     const state = buildStateWithTopThree()
-    // points pace = (35/40)*82 = 71.75, clear of the all-time mark (>3%) → fires.
+    // points pace = (55/60)*82 = 75.2, clear of the all-time 60 mark (>3%) → fires.
     // Capped at a single alert per call (the most emphatic run), so exactly one seed.
     const result = recordWatch({
       state,
-      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 30, assists: 5, points: 35, gamesPlayed: 40 })],
+      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 40, assists: 15, points: 55, gamesPlayed: 60 })],
       year: 2002,
-      teamGamesPlayed: 40,
+      teamGamesPlayed: 60,
       totalSeasonGames: 82,
     })
     expect(result.newsSeeds).toHaveLength(1)
@@ -442,25 +475,26 @@ describe('recordWatch', () => {
     expect(result.newsSeeds[0]!.headline).toMatch(/all-time/)
   })
 
-  it('does NOT emit when fewer than 30 team games played', () => {
+  it('says NOTHING before two thirds of the season is gone (C4: a hot October is not a chase)', () => {
     const state = buildStateWithTopThree()
-    const result = recordWatch({
-      state,
-      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 25 })],
-      year: 2002,
-      teamGamesPlayed: 29,
-      totalSeasonGames: 82,
-    })
-    expect(result.newsSeeds).toHaveLength(0)
+    // The identical line that fires at game 60 must be silent at game 53: a pace
+    // extrapolated from a third of a season isn't a record chase, it's noise.
+    const line = skaterLine({ playerId: 'pX', name: 'Rocket', goals: 40, assists: 15, points: 55, gamesPlayed: 53 })
+    expect(recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 53, totalSeasonGames: 82 }).newsSeeds).toHaveLength(0)
+    expect(recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 55, totalSeasonGames: 82 }).newsSeeds).toHaveLength(1)
   })
 
   it('emits at most ONCE per player-stat-year combination', () => {
     const state = buildStateWithTopThree()
-    const line = skaterLine({ playerId: 'pX', name: 'Rocket', goals: 30 })
+    const line = skaterLine({ playerId: 'pX', name: 'Rocket', goals: 46, assists: 0, points: 46, gamesPlayed: 60 })
 
-    recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 40, totalSeasonGames: 82 })
-    const second = recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 45, totalSeasonGames: 82 })
-    expect(second.newsSeeds).toHaveLength(0)
+    const first = recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 60, totalSeasonGames: 82 })
+    expect(first.newsSeeds).toHaveLength(1)
+    // Second call: the goals key is spent, so only the (equal) points run is left,
+    // and a third call has nothing at all to say.
+    recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 62, totalSeasonGames: 82 })
+    const third = recordWatch({ state, seasonLines: [line], year: 2002, teamGamesPlayed: 64, totalSeasonGames: 82 })
+    expect(third.newsSeeds).toHaveLength(0)
   })
 
   it('emits again in a different year', () => {
@@ -477,22 +511,22 @@ describe('recordWatch', () => {
     // points pace: same as goals since no assists
     // Ensure 'once per key' logic: fire goals+points in year 2002
     // goals=32 → pace (32/40)*82 = 65.6, clear of the all-time 60 mark (>3%).
-    const mkLine = () => skaterLine({ playerId: 'pX', name: 'Rocket', goals: 32, assists: 0, points: 32 })
-    recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2002, teamGamesPlayed: 40, totalSeasonGames: 82 })
+    const mkLine = () => skaterLine({ playerId: 'pX', name: 'Rocket', goals: 48, assists: 0, points: 48, gamesPlayed: 60 })
+    recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2002, teamGamesPlayed: 60, totalSeasonGames: 82 })
     // In year 2003 the keys are different (different year), so it fires again.
-    const second = recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2003, teamGamesPlayed: 40, totalSeasonGames: 82 })
+    const second = recordWatch({ state: stateGoalsOnly, seasonLines: [mkLine()], year: 2003, teamGamesPlayed: 60, totalSeasonGames: 82 })
     expect(second.newsSeeds.length).toBeGreaterThanOrEqual(1)
     expect(second.newsSeeds.every((n) => n.playerId === 'pX')).toBe(true)
   })
 
   it('does NOT emit when pace is below top-3', () => {
     const state = buildStateWithTopThree()
-    // pace = (20/40)*82 = 41 goals, below 50 (3rd)
+    // pace = (30/60)*82 = 41 goals, nowhere near the all-time 60 mark
     const result = recordWatch({
       state,
-      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 20 })],
+      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 30, gamesPlayed: 60 })],
       year: 2002,
-      teamGamesPlayed: 40,
+      teamGamesPlayed: 60,
       totalSeasonGames: 82,
     })
     expect(result.newsSeeds).toHaveLength(0)
@@ -503,9 +537,9 @@ describe('recordWatch', () => {
     // No archived seasons → no all-time mark exists, so nothing can be "on pace".
     const result = recordWatch({
       state,
-      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 56 })],
+      seasonLines: [skaterLine({ playerId: 'pX', name: 'Rocket', goals: 56, gamesPlayed: 60 })],
       year: 2002,
-      teamGamesPlayed: 40,
+      teamGamesPlayed: 60,
       totalSeasonGames: 82,
     })
     expect(result.newsSeeds).toHaveLength(0)
@@ -518,13 +552,13 @@ describe('recordWatch', () => {
       goalieLine({ playerId: 'g2', name: 'B', goalieWins: 42 }),
       goalieLine({ playerId: 'g3', name: 'C', goalieWins: 40 }),
     ])
-    // pace for goalie: 23 wins in 40 games → (23/40)*82 = 47.15, clear of the
-    // all-time 44 mark (>3%) → fires.
+    // pace for goalie: 35 wins in 60 team games → (35/60)*82 = 47.8, clear of
+    // the all-time 44 mark (>3%) → fires.
     const result = recordWatch({
       state,
-      seasonLines: [goalieLine({ playerId: 'gX', name: 'Hotshot', goalieWins: 30, shotsAgainst: 1200 })],
+      seasonLines: [goalieLine({ playerId: 'gX', name: 'Hotshot', goalieWins: 35, shotsAgainst: 1200 })],
       year: 2002,
-      teamGamesPlayed: 40,
+      teamGamesPlayed: 60,
       totalSeasonGames: 82,
     })
     const winsNews = result.newsSeeds.filter((n) => n.headline.includes('win'))
@@ -540,8 +574,8 @@ describe('recordWatch', () => {
     archiveWith(s1, 2001, lines)
     archiveWith(s2, 2001, lines)
 
-    const r1 = recordWatch({ state: s1, seasonLines: [skaterLine({ playerId: 'pX', name: 'R', goals: 25 })], year: 2002, teamGamesPlayed: 40, totalSeasonGames: 82 })
-    const r2 = recordWatch({ state: s2, seasonLines: [skaterLine({ playerId: 'pX', name: 'R', goals: 25 })], year: 2002, teamGamesPlayed: 40, totalSeasonGames: 82 })
+    const r1 = recordWatch({ state: s1, seasonLines: [skaterLine({ playerId: 'pX', name: 'R', goals: 40, gamesPlayed: 60 })], year: 2002, teamGamesPlayed: 60, totalSeasonGames: 82 })
+    const r2 = recordWatch({ state: s2, seasonLines: [skaterLine({ playerId: 'pX', name: 'R', goals: 40, gamesPlayed: 60 })], year: 2002, teamGamesPlayed: 60, totalSeasonGames: 82 })
     expect(r1.newsSeeds).toEqual(r2.newsSeeds)
   })
 })

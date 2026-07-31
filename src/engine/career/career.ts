@@ -196,11 +196,20 @@ import {
   inductHallOfFame,
   recordWatch,
   registerRetirements,
+  RECORD_BOOK_MIN_ENTRIES,
   seedRecordsHistory,
   seedRecordsFromHistory,
   type RecordsState,
   type SeasonLine,
 } from '@engine/story/records'
+import {
+  canClaimFirstGoal,
+  detectHistoryLeagueLabel,
+  hasImportedHistory,
+  importedCareerIn,
+  isTrueRookieSeason,
+  type ImportedCareer,
+} from '@engine/story/careerLedger'
 import { detectGameStory, detectPlayerStory, type PlayerGameLine } from '@engine/story/gameStory'
 import {
   buildMatchKeys,
@@ -1778,6 +1787,7 @@ export class Career {
       shGoals: this.shGoals,
       shAssists: this.shAssists,
       standingsSorted: sortStandings([...this.standings.values()]),
+      historyLeagueLabel: this.historyLeagueLabel(),
     }
   }
 
@@ -2203,7 +2213,39 @@ export class Career {
       .slice(0, maxAlts)
   }
 
-  /** All-time totals (archived seasons + current season counters). */
+  /**
+   * The league label the imported career histories use for THIS league, found
+   * once by club overlap (a mod names it "National Hockey League" in a player's
+   * history and "NHL (EHM import)" in the meta). Null = the histories don't
+   * cover us, so a prior career is UNKNOWN rather than zero.
+   */
+  private historyLabelResolved = false
+  private historyLabel: string | null = null
+  private historyLeagueLabel(): string | null {
+    if (!this.historyLabelResolved) {
+      this.historyLabel = detectHistoryLeagueLabel(
+        this.data.players.values(),
+        [...this.data.teams.values()].map((t) => t.name),
+      )
+      this.historyLabelResolved = true
+    }
+    return this.historyLabel
+  }
+
+  /**
+   * What the source database records of a man's career in THIS league before
+   * the save began. Null when no record exists (a fictional player, or a mod
+   * that ships no histories) — the caller must then treat his past as unknown,
+   * never as zero. See {@link canClaimFirstGoal}.
+   */
+  private importedCareerOf(p: Player): ImportedCareer | null {
+    if (!hasImportedHistory(p)) return null
+    const label = this.historyLeagueLabel()
+    if (label === null) return null
+    return importedCareerIn(p, label)
+  }
+
+  /** All-time totals (imported pre-save career + archived seasons + this season). */
   private careerTotalsOf(pid: PlayerId): {
     goals: number
     assists: number
@@ -2217,6 +2259,15 @@ export class Career {
     let shutouts = 0
     const p = this.data.players.get(pid)
     if (p) {
+      // The career we never watched but the database DID record. Without this a
+      // 39-year-old import reads as a man who has never played a game.
+      const imported = this.importedCareerOf(p)
+      if (imported) {
+        goals += imported.goals
+        assists += imported.assists
+        gamesPlayed += imported.gamesPlayed
+        shutouts += imported.shutouts
+      }
       for (const s of p.stats) {
         if (s.league === 'ahl') continue // NHL career totals only — the farm line is separate
         goals += s.ev.goals + s.pp.goals + s.pk.goals
@@ -2320,8 +2371,11 @@ export class Career {
    * mid-season load can't re-announce. Fires from storyTickDay.
    */
   private emitRecordWatch(_day: number, outcomes: GameOutcome[]): void {
-    const ptsRec = this.recordsState.singleSeason.points[0]
-    const gRec = this.recordsState.singleSeason.goals[0]
+    // A half-written book holds no records: until a board carries real marks,
+    // its "#1" is just whoever led the league last year (playtest C4).
+    const established = (b: { length: number }): boolean => b.length >= RECORD_BOOK_MIN_ENTRIES
+    const ptsRec = established(this.recordsState.singleSeason.points) ? this.recordsState.singleSeason.points[0] : undefined
+    const gRec = established(this.recordsState.singleSeason.goals) ? this.recordsState.singleSeason.goals[0] : undefined
     if (!ptsRec && !gRec) return
     const y = this.year
 
@@ -2441,8 +2495,11 @@ export class Career {
       const p = tid ? this.standings.get(tid)?.points ?? 0 : 0
       return 0.8 + 0.4 * (p / maxTeamPts)
     }
-    // Rookie: a genuine first-year pro (no archived season) young enough to qualify.
-    const isRookieSeason = (p: Player): boolean => p.stats.length === 0 && p.age <= 24
+    // Rookie: a genuine first-year pro (no archived season, and no imported
+    // career in this league either) young enough to qualify. The Calder cannot
+    // go to a 24-year-old import with 200 games on his real record.
+    const isRookieSeason = (p: Player): boolean =>
+      isTrueRookieSeason({ age: p.age, simSeasons: p.stats.length, imported: this.importedCareerOf(p) })
 
     const pick = (
       award: string,
@@ -3570,10 +3627,17 @@ export class Career {
         if (s.goals >= 3) {
           this.queueVoice({ kind: 'hatTrick', playerId: pid as string, numbers: { goals: s.goals } })
         }
-        // careerTotalsOf includes today's tallies once applied: his career
-        // goals equalling tonight's haul means tonight held his first.
+        // careerTotalsOf includes today's tallies once applied (and now the
+        // imported pre-save career too): his career goals equalling tonight's
+        // haul means tonight held his first — provided we can vouch for the
+        // career at all. A veteran with no imported record stays silent rather
+        // than posting "first NHL goal" at 39.
         const tot = this.careerTotalsOf(pid)
-        if (tot.goals === s.goals || tot.goals === 0) {
+        if (canClaimFirstGoal({
+          age: p.age,
+          knownGoalsBefore: Math.max(0, tot.goals - s.goals),
+          imported: this.importedCareerOf(p),
+        })) {
           this.queueVoice({ kind: 'firstNhlGoal', playerId: pid as string })
         }
       }
@@ -3817,7 +3881,7 @@ export class Career {
           // Rookie definition matches the Calder pick in seasonAwardWinners
           // (first-year pro, age ≤ 24) so the race the feed hypes and the trophy
           // it eventually hands out agree on who's eligible.
-          isRookie: p.age <= 24 && p.stats.length === 0,
+          isRookie: isTrueRookieSeason({ age: p.age, simSeasons: p.stats.length, imported: this.importedCareerOf(p) }),
           consecutivePointGames: this.pointStreaks.get(id) ?? 0,
           scorelessStreak: this.scorelessStreaks.get(id) ?? 0,
         })
@@ -4915,7 +4979,15 @@ export class Career {
       const alreadyChronicled = this.chronicle.events.some(
         (e) => e.details?.moment === 'firstGoal' && e.playerIds.includes(pid as string)
       )
-      if (priorSeason + priorCareer === 0 && !alreadyChronicled) {
+      // An empty in-sim ledger is NOT proof of a debut: imported veterans arrive
+      // with no stat lines at all. Only the database's own career record — or an
+      // age at which no career can be hiding — earns the "his first" claim.
+      const isDebutGoal = canClaimFirstGoal({
+        age: p.age,
+        knownGoalsBefore: priorSeason + priorCareer,
+        imported: this.importedCareerOf(p),
+      })
+      if (isDebutGoal && !alreadyChronicled) {
         firstGoalScorers.push({ playerId: pid as string, name: p.name, age: p.age })
       }
     }
@@ -7609,16 +7681,11 @@ export class Career {
   private realCareerTotalsOf(p: Player): {
     gp: number; goals: number; assists: number; points: number; shutouts: number
   } {
-    const sim = this.careerTotalsOf(p.id)
-    let gp = sim.gamesPlayed, goals = sim.goals, assists = sim.assists, shutouts = sim.shutouts
-    for (const h of p.careerHistory ?? []) {
-      if (/ahl|american hockey/i.test(h.league)) continue // NHL/senior career line only
-      gp += h.gamesPlayed
-      goals += h.goals
-      assists += h.assists
-      shutouts += h.shutouts
-    }
-    return { gp, goals, assists, points: goals + assists, shutouts }
+    // careerTotalsOf already folds the imported pre-save career for THIS league
+    // (filtered by league label, so a man's junior and European seasons are not
+    // counted as NHL goals on his send-off).
+    const t = this.careerTotalsOf(p.id)
+    return { gp: t.gamesPlayed, goals: t.goals, assists: t.assists, points: t.points, shutouts: t.shutouts }
   }
 
   /**

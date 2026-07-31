@@ -27,6 +27,7 @@ import { buildScoutVerdict } from '@engine/career/scoutVerdict'
 import { buildScoutReport, reportProsCons } from '@engine/career/scoutReport'
 import { buildSquadFitNotes } from '@engine/career/scoutFit'
 import { buildScoutPanel } from '@engine/career/multiScout'
+import { importedCareerIn } from '@engine/story/careerLedger'
 import type { StaffMember } from '@engine/league/staff'
 import { contractStatus, requiresWaivers, CAP_FLOOR } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
@@ -112,6 +113,9 @@ export interface ViewCtx {
   shAssists?: Map<PlayerId, number>
   /** League-wide standings, best first (already tiebreak-sorted). */
   standingsSorted: Standing[]
+  /** The label imported career histories use for THIS league (null = none/
+   *  fictional). Lets the profile count a man's real pre-save career. */
+  historyLeagueLabel?: string | null
 }
 
 /* ────────────────────────── fog helpers ────────────────────────── */
@@ -686,10 +690,18 @@ function buildPositions(p: Player): Array<{ pos: string; level: 'Natural' | 'Acc
 }
 
 /** FM-style career highlights: the highest round-number career total reached in
- *  each category, from archived NHL seasons. Empty until he's built a real
- *  résumé. */
-function careerMilestoneBadges(p: Player): string[] {
+ *  each category, from archived NHL seasons PLUS the imported career the sim
+ *  never watched — a 39-year-old legend's badges must not read empty because
+ *  the save is young. Empty until he's built a real résumé. */
+function careerMilestoneBadges(p: Player, historyLabel?: string | null): string[] {
   let g = 0, a = 0, gp = 0, so = 0
+  if (historyLabel != null) {
+    const imported = importedCareerIn(p, historyLabel)
+    g += imported.goals
+    a += imported.assists
+    gp += imported.gamesPlayed
+    so += imported.shutouts
+  }
   for (const s of p.stats) {
     if (s.league === 'ahl') continue
     g += s.ev.goals + s.pp.goals + s.pk.goals
@@ -976,7 +988,10 @@ export function buildPlayerProfile(
     personalityReads,
     bio: buildBio(p),
     honours: buildHonours(p),
-    ...(careerMilestoneBadges(p).length ? { careerAchievements: careerMilestoneBadges(p) } : {}),
+    ...(() => {
+      const badges = careerMilestoneBadges(p, ctx.historyLeagueLabel)
+      return badges.length ? { careerAchievements: badges } : {}
+    })(),
     profileContract: buildProfileContract(p, teamId !== null, isAmateur),
     scoutReport,
     ...(scoutPanel !== undefined ? { scoutPanel } : {}),

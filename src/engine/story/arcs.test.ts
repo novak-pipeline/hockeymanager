@@ -547,16 +547,18 @@ describe('milestoneWatch detector', () => {
       rng,
     })
 
-    const milestoneNews = newsSeeds.filter(s => s.category === 'milestone')
-    expect(milestoneNews.some(s => s.headline.includes('200'))).toBe(true)
+    // The CHASE is this module's job; the crossing headline belongs to the
+    // career layer (which shares the ladder and applies the scope rule), so all
+    // that happens here is the arc resolving on its own beat.
+    expect(newsSeeds.filter(s => s.category === 'milestone' && /reaches/.test(s.headline))).toHaveLength(0)
     const arc = state.arcs.find(a => a.kind === 'milestoneWatch')
     expect(arc?.status).toBe('resolved')
+    expect(arc?.resolution).toBe('Reached 200 career goals')
   })
 
-  it('does not re-announce a milestone crossed without a prior approach arc', () => {
+  it('does not start a chase for a milestone already behind him', () => {
     const state = createInitialArcsState()
     const rng = makeRng()
-    const goals200 = (h: string): boolean => h.includes('200 career goals')
     // Jump straight over 200 career goals with no prior approach arc.
     const first = tickArcs({
       state,
@@ -567,8 +569,9 @@ describe('milestoneWatch detector', () => {
       }),
       rng,
     })
-    expect(first.newsSeeds.filter(s => s.category === 'milestone' && goals200(s.headline))).toHaveLength(1)
-    // Next game, still just past 200 — the same milestone must NOT re-announce.
+    expect(first.newsSeeds.some(s => /200 career goals/.test(s.headline))).toBe(false)
+    // A resolved marker was dropped, so the next game cannot open a "closing in
+    // on 200" chase for a mark he is already past.
     const second = tickArcs({
       state,
       inputs: quietInputs({
@@ -578,7 +581,8 @@ describe('milestoneWatch detector', () => {
       }),
       rng,
     })
-    expect(second.newsSeeds.some(s => s.category === 'milestone' && goals200(s.headline))).toBe(false)
+    expect(second.newsSeeds.some(s => /200 career goals/.test(s.headline))).toBe(false)
+    expect(state.arcs.filter(a => a.kind === 'milestoneWatch')).toHaveLength(1)
   })
 })
 
@@ -1028,22 +1032,35 @@ describe('headline quality', () => {
 })
 
 describe('games-played milestones (#48 story slice)', () => {
-  it('fires a career-games milestone news beat when a veteran crosses 500 games', () => {
+  it('opens a chase as a veteran closes on 500 games, and resolves it when he gets there', () => {
     const state = createInitialArcsState()
     const rng = makeRng()
-    const { newsSeeds } = tickArcs({
+    const chase = tickArcs({
       state,
       inputs: quietInputs({
         day: 40,
         playerLines: [playerLine('p1', 't1', { points: 1 })],
         playerName: () => 'Ironman',
-        careerTotals: () => ({ goals: 120, points: 300, gamesPlayed: 500 }),
+        careerTotals: () => ({ goals: 120, points: 300, gamesPlayed: 496 }),
       }),
       rng,
     })
-    const seed = newsSeeds.find((s) => s.category === 'milestone' && /career games/.test(s.headline))
+    const seed = chase.newsSeeds.find((s) => s.category === 'milestone' && /career games/.test(s.headline))
     expect(seed).toBeTruthy()
     expect(seed!.headline).toContain('500')
+
+    tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 44,
+        playerLines: [playerLine('p1', 't1', { points: 1 })],
+        playerName: () => 'Ironman',
+        careerTotals: () => ({ goals: 120, points: 302, gamesPlayed: 500 }),
+      }),
+      rng,
+    })
+    const arc = state.arcs.find((a) => a.kind === 'milestoneWatch')
+    expect(arc?.resolution).toBe('Reached 500 career games')
   })
 
   it('does NOT fire a games milestone at a non-marquee count (e.g. 300 games)', () => {

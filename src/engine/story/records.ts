@@ -431,24 +431,12 @@ function insertSorted(
 }
 
 /**
- * Insert into board and return both the updated board AND whether the entry
- * cracked the top-3 positions (triggers a record-breaking news item).
+ * A board must already hold this many marks before anything on it can be
+ * "broken". A young league's boards start EMPTY: without this the very first
+ * season's leader in every category is announced as an all-time record holder,
+ * and the next three seasons keep "breaking" a book that was never written.
  */
-function insertAndCheckTopThree(
-  board: RecordEntry[],
-  entry: RecordEntry,
-  ascending = false,
-): { updated: RecordEntry[]; brokeTopThree: boolean; displaced: RecordEntry | null } {
-  const updated = insertSorted(board, entry, ascending)
-  const newRank = updated.findIndex(
-    (e) => e.playerId === entry.playerId && e.year === entry.year && e.value === entry.value,
-  )
-  // Did this entry land in positions 0-2 (top 3)?
-  const brokeTopThree = newRank !== -1 && newRank < 3
-  // Who was previously at that rank (if the list grew from ≥3 entries)?
-  const displaced = brokeTopThree && board.length >= 3 ? board[newRank] ?? null : null
-  return { updated, brokeTopThree, displaced }
-}
+export const RECORD_BOOK_MIN_ENTRIES = 3
 
 function recordLabel(stat: string): string {
   switch (stat) {
@@ -471,15 +459,10 @@ function fmtValue(stat: string, value: number): string {
   return String(value)
 }
 
-function recordBreakHeadline(
-  entry: RecordEntry,
-  stat: string,
-  isAllTime: boolean,
-): string {
+function recordBreakHeadline(entry: RecordEntry, stat: string): string {
   const label = recordLabel(stat)
   const fv = fmtValue(stat, entry.value)
-  const kind = isAllTime ? 'all-time league record' : 'top-3 league mark'
-  return `${entry.playerName} breaks the ${kind} for single-season ${label}s with ${fv}`
+  return `${entry.playerName} breaks the all-time league record for single-season ${label}s with ${fv}`
 }
 
 function recordBreakBody(
@@ -600,9 +583,20 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
   const { state, year, champion, presidentsName, userRank, seasonLines, awards } = args
   const newsSeeds: NewsSeed[] = []
 
-  /* ── single-season boards ── */
+  /* ── single-season boards ──
+   *
+   * A record is judged against the book AS IT STOOD when the season began, and
+   * only the season's BEST in a category may claim it. Folding this year's
+   * lines in one at a time made the league's fourth-best goalie "break" the
+   * mark the third-best had set moments earlier in the same loop — which is how
+   * a brand-new league announced four all-time records in its first season. */
 
   type StatKey = 'goals' | 'assists' | 'points' | 'wins' | 'savePct' | 'shutouts'
+  const STAT_KEYS: StatKey[] = ['goals', 'assists', 'points', 'wins', 'savePct', 'shutouts']
+
+  const bookAtSeasonStart: Partial<Record<StatKey, RecordEntry[]>> = {}
+  for (const key of STAT_KEYS) bookAtSeasonStart[key] = [...(state.singleSeason[key] ?? [])]
+  const seasonBest = new Map<StatKey, RecordEntry>()
 
   for (const line of seasonLines) {
     const isGoalie = line.position === 'G'
@@ -635,19 +629,10 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
       // Default for the optional shutouts board (absent on pre-shutouts saves).
       const board = state.singleSeason[key] ?? []
       const e: RecordEntry = { ...entry, value }
-      const isAllTime = board.length === 0 || value > board[0]!.value
+      state.singleSeason[key] = insertSorted(board, e)
 
-      const { updated, brokeTopThree, displaced } = insertAndCheckTopThree(board, e)
-      state.singleSeason[key] = updated
-
-      if (brokeTopThree) {
-        newsSeeds.push({
-          category: 'milestone',
-          headline: recordBreakHeadline(e, key, isAllTime),
-          body: recordBreakBody(e, key, displaced),
-          playerId: line.playerId,
-        })
-      }
+      const best = seasonBest.get(key)
+      if (!best || value > best.value) seasonBest.set(key, e)
     }
 
     /* ── career boards ── */
@@ -663,6 +648,20 @@ export function archiveSeason(args: ArchiveSeasonArgs): ArchiveSeasonResult {
         line.gamesPlayed,
       )
     }
+  }
+
+  /* ── did the season's best actually take a record off the book? ── */
+  for (const key of STAT_KEYS) {
+    const best = seasonBest.get(key)
+    const prior = bookAtSeasonStart[key] ?? []
+    if (!best || prior.length < RECORD_BOOK_MIN_ENTRIES) continue
+    if (best.value <= prior[0]!.value) continue
+    newsSeeds.push({
+      category: 'milestone',
+      headline: recordBreakHeadline(best, key),
+      body: recordBreakBody(best, key, prior[0] ?? null),
+      playerId: best.playerId,
+    })
   }
 
   /* ── season leaders snapshot (for archive header) ── */
@@ -730,16 +729,24 @@ export interface RecordWatchResult {
 }
 
 /**
- * Mid-season pace detection: once a team has played ≥ 30 games, check whether
- * any player is on pace to beat a top-3 all-time single-season record. Emits
- * the news seed at most once per player × stat × year combination.
+ * How much of the schedule must be gone before a pace means anything.
+ * Extrapolating from game 30 turns a hot October into a "record chase" for a
+ * dozen goalies a year (measured: 22 per season), and a chase that happens
+ * every year is not a chase.
+ */
+export const PACE_WATCH_SEASON_FRACTION = 2 / 3
+
+/**
+ * Late-season pace detection: once two thirds of the schedule is gone, check
+ * whether any player is on pace to beat the all-time single-season record.
+ * Emits the news seed at most once per player × stat × year combination.
  */
 export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
   const { state, seasonLines, year, teamGamesPlayed, totalSeasonGames } = args
   const newsSeeds: NewsSeed[] = []
 
-  if (teamGamesPlayed < 30) return { newsSeeds }
   if (totalSeasonGames <= 0) return { newsSeeds }
+  if (teamGamesPlayed < PACE_WATCH_SEASON_FRACTION * totalSeasonGames) return { newsSeeds }
 
   const pace = (current: number) => (current / teamGamesPlayed) * totalSeasonGames
 
@@ -794,7 +801,9 @@ export function recordWatch(args: RecordWatchArgs): RecordWatchResult {
   const cands: Cand[] = []
   for (const { key, extract, filter } of statExtractors) {
     const board = state.singleSeason[key] ?? []
-    if (board.length < 1) continue
+    // An empty or half-written board has no record to chase — a young league
+    // would otherwise put every leader "on pace" against a mark nobody set.
+    if (board.length < RECORD_BOOK_MIN_ENTRIES) continue
     const record = board[0]! // the all-time single-season mark to break
 
     for (const line of seasonLines) {
