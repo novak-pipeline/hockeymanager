@@ -8,6 +8,7 @@ import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
+import { Dropdown, type DropdownOption } from '../components/Dropdown'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
 import { useUiStore, toast } from '../components/store'
@@ -19,6 +20,14 @@ type SortKey =
   | 'condition' | 'morale' | 'form'
   | 'salary' | 'years'
   | 'gp' | 'g' | 'a' | 'pts' | 'plusMinus' | 'pim' | 'toi'
+
+type ColView = 'general' | 'contract' | 'stats'
+
+const COL_VIEWS: DropdownOption<ColView>[] = [
+  { value: 'general', label: 'General' },
+  { value: 'contract', label: 'Contract' },
+  { value: 'stats', label: 'Statistics' },
+]
 
 const POS_TABS: { label: string; value: PosFilter }[] = [
   { label: 'All', value: 'ALL' },
@@ -229,7 +238,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('line')
   const [sortAsc, setSortAsc] = useState(true)
-  const [colView, setColView] = useState<'general' | 'contract' | 'stats'>('general')
+  const [colView, setColView] = useState<ColView>('general')
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -419,14 +428,17 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                     )}
                   </button>
                 ))}
-                <label className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span className="muted small" style={{ marginLeft: 'auto', alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 4 }}>
                   View:
-                  <select className="select" value={colView} onChange={(e) => setColView(e.target.value as 'general' | 'contract' | 'stats')} style={{ fontSize: 12 }}>
-                    <option value="general">General</option>
-                    <option value="contract">Contract</option>
-                    <option value="stats">Statistics</option>
-                  </select>
-                </label>
+                  <Dropdown
+                    value={colView}
+                    options={COL_VIEWS}
+                    onChange={setColView}
+                    ariaLabel="Column view"
+                    title="Which set of columns the table shows"
+                    align="end"
+                  />
+                </span>
                 <span className="muted small" style={{ alignSelf: 'center', paddingRight: 8 }}>
                   {filtered.length} player{filtered.length !== 1 ? 's' : ''}
                 </span>
