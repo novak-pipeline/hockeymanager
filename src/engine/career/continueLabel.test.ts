@@ -22,6 +22,8 @@ type Gates = {
   deadlineHold: boolean
   reviewFacts: unknown
   trainingCamp: unknown
+  tradeOffers: unknown[]
+  news: Array<{ headline: string }>
 }
 
 function seasonCareer(): { career: Career; gates: Gates } {
@@ -72,6 +74,166 @@ describe('continueLabel — every gate names itself', () => {
     expect(career.getDashboard().continueLabel).toBe('Continue — scout meeting')
     gates.scoutMeetingScene = null
     expect(career.getDashboard().continueLabel).toBe('Continue — scouting report')
+  })
+})
+
+/* ───────────────────── playtest A6 — the standing trade offer ─────────────────
+ * A rival GM holding for an answer on one of your players is a decision, and a
+ * decision the GM can sim straight past is not a decision at all. These fail
+ * without the gate: the label read "Continue to Nov 12" and the day simmed.
+ */
+
+/** Table a real inbound offer for one of the user's players, the way the AI
+ *  offer generator does — the engine reads `tradeOffers` for the gate. */
+function tableOffer(
+  career: Career,
+  gates: Gates,
+  data: ReturnType<typeof generateLeague>,
+  partnerIndex: number,
+  offerId: string
+): string {
+  const userTeamId = career.getDashboard().userTeam.teamId
+  const mine = data.teams.get(userTeamId as never)!.roster
+  const partnerTeamId = data.league.teams.filter((t) => (t as string) !== userTeamId)[partnerIndex]!
+  gates.tradeOffers.push({
+    offerId,
+    partnerTeamId,
+    userReceivesPlayerIds: [],
+    userReceivesPicks: [],
+    userGivesPlayerIds: [mine[partnerIndex]!],
+    userGivesPicks: [],
+    message: 'We like your guy. Make a call.',
+    expiresOnDay: 999,
+  })
+  return data.teams.get(partnerTeamId)!.abbreviation
+}
+
+describe('a standing trade offer is a beat gate (playtest A6, bar B2.2)', () => {
+  it('names the club on the Continue button', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+
+    expect(career.getDashboard().tradeOffersPending).toBe(0)
+    const abbr = tableOffer(career, gates, data, 0, 'a6-1')
+    expect(career.getDashboard().tradeOffersPending).toBe(1)
+    expect(career.getDashboard().continueLabel).toBe(`Continue — trade offer from ${abbr}`)
+  })
+
+  it('counts them when several clubs are holding', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+
+    tableOffer(career, gates, data, 0, 'a6-1')
+    tableOffer(career, gates, data, 1, 'a6-2')
+    expect(career.getDashboard().continueLabel).toBe('Continue — 2 trade offers')
+  })
+
+  it('sits under the deadline and over the meetings in the routing order', () => {
+    // Same law as the other gates: the label must name the beat the shell will
+    // actually land on. App.tsx routes deadline → trade desk → staff meeting.
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+
+    const abbr = tableOffer(career, gates, data, 0, 'a6-1')
+    gates.staffMeetingScene = { proposals: [] }
+    gates.deadlineHold = true
+    expect(career.getDashboard().continueLabel).toBe('Continue — trade deadline')
+    gates.deadlineHold = false
+    expect(career.getDashboard().continueLabel).toBe(`Continue — trade offer from ${abbr}`)
+    career.declineAllTradeOffers()
+    expect(career.getDashboard().continueLabel).toBe('Continue — staff meeting')
+  })
+
+  it('has a one-click escape: the AGM passes on the lot', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+
+    tableOffer(career, gates, data, 0, 'a6-1')
+    tableOffer(career, gates, data, 1, 'a6-2')
+    const res = career.declineAllTradeOffers()
+    expect(res.declined).toBe(2)
+    expect(career.getDashboard().tradeOffersPending).toBe(0)
+    expect(career.getDashboard().continueLabel).toMatch(/^Continue to /)
+    // The GM is told what was turned down in his name — a delegated decision is
+    // still a decision, and it has to leave a trace.
+    expect(gates.news.some((n) => /passes on 2 offers/.test(n.headline))).toBe(true)
+  })
+
+  it('cannot softlock: a day simmed past the gate delegates to the AGM', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+
+    tableOffer(career, gates, data, 0, 'a6-1')
+    expect(career.getDashboard().tradeOffersPending).toBe(1)
+    career.advanceDay()
+    // Whatever fresh offers the day generated, the one we tabled is answered.
+    expect(gates.tradeOffers.some((o) => (o as { offerId: string }).offerId === 'a6-1')).toBe(false)
+  })
+})
+
+/* ───────────────────── playtest A7 — the trade deadline ───────────────────────
+ * The engine armed a one-press hold, but a BATCH sim spent it silently: "+7
+ * days" or "to next game" armed the hold on one iteration and consumed it on
+ * the next, so the season's biggest decision point slid by unattended.
+ */
+describe('the trade deadline is a hard gate (playtest A7)', () => {
+  function freshCareer(seed: number): Career {
+    const data = generateLeague({ seed })
+    const career = new Career(data, seed, data.league.teams[3]!)
+    ;(career as unknown as Gates).trainingCamp = null
+    return career
+  }
+
+  it('a multi-day sim stops AT the deadline instead of steamrolling it', () => {
+    const career = freshCareer(2029)
+    career.advance(400) // enough to run the whole regular season and then some
+    expect(career.getDashboard().deadlinePending).toBe(true)
+    expect(career.getDashboard().continueLabel).toBe('Continue — trade deadline')
+    expect(career.getDashboard().phase).toBe('regularSeason')
+  })
+
+  it('the batch resumes normally once the GM has had his day', () => {
+    const career = freshCareer(2029)
+    career.advance(400)
+    expect(career.getDashboard().deadlinePending).toBe(true)
+    const dayAtHold = career.getDashboard().day
+    career.advance(5) // the hold is spent by the first step, then it runs on
+    expect(career.getDashboard().deadlinePending).toBe(false)
+    expect(career.getDashboard().day).toBeGreaterThan(dayAtHold)
+    expect(career.getTentpoles().deadlinePassed).toBe(true)
+  })
+
+  it('"to next game" does not carry the GM through the deadline either', () => {
+    // Count the advances it takes for the hold to arm, then stop one short and
+    // reach for the "to next game" button — the path that used to sail past.
+    const probe = freshCareer(2029)
+    let steps = 0
+    for (; steps < 400; steps++) {
+      probe.advance(1)
+      if (probe.getDashboard().deadlinePending) break
+    }
+    expect(probe.getDashboard().deadlinePending).toBe(true)
+
+    const career = freshCareer(2029)
+    career.advance(steps) // one short of the arming step
+    expect(career.getDashboard().deadlinePending).toBe(false)
+    career.advanceToNextGame()
+    expect(career.getDashboard().deadlinePending).toBe(true)
   })
 })
 

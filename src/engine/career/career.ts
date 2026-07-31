@@ -5573,6 +5573,11 @@ export class Career {
     // Playtest #10: simming past a held scout digest lets the scouts keep the
     // queue — the delegate default, so the gate can never softlock.
     if (this.scoutDigestPending) this.resolveScoutDigest()
+    // Playtest A6: same law for a standing trade offer. The shell holds Continue
+    // on the trade desk while one is live; a day simmed past it anyway hands the
+    // phones to the AGM, who passes on the lot. The gate can never softlock, and
+    // an offer is never left hanging unanswered.
+    if (this.pendingTradeOffers().length > 0) this.declineAllTradeOffers()
     const nextDay = this.matchDays.find((d) => d > this.currentDay)
     // Deadline day pauses the sim like draft day: the FIRST continue that would
     // cross the deadline is held — one last chance to work the phones — and the
@@ -5830,6 +5835,12 @@ export class Career {
     for (let i = 0; i < days; i++) {
       if (!this.step()) break
       played++
+      // Playtest A7 (bar B3.2): the trade deadline is the season's biggest
+      // decision point and a batch sim used to steamroll it — "+7 days" or
+      // "to next game" armed the hold on one iteration and consumed it on the
+      // next, so the deadline passed without the GM ever seeing the war room.
+      // A hard gate stops the batch dead where it arms.
+      if (this.deadlineHold) break
     }
     return played
   }
@@ -5912,6 +5923,8 @@ export class Career {
       if (!this.step()) return
       if (this.userGamesPlayed() > before) return
       if (this.phase === 'offseason') return
+      // A7: "to next game" must not carry the GM through the deadline either.
+      if (this.deadlineHold) return
     }
   }
 
@@ -11956,6 +11969,58 @@ export class Career {
     this.tradeOffers = this.tradeOffers.filter((o) => o.offerId !== offerId)
   }
 
+  /**
+   * Playtest A6 (bar B2.2): the standing inbound offers that are a real DECISION
+   * — the ones asking for one of your own players or picks. A club phoning about
+   * your second-line centre is not ambient league news; it is a yes or a no, and
+   * the GM must not be able to sim straight past it. This arms the Continue gate
+   * (see `continueLabel` and the shell routing in App.tsx).
+   *
+   * Derived, not stored: offers already carry their own expiry and are not in the
+   * save snapshot, so a boolean flag would survive a load with nothing behind it.
+   */
+  private pendingTradeOffers(): StoredTradeOffer[] {
+    if (this.phase !== 'regularSeason') return []
+    return this.tradeOffers.filter(
+      (o) => o.userGivesPlayerIds.length > 0 || o.userGivesPicks.length > 0
+    )
+  }
+
+  /**
+   * The one-click escape from the trade-offer gate (bar B2.2 — every gate has a
+   * way out): hand the phones to the Assistant GM, who passes on the lot. Also
+   * the delegate the engine applies when the day is simmed past the gate, so the
+   * beat can never softlock and an offer never just evaporates unanswered.
+   */
+  declineAllTradeOffers(): { declined: number; message: string } {
+    const pending = this.pendingTradeOffers()
+    if (pending.length === 0) return { declined: 0, message: 'No offers on the desk.' }
+    const ids = new Set(pending.map((o) => o.offerId))
+    this.tradeOffers = this.tradeOffers.filter((o) => !ids.has(o.offerId))
+    const agm = this.getTeamStaff(this.userTeamId as string).assistantGM?.name ?? 'Your Assistant GM'
+    const clubs = [
+      ...new Set(pending.map((o) => this.data.teams.get(o.partnerTeamId)?.abbreviation ?? '—')),
+    ]
+    const headline =
+      pending.length === 1
+        ? `${agm} passes on ${clubs[0]}'s offer`
+        : `${agm} passes on ${pending.length} offers`
+    this.pushNews(
+      'trade',
+      headline,
+      `${agm} worked the phones so you didn't have to. He turned down ${clubs.join(', ')} — ` +
+      `nothing on the table was worth what it asked for. The desk is clear.`,
+      { teamId: this.userTeamId as string }
+    )
+    return {
+      declined: pending.length,
+      message:
+        pending.length === 1
+          ? `${agm} declined ${clubs[0]}'s offer.`
+          : `${agm} declined ${pending.length} offers.`,
+    }
+  }
+
   private tradingOpen(): boolean {
     // Open all season until the deadline, closed through the playoffs, and
     // OPEN again all summer — July trades are half the fun of an offseason.
@@ -13058,6 +13123,17 @@ export class Career {
         // GM into a staff meeting — a beat arriving unannounced is the same
         // broken trust as one with no way out.
         if (this.deadlineHold) return 'Continue — trade deadline'
+        // A6: a rival GM is holding for an answer on one of your players. That
+        // outranks the recurring meetings (offers expire; meetings don't) and
+        // sits under the deadline, which is the trade desk's own bigger beat.
+        {
+          const offers = this.pendingTradeOffers()
+          if (offers.length === 1) {
+            const abbr = this.data.teams.get(offers[0]!.partnerTeamId)?.abbreviation ?? 'a rival'
+            return `Continue — trade offer from ${abbr}`
+          }
+          if (offers.length > 1) return `Continue — ${offers.length} trade offers`
+        }
         if (this.staffMeetingScene !== null) return 'Continue — staff meeting'
         if (this.scoutMeetingScene !== null) return 'Continue — scout meeting'
         if (this.scoutDigestPending) return 'Continue — scouting report'
@@ -13194,6 +13270,7 @@ export class Career {
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
+      tradeOffersPending: this.pendingTradeOffers().length,
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,

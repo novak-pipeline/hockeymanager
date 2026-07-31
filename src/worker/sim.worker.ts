@@ -374,6 +374,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'rejectTrade':
       must().rejectTrade(req.offerId)
       return { id: req.id, type: 'ok' }
+    case 'declineAllTradeOffers': {
+      const r = must().declineAllTradeOffers()
+      return { id: req.id, type: 'shopResult', count: r.declined, message: r.message }
+    }
     case 'resignPlayer': {
       const res = must().resignPlayer(req.playerId, req.salary, req.years)
       if (!res.signed) throw new Error(res.message)

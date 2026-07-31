@@ -70,6 +70,34 @@ export function TopNav(props: {
               <span>{fmtDate(next.date)}</span>
             </div>
           )}
+          {/* Beat flags (playtest A6/A7, bar B2.2): a gate that holds Continue is
+              visible up here too, and clicking it goes straight to the desk that
+              can clear it. The button already names the beat — this says it is
+              still standing after you've navigated away. */}
+          {(d?.deadlinePending || (d?.tradeOffersPending ?? 0) > 0) && (
+            <div className="topnav-beats">
+              {d?.deadlinePending && (
+                <button
+                  className="chip chip-danger topnav-beat"
+                  onClick={() => nav.navigate('deadlineDay')}
+                  title="The trade deadline is today — the sim is held until you continue"
+                >
+                  Deadline day
+                </button>
+              )}
+              {(d?.tradeOffersPending ?? 0) > 0 && (
+                <button
+                  className="chip chip-warn topnav-beat"
+                  onClick={() => nav.navigate('trades')}
+                  title="A rival GM is waiting on an answer"
+                >
+                  {d?.tradeOffersPending === 1
+                    ? '1 trade offer'
+                    : `${d?.tradeOffersPending} trade offers`}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Actions right cluster */}

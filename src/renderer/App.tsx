@@ -458,6 +458,25 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           navigate('seasonReview')
           return
         }
+        // Deadline day (playtest A7): the season's biggest decision point. The
+        // engine holds the sim; Continue walks the GM into the war room instead
+        // of quietly spending the hold. Continuing FROM the deadline screen is
+        // the escape — the window closes and the roster you have is the one you
+        // ride. Ordered to match `continueLabel`: after the review, before the
+        // meetings.
+        if (dashboard?.deadlinePending && nav.screen !== 'deadlineDay') {
+          setProcessing(null)
+          navigate('deadlineDay')
+          return
+        }
+        // Standing trade offer (playtest A6): a rival GM is holding for an answer
+        // on one of your players. Continue routes to the trade desk; continuing
+        // FROM it delegates — the AGM passes on the lot (engine-side).
+        if ((dashboard?.tradeOffersPending ?? 0) > 0 && nav.screen !== 'trades') {
+          setProcessing(null)
+          navigate('trades')
+          return
+        }
         // Bi-weekly staff meeting: the coaches convene with live-roster proposals.
         // Skipping (delegate) hands the meeting to the AGM (engine-safe defaults).
         if (dashboard?.staffMeetingDue && nav.screen !== 'staffBriefing') {
@@ -488,7 +507,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           dashboard?.campPending || dashboard?.devCampPending ||
           dashboard?.boardMeetingPending || dashboard?.reviewPending ||
           dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue ||
-          dashboard?.scoutDigestPending
+          dashboard?.scoutDigestPending ||
+          // A7/A6: the deadline and the trade desk resolve in place too — a
+          // Continue pressed ON the beat's own screen spends the gate.
+          dashboard?.deadlinePending || (dashboard?.tradeOffersPending ?? 0) > 0
         )
         if (resolvingBeat) {
           setProcessing(null)
@@ -516,7 +538,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, dashboard?.scoutDigestPending, dashboard?.scoutDigestNewsId, nav.screen, navigate]
+    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, dashboard?.scoutDigestPending, dashboard?.scoutDigestNewsId, dashboard?.deadlinePending, dashboard?.tradeOffersPending, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
