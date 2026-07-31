@@ -2999,6 +2999,13 @@ export class Career {
         kind: 'unhappy',
         severity: 'serious',
         message: renderTemplate(ev.scene, slots),
+        // This is an authored SCENE, not the player's own words — narrated prose
+        // with dialogue set inside it, staged in your office (the news item below
+        // says exactly that). Flagged so the living phone lifts the dialogue out
+        // before voicing it, attributes it to whoever actually says it, and stays
+        // silent for the scenes where nobody speaks at all.
+        scene: true,
+        ...(ev.speaker ? { speaker: ev.speaker } : {}),
         options: ev.options.map((o) => ({ id: o.id, label: o.label, tone: 'firm' as const })),
         status: 'open',
       })
@@ -14815,6 +14822,9 @@ export class Career {
       kind: r.kind,
       title: r.title,
       body: r.body,
+      // Saves written before the owner had a spoken line carry none; the phone
+      // simply stays quiet for those rather than voicing the card prose.
+      ...(r.spoken ? { spoken: r.spoken } : {}),
       acceptHint: `Go along with it (board confidence ${sign(r.acceptConfidence)})`,
       declineHint: `Push back (board confidence ${sign(r.declineConfidence)})`,
     }
@@ -17232,6 +17242,8 @@ export class Career {
         kind: i.kind,
         severity: i.severity,
         message: i.message,
+        ...(i.scene ? { scene: true as const } : {}),
+        ...(i.speaker ? { speaker: i.speaker } : {}),
         day: i.day,
         year: i.year,
         options: i.options.map((o) => ({ id: o.id, label: o.label })),
@@ -17323,13 +17335,60 @@ export class Career {
   }
 
   private offerView(o: StoredTradeOffer): TradeOfferView {
+    const receive = this.tradeSide(o.partnerTeamId, o.userReceivesPlayerIds, o.userReceivesPicks)
+    const give = this.tradeSide(this.userTeamId, o.userGivesPlayerIds, o.userGivesPicks)
+    const gm = this.gmPersonaFor(o.partnerTeamId)
     return {
       offerId: o.offerId,
-      receive: this.tradeSide(o.partnerTeamId, o.userReceivesPlayerIds, o.userReceivesPicks),
-      give: this.tradeSide(this.userTeamId, o.userGivesPlayerIds, o.userGivesPicks),
+      receive,
+      give,
       message: o.message,
+      gmName: gm.name,
+      ...(this.offerPitch(o, receive, give, gm) ?? {}),
       expiresOnDay: o.expiresOnDay,
     }
+  }
+
+  /** The offer as the rival GM would put it to you on the phone: first person,
+   *  naming the man he wants and what he's putting up for him, in the register of
+   *  his own persona. The stored `message` is card prose ("Nashville are after X.
+   *  On the table: …") — read aloud in his own voice it made no sense, which is
+   *  why the living phone speaks this instead. */
+  private offerPitch(
+    o: StoredTradeOffer,
+    receive: TradeSideView,
+    give: TradeSideView,
+    gm: GmPersona,
+  ): { spoken: string } | null {
+    // The man he wants is the best player on OUR side of the deal.
+    const want = [...give.players].sort((a, b) => b.overall - a.overall)[0]
+    if (!want) return null
+    const offering = [
+      ...[...receive.players].sort((a, b) => b.overall - a.overall).map((p) => p.name),
+      ...receive.picks.map((p) => p.label),
+    ]
+    const list =
+      offering.length === 0 ? 'something that works for you'
+        : offering.length === 1 ? offering[0]!
+          : `${offering.slice(0, -1).join(', ')} and ${offering[offering.length - 1]!}`
+
+    // An aggressive dealer opens by saying what he wants; a patient one circles it.
+    const opener = gm.aggression >= 0.66
+      ? `I'll get straight to it. We want ${want.name}.`
+      : gm.aggression <= 0.34
+        ? `I've been sitting on this one a while, so take it in the spirit it's meant: we like ${want.name}.`
+        : `I'd rather say this to you than let you hear it somewhere else — we want ${want.name}.`
+    // And what he leans on to sell it.
+    const pitch = gm.analyticsLean >= 0.7
+      ? `Our numbers say he's a better fit in our system than he is in yours.`
+      : gm.pickHoarding <= 0.3
+        ? `We're not in the business of collecting picks, so we'd rather spend them on a player.`
+        : `We've watched him enough to know what he'd be for us.`
+    const deadlineSoon = this.deadlineDay > 0 && o.expiresOnDay >= this.deadlineDay - 7
+    const urgency = deadlineSoon
+      ? `I need an answer before the deadline, not after it.`
+      : `Have a look and call me back — the offer's good for a few days.`
+    return { spoken: `${opener} ${pitch} We'll put up ${list}. ${urgency}` }
   }
 
   getTrades(): TradesView {

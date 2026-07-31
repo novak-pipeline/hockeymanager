@@ -41,7 +41,7 @@ import { BoardMeetingScreen } from './screens/BoardMeetingScreen'
 import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
 import { ScoutMeetingScreen } from './screens/ScoutMeetingScreen'
 import { CommandPalette } from './components/CommandPalette'
-import { PhoneCallOverlay } from './components/PhoneCallOverlay'
+import { PhoneCallOverlay, resetPhoneSeen } from './components/PhoneCallOverlay'
 import { WarRoomScreen } from './screens/WarRoomScreen'
 import { DeadlineDayScreen } from './screens/DeadlineDayScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
@@ -100,10 +100,10 @@ export function App(): JSX.Element {
         if (newest) setResumeInfo({ slot: newest.slot, teamName: newest.teamName, year: newest.year, phase: newest.phase })
       })
       .catch(() => { /* no bridge / no saves — just show the new-game flow */ })
-    // NOTE: the neural voices are NOT warmed on startup — running the onnxruntime
-    // WASM at launch is heavy and best kept off the critical boot path. They
-    // auto-load on the first spoken line instead (see speak.ts), so a fresh
-    // launch is always light and stable.
+    // NOTE: the neural voices ARE warmed shortly after startup (see main.tsx) —
+    // they're the default, not a button to find — but off the critical boot path
+    // and retried with backoff, so a fresh launch stays light and a bad network
+    // moment doesn't cost the whole session's voices.
     return () => {
       c.dispose()
       setClient(null)
@@ -171,6 +171,9 @@ export function App(): JSX.Element {
       toast(res.message, 'error')
       return
     }
+    // Call ids are per-career counters that restart at zero, so a seen-set left
+    // over from the last career would silently swallow this one's phone calls.
+    resetPhoneSeen()
     setUserTeam(team)
     setPhase('shell')
   }

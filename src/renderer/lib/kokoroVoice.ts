@@ -1,14 +1,16 @@
 /**
  * kokoroVoice.ts — Kokoro-JS neural TTS voice engine.
  *
- * Downloads ~80-90 MB of ONNX model weights from Hugging Face on first use.
- * The download is NEVER triggered automatically: call loadKokoro() only after
- * the user explicitly opts in (e.g. by toggling "Enhanced voice" in the UI).
- * Transformers.js caches the model in the browser's Cache API / IndexedDB so
- * subsequent loads are instant.
+ * Downloads ~86-330 MB of ONNX model weights (by fidelity) from Hugging Face on
+ * first use. The download is kicked automatically in the background at startup —
+ * neural voices are the default, not a button to find (see speak.ts) — and can be
+ * opted out of in Settings. Transformers.js caches the model in the Cache API, which
+ * is available under the packaged app's file:// origin, so later loads are instant.
  *
  * Integration contract (VoiceEngine):
- *   - speak(line): queue and play; drops importance-1 lines when busy.
+ *   - speak(line): queue and play; drops importance-1 lines when busy. Long lines
+ *     are chunked so audio starts after the first chunk, not the whole message.
+ *   - prewarm(line): synthesise the opening ahead of time, play nothing.
  *   - cancel(): stop current playback and flush the queue.
  *   - ready: true when the model is loaded and playback-ready.
  *   - name: 'kokoro'
@@ -208,6 +210,65 @@ export async function prefetchVoiceData(voices: readonly string[] = CAST_VOICES)
  */
 const SPORTS_VOICE = 'am_michael'
 
+// ── Chunking ────────────────────────────────────────────────────────────────
+
+/** Target and hard-cap chunk sizes, in characters. Small enough that the first
+ *  chunk synthesises quickly, large enough that the delivery still phrases like
+ *  a person talking rather than a list of sentences. */
+const CHUNK_TARGET = 110
+const CHUNK_MAX = 220
+
+/**
+ * Split a line into speakable chunks at sentence boundaries.
+ *
+ * Why this exists: onnxruntime-web runs single-threaded, un-proxied, on the
+ * renderer's MAIN thread (see _doLoad), so a synthesis call freezes the UI for
+ * its whole duration and no audio starts until it finishes. Measured on the
+ * FASTER native-CPU backend, one 49-word phone call took 4.80s end to end but
+ * only 1.43s for its first sentence — so synthesising a message whole is the
+ * reason answering the phone lagged. Chunked, playback starts after the first
+ * chunk and each later chunk is synthesised while the previous one is still
+ * playing (WebAudio plays off-thread), so the main thread blocks in short
+ * slices instead of one long one.
+ *
+ * Sentences shorter than the target are merged so delivery doesn't turn choppy;
+ * a single sentence longer than CHUNK_MAX is broken at a clause boundary, and
+ * failing that at a word boundary — never mid-word.
+ */
+export function chunkForSpeech(text: string): string[] {
+  const clean = text.trim()
+  if (clean.length <= CHUNK_TARGET) return clean ? [clean] : []
+  const sentences = clean.split(/(?<=[.!?…])\s+/).filter((s) => s.trim().length > 0)
+  const out: string[] = []
+  let buf = ''
+  const flush = (): void => { if (buf.trim()) out.push(buf.trim()); buf = '' }
+  for (const s of sentences) {
+    for (const piece of splitLong(s)) {
+      if (buf && (buf.length + 1 + piece.length) > CHUNK_TARGET) flush()
+      buf = buf ? `${buf} ${piece}` : piece
+    }
+  }
+  flush()
+  return out
+}
+
+/** Break one over-long sentence at a clause boundary, else at word boundaries. */
+function splitLong(sentence: string): string[] {
+  if (sentence.length <= CHUNK_MAX) return [sentence]
+  const clauses = sentence.split(/(?<=[,;:—])\s+/)
+  const out: string[] = []
+  for (const c of clauses) {
+    if (c.length <= CHUNK_MAX) { out.push(c); continue }
+    let line = ''
+    for (const word of c.split(/\s+/)) {
+      if (line && (line.length + 1 + word.length) > CHUNK_MAX) { out.push(line); line = '' }
+      line = line ? `${line} ${word}` : word
+    }
+    if (line) out.push(line)
+  }
+  return out
+}
+
 /** Small LRU cache of synthesised clips (raw PCM) keyed by voice+text, so stock
  *  phrases (goal calls, repeated meeting lines) don't pay synthesis twice. */
 const CACHE_MAX = 64
@@ -286,48 +347,65 @@ class KokoroVoiceEngine implements VoiceEngine {
     return this._ctx
   }
 
+  /**
+   * Synthesise the OPENING of a line and leave it in the clip cache, without
+   * playing anything. The living phone calls this while the handset is still
+   * ringing, so by the time the GM clicks Answer the expensive first chunk is
+   * already done and speech starts effectively instantly. Best-effort and
+   * silent: a failure just means the line is synthesised the normal way.
+   */
+  async prewarm(line: Pick<SpeakLine, 'speech' | 'voice' | 'rate'>): Promise<void> {
+    if (this._busy) return // never compete with a line that's actually speaking
+    const first = chunkForSpeech(line.speech)[0]
+    if (!first) return
+    await this._synth(first, line.voice ?? SPORTS_VOICE, line.rate ?? 1.08)
+  }
+
+  /** Synthesise one chunk, falling back to the default voice if the cast voice
+   *  can't be produced. Returns null when neural synthesis is truly down. */
+  private async _synthWithFallback(
+    speech: string, voice: string, rate: number,
+  ): Promise<RawAudioLike | null> {
+    const raw = await this._synth(speech, voice, rate)
+    if (raw || voice === SPORTS_VOICE) return raw
+    console.warn(`[kokoro] voice "${voice}" failed — retrying with ${SPORTS_VOICE}`)
+    return this._synth(speech, SPORTS_VOICE, rate)
+  }
+
   private async _play(line: SpeakLine): Promise<void> {
     this._busy = true
     const epoch = this._epoch
     let handedOff = false
     try {
       const rate = line.rate ?? 1.08
-      // Never-silent: if the cast voice fails to synthesise (its style file
-      // couldn't be fetched, bad weights, …), retry once on the default voice,
-      // and if neural is truly down hand the line to the system engine.
-      let raw = await this._synth(line.speech, line.voice ?? SPORTS_VOICE, rate)
-      if (!raw && line.voice && line.voice !== SPORTS_VOICE) {
-        console.warn(`[kokoro] voice "${line.voice}" failed — retrying with ${SPORTS_VOICE}`)
-        raw = await this._synth(line.speech, SPORTS_VOICE, rate)
-      }
-      if (this._epoch !== epoch) return // cancelled while synthesising — stay quiet
-      if (!raw) {
-        if (this._fallback) {
-          console.warn('[kokoro] synthesis failed — falling back to system voice')
-          handedOff = true
-          this._fallback.speak(line)
+      const voice = line.voice ?? SPORTS_VOICE
+      const chunks = chunkForSpeech(line.speech)
+      if (chunks.length === 0) return
+
+      // Pipeline: chunk i plays on the audio thread while chunk i+1 is
+      // synthesised on the main one, so only the FIRST chunk is ever waited on.
+      let pending = this._synthWithFallback(chunks[0]!, voice, rate)
+      for (let i = 0; i < chunks.length; i++) {
+        const raw = await pending
+        if (this._epoch !== epoch) return // cancelled while synthesising — stay quiet
+        pending = i + 1 < chunks.length
+          ? this._synthWithFallback(chunks[i + 1]!, voice, rate)
+          : Promise.resolve(null)
+        if (!raw) {
+          // Never-silent: if the very first chunk can't be produced, neural is
+          // down — hand the WHOLE line to the system voice rather than speaking
+          // a fragment of it. A later chunk failing just drops that fragment.
+          if (i === 0 && this._fallback) {
+            console.warn('[kokoro] synthesis failed — falling back to system voice')
+            handedOff = true
+            this._fallback.speak(line)
+            return
+          }
+          continue
         }
-        return
+        await this._playBuffer(raw, epoch)
+        if (this._epoch !== epoch) return
       }
-
-      const ctx = this._audioCtx()
-      if (ctx.state === 'suspended') {
-        try { await ctx.resume() } catch { /* ignore */ }
-      }
-      if (this._epoch !== epoch) return
-
-      const audioBuf = ctx.createBuffer(1, raw.audio.length, raw.sampling_rate)
-      audioBuf.getChannelData(0).set(raw.audio)
-
-      const src = ctx.createBufferSource()
-      src.buffer = audioBuf
-      src.connect(ctx.destination)
-      this._currentSource = src
-
-      await new Promise<void>((resolve) => {
-        src.onended = () => resolve()
-        src.start()
-      })
     } catch (err) {
       console.warn('[kokoro] speak failed:', err)
     } finally {
@@ -342,6 +420,29 @@ class KokoroVoiceEngine implements VoiceEngine {
         void this._play(next)
       }
     }
+  }
+
+  /** Play one synthesised clip to completion (or until cancelled). */
+  private async _playBuffer(raw: RawAudioLike, epoch: number): Promise<void> {
+    const ctx = this._audioCtx()
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume() } catch { /* ignore */ }
+    }
+    if (this._epoch !== epoch) return
+
+    const audioBuf = ctx.createBuffer(1, raw.audio.length, raw.sampling_rate)
+    audioBuf.getChannelData(0).set(raw.audio)
+
+    const src = ctx.createBufferSource()
+    src.buffer = audioBuf
+    src.connect(ctx.destination)
+    this._currentSource = src
+
+    await new Promise<void>((resolve) => {
+      src.onended = () => resolve()
+      src.start()
+    })
+    this._currentSource = null
   }
 
   /** Synthesise (with LRU cache); returns null instead of throwing. */

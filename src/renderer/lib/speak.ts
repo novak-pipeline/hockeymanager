@@ -12,7 +12,9 @@ import { castFor, type VoiceRole, type VoiceTraits } from './voiceCast'
 
 let _ann: Announcer | null = null
 let _neuralPreferred = false // switched the announcer over to neural once it's ready
-let _autoLoadKicked = false // fired the one-time background download
+let _autoLoadInFlight = false // a background download is running right now
+let _autoLoadFailures = 0 // consecutive failures, for the retry backoff
+let _autoRetryAt = 0 // epoch ms before which we don't try again
 
 /** Neural-voice auto-download — default: ON (opt-OUT).
  *
@@ -37,7 +39,14 @@ function autoNeuralEnabled(): boolean {
 /** Persist the GM's neural-voice preference (Settings toggle). */
 export function setAutoNeuralEnabled(on: boolean): void {
   try { localStorage.setItem(LS_AUTO, on ? 'true' : 'false') } catch { /* ignore */ }
-  if (on) warmNeuralVoices()
+  if (on) {
+    // Turning it back on must actually put the neural engine back: a caller that
+    // opted out forced the announcer to 'system', and without clearing this the
+    // one-time switch-over would never fire again this session.
+    _neuralPreferred = false
+    _autoRetryAt = 0
+    warmNeuralVoices()
+  }
 }
 
 /** Read the current neural-voice preference (for the Settings toggle UI). */
@@ -45,16 +54,39 @@ export function isAutoNeuralEnabled(): boolean {
   return autoNeuralEnabled()
 }
 
-/** Kick the neural download once, in the background — unless the GM opted out.
- *  Silent to the user: on failure the stable system voice stays in place. Safe now
- *  that the renderer sandbox is enabled (see the note above and src/main/index.ts). */
+/** Retry backoff after a failed background download: 30s, 2min, 8min, then every
+ *  15min. A launch with no network must not cost the GM neural voices for the
+ *  whole session — that latched failure is what left the enhanced voice off until
+ *  somebody found the Settings button and pressed it by hand. */
+const RETRY_DELAYS_MS = [30_000, 120_000, 480_000, 900_000]
+
+/** Kick the neural download in the background — unless the GM opted out. Silent
+ *  to the user: while it's in flight (or after a failure) the stable system voice
+ *  keeps talking. Retried with backoff so a transient failure heals itself. Safe
+ *  now that the renderer sandbox is enabled (see the note above and
+ *  src/main/index.ts). */
 function maybeAutoLoadNeural(): void {
-  if (_autoLoadKicked || !autoNeuralEnabled()) return
-  if (kokoroState() !== 'unloaded') return
-  _autoLoadKicked = true
+  if (_autoLoadInFlight || !autoNeuralEnabled()) return
+  if (kokoroState() === 'ready' || kokoroState() === 'downloading') return
+  if (Date.now() < _autoRetryAt) return
+  _autoLoadInFlight = true
   void loadKokoro().then(
-    () => console.info('[voice] neural voices ready'),
-    (e) => console.warn('[voice] neural voices unavailable — using system voice:', (e as Error)?.message ?? e),
+    () => {
+      _autoLoadInFlight = false
+      _autoLoadFailures = 0
+      console.info('[voice] neural voices ready')
+    },
+    (e) => {
+      _autoLoadInFlight = false
+      const wait = RETRY_DELAYS_MS[Math.min(_autoLoadFailures, RETRY_DELAYS_MS.length - 1)]!
+      _autoLoadFailures++
+      _autoRetryAt = Date.now() + wait
+      console.warn(
+        `[voice] neural voices unavailable — using system voice, retrying in ${Math.round(wait / 1000)}s:`,
+        (e as Error)?.message ?? e,
+      )
+      window.setTimeout(() => maybeAutoLoadNeural(), wait + 50)
+    },
   )
 }
 
@@ -84,6 +116,23 @@ export function isAutoplayEnabled(): boolean {
 export function setAutoplayEnabled(on: boolean): void {
   try { localStorage.setItem(LS_AUTOPLAY, on ? 'true' : 'false') } catch { /* ignore */ }
   if (!on) cancelSpeech()
+}
+
+/**
+ * The ONE Announcer the whole app speaks through.
+ *
+ * Every caller must go through this rather than constructing its own: the neural
+ * engine is attached to (and switched on for) this instance the moment the
+ * background download finishes, so a private `new Announcer()` is permanently
+ * stuck on the robotic system voice no matter what the GM has set. That is
+ * exactly what happened to match commentary — the loudest voice in the game —
+ * until you found the match screen's own "Enhanced voice" button and pressed it.
+ *
+ * Call it per use, not once at module scope: each call is also what performs the
+ * upgrade-to-neural check.
+ */
+export function sharedAnnouncer(): Announcer {
+  return announcer()
 }
 
 /** Master voice switch (persisted by the Announcer) — for the Settings toggle. */
@@ -159,6 +208,30 @@ export function speakScene(lines: SceneLine[]): void {
     })
   }
   playNext(0)
+}
+
+/**
+ * Synthesise the opening of a line ahead of time so speaking it later starts
+ * without a wait — and play nothing now.
+ *
+ * The neural engine runs its WASM inference on the renderer's main thread, so a
+ * long line costs seconds between the click and the first sound. Anything with a
+ * natural pause before the GM commits (the phone ringing, a scene fading in) can
+ * spend that pause here instead. No-op when voice is off or neural isn't ready.
+ */
+export function prewarmSpeech(
+  role: VoiceRole,
+  text: string,
+  opts?: { seed?: string; traits?: VoiceTraits },
+): void {
+  const a = announcer()
+  if (!a.isEnabled) return
+  const eng = getKokoroEngine()
+  if (!eng?.prewarm || kokoroState() !== 'ready') return
+  const cast = castFor(role, opts?.seed, opts?.traits)
+  void eng.prewarm({ speech: text, voice: cast.voice, rate: cast.rate }).catch(() => {
+    /* best-effort — the line is simply synthesised the normal way */
+  })
 }
 
 /** Stop any in-progress speech (call on unmount / when leaving a scene). */

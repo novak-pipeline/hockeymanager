@@ -352,14 +352,22 @@ function VoicePanel(): JSX.Element {
         </div>
       </div>
       <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Status, not a chore. The download runs itself and retries on failure
+          * (see speak.ts) — the button is only ever a way to jump the queue, so it
+          * never reads as the thing that turns neural voices on. */}
         {state === 'ready' ? (
           <span className="chip chip-accent" style={{ fontSize: 11 }}>Neural voices ready</span>
         ) : state === 'downloading' ? (
-          <span className="chip" style={{ fontSize: 11 }}>Downloading… {pct}%</span>
-        ) : state === 'failed' ? (
-          <button className="btn btn-sm btn-primary" onClick={() => void download()}>↻ Retry download</button>
-        ) : (
+          <span className="chip" style={{ fontSize: 11 }}>Downloading…{pct > 0 ? ` ${pct}%` : ''}</span>
+        ) : !autoNeural ? (
           <button className="btn btn-sm btn-primary" onClick={() => void download()}>Download now</button>
+        ) : state === 'failed' ? (
+          <span className="chip" style={{ fontSize: 11 }}>
+            Couldn’t reach the voice server — retrying
+            <button className="btn btn-sm btn-ghost" style={{ marginLeft: 8 }} onClick={() => void download()}>↻ now</button>
+          </span>
+        ) : (
+          <span className="chip" style={{ fontSize: 11 }}>Downloading in the background…</span>
         )}
         {state === 'ready' && (
           <>
