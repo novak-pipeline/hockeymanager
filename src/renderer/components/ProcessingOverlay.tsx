@@ -82,6 +82,7 @@ export function ProcessingOverlay({
   onClose,
   onOpenMessage,
   onWatch,
+  onSimView,
   onOpenBoxScore,
   busy,
 }: {
@@ -91,6 +92,8 @@ export function ProcessingOverlay({
   onOpenMessage: (item: NewsItem) => void
   /** B6.1: watch the game live instead of simming it (pregame frame). */
   onWatch?: () => void
+  /** C1: follow it as a live gamecast instead — play-by-play + box score. */
+  onSimView?: () => void
   /** B6.2: deep-link to the match center box score (postgame receipts). */
   onOpenBoxScore?: (gameId: string) => void
   busy: boolean
@@ -151,6 +154,7 @@ export function ProcessingOverlay({
             busy={busy}
             onPlay={onContinue}
             onWatch={onWatch ?? onContinue}
+            onSimView={onSimView}
             onClose={onClose}
           />
         </div>

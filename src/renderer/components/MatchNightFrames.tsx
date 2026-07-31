@@ -68,12 +68,16 @@ export function PregameFrame({
   busy,
   onPlay,
   onWatch,
+  onSimView,
   onClose,
 }: {
   preview: MatchDayPreviewView
   busy: boolean
   onPlay: () => void
+  /** Watch it on the ice — the 2D/3D renderer. */
   onWatch: () => void
+  /** Watch it as a live gamecast — play-by-play + a box score filling in (C1). */
+  onSimView?: (() => void) | undefined
   onClose: () => void
 }): JSX.Element {
   const p = preview
@@ -130,7 +134,18 @@ export function PregameFrame({
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', marginTop: 'auto', paddingTop: 'var(--sp-1)' }}>
         <button className="btn btn-ghost" onClick={onClose} disabled={busy}>Close</button>
-        <button className="btn btn-ghost" aria-label="Watch the game live" onClick={onWatch} disabled={busy}>Watch live</button>
+        {onSimView && (
+          <button
+            className="btn btn-ghost"
+            aria-label="Follow the game as a live gamecast"
+            title="Play-by-play and a box score, filling in as the game runs"
+            onClick={onSimView}
+            disabled={busy}
+          >
+            Sim view
+          </button>
+        )}
+        <button className="btn btn-ghost" aria-label="Watch the game live" onClick={onWatch} disabled={busy}>Watch on the ice</button>
         <button className="btn btn-primary" aria-label="Play the game" onClick={onPlay} disabled={busy}>
           {busy ? 'Processing…' : 'Continue — play the game'}
         </button>

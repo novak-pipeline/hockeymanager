@@ -2,6 +2,9 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+/** Opt-in profiling build — see the renderer `build` block below. */
+const PROFILE_BUILD = process.env.PROFILE_BUILD === '1'
+
 export default defineConfig({
   main: {
     build: {
@@ -44,8 +47,16 @@ export default defineConfig({
       }
     },
     build: {
+      // PROFILE_BUILD=1 produces a build a CPU profiler can read: names survive
+      // (no minification) and React/Pixi land in their OWN chunks, so sampled
+      // self-time can be attributed by file even though react-dom ships
+      // pre-minified. Ordinary builds are untouched.
+      ...(PROFILE_BUILD ? { minify: false as const } : {}),
       rollupOptions: {
-        input: { index: resolve('src/renderer/index.html') }
+        input: { index: resolve('src/renderer/index.html') },
+        ...(PROFILE_BUILD
+          ? { output: { manualChunks: { react: ['react', 'react-dom'], pixi: ['pixi.js'] } } }
+          : {})
       }
     },
     plugins: [react()]

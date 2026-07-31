@@ -334,7 +334,7 @@ export function DashboardScreen(): JSX.Element {
                 <div className="row">
                   <button
                     className="btn btn-primary"
-                    onClick={actions.watchNext}
+                    onClick={() => actions.watchNext()}
                     disabled={actions.busy}
                   >
                     Watch

@@ -13,9 +13,19 @@ export interface ShellActions {
   continueGame: () => void
   advanceDays: (days: number) => void
   toNextGame: () => void
-  /** Play the user's next fixture in the match viewer (full engine). */
-  watchNext: () => void
+  /**
+   * Play the user's next fixture with the full engine and open it.
+   *
+   * `mode` picks the surface, both reading the same GameEvent stream:
+   *   'rink' — the 2D/3D match viewer (skaters on the ice).
+   *   'sim'  — the live gamecast: play-by-play and a box score filling in.
+   * Omitted, it reopens whichever the GM used last.
+   */
+  watchNext: (mode?: WatchMode) => void
 }
+
+/** Which match-night surface to open a watched game on. */
+export type WatchMode = 'rink' | 'sim'
 
 export const ActionsContext = createContext<ShellActions | null>(null)
 

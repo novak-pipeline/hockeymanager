@@ -50,7 +50,7 @@ export function TopBar(props: { dashboard: DashboardView | null }): JSX.Element 
 
       <div className="topbar-actions">
         {next && (
-          <button className="btn btn-ghost" onClick={actions.watchNext} disabled={actions.busy}>
+          <button className="btn btn-ghost" onClick={() => actions.watchNext()} disabled={actions.busy}>
             Watch next game
           </button>
         )}

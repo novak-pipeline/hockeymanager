@@ -14,7 +14,8 @@ import { MatchSfx } from './lib/sfx'
 import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/playbackDirector'
 import type { SpeedSegment } from '../render2d/playbackDirector'
 import { loadKokoro, kokoroState } from './lib/kokoroVoice'
-import type { GoalEvent, StoppageEvent } from '@domain'
+import { EventCursor } from '../render2d/eventCursor'
+import type { GoalEvent, StoppageReason } from '@domain'
 import { Volume2, VolumeX, Mic, Check, Disc } from 'lucide-react'
 import { Icon } from './components/primitives'
 
@@ -60,36 +61,21 @@ function writeKokoroPref(v: boolean): void {
 
 /** Find the goal event closest to (but not after) a given absT. */
 function findGoalEventAt(
-  stream: WatchedGame['stream'],
+  cursor: EventCursor,
   targetAbsT: number,
   tolerance = 2,
 ): GoalEvent | null {
   let best: GoalEvent | null = null
   let bestDiff = Infinity
-  for (const ev of stream) {
+  for (const { absT, ev } of cursor.all) {
     if (ev.type !== 'goal') continue
-    const at = (ev.period - 1) * 1200 + ev.t
-    const diff = Math.abs(at - targetAbsT)
+    const diff = Math.abs(absT - targetAbsT)
     if (diff <= tolerance && diff < bestDiff) {
       bestDiff = diff
       best = ev
     }
   }
   return best
-}
-
-/** Find the whistle event that just crossed, given last and current absT. */
-function findCrossedWhistle(
-  stream: WatchedGame['stream'],
-  fromAbsT: number,
-  toAbsT: number,
-): StoppageEvent | null {
-  for (const ev of stream) {
-    if (ev.type !== 'whistle') continue
-    const at = (ev.period - 1) * 1200 + ev.t
-    if (at > fromAbsT && at <= toAbsT) return ev as StoppageEvent
-  }
-  return null
 }
 
 /** The away team always wears white (slightly off-white for contrast on ice). */
@@ -152,8 +138,16 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const commentaryLinesRef = useRef<CommentaryLine[]>([])
   const lastCommentaryAbsT = useRef<number>(-1)
 
-  // SFX event tracking (keyed on last evaluated clock to avoid re-firing)
-  const lastSfxAbsTRef = useRef<number>(-1)
+  // Read head over the stream for the SFX cue map and stoppage chips. Replaces
+  // two full-stream scans per rendered frame — see eventCursor.ts and
+  // docs/perf/2d-match-cpu-profile.txt.
+  //
+  // Built LAZILY, not as `useRef(new EventCursor(...))`: this component commits
+  // on every renderer tick, and a useRef argument is evaluated on every one of
+  // those renders. Indexing a 20k-event stream sixty times a second cost more
+  // than the scans it replaced (measured: 70 fps → 32 fps).
+  const cursorRef = useRef<EventCursor | null>(null)
+  if (cursorRef.current === null) cursorRef.current = new EventCursor(game.stream)
 
   // Goal banner / replay
   const goalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -234,7 +228,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     prevScoreRef.current      = { home: 0, away: 0 }
     lastAbsTRef.current       = -1
-    lastSfxAbsTRef.current    = -1
+    cursorRef.current         = new EventCursor(game.stream)
     lastCommentaryAbsT.current = -1
     lastGoalEventRef.current  = null
     setGoalBanner(null)
@@ -359,28 +353,24 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       }
     }
 
-    // ── SFX cue map ───────────────────────────────────────────────────────────
-    const lastSfx = lastSfxAbsTRef.current
-    if (currentAbsT > lastSfx) {
-      for (const ev of game.stream) {
-        const at = (ev.period - 1) * 1200 + ev.t
-        if (at <= lastSfx || at > currentAbsT) continue
-
-        switch (ev.type) {
-          case 'pass':         sfx.pass();                          break
-          case 'shot':         sfx.shot(ev.danger);                 break
-          case 'save':         sfx.save();                          break
-          case 'faceoff':      sfx.puckDrop();                      break
-          case 'whistle':
-          case 'periodEnd':    sfx.whistle();                       break
-          case 'goal':         /* handled in score-change path */   break
-        }
-
-        // Crowd reaction
-        if (ev.type === 'shot' && ev.danger >= 0.6) sfx.crowd(0.55)
-        if (ev.type === 'goal') sfx.crowd(1.0)
+    // ── SFX cue map + stoppage chip ───────────────────────────────────────────
+    // One walk of the events that actually crossed this frame — the cursor keeps
+    // its place, so this is a couple of iterations rather than a 20k-event scan.
+    let crossedWhistle: StoppageReason | undefined
+    for (const { ev } of cursorRef.current?.advance(currentAbsT) ?? []) {
+      switch (ev.type) {
+        case 'pass':         sfx.pass();                          break
+        case 'shot':         sfx.shot(ev.danger);                 break
+        case 'save':         sfx.save();                          break
+        case 'faceoff':      sfx.puckDrop();                      break
+        case 'whistle':      sfx.whistle(); crossedWhistle = ev.reason ?? 'other'; break
+        case 'periodEnd':    sfx.whistle();                       break
+        case 'goal':         /* handled in score-change path */   break
       }
-      lastSfxAbsTRef.current = currentAbsT
+
+      // Crowd reaction
+      if (ev.type === 'shot' && ev.danger >= 0.6) sfx.crowd(0.55)
+      if (ev.type === 'goal') sfx.crowd(1.0)
     }
 
     // ── Goal detection (score change) ─────────────────────────────────────────
@@ -389,7 +379,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     const awayScored = v.awayScore > prev.away
     if (homeScored || awayScored) {
       // Find the exact goal event that fired — search backward from currentAbsT
-      const goalEv = findGoalEventAt(game.stream, currentAbsT, 3)
+      const goalEv = cursorRef.current ? findGoalEventAt(cursorRef.current, currentAbsT, 3) : null
       if (goalEv && goalEv !== lastGoalEventRef.current) {
         lastGoalEventRef.current = goalEv
         const scorerName = game.playerNames[goalEv.scorer] ?? goalEv.scorer
@@ -441,10 +431,9 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     }
 
     // ── Stoppage overlay ──────────────────────────────────────────────────────
-    const whistle = findCrossedWhistle(game.stream, lastAbsTRef.current, currentAbsT)
-    if (whistle && whistle.reason && whistle.reason !== 'goal') {
+    if (crossedWhistle && crossedWhistle !== 'goal') {
       let label: string
-      switch (whistle.reason) {
+      switch (crossedWhistle) {
         case 'offside':      label = 'OFFSIDE';      break
         case 'icing':        label = 'ICING';        break
         case 'goalieFreeze': label = 'PUCK FROZEN';  break
@@ -513,7 +502,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       }
       lastCommentaryAbsT.current = toAbsT
       lastAbsTRef.current        = toAbsT
-      lastSfxAbsTRef.current     = toAbsT
+      cursorRef.current?.seek(toAbsT)
       setVisibleLines(commentaryLinesRef.current.filter((l) => l.absT <= toAbsT).slice(-50))
       ffActiveRef.current = false
       setFfClock(null)
@@ -534,7 +523,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     if (dur > 0 && v) {
       const at = v.progress * dur
       lastCommentaryAbsT.current = at
-      lastSfxAbsTRef.current     = at
+      cursorRef.current?.seek(at)
       lastAbsTRef.current        = at
       const planSpd = currentSpeed(planRef.current, at)
       rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
@@ -638,7 +627,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       setVisibleLines(backfill.slice(-50))
       lastCommentaryAbsT.current = at
       lastAbsTRef.current        = at
-      lastSfxAbsTRef.current     = at
+      cursorRef.current?.seek(at)
       // Also apply correct plan speed at seek destination
       const planSpd = currentSpeed(planRef.current, at)
       rendererRef.current?.setSpeed(planSpd * nudgeRef.current)

@@ -6,7 +6,8 @@ import { shouldHoldOverlay } from '@renderer/lib/cadence'
 import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
-import { ActionsContext, type ShellActions } from './components/ActionsContext'
+import { SimView } from './SimView'
+import { ActionsContext, type ShellActions, type WatchMode } from './components/ActionsContext'
 import { NavContext, type NavApi, type NavParams, type ScreenId } from './components/NavContext'
 import { PlayerActionMenu } from './components/PlayerActionMenu'
 import { ProcessingOverlay, type ProcessingData } from './components/ProcessingOverlay'
@@ -61,6 +62,15 @@ import { DataHubScreen } from './screens/DataHubScreen'
 type AppPhase = 'setup' | 'picking' | 'shell'
 
 const SAVE_SLOT = 'slot-1'
+
+/** Which match-night surface the GM last watched a game on. */
+const LS_WATCH_MODE = 'hockeyWatchMode'
+function readWatchMode(): WatchMode {
+  try { return localStorage.getItem(LS_WATCH_MODE) === 'sim' ? 'sim' : 'rink' } catch { return 'rink' }
+}
+function writeWatchMode(v: WatchMode): void {
+  try { localStorage.setItem(LS_WATCH_MODE, v) } catch { /* ignore */ }
+}
 
 /**
  * App root. Owns the single SimClient, the pre-career flow (setup → team
@@ -262,6 +272,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   )
 
   const [watched, setWatched] = useState<WatchedGame | null>(null)
+  // Which match-night surface the watched game opens on. Both read the same
+  // GameEvent stream: 'rink' = the 2D/3D viewer, 'sim' = the live gamecast
+  // (play-by-play + a box score filling in). The choice sticks between games.
+  const [watchMode, setWatchMode] = useState<WatchMode>(readWatchMode)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   // FM-style processing overlay: non-null while a normal day-advance is showing
@@ -506,8 +520,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       toNextGame: () => {
         void run(() => client.advanceToNextGame())
       },
-      watchNext: () => {
+      watchNext: (mode?: WatchMode) => {
         void (async () => {
+          if (mode) { setWatchMode(mode); writeWatchMode(mode) }
           const res = await run(() => client.watch())
           if (res && res.type === 'watch') {
             if (res.game) setWatched(res.game)
@@ -628,7 +643,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         <TeamColorsProvider>
         {watched ? (
           <div className="match-fullbleed">
-            <MatchViewer game={watched} onClose={closeViewer} />
+            {watchMode === 'sim' ? (
+              <SimView
+                game={watched}
+                onClose={closeViewer}
+                onWatchOnIce={() => { setWatchMode('rink'); writeWatchMode('rink') }}
+              />
+            ) : (
+              <MatchViewer game={watched} onClose={closeViewer} />
+            )}
           </div>
         ) : (
           <div className="app-shell" style={appTheme}>
@@ -688,7 +711,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
             onContinue={actions.continueGame}
             onClose={() => setProcessing(null)}
             onOpenMessage={() => { setProcessing(null); navigate('inbox') }}
-            onWatch={() => { setProcessing(null); actions.watchNext() }}
+            onWatch={() => { setProcessing(null); actions.watchNext('rink') }}
+            onSimView={() => { setProcessing(null); actions.watchNext('sim') }}
             onOpenBoxScore={(gameId) => {
               setProcessing(null)
               navigate('matchcenter', gameId ? { gameId } : {})

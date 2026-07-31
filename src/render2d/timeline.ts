@@ -31,6 +31,41 @@ export function absTime(period: number, t: number): number {
   return (period - 1) * REGULATION_PERIOD_SECONDS + t
 }
 
+/**
+ * Absolute clock offset at which each period starts, derived from the stream.
+ * Regulation periods are 1200 s each; an overtime period's length comes from
+ * the latest event seen inside it, so 3v3 OT (~300 s) and a 20-minute playoff
+ * OT both lay end to end correctly without hard-coding either.
+ *
+ * Shared so every consumer of the stream places an event on the SAME clock the
+ * timeline scrubs on — MatchViewer used to assume 1200 s per period, which
+ * drifts by minutes once a playoff game reaches a second overtime.
+ */
+export function periodBases(stream: GameStream): Map<number, number> {
+  // Frames first — they define the period the way MatchTimeline sees it. Streams
+  // with no positional frames (the quick sim, synthetic test streams) fall back
+  // to their other events so the helper still places them.
+  const maxT = new Map<number, number>()
+  for (const ev of stream) {
+    if (ev.type !== 'frame') continue
+    const prev = maxT.get(ev.period) ?? 0
+    if (ev.t > prev) maxT.set(ev.period, ev.t)
+  }
+  for (const ev of stream) {
+    if (ev.type === 'frame' || maxT.has(ev.period)) continue
+    const prev = maxT.get(ev.period) ?? 0
+    if (ev.t > prev) maxT.set(ev.period, ev.t)
+  }
+  const bases = new Map<number, number>()
+  let base = 0
+  for (const p of [...maxT.keys()].sort((a, b) => a - b)) {
+    bases.set(p, base)
+    base += p <= 3 ? REGULATION_PERIOD_SECONDS : (maxT.get(p) ?? REGULATION_PERIOD_SECONDS)
+  }
+  if (!bases.has(1)) bases.set(1, 0)
+  return bases
+}
+
 export interface PosSnapshot {
   home: XY[]
   away: XY[]
@@ -70,6 +105,39 @@ function lerp(a: number, b: number, f: number): number {
 
 function lerpXY(a: XY, b: XY, f: number): XY {
   return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f) }
+}
+
+/** Keep an interpolated point on the sheet (a spline may overshoot a corner). */
+function clampRink(v: number): number {
+  return v < -1 ? -1 : v > 1 ? 1 : v
+}
+
+/**
+ * Catmull-Rom through p1 → p2, using p0 and p3 as tangent hints.
+ *
+ * WHY (playtest C2, "2× is laggy"): the engine emits one positional frame every
+ * 0.25 s, and straight-line interpolation between consecutive frames means the
+ * skaters change direction at every frame boundary. At 1× that's 4 kinks a
+ * second across 15 rendered frames each and the eye never sees it; the 2× nudge
+ * runs open play at 4× and whistle-to-faceoff dead time at 10×, which is 16–40
+ * kinks a second over as little as 1.5 rendered frames per engine frame. The
+ * profile (docs/perf/2d-match-cpu-profile.txt) shows the frame pipeline idle at
+ * both speeds — the judder is the polyline, not the frame rate. A spline curves
+ * through the same control points, so fast playback reads as motion instead of
+ * a stutter, and it costs a few multiplies on a thread that is 84% idle.
+ *
+ * The curve passes exactly through p1 at f=0 and p2 at f=1, so every position
+ * the engine actually stated is still rendered verbatim.
+ */
+function splineXY(p0: XY, p1: XY, p2: XY, p3: XY, f: number): XY {
+  const f2 = f * f
+  const f3 = f2 * f
+  const c = (a: number, b: number, cc: number, d: number): number =>
+    0.5 * (2 * b + (cc - a) * f + (2 * a - 5 * b + 4 * cc - d) * f2 + (3 * b - 3 * cc + d) * f3)
+  return {
+    x: clampRink(c(p0.x, p1.x, p2.x, p3.x)),
+    y: clampRink(c(p0.y, p1.y, p2.y, p3.y)),
+  }
 }
 
 export class MatchTimeline {
@@ -178,17 +246,33 @@ export class MatchTimeline {
     // puck position for absT before the stoppage, and frame B's position after.
     // Skaters continue to ease normally — only the puck snaps.
     const stoppageT = this.firstStoppageBetween(frameAT, frameBT)
+
+    // Tangent frames for the spline. A stoppage anywhere in the four-frame
+    // window means the positions on the far side belong to a different piece of
+    // play (the teams are skating to a faceoff dot), so we fall back to the
+    // straight line there rather than curving between two unrelated states.
+    const prev = this.frames[i - 1]?.frame
+    const after = this.frames[i + 2]?.frame
+    const smooth =
+      prev !== undefined &&
+      after !== undefined &&
+      stoppageT === null &&
+      this.firstStoppageBetween(this.frames[i - 1].absT, frameAT) === null &&
+      this.firstStoppageBetween(frameBT, this.frames[i + 2].absT) === null
+
     const puck = stoppageT !== null
       ? (absT < stoppageT ? { ...a.puck } : { ...b.puck })
-      : lerpXY(a.puck, b.puck, f)
+      : smooth
+        ? splineXY(prev!.puck, a.puck, b.puck, after!.puck, f)
+        : lerpXY(a.puck, b.puck, f)
 
     // For player IDs use the dominant frame (same side-selection as carrier/blendOne)
     const dom = f < 0.5 ? a : b
     return {
-      home: blend(a.home, b.home, f),
-      away: blend(a.away, b.away, f),
-      homeGoalie: blendOne(a.homeGoalie, b.homeGoalie, f),
-      awayGoalie: blendOne(a.awayGoalie, b.awayGoalie, f),
+      home: blend(a.home, b.home, f, smooth ? prev!.home : undefined, smooth ? after!.home : undefined),
+      away: blend(a.away, b.away, f, smooth ? prev!.away : undefined, smooth ? after!.away : undefined),
+      homeGoalie: blendOne(a.homeGoalie, b.homeGoalie, f, smooth ? prev!.homeGoalie : undefined, smooth ? after!.homeGoalie : undefined),
+      awayGoalie: blendOne(a.awayGoalie, b.awayGoalie, f, smooth ? prev!.awayGoalie : undefined, smooth ? after!.awayGoalie : undefined),
       puck,
       carrier: dom.puckCarrier,
       homeIds: dom.home.map((s) => s.player),
@@ -203,10 +287,18 @@ export class MatchTimeline {
    * (exclusive) and frameBT (inclusive), or null if none exists.
    */
   private firstStoppageBetween(frameAT: number, frameBT: number): number | null {
-    for (const s of this.stoppages) {
-      if (s.absT > frameAT && s.absT <= frameBT) return s.absT
+    // Binary search — stoppages are indexed in ascending order, and sampleAt
+    // asks this three times per rendered frame.
+    const s = this.stoppages
+    let lo = 0
+    let hi = s.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (s[mid].absT <= frameAT) lo = mid + 1
+      else hi = mid
     }
-    return null
+    const first = s[lo]
+    return first !== undefined && first.absT <= frameBT ? first.absT : null
   }
 
   scoreAt(absT: number): { home: number; away: number } {
@@ -271,25 +363,32 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
   }
 }
 
+type Slot = { player: PlayerId; pos: XY }
+
 /**
- * Lerp positions index-by-index, but snap to the later frame when the skater at
- * that index changed (a line change) so we don't blend two different players.
+ * Interpolate positions index-by-index, but snap to the later frame when the
+ * skater at that index changed (a line change) so we don't blend two different
+ * players. `p` and `n` are the neighbouring frames: when the SAME player holds
+ * the slot across all four, the path is splined instead of straight-lined (see
+ * splineXY), which is what keeps fast playback readable.
  */
-function blend(
-  a: { player: PlayerId; pos: XY }[],
-  b: { player: PlayerId; pos: XY }[],
-  f: number
-): XY[] {
+function blend(a: Slot[], b: Slot[], f: number, p?: Slot[], n?: Slot[]): XY[] {
   return b.map((bs, i) => {
     const as = a[i]
-    return as && as.player === bs.player ? lerpXY(as.pos, bs.pos, f) : { ...bs.pos }
+    if (!as || as.player !== bs.player) return { ...bs.pos }
+    const ps = p?.[i]
+    const ns = n?.[i]
+    if (ps && ns && ps.player === as.player && ns.player === bs.player) {
+      return splineXY(ps.pos, as.pos, bs.pos, ns.pos, f)
+    }
+    return lerpXY(as.pos, bs.pos, f)
   })
 }
 
-function blendOne(
-  a: { player: PlayerId; pos: XY },
-  b: { player: PlayerId; pos: XY },
-  f: number
-): XY {
-  return a.player === b.player ? lerpXY(a.pos, b.pos, f) : { ...b.pos }
+function blendOne(a: Slot, b: Slot, f: number, p?: Slot, n?: Slot): XY {
+  if (a.player !== b.player) return { ...b.pos }
+  if (p && n && p.player === a.player && n.player === b.player) {
+    return splineXY(p.pos, a.pos, b.pos, n.pos, f)
+  }
+  return lerpXY(a.pos, b.pos, f)
 }

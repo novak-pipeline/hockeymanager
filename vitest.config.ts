@@ -25,6 +25,9 @@ export default defineConfig({
       'src/engine/career/draftCalibration.test.ts',
       // Standalone season bug-hunter (sims full seasons; run on demand).
       'src/engine/career/seasonSanity.test.ts',
+      // Playback profiler (playtest C2) — replays whole games and prints timings.
+      // Run on demand: npx vitest run --config vitest.profile.config.ts
+      'src/render2d/playbackProfile.test.ts',
     ],
     environment: 'node',
     // Fixed-seed full/quick-sim and full-season tests run several seconds each;

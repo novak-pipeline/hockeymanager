@@ -1,0 +1,74 @@
+2D playback profile — C2: full-stream scans vs EventCursor
+
+── BEFORE — full-stream scans per frame (speed 1×) ──
+   ticks 215985  ≈ 3599.8 s of wall-clock playback
+   R renderer/timeline    0.008 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.001 ms/tick   (0.0%)
+   E event processing     0.435 ms/tick   (2.6%)
+   TOTAL                  0.444 ms/tick   (2.7%)
+   worst single tick    40.55 ms
+   SFX cues fired       1085  (0.3 / wall-second)
+   React commits        215985 from setView + 223 from setVisibleLines
+                        = 60.1 / wall-second
+
+── AFTER  — EventCursor (speed 1×) ──
+   ticks 215985  ≈ 3599.8 s of wall-clock playback
+   R renderer/timeline    0.001 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.000 ms/tick   (0.0%)
+   E event processing     0.001 ms/tick   (0.0%)
+   TOTAL                  0.003 ms/tick   (0.0%)
+   worst single tick    0.80 ms
+   SFX cues fired       1085  (0.3 / wall-second)
+   React commits        215985 from setView + 223 from setVisibleLines
+                        = 60.1 / wall-second
+
+── BEFORE — full-stream scans per frame (speed 2×) ──
+   ticks 107993  ≈ 1799.9 s of wall-clock playback
+   R renderer/timeline    0.004 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.001 ms/tick   (0.0%)
+   E event processing     0.288 ms/tick   (1.7%)
+   TOTAL                  0.293 ms/tick   (1.8%)
+   worst single tick    4.84 ms
+   SFX cues fired       1085  (0.6 / wall-second)
+   React commits        107993 from setView + 223 from setVisibleLines
+                        = 60.1 / wall-second
+
+── AFTER  — EventCursor (speed 2×) ──
+   ticks 107993  ≈ 1799.9 s of wall-clock playback
+   R renderer/timeline    0.001 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.000 ms/tick   (0.0%)
+   E event processing     0.001 ms/tick   (0.0%)
+   TOTAL                  0.002 ms/tick   (0.0%)
+   worst single tick    0.49 ms
+   SFX cues fired       1085  (0.6 / wall-second)
+   React commits        107993 from setView + 223 from setVisibleLines
+                        = 60.1 / wall-second
+
+── BEFORE — full-stream scans per frame (speed 4×) ──
+   ticks 53997  ≈ 900.0 s of wall-clock playback
+   R renderer/timeline    0.003 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.001 ms/tick   (0.0%)
+   E event processing     0.233 ms/tick   (1.4%)
+   TOTAL                  0.237 ms/tick   (1.4%)
+   worst single tick    3.73 ms
+   SFX cues fired       1085  (1.2 / wall-second)
+   React commits        53997 from setView + 223 from setVisibleLines
+                        = 60.2 / wall-second
+
+── AFTER  — EventCursor (speed 4×) ──
+   ticks 53997  ≈ 900.0 s of wall-clock playback
+   R renderer/timeline    0.001 ms/tick   (0.0% of the 16.7 ms budget)
+   D playback director    0.000 ms/tick   (0.0%)
+   E event processing     0.001 ms/tick   (0.0%)
+   TOTAL                  0.002 ms/tick   (0.0%)
+   worst single tick    0.48 ms
+   SFX cues fired       1085  (1.2 / wall-second)
+   React commits        53997 from setView + 223 from setVisibleLines
+                        = 60.2 / wall-second
+
+── motion resolution (how much sim-time each rendered frame covers) ──
+    1× effective: 15.00 rendered frames per engine frame ·   4 direction changes/sec · puck moves 3.47 ft/frame (max 162.6 ft)
+    2× effective:  7.50 rendered frames per engine frame ·   8 direction changes/sec · puck moves 5.92 ft/frame (max 162.6 ft)
+    4× effective:  3.75 rendered frames per engine frame ·  16 direction changes/sec · puck moves 10.11 ft/frame (max 162.6 ft)
+    5× effective:  3.00 rendered frames per engine frame ·  20 direction changes/sec · puck moves 12.17 ft/frame (max 163.7 ft)
+   10× effective:  1.50 rendered frames per engine frame ·  40 direction changes/sec · puck moves 13.56 ft/frame (max 163.7 ft)

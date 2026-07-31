@@ -1,0 +1,76 @@
+  ▶ shell up — walking to the first match day
+  ▶ match day reached — opening the watched game
+  ▶ playing — profiling
+
+══ PLAN SPEED, nudge 1× (the "Speed: 1×" button) ══
+  frames 859  ·  69.5 fps  ·  median 12.50 ms  ·  p95 16.70 ms  ·  worst 316.6 ms  ·  22 frames over 20 ms
+  sampled CPU: 12320 ms over 12 s wall
+  ── by layer ──
+      10408.7 ms   84.5%  Idle / VM
+       1314.6 ms   10.7%  Other (native / app / DOM)
+        301.7 ms    2.4%  React (render / reconcile / commit)
+        217.5 ms    1.8%  Pixi draw
+         44.1 ms    0.4%  Timeline sampling (renderer per-tick)
+         26.1 ms    0.2%  MatchViewer per-tick event processing
+          6.3 ms    0.1%  GC
+          0.6 ms    0.0%  Audio (SFX / announcer)
+  ── top 20 functions by self time ──
+      10368.6 ms   84.2%  (program) @ (native)
+       1094.2 ms    8.9%  (anonymous) @ index-BZj7dYHq.js
+         41.6 ms    0.3%  Bj @ react-7Ayr7nTX.js
+         40.1 ms    0.3%  (idle) @ (native)
+         28.7 ms    0.2%  q @ index-BZj7dYHq.js
+         28.2 ms    0.2%  Ej @ react-7Ayr7nTX.js
+         26.1 ms    0.2%  MatchViewer @ index-BZj7dYHq.js
+         25.7 ms    0.2%  requestAnimationFrame @ (native)
+         23.3 ms    0.2%  clear @ (native)
+         23.2 ms    0.2%  packAttributes @ pixi-CPVcxklC.js
+         22.8 ms    0.2%  bufferSubData @ (native)
+         20.9 ms    0.2%  postMessage @ (native)
+         19.8 ms    0.2%  render @ pixi-CPVcxklC.js
+         18.6 ms    0.2%  Nh @ react-7Ayr7nTX.js
+         18.5 ms    0.2%  R @ react-7Ayr7nTX.js
+         17.8 ms    0.1%  toPascalCase @ index-BZj7dYHq.js
+         16.1 ms    0.1%  k @ react-7Ayr7nTX.js
+         15.2 ms    0.1%  n @ react-7Ayr7nTX.js
+         14.7 ms    0.1%  bind @ pixi-CPVcxklC.js
+         13.1 ms    0.1%  update @ pixi-CPVcxklC.js
+
+══ PLAN SPEED, nudge 2× (the "Speed: 2×" button) ══
+  frames 887  ·  72.6 fps  ·  median 12.50 ms  ·  p95 16.70 ms  ·  worst 174.9 ms  ·  18 frames over 20 ms
+  sampled CPU: 12177 ms over 12 s wall
+  ── by layer ──
+      10321.7 ms   84.8%  Idle / VM
+       1070.9 ms    8.8%  Other (native / app / DOM)
+        301.0 ms    2.5%  React (render / reconcile / commit)
+        233.9 ms    1.9%  MatchViewer per-tick event processing
+        207.6 ms    1.7%  Pixi draw
+         35.4 ms    0.3%  Timeline sampling (renderer per-tick)
+          5.0 ms    0.0%  GC
+          1.2 ms    0.0%  Audio (SFX / announcer)
+  ── top 20 functions by self time ──
+      10271.2 ms   84.4%  (program) @ (native)
+        855.1 ms    7.0%  (anonymous) @ index-BZj7dYHq.js
+        212.2 ms    1.7%  findCrossedWhistle @ index-BZj7dYHq.js
+         50.5 ms    0.4%  (idle) @ (native)
+         32.6 ms    0.3%  Bj @ react-7Ayr7nTX.js
+         30.1 ms    0.2%  q @ index-BZj7dYHq.js
+         24.9 ms    0.2%  n @ react-7Ayr7nTX.js
+         24.8 ms    0.2%  Ej @ react-7Ayr7nTX.js
+         23.8 ms    0.2%  bufferSubData @ (native)
+         21.9 ms    0.2%  k @ react-7Ayr7nTX.js
+         21.7 ms    0.2%  MatchViewer @ index-BZj7dYHq.js
+         21.3 ms    0.2%  render @ pixi-CPVcxklC.js
+         19.7 ms    0.2%  requestAnimationFrame @ (native)
+         19.4 ms    0.2%  toPascalCase @ index-BZj7dYHq.js
+         19.4 ms    0.2%  Uk @ react-7Ayr7nTX.js
+         19.0 ms    0.2%  clear @ (native)
+         19.0 ms    0.2%  packAttributes @ pixi-CPVcxklC.js
+         16.9 ms    0.1%  postMessage @ (native)
+         11.7 ms    0.1%  emit @ pixi-CPVcxklC.js
+         11.5 ms    0.1%  uniformMatrix3fv @ (native)
+
+══ VERDICT ══
+  fps 1× 69.5  →  2× 72.6
+  p95 frame 1× 16.70 ms  →  2× 16.70 ms
+  frames over 20 ms: 1× 22  →  2× 18

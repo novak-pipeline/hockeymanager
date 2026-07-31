@@ -102,7 +102,7 @@ export function TopNav(props: {
               To game
             </button>
             {next && (
-              <button className="btn" onClick={actions.watchNext} disabled={actions.busy} title="Watch next game in full viewer">
+              <button className="btn" onClick={() => actions.watchNext()} disabled={actions.busy} title="Watch next game in full viewer">
                 Watch
               </button>
             )}
