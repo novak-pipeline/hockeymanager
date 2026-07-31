@@ -1506,11 +1506,19 @@ export interface TradeDraftAsset {
   faceId?: string
   /** Provenance for acquired picks — "(via MTL)". */
   viaAbbr?: string
-  /** Value in the AI's own trade points (rounded 1dp). */
+  /** Market value in trade points (rounded 1dp) — the average of thirty-two
+   *  opinions, and what the meter reads by default. */
   value: number
   /** True when this is a fog-of-war estimate (unscouted opponent). */
   estimated?: boolean
   drivers: ValueDriver[]
+  /** A2: what THE PARTNER'S front office puts on this asset, through its own
+   *  lens (posture, roster shape, cap sheet). Differs from `value` — that is the
+   *  point — and is why a paper-even deal can still get a no. */
+  partnerValue?: number
+  /** Why the partner lands where it does ("Rebuilding club", "Thin at R-shot
+   *  defence", "Below market by ~22%"). */
+  partnerDrivers?: ValueDriver[]
 }
 
 /**
@@ -1540,6 +1548,14 @@ export interface TradeDraftView {
   agmName: string
   agmLine: string
   agmTone: TradeAssessmentView['tone']
+  /** A2: the same two packages totalled on the PARTNER'S book. When these
+   *  diverge from give/receiveTotal, the two clubs genuinely disagree about the
+   *  deal — which is the whole reason a "fair" offer can be refused. */
+  partnerGiveTotal?: number
+  partnerReceiveTotal?: number
+  /** One line naming the disagreement, e.g. "Detroit are rebuilding — they
+   *  price your side ~18% below the market." */
+  lensLine?: string
   /** The partner's projected answer from an `evaluateProposal` dry-run. */
   partnerVerdict: 'accept' | 'counter' | 'reject' | 'blocked' | 'empty'
   /** Plain projection, e.g. "Vancouver would likely reject this." or the

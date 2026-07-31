@@ -17,6 +17,11 @@ import {
   assetValue,
   buildTeamProfile,
   canRetain,
+  clubDepthOf,
+  clubPickValue,
+  clubPlayerValue,
+  defaultPostureFor,
+  type ClubLens,
   describePickValue,
   describePlayerValue,
   evaluateProposal,
@@ -313,7 +318,7 @@ describe('evaluateProposal', () => {
 
   it('relationship eases or hardens the ask (neutral default unchanged)', () => {
     const rank = (v: string): number => (v === 'accept' ? 2 : v === 'counter' ? 1 : 0)
-    const deal = (relationship?: number) => {
+    const deal = (relationship: number | undefined, seed: number) => {
       const { partnerTeam, partnerPlayers } = partnerFixture()
       return evaluateProposal({
         // A near-even one-for-one swap so the relationship nudge can tip the verdict.
@@ -321,20 +326,23 @@ describe('evaluateProposal', () => {
         receive: { players: [makePlayer('recv-w', 72, { position: 'W' })], picks: [] },
         partnerTeam,
         partnerPlayers,
-        rng: new Rng(5),
+        rng: new Rng(seed),
         ...(relationship === undefined ? {} : { relationship }),
       }).verdict
     }
-    const friendly = deal(100)
-    const neutral = deal(50)
-    const omitted = deal(undefined)
-    const hostile = deal(0)
     // Neutral (50) is identical to omitting the field — byte-compatible default.
-    expect(neutral).toBe(omitted)
-    // A friendlier club is never harder to deal with than a hostile one.
-    expect(rank(friendly)).toBeGreaterThanOrEqual(rank(hostile))
-    // And on a borderline deal it genuinely helps.
-    expect(rank(friendly)).toBeGreaterThan(rank(hostile))
+    expect(deal(50, 5)).toBe(deal(undefined, 5))
+    // Swept across the mood distribution rather than pinned to one seed: a
+    // friendlier club is never harder to deal with, and on some moods it is
+    // genuinely easier.
+    let strictlyBetter = 0
+    for (let seed = 1; seed <= 20; seed++) {
+      const friendly = rank(deal(100, seed))
+      const hostile = rank(deal(0, seed))
+      expect(friendly).toBeGreaterThanOrEqual(hostile)
+      if (friendly > hostile) strictlyBetter++
+    }
+    expect(strictlyBetter).toBeGreaterThan(0)
   })
 
   it('accepts when the partner clearly gains value', () => {
@@ -355,12 +363,14 @@ describe('evaluateProposal', () => {
   it('counters when the offer is close but short', () => {
     const { partnerTeam, partnerPlayers } = partnerFixture()
     for (let seed = 1; seed <= 20; seed++) {
-      // Perri curve + RebuildDraft philosophy (team 'pt' hashes to RebuildDraft, 1.25× pick bias):
-      // gain_biased = r1 * 1.25 ≈ 34.9; loss = r1+r5 ≈ 38.1 → ratio ≈ 0.917
-      // Counter zone: ratio in [threshold-0.15, threshold). 0.917 is in [0.84, 0.99) for all seeds.
+      // Perri curve, pick-only (so the club's lens multipliers cancel on both
+      // sides and the ratio is pure Perri): gain = r1+r2+r7 ≈ 53.3;
+      // loss = r1+r1 ≈ 55.8 → ratio ≈ 0.955.
+      // Counter zone: ratio in [threshold-0.15, threshold) = worst case
+      // [0.88, 0.99) … [0.92, 1.07). 0.955 sits inside for every seed.
       const result = evaluateProposal({
-        give: { players: [], picks: [makePick(2026, 1, 'u')] },
-        receive: { players: [], picks: [makePick(2026, 1, 'pt'), makePick(2026, 5, 'pt')] },
+        give: { players: [], picks: [makePick(2026, 1, 'u'), makePick(2026, 2, 'u'), makePick(2026, 7, 'u')] },
+        receive: { players: [], picks: [makePick(2026, 1, 'pt'), makePick(2026, 1, 'pt')] },
         partnerTeam,
         partnerPlayers,
         rng: new Rng(seed)
@@ -623,15 +633,27 @@ describe('generateAiOffers', () => {
       expect(offer.expiresOnDay - offer.day).toBeLessThanOrEqual(8)
       expect(offer.message.length).toBeGreaterThan(0)
 
+      // Rationality is judged on the OFFERING CLUB'S book, not the market's —
+      // a club that rates a player above market pays above market, and that is
+      // the whole point of the per-club lens. What must never happen is a club
+      // being irrational by its OWN valuation.
+      const phil = teamPhilosophy(partner.id)
+      const lens: ClubLens = {
+        philosophy: phil,
+        posture: defaultPostureFor(phil),
+        depth: clubDepthOf(partner, players),
+        capSpace: partner.finances.salaryCap - rosterCapUsed(partner, players),
+        deadlineProximity: 0,
+      }
       const giveValue = offer.userGivesPlayerIds.reduce(
-        (s, id) => s + playerValue(players.get(id)!),
+        (s, id) => s + clubPlayerValue(players.get(id)!, lens),
         0
       )
       const receiveValue =
-        offer.userReceivesPlayerIds.reduce((s, id) => s + playerValue(players.get(id)!), 0) +
+        offer.userReceivesPlayerIds.reduce((s, id) => s + clubPlayerValue(players.get(id)!, lens), 0) +
         offer.userReceivesPicks.reduce(
           (s, p) =>
-            s + pickValue(p, { year: 2026, teamStrengthRank: ranks.get(p.originalTeamId)! }),
+            s + clubPickValue(p, lens, { year: 2026, teamStrengthRank: ranks.get(p.originalTeamId)! }),
           0
         )
       expect(receiveValue).toBeGreaterThanOrEqual(0.8 * giveValue)

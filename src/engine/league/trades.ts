@@ -30,7 +30,7 @@
  * stochastic decision flows through the injected seeded Rng — determinism is
  * a hard requirement (docs/ARCHITECTURE.md §7).
  */
-import type { DraftPick, Player, PlayerId, Position, Team, TeamId } from '@domain'
+import type { DraftPick, Handedness, Player, PlayerId, Position, Team, TeamId } from '@domain'
 import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
 
@@ -326,6 +326,52 @@ export function assetValue(asset: TradeAsset, ctx: AssetValueContext): number {
  */
 export const MIN_SHOP_VALUE = 8
 
+/**
+ * A trade value, translated out of decimals and into the language a GM speaks.
+ *
+ * The raw currency (`22.9`, `60.7`) is an internal quantity: it reads like a
+ * spreadsheet and implies a precision the model does not have. Every surface
+ * shows this instead — a tier word and a 0–1 meter fill — with the number
+ * available on hover for anyone who wants it.
+ *
+ * `fill` is logarithmic because the underlying scale is: the gap between a
+ * depth piece (9) and a solid roster player (20) matters as much to a GM as the
+ * gap between a star (60) and a franchise player (140).
+ */
+export interface AssetValueTier {
+  /** 0 (fringe) … 6 (franchise) — for segmented meters and colour ramps. */
+  tier: number
+  /** What a GM would call this asset. */
+  label: string
+  /** 0–1 meter fill, log-scaled across the tradeable range. */
+  fill: number
+}
+
+const TIER_BANDS: ReadonlyArray<readonly [number, string]> = [
+  [110, 'Franchise'],
+  [58, 'Star'],
+  [36, 'Top-line'],
+  [22, 'Core piece'],
+  [13, 'Roster player'],
+  [7, 'Depth'],
+]
+
+export function assetValueTier(value: number): AssetValueTier {
+  let tier = 0
+  let label = 'Fringe'
+  for (let i = 0; i < TIER_BANDS.length; i++) {
+    const [floor, name] = TIER_BANDS[i]!
+    if (value >= floor) {
+      tier = TIER_BANDS.length - i
+      label = name
+      break
+    }
+  }
+  // Log fill across ~3 (a late pick) to ~150 (a genuine franchise player).
+  const fill = clamp(Math.log(Math.max(value, 1) / 3) / Math.log(150 / 3), 0, 1)
+  return { tier, label, fill }
+}
+
 const roundOrdinal = (round: number): string =>
   round === 1 ? '1st' : round === 2 ? '2nd' : round === 3 ? '3rd' : `${round}th`
 
@@ -475,6 +521,319 @@ function philosophyGainBias(
     return ovr >= 80 ? 0.90 : 0.80
   }
   return 1.0 // Balanced
+}
+
+/* ═══════════════════════ per-club valuation (the lens) ═══════════════════════
+ *
+ * THERE IS NO ONE TRUE VALUE. `assetValue` above is the MARKET baseline — the
+ * average of thirty-two opinions, useful for sorting a board and for the UI's
+ * "on paper" read. It is not what any actual front office would pay.
+ *
+ * A club prices an asset through its own lens: its competitive posture, its GM's
+ * philosophy, the shape of its roster (a club with five left-shot defencemen
+ * pays up for a righty), its cap sheet, and where the season sits. A rebuilder
+ * and a contender look at the same 33-year-old and see two different players.
+ *
+ * `clubAssetValue` is that lens, and it is applied SYMMETRICALLY inside
+ * `evaluateProposal` — to what a club would receive AND to what it would give
+ * up. That symmetry is what makes the market feel like people rather than a
+ * spreadsheet: a rebuilder sells its veteran cheap because it genuinely does not
+ * value him, and refuses its 22-year-old at any veteran price because it
+ * genuinely does.
+ */
+
+/** Competitive stance of a club, as the trade market sees it. */
+export type ClubPostureKind = 'contend' | 'retool' | 'rebuild'
+
+/**
+ * Live roster shape a club prices positional scarcity from. Counts are of
+ * NHL-calibre bodies at each group, and — on defence, where handedness actually
+ * constrains a coach's pairs — split by shot side.
+ */
+export interface ClubDepth {
+  group: Record<PositionGroup, number>
+  /** Defencemen by shot side. A club thin at RD pays a premium for RD. */
+  defenceBySide: Record<Handedness, number>
+}
+
+/**
+ * Fallback posture when a caller hasn't supplied live club context — read off
+ * the GM's philosophy so the lens is never absent. Callers inside the Career
+ * always pass the real posture; tests and older call sites get this.
+ */
+export function defaultPostureFor(philosophy: TeamPhilosophy): ClubPostureKind {
+  if (philosophy === 'WinNow') return 'contend'
+  if (philosophy === 'RebuildDraft' || philosophy === 'RebuildProspects') return 'rebuild'
+  return 'retool'
+}
+
+/**
+ * A player a club considers a cornerstone — young enough that his best seasons
+ * are ahead of him and valuable enough that moving him is a fireable offence.
+ * Judged on the CLUB's book, not the market's.
+ */
+export const CORNERSTONE_MAX_AGE = 25
+export const CORNERSTONE_VALUE = 52
+
+/**
+ * Above this club-value, the asset leaving is a real hockey player and the
+ * "best asset in the deal" rule applies — quantity stops being able to buy it.
+ * Deliberately low: the rule used to trigger only at star level (45), which let
+ * a pile of depth pieces buy a genuine top-six forward.
+ */
+export const HEADLINE_MIN_VALUE = 26
+
+/** Everything a club needs to price an asset as ITSELF rather than as "the market". */
+export interface ClubLens {
+  philosophy: TeamPhilosophy
+  posture: ClubPostureKind
+  depth: ClubDepth
+  /** Cap space ($) remaining. Negative = over. Drives how term/money is priced. */
+  capSpace: number
+  /** 0 = October … 1 = the final hours before the deadline. */
+  deadlineProximity: number
+}
+
+/**
+ * Build the depth half of a lens from a live roster. `leaving` are players the
+ * club would be trading away — depth is judged AFTER the deal, which is how a
+ * GM actually thinks ("if I move him, what am I left with?").
+ */
+export function clubDepthOf(
+  team: Team,
+  players: Map<PlayerId, Player>,
+  leaving: Player[] = [],
+): ClubDepth {
+  const gone = new Set(leaving.map((p) => p.id as string))
+  const group: Record<PositionGroup, number> = { F: 0, D: 0, G: 0 }
+  const defenceBySide: Record<Handedness, number> = { L: 0, R: 0 }
+  for (const id of team.roster) {
+    if (gone.has(id as string)) continue
+    const p = players.get(id)
+    if (!p) continue
+    group[groupOf(p.position)]++
+    if (p.position === 'D') defenceBySide[p.handedness]++
+  }
+  return { group, defenceBySide }
+}
+
+/** Healthy shot-side split on an NHL blue line — three a side. */
+const DEFENCE_SIDE_TARGET = 3
+
+/**
+ * Posture age curves. Anchors are (age, multiplier) applied ON TOP of the
+ * market age curve, so this is the club's *disagreement* with the market, not a
+ * replacement for it. A rebuilder writes down anyone over thirty; a contender
+ * writes down teenagers who cannot help this spring.
+ */
+const POSTURE_AGE_CURVE: Record<ClubPostureKind, ReadonlyArray<readonly [number, number]>> = {
+  rebuild: [[19, 1.22], [23, 1.12], [26, 0.98], [29, 0.82], [31, 0.70], [34, 0.55]],
+  retool: [[19, 1.10], [23, 1.05], [27, 1.0], [30, 0.92], [33, 0.82]],
+  contend: [[19, 0.84], [22, 0.93], [25, 1.02], [28, 1.10], [31, 1.06], [34, 0.94]],
+}
+
+function lerpCurve(curve: ReadonlyArray<readonly [number, number]>, x: number): number {
+  const first = curve[0]!
+  const last = curve[curve.length - 1]!
+  if (x <= first[0]) return first[1]
+  if (x >= last[0]) return last[1]
+  for (let i = 1; i < curve.length; i++) {
+    const [x1, y1] = curve[i]!
+    if (x <= x1) {
+      const [x0, y0] = curve[i - 1]!
+      return y0 + ((x - x0) / (x1 - x0)) * (y1 - y0)
+    }
+  }
+  return last[1]
+}
+
+/** How much of a young player's UNREALIZED ceiling a club is willing to pay for. */
+const UPSIDE_APPETITE: Record<ClubPostureKind, number> = { rebuild: 0.55, retool: 0.36, contend: 0.22 }
+
+/**
+ * The premium a club puts on a young player's unrealized ceiling, in trade
+ * points, ON TOP of what the market already prices in.
+ *
+ * The market model (`computePlayerValue`) credits 55% of the gap to potential,
+ * fading out by 24. That is a market average and it is precisely why the AI used
+ * to sell blue-chip 22-year-olds for good-not-great veterans: nobody in the room
+ * was pricing the ceiling. A club with a rebuild lens prices most of the rest of
+ * it; a contender barely prices any.
+ */
+export function upsidePremium(player: Player, lens: ClubLens): number {
+  if (player.age >= 26) return 0
+  const ovr = ratedOverall(player)
+  const gap = ratedPotential(player) - ovr
+  if (gap < 2) return 0
+  const ceiling = valueFromOverall(ovr + gap) - valueFromOverall(ovr)
+  // How much of the gap the market already paid for (mirrors computePlayerValue).
+  const alreadyPriced = player.age < 24 ? 0.55 * clamp((24 - player.age) / 6, 0, 1) : 0
+  // How near the ceiling is — an 18-year-old has a decade to get there, a
+  // 25-year-old is nearly who he will be.
+  const proximity = clamp((26 - player.age) / 10, 0, 1)
+  return ceiling * Math.max(0, 1 - alreadyPriced) * proximity * UPSIDE_APPETITE[lens.posture]
+}
+
+/**
+ * Positional fit: what this club, with THIS roster, would pay extra (or less)
+ * for a body at that spot. Goalies swing hardest — a club with one is a club in
+ * trouble — and defence is priced by shot side, because two right-shot pairs is
+ * not a blue line.
+ */
+export function positionalFitMultiplier(player: Player, lens: ClubLens): number {
+  const g = groupOf(player.position)
+  let m = 1
+  const have = lens.depth.group[g]
+  const want = GROUP_TARGET[g]
+  if (have < want) m *= 1 + Math.min(0.20, (want - have) * (g === 'G' ? 0.10 : 0.035))
+  else if (have >= want + 4) m *= 0.93 // a surplus club does not bid on a sixteenth forward
+  if (player.position === 'D') {
+    const side = lens.depth.defenceBySide[player.handedness]
+    if (side <= 1) m *= 1.14
+    else if (side < DEFENCE_SIDE_TARGET) m *= 1.06
+    else if (side >= DEFENCE_SIDE_TARGET + 2) m *= 0.92
+  }
+  return m
+}
+
+/**
+ * How a club's cap sheet and stance colour a CONTRACT. This is the lever the
+ * playtest asked for by name: "a cap-strapped club discounts term."
+ *
+ *  - Money you cannot fit is worth less than money you can. A club whose whole
+ *    remaining space would go on one contract prices that contract down.
+ *  - Term amplifies whatever the contract already is: years on a bargain are an
+ *    asset, years on an overpay are a mortgage.
+ *  - A rebuilder does not want long money on an old player at any discount —
+ *    those years land squarely in the seasons he is trying to be good again.
+ */
+export function contractLensMultiplier(player: Player, lens: ClubLens): number {
+  const yrs = player.contract.yearsRemaining
+  const fair = fairSalaryFor(ratedOverall(player))
+  const richness = player.contract.salary / Math.max(fair, 1e6) // >1 = paid above the curve
+  let m = 1
+
+  const bite = player.contract.salary / Math.max(lens.capSpace, 1e6)
+  if (lens.capSpace <= 0) m *= 0.80
+  else if (bite >= 1) m *= 0.86
+  else if (bite >= 0.6) m *= 0.93
+
+  if (yrs >= 3) m *= clamp(1 + (1 - richness) * 0.10, 0.82, 1.14)
+  if (lens.posture === 'rebuild' && yrs >= 3 && player.age >= 30) m *= 0.85
+  if (lens.posture === 'contend' && yrs >= 4 && player.age >= 31) m *= 0.90
+
+  // Rentals. An expiring veteran is deadline gold to a contender and close to
+  // worthless to a rebuilder — and because the lens is symmetric, that is also
+  // WHY the rebuilder sells him for a 2nd in February and the contender won't.
+  if (yrs <= 1 && player.age >= 27) {
+    if (lens.posture === 'contend') m *= 1 + 0.08 * lens.deadlineProximity
+    else if (lens.posture === 'rebuild') m *= 0.55
+    else m *= 0.8
+  }
+
+  return m
+}
+
+/**
+ * What THIS club would pay for THIS player, in the shared trade currency.
+ * Never equals `playerValue` except by coincidence — that is the point.
+ */
+export function clubPlayerValue(player: Player, lens: ClubLens): number {
+  const base = playerValue(player)
+  const m =
+    lerpCurve(POSTURE_AGE_CURVE[lens.posture], player.age) *
+    positionalFitMultiplier(player, lens) *
+    contractLensMultiplier(player, lens) *
+    philosophyGainBias(lens.philosophy, { kind: 'player', player })
+  return base * m + upsidePremium(player, lens)
+}
+
+/**
+ * What THIS club would pay for THIS pick. A rebuilder's currency is futures and
+ * it bids them up as the deadline nears; a contender is spending next June to
+ * win this April and discounts accordingly.
+ */
+export function clubPickValue(
+  pick: DraftPick,
+  lens: ClubLens,
+  ctx: AssetValueContext,
+): number {
+  const base = pickValue(pick, ctx)
+  const postureMult =
+    lens.posture === 'rebuild' ? 1.10 + 0.12 * lens.deadlineProximity
+    : lens.posture === 'contend' ? 0.90 - 0.06 * lens.deadlineProximity
+    : 1.0
+  return base * postureMult * philosophyGainBias(lens.philosophy, { kind: 'pick', pick })
+}
+
+/**
+ * THE per-club asset valuation — the same signature as {@link assetValue} but
+ * seen through one club's eyes. Use this anywhere a specific front office is
+ * deciding; use `assetValue` only where you genuinely mean "the market".
+ */
+export function clubAssetValue(asset: TradeAsset, lens: ClubLens, ctx: AssetValueContext): number {
+  return asset.kind === 'player'
+    ? clubPlayerValue(asset.player, lens)
+    : clubPickValue(asset.pick, lens, ctx)
+}
+
+/**
+ * `clubAssetValue` plus the human-readable reasons THIS club lands where it
+ * does — the lines that let the trade UI say "Detroit see him differently"
+ * rather than printing a second decimal.
+ */
+export function describeClubValue(
+  asset: TradeAsset,
+  lens: ClubLens,
+  ctx: AssetValueContext,
+): { value: number; drivers: ValueDriver[] } {
+  const value = clubAssetValue(asset, lens, ctx)
+  const market = assetValue(asset, ctx)
+  const drivers: ValueDriver[] = []
+  const POSTURE_WORD: Record<ClubPostureKind, string> = {
+    contend: 'Contending', retool: 'Retooling', rebuild: 'Rebuilding',
+  }
+  drivers.push({ label: `${POSTURE_WORD[lens.posture]} club`, tone: 'flat' })
+
+  if (asset.kind === 'player') {
+    const p = asset.player
+    const ageM = lerpCurve(POSTURE_AGE_CURVE[lens.posture], p.age)
+    if (ageM >= 1.06) drivers.push({ label: `Age ${p.age} fits their window`, tone: 'up' })
+    else if (ageM <= 0.94) drivers.push({ label: `Age ${p.age} is off their timeline`, tone: 'down' })
+
+    const up = upsidePremium(p, lens)
+    if (up >= market * 0.12) drivers.push({ label: 'They pay for the ceiling', tone: 'up' })
+
+    const fit = positionalFitMultiplier(p, lens)
+    if (fit >= 1.05) {
+      drivers.push({
+        label: p.position === 'D'
+          ? `Thin at ${p.handedness}-shot defence`
+          : `Thin at ${p.position === 'G' ? 'goal' : p.position === 'C' ? 'centre' : 'the position'}`,
+        tone: 'up',
+      })
+    } else if (fit <= 0.95) drivers.push({ label: 'Already deep there', tone: 'down' })
+
+    const con = contractLensMultiplier(p, lens)
+    if (con <= 0.92) {
+      drivers.push({
+        label: lens.capSpace < p.contract.salary ? 'They cannot fit the money' : 'The term scares them',
+        tone: 'down',
+      })
+    } else if (con >= 1.06) drivers.push({ label: 'They like the contract', tone: 'up' })
+  } else {
+    if (lens.posture === 'rebuild') drivers.push({ label: 'Futures are their currency', tone: 'up' })
+    else if (lens.posture === 'contend') drivers.push({ label: 'Picks are spending money to them', tone: 'down' })
+  }
+
+  const delta = market > 0 ? (value - market) / market : 0
+  if (Math.abs(delta) >= 0.08) {
+    drivers.push({
+      label: `${delta > 0 ? 'Above' : 'Below'} market by ~${Math.round(Math.abs(delta) * 100)}%`,
+      tone: delta > 0 ? 'up' : 'down',
+    })
+  }
+  return { value, drivers }
 }
 
 /* ────────────────────────── retained salary ────────────────────────── */
@@ -742,47 +1101,31 @@ export function evaluateProposal(args: {
 
   const year = baselineYear([...give.picks, ...receive.picks])
 
-  // Arrivals at a position the partner is thin at are worth a premium.
-  const counts = groupCounts(partnerTeam, partnerPlayers, receive.players)
-  const needBonus = (pos: Position): number => {
-    const g = groupOf(pos)
-    if (counts[g] >= GROUP_TARGET[g]) return 1
-    return g === 'G' ? 1.1 : 1.07
-  }
-
   const philosophy = args.philosophy ?? teamPhilosophy(partnerTeam.id)
-
-  /* ── real-GM context: what would THIS club, in THIS situation, pay for? ──
-   * A rental (expiring deal, 27+) is deadline gold to a contender and nearly
-   * worthless to a rebuilder; a 31-year-old is a discount to a rebuilder and a
-   * premium to a contender; picks appreciate in a seller's market. */
   const ctx = args.context
-  const acquiringMult = (p: Player): number => {
-    if (!ctx) return 1
-    let m = 1
-    const rental = p.contract.yearsRemaining <= 1 && p.age >= 27
-    if (rental) {
-      if (ctx.posture === 'contend') m *= 1 + 0.08 * ctx.deadlineProximity
-      else if (ctx.posture === 'rebuild') m *= 0.55
-      else m *= 0.8
-    }
-    if (ctx.posture === 'rebuild') {
-      if (p.age >= 32) m *= 0.6
-      else if (p.age >= 29) m *= 0.75
-      else if (p.age <= 23) m *= 1.12
-    } else if (ctx.posture === 'contend') {
-      if (p.age >= 27 && p.age <= 31) m *= 1.06
-      if (p.age <= 22 && ratedOverall(p) < 70) m *= 0.85
-    }
-    return m
+
+  /* ── THE LENS ──
+   * The partner prices every asset in this deal as ITSELF: its posture, its GM,
+   * the shape of its roster after the deal, its cap sheet, the date. The SAME
+   * lens is used on both sides, which is the whole point — a rebuilder both
+   * sells its 31-year-old cheap and refuses its 22-year-old, because those are
+   * the same belief seen from two directions. */
+  const lens: ClubLens = {
+    philosophy,
+    posture: ctx?.posture ?? defaultPostureFor(philosophy),
+    // Depth judged AFTER the players it is sending out have left the room.
+    depth: clubDepthOf(partnerTeam, partnerPlayers, receive.players),
+    capSpace: partnerTeam.finances.salaryCap - partnerCapUsed,
+    deadlineProximity: ctx?.deadlineProximity ?? 0,
   }
-  const pickCtxMult = ctx && ctx.posture === 'rebuild' ? 1 + 0.1 * ctx.deadlineProximity : 1
+  const lensCtx: AssetValueContext = { year }
+  const lensPlayer = (p: Player): number => clubPlayerValue(p, lens)
+  const lensPick = (p: DraftPick): number => clubPickValue(p, lens, lensCtx)
 
   // Gain = what the partner receives (the user's "give" side).
   const gain =
     give.players.reduce((s, p) => {
-      const base = playerValue(p) * needBonus(p.position) * acquiringMult(p)
-      const bias = philosophyGainBias(philosophy, { kind: 'player', player: p })
+      const base = lensPlayer(p)
       // Cap relief bonus: if the player's salary is retained by the other side,
       // the partner benefits from reduced cap hit.
       const retained = give.retainedAmounts?.get(p.id as string) ?? 0
@@ -790,48 +1133,55 @@ export function evaluateProposal(args: {
       // reason the hard cap check above was switched off the stored field.
       const partnerCapAfterPlayer = partnerCapUsed + (p.contract.salary - retained) - outgoingSalary
       const relief = retentionValueBonus(retained, partnerTeam.finances.salaryCap - partnerCapAfterPlayer)
-      return s + base * bias + relief
+      return s + base + relief
     }, 0) +
-    give.picks.reduce((s, p) => {
-      const pv = pickValue(p, { year }) * pickCtxMult
-      const bias = philosophyGainBias(philosophy, { kind: 'pick', pick: p })
-      return s + pv * bias
-    }, 0)
+    give.picks.reduce((s, p) => s + lensPick(p), 0)
 
-  // Loss = what the partner gives up (the user's "receive" side).
-  // Real-GM rule: the endowment effect — every GM values his own players a
-  // shade above market (picks are commodity; players are HIS guys). This is
-  // what makes fleecing the AI impossible: a "fair" offer is not enough.
+  // Loss = what the partner gives up (the user's "receive" side), priced through
+  // the SAME lens. Before this, a club valued its own players at flat market —
+  // which is why a rebuilder would hand over a blue-chip 22-year-old for a good
+  // 28-year-old, and why every club in the league quoted the same price.
+  // Real-GM rule on top: the endowment effect — every GM values his own players
+  // a shade above his own book (picks are commodity; players are HIS guys).
   const ENDOWMENT = OWN_PLAYER_ENDOWMENT
   const loss =
-    receive.players.reduce((s, p) => s + playerValue(p) * ENDOWMENT, 0) +
-    receive.picks.reduce((s, p) => s + pickValue(p, { year }), 0)
+    receive.players.reduce((s, p) => s + lensPlayer(p) * ENDOWMENT, 0) +
+    receive.picks.reduce((s, p) => s + lensPick(p), 0)
 
   /* ── real-GM rule: the young core is basically untouchable ──
-   * Prying a 23-and-under star out of any front office takes a massive
-   * overpay — real GMs get fired for moving those players, and they know it. */
-  const youngStar = receive.players.find((p) => p.age <= 23 && playerValue(p) >= 55)
-  if (youngStar) threshold += 0.35
+   * Prying a cornerstone out of any front office takes a massive overpay — real
+   * GMs get fired for moving those players, and they know it. "Cornerstone" is
+   * now a LENS judgement: a rebuilder's untouchable is not a contender's. */
+  const cornerstones = receive.players.filter(
+    (p) => p.age <= CORNERSTONE_MAX_AGE && lensPlayer(p) >= CORNERSTONE_VALUE,
+  )
+  if (cornerstones.some((p) => p.age <= 23)) threshold += 0.35
+  else if (cornerstones.length > 0) threshold += 0.22
 
   /* ── real-GM rule: the best player in the deal wins the deal ──
    * Nobody trades a top-six player for four third-liners. If the partner is
    * giving up a clear best asset, the return must be headlined by something
-   * comparable — quantity is not quality. */
-  const bestOut = Math.max(
-    0,
-    ...receive.players.map((p) => playerValue(p)),
-    ...receive.picks.map((p) => pickValue(p, { year }))
-  )
+   * comparable — quantity is not quality. Priced through the lens, and the bar
+   * rises to near-parity when the asset leaving is a cornerstone: a club moving
+   * its future wants a player back, not a pile. */
+  // Only PLAYERS headline a deal. Picks are commodity — a 1st for two 2nds is a
+  // value trade nobody calls an insult — so the rule keys off the best player
+  // leaving, and the best single asset (of either kind) coming back.
+  const bestOut = Math.max(0, ...receive.players.map(lensPlayer))
   const bestIn = Math.max(
     0,
-    ...give.players.map((p) => playerValue(p)),
-    ...give.picks.map((p) => pickValue(p, { year }))
+    ...give.players.map(lensPlayer),
+    ...give.picks.map(lensPick)
   )
-  if (bestOut >= 45 && bestIn < bestOut * 0.6) {
+  const headlineBar = cornerstones.length > 0 ? 0.85 : 0.62
+  if (bestOut >= HEADLINE_MIN_VALUE && bestIn < bestOut * headlineBar) {
+    const cornerstone = cornerstones[0]
     return {
       verdict: 'reject',
-      message: `${partnerTeam.name} pass. ${receive.players.length + receive.picks.length > 1 ? 'Quantity is not quality — ' : ''}they need the best asset in the deal coming back their way, not depth pieces.`,
-      counterAskValue: round1(bestOut * 0.75 - bestIn)
+      message: cornerstone
+        ? `${partnerTeam.name} aren't moving ${cornerstone.name} for that. He's the kind of player you build around — if he goes anywhere, a comparable player comes back, not a package.`
+        : `${partnerTeam.name} pass. ${receive.players.length + receive.picks.length > 1 ? 'Quantity is not quality — ' : ''}they need the best asset in the deal coming back their way, not depth pieces.`,
+      counterAskValue: round1(bestOut * (headlineBar + 0.1) - bestIn)
     }
   }
 
@@ -839,6 +1189,13 @@ export function evaluateProposal(args: {
    * Star-level deals carry career risk for the GM who makes them; the bar is
    * higher and the phone calls are longer. */
   if (bestOut >= 70) threshold += 0.05
+
+  /* ── real-GM rule: you don't take on money you can't spend ──
+   * A club whose entire remaining cap space would go into one arriving contract
+   * needs to be paid to do it, not merely convinced the hockey is even. */
+  if (lens.capSpace > 0 && incomingSalary - outgoingSalary > lens.capSpace * 0.75) {
+    threshold += 0.08
+  }
 
   /* ── deadline urgency: a contender buying help near the deadline is the one
    * moment a real GM knowingly pays a little over ── */
@@ -1108,6 +1465,19 @@ export function generateAiOffers(args: {
   }
   const need = weakestGroup(partner, players)
 
+  // The offering club's own lens — it must price BOTH the player it wants and
+  // the assets it would part with as itself. Without this the AI would happily
+  // table its own blue-chip 22-year-old for a market-priced veteran, which is
+  // exactly the deal `evaluateProposal` now refuses when the user proposes it.
+  const offerLens: ClubLens = {
+    philosophy: teamPhilosophy(partner.id),
+    posture: args.postureOf?.(partner.id) ?? defaultPostureFor(teamPhilosophy(partner.id)),
+    depth: clubDepthOf(partner, players),
+    capSpace: partner.finances.salaryCap - rosterCapUsed(partner, players),
+    deadlineProximity:
+      daysLeft !== undefined && daysLeft >= 0 && daysLeft <= 45 ? 1 - daysLeft / 45 : 0,
+  }
+
   // Target one of the user's best few players at the need group. NTC players
   // would veto the move and injured players don't get shopped for.
   const shoppable = user.roster
@@ -1119,7 +1489,7 @@ export function generateAiOffers(args: {
         !p.contract.noTradeClause &&
         p.injuryStatus === null
     )
-    .map((player) => ({ player, value: playerValue(player) }))
+    .map((player) => ({ player, value: clubPlayerValue(player, offerLens) }))
     .sort((x, y) => y.value - x.value || (x.player.id < y.player.id ? -1 : 1))
 
   // The shop floor is absolute, and on a weak league nobody clears it. Measured
@@ -1157,16 +1527,18 @@ export function generateAiOffers(args: {
     const p = players.get(id)
     if (!p || p.contract.noTradeClause || p.injuryStatus !== null) continue
     if (p.position === 'G' || groupOf(p.position) === need) continue
-    candidates.push({ kind: 'player', player: p, value: playerValue(p) })
+    const v = clubPlayerValue(p, offerLens)
+    // A club does not offer up its own cornerstone unprompted.
+    if (p.age <= CORNERSTONE_MAX_AGE && v >= CORNERSTONE_VALUE) continue
+    candidates.push({ kind: 'player', player: p, value: v })
   }
   for (const pick of picks) {
     if (pick.ownerTeamId !== partner.id) continue
     const rank = ranks.get(pick.originalTeamId)
-    const value =
-      rank === undefined
-        ? pickValue(pick, { year: currentYear })
-        : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
-    candidates.push({ kind: 'pick', pick, value })
+    const ctx = rank === undefined
+      ? { year: currentYear }
+      : { year: currentYear, teamStrengthRank: rank }
+    candidates.push({ kind: 'pick', pick, value: clubPickValue(pick, offerLens, ctx) })
   }
   candidates.sort((x, y) => y.value - x.value || (assetKey(x) < assetKey(y) ? -1 : 1))
 
@@ -1224,12 +1596,15 @@ export function solicitOffersForPlayer(args: {
   expiresOnDay: number
   /** GM aggression lookup, 0–1 — aggressive GMs stretch their package further. */
   aggressionOf?: (teamId: TeamId) => number
+  /** Club stance lookup — each bidder prices him through its own lens. */
+  postureOf?: (teamId: TeamId) => ClubPostureKind
+  /** 0 = October … 1 = the deadline hours. */
+  deadlineProximity?: number
   /** Cap on how many offers come back (default 4). */
   maxOffers?: number
 }): StoredTradeOffer[] {
   const { target, userTeamId, teams, players, picks, rng, nextOfferId, expiresOnDay } = args
   const tgtGroup = groupOf(target.position)
-  const tgtValue = playerValue(target)
   const ranks = strengthRanks(teams, players)
   const currentYear =
     picks.length === 0 ? 0 : picks.reduce((min, p) => Math.min(min, p.year), Infinity)
@@ -1242,7 +1617,18 @@ export function solicitOffersForPlayer(args: {
 
     const aggression = args.aggressionOf?.(partner.id)
     const aimHi = aggression === undefined ? 1.15 : 1.03 + 0.18 * aggression
-    const aim = tgtValue * rng.float(1.0, aimHi)
+
+    // This club's own book. Two clubs shopping the same player table different
+    // packages because they do not agree on what he is worth.
+    const bidLens: ClubLens = {
+      philosophy: teamPhilosophy(partner.id),
+      posture: args.postureOf?.(partner.id) ?? defaultPostureFor(teamPhilosophy(partner.id)),
+      depth: clubDepthOf(partner, players),
+      capSpace: partner.finances.salaryCap - rosterCapUsed(partner, players),
+      deadlineProximity: args.deadlineProximity ?? 0,
+    }
+    const myValueOfTarget = clubPlayerValue(target, bidLens)
+    const aim = myValueOfTarget * rng.float(1.0, aimHi)
 
     // Candidate assets: the partner's players (keeping his need group + both
     // goalies at home) plus the picks he owns.
@@ -1251,16 +1637,17 @@ export function solicitOffersForPlayer(args: {
       const p = players.get(id)
       if (!p || p.contract.noTradeClause || p.injuryStatus !== null) continue
       if (p.position === 'G' || groupOf(p.position) === tgtGroup) continue
-      candidates.push({ kind: 'player', player: p, value: playerValue(p) })
+      const v = clubPlayerValue(p, bidLens)
+      if (p.age <= CORNERSTONE_MAX_AGE && v >= CORNERSTONE_VALUE) continue
+      candidates.push({ kind: 'player', player: p, value: v })
     }
     for (const pick of picks) {
       if (pick.ownerTeamId !== partner.id) continue
       const rank = ranks.get(pick.originalTeamId)
-      const value =
-        rank === undefined
-          ? pickValue(pick, { year: currentYear })
-          : pickValue(pick, { year: currentYear, teamStrengthRank: rank })
-      candidates.push({ kind: 'pick', pick, value })
+      const ctx = rank === undefined
+        ? { year: currentYear }
+        : { year: currentYear, teamStrengthRank: rank }
+      candidates.push({ kind: 'pick', pick, value: clubPickValue(pick, bidLens, ctx) })
     }
     candidates.sort((x, y) => y.value - x.value || (assetKey(x) < assetKey(y) ? -1 : 1))
 
@@ -1272,7 +1659,7 @@ export function solicitOffersForPlayer(args: {
       chosen.push(c)
       total += c.value
     }
-    if (chosen.length === 0 || total < tgtValue * 0.85) continue
+    if (chosen.length === 0 || total < myValueOfTarget * 0.85) continue
 
     const salaryOut = chosen.reduce((s, c) => s + (c.kind === 'player' ? c.player.contract.salary : 0), 0)
     if (partner.finances.capUsed + target.contract.salary - salaryOut > partner.finances.salaryCap) continue
