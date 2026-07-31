@@ -368,9 +368,13 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().shopPlayer(req.playerId)
       return { id: req.id, type: 'shopResult', count: r.count, message: r.message }
     }
-    case 'acceptTrade':
-      must().acceptTrade(req.offerId)
+    case 'acceptTrade': {
+      // The engine reports a dead/illegal offer rather than throwing; the UI
+      // still wants it as an error banner, same as a signing that doesn't fit.
+      const res = must().acceptTrade(req.offerId)
+      if (!res.ok) throw new Error(res.message ?? 'That offer could not be completed.')
       return { id: req.id, type: 'ok' }
+    }
     case 'rejectTrade':
       must().rejectTrade(req.offerId)
       return { id: req.id, type: 'ok' }
