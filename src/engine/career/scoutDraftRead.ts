@@ -79,6 +79,72 @@ export function scoutSignalParts(player: Player, interviews = 0): {
   return { intangibleAdj, twoWayAdj, raw: intangibleAdj + twoWayAdj }
 }
 
+export interface ScoutBoardNoteArgs {
+  /** Where OUR board has him (1 = best). */
+  ourRank: number
+  /** Where the public consensus has him. */
+  consensusRank: number
+  /** The verdict already computed from the rank gap. */
+  verdict: ScoutVerdict
+  /** Whether our staff has watched him enough to hold an opinion at all. */
+  seen: boolean
+  /** Our fog-aware ceiling read (0–100) and the analysts' perceived ceiling. */
+  ourCeiling?: number
+  analystCeiling?: number
+  /** Signal components from {@link scoutSignalParts} — the reason clause. */
+  intangibleAdj?: number
+  twoWayAdj?: number
+}
+
+/**
+ * One sentence saying, in words, what our staff thinks of a prospect RELATIVE to
+ * the public board — and why.
+ *
+ * E2 (playtest 2026-07-31): a prospect showed 5★ potential and a staff recommend
+ * on the same row as a bare "#38 ▼". Both readings were true and neither was
+ * explained, so the row read as a bug rather than as drama. The two are different
+ * axes — how good we think he is, versus how good we think he is compared to the
+ * consensus — and a high ceiling with a low relative ranking is a real, common
+ * scouting position ("we love the ceiling; we'd still take thirty-seven kids
+ * first"). This says which it is out loud. Disagreement is the point; unexplained
+ * contradiction is the bug.
+ */
+export function scoutBoardNote(a: ScoutBoardNoteArgs): string {
+  const gap = a.consensusRank - a.ourRank // + = we're higher on him
+  const spots = Math.abs(gap)
+  const where = `we have him #${a.ourRank}, the board #${a.consensusRank}`
+  if (!a.seen) {
+    return `Light viewings so far — ${where}, but that ranking is a placeholder until our scouts get eyes on him.`
+  }
+  const reason = ((): string => {
+    const int = a.intangibleAdj ?? 0
+    const two = a.twoWayAdj ?? 0
+    if (Math.abs(int) >= Math.abs(two)) {
+      if (int >= 1.5) return 'he interviews well and the makeup checks out'
+      if (int <= -1.5) return 'there are maturity and attitude questions'
+    } else {
+      if (two >= 1) return 'the underlying two-way game is better than his point totals suggest'
+      if (two <= -1) return 'the game away from the puck lags behind the offensive flash'
+    }
+    return 'they read the whole package a little differently'
+  })()
+  // Does our own CEILING read agree with the board's? If we like the ceiling just
+  // as much and are still lower, the disagreement is about the field, not the
+  // player — which is exactly the case that read as a contradiction.
+  const ceilingGap = (a.ourCeiling !== undefined && a.analystCeiling !== undefined)
+    ? a.ourCeiling - a.analystCeiling
+    : 0
+  if (a.verdict === 'lower') {
+    return ceilingGap >= -3
+      ? `Our staff rate the ceiling as highly as anyone — they just have ${spots} other prospect${spots === 1 ? '' : 's'} they would take first (${where}).`
+      : `Our staff are lower on him than the consensus — ${reason}. They would let him slide rather than reach (${where}).`
+  }
+  if (a.verdict === 'higher') {
+    return `Our staff are higher on him than the consensus — ${reason}. They would take him ${spots} spot${spots === 1 ? '' : 's'} earlier than the board says (${where}).`
+  }
+  return `Our staff's board lines up with the consensus (${where}).`
+}
+
 /**
  * Build your scouts' draft read, or null if they haven't seen enough of him to
  * hold an independent opinion (assign a scout to change that).

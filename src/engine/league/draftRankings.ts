@@ -44,6 +44,14 @@ export interface RankInput {
   position?: string
   /** Draft eligibility — re-entry (passed-over) prospects are docked. */
   eligibility?: DraftEligibility
+  /**
+   * What he has DONE, as a signed value-point term from {@link productionRankBonus}
+   * (NHLe-translated, age-adjusted; 0 = par / no sample). A first-class ranking
+   * term, not a nudge inside the ceiling: a teenager dominating his league is the
+   * loudest thing on a real draft board, and it must be able to move him past a
+   * prospect with better raw tools. Omitted → the board is tools-only.
+   */
+  production?: number
 }
 
 /**
@@ -83,15 +91,33 @@ function phaseWeights(phase: DraftRankPhase): { ceilingWeight: number; noise: nu
 }
 
 /**
+ * How heavily a board weights PRODUCTION at each phase. Production always counts —
+ * the scoresheet is public and analysts are not blind to it — but it counts for
+ * more as the body of work grows: an early board is projection-led, a pre-draft
+ * board is written by what a kid actually did all season.
+ */
+export function productionWeight(phase: DraftRankPhase): number {
+  switch (phase) {
+    case 'preliminary': return 1.1
+    case 'midseason': return 1.3
+    case 'final': return 1.5
+  }
+}
+
+/**
  * Rank draft-eligible prospects best-first for the given phase. Returns ids in
  * ranked order (caller maps to display rows).
  */
 export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[] {
   const { ceilingWeight, noise } = phaseWeights(phase)
+  const prodW = productionWeight(phase)
   return [...inputs]
     .map((x) => {
       const base = x.ceiling * ceilingWeight + x.current * (1 - ceilingWeight)
-      return { id: x.id, score: base * positionFactor(x.position) - reentryPenalty(x.eligibility) + hashUnit(`${x.id}|${phase}`) * noise }
+      // Production is added AFTER the position fade, so a goalie (who has no
+      // scoring line at all, and so sits at a neutral 0) isn't taxed twice.
+      const tools = base * positionFactor(x.position) - reentryPenalty(x.eligibility)
+      return { id: x.id, score: tools + (x.production ?? 0) * prodW + hashUnit(`${x.id}|${phase}`) * noise }
     })
     .sort((a, b) => b.score - a.score)
     .map((x) => x.id)
@@ -117,6 +143,45 @@ export function perceivedCeiling(trueCeiling: number, age: number, productionBon
 }
 
 /**
+ * A prospect's scoring rate as a multiple of the NHL-equivalent rate a "notable"
+ * prospect at his position clears. 1.0 = par, 2.0 = twice what the par prospect
+ * manages once his league is translated to NHL terms. 0 = no sample (goalies, or
+ * a kid who hasn't played), which every consumer must read as "no opinion", never
+ * as "bad". This is the one place raw points become comparable across the OHL,
+ * NCAA, MHL, J20 and everything else in the feeder world.
+ */
+export function productionRatio(ppg: number, isD: boolean, leagueStrength: number): number {
+  if (ppg <= 0) return 0
+  const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
+  return (ppg * Math.max(0.05, leagueStrength)) / par
+}
+
+/**
+ * The RANKING value of what a prospect has done, in the same 0–100 value points
+ * the ceiling/current blend uses — the term that makes production actually move a
+ * draft board.
+ *
+ * Log-scaled, so every DOUBLING of the NHL-equivalent rate is worth a fixed step
+ * (par → +0, twice par → +15, four times par → +30, half par → −15). That shape
+ * matters: a linear premium saturates exactly where real boards get loudest, which
+ * is how a 141-point 18-year-old ended up ranked #60. Age-adjusted upward for the
+ * young (the same output from a 16-year-old is a different player), and the
+ * downside is NOT age-scaled — a young no-show is a project, not a bust.
+ *
+ * Bounded, because production is dominant but not sovereign: a prospect with real
+ * tools and a quiet year still belongs on the board, and no scoring rate turns a
+ * fourth-liner's frame into a first-overall pick.
+ */
+export function productionRankBonus(ppg: number, isD: boolean, leagueStrength: number, age = 18): number {
+  const ratio = productionRatio(ppg, isD, leagueStrength)
+  if (ratio <= 0) return 0
+  const raw = Math.log2(Math.max(0.15, ratio)) * 15
+  const ageMult = age <= 16 ? 1.3 : age === 17 ? 1.15 : age === 18 ? 1 : age <= 20 ? 0.8 : 0.7
+  const adj = raw > 0 ? raw * ageMult : raw
+  return Math.round(Math.max(-16, Math.min(32, adj)) * 10) / 10
+}
+
+/**
  * How much a prospect's PRODUCTION moves analysts off the book. When the rating
  * is generic, scouts rank on what a kid does on the ice — a teenager dominating
  * a junior (or, better, a pro) league rockets up boards; a low producer slides.
@@ -129,21 +194,23 @@ export function perceivedCeiling(trueCeiling: number, age: number, productionBon
  * @param leagueStrength NHL-equivalency of the league he produces in (0,1]
  */
 export function productionPremium(ppg: number, isD: boolean, leagueStrength: number, age = 18): number {
-  if (ppg <= 0) return 0 // no sample → no opinion either way
-  const nhlePpg = ppg * Math.max(0.05, leagueStrength)
-  const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
-  const ratio = nhlePpg / par
+  const ratio = productionRatio(ppg, isD, leagueStrength)
+  if (ratio <= 0) return 0 // no sample → no opinion either way
   // Production is the DOMINANT visible driver of a real draft board, and it's
   // NHLe-translated — so a point-per-game in a strong league (NCAA, 0.40) beats a
   // point-per-game in a weaker one (OHL, 0.30). It's also AGE-ADJUSTED: the same
   // output is far more impressive from a 16/17-year-old than a passed-over 19/20,
   // so younger producers get more credit (penalties aren't age-scaled — a young
-  // no-show is a project, not a bust). Bounds wide enough that a dominant young
-  // producer genuinely climbs and a no-show genuinely slides.
-  const raw = (ratio - 1) * 16
+  // no-show is a project, not a bust).
+  //
+  // Log-scaled (every doubling of the NHLe rate is worth a fixed step), because a
+  // linear premium flattened out at ~2.5× par — exactly where a real board starts
+  // projecting a franchise player — so a historic season read the same as a merely
+  // very good one. Calibrated to agree with the old linear curve at 2× par.
+  const raw = Math.log2(ratio) * 16
   const ageMult = age <= 16 ? 1.25 : age === 17 ? 1.15 : age === 18 ? 1.0 : age <= 20 ? 0.85 : 0.75
   const adj = raw > 0 ? raw * ageMult : raw
-  return Math.max(-10, Math.min(24, Math.round(adj)))
+  return Math.max(-10, Math.min(28, Math.round(adj)))
 }
 
 /** Goalies are notoriously hard to project — boards fade them (an elite goalie

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Player } from '@domain'
-import { buildScoutDraftRead } from './scoutDraftRead'
+import { buildScoutDraftRead, scoutBoardNote } from './scoutDraftRead'
 
 /** Minimal player carrying just the fields the read consumes. */
 function mk(opts: {
@@ -79,5 +79,63 @@ describe('buildScoutDraftRead', () => {
       analystCeiling: 76, analystRole: 'Top-pair D',
     })!
     expect(r.verdict).toBe('lower')
+  })
+})
+
+// E2 (playtest 2026-07-31): a prospect showed 5★ potential AND a staff recommend
+// on the same row as a bare "#38 ▼", with no explanation. The note is what turns
+// that from an apparent contradiction into a stated scouting position.
+describe('scoutBoardNote', () => {
+  const base = { ourRank: 38, consensusRank: 20, verdict: 'lower' as const, seen: true }
+
+  it('always names both rankings, so the two numbers are never bare', () => {
+    for (const verdict of ['higher', 'inline', 'lower'] as const) {
+      const s = scoutBoardNote({ ...base, verdict })
+      expect(s).toMatch(/#38/)
+      expect(s).toMatch(/#20/)
+    }
+  })
+
+  it('explains a ▼ on a prospect whose CEILING we rate just as highly — the 5★ case', () => {
+    // We are lower on the board but not on the player: the disagreement is about
+    // the field, and the sentence has to say so rather than imply we dislike him.
+    const s = scoutBoardNote({ ...base, ourCeiling: 84, analystCeiling: 84 })
+    expect(s).toMatch(/ceiling as highly as anyone/)
+    expect(s).toMatch(/18 other prospects/)
+    expect(s).not.toMatch(/lower on him/)
+  })
+
+  it('gives a concrete reason when we genuinely rate the player lower', () => {
+    const s = scoutBoardNote({
+      ...base, ourCeiling: 64, analystCeiling: 80, twoWayAdj: -2, intangibleAdj: 0,
+    })
+    expect(s).toMatch(/lower on him than the consensus/)
+    expect(s).toMatch(/away from the puck/)
+    expect(s).toMatch(/let him slide/)
+  })
+
+  it('says how much earlier we would take a prospect we like', () => {
+    const s = scoutBoardNote({
+      ourRank: 12, consensusRank: 30, verdict: 'higher', seen: true, twoWayAdj: 2,
+    })
+    expect(s).toMatch(/higher on him than the consensus/)
+    expect(s).toMatch(/18 spots earlier/)
+  })
+
+  it('flags an unseen prospect as a placeholder rather than an opinion', () => {
+    const s = scoutBoardNote({ ...base, seen: false })
+    expect(s).toMatch(/[Ll]ight viewings/)
+    expect(s).toMatch(/placeholder/)
+  })
+
+  it('reads as agreement when the boards line up', () => {
+    const s = scoutBoardNote({ ourRank: 21, consensusRank: 20, verdict: 'inline', seen: true })
+    expect(s).toMatch(/lines up with the consensus/)
+  })
+
+  it('never says "1 spots" / "1 prospects"', () => {
+    expect(scoutBoardNote({ ourRank: 19, consensusRank: 20, verdict: 'higher', seen: true })).toMatch(/1 spot earlier/)
+    expect(scoutBoardNote({ ourRank: 21, consensusRank: 20, verdict: 'lower', seen: true, ourCeiling: 80, analystCeiling: 80 }))
+      .toMatch(/1 other prospect they/)
   })
 })

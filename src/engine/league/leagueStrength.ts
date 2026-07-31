@@ -58,7 +58,10 @@ const NHLE_BY_ABBREV: Record<string, number> = {
   USHL: 0.19,
   NTDP: 0.18, // USA Hockey National Team Development Program (plays USHL + exhibitions)
   BCHL: 0.18, // British Columbia HL — now an elite Tier-1 junior
-  MHL: 0.2, // Russian Molodyozhnaya HL — Russia's top junior
+  // Russian Molodyozhnaya HL — Russia's top junior. Published translations put it
+  // around 0.23–0.25; the old 0.20 sat under that band and crushed MHL scorers on
+  // the draft board (a 141-point season translated worse than a quiet NCAA year).
+  MHL: 0.24,
   J20: 0.15, // Swedish U20 Nationell
   U20SM: 0.15, // Finnish U20 SM-sarja
   CZEJR: 0.13, // Czech Extraliga juniorů

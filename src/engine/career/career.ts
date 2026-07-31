@@ -96,12 +96,12 @@ import {
   type GMJobOpening,
 } from '@engine/league/gmCareer'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, productionRankBonus, productionWeight, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
-import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { farmSplit } from '@engine/career/farmReassign'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
@@ -1550,6 +1550,15 @@ export class Career {
       }
     }
     return out
+  }
+
+  /** What a prospect has DONE, as the value-point ranking term every draft board
+   *  in the game shares (NHLe-translated via the league he plays in, age-adjusted;
+   *  0 for goalies and anyone with no games). The one production read used by the
+   *  analyst consensus board, our scouts' board, and the draft-day class order —
+   *  so the three can never disagree about whether a kid is producing. */
+  private prospectProductionBonus(p: Player, leagueAbbr: string | undefined): number {
+    return productionRankBonus(this.prospectPpg(p), p.position === 'D', nhleFactorByAbbrev(leagueAbbr ?? ''), p.age)
   }
 
   /** A prospect's scoring line: live this-season world production if he's played,
@@ -6789,11 +6798,17 @@ export class Career {
         const neededPicks = this.data.league.teams.length * DRAFT_ROUNDS
         let draftClass: DraftClass
         if (realEligibles.length >= neededPicks) {
+          // The class order is production-aware, on the same NHLe currency as the
+          // pre-draft board: the kid who put up 141 points in the MHL cannot come
+          // out of the summer ranked #60 behind a quiet prospect with a prettier
+          // hidden potential rating.
+          const clubOf = this.worldClubInfoByPid()
           draftClass = buildDraftClassFromPlayers({
             year: draftYear,
             eligible: realEligibles,
             count: classCount,
             rng: this.rngFor(8002),
+            productionOf: (p) => this.prospectProductionBonus(p, clubOf.get(p.id as string)?.leagueAbbr),
           })
         } else {
           const cls = generateDraftClass({
@@ -16686,7 +16701,10 @@ export class Career {
     return Math.max(1, Math.min(99, Math.round(biased)))
   }
 
-  private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; projection: ProspectProjection } {
+  /** A prospect's scoring rate for evaluation: this season's live world-sim pace
+   *  blended with last season's from the historical record (the blend ramps to
+   *  live over ~30 GP, so a pre-season board already reflects last year's work). */
+  private prospectPpg(p: Player): number {
     const pid = p.id as PlayerId
     const liveGp = this.worldSim.gp.get(pid) ?? 0
     const liveT = this.worldSim.totals.get(pid)
@@ -16695,12 +16713,17 @@ export class Career {
     const last = hist.length > 0 ? hist.reduce((a, b) => (b.year > a.year ? b : a)) : null
     const lastPpg = last ? (last.goals + last.assists) / last.gamesPlayed : 0
     const w = Math.min(1, liveGp / 30) // ramp from last-season to this-season over ~30 GP
-    const ppg = livePpg * w + lastPpg * (1 - w)
+    return livePpg * w + lastPpg * (1 - w)
+  }
+
+  private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; rankBonus: number; projection: ProspectProjection } {
+    const ppg = this.prospectPpg(p)
     const isD = p.position === 'D'
     const leagueFactor = nhleFactorByAbbrev(abbrev)
     return {
       premium: productionPremium(ppg, isD, leagueFactor, p.age),
-      projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: pid as string }),
+      rankBonus: productionRankBonus(ppg, isD, leagueFactor, p.age),
+      projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: p.id as string }),
     }
   }
 
@@ -16758,7 +16781,13 @@ export class Career {
           // others, rather than being a uniformly over-hyped wrong version. The rest
           // is genuine misread. Both shrink the louder a prospect's production is
           // (analysts aren't blind to a monster season).
-          const errorScale = Math.max(0.4, 1 - Math.max(0, evalRes.premium) / 24 * 0.6)
+          // Scaled by how LOUD his production is: nobody misreads a kid who just
+          // put up 141 points, so a monster season all but erases the random
+          // misread (and the analyst edge with it). Driven off the log-scaled rank
+          // bonus rather than the saturating premium — the premium tops out exactly
+          // where real boards get loudest, so it left the biggest producers eating
+          // ±20 spots of noise.
+          const errorScale = Math.max(0.2, 1 - Math.max(0, evalRes.rankBonus) / 15 * 0.8)
           const consensusError = (analystEdge(id) * 6 + hashSigned(id + ':consensus') * 13) * errorScale
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
@@ -16781,7 +16810,7 @@ export class Career {
             ...(isSkater ? { pNHLer: evalRes.projection.pNHLer, pStar: evalRes.projection.pStar } : {}),
           }
           if (elig === 'radar') radarRows.push(row)
-          else board.set(id, { input: { id, ceiling: perceived, current: ratedOverall(p), position: p.position, eligibility: elig }, row, player: p })
+          else board.set(id, { input: { id, ceiling: perceived, current: ratedOverall(p), position: p.position, eligibility: elig, production: evalRes.rankBonus }, row, player: p })
         }
       }
     }
@@ -16867,7 +16896,14 @@ export class Career {
       const kw = isOwn ? 1 : Math.max(0, Math.min(1, knowledge / 100))
       const valueCeil = ceil * kw + c.input.ceiling * (1 - kw)
       const base = valueCeil * 0.74 + c.input.current * 0.26
-      valueById.set(id, base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility))
+      // PRODUCTION counts on our board too, at the same weight the public board
+      // gives it — the scoresheet is not fog-of-war. Nobody has to be assigned to
+      // a prospect for the department to know he put up 141 points; what scouting
+      // buys is an independent read on the TOOLS, which is the `ceil` term above.
+      // (Without this our board ignored production entirely, so it read a monster
+      // producer as a nobody and then flagged the public board as "too high".)
+      const prod = (c.input.production ?? 0) * productionWeight(phase)
+      valueById.set(id, base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility) + prod)
       const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
       meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
     }
@@ -16891,9 +16927,20 @@ export class Career {
           const consensusRank = consensusRankOf.get(id) ?? yourRank
           const movement = consensusRank - yourRank
           const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
+          const seen = (meta.get(id)?.knowledge ?? 0) >= 35
+          const ourCeiling = ceilingById.get(id) ?? agedPotential(c.player)
+          // E2: the arrow alone made a 5★ grade next to a "▼" look like a bug. Say
+          // the position in words, from the same signal parts the profile blurb and
+          // the war-room note use, so all three tell one story.
+          const parts = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length)
+          const note = scoutBoardNote({
+            ourRank: yourRank, consensusRank, verdict, seen,
+            ourCeiling, analystCeiling: c.input.ceiling,
+            intangibleAdj: parts.intangibleAdj, twoWayAdj: parts.twoWayAdj,
+          })
           // The Potential column on OUR board shows OUR fog-aware read (c.row's is
           // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
-          return { rank: yourRank, ...c.row, potentialStars: overallToStars(ceilingById.get(id) ?? agedPotential(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
+          return { rank: yourRank, ...c.row, potentialStars: overallToStars(ourCeiling), consensusRank, movement, verdict, seen, note }
         })
 
     // Staff consensus board: department signal breaks ties between equal-value
@@ -17468,7 +17515,16 @@ export class Career {
           row.seasonPts = line.pts; row.seasonIsHistory = line.isHistory
         }
         const sb = sbByPid.get(pid)
-        if (sb) { row.scoutRank = sb.rank; row.scoutVerdict = sb.verdict }
+        if (sb) {
+          row.scoutRank = sb.rank
+          row.scoutVerdict = sb.verdict
+          row.scoutNote = sb.note
+          // E2: take the POTENTIAL grade from the same read that produced the rank
+          // and the ▲/▼, instead of a separately-masked estimate. The two used to
+          // be derived independently, so the stars and the arrow could disagree
+          // about the same prospect on the same row.
+          row.potentialStars = sb.potentialStars
+        }
         return row
       }),
       complete: d.selections.length >= d.order.length,

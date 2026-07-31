@@ -1248,6 +1248,10 @@ export interface ScoutBoardRowView extends DraftRankRowView {
   verdict: 'higher' | 'inline' | 'lower'
   /** Whether your staff has actually seen enough of him to hold an opinion. */
   seen: boolean
+  /** One sentence saying the agreement/disagreement with the public board in
+   *  words, and why — so a high potential grade sitting next to a ▼ reads as a
+   *  scouting position rather than a contradiction (E2). */
+  note: string
 }
 
 export interface DraftRankingsView {
@@ -1639,6 +1643,10 @@ export interface ProspectRowView extends PlayerBadge {
   scoutRank?: number
   /** Your scouts' read vs the public board: 'higher' = they like him more. */
   scoutVerdict?: 'higher' | 'inline' | 'lower'
+  /** One sentence explaining that verdict in words (E2) — a high potential grade
+   *  sitting beside a ▼ is a scouting position, not a contradiction, and the row
+   *  has to say which. */
+  scoutNote?: string
 }
 
 /** One key staff member's draft recommendation while the GM is on the clock.
