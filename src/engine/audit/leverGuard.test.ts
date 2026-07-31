@@ -36,8 +36,8 @@ const byId = (id: string): LeverSpec => {
 const CERTIFIED: Array<{ id: string; games: number; lo: number; hi: number }> = [
   // Measured +24.1 pts/82 over 40k games. The biggest lever in the game.
   { id: 'q-line-assembly', games: 3_000, lo: 14, hi: 36 },
-  // Measured +12.1 over four rosters (10.1 / 10.6 / 13.2 / 14.6) — the pure
-  // ordering decision with the dressed 18 held fixed.
+  // Measured +10.1 on this roster at 40k games (10.1 / 10.6 / 13.2 / 14.6 across
+  // four rosters) — the pure ordering decision, dressed 18 held fixed.
   { id: 'q-line-order', games: 6_000, lo: 6, hi: 22 },
   // Measured +6.5.
   { id: 'q-pp-units', games: 10_000, lo: 3, hi: 11 },

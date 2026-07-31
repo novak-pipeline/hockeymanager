@@ -66,30 +66,39 @@ LEVER_AUDIT=1 npx vitest run src/engine/audit/leverAudit.harness.test.ts --no-fi
 
 ## 1. Quick sim — the engine that plays your season
 
-40,000 mirror games per lever. Detection floor ±1.0 points, so anything real down
-to a single standings point is visible.
+40,000 mirror games per lever, all thirteen from a single batch on one method.
+Detection floor ±1.0 points, so anything real down to a single standings point is
+visible. Every figure below reproduces byte-for-byte on re-run (fixed seeds).
 
-| Lever | Where the GM sets it | Contrast | Δ pts / 82 | 95% CI | z | Δ shots/g | Verdict |
-| --- | --- | --- | ---: | --- | ---: | ---: | --- |
-| *NULL CONTROL* | — | identical benches | +0.4 | −0.3 … +1.0 | 1.0 | +0.01 | *rig reads zero* ✅ |
-| **Line assembly** | Tactics → line board | best 12F/6D dressed and stacked L1-first vs worst 12F/6D dressed and stacked worst-first | **+24.1** | +23.4 … +24.8 | 70.7 | +3.89 | **REAL** |
-| **Line order** *(same 18 dressed)* | Tactics → line board | strongest on L1/D1 vs weakest, dressing the same men | **+12.1** | four rosters: 10.1 / 10.6 / 13.2 / 14.6 | 23–33 | — | **REAL** |
-| **Power-play unit** | Tactics → PP1/PP2 | best scorers on PP1 vs worst | **+6.5** | +5.9 … +7.2 | 19.0 | +0.70 | **REAL** |
-| **Penalty-kill unit** | Tactics → PK1/PK2 | best defenders on PK1 vs worst | **+4.9** | +4.2 … +5.5 | 13.9 | +0.85 | **REAL** |
-| **Goalie depth order** | Tactics → line board | better goalie starts vs worse | **+4.3** | +3.6 … +5.0 | 12.2 | −0.14 | **REAL** |
-| **Coach PP edge** | Staff → hire coach | ppEdge 1.15 vs 0.85 | **+3.4** | +2.7 … +4.0 | 9.7 | +1.21 | **REAL** |
-| **Coach PK edge** | Staff → hire coach | pkEdge 0.85 vs 1.15 | **+3.4** | +2.8 … +4.1 | 9.9 | +1.10 | **REAL** |
-| **Coach roster fit** | Staff → hire coach | coachFit 100 vs 0 | **+2.5** | +1.8 … +3.2 | 7.2 | −0.09 | **REAL** |
-| Line matching | coach-owned, not GM-settable | on vs off | +1.8 | +1.1 … +2.4 | 5.0 | +0.32 | **TOO WEAK** *(by design — see §6)* |
+| Lever | Where the GM sets it | Contrast | Δ pts / 82 | 95% CI | z | Δ shots/g | Δ own PP% | Verdict |
+| --- | --- | --- | ---: | --- | ---: | ---: | ---: | --- |
+| *NULL CONTROL* | — | identical benches | +0.4 | −0.3 … +1.0 | 1.0 | +0.01 | −0.16 | *rig reads zero* ✅ |
+| **Line assembly** | Tactics → line board | best 12F/6D dressed and stacked vs worst dressed and stacked | **+24.1** | +23.4 … +24.8 | 70.7 | +3.89 | +0.47 | **REAL** |
+| **Line order** *(same 18 dressed)* | Tactics → line board | strongest on L1/D1 vs weakest, same men | **+10.1** | +9.4 … +10.8 | 29.2 | +1.61 | +0.00 | **REAL** |
+| **Power-play unit** | Tactics → PP1/PP2 | best scorers on PP1 vs worst | **+6.5** | +5.9 … +7.2 | 19.0 | +0.70 | **+5.64** | **REAL** |
+| **Penalty-kill unit** | Tactics → PK1/PK2 | best defenders on PK1 vs worst | **+4.9** | +4.2 … +5.5 | 13.9 | +0.85 | +3.65 | **REAL** |
+| **Goalie depth order** | Tactics → line board | better goalie starts vs worse | **+4.3** | +3.6 … +5.0 | 12.2 | −0.14 | +0.81 | **REAL** |
+| **Coach PP edge** | Staff → hire coach | ppEdge 1.15 vs 0.85 | **+3.4** | +2.7 … +4.0 | 9.7 | +1.21 | **+3.92** | **REAL** |
+| **Coach PK edge** | Staff → hire coach | pkEdge 0.85 vs 1.15 | **+3.4** | +2.8 … +4.1 | 9.9 | +1.10 | +3.65 | **REAL** |
+| **Coach roster fit** | Staff → hire coach | coachFit 100 vs 0 | **+2.5** | +1.8 … +3.2 | 7.2 | −0.09 | +0.50 | **REAL** |
+| Line matching | coach-owned, not GM-settable | on vs off | +1.8 | +1.1 … +2.4 | 5.0 | +0.32 | +0.03 | **TOO WEAK** *(by design — see §6)* |
 
 **Read this table before anything else.** Line assembly is worth **twenty-four
 standings points** — an order of magnitude more than any tactical setting. The
 game's deepest lever is already the one on the screen the GM spends most of his
-time on, and it works. The two rows are deliberately separate because they are
-two different decisions: *who dresses* and *what order they play in*. Ordering
-alone — same eighteen men, just arranged worst-to-best — is worth **12.1 points**,
-still nearly four times the biggest coaching lever. Dressing the right men on top
-of that roughly doubles it.
+time on, and it works. The two line rows are deliberately separate because they
+are two different decisions: *who dresses* and *what order they play in*.
+Ordering alone — the same eighteen men, arranged worst-to-best — is worth 10.1
+points on this roster (10.1 / 10.6 / 13.2 / 14.6 across four rosters), still
+nearly four times the biggest coaching lever. Dressing the right men on top of
+that roughly doubles it.
+
+**Each lever moves the channel it is supposed to, not just the scoreboard.** The
+`Δ own PP%` column is the check: stacking PP1 moves power-play conversion by
+**+5.6 points** and a coach's PP competence by **+3.9**, while reordering the
+even-strength lines moves it by **0.00** and line matching by **0.03** — exactly
+as those levers should behave. A lever that moved the result through the wrong
+mechanism would be a different kind of lie, and this rules it out.
 
 ---
 
@@ -102,11 +111,11 @@ captaincy and locker-room work all cash out **here and nowhere else**, so these
 numbers set the ceiling on what all of those decisions can be worth. Spans are
 the realistic in-season range, not the model's clamps.
 
-| Lever | Contrast | Δ pts / 82 | 95% CI | z | Verdict |
-| --- | --- | ---: | --- | ---: | --- |
-| **Team freshness (fatigue)** | fatigue 2 vs 18 | **+37.9** | +37.2 … +38.6 | 109.7 | **REAL** |
-| **Team form** | +2.5 vs −2.5 across the roster | **+17.5** | +16.8 … +18.2 | 50.0 | **REAL** |
-| **Team morale** | 80 vs 35 | **+11.3** | +10.6 … +12.0 | 32.3 | **REAL** |
+| Lever | Contrast | Δ pts / 82 | 95% CI | z | Δ shots/g | Verdict |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| **Team freshness (fatigue)** | fatigue 2 vs 18 | **+37.9** | +37.2 … +38.6 | 109.7 | +4.43 | **REAL** |
+| **Team form** | +2.5 vs −2.5 across the roster | **+17.5** | +16.8 … +18.2 | 50.0 | +2.20 | **REAL** |
+| **Team morale** | 80 vs 35 | **+11.3** | +10.6 … +12.0 | 32.3 | +1.37 | **REAL** |
 
 **The single most powerful thing in the game is rest.** Freshness outweighs every
 tactical setting combined by a factor of ten. That is a finding with two edges:
@@ -482,7 +491,7 @@ document — do not widen the bound.**
 
 | Category | Count | Levers |
 | --- | ---: | --- |
-| **REAL — the GM's own decisions** | 8 | line assembly (+24.1) · line order alone (+12.1) · PP1 (+6.5) · PK1 (+4.9) · goalie order (+4.3) · coach PP edge (+3.4) · coach PK edge (+3.4) · coach fit (+2.5) |
+| **REAL — the GM's own decisions** | 8 | line assembly (+24.1) · line order alone (+10.1) · PP1 (+6.5) · PK1 (+4.9) · goalie order (+4.3) · coach PP edge (+3.4) · coach PK edge (+3.4) · coach fit (+2.5) |
 | **REAL — man-management channel** | 3 | freshness (+37.9) · form (+17.5) · morale (+11.3) |
 | **REAL — development** | 6 | playing prospects (+1.46 ovr/yr) · deployment (+0.51) · mentorship (+0.35) · four practice focuses (+0.3…+0.7 on the targeted composite) |
 | **REAL — coach tactics (watched games only)** | 7 | forecheck (−12.4) · pass risk (+11.4) · dumping (−10.3) · gap control (+8.2) · puck pressure (+8.0) · passing (−16.4 after the fix) · aggressiveness (−3.2) |
