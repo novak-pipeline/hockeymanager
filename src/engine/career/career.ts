@@ -321,9 +321,16 @@ import {
   MAX_ROSTER_SIZE,
   offerAcceptable,
   processExpiries,
+  qualifyingOffer,
+  termPriceMultiplier,
   signPlayer,
   releasePlayer as releaseFromTeam,
 } from '@engine/league/contracts'
+import {
+  acceptsQualifyingOffer,
+  evaluateResignOffer,
+  RESIGN_WINDOW_DAYS,
+} from '@engine/league/resignWindow'
 import {
   agentFor,
   evaluateRound,
@@ -985,8 +992,31 @@ export class Career {
   /** Per-team signed current streak (+wins / −winless), for ambient league news.
    *  NHL games only; reset each season. Serialized additively. */
   private teamStreaks = new Map<string, number>()
-  /** Rival offer sheets tendered to the user's RFAs in the re-sign window. */
-  private offerSheets: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }> = []
+  /** Rival offer sheets tendered to the user's RFAs in the re-sign window.
+   *  `decideDay` is the resign-window day the match window expires on — an
+   *  unanswered sheet resolves itself, the way a real 7-day clock does. */
+  private offerSheets: Array<{ playerId: string; fromTeamId: string; salary: number; years: number; decideDay?: number }> = []
+  /** Playtest §B1: offers tabled to the club's OWN expiring players. They are
+   *  not answered on the spot — the camp takes them away and comes back on a
+   *  later window day with a yes, a priced counter, or a no. Same async shape
+   *  as faPendingOffers (#167) / pendingOfferSheets (#183) / pendingTrades. */
+  private resignOffers: Array<{
+    playerId: string
+    salary: number
+    years: number
+    decideDay: number
+    status: 'pending' | 'countered' | 'refused'
+    counterSalary?: number
+    counterYears?: number
+    note?: string
+  }> = []
+  /** Camp patience per expiring player across the window: lowballs burn it and
+   *  an empty camp walks to July 1. Seeded from the agent's persona. */
+  private resignPatience = new Map<string, number>()
+  /** Playtest §B2: qualifying offers. Tendering keeps his RFA rights (and
+   *  exposes him to offer sheets and arbitration); walking away makes him an
+   *  unrestricted free agent for nothing. No entry = not yet decided. */
+  private qualifyingOffers = new Map<string, 'tendered' | 'declined'>()
   private faPool: PlayerId[] = []
   private matchDays: number[] = []
   private playerCounter = 0
@@ -5850,12 +5880,16 @@ export class Career {
   startAtOffseason(): void {
     if (this.phase !== 'regularSeason' || this.currentDay > 0) return
     this.phase = 'offseason'
-    this.offseason = { year: this.year, stage: 'resign', draft: null, faDay: 0 }
+    this.offseason = { year: this.year, stage: 'resign', draft: null, faDay: 0, resignDay: 0 }
     // The resign-stage prep that normally runs at the draft→resign transition.
     this.resignStatus.clear()
     for (const id of this.userTeam.roster) {
       if (this.resolve(id).contract.yearsRemaining === 0) this.resignStatus.set(id, 'pending')
     }
+    this.resignOffers = []
+    this.resignPatience.clear()
+    this.qualifyingOffers.clear()
+    this.openQualifyingOffers()
     this.generateOfferSheets()
     // Stock the open market from day one — the FA desk should never be empty
     // when the user arrives at July 1.
@@ -6897,6 +6931,14 @@ export class Career {
         for (const id of this.userTeam.roster) {
           if (this.resolve(id).contract.yearsRemaining === 0) this.resignStatus.set(id, 'pending')
         }
+        // The June window opens on day 0: qualifying offers first (they decide
+        // who is still an RFA), then the rival sheets that only qualified RFAs
+        // can draw. Every offer tabled from here is answered over days.
+        os.resignDay = 0
+        this.resignOffers = []
+        this.resignPatience.clear()
+        this.qualifyingOffers.clear()
+        this.openQualifyingOffers()
         this.generateOfferSheets()
         const ai = aiResignDay({
           teams: this.data.teams,
@@ -6923,6 +6965,26 @@ export class Career {
         return true
       }
       case 'resign': {
+        // The re-signing window is a WINDOW, not a button (playtest §B1). Each
+        // Continue is another day in late June: tabled offers come back
+        // answered, qualifying offers get taken or turned down, and the match
+        // clock on every rival offer sheet ticks. Only when the days run out
+        // does July 1 arrive and the stage close.
+        const rDay = os.resignDay ?? 0
+        if (rDay < RESIGN_WINDOW_DAYS) {
+          os.resignDay = rDay + 1
+          this.tickResignWindow(os.resignDay)
+          return true
+        }
+        // Offers still sitting on a desk when the window shuts simply lapse.
+        for (const o of this.resignOffers) {
+          const p = this.data.players.get(asPlayerId(o.playerId))
+          if (!p) continue
+          this.pushNews('contract', `Your offer to ${p.name} lapses`,
+            `July 1 arrived with your ${'$' + (o.salary / 1e6).toFixed(2)}M × ${o.years} offer unanswered. ${p.name} reaches the market.`,
+            { playerId: o.playerId })
+        }
+        this.resignOffers = []
         // Any offer sheet the GM ignored resolves as a walk — the RFA signs with
         // the suitor and the compensation comes back. (Decline mutates the list.)
         for (const sheet of [...this.offerSheets]) this.declineOfferSheet(sheet.playerId)
@@ -6940,6 +7002,16 @@ export class Career {
           if (e.teamId !== this.userTeamId) continue
           const p = this.data.players.get(e.playerId)
           if (!p || contractStatus(p) !== 'RFA' || ratedOverall(p) < 60) continue
+          // Only a QUALIFIED restricted free agent has anything to arbitrate.
+          // Walk away from the qualifying offer and you walk away from the
+          // rights that come with it — he is simply unrestricted (playtest §B2).
+          if (this.qualifyingOffers.get(e.playerId as string) !== 'tendered') {
+            this.pushNews('contract', `${p.name} leaves unqualified`,
+              `You did not tender ${p.name} a qualifying offer, so his restricted rights lapse with the window. ` +
+              `He is an unrestricted free agent — no compensation, no arbitration, no match.`,
+              { playerId: e.playerId as string })
+            continue
+          }
           // Arbitration is RARE in real life: only established RFAs are
           // eligible (past the entry-level years), and filing is a choice —
           // the confident, high-value ones go to a hearing; the rest simply
@@ -7008,6 +7080,9 @@ export class Career {
         for (const team of this.data.teams.values()) {
           try { repairLines(team, this.data.players) } catch { /* skip a bad team */ }
         }
+        // The June window is shut; its bookkeeping doesn't follow you into July.
+        this.resignPatience.clear()
+        this.qualifyingOffers.clear()
         os.stage = 'freeAgency'
         os.faDay = 0
         return true
@@ -10104,21 +10179,331 @@ export class Career {
     )
   }
 
+  /* ───────────── the June re-signing window (playtest §B1–B4) ───────────── */
+
+  /** The day the window is on (0 = the moment it opened). */
+  private get resignDay(): number {
+    return this.offseason?.resignDay ?? 0
+  }
+
+  /** True while the club can act on its own expiring players. */
+  private resignWindowOpen(): boolean {
+    return this.offseason?.stage === 'resign'
+  }
+
+  /** Camp patience for one man, seeded from his agent's persona the first time
+   *  the club puts anything in front of him. */
+  private resignPatienceFor(playerId: string): number {
+    const held = this.resignPatience.get(playerId)
+    if (held !== undefined) return held
+    const p = this.data.players.get(asPlayerId(playerId))
+    const seeded = p ? Math.round(55 + agentFor(p).patient * 40) : 70
+    this.resignPatience.set(playerId, seeded)
+    return seeded
+  }
+
+  /** The club's expiring players who are restricted — the ones a qualifying
+   *  offer is even a question for. */
+  private expiringRfas(): PlayerId[] {
+    const out: PlayerId[] = []
+    for (const [id, status] of this.resignStatus) {
+      if (status !== 'pending') continue
+      const p = this.data.players.get(id)
+      if (p && contractStatus(p) === 'RFA') out.push(id)
+    }
+    return out
+  }
+
+  /** §B2: open the qualifying-offer decision for every expiring RFA. Players
+   *  the AGM would obviously keep are tendered by default (no footgun for a GM
+   *  who never opens the screen); the bubble ones are left OPEN, so choosing to
+   *  tender — or to walk away and free the spot — is a real decision. */
+  private openQualifyingOffers(announce = true): void {
+    const rfas = this.expiringRfas()
+    if (rfas.length === 0) return
+    const auto: string[] = []
+    for (const id of rfas) {
+      const p = this.resolve(id)
+      if (ratedOverall(p) >= 55) {
+        this.qualifyingOffers.set(id as string, 'tendered')
+        auto.push(`${p.name} ($${(qualifyingOffer(p) / 1e6).toFixed(2)}M)`)
+      }
+    }
+    const open = rfas.filter((id) => !this.qualifyingOffers.has(id as string))
+    if (!announce) return
+    const body =
+      (auto.length > 0
+        ? `Tendered on your behalf: ${auto.join(', ')}. `
+        : '') +
+      (open.length > 0
+        ? `Undecided — tender or walk away before July 1: ${open.map((id) => this.resolve(id).name).join(', ')}. `
+        : '') +
+      `A qualifying offer keeps his restricted rights: he can accept it as a one-year deal, file for arbitration, ` +
+      `or be offer-sheeted by a rival. Decline to tender and he simply becomes an unrestricted free agent — for nothing.`
+    this.pushNews('contract', `Qualifying offers due: ${rfas.length} restricted free agent${rfas.length > 1 ? 's' : ''}`, body, {})
+  }
+
+  /** §B2: tender the qualifying offer, keeping his restricted rights. */
+  tenderQualifyingOffer(playerId: string): { ok: boolean; message: string } {
+    if (!this.resignWindowOpen()) return { ok: false, message: 'The re-signing window is closed.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Unknown player.' }
+    if (this.resignStatus.get(asPlayerId(playerId)) !== 'pending') {
+      return { ok: false, message: `${p.name} is not an expiring player of yours.` }
+    }
+    if (contractStatus(p) !== 'RFA') return { ok: false, message: `${p.name} is not a restricted free agent.` }
+    if (this.qualifyingOffers.get(playerId) === 'tendered') return { ok: true, message: 'Already tendered.' }
+    const qo = qualifyingOffer(p)
+    this.qualifyingOffers.set(playerId, 'tendered')
+    this.pushNews('contract', `Qualifying offer tendered to ${p.name}`,
+      `You've tendered ${p.name} his $${(qo / 1e6).toFixed(2)}M qualifying offer. His rights are yours — but so is the ` +
+      `risk: he can take the one-year deal, go to arbitration, or sign a rival's offer sheet.`,
+      { playerId })
+    return { ok: true, message: `Qualified at $${(qo / 1e6).toFixed(2)}M — his rights stay with you.` }
+  }
+
+  /** §B2: walk away. He becomes unrestricted when the window shuts. */
+  declineQualifyingOffer(playerId: string): { ok: boolean; message: string } {
+    if (!this.resignWindowOpen()) return { ok: false, message: 'The re-signing window is closed.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Unknown player.' }
+    if (contractStatus(p) !== 'RFA') return { ok: false, message: `${p.name} is not a restricted free agent.` }
+    this.qualifyingOffers.set(playerId, 'declined')
+    // A rival's sheet on a man you've walked away from is moot.
+    this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    this.pushNews('contract', `You walk away from ${p.name}`,
+      `No qualifying offer for ${p.name}. His restricted rights lapse on July 1 and he hits the open market unrestricted — ` +
+      `you can still negotiate before then, but you no longer hold anything over him.`,
+      { playerId })
+    return { ok: true, message: `${p.name} will be unrestricted. You can still talk — you just can't match.` }
+  }
+
+  /** §B1: table an offer to one of your own expiring players. It is NOT
+   *  answered on the spot: his camp takes it away and responds on a later
+   *  window day (accept / priced counter / refusal). */
+  submitResignOffer(playerId: string, salary: number, years: number): { ok: boolean; message: string } {
+    if (!this.resignWindowOpen()) return { ok: false, message: 'The re-signing window is closed.' }
+    const id = asPlayerId(playerId)
+    const status = this.resignStatus.get(id)
+    if (status === 'signed') return { ok: false, message: 'He is already signed.' }
+    if (status === 'walked') return { ok: false, message: 'His camp has left the table — he is testing free agency.' }
+    if (status !== 'pending') return { ok: false, message: 'He is not on your re-sign list.' }
+    const player = this.resolve(id)
+    if (!Number.isInteger(years) || years < 1 || years > MAX_TERM_RESIGN) {
+      return { ok: false, message: `A contract runs 1–${MAX_TERM_RESIGN} years when you re-sign your own player.` }
+    }
+    const elc = this.elcTermRejection(player, salary, years)
+    if (elc) return { ok: false, message: elc.message }
+    const capUsedNow = this.userCapUsed()
+    if (capUsedNow - player.contract.salary + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: 'That offer does not fit under your cap — clear space before you table it.' }
+    }
+    const rng = this.rngFor(8026, this.resignDay, Career.pidNum(playerId))
+    const decideDay = this.resignDay + 1 + rng.range(0, 1)
+    this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
+    this.resignOffers.push({ playerId, salary, years, decideDay, status: 'pending' })
+    const agent = agentFor(player)
+    this.pushNews('contract', `Offer tabled to ${player.name}`,
+      `$${(salary / 1e6).toFixed(2)}M × ${years} on the table for ${player.name}. ${agent.name} is taking it to his client — ` +
+      `you'll have an answer inside a couple of days.`,
+      { playerId })
+    return { ok: true, message: `Tabled. ${agent.name} will come back to you by day ${decideDay} of the window.` }
+  }
+
+  /** §B1: take the camp's counter as written — a handshake, executed now. */
+  acceptResignCounter(playerId: string): { ok: boolean; message: string } {
+    if (!this.resignWindowOpen()) return { ok: false, message: 'The re-signing window is closed.' }
+    const row = this.resignOffers.find((o) => o.playerId === playerId && o.status === 'countered')
+    if (!row || row.counterSalary === undefined || row.counterYears === undefined) {
+      return { ok: false, message: 'There is no counter on the table from his camp.' }
+    }
+    const player = this.resolve(asPlayerId(playerId))
+    const salary = row.counterSalary
+    const years = row.counterYears
+    try {
+      signPlayer({ team: this.userTeam, player, salary, years, year: this.year, players: this.data.players })
+    } catch {
+      return { ok: false, message: `You can't fit $${(salary / 1e6).toFixed(2)}M — clear space and re-open talks.` }
+    }
+    this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
+    this.resignStatus.set(asPlayerId(playerId), 'signed')
+    this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    repairLines(this.userTeam, this.data.players)
+    this.pushNews('contract', `${player.name} re-signs`,
+      `You took his camp's counter: $${(salary / 1e6).toFixed(2)}M × ${years} years.`, { playerId })
+    this.queueVoice({ kind: 'signed', playerId, numbers: { years }, relevant: true })
+    const txResult = recordTransaction(this.transactionLedger, {
+      day: this.currentDay, year: this.year, kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${this.userTeam.abbreviation} re-sign ${player.name} ($${(salary / 1e6).toFixed(1)}M × ${years}).`,
+    })
+    this.transactionLedger = txResult.ledger
+    return { ok: true, message: `${player.name} signs for $${(salary / 1e6).toFixed(2)}M × ${years}.` }
+  }
+
+  /** One day of the window: answers come back, qualifying offers get taken,
+   *  match clocks expire, and late rival interest lands. */
+  private tickResignWindow(day: number): void {
+    this.resolveResignOffers(day)
+    this.resolveQualifyingOffers(day)
+    this.lapseOfferSheets(day)
+    if (day === 2) this.generateOfferSheets(true)
+  }
+
+  /** §B1: every tabled offer whose day has come gets its answer. */
+  private resolveResignOffers(day: number): void {
+    const due = this.resignOffers.filter((o) => o.status === 'pending' && o.decideDay <= day)
+    for (const row of due) {
+      const id = asPlayerId(row.playerId)
+      const player = this.data.players.get(id)
+      if (!player || this.resignStatus.get(id) !== 'pending') {
+        this.resignOffers = this.resignOffers.filter((o) => o !== row)
+        continue
+      }
+      const ask = askTerms(player, this.year)
+      const rng = this.rngFor(8027, day, Career.pidNum(row.playerId))
+      const res = evaluateResignOffer({
+        player,
+        offer: { salary: row.salary, years: row.years },
+        ask,
+        patience: this.resignPatienceFor(row.playerId),
+        rng,
+        qualified: this.qualifyingOffers.get(row.playerId) !== 'declined',
+      })
+      this.resignPatience.set(row.playerId, res.patienceAfter)
+      const agent = agentFor(player)
+
+      if (res.verdict === 'accept') {
+        let signed = true
+        try {
+          signPlayer({ team: this.userTeam, player, salary: row.salary, years: row.years, year: this.year, players: this.data.players })
+        } catch {
+          signed = false
+        }
+        if (!signed) {
+          this.resignOffers = this.resignOffers.filter((o) => o !== row)
+          this.pushNews('contract', `${player.name} said yes — and the cap said no`,
+            `${player.name} accepted your $${(row.salary / 1e6).toFixed(2)}M × ${row.years}, but your sheet no longer fits it. The deal lapses.`,
+            { playerId: row.playerId })
+          continue
+        }
+        this.resignOffers = this.resignOffers.filter((o) => o !== row)
+        this.resignStatus.set(id, 'signed')
+        this.offerSheets = this.offerSheets.filter((s) => s.playerId !== row.playerId)
+        repairLines(this.userTeam, this.data.players)
+        this.pushNews('contract', `${player.name} re-signs`,
+          `${agent.name} came back with a yes. ${res.lines.join(' ')} $${(row.salary / 1e6).toFixed(2)}M × ${row.years} years.`,
+          { playerId: row.playerId })
+        this.queueVoice({ kind: 'signed', playerId: row.playerId, numbers: { years: row.years }, relevant: true })
+        const txResult = recordTransaction(this.transactionLedger, {
+          day: this.currentDay, year: this.year, kind: 'signing',
+          teamIds: [this.userTeamId as string],
+          summary: `${this.userTeam.abbreviation} re-sign ${player.name} ($${(row.salary / 1e6).toFixed(1)}M × ${row.years}).`,
+        })
+        this.transactionLedger = txResult.ledger
+        continue
+      }
+
+      if (res.verdict === 'counter' && res.counter) {
+        row.status = 'countered'
+        row.counterSalary = res.counter.salary
+        row.counterYears = res.counter.years
+        row.note = res.lines.join(' ')
+        this.pushNews('contract', `${player.name}'s camp counters`,
+          `${res.lines.join(' ')} (Your offer: $${(row.salary / 1e6).toFixed(2)}M × ${row.years}.)`,
+          { playerId: row.playerId })
+        continue
+      }
+
+      if (res.verdict === 'walk') {
+        this.resignOffers = this.resignOffers.filter((o) => o !== row)
+        this.resignStatus.set(id, 'walked')
+        this.offerSheets = this.offerSheets.filter((s) => s.playerId !== row.playerId)
+        this.pushNews('contract', `${player.name}'s camp walks out`,
+          `${res.lines.join(' ')} ${player.name} will test the open market.`, { playerId: row.playerId })
+        continue
+      }
+
+      row.status = 'refused'
+      row.note = res.lines.join(' ')
+      this.pushNews('contract', `${player.name} turns you down`,
+        `${res.lines.join(' ')} His ask stands at $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}.`,
+        { playerId: row.playerId })
+    }
+  }
+
+  /** §B2: a qualified RFA who likes the number can simply take it — a one-year
+   *  deal at the CBA price, which is exactly how depth RFAs get done in June. */
+  private resolveQualifyingOffers(day: number): void {
+    if (day !== 2) return
+    for (const id of this.expiringRfas()) {
+      const pid = id as string
+      if (this.qualifyingOffers.get(pid) !== 'tendered') continue
+      if (this.resignOffers.some((o) => o.playerId === pid)) continue // a real offer is in front of him
+      const player = this.resolve(id)
+      const ask = askTerms(player, this.year)
+      const rng = this.rngFor(8028, day, Career.pidNum(pid))
+      if (!acceptsQualifyingOffer(player, ask, rng)) continue
+      const qo = qualifyingOffer(player)
+      try {
+        signPlayer({ team: this.userTeam, player, salary: qo, years: 1, year: this.year, players: this.data.players })
+      } catch {
+        continue
+      }
+      this.resignStatus.set(id, 'signed')
+      this.offerSheets = this.offerSheets.filter((s) => s.playerId !== pid)
+      repairLines(this.userTeam, this.data.players)
+      this.pushNews('contract', `${player.name} accepts his qualifying offer`,
+        `Rather than fight it out, ${player.name} has signed his $${(qo / 1e6).toFixed(2)}M qualifying offer — one year, ` +
+        `and you do this again next June.`, { playerId: pid })
+      const txResult = recordTransaction(this.transactionLedger, {
+        day: this.currentDay, year: this.year, kind: 'signing',
+        teamIds: [this.userTeamId as string],
+        summary: `${this.userTeam.abbreviation} re-sign ${player.name} ($${(qo / 1e6).toFixed(1)}M × 1, QO).`,
+      })
+      this.transactionLedger = txResult.ledger
+    }
+  }
+
+  /** §B3: an offer sheet you never answered doesn't wait forever. The match
+   *  window elapses and the player is gone, with the compensation on the way. */
+  private lapseOfferSheets(day: number): void {
+    for (const sheet of [...this.offerSheets]) {
+      const due = sheet.decideDay ?? RESIGN_WINDOW_DAYS
+      if (due > day) continue
+      const p = this.data.players.get(asPlayerId(sheet.playerId))
+      this.pushNews('contract', `Match window expires on ${p?.name ?? 'your RFA'}`,
+        `You let the clock run out. ${p?.name ?? 'He'} joins ${this.data.teams.get(asTeamId(sheet.fromTeamId))?.name ?? 'the suitor'} ` +
+        `and the compensation picks come back to you.`,
+        { playerId: sheet.playerId })
+      this.declineOfferSheet(sheet.playerId)
+    }
+  }
+
   /** Rival GMs tender offer sheets to the user's best RFAs during the re-sign
-   *  window — you must match the price or let him walk for pick compensation. */
-  private generateOfferSheets(): void {
-    this.offerSheets = []
-    const rng = this.rngFor(8009)
+   *  window — you must match the price or let him walk for pick compensation.
+   *  Only a QUALIFIED restricted free agent can be offer-sheeted (§B2/§B3), and
+   *  every sheet now runs a live match clock instead of sitting inert until the
+   *  window shuts. `late` = the second-wave pass on window day 2 (appends). */
+  private generateOfferSheets(late = false): void {
+    if (!late) this.offerSheets = []
+    const rng = this.rngFor(8009, late ? 1 : 0)
     const rivals = this.data.league.teams
       .filter((t) => t !== this.userTeamId)
       .map((t) => this.data.teams.get(t)!)
       .filter((t) => t && t.tier !== 'ahl')
     for (const [id, status] of this.resignStatus) {
       if (status !== 'pending') continue
+      if (this.offerSheets.some((s) => s.playerId === (id as string))) continue
       const p = this.resolve(id)
       if (contractStatus(p) !== 'RFA') continue
+      // No qualifying offer, no rights to prise loose — nobody sheets a man who
+      // is about to be unrestricted anyway.
+      if (this.qualifyingOffers.get(id as string) !== 'tendered') continue
       const ovr = ratedOverall(p)
       if (ovr < 68) continue
+      // The late wave is rarer — it's the club that missed on someone else.
+      if (late && !rng.chance(0.25)) continue
       // Better players are likelier to draw a sheet; a 78+ stud always does.
       const chance = Math.min(0.95, (ovr - 64) / 16)
       if (ovr < 78 && !rng.chance(chance)) continue
@@ -10131,11 +10516,17 @@ export class Career {
         return capUsed + salary <= t.finances.salaryCap
       })
       if (!suitor) continue
-      this.offerSheets.push({ playerId: id as string, fromTeamId: suitor.id as string, salary, years: Math.max(ask.years, 4) })
+      // The real match window is 7 days; here it's the days you have left in
+      // June. Let it run out and the decision gets made for you.
+      const decideDay = Math.min(RESIGN_WINDOW_DAYS, this.resignDay + (late ? 2 : 3))
+      this.offerSheets.push({ playerId: id as string, fromTeamId: suitor.id as string, salary, years: Math.max(ask.years, 4), decideDay })
+      const daysToMatch = Math.max(1, decideDay - this.resignDay)
       this.pushNews(
         'contract',
         `${suitor.abbreviation} tenders an offer sheet to ${p.name}`,
-        `${suitor.name} has tabled a ${p.contract ? '' : ''}$${(salary / 1e6).toFixed(2)}M × ${Math.max(ask.years, 4)} offer sheet for your RFA ${p.name}. Match it to keep him, or let him walk for draft-pick compensation.`,
+        `${suitor.name} has tabled a $${(salary / 1e6).toFixed(2)}M × ${Math.max(ask.years, 4)} offer sheet for your RFA ${p.name}. ` +
+        `You have ${daysToMatch} day${daysToMatch > 1 ? 's' : ''} to match it or let him walk for draft-pick compensation — ` +
+        `an unanswered sheet decides itself.`,
         { playerId: id as string, teamId: suitor.id as string }
       )
     }
@@ -10155,6 +10546,7 @@ export class Career {
     }
     this.resignStatus.set(asPlayerId(playerId), 'signed')
     this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
     this.pushNews('contract', `${player.name} matched & retained`, `You matched the offer sheet — ${player.name} stays at $${(sheet.salary / 1e6).toFixed(2)}M × ${sheet.years}.`, { playerId })
     return { ok: true, message: `Matched. ${player.name} stays.` }
   }
@@ -10207,6 +10599,7 @@ export class Career {
     }
     this.resignStatus.delete(asPlayerId(playerId))
     this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
+    this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
     // Letting a rival poach your RFA sours the relationship with that front office.
     this.adjustRelationship(suitor.id as string, -12)
     const compStr = slots.length ? slots.map((s) => `R${s.round} (${s.year})`).join(' + ') : 'no compensation (below threshold)'
@@ -10251,6 +10644,8 @@ export class Career {
         players: this.data.players,
       })
       this.resignStatus.set(id, 'signed')
+      this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
+      this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
       this.pushNews(
         'contract',
         `${player.name} re-signs`,
@@ -11112,6 +11507,8 @@ export class Career {
 
     if (kind === 'resign') {
       this.resignStatus.set(asPlayerId(playerId), 'signed')
+      this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
+      this.offerSheets = this.offerSheets.filter((s) => s.playerId !== playerId)
       this.pushNews(
         'contract',
         `${player.name} re-signs`,
@@ -12746,7 +13143,12 @@ export class Career {
     switch (os.stage) {
       case 'awards': return `${summerYear}-06-18`
       case 'draft': return `${summerYear}-06-27`
-      case 'resign': return `${summerYear}-07-01`
+      // The re-signing window is the run-up to July 1: qualifying offers and
+      // tabled offers play out across the last days of June.
+      case 'resign': {
+        const d = 27 + Math.min(RESIGN_WINDOW_DAYS, os.resignDay ?? 0)
+        return d > 30 ? `${summerYear}-07-01` : `${summerYear}-06-${String(d).padStart(2, '0')}`
+      }
       case 'freeAgency': return `${summerYear}-07-${String(Math.min(31, 1 + os.faDay)).padStart(2, '0')}`
       case 'preseason': return `${summerYear}-09-15`
     }
@@ -13079,7 +13481,10 @@ export class Career {
       const labels: Record<string, string> = {
         awards: 'Continue — season awards & development',
         draft: this.draftPending() ? 'Go to the entry draft' : 'Continue — open free agency',
-        resign: 'Continue — open free agency',
+        resign:
+          (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
+            ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
+            : 'Continue — open free agency',
         freeAgency: `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
         preseason: this.captainsPending() ? 'Name your captain to start the season' : 'Continue — start the new season',
       }
@@ -13184,7 +13589,7 @@ export class Career {
               {
                 awards: 'Season awards',
                 draft: 'Entry draft',
-                resign: 'Re-signing window',
+                resign: `Re-signing window — day ${(this.offseason.resignDay ?? 0) + 1}`,
                 freeAgency: `Free agency — day ${this.offseason.faDay + 1}`,
                 preseason: 'Training camp',
               } as Record<string, string>
@@ -17484,7 +17889,7 @@ export class Career {
     const stageLabels: Record<OffseasonState['stage'], string> = {
       awards: 'Season awards',
       draft: 'Entry draft',
-      resign: 'Re-sign your players',
+      resign: `Re-sign your players — window day ${os.resignDay ?? 0} of ${RESIGN_WINDOW_DAYS}`,
       freeAgency: `Free agency — day ${os.faDay}`,
       preseason: 'Preseason',
     }
@@ -17511,9 +17916,22 @@ export class Career {
         for (const id of team.roster) {
           if (this.resolve(id).contract.yearsRemaining === 0 && !rows.has(id)) rows.set(id, 'pending')
         }
+        const day = os.resignDay ?? 0
         return [...rows.entries()].map(([id, status]) => {
+          const pid = id as string
           const p = this.resolve(id)
           const ask = askTerms(p, this.year)
+          const rights = contractStatus(p)
+          const pending = this.resignOffers.find((o) => o.playerId === pid)
+          // §B4: the ask AAV repriced for every legal term, so a GM can SEE
+          // that four years costs more than the two he was asked for.
+          const priceByYears: Array<{ years: number; salary: number }> = []
+          for (let y = 1; y <= MAX_TERM_RESIGN; y++) {
+            priceByYears.push({
+              years: y,
+              salary: Math.round((ask.salary * termPriceMultiplier(p, ask.years, y)) / 25_000) * 25_000,
+            })
+          }
           return {
             ...badge(p),
             currentSalary: p.contract.salary,
@@ -17521,9 +17939,27 @@ export class Career {
             askYears: ask.years,
             morale: Math.round(p.morale),
             status,
+            rights,
+            agentName: agentFor(p).name,
+            ...(rights === 'RFA'
+              ? {
+                  qualifyingOffer: qualifyingOffer(p),
+                  qoStatus: this.qualifyingOffers.get(pid) ?? 'open',
+                }
+              : {}),
+            priceByYears,
+            ...(pending && pending.status === 'pending'
+              ? { pendingOffer: { salary: pending.salary, years: pending.years, daysLeft: Math.max(0, pending.decideDay - day) } }
+              : {}),
+            ...(pending && pending.status === 'countered' && pending.counterSalary !== undefined && pending.counterYears !== undefined
+              ? { counter: { salary: pending.counterSalary, years: pending.counterYears, note: pending.note ?? '' } }
+              : {}),
+            ...(pending && pending.status === 'refused' ? { lastRefusal: pending.note ?? '' } : {}),
+            ...(this.resignPatience.has(pid) ? { patience: this.resignPatience.get(pid)! } : {}),
           }
         })
       })(),
+      ...(os.stage === 'resign' ? { resignDay: os.resignDay ?? 0, resignWindowDays: RESIGN_WINDOW_DAYS } : {}),
       arbitration: this.getArbitrationCases(),
       freeAgents: this.faPool
         .map((id) => this.resolve(id))
@@ -17548,6 +17984,7 @@ export class Career {
           salary: s.salary,
           years: s.years,
           compRounds: this.offerSheetComp(s.salary),
+          matchDaysLeft: Math.max(0, (s.decideDay ?? RESIGN_WINDOW_DAYS) - (os.resignDay ?? 0)),
         }
       }),
       capUsed,
@@ -18883,6 +19320,9 @@ export class Career {
       faShortlist: [...this.faShortlist],
       faPendingOffers: this.faPendingOffers.map((o) => ({ ...o })),
       pendingOfferSheets: this.pendingOfferSheets.map((o) => ({ ...o })),
+      resignOffers: this.resignOffers.map((o) => ({ ...o })),
+      resignPatience: [...this.resignPatience.entries()],
+      qualifyingOffers: [...this.qualifyingOffers.entries()],
       pendingTrades: this.pendingTrades.map((o) => ({ ...o, proposal: { ...o.proposal } })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
@@ -19073,6 +19513,11 @@ export class Career {
     if (snapshot.faShortlist) career.faShortlist = new Set(snapshot.faShortlist)
     if (snapshot.faPendingOffers) career.faPendingOffers = snapshot.faPendingOffers.map((o) => ({ ...o }))
     if (snapshot.pendingOfferSheets) career.pendingOfferSheets = snapshot.pendingOfferSheets.map((o) => ({ ...o }))
+    // The June window's own queues — a counter you were sitting on when you
+    // saved is still on the table when you load (playtest §B1/§B2).
+    if (snapshot.resignOffers) career.resignOffers = snapshot.resignOffers.map((o) => ({ ...o }))
+    if (snapshot.resignPatience) career.resignPatience = new Map(snapshot.resignPatience)
+    if (snapshot.qualifyingOffers) career.qualifyingOffers = new Map(snapshot.qualifyingOffers)
     if (snapshot.pendingTrades) career.pendingTrades = snapshot.pendingTrades.map((o: typeof career.pendingTrades[number]) => ({ ...o, proposal: { ...o.proposal } }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
@@ -19241,6 +19686,10 @@ export class Career {
           career.resignStatus.set(id, 'pending')
         }
       }
+      // A save written before qualifying offers existed carries none. Seeding
+      // the defaults here (silently — the news already happened in that save's
+      // timeline) keeps its RFAs from all silently walking at July 1.
+      if (career.qualifyingOffers.size === 0) career.openQualifyingOffers(false)
     }
     if (career.phase === 'offseason' && career.offseason?.stage === 'freeAgency') {
       const rostered = new Set<string>()

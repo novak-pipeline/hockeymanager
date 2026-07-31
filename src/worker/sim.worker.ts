@@ -395,6 +395,26 @@ function handle(req: WorkerRequest): WorkerResponse {
       const r = must().declineOfferSheet(req.playerId)
       return { id: req.id, type: 'ok', note: r.message }
     }
+    case 'submitResignOffer': {
+      const r = must().submitResignOffer(req.playerId, req.salary, req.years)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'acceptResignCounter': {
+      const r = must().acceptResignCounter(req.playerId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'tenderQualifyingOffer': {
+      const r = must().tenderQualifyingOffer(req.playerId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
+    case 'declineQualifyingOffer': {
+      const r = must().declineQualifyingOffer(req.playerId)
+      if (!r.ok) throw new Error(r.message)
+      return { id: req.id, type: 'ok', note: r.message }
+    }
     case 'getWaiverWire':
       return { id: req.id, type: 'waiverWire', waiverWire: must().getWaiverWire() }
     case 'getLeagueWire':

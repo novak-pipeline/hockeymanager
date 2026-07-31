@@ -1706,6 +1706,25 @@ export interface ResignRowView extends PlayerBadge {
   morale: number
   /** Set when negotiations concluded. */
   status: 'pending' | 'signed' | 'walked'
+  /* ── the June window (playtest §B). All optional/additive. ── */
+  /** ELC / RFA / UFA — what rights you actually hold over him. */
+  rights?: 'ELC' | 'RFA' | 'UFA'
+  agentName?: string
+  /** §B2: the CBA qualifying-offer number, and where that decision stands.
+   *  'open' = neither tendered nor walked away from yet. RFAs only. */
+  qualifyingOffer?: number
+  qoStatus?: 'tendered' | 'declined' | 'open'
+  /** §B4: what his camp says this term costs — the ask AAV repriced for the
+   *  years YOU want. Keyed by term so the offer builder can show the bill. */
+  priceByYears?: Array<{ years: number; salary: number }>
+  /** §B1: an offer of yours his camp is still weighing. */
+  pendingOffer?: { salary: number; years: number; daysLeft: number }
+  /** §B1: the terms his camp came back with — accept as written, or re-offer. */
+  counter?: { salary: number; years: number; note: string }
+  /** His camp's last word when they turned you down. */
+  lastRefusal?: string
+  /** 0–100 appetite for more rounds; an empty camp walks to July 1. */
+  patience?: number
 }
 
 export interface FreeAgentRowView extends PlayerBadge {
@@ -1901,6 +1920,8 @@ export interface OfferSheetRowView extends PlayerBadge {
   years: number
   /** Compensation rounds you'd receive if you let him walk (e.g. [1,3]). */
   compRounds: number[]
+  /** §B3: days left on the match window. At 0 the decision makes itself. */
+  matchDaysLeft?: number
 }
 
 /** A player an AI club has exposed on the in-season waiver wire, claimable by the
@@ -2031,6 +2052,10 @@ export interface OffseasonView {
   expiring: ResignRowView[]
   /** Re-sign stage: rival offer sheets on your RFAs — match or take compensation. */
   offerSheets?: OfferSheetRowView[]
+  /** §B1: which day of the June window you're on, and how many it runs.
+   *  Optional/additive — absent outside the re-sign stage. */
+  resignDay?: number
+  resignWindowDays?: number
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
   /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
@@ -2399,7 +2424,7 @@ export interface CareerSnapshot {
   picks: DraftPick[]
   /** Rival offer sheets pending on the user's RFAs (re-sign window). Additive;
    *  absent on pre-offer-sheet saves → restored as empty. */
-  offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number }>
+  offerSheets?: Array<{ playerId: string; fromTeamId: string; salary: number; years: number; decideDay?: number }>
   /** Live in-season waiver-wire entries. Additive; absent on old saves → empty. */
   waiverWire?: Array<{ playerId: string; fromTeamId: string; placedDay: number }>
   /** Per-team hot/cold streak counters for ambient news. Additive; absent → empty. */
@@ -2543,6 +2568,22 @@ export interface CareerSnapshot {
    *  Optional/additive. */
   faPendingOffers?: Array<{ playerId: string; salary: number; years: number; decideDay: number }>
   pendingOfferSheets?: Array<{ playerId: string; ownerTeamId: string; salary: number; years: number; decideDay: number }>
+  /** Playtest §B: the June re-signing window's own async queues — offers the
+   *  camps are still weighing, their patience, and the qualifying-offer
+   *  decisions. All optional/additive; a save written before the window
+   *  existed loads with an empty queue on day 0. */
+  resignOffers?: Array<{
+    playerId: string
+    salary: number
+    years: number
+    decideDay: number
+    status: 'pending' | 'countered' | 'refused'
+    counterSalary?: number
+    counterYears?: number
+    note?: string
+  }>
+  resignPatience?: Array<[string, number]>
+  qualifyingOffers?: Array<[string, 'tendered' | 'declined']>
   pendingTrades?: Array<{ proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number; daysLeft: number }>
   /** [playerId, askedQuestionIds][] — interview questions asked. Optional/additive. */
   interviews?: Array<[string, string[]]>
