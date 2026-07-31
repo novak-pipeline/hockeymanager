@@ -376,7 +376,9 @@ function buildPackage(tv: ReturnType<Career['getTrades']>, targetVal: number, ne
   // that's what a real GM does when he wants the player.
   const target = targetVal * 1.12
   const picks = [...tv.myPicks].sort((a, b) => a.value - b.value)
-  const surplus = tv.myPlayers.filter((p) => POS_GROUP(p.position) !== need && p.tradeValue != null && !p.noTradeClause).sort((a, b) => (a.tradeValue ?? 0) - (b.tradeValue ?? 0))
+  // The trade view now lists the whole organisation (A4); the GM's own lineup
+  // math is about the men who actually dress, so read the NHL roster only.
+  const surplus = tv.myPlayers.filter((p) => (p.assetClass ?? 'nhl') === 'nhl' && POS_GROUP(p.position) !== need && p.tradeValue != null && !p.noTradeClause).sort((a, b) => (a.tradeValue ?? 0) - (b.tradeValue ?? 0))
   const playerIds: string[] = []; const pickIds: string[] = []; let acc = 0
   for (const pk of [...picks].reverse()) { if (acc >= target) break; pickIds.push(pk.id); acc += pk.value }
   let si = 0
@@ -391,7 +393,8 @@ function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
   if (!tv || !tv.tradingOpen) return false
   noteFeature(ctx, 'trades', `Every partner's roster comes with per-player tradeValue + cap space + posture, and evaluateTradeDraft gives a side-effect-free partner verdict — enough to value a deal. Friction: to price a target I query getTrades then a separate evaluateTradeDraft; the value isn't on the roster screen. Partners seen: ${tv.partners.length}, my cap space ${money(tv.myCapSpace)}.`)
   const byGroup: Record<string, number[]> = { F: [], D: [], G: [] }
-  for (const p of tv.myPlayers) byGroup[POS_GROUP(p.position)].push(p.overall)
+  // NHL roster only — a farm full of prospects must not read as blue-line depth.
+  for (const p of tv.myPlayers) if ((p.assetClass ?? 'nhl') === 'nhl') byGroup[POS_GROUP(p.position)].push(p.overall)
   for (const k of Object.keys(byGroup)) byGroup[k].sort((a, b) => b - a)
   const weakStarter = (g: string, n: number): number => byGroup[g][n - 1] ?? 0
   const needScore: Record<string, number> = { F: 90 - weakStarter('F', 9), D: 90 - weakStarter('D', 5), G: 90 - weakStarter('G', 1) }
@@ -476,7 +479,7 @@ function doDeadline(ctx: Ctx): void {
     log(ctx, { kind: 'deadline-buy', summary: 'Deadline: shopped the board but stood pat', drivers: [`contending (${note})`, 'no affordable fit / package'], result: 'no move', ok: true })
   } else {
     const tv = guarded(ctx, 'getTrades', () => ctx.career.getTrades())
-    const rental = tv?.myPlayers.filter((p) => p.yearsRemaining <= 1 && p.age >= 27 && !p.noTradeClause).sort((a, b) => (b.tradeValue ?? 0) - (a.tradeValue ?? 0))[0]
+    const rental = tv?.myPlayers.filter((p) => (p.assetClass ?? 'nhl') === 'nhl' && p.yearsRemaining <= 1 && p.age >= 27 && !p.noTradeClause).sort((a, b) => (b.tradeValue ?? 0) - (a.tradeValue ?? 0))[0]
     if (rental) {
       const r = guarded(ctx, 'shopPlayer', () => ctx.career.shopPlayer(rental.playerId))
       log(ctx, { kind: 'deadline-sell', summary: `Deadline: shopped rental ${rental.name} (${rental.overall} OVR, expiring)`, drivers: [`out of it (${note})`, 'selling futures for picks'], result: r?.message ?? 'shopped', ok: !!r })

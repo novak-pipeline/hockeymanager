@@ -583,6 +583,7 @@ import {
   type StatsView,
   type TacticsView,
   type TentpoleView,
+  type TradeAssetClass,
   type TradeAssessmentView,
   type TradeDraftView,
   type TradeDraftAsset,
@@ -10303,6 +10304,10 @@ export class Career {
       const toAhl = to?.affiliateId ? this.data.teams.get(to.affiliateId) : undefined
       if (toAhl) toAhl.roster.push(pid)
       else if (to) to.roster.push(pid)
+      // Both farm clubs just changed shape — re-deploy them, or the AHL sim
+      // skates a line with a man who is no longer on the roster.
+      if (fromAhl) repairLines(fromAhl, this.data.players)
+      if (toAhl) repairLines(toAhl, this.data.players)
     }
     p.rightsTeamId = toTeamId
   }
@@ -11185,7 +11190,12 @@ export class Career {
       receivePlayers.reduce((s, p) => s + playerValue(p), 0) +
       this.pickByIds(proposal.receivePickIds).reduce((s, p) => s + pickValue(p, { year }), 0)
 
-    if (giveValue <= 0 || receiveValue <= 0) {
+    // "Empty" means a side with NOTHING on it — not a side whose only piece is
+    // a fringe asset. Now that the farm is tradeable (A4) a near-zero prospect is
+    // a legitimate selection and deserves a real read, not a "put something in".
+    const giveCount = proposal.givePlayerIds.length + proposal.givePickIds.length
+    const receiveCount = proposal.receivePlayerIds.length + proposal.receivePickIds.length
+    if (giveCount === 0 || receiveCount === 0) {
       return { agmName, tone: 'empty', line: 'Put players or picks on both sides and I’ll give you my read.' }
     }
 
@@ -11200,9 +11210,15 @@ export class Career {
       }
     }
 
-    // Practical flag: can WE fit the money coming back?
-    const incoming = receivePlayers.reduce((s, p) => s + p.contract.salary, 0)
-    const outgoing = givePlayers.reduce((s, p) => s + p.contract.salary, 0)
+    // Practical flag: can WE fit the money coming back? Farm assets (A4) sit
+    // outside the NHL cap on both sides, so they neither cost nor free room.
+    const partnerId = asTeamId(proposal.partnerTeamId)
+    const incoming = receivePlayers
+      .filter((p) => !this.isFarmAsset(p, partnerId))
+      .reduce((s, p) => s + p.contract.salary, 0)
+    const outgoing = givePlayers
+      .filter((p) => !this.isFarmAsset(p, this.userTeamId))
+      .reduce((s, p) => s + p.contract.salary, 0)
     const capAfter = rosterCapUsed(this.userTeam, this.data.players) + incoming - outgoing
     if (capAfter > this.userTeam.finances.salaryCap) {
       const over = capAfter - this.userTeam.finances.salaryCap
@@ -11212,9 +11228,12 @@ export class Career {
       }
     }
 
-    const rel = (receiveValue - giveValue) / Math.max(giveValue, receiveValue)
+    const denom = Math.max(giveValue, receiveValue)
+    const rel = denom > 0 ? (receiveValue - giveValue) / denom : 0
     const total = giveValue + receiveValue
-    const shares = { giveShare: giveValue / total, receiveShare: receiveValue / total }
+    const shares = total > 0
+      ? { giveShare: giveValue / total, receiveShare: receiveValue / total }
+      : { giveShare: 0.5, receiveShare: 0.5 }
     if (rel > 0.30) return { agmName, tone: 'love', line: 'If they say yes to this, we’re fleecing them. I’d send it before they think twice.', ...shares }
     if (rel > 0.12) return { agmName, tone: 'good', line: 'Good value on our end. I like this one.', ...shares }
     if (rel >= -0.12) return { agmName, tone: 'fair', line: 'Fair hockey trade — it comes down to whether he fits our room.', ...shares }
@@ -11282,19 +11301,28 @@ export class Career {
     let marketVerdict: TradeDraftView['marketVerdict'] = 'empty'
     let marketLine = 'Add players or picks to both sides to see the balance.'
     let marketPct: number | undefined
-    if (giveTotal > 0 && receiveTotal > 0) {
-      const rel = (receiveTotal - giveTotal) / Math.max(giveTotal, receiveTotal)
+    // A side is empty when nothing is ON it. A selected asset that happens to
+    // grade at ~0 (a fringe prospect, a 7th-rounder) still gets a real read.
+    if (give.length > 0 && receive.length > 0) {
+      const denom = Math.max(giveTotal, receiveTotal)
+      const rel = denom > 0 ? (receiveTotal - giveTotal) / denom : 0
       if (Math.abs(rel) <= 0.1) {
         marketVerdict = 'fair'
         marketLine = 'Even value on paper.'
       } else if (rel < 0) {
         marketVerdict = 'overpay'
-        marketPct = Math.round(((giveTotal - receiveTotal) / receiveTotal) * 100)
-        marketLine = `You're overpaying by ~${marketPct}% on paper.`
+        // Nothing of graded value coming back — a percentage would be Infinity,
+        // so say it in words instead.
+        marketPct = receiveTotal > 0 ? Math.round(((giveTotal - receiveTotal) / receiveTotal) * 100) : undefined
+        marketLine = marketPct !== undefined
+          ? `You're overpaying by ~${marketPct}% on paper.`
+          : 'You get nothing of value back on paper.'
       } else {
         marketVerdict = 'fleece'
-        marketPct = Math.round(((receiveTotal - giveTotal) / giveTotal) * 100)
-        marketLine = `You come out ~${marketPct}% ahead on paper.`
+        marketPct = giveTotal > 0 ? Math.round(((receiveTotal - giveTotal) / giveTotal) * 100) : undefined
+        marketLine = marketPct !== undefined
+          ? `You come out ~${marketPct}% ahead on paper.`
+          : 'You give up nothing of value on paper.'
       }
     }
 
@@ -11348,13 +11376,14 @@ export class Career {
     const waivedNtcIds = new Set(
       give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
     )
+    const nonRosterIds = this.farmIdsIn(give.players, receive.players, partnerId)
     const charSum = (s: string): number => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h }
     const stableKey = [...proposal.givePlayerIds, ...proposal.givePickIds, ...proposal.receivePlayerIds, ...proposal.receivePickIds]
       .reduce((h, s) => (h * 31 + charSum(s)) | 0, 11)
     const rng = this.rngFor(7011, this.currentDay, stableKey)
     const posture = this.clubPostureFor(partnerId)
     const evaln = evaluateProposal({
-      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds,
+      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds, nonRosterIds,
       relationship: this.relationshipWith(partnerId as string),
       philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), posture.posture),
       context: {
@@ -11397,6 +11426,7 @@ export class Career {
     const waivedNtcIds = new Set(
       give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
     )
+    const nonRosterIds = this.farmIdsIn(give.players, receive.players, partnerId)
     // Stable gauge RNG: derived from the package so repeated gauges match and it
     // never touches the live proposal counter.
     const charSum = (s: string): number => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h }
@@ -11404,7 +11434,7 @@ export class Career {
       .reduce((h, s) => (h * 31 + charSum(s)) | 0, 7)
     const rng = this.rngFor(7010, this.currentDay, stableKey)
     const evaln = evaluateProposal({
-      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds,
+      give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds, nonRosterIds,
       relationship: this.relationshipWith(partnerId as string),
       philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
       context: {
@@ -11457,6 +11487,7 @@ export class Career {
     const waivedNtcIds = new Set(
       give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
     )
+    const nonRosterIds = this.farmIdsIn(give.players, receive.players, partnerId)
     const rng = this.rngFor(7006, this.currentDay, this.offerCounter)
     const evaln = evaluateProposal({
       give,
@@ -11465,6 +11496,7 @@ export class Career {
       partnerPlayers: this.data.players,
       rng,
       waivedNtcIds,
+      nonRosterIds,
       relationship: this.relationshipWith(partnerId as string),
       // Living World LW3: the partner's stance flows from his GM's persona +
       // the club's live posture, not a static hash.
@@ -11561,9 +11593,11 @@ export class Career {
         `The window closed before ${partner.name} came back on your proposal.`, { teamId: partnerId as string })
       return
     }
-    // Re-validate the assets are still where they were — rosters may have shifted.
-    const stillHave = pt.proposal.givePlayerIds.every((id) => this.userTeam.roster.includes(asPlayerId(id)))
-    const stillTheirs = pt.proposal.receivePlayerIds.every((id) => partner.roster.includes(asPlayerId(id)))
+    // Re-validate the assets are still where they were — rosters may have
+    // shifted. "Still ours" is an ORGANISATION test (A4): a prospect in the farm
+    // or a junior whose rights we hold is just as tradeable as a roster player.
+    const stillHave = pt.proposal.givePlayerIds.every((id) => this.orgHolds(asPlayerId(id), this.userTeamId))
+    const stillTheirs = pt.proposal.receivePlayerIds.every((id) => this.orgHolds(asPlayerId(id), partner.id))
     if (!stillHave || !stillTheirs) {
       this.pushNews('trade', `The deal with ${partner.abbreviation} fell through`,
         `By the time ${partner.name} came back, the pieces had moved — the proposal is dead.`, { teamId: partnerId as string })
@@ -11598,37 +11632,40 @@ export class Career {
     if (!partner) return { ok: false }
     const give = { players: proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.givePickIds) }
     const receive = { players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.receivePickIds) }
+    // A4: farm assets (AHL skaters, rights-held juniors) move between the two
+    // ORGANISATIONS; only NHL roster players go through executeTrade.
+    const giveFarm = give.players.filter((p) => this.isFarmAsset(p, this.userTeamId))
+    const recvFarm = receive.players.filter((p) => this.isFarmAsset(p, partnerId))
+    const farmIds = new Set([...giveFarm, ...recvFarm].map((p) => p.id as string))
     try {
       executeTrade({
         teams: this.data.teams,
         players: this.data.players,
         teamA: this.userTeamId,
         teamB: partnerId,
-        aGivesPlayerIds: give.players.map((p) => p.id),
+        aGivesPlayerIds: give.players.filter((p) => !farmIds.has(p.id as string)).map((p) => p.id),
         aGivesPicks: give.picks,
-        bGivesPlayerIds: receive.players.map((p) => p.id),
+        bGivesPlayerIds: receive.players.filter((p) => !farmIds.has(p.id as string)).map((p) => p.id),
         bGivesPicks: receive.picks,
         allPicks: this.picks,
       })
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : undefined }
     }
+    for (const p of giveFarm) this.moveProspectBetweenOrgs(p.id, this.userTeamId, partnerId)
+    for (const p of recvFarm) this.moveProspectBetweenOrgs(p.id, partnerId, this.userTeamId)
     repairLines(this.userTeam, this.data.players)
     repairLines(partner, this.data.players)
     for (const p of give.players) {
+      if (farmIds.has(p.id as string)) continue
       this.lockerDeparture(this.userTeamId, p.id)
       this.lockerArrival(partnerId, p.id)
     }
     for (const p of receive.players) {
+      if (farmIds.has(p.id as string)) continue
       this.lockerDeparture(partnerId, p.id)
       this.lockerArrival(this.userTeamId, p.id)
     }
-    this.pushNews(
-      'trade',
-      `Trade completed with ${partner.abbreviation}`,
-      `${give.players.map((p) => p.name).join(', ') || 'Picks'} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
-      { teamId: partnerId as string }
-    )
     const txResult = recordTransaction(this.transactionLedger, {
       day: this.currentDay,
       year: this.year,
@@ -11637,15 +11674,13 @@ export class Career {
       summary: `${this.userTeam.abbreviation} trades ${give.players.map((p) => p.name).join(', ') || 'picks'} to ${partner.abbreviation} for ${receive.players.map((p) => p.name).join(', ') || 'picks'}.`,
     })
     this.transactionLedger = txResult.ledger
-    this.chronicleTrade({
-      teamAId: this.userTeamId,
-      teamBId: partnerId,
-      aGivesPlayerIds: give.players.map((p) => p.id),
-      aGivesPicks: give.picks,
-      bGivesPlayerIds: receive.players.map((p) => p.id),
-      bGivesPicks: receive.picks,
+    this.announceTrade({
+      partnerId,
+      outgoing: give.players.map((p) => p.id),
+      outgoingPicks: give.picks,
+      incoming: receive.players.map((p) => p.id),
+      incomingPicks: receive.picks,
     })
-    this.tradeWriteup(receive.players.map((p) => p.id), give.players.map((p) => p.id), partnerId)
     this.adjustRelationship(partnerId as string, 6)
     return { ok: true }
   }
@@ -11866,7 +11901,18 @@ export class Career {
     // Cap guard: you can't complete a deal that puts you over the ceiling — the
     // same check the AGM shows in his read. Salary in minus salary out, netted
     // against a former club's retained share.
+    // A4: farm assets (AHL / rights-held juniors) carry no NHL cap hit and no
+    // roster slot — they move org-to-org, outside executeTrade.
+    const farmIds = new Set<string>([
+      ...offer.userGivesPlayerIds
+        .filter((id) => { const p = this.data.players.get(id); return p !== undefined && this.isFarmAsset(p, this.userTeamId) })
+        .map((id) => id as string),
+      ...offer.userReceivesPlayerIds
+        .filter((id) => { const p = this.data.players.get(id); return p !== undefined && this.isFarmAsset(p, offer.partnerTeamId) })
+        .map((id) => id as string),
+    ])
     const salOf = (id: string): number => {
+      if (farmIds.has(id)) return 0
       const p = this.data.players.get(asPlayerId(id))
       return p ? p.contract.salary - (p.contract.retainedByOthers ?? 0) : 0
     }
@@ -11882,40 +11928,31 @@ export class Career {
       players: this.data.players,
       teamA: this.userTeamId,
       teamB: offer.partnerTeamId,
-      aGivesPlayerIds: offer.userGivesPlayerIds,
+      aGivesPlayerIds: offer.userGivesPlayerIds.filter((id) => !farmIds.has(id as string)),
       aGivesPicks: offer.userGivesPicks,
-      bGivesPlayerIds: offer.userReceivesPlayerIds,
+      bGivesPlayerIds: offer.userReceivesPlayerIds.filter((id) => !farmIds.has(id as string)),
       bGivesPicks: offer.userReceivesPicks,
       allPicks: this.picks,
     })
+    for (const id of offer.userGivesPlayerIds) {
+      if (farmIds.has(id as string)) this.moveProspectBetweenOrgs(id, this.userTeamId, offer.partnerTeamId)
+    }
+    for (const id of offer.userReceivesPlayerIds) {
+      if (farmIds.has(id as string)) this.moveProspectBetweenOrgs(id, offer.partnerTeamId, this.userTeamId)
+    }
     repairLines(this.userTeam, this.data.players)
     repairLines(partner, this.data.players)
     for (const id of offer.userGivesPlayerIds) {
+      if (farmIds.has(id as string)) continue
       this.lockerDeparture(this.userTeamId, id)
       this.lockerArrival(offer.partnerTeamId, id)
     }
     for (const id of offer.userReceivesPlayerIds) {
+      if (farmIds.has(id as string)) continue
       this.lockerDeparture(offer.partnerTeamId, id)
       this.lockerArrival(this.userTeamId, id)
     }
     this.tradeOffers = this.tradeOffers.filter((o) => o.offerId !== offerId)
-    // Spell out the deal — who and what moved each way — so the inbox reads like
-    // real news, not a bare "the deal is done".
-    const roundOrd = (r: number): string => (r === 1 ? '1st' : r === 2 ? '2nd' : r === 3 ? '3rd' : `${r}th`)
-    const nameList = (ids: readonly string[], picks: readonly { round: number; year: number }[]): string => {
-      const names = ids.map((id) => this.data.players.get(asPlayerId(id))?.name).filter(Boolean) as string[]
-      const pickBits = picks.map((p) => `${p.year} ${roundOrd(p.round)}-round pick`)
-      const all = [...names, ...pickBits]
-      return all.length ? all.join(', ') : 'future considerations'
-    }
-    const acquired = nameList(offer.userReceivesPlayerIds, offer.userReceivesPicks)
-    const sent = nameList(offer.userGivesPlayerIds, offer.userGivesPicks)
-    this.pushNews(
-      'trade',
-      `${this.userTeam.abbreviation} acquire ${acquired} from ${partner.name}`,
-      `${this.userTeam.name} have completed a trade with the ${partner.name}: ${this.userTeam.abbreviation} receive ${acquired} in exchange for ${sent}.`,
-      { teamId: offer.partnerTeamId as string }
-    )
     /* ── Coach quote: trade-add reaction (if at least one player received) ── */
     if (offer.userReceivesPlayerIds.length > 0) {
       const firstReceived = offer.userReceivesPlayerIds[0]!
@@ -11941,15 +11978,13 @@ export class Career {
       })
       this.transactionLedger = txResult.ledger
     }
-    this.chronicleTrade({
-      teamAId: this.userTeamId,
-      teamBId: offer.partnerTeamId,
-      aGivesPlayerIds: offer.userGivesPlayerIds,
-      aGivesPicks: offer.userGivesPicks,
-      bGivesPlayerIds: offer.userReceivesPlayerIds,
-      bGivesPicks: offer.userReceivesPicks,
+    this.announceTrade({
+      partnerId: offer.partnerTeamId,
+      outgoing: offer.userGivesPlayerIds,
+      outgoingPicks: offer.userGivesPicks,
+      incoming: offer.userReceivesPlayerIds,
+      incomingPicks: offer.userReceivesPicks,
     })
-    this.tradeWriteup(offer.userReceivesPlayerIds, offer.userGivesPlayerIds, offer.partnerTeamId)
   }
 
   rejectTrade(offerId: string): void {
@@ -12733,6 +12768,124 @@ export class Career {
       press: { byline: `${persona.name} — ${persona.outlet}`, kind: 'tradeColumn' },
       salience: 85,
     })
+  }
+
+  /**
+   * A5 — the single announcement path for every trade the GM makes, with the
+   * noise SCALED to what actually moved. The playtest found a franchise
+   * defenceman changing teams in silence; the fix is that one call covers all
+   * three surfaces the moment deserves — a headline on the GM's desk, a reaction
+   * on the Feed, and a World Chronicle entry — and that the volume knob is the
+   * best asset in the deal:
+   *
+   *   franchise (a genuine star, or a 1st on its own)  → breaking headline,
+   *       a guaranteed insider break on the Feed, and the press column;
+   *   notable (a real roster piece)                    → a proper headline;
+   *   depth (a fourth-liner, a late pick)              → one quiet line.
+   *
+   * Call AFTER the assets have moved.
+   */
+  private announceTrade(args: {
+    partnerId: TeamId
+    outgoing: PlayerId[]
+    outgoingPicks: DraftPick[]
+    incoming: PlayerId[]
+    incomingPicks: DraftPick[]
+  }): void {
+    const partner = this.data.teams.get(args.partnerId)
+    if (!partner) return
+    const us = this.userTeam
+
+    // The chronicle + the players' own voices — every deal, always.
+    this.chronicleTrade({
+      teamAId: this.userTeamId,
+      teamBId: args.partnerId,
+      aGivesPlayerIds: args.outgoing,
+      aGivesPicks: args.outgoingPicks,
+      bGivesPlayerIds: args.incoming,
+      bGivesPicks: args.incomingPicks,
+    })
+
+    const resolveAll = (ids: readonly PlayerId[]): Player[] =>
+      ids.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+    const outPlayers = resolveAll(args.outgoing)
+    const inPlayers = resolveAll(args.incoming)
+    const byOvr = (ps: Player[]): Player[] => [...ps].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    const bestOut = byOvr(outPlayers)[0]
+    const bestIn = byOvr(inPlayers)[0]
+    const headliner = byOvr([...outPlayers, ...inPlayers])[0]
+    const topOvr = headliner ? ratedOverall(headliner) : 0
+    const bestRound = Math.min(
+      9,
+      ...args.outgoingPicks.map((p) => p.round),
+      ...args.incomingPicks.map((p) => p.round),
+    )
+    // A first-round pick is itself a headline asset even when no name moves.
+    const tier: 'franchise' | 'notable' | 'depth' =
+      topOvr >= 84 ? 'franchise'
+        : topOvr >= 76 || bestRound <= 1 ? 'notable'
+          : 'depth'
+
+    const roundOrd = (r: number): string => (r === 1 ? '1st' : r === 2 ? '2nd' : r === 3 ? '3rd' : `${r}th`)
+    const sideList = (ps: Player[], picks: readonly DraftPick[]): string => {
+      const bits = [...ps.map((p) => p.name), ...picks.map((p) => `a ${p.year} ${roundOrd(p.round)}-round pick`)]
+      return bits.length ? bits.join(', ') : 'future considerations'
+    }
+    const acquired = sideList(inPlayers, args.incomingPicks)
+    const sent = sideList(outPlayers, args.outgoingPicks)
+    // Whose move is the story — the best man coming in, or the one going out.
+    const inIsStory = !!bestIn && (!bestOut || ratedOverall(bestIn) >= ratedOverall(bestOut))
+
+    let headline: string
+    if (tier === 'depth') {
+      headline = `Trade completed with ${partner.abbreviation}`
+    } else if (inIsStory && bestIn) {
+      headline = `${us.abbreviation} acquire ${bestIn.name} from ${partner.name}`
+    } else if (bestOut) {
+      headline = `${us.abbreviation} trade ${bestOut.name} to ${partner.name}`
+    } else {
+      headline = `${us.abbreviation} swing a deal with ${partner.abbreviation}`
+    }
+    if (tier === 'franchise') headline = `BLOCKBUSTER: ${headline}`
+
+    const body = `${us.name} have completed a trade with the ${partner.name}: ${us.abbreviation} receive ${acquired} in exchange for ${sent}.`
+    this.pushNews('trade', headline, body, {
+      // The GM's OWN club is the subject — this is his business, not the
+      // partner's, and the inbox curation keys off that.
+      teamId: this.userTeamId as string,
+      ...(headliner ? { playerId: headliner.id as string } : {}),
+      salience: tier === 'franchise' ? 92 : tier === 'notable' ? 70 : 25,
+      ...(tier === 'franchise' ? { rare: true } : {}),
+    })
+
+    // A star changing teams breaks on the wire the same hour. Pushed straight to
+    // the timeline rather than queued as a voice, because the voice pipeline's
+    // one-post-per-author quiet gate is allowed to swallow ambient chatter — it
+    // must never swallow the biggest deal of the season.
+    if (tier === 'franchise' && headliner) {
+      const author = FEED_AUTHORS['insider']
+      const dest = inIsStory ? us : partner
+      const from = inIsStory ? partner : us
+      this.feedPosts.unshift({
+        id: `fp${this.feedCounter++}`,
+        day: Math.max(0, this.currentDay),
+        year: this.year,
+        category: 'league',
+        headline: `@${author?.handle ?? 'insider'}`,
+        body: `BREAKING: ${headliner.name} is a ${dest.name}. ${from.abbreviation} move him to ${dest.abbreviation} — ${us.abbreviation} get ${acquired}, ${partner.abbreviation} get ${sent}. Deal is done.`,
+        read: true,
+        teamId: this.userTeamId as string,
+        playerId: headliner.id as string,
+        channel: 'feed',
+        authorId: 'insider',
+        salience: 95,
+        rare: true,
+      })
+      if (this.feedPosts.length > 400) this.feedPosts.length = 400
+    }
+
+    // The press column — a real piece changing hands earns a written take.
+    this.tradeWriteup(args.incoming, args.outgoing, args.partnerId)
   }
 
   /* ────────────────────────── view builders ────────────────────────── */
@@ -17332,13 +17485,94 @@ export class Career {
     }
   }
 
+  /**
+   * Playtest A4 — an index of where every player actually skates, plus the
+   * rights-held prospects of each organisation. Built ONCE per trade view so
+   * the rights sweep over the player map doesn't run again for all 31 partner
+   * clubs on an imported world.
+   */
+  private orgAssetIndex(): { rights: Map<string, Player[]>; club: Map<string, Team> } {
+    const club = new Map<string, Team>()
+    for (const t of this.data.teams.values()) {
+      for (const id of t.roster) club.set(id as string, t)
+    }
+    const rights = new Map<string, Player[]>()
+    for (const p of this.data.players.values()) {
+      const owner = p.rightsTeamId as string | undefined
+      if (owner === undefined) continue
+      if (p.retiredYear !== undefined) continue
+      // Only a man playing OUTSIDE the NHL is a rights asset; anyone on an NHL
+      // roster belongs to that club's roster list, not to a rights list.
+      const where = club.get(p.id as string)
+      if (where && (where.tier ?? 'nhl') === 'nhl') continue
+      const list = rights.get(owner)
+      if (list) list.push(p)
+      else rights.set(owner, [p])
+    }
+    return { rights, club }
+  }
+
+  /**
+   * Every player an organisation can actually move: the NHL roster, the AHL
+   * affiliate, and the juniors/Europeans whose rights it holds. Futures ARE the
+   * asset market — without them a GM can neither sell a prospect nor buy one,
+   * and the only currency left is the big-league roster (playtest A4).
+   */
+  private orgTradeAssets(
+    teamId: TeamId,
+    index: { rights: Map<string, Player[]>; club: Map<string, Team> },
+  ): Array<{ player: Player; assetClass: TradeAssetClass; clubAbbr?: string }> {
+    const team = this.data.teams.get(teamId)
+    if (!team) return []
+    const out: Array<{ player: Player; assetClass: TradeAssetClass; clubAbbr?: string }> = []
+    const seen = new Set<string>()
+    const add = (p: Player | undefined, assetClass: TradeAssetClass, clubAbbr?: string): void => {
+      if (!p || seen.has(p.id as string) || p.retiredYear !== undefined) return
+      seen.add(p.id as string)
+      out.push({ player: p, assetClass, ...(clubAbbr !== undefined ? { clubAbbr } : {}) })
+    }
+    for (const id of team.roster) add(this.data.players.get(id), 'nhl')
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    if (ahl) for (const id of ahl.roster) add(this.data.players.get(id), 'ahl', ahl.abbreviation)
+    for (const p of index.rights.get(teamId as string) ?? []) {
+      add(p, 'junior', index.club.get(p.id as string)?.abbreviation)
+    }
+    return out
+  }
+
+  /** True when this player is an org asset rather than an NHL roster player —
+   *  the flag that keeps a prospect out of cap and roster-slot math. */
+  private isFarmAsset(p: Player, orgTeamId: TeamId): boolean {
+    return !(this.data.teams.get(orgTeamId)?.roster.includes(p.id) ?? false)
+  }
+
+  /** The farm/prospect ids in a proposal — the pieces the AI must value fully
+   *  but charge no cap space and no roster slot for (A4). */
+  private farmIdsIn(givePlayers: Player[], receivePlayers: Player[], partnerId: TeamId): Set<string> {
+    const ids = new Set<string>()
+    for (const p of givePlayers) if (this.isFarmAsset(p, this.userTeamId)) ids.add(p.id as string)
+    for (const p of receivePlayers) if (this.isFarmAsset(p, partnerId)) ids.add(p.id as string)
+    return ids
+  }
+
+  /** Does this organisation hold the player at all — NHL roster, AHL affiliate,
+   *  or rights? The A4 test for "is he mine to trade". */
+  private orgHolds(pid: PlayerId, orgTeamId: TeamId): boolean {
+    const team = this.data.teams.get(orgTeamId)
+    if (!team) return false
+    if (team.roster.includes(pid)) return true
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    if (ahl?.roster.includes(pid)) return true
+    const p = this.data.players.get(pid)
+    return !!p && (p.rightsTeamId as string | undefined) === (orgTeamId as string)
+  }
+
   getTrades(): TradesView {
     const fog = this.fogCtx()
+    const index = this.orgAssetIndex()
     const tradable = (teamId: TeamId) => {
-      const team = this.data.teams.get(teamId)!
       const isUserTeam = teamId === this.userTeamId
-      return team.roster.map((id) => {
-        const p = this.resolve(id)
+      return this.orgTradeAssets(teamId, index).map(({ player: p, assetClass, clubAbbr }) => {
         const playerFog = isUserTeam ? undefined : fog
         const b = badge(p, playerFog)
         // Your own players read exactly; an unscouted opponent's value is your
@@ -17354,6 +17588,8 @@ export class Career {
           tradeValue: Math.round(value * 10) / 10,
           valueEstimated: estimated,
           valueDrivers: drivers,
+          assetClass,
+          ...(clubAbbr !== undefined ? { clubAbbr } : {}),
         }
       })
     }

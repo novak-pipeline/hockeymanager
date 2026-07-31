@@ -1382,6 +1382,19 @@ export interface PickAssetView {
   drivers?: ValueDriver[]
 }
 
+/** Where a tradeable player sits in the organisation. `nhl` = on the big club's
+ *  roster; `ahl` = with the AHL affiliate; `junior` = a rights-held prospect
+ *  still playing junior / Europe / college. Futures are assets too — a GM has to
+ *  be able to sell and buy them (playtest A4). */
+export type TradeAssetClass = 'nhl' | 'ahl' | 'junior'
+
+/** Org placement of a tradeable player (additive; absent reads as `nhl`). */
+export interface TradeAssetOrigin {
+  assetClass?: TradeAssetClass
+  /** The club he actually suits up for when he isn't on the NHL roster. */
+  clubAbbr?: string
+}
+
 /** Value fields attached to a tradeable player row (additive to PlayerBadge). */
 export interface TradeValued {
   /** This player's trade value in the same points the AI weighs (rounded 1dp).
@@ -1397,7 +1410,7 @@ export interface TradeSideView {
   teamId: string
   teamName: string
   teamAbbr: string
-  players: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number }>
+  players: Array<PlayerBadge & TradeValued & TradeAssetOrigin & { salary: number; yearsRemaining: number }>
   picks: PickAssetView[]
 }
 
@@ -1464,7 +1477,7 @@ export interface TradePartnerView {
   teamId: string
   teamName: string
   teamAbbr: string
-  players: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  players: Array<PlayerBadge & TradeValued & TradeAssetOrigin & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
   picks: PickAssetView[]
   /** Roster cap space ($). Positive = room available. */
   capSpace: number
@@ -1487,7 +1500,7 @@ export interface TradesView {
   incoming: TradeOfferView[]
   /** Every other club's tradeable assets for the proposal builder. */
   partners: TradePartnerView[]
-  myPlayers: Array<PlayerBadge & TradeValued & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
+  myPlayers: Array<PlayerBadge & TradeValued & TradeAssetOrigin & { salary: number; yearsRemaining: number; noTradeClause: boolean }>
   myPicks: PickAssetView[]
   /** Trades are frozen outside the regular season (and after the deadline day, if set). */
   deadlineDay: number | null

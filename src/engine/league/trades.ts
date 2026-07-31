@@ -671,8 +671,17 @@ export function evaluateProposal(args: {
    *  sign-off / an acceptable-destination list). Absent → no waivers (identical
    *  to the original behaviour). */
   waivedNtcIds?: ReadonlySet<string>
+  /** Playtest A4: ids in either package that are ORG assets rather than NHL
+   *  roster players — an AHL affiliate skater or a rights-held junior. They
+   *  carry full trade value (that is the point of a futures market) but they
+   *  occupy no NHL roster slot and no cap space, so they must be kept out of the
+   *  cap fit and the "don't leave yourself short" roster check. Absent → every
+   *  named player is treated as an NHL roster player (the original behaviour). */
+  nonRosterIds?: ReadonlySet<string>
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
+  /** True for a farm/prospect asset: real value, no cap hit, no roster slot. */
+  const isFarm = (p: Player): boolean => args.nonRosterIds?.has(p.id as string) ?? false
 
   // Draw the mood wiggle up front so rng consumption is identical on every
   // path — repeat evaluations with the same seed must match exactly.
@@ -698,8 +707,8 @@ export function evaluateProposal(args: {
   // finances.capUsed — that field goes stale across a season (retirements,
   // departures, ELCs, call-ups) and a stale-high value wrongly rejects deals
   // that actually shed salary. Matches how applyTrade recomputes cap.
-  const incomingSalary = sumSalary(give.players, give.retainedAmounts)
-  const outgoingSalary = sumSalary(receive.players)
+  const incomingSalary = sumSalary(give.players.filter((p) => !isFarm(p)), give.retainedAmounts)
+  const outgoingSalary = sumSalary(receive.players.filter((p) => !isFarm(p)))
   const partnerCapUsed = rosterCapUsed(partnerTeam, partnerPlayers)
   const capAfter = partnerCapUsed + incomingSalary - outgoingSalary
   if (capAfter > partnerTeam.finances.salaryCap) {
@@ -722,13 +731,13 @@ export function evaluateProposal(args: {
       const pl = partnerPlayers.get(id)
       if (pl) post[groupOf(pl.position)]++
     }
-    for (const pl of give.players) post[groupOf(pl.position)]++
+    for (const pl of give.players) if (!isFarm(pl)) post[groupOf(pl.position)]++
     // One short up front is recallable from the farm; gutted is gutted.
     const MIN: Record<PositionGroup, number> = { F: 8, D: 4, G: 2 }
     for (const g of ['F', 'D', 'G'] as const) {
       const netOut =
-        receive.players.filter((pl) => groupOf(pl.position) === g).length -
-        give.players.filter((pl) => groupOf(pl.position) === g).length
+        receive.players.filter((pl) => !isFarm(pl) && groupOf(pl.position) === g).length -
+        give.players.filter((pl) => !isFarm(pl) && groupOf(pl.position) === g).length
       if (netOut > 0 && post[g] < MIN[g]) {
         const short = g === 'G' ? 'in the crease' : g === 'D' ? 'on the blue line' : 'up front'
         return {
@@ -781,7 +790,8 @@ export function evaluateProposal(args: {
   // Gain = what the partner receives (the user's "give" side).
   const gain =
     give.players.reduce((s, p) => {
-      const base = playerValue(p) * needBonus(p.position) * acquiringMult(p)
+      // A prospect fills no hole on tonight's roster — no positional-need premium.
+      const base = playerValue(p) * (isFarm(p) ? 1 : needBonus(p.position)) * acquiringMult(p)
       const bias = philosophyGainBias(philosophy, { kind: 'player', player: p })
       // Cap relief bonus: if the player's salary is retained by the other side,
       // the partner benefits from reduced cap hit.

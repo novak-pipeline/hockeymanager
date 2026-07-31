@@ -144,6 +144,38 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
   )
 }
 
+/** One selectable asset row in the builder. */
+type TradeAssetRow = TradePartnerView['players'][number]
+
+/**
+ * A4: the big club first, then the farm. AHL skaters and rights-held juniors are
+ * real trade assets — without them the GM can neither sell futures nor buy them.
+ */
+function groupTradeAssets(players: TradeAssetRow[]): Array<{ label: string | null; rows: TradeAssetRow[] }> {
+  const nhl = players.filter((p) => (p.assetClass ?? 'nhl') === 'nhl')
+  const farm = players.filter((p) => (p.assetClass ?? 'nhl') !== 'nhl')
+  const groups: Array<{ label: string | null; rows: TradeAssetRow[] }> = []
+  if (nhl.length > 0) groups.push({ label: null, rows: nhl })
+  if (farm.length > 0) groups.push({ label: 'Farm & prospects', rows: farm })
+  return groups
+}
+
+/** "AHL · WBS" / "JR · LDN" — where a non-roster asset actually plays. */
+function FarmTag({ row }: { row: TradeAssetRow }): JSX.Element | null {
+  const cls = row.assetClass ?? 'nhl'
+  if (cls === 'nhl') return null
+  const label = cls === 'ahl' ? 'AHL' : 'JR'
+  return (
+    <span
+      className="chip"
+      style={{ marginLeft: 6, fontSize: 9, opacity: 0.85 }}
+      title={cls === 'ahl' ? 'On the AHL affiliate' : 'Rights held — still playing junior/abroad'}
+    >
+      {label}{row.clubAbbr ? ` · ${row.clubAbbr}` : ''}
+    </span>
+  )
+}
+
 // ─── trade side summary (receive / give) ──────────────────────────────────────
 
 function TradeSideChips(props: {
@@ -780,61 +812,70 @@ function ProposeTab(props: {
             <div style={{ marginBottom: 10 }}>
               <div className="panel-title" style={{ marginBottom: 6 }}>Players</div>
               <div className="stack" style={{ gap: 4 }}>
-                {data.myPlayers.map((p) => {
-                  const selected = myPlayerIds.has(p.playerId)
-                  const ntc = p.noTradeClause
-                  return (
-                    <button
-                      key={p.playerId}
-                      type="button"
-                      disabled={ntc}
-                      onClick={() => !ntc && setMyPlayerIds(toggleSet(myPlayerIds, p.playerId))}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        width: '100%',
-                        padding: '5px 8px',
-                        background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
-                        border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
-                        borderRadius: 6,
-                        cursor: ntc ? 'not-allowed' : 'pointer',
-                        opacity: ntc ? 0.5 : 1,
-                        fontSize: 13,
-                        color: 'var(--text)',
-                        textAlign: 'left',
-                        gap: 8,
-                      }}
-                    >
-                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
-                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
-                        <span>
-                          <PlayerLink playerId={p.playerId} name={p.name} />
-                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                            {p.position} · {p.age}
+                {groupTradeAssets(data.myPlayers).flatMap((grp) => [
+                  ...(grp.label !== null
+                    ? [<div key={`h-${grp.label}`} className="panel-title" style={{ marginTop: 6, marginBottom: 2, opacity: 0.7 }}>{grp.label}</div>]
+                    : []),
+                  ...grp.rows.map((p) => {
+                    const selected = myPlayerIds.has(p.playerId)
+                    const ntc = p.noTradeClause
+                    return (
+                      <button
+                        key={p.playerId}
+                        type="button"
+                        disabled={ntc}
+                        onClick={() => !ntc && setMyPlayerIds(toggleSet(myPlayerIds, p.playerId))}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          width: '100%',
+                          padding: '5px 8px',
+                          background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
+                          border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
+                          borderRadius: 6,
+                          cursor: ntc ? 'not-allowed' : 'pointer',
+                          opacity: ntc ? 0.5 : 1,
+                          fontSize: 13,
+                          color: 'var(--text)',
+                          textAlign: 'left',
+                          gap: 8,
+                        }}
+                      >
+                        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                          <span>
+                            <PlayerLink playerId={p.playerId} name={p.name} />
+                            <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                              {p.position} · {p.age}
+                            </span>
+                            <FarmTag row={p} />
                           </span>
                         </span>
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                          {fmtMoney(p.salary)} / {p.yearsRemaining}yr
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+                            {p.salary > 0 ? `${fmtMoney(p.salary)} / ${p.yearsRemaining}yr` : 'unsigned'}
+                          </span>
+                          <ValuePill
+                            value={p.tradeValue}
+                            drivers={p.valueDrivers}
+                            estimated={p.valueEstimated}
+                            title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
+                          />
+                          {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                         </span>
-                        <ValuePill
-                          value={p.tradeValue}
-                          drivers={p.valueDrivers}
-                          estimated={p.valueEstimated}
-                          title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
-                        />
-                        {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
-                      </span>
-                    </button>
-                  )
-                })}
+                      </button>
+                    )
+                  }),
+                ])}
               </div>
               {/* DEPTH 3: shop the one selected player around the whole league */}
               {myPlayerIds.size === 1 && (() => {
                 const shopId = [...myPlayerIds][0]!
-                const shopName = data.myPlayers.find((p) => p.playerId === shopId)?.name ?? 'him'
+                const shopRow = data.myPlayers.find((p) => p.playerId === shopId)
+                const shopName = shopRow?.name ?? 'him'
+                // Shopping is a big-league exercise — nobody canvasses 31 GMs about a junior.
+                if ((shopRow?.assetClass ?? 'nhl') !== 'nhl') return null
                 return (
                   <button
                     type="button"
@@ -888,67 +929,73 @@ function ProposeTab(props: {
             <div style={{ marginBottom: 10 }}>
               <div className="panel-title" style={{ marginBottom: 6 }}>Players</div>
               <div className="stack" style={{ gap: 4 }}>
-                {partner.players.map((p) => {
-                  const selected = theirPlayerIds.has(p.playerId)
-                  const ntc = p.noTradeClause
-                  return (
-                    <button
-                      key={p.playerId}
-                      type="button"
-                      disabled={ntc}
-                      onClick={() => !ntc && setTheirPlayerIds(toggleSet(theirPlayerIds, p.playerId))}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        width: '100%',
-                        padding: '5px 8px',
-                        background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
-                        border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
-                        borderRadius: 6,
-                        cursor: ntc ? 'not-allowed' : 'pointer',
-                        opacity: ntc ? 0.5 : 1,
-                        fontSize: 13,
-                        color: 'var(--text)',
-                        textAlign: 'left',
-                        gap: 8,
-                      }}
-                    >
-                      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
-                        <PlayerFace faceId={p.faceId} name={p.name} size={24} />
-                        <span>
-                        <PlayerLink playerId={p.playerId} name={p.name} />
-                        <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                          {p.position} · {p.age}
-                        </span>
-                        {p.scouted && (
-                          <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
-                            {p.scouted.exact
-                              ? <OverallStars value={p.overall} />
-                              : (
-                                <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
-                                  <OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} />
-                                </span>
-                              )}
+                {groupTradeAssets(partner.players).flatMap((grp) => [
+                  ...(grp.label !== null
+                    ? [<div key={`h-${grp.label}`} className="panel-title" style={{ marginTop: 6, marginBottom: 2, opacity: 0.7 }}>{grp.label}</div>]
+                    : []),
+                    ...grp.rows.map((p) => {
+                    const selected = theirPlayerIds.has(p.playerId)
+                    const ntc = p.noTradeClause
+                    return (
+                      <button
+                        key={p.playerId}
+                        type="button"
+                        disabled={ntc}
+                        onClick={() => !ntc && setTheirPlayerIds(toggleSet(theirPlayerIds, p.playerId))}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          width: '100%',
+                          padding: '5px 8px',
+                          background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
+                          border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
+                          borderRadius: 6,
+                          cursor: ntc ? 'not-allowed' : 'pointer',
+                          opacity: ntc ? 0.5 : 1,
+                          fontSize: 13,
+                          color: 'var(--text)',
+                          textAlign: 'left',
+                          gap: 8,
+                        }}
+                      >
+                        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+                          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
+                          <span>
+                          <PlayerLink playerId={p.playerId} name={p.name} />
+                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+                            {p.position} · {p.age}
                           </span>
-                        )}
+                          <FarmTag row={p} />
+                          {p.scouted && (
+                            <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
+                              {p.scouted.exact
+                                ? <OverallStars value={p.overall} />
+                                : (
+                                  <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
+                                    <OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} />
+                                  </span>
+                                )}
+                            </span>
+                          )}
+                          </span>
                         </span>
-                      </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                        <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                          {fmtMoney(p.salary)} / {p.yearsRemaining}yr
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+                            {p.salary > 0 ? `${fmtMoney(p.salary)} / ${p.yearsRemaining}yr` : 'unsigned'}
+                          </span>
+                          <ValuePill
+                            value={p.tradeValue}
+                            drivers={p.valueDrivers}
+                            estimated={p.valueEstimated}
+                            title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
+                          />
+                          {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
                         </span>
-                        <ValuePill
-                          value={p.tradeValue}
-                          drivers={p.valueDrivers}
-                          estimated={p.valueEstimated}
-                          title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
-                        />
-                        {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
-                      </span>
-                    </button>
-                  )
-                })}
+                      </button>
+                    )
+                  }),
+                ])}
               </div>
             </div>
             {partner.picks.length > 0 && (
