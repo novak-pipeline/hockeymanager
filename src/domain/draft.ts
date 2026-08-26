@@ -42,4 +42,8 @@ export interface OffseasonState {
   draft: DraftState | null
   /** Day counter within the free-agency window (signings resolve day by day). */
   faDay: number
+  /** Day counter within the June re-signing window (offers are answered over
+   *  days, offer sheets run a live match clock). Optional so saves written
+   *  before the window existed load as day 0. */
+  resignDay?: number
 }

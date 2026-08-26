@@ -374,14 +374,96 @@ function AwardsPanel(props: { view: OffseasonView }): JSX.Element {
   )
 }
 
-// ─── re-sign stage ────────────────────────────────────────────────────────────
+// ─── re-sign stage: the June window (playtest §B) ─────────────────────────────
+
+/** The offer builder that sits under a re-sign row. Term is PRICED — moving the
+ *  years moves the number his camp needs to see (§B4), so the GM can watch the
+ *  bill for the cost certainty he's asking for. */
+function OfferBuilder(props: { row: ResignRowView; onDone: () => void }): JSX.Element {
+  const client = useClient()
+  const { row } = props
+  const priceFor = useCallback(
+    (y: number): number => row.priceByYears?.find((p) => p.years === y)?.salary ?? row.askSalary,
+    [row]
+  )
+  const [years, setYears] = useState(row.askYears)
+  const [salary, setSalary] = useState(() => priceFor(row.askYears))
+  const [busy, setBusy] = useState(false)
+
+  const asked = priceFor(years)
+  const delta = salary - asked
+  const maxYears = row.priceByYears?.length ?? 8
+
+  async function table(): Promise<void> {
+    setBusy(true)
+    const r = await client.submitResignOffer(row.playerId, salary, years)
+    setBusy(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else {
+      if (r.type === 'ok' && r.note) toast(r.note, 'info')
+      props.onDone()
+    }
+  }
+
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label className="small muted">Term</label>
+        <select
+          value={years}
+          onChange={(e) => {
+            const y = Number(e.target.value)
+            setYears(y)
+            setSalary(priceFor(y))
+          }}
+          style={{ background: 'var(--bg1)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px' }}
+        >
+          {Array.from({ length: maxYears }, (_, i) => i + 1).map((y) => (
+            <option key={y} value={y}>{y} yr — {fmtMoney(priceFor(y))}/yr</option>
+          ))}
+        </select>
+        <label className="small muted">AAV</label>
+        <input
+          type="number"
+          step={250000}
+          value={salary}
+          onChange={(e) => setSalary(Number(e.target.value))}
+          style={{ width: 130, background: 'var(--bg1)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: 4, padding: '2px 6px' }}
+        />
+        <button className="btn btn-primary" disabled={busy} onClick={() => void table()}>Table the offer</button>
+      </div>
+      <div className="small" style={{ color: delta < 0 ? 'var(--danger)' : 'var(--muted)' }}>
+        {years > row.askYears
+          ? `He asked for ${row.askYears} years. The ${years - row.askYears} extra ${years - row.askYears > 1 ? 'years are' : 'year is'} your cost certainty, not his — his camp prices ${years} years at ${fmtMoney(asked)}.`
+          : years < row.askYears
+            ? `Shorter than the ${row.askYears} years he wanted — cheaper per year, but he loses the security he asked for.`
+            : `His asking terms: ${fmtMoney(row.askSalary)} × ${row.askYears}.`}
+        {delta < 0 ? ` You are ${fmtMoney(-delta)} light.` : ''}
+      </div>
+    </div>
+  )
+}
 
 function ResignRow(props: {
   row: ResignRowView
   onRefetch: () => void
 }): JSX.Element {
   const nav = useNav()
+  const client = useClient()
   const { row } = props
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const act = async (fn: () => Promise<{ type: string; message?: string; note?: string }>, tone: 'success' | 'info'): Promise<void> => {
+    setBusy(true)
+    const r = await fn()
+    setBusy(false)
+    if (r.type === 'error') toast(r.message ?? 'That did not work.', 'error')
+    else {
+      if (r.note) toast(r.note, tone)
+      props.onRefetch()
+    }
+  }
 
   if (row.status === 'signed') {
     return (
@@ -419,29 +501,117 @@ function ResignRow(props: {
   const moraleColor = morale >= 75 ? 'var(--success)' : morale >= 40 ? 'var(--accent2)' : 'var(--danger)'
 
   return (
-    <tr>
-      <td>
-        <PlayerLink playerId={row.playerId} name={row.name} />
-      </td>
-      <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
-      <td className="num"><OverallStars value={row.overall} /></td>
-      <td className="num">{fmtMoney(row.currentSalary)}</td>
-      <td style={{ fontSize: 12 }}>
-        {fmtMoney(row.askSalary)} × {row.askYears}yr
-      </td>
-      <td style={{ color: moraleColor, fontSize: 12 }}>
-        {morale >= 75 ? 'Happy' : morale >= 40 ? 'Content' : 'Unsettled'}
-      </td>
-      <td>
-        <button
-          className="btn btn-primary"
-          style={{ padding: '3px 12px', fontSize: 12 }}
-          onClick={() => nav.navigate('negotiation', { playerId: row.playerId })}
-        >
-          Open talks →
-        </button>
-      </td>
-    </tr>
+    <>
+      <tr>
+        <td>
+          <PlayerLink playerId={row.playerId} name={row.name} />
+          {row.rights ? <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>{row.rights}</span> : null}
+        </td>
+        <td style={{ color: 'var(--muted)' }}>{row.position} · {row.age}</td>
+        <td className="num"><OverallStars value={row.overall} /></td>
+        <td className="num">{fmtMoney(row.currentSalary)}</td>
+        <td style={{ fontSize: 12 }}>
+          {fmtMoney(row.askSalary)} × {row.askYears}yr
+          {row.agentName ? <div className="muted" style={{ fontSize: 11 }}>{row.agentName}</div> : null}
+        </td>
+        <td style={{ color: moraleColor, fontSize: 12 }}>
+          {morale >= 75 ? 'Happy' : morale >= 40 ? 'Content' : 'Unsettled'}
+          {row.patience !== undefined && row.patience <= 25
+            ? <div style={{ color: 'var(--danger)', fontSize: 11 }}>camp losing patience</div>
+            : null}
+        </td>
+        <td>
+          <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+            <button
+              className="btn"
+              style={{ padding: '3px 10px', fontSize: 12 }}
+              disabled={!!row.pendingOffer}
+              onClick={() => setOpen((v) => !v)}
+            >
+              {open ? 'Close' : 'Offer'}
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ padding: '3px 10px', fontSize: 12 }}
+              onClick={() => nav.navigate('negotiation', { playerId: row.playerId })}
+            >
+              Sit down →
+            </button>
+          </div>
+        </td>
+      </tr>
+
+      {/* §B2 — the qualifying offer, and what walking away from it costs. */}
+      {row.qoStatus ? (
+        <tr>
+          <td colSpan={7} style={{ paddingTop: 0, borderTop: 'none' }}>
+            <div className="row small" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="muted">Qualifying offer {row.qualifyingOffer ? fmtMoney(row.qualifyingOffer) : ''}:</span>
+              {row.qoStatus === 'tendered' ? (
+                <span className="chip chip-success">Tendered — his rights are yours</span>
+              ) : row.qoStatus === 'declined' ? (
+                <span className="chip chip-danger">Walked away — he'll be unrestricted</span>
+              ) : (
+                <>
+                  <span className="chip chip-warn">Undecided</span>
+                  <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy}
+                    onClick={() => void act(() => client.tenderQualifyingOffer(row.playerId), 'success')}>Tender</button>
+                  <button className="btn" style={{ padding: '2px 8px', fontSize: 11 }} disabled={busy}
+                    onClick={() => void act(() => client.declineQualifyingOffer(row.playerId), 'info')}>Walk away</button>
+                </>
+              )}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+
+      {/* §B1 — what his camp is doing with the offer you tabled. */}
+      {row.pendingOffer ? (
+        <tr>
+          <td colSpan={7} style={{ paddingTop: 0, borderTop: 'none' }}>
+            <div className="small" style={{ color: 'var(--accent2)' }}>
+              Tabled: <strong>{fmtMoney(row.pendingOffer.salary)} × {row.pendingOffer.years}</strong> —{' '}
+              {row.pendingOffer.daysLeft <= 0
+                ? 'his camp answers today.'
+                : row.pendingOffer.daysLeft === 1
+                  ? 'his camp answers tomorrow.'
+                  : `his camp answers in ${row.pendingOffer.daysLeft} days.`}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+
+      {row.counter ? (
+        <tr>
+          <td colSpan={7} style={{ paddingTop: 0, borderTop: 'none' }}>
+            <div className="stack" style={{ gap: 4, padding: '6px 8px', background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)' }}>
+              <div className="small" style={{ fontStyle: 'italic' }}>{row.counter.note}</div>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="small">Their counter: <strong>{fmtMoney(row.counter.salary)} × {row.counter.years}</strong></span>
+                <button className="btn btn-primary" style={{ padding: '2px 10px', fontSize: 11 }} disabled={busy}
+                  onClick={() => void act(() => client.acceptResignCounter(row.playerId), 'success')}>Accept as written</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      ) : null}
+
+      {row.lastRefusal && !row.pendingOffer && !row.counter ? (
+        <tr>
+          <td colSpan={7} style={{ paddingTop: 0, borderTop: 'none' }}>
+            <div className="small muted" style={{ fontStyle: 'italic' }}>{row.lastRefusal}</div>
+          </td>
+        </tr>
+      ) : null}
+
+      {open && !row.pendingOffer ? (
+        <tr>
+          <td colSpan={7} style={{ paddingTop: 0, borderTop: 'none' }}>
+            <OfferBuilder row={row} onDone={() => { setOpen(false); props.onRefetch() }} />
+          </td>
+        </tr>
+      ) : null}
+    </>
   )
 }
 
@@ -458,7 +628,8 @@ function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => 
   return (
     <Panel title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={16} color="var(--amber)"><Icons.Warning /></Icon> Offer sheets on your RFAs</span>}>
       <div className="muted small" style={{ marginBottom: 8 }}>
-        Rival clubs have tendered offer sheets. Match the price to keep your player, or let him walk for the draft-pick compensation.
+        Rival clubs have tendered offer sheets. Match the price to keep your player, or let him walk for the draft-pick
+        compensation. The match window runs on the clock — let it expire and the decision is made for you.
       </div>
       <div className="stack">
         {props.sheets.map((s) => (
@@ -470,6 +641,13 @@ function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => 
                 Offer: <strong>{fmtMoney(s.salary)}</strong> × {s.years} · compensation if you pass:{' '}
                 {s.compRounds.length ? s.compRounds.map((r) => `R${r}`).join(' + ') : 'none'}
               </div>
+              {s.matchDaysLeft !== undefined ? (
+                <div className="small" style={{ marginTop: 2, color: s.matchDaysLeft <= 1 ? 'var(--danger)' : 'var(--amber)' }}>
+                  {s.matchDaysLeft <= 0
+                    ? 'Match window expires today.'
+                    : `${s.matchDaysLeft} day${s.matchDaysLeft > 1 ? 's' : ''} left to match.`}
+                </div>
+              ) : null}
             </div>
             <button className="btn btn-primary" disabled={busy} onClick={() => act('match', s)}>Match</button>
             <button className="btn" disabled={busy} onClick={() => act('decline', s)}>Let him walk</button>
@@ -482,17 +660,35 @@ function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => 
 
 function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX.Element {
   const { view } = props
+  const day = view.resignDay ?? 0
+  const total = view.resignWindowDays ?? 0
+  const title = total > 0
+    ? `Re-sign your players — window day ${day} of ${total}`
+    : 'Re-sign players'
 
   if (view.expiring.length === 0) {
     return (
-      <Panel title="Re-sign players">
+      <Panel title={title}>
         <Notice kind="info">No expiring contracts to negotiate.</Notice>
       </Panel>
     )
   }
 
+  const waiting = view.expiring.filter((r) => r.pendingOffer).length
+  const countered = view.expiring.filter((r) => r.counter).length
+  const openQos = view.expiring.filter((r) => r.qoStatus === 'open').length
+
   return (
-    <Panel title="Re-sign players">
+    <Panel title={title}>
+      {total > 0 ? (
+        <div className="muted small" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+          Offers are taken away and answered over the next day or two — nobody signs on the spot.
+          {' '}July 1 arrives after {Math.max(0, total - day)} more {total - day === 1 ? 'press' : 'presses'} of Continue.
+          {waiting > 0 ? ` ${waiting} offer${waiting > 1 ? 's' : ''} out.` : ''}
+          {countered > 0 ? ` ${countered} counter${countered > 1 ? 's' : ''} waiting on you.` : ''}
+          {openQos > 0 ? ` ${openQos} qualifying offer${openQos > 1 ? 's' : ''} undecided.` : ''}
+        </div>
+      ) : null}
       <div className="table-wrap">
         <table className="table">
           <thead>

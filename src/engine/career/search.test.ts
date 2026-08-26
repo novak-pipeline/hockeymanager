@@ -411,8 +411,9 @@ describe('summer takeover (#145) + camps (M3)', () => {
     const data = generateLeague({ seed: 313 })
     const c = new Career(data, 313, data.league.teams[0])
     c.startAtOffseason()
-    // Advance resign -> freeAgency (dev camp auto-resolves on the way).
-    for (let i = 0; i < 5; i++) {
+    // Advance resign -> freeAgency (dev camp auto-resolves on the way; the
+    // re-signing window is a handful of days of its own).
+    for (let i = 0; i < 14; i++) {
       if (c.getOffseason()?.stage === 'freeAgency') break
       c.advanceOffseason()
     }
@@ -704,7 +705,7 @@ describe('negotiation sessions (DEPTH 1)', () => {
 
   it('free agents negotiate too, and signing pulls them off the market', () => {
     const c = summerCareer()
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 14; i++) {
       if (c.getOffseason()?.stage === 'freeAgency') break
       c.advanceOffseason()
     }

@@ -155,13 +155,87 @@ export function askTerms(player: Player, year: number): { salary: number; years:
   return { salary, years }
 }
 
+/* ─────────────────────────── the price of term ─────────────────────────── */
+
+/** Age at which a player is free to sign anywhere (see contractStatus). */
+const UFA_AGE = 27
+
+/**
+ * TERM IS A CONCESSION THE CLUB ASKS FOR, NOT A GIFT IT GIVES.
+ *
+ * A year of term past what the player asked for is a year the CLUB wants: cap
+ * certainty, his prime locked up, and — if it runs past his UFA age — a year of
+ * open-market freedom the club is buying off him. Real contracts price that:
+ * the AAV goes UP with term, it does not stay flat. (The playtest found the
+ * opposite — offering the ask AAV over MORE years was an automatic yes, which
+ * is backwards and made every re-signing free.)
+ *
+ * Returns a multiplier on his asking AAV — the number he actually needs to see
+ * for THAT term. 1.0 at exactly the term he asked for. Shorter deals are a
+ * little cheaper per year (he keeps his optionality), but only a little.
+ */
+export function termPriceMultiplier(
+  player: Player,
+  askYears: number,
+  years: number
+): number {
+  let mult = 1
+  if (years > askYears) {
+    for (let i = askYears; i < years; i++) {
+      const ageThatSeason = player.age + i
+      // Base cost of an extra guaranteed year the club wanted and he didn't.
+      let step = 0.045
+      // A year at or past UFA age is a year of free agency he is selling.
+      if (ageThatSeason >= UFA_AGE) step += 0.03
+      // Decline years are the ones clubs regret; his camp prices them highest.
+      if (ageThatSeason >= 31) step += 0.015 * (ageThatSeason - 30)
+      mult += step
+    }
+  } else if (years < askYears) {
+    mult -= 0.03 * (askYears - years)
+  }
+  return Math.max(0.88, Math.min(2.2, mult))
+}
+
+/**
+ * How much of the security he asked for a shorter deal actually delivers, 0–1.
+ * Falling short of his term costs real points with players who want roots —
+ * veterans and the loyal ones — so a bridge deal has to be bought with money.
+ */
+export function termSecurityScore(
+  player: Player,
+  askYears: number,
+  years: number
+): number {
+  if (years >= askYears) return 1
+  const appetite =
+    (player.age >= 30 ? 0.9 : player.age >= 26 ? 0.7 : 0.5) +
+    (player.personality.loyalty - 10.5) / 19 * 0.2
+  const shortfall = (askYears - years) / Math.max(1, askYears)
+  return Math.max(0, 1 - shortfall * appetite)
+}
+
+/**
+ * The qualifying offer a club must tender to keep a restricted free agent's
+ * rights (real CBA ladder, by prior salary: 110% under $1M, 105% to $2M, 100%
+ * above). Let the deadline pass without tendering and he walks to the open
+ * market for nothing — the club has walked away.
+ */
+export function qualifyingOffer(player: Player): number {
+  const prior = player.contract.salary
+  const pct = prior < 1_000_000 ? 1.1 : prior < 2_000_000 ? 1.05 : 1.0
+  return Math.max(LEAGUE_MIN_SALARY, roundTo25k(prior * pct))
+}
+
 /**
  * Does the player take the offer? Offer value is measured against the ask —
- * salary weighted 75%, term 25%, each ratio capped so overpaying one dimension
- * can't fully buy out a lowball on the other. The acceptance threshold sits
- * near 95% of ask, nudged by personality (ambitious players hold out, loyal
- * players settle) plus a small rng wiggle, clamped so a full-ask offer always
- * lands and an 85%-value offer never does.
+ * money weighted 75%, security 25%. The money is measured against the price of
+ * the TERM OFFERED (termPriceMultiplier), not the bare ask, so buying extra
+ * years costs extra dollars instead of being free value. At exactly his asking
+ * term the arithmetic is unchanged: full ask = 1.0. The acceptance threshold
+ * sits near 95% of ask, nudged by personality (ambitious players hold out,
+ * loyal players settle) plus a small rng wiggle, clamped so a full-ask offer
+ * always lands and an 85%-value offer never does.
  */
 export function offerAcceptable(
   player: Player,
@@ -169,9 +243,9 @@ export function offerAcceptable(
   ask: { salary: number; years: number },
   rng: Rng
 ): boolean {
-  const ratio = (offered: number, asked: number): number =>
-    asked <= 0 ? 1 : Math.min(1.4, offered / asked)
-  const value = 0.75 * ratio(offer.salary, ask.salary) + 0.25 * ratio(offer.years, ask.years)
+  const required = Math.max(1, ask.salary * termPriceMultiplier(player, ask.years, offer.years))
+  const money = Math.min(1.4, offer.salary / required)
+  const value = 0.75 * money + 0.25 * termSecurityScore(player, ask.years, offer.years)
 
   let threshold =
     0.95 +

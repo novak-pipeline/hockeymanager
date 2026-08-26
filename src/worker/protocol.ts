@@ -370,6 +370,14 @@ export type WorkerRequestBody =
   | { type: 'matchOfferSheet'; playerId: string }
   /** Let an offer-sheeted RFA walk and take the draft-pick compensation. */
   | { type: 'declineOfferSheet'; playerId: string }
+  /** Playtest §B1: table an offer to one of your own expiring players. It is
+   *  answered over DAYS, not on the spot — the response arrives by inbox. */
+  | { type: 'submitResignOffer'; playerId: string; salary: number; years: number }
+  /** §B1: sign the terms his camp countered with, as written. */
+  | { type: 'acceptResignCounter'; playerId: string }
+  /** §B2: tender / walk away from an expiring RFA's qualifying offer. */
+  | { type: 'tenderQualifyingOffer'; playerId: string }
+  | { type: 'declineQualifyingOffer'; playerId: string }
   /** Read the live in-season waiver wire (AI castoffs claimable by the user). */
   | { type: 'getWaiverWire' }
   /** Read the leaguewide ticker feed (recent transactions + notable streaks). */

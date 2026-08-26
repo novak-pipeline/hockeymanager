@@ -24,7 +24,7 @@
 import type { Player } from '@domain'
 import { ratedOverall } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
-import { askTerms, contractStatus } from './contracts'
+import { askTerms, contractStatus, termPriceMultiplier, termSecurityScore } from './contracts'
 
 /* ────────────────────────────── offer shape ────────────────────────────── */
 
@@ -274,6 +274,11 @@ const clauseRank: Record<ClauseLevel, number> = { none: 0, modified: 1, full: 2 
  * What this offer is worth to THIS player, as a fraction of his ask (~1.0 =
  * met). Salary and term are weighted by his priorities; clause protection
  * and signing bonus are worth real points to players who care.
+ *
+ * Term is priced, not gifted: the money is measured against what the TERM
+ * OFFERED costs (termPriceMultiplier), so tacking extra years onto the asking
+ * AAV lowers the offer's worth instead of raising it. Meeting the ask exactly
+ * is still exactly 1.0.
  */
 export function offerValue(player: Player, offer: ContractOffer, ask: ContractOffer): number {
   const w = priorityWeights(player)
@@ -284,9 +289,10 @@ export function offerValue(player: Player, offer: ContractOffer, ask: ContractOf
   const moneyShare = 0.45 + w.money * 0.6
   const termShare = 0.2 + w.term * 0.5
   const norm = moneyShare + termShare
+  const requiredSalary = ask.salary * termPriceMultiplier(player, ask.years, offer.years)
   let value =
-    (moneyShare / norm) * ratio(offer.salary, ask.salary) +
-    (termShare / norm) * ratio(offer.years, ask.years)
+    (moneyShare / norm) * ratio(offer.salary, requiredSalary) +
+    (termShare / norm) * termSecurityScore(player, ask.years, offer.years)
 
   // Clause protection, measured against what he asked for: short of the ask
   // costs a clause-hungry veteran real points; exceeding it adds goodwill.
@@ -384,9 +390,11 @@ export function evaluateRound(
     }
 
     lines.push(
-      insulted
-        ? `"${fmtM(offer.salary)}? I have to assume that's a typo. Don't waste my client's summer."`
-        : `"That's not a serious number. We're asking ${fmtM(state.ask.salary)} on ${state.ask.years} years for a reason."`
+      offer.years > state.ask.years
+        ? `"${fmtM(offer.salary)} over ${offer.years} years? You're asking him to sign away ${offer.years - state.ask.years} extra year${offer.years - state.ask.years > 1 ? 's' : ''} at the price of ${state.ask.years}. Term costs money — it doesn't save you any."`
+        : insulted
+          ? `"${fmtM(offer.salary)}? I have to assume that's a typo. Don't waste my client's summer."`
+          : `"That's not a serious number. We're asking ${fmtM(state.ask.salary)} on ${state.ask.years} years for a reason."`
     )
     if (agent.comparableFocus > 0.45 && ctx.comparables.length > 0) {
       const c = ctx.comparables[0]
@@ -424,6 +432,16 @@ export function evaluateRound(
       ? `"We're close. Split the difference and we can shake hands today."`
       : `"The structure works — the number doesn't yet. We've come to ${fmtM(ask.salary)}; meet us there."`
   )
+
+  // Term is a concession the CLUB is asking for. Say so, with the number.
+  if (offer.years > state.ask.years) {
+    const extra = offer.years - state.ask.years
+    const priced = Math.round((state.ask.salary * termPriceMultiplier(player, state.ask.years, offer.years)) / 25_000) * 25_000
+    lines.push(
+      `"You want ${extra} year${extra > 1 ? 's' : ''} past what we asked for — that's your cost certainty, not his. ` +
+      `${offer.years} years is ${fmtM(priced)} a season, not ${fmtM(state.ask.salary)}."`
+    )
+  }
 
   // Cite a comparable when the money is the sticking point.
   if (agent.comparableFocus > 0.35 && ctx.comparables.length > 0 && offer.salary < state.ask.salary) {

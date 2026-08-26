@@ -545,6 +545,22 @@ export class SimClient {
     return this.send({ type: 'declineOfferSheet', playerId })
   }
 
+  submitResignOffer(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
+    return this.send({ type: 'submitResignOffer', playerId, salary, years })
+  }
+
+  acceptResignCounter(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'acceptResignCounter', playerId })
+  }
+
+  tenderQualifyingOffer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'tenderQualifyingOffer', playerId })
+  }
+
+  declineQualifyingOffer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'declineQualifyingOffer', playerId })
+  }
+
   getWaiverWire(): Promise<WorkerResponse> {
     return this.send({ type: 'getWaiverWire' })
   }
