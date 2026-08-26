@@ -203,18 +203,23 @@ function BestAvailable(props: {
                 <td>
                   <PotentialStars stars={p.potentialStars} />
                 </td>
-                <td className="small">
+                {/* E2: the bare "#38 ▼" read as a contradiction next to a 5★
+                    potential grade. The verdict now says itself in words. */}
+                <td className="small" style={{ maxWidth: 230 }}>
                   {p.scoutRank
-                    ? <span
-                        title={
-                          p.scoutVerdict === 'higher' ? 'Your scouts are HIGHER on him than the board'
-                          : p.scoutVerdict === 'lower' ? 'Your scouts are LOWER on him than the board'
-                          : 'Your scouts agree with the board'
-                        }
-                        style={{ color: p.scoutVerdict === 'higher' ? 'var(--success)' : p.scoutVerdict === 'lower' ? 'var(--danger)' : 'var(--muted)' }}
-                      >
-                        #{p.scoutRank}{p.scoutVerdict === 'higher' ? ' ▲' : p.scoutVerdict === 'lower' ? ' ▼' : ''}
-                      </span>
+                    ? <>
+                        <span
+                          title={p.scoutNote}
+                          style={{ color: p.scoutVerdict === 'higher' ? 'var(--success)' : p.scoutVerdict === 'lower' ? 'var(--danger)' : 'var(--muted)' }}
+                        >
+                          #{p.scoutRank}{p.scoutVerdict === 'higher' ? ' ▲' : p.scoutVerdict === 'lower' ? ' ▼' : ''}
+                        </span>
+                        {p.scoutNote && (
+                          <div className="muted" style={{ fontSize: 10, lineHeight: 1.3, marginTop: 1 }} title={p.scoutNote}>
+                            {p.scoutNote}
+                          </div>
+                        )}
+                      </>
                     : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
                 <td className="num small" style={{ color: p.knowledge >= 60 ? 'var(--success)' : p.knowledge >= 30 ? 'var(--accent)' : 'var(--muted)' }}

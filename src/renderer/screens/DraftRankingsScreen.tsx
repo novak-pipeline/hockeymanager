@@ -255,6 +255,11 @@ function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; 
                 <PlayerLink playerId={p.playerId} name={p.name} />
                 {!p.seen && <span className="muted small" title="Not yet scouted"> · unseen</span>}
                 {p.eligibility === 'reentry' && <span className="muted small" title="Re-entry eligible"> · RE</span>}
+                {/* E2: an arrow on its own reads as a contradiction next to a high
+                    potential grade — the staff's position is stated in words. */}
+                {p.verdict !== 'inline' && (
+                  <div className="muted" style={{ fontSize: 10, lineHeight: 1.3 }}>{p.note}</div>
+                )}
               </td>
               <td style={{ textAlign: 'center' }}>{p.age}</td>
               <td style={{ textAlign: 'center' }}>{p.position}</td>

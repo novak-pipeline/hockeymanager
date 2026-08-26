@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, draftRoundLabel, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, draftRoundLabel, perceivedCeiling, productionPremium, productionRankBonus, productionWeight, projectionHedge, type RankInput } from './draftRankings'
 
 describe('draftRoundLabel', () => {
   it('maps a full-ordering rank to a round/standing', () => {
@@ -79,7 +79,17 @@ describe('analystRank', () => {
     // No sample → neutral.
     expect(productionPremium(0, false, 0.30)).toBe(0)
     // Bounded — production is a strong driver but still can't fully override pedigree.
-    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(24)
+    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(28)
+  })
+  it('productionPremium keeps separating prospects past 2.5x par (no saturation)', () => {
+    // The old linear curve flattened at its cap around 2.5x par, so a historic
+    // season read the same as a merely very good one — which is how a 141-point
+    // 18-year-old came out ranked #60. Each further doubling must still register.
+    const good = productionPremium(0.55, false, 0.30) // ~0.75x par
+    const great = productionPremium(1.10, false, 0.30) // ~1.5x par
+    const historic = productionPremium(2.20, false, 0.30) // ~3x par
+    expect(great).toBeGreaterThan(good + 5)
+    expect(historic).toBeGreaterThan(great + 5)
   })
   it('productionPremium is age-adjusted — a younger producer gets more credit', () => {
     // Same NHLe-translated output: a 17-year-old is rated above a passed-over 20yo.
@@ -108,6 +118,89 @@ describe('analystRank', () => {
     expect(perceivedCeiling(78, 17)).toBeLessThan(88)
     // Only a genuinely elite true ceiling reaches the top.
     expect(perceivedCeiling(95, 18)).toBeGreaterThanOrEqual(88)
+  })
+
+  // E1 (playtest 2026-07-31): the board ignored production. A draft-eligible kid
+  // with a 141-point season was ranked #60 behind prospects who had done nothing,
+  // because the score was tools-only. Production is now a first-class ranking term.
+  describe('production drives the board', () => {
+    /** 64 tools-ranked prospects; `elite` sits in the BOTTOM THIRD on tools. */
+    const field = (eliteProduction: number): RankInput[] => [
+      ...Array.from({ length: 64 }, (_, i) => ({
+        id: `p${i}`,
+        ceiling: 88 - i * 0.5, // p0 best tools … p63 worst
+        current: 66 - i * 0.3,
+        position: 'C',
+        production: 0,
+      })),
+      { id: 'elite', ceiling: 66, current: 48, position: 'C', production: eliteProduction },
+    ]
+
+    it('an elite producer cannot rank outside the top 25', () => {
+      // productionRankBonus for a 2x-par 18-year-old — the Fyodorov case.
+      const bonus = productionRankBonus(2.2, false, 0.24, 18)
+      expect(bonus).toBeGreaterThan(14)
+      for (const phase of ['preliminary', 'midseason', 'final'] as const) {
+        const rank = analystRank(field(bonus), phase).indexOf('elite') + 1
+        expect(rank).toBeGreaterThan(0)
+        expect(rank).toBeLessThanOrEqual(25)
+      }
+      // …and with production ignored (the old behaviour) the same prospect sinks
+      // deep into the board, which is exactly the bug.
+      expect(analystRank(field(0), 'final').indexOf('elite') + 1).toBeGreaterThan(40)
+    })
+
+    it('a no-show slides below an equal-tools prospect who produced', () => {
+      const inputs: RankInput[] = [
+        { id: 'quiet', ceiling: 80, current: 60, position: 'C', production: productionRankBonus(0.3, false, 0.30, 18) },
+        { id: 'loud', ceiling: 80, current: 60, position: 'C', production: productionRankBonus(1.3, false, 0.30, 18) },
+      ]
+      for (const phase of ['preliminary', 'midseason', 'final'] as const) {
+        expect(analystRank(inputs, phase).indexOf('loud')).toBeLessThan(analystRank(inputs, phase).indexOf('quiet'))
+      }
+    })
+
+    it('weights production more heavily as the body of work grows', () => {
+      expect(productionWeight('preliminary')).toBeLessThan(productionWeight('midseason'))
+      expect(productionWeight('midseason')).toBeLessThan(productionWeight('final'))
+    })
+
+    it('tools still matter — production alone does not reorder the whole board', () => {
+      // Equal (strong) production, very different tools: the better prospect wins.
+      const prod = productionRankBonus(1.4, false, 0.30, 18)
+      const inputs: RankInput[] = [
+        { id: 'tools', ceiling: 88, current: 68, position: 'C', production: prod },
+        { id: 'raw', ceiling: 58, current: 42, position: 'C', production: prod },
+      ]
+      for (const phase of ['preliminary', 'midseason', 'final'] as const) {
+        expect(analystRank(inputs, phase).indexOf('tools')).toBeLessThan(analystRank(inputs, phase).indexOf('raw'))
+      }
+    })
+  })
+
+  describe('productionRankBonus', () => {
+    it('is 0 for no sample, so goalies sit at par rather than being penalised', () => {
+      expect(productionRankBonus(0, false, 0.30)).toBe(0)
+    })
+    it('is league-strength translated — the same rate is worth more in a tougher league', () => {
+      expect(productionRankBonus(1.2, false, 0.40)).toBeGreaterThan(productionRankBonus(1.2, false, 0.20))
+    })
+    it('scales by doublings of the NHLe rate, not linearly', () => {
+      const par = productionRankBonus(0.22 / 0.30, false, 0.30)
+      const twice = productionRankBonus(0.44 / 0.30, false, 0.30)
+      const fourTimes = productionRankBonus(0.88 / 0.30, false, 0.30)
+      expect(Math.abs(par)).toBeLessThan(1) // par ⇒ neutral
+      expect(twice - par).toBeGreaterThan(12)
+      // A second doubling is worth about the same again (log-scaled, not saturating).
+      expect(fourTimes - twice).toBeGreaterThan(12)
+    })
+    it('credits a younger producer more and does not punish a young no-show harder', () => {
+      expect(productionRankBonus(1.2, false, 0.30, 17)).toBeGreaterThan(productionRankBonus(1.2, false, 0.30, 20))
+      expect(productionRankBonus(0.25, false, 0.30, 17)).toBe(productionRankBonus(0.25, false, 0.30, 20))
+    })
+    it('rewards a defenceman for less scoring than a forward', () => {
+      expect(productionRankBonus(0.9, true, 0.30)).toBeGreaterThan(productionRankBonus(0.9, false, 0.30))
+    })
   })
 
   it('docks re-entry prospects vs equal first-time-eligible ones', () => {

@@ -857,12 +857,22 @@ export function buildDraftClassFromPlayers(args: {
   eligible: Player[]
   count: number
   rng: Rng
+  /**
+   * Signed value-point bonus for what a prospect has DONE (see
+   * `productionRankBonus`) — NHLe-translated so leagues are comparable. Without
+   * it this ordering is pure hidden potential, which is how a 141-point
+   * 18-year-old came out ranked #60 on draft day. Omitted → tools-only (keeps the
+   * generated-league path, which has no feeder-league stat lines, unchanged).
+   */
+  productionOf?: (p: Player) => number
 }): DraftClass {
-  const { year, eligible, count, rng } = args
+  const { year, eligible, count, rng, productionOf } = args
   const consensus = eligible.map((p, i) => ({
     playerId: p.id,
     index: i,
-    score: overall(computeComposites(p.potential, p.role, p.position), p.position) + rng.normal(0, 4),
+    score: overall(computeComposites(p.potential, p.role, p.position), p.position)
+      + (productionOf ? productionOf(p) : 0)
+      + rng.normal(0, 4),
   }))
   consensus.sort((a, b) => b.score - a.score || a.index - b.index)
   const prospects: DraftProspect[] = consensus
