@@ -69,6 +69,10 @@ import {
   expectedPointsFor,
   generateDraftClass,
   processRetirements,
+  retirementFormFromStats,
+  retirementProbability,
+  washoutProbability,
+  type RetirementForm,
 } from '@engine/league/offseason'
 import { tickInSeasonDevelopment } from '@engine/league/inSeasonDevelopment'
 import {
@@ -2079,6 +2083,14 @@ export class Career {
   private static readonly COACH_MARKET_NS = 9262
   /** How many available coaches to surface in the hiring market. */
   private static readonly COACH_MARKET_SIZE = 16
+
+  /**
+   * Rng namespace for the orphan-sweep retirement draw. Unused elsewhere.
+   * Keyed by (seed, year, playerId) rather than drawn from a stream, because
+   * reconcileOrphans runs both at rollover and on load — a stream draw would
+   * shift every downstream result depending on how often the save was opened.
+   */
+  private static readonly ORPHAN_RETIRE_NS = 9263
 
   /**
    * Generate a full TeamStaff for every NHL-tier team.
@@ -5353,6 +5365,78 @@ export class Career {
     this.ensureJerseyNumbers()
   }
 
+  /**
+   * Last-resort depth signings for the GM's own club, run as free agency closes.
+   *
+   * AI clubs are filled by {@link aiFreeAgencyDay}, which deliberately skips the
+   * user's team — his roster is his business. But the season cannot open with an
+   * illegal one, and a summer of retirements and departures can leave a hole the
+   * GM never noticed. Rather than hard-stopping on the first game day with free
+   * agents still on the board, the AGM signs the cheapest bodies that close the
+   * gap and puts a note in the mail. It no-ops whenever the GM has done his job.
+   */
+  private backfillUserRoster(): void {
+    const grpOf = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
+    // One body past the legal minimum, so a single injury is not an instant crisis.
+    const NEED: Record<'F' | 'D' | 'G', number> = { F: 13, D: 7, G: 3 }
+    // Mirrors MAX_ROSTER_SIZE in contracts.ts, which signPlayer enforces by throw.
+    const SIGNABLE_ROSTER_MAX = 26
+    const nhl = this.userTeam
+    const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+    const orgCount = (grp: 'F' | 'D' | 'G'): number => {
+      const count = (roster: PlayerId[]): number =>
+        roster.reduce((n, id) => {
+          const p = this.data.players.get(id)
+          return p && grpOf(p) === grp ? n + 1 : n
+        }, 0)
+      return count(nhl.roster) + (ahl ? count(ahl.roster) : 0)
+    }
+
+    const signed: Player[] = []
+    for (const grp of ['G', 'D', 'F'] as const) {
+      while (orgCount(grp) < NEED[grp]) {
+        if (this.orgContractCount(this.userTeamId) >= ORG_CONTRACT_LIMIT) break
+        // signPlayer THROWS on a full roster or an over-cap deal; every guard
+        // below mirrors its own arithmetic so a depth signing can never take the
+        // offseason down.
+        if (nhl.roster.length >= SIGNABLE_ROSTER_MAX) break
+        // Cheapest first: this is depth, not a shopping spree.
+        const cand = this.faPool
+          .map((id) => this.data.players.get(id))
+          .filter((p): p is Player => !!p && p.retiredYear === undefined && grpOf(p) === grp)
+          .sort((a, b) => askTerms(a, this.year).salary - askTerms(b, this.year).salary || (a.id < b.id ? -1 : 1))[0]
+        if (!cand) break // the market is genuinely empty at this position
+        const salary = askTerms(cand, this.year).salary
+        const capNow = Math.max(capUsedFor(nhl, this.data.players), this.userCapUsed() + this.userDeadCap)
+        if (capNow + salary > nhl.finances.salaryCap) break
+        signPlayer({ team: nhl, player: cand, salary, years: 1, year: this.year, players: this.data.players })
+        this.faPool = this.faPool.filter((f) => f !== cand.id)
+        this.lockerArrival(nhl.id, cand.id)
+        const tx = recordTransaction(this.transactionLedger, {
+          day: this.currentDay,
+          year: this.year,
+          kind: 'signing',
+          teamIds: [nhl.id as string],
+          summary: `${nhl.abbreviation} sign ${cand.position} ${cand.name} ($${(salary / 1e6).toFixed(2)}M × 1y, depth).`,
+        })
+        this.transactionLedger = tx.ledger
+        signed.push(cand)
+      }
+    }
+    if (signed.length === 0) return
+    repairLines(nhl, this.data.players)
+    nhl.finances.capUsed = capUsedFor(nhl, this.data.players)
+    this.pushNews(
+      'contract',
+      `We were short — ${signed.length} depth deal${signed.length > 1 ? 's' : ''} done`,
+      `Free agency closed with holes in the organisation, so we filled them before camp: ` +
+      `${signed.map((p) => `${p.name} (${p.position}, ${p.age})`).join(', ')}. ` +
+      `All one-year deals at the going rate — replace them whenever you like.`,
+      { teamId: nhl.id as string },
+    )
+  }
+
   /** If the user's club cannot ice a legal lineup (12 healthy F / 6 D / 2 G)
    *  even after pulling every healthy AHL body up, return a plain-English,
    *  actionable message; otherwise null. Counts the AHL as available depth
@@ -5899,6 +5983,22 @@ export class Career {
     if (at) args.ahl = at
     if (wt) args.world = wt
     return combinedDevProduction(args)
+  }
+
+  /**
+   * The season just played, in the shape the retirement curve wants. Read from
+   * the live totals rather than p.stats, which does not hold this season until
+   * startNewSeason archives it — without this a retiring veteran would be
+   * judged on a year-old sample.
+   */
+  private retirementForm(p: Player, worldStrength: Map<string, number>): RetirementForm {
+    const perf = this.combinedDevPerformance(p.id, worldStrength)
+    const nhl = this.totals.get(p.id)
+    const nhlGp = this.gp.get(p.id) ?? 0
+    const form: RetirementForm = { gamesPlayed: perf.gamesPlayed, points: perf.points }
+    if (perf.savePct !== undefined) form.savePct = perf.savePct
+    if (nhl && nhlGp > 0) form.toiPerGame = nhl.toi / nhlGp
+    return form
   }
 
   /** Combined games played across NHL + AHL + wider world (ice-time for dev). */
@@ -6746,6 +6846,10 @@ export class Career {
           teams: this.data.teams,
           year: this.year,
           rng,
+          // The season just finished is not in p.stats yet (archiveSeasonStats
+          // runs at startNewSeason), so hand the curve the live totals: a
+          // 39-year-old who just put up points and played 70 games plays on.
+          form: (p) => this.retirementForm(p, offseasonWorldStrength),
         })
         for (const id of retired.retired.slice(0, 8)) {
           const p = this.resolve(id)
@@ -7266,6 +7370,9 @@ export class Career {
           for (const c of [...this.arbitrationCases]) this.acceptArbitration(c.playerId)
           for (const c of [...this.arbitrationCases]) this.walkAwayArbitration(c.playerId) // cap-blocked leftovers walk
           this.runWorldFreeAgency()
+          // Nobody fills the GM's own roster but the GM — except when he has left
+          // it illegal and the market is about to close behind him.
+          this.backfillUserRoster()
           // The window's shut; unresolved standing offers lapse. Any offer sheet
           // still pending gets its final verdict now rather than vanishing.
           this.faPendingOffers = []
@@ -7780,9 +7887,30 @@ export class Career {
       // Expired (or a contract with no resolvable club): retire the ones whose
       // careers are plainly finished; list everyone else as a free agent so the
       // GM can actually sign them.
+      //
+      // This used to be a flat `age >= 37`, which quietly made every unsigned
+      // veteran's retirement a certainty — the real reason the same franchise
+      // names hung them up on schedule every save. It now asks the same hazard
+      // curve the offseason does. Still replay-safe: the draw is a pure function
+      // of (seed, year, player), so running this sweep twice in a year — at
+      // rollover and again on load — always reaches the same verdict and never
+      // touches a shared Rng stream.
       const ovr = ratedOverall(p)
-      const done = p.age >= 37 || (p.age >= 34 && ovr < 74) || (p.age >= 31 && ovr < 58)
-      if (done) {
+      const chance = Math.max(
+        retirementProbability({
+          age: p.age,
+          ovr,
+          position: p.position,
+          role: p.role,
+          yearsRemaining: 0, // he is on nobody's books — that is why he is here
+          form: retirementFormFromStats(p),
+          injuryGamesRemaining: p.injuryStatus?.gamesRemaining,
+          injuryProneness: p.injuryProneness,
+        }),
+        washoutProbability(p.age, ovr),
+      )
+      const draw = new Rng(deriveSeed(this.seed, Career.ORPHAN_RETIRE_NS, this.year, Career.pidNum(id)))
+      if (draw.chance(chance)) {
         p.retiredYear = this.year
         retirees.push(p)
       } else {

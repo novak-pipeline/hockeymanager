@@ -30,6 +30,8 @@ function readSaveJson(path: string): string {
 }
 import type { PlayerId, SeasonStats } from '@domain'
 import { generateLeague } from '@data/generate'
+import { ratedOverall } from '@engine/ratings/composites'
+import { expectedPointsFor } from '@engine/league/offseason'
 import { Career } from './career'
 
 /** A zeroed NHL season line pinning a player to a club in year `season`. */
@@ -101,9 +103,11 @@ describe('rollover — no silent vanish', () => {
     club.roster = club.roster.filter((id) => id !== starId)
 
     // Orphan #2: an expired, plainly-finished veteran lingering in the map.
+    // 44 and unsigned — the one profile where retirement is near-certain rather
+    // than a roll (see the retirement hazard curve in offseason.ts).
     const vetId = club.roster[3] as PlayerId
     const vet = data.players.get(vetId)!
-    vet.age = 40
+    vet.age = 44
     vet.contract = { ...vet.contract, yearsRemaining: 0 }
     club.roster = club.roster.filter((id) => id !== vetId)
 
@@ -123,6 +127,55 @@ describe('rollover — no silent vanish', () => {
     expect(mentioned).toBe(true)
 
     // Invariant: nobody in the NHL ecosystem is invisible.
+    expect(invisibleNhlPlayers(career).count).toBe(0)
+  })
+
+  /**
+   * Regression (playtest F1): the orphan sweep used to retire every unsigned
+   * 37+ veteran on a flat `age >= 37`, so the league's old names hung them up
+   * on schedule in every save. Being 38 and between contracts is a reason to
+   * look for work, not a verdict — most of them belong on the free-agent list.
+   */
+  it('does not auto-retire every unsigned 38-year-old — most are listed as free agents', () => {
+    const data = generateLeague({ seed: 909 })
+    const career = new Career(data, 909, data.league.teams[0]!) as any
+    const year: number = career.year
+
+    // Drop 40 useful 38-year-olds off their rosters with expired deals: a full
+    // season behind them, producing to their rating, still playing real minutes.
+    const orphans: PlayerId[] = []
+    for (const t of data.teams.values()) {
+      if (!data.league.teams.includes(t.id) || orphans.length >= 40) continue
+      for (const pid of [...t.roster].slice(0, 3)) {
+        if (orphans.length >= 40) break
+        const p = data.players.get(pid)!
+        p.age = 38
+        p.contract = { ...p.contract, yearsRemaining: 0 }
+        const season = stubSeason(t.id as string, year - 1)
+        const expected = expectedPointsFor(ratedOverall(p), p.position, p.role)
+        season.ev.assists = Math.round(expected * season.gamesPlayed)
+        season.ev.timeOnIce = 1000 * season.gamesPlayed
+        season.shotsAgainst = 1800
+        season.saves = 1647 // .915 — a league-average starter
+        p.stats.push(season)
+        t.roster = t.roster.filter((id) => id !== pid)
+        orphans.push(pid)
+      }
+    }
+    expect(orphans.length).toBe(40)
+
+    career.reconcileOrphans()
+
+    const retired = orphans.filter((id) => data.players.get(id)!.retiredYear !== undefined)
+    // The old rule retired all 40, every seed. Retirement at 38 is now a chance:
+    // some walk away, most go on the market — and nobody is left invisible.
+    expect(retired.length).toBeGreaterThan(0)
+    expect(retired.length).toBeLessThan(20)
+    const listed = new Set<string>((career.faPool ?? []).map((x: PlayerId) => x as string))
+    for (const id of orphans) {
+      const p = data.players.get(id)!
+      if (p.retiredYear === undefined) expect(listed.has(id as string)).toBe(true)
+    }
     expect(invisibleNhlPlayers(career).count).toBe(0)
   })
 

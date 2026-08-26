@@ -37,6 +37,7 @@ import {
   type PlayerRole,
   type Position,
   type RawAttributes,
+  type SeasonStats,
   type Team,
   type TeamId
 } from '@domain'
@@ -444,43 +445,185 @@ export function developPlayers(args: {
 
 /* ────────────────────────── retirements ────────────────────────── */
 
-/** Base retirement probability by age 33..40; ramps to near-certain. */
-const RETIREMENT_BASE = [0.03, 0.06, 0.12, 0.22, 0.35, 0.55, 0.75, 0.95]
+/**
+ * Retirement is a hazard curve, never a verdict.
+ *
+ * The old model was a steep age table that hit 0.95 at 40 and floored at 0.90
+ * past it, so no player in the world ever reached 41 and every franchise
+ * forward hung them up on schedule at 38–39 — the same names, every save. Real
+ * careers mostly end between 35 and 40 with a long tail: Ovechkin at 40, Perry
+ * at 40, Marleau at 42, Thornton at 43, Chara at 45. Age sets the base rate;
+ * what a player is *still doing* decides whether he beats it.
+ *
+ * Base annual hazard for a league-average skater with no other signal. Below
+ * RETIREMENT_MIN_AGE nobody retires by age (the fringe washout below is the
+ * only exit); past the top of the table the last entry holds.
+ */
+const RETIREMENT_MIN_AGE = 33
+const RETIREMENT_BASE = [
+  /* 33 */ 0.010, /* 34 */ 0.020, /* 35 */ 0.038, /* 36 */ 0.065, /* 37 */ 0.105,
+  /* 38 */ 0.160, /* 39 */ 0.280, /* 40 */ 0.400, /* 41 */ 0.530, /* 42 */ 0.660,
+  /* 43 */ 0.790, /* 44 */ 0.890, /* 45 */ 0.940, /* 46+ */ 0.970,
+]
 
-function retirementProbability(age: number, ovr: number): number {
-  const base = age > 40 ? 0.99 : RETIREMENT_BASE[age - 33]
-  // Fringe players hang them up earlier; stars get a small benefit of doubt.
-  const adjusted = base + Math.max(0, 60 - ovr) * 0.012 - Math.max(0, ovr - 78) * 0.006
-  const floor = age > 40 ? 0.9 : 0.01
-  return Math.min(0.995, Math.max(floor, adjusted))
+/**
+ * Hard ceiling on the annual hazard by age: high but never certain at 40–41,
+ * near-certain only in the early-to-mid 40s. No modifier stack can push a
+ * 39-year-old past a coin flip — someone always has one more year in him.
+ */
+function retirementCeiling(age: number): number {
+  if (age >= 45) return 0.99
+  if (age >= 43) return 0.95
+  if (age >= 41) return 0.85
+  if (age >= 40) return 0.70
+  return 0.55
 }
 
-// A sub-replacement pro (below this overall) can drift out of the league in his
-// late 20s / early 30s — the classic AHL/ECHL tweener who never sticks and stops
-// getting NHL looks. Genuine roster players (60+) never wash out this way.
+/** A season's workload and production, as known at the moment retirements are
+ *  rolled. Every field is optional — with no sample the curve falls back to age
+ *  and ability alone (a fresh league's first summer, an imported body with no
+ *  recorded season). */
+export interface RetirementForm {
+  /** Games played last season across every tier he appeared in. */
+  gamesPlayed?: number | undefined
+  /** Points last season (skaters). */
+  points?: number | undefined
+  /** Save percentage last season (goalies), 0–1. */
+  savePct?: number | undefined
+  /** Average time on ice per game, in seconds. */
+  toiPerGame?: number | undefined
+}
+
+/** Everything the retirement curve looks at for one player. */
+export interface RetirementInput {
+  age: number
+  /** Current ability, 0–100. */
+  ovr: number
+  position: Position
+  role: PlayerRole
+  /** Years left on his deal — a club paying him is a reason to keep playing. */
+  yearsRemaining: number
+  form?: RetirementForm | undefined
+  /** Currently-injured games remaining, if any. */
+  injuryGamesRemaining?: number | undefined
+  /** EHM durability attribute (1–99); high = chronically fragile. */
+  injuryProneness?: number | undefined
+}
+
+const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+
+/**
+ * Annual probability that this player retires, as a product of an age hazard
+ * and what the season just played says about him. Exported so the orphan sweep
+ * in career.ts asks exactly the same question the offseason does.
+ */
+export function retirementProbability(input: RetirementInput): number {
+  const { age, ovr, yearsRemaining } = input
+  if (age < RETIREMENT_MIN_AGE) return 0
+  const base = RETIREMENT_BASE[Math.min(RETIREMENT_BASE.length - 1, age - RETIREMENT_MIN_AGE)]
+
+  // ── ability: a star at 38 is a very different bet than a fourth-liner ──
+  let mult = clamp(1 + (63 - ovr) * 0.030, 0.45, 2.2)
+
+  // ── contract status: an unsigned veteran is one un-returned call from done ──
+  mult *= yearsRemaining >= 2 ? 0.35 : yearsRemaining === 1 ? 0.60 : 1.15
+
+  const form = input.form
+  const gp = form?.gamesPlayed
+  if (gp !== undefined) {
+    // ── availability: games missed is injury load and healthy-scratch in one ──
+    mult *= gp >= 60 ? 0.78 : gp >= 40 ? 1.0 : gp >= 20 ? 1.35 : gp >= 1 ? 1.9 : 2.4
+
+    if (gp >= 20) {
+      // ── still productive? measured against what his rating should produce ──
+      const expected = expectedPointsFor(ovr, input.position, input.role)
+      let ratio = 1
+      if (input.position === 'G') {
+        if (form?.savePct !== undefined && expected > 0) ratio = form.savePct / expected
+      } else if (form?.points !== undefined && expected > 0) {
+        ratio = form.points / gp / expected
+      }
+      mult *= clamp(1 + (1 - ratio) * 0.9, 0.55, 1.8)
+    }
+
+    // ── ice time: a 37-year-old down to eight minutes a night is being eased out ──
+    const toi = form?.toiPerGame
+    if (toi !== undefined && gp >= 20 && input.position !== 'G') {
+      mult *= toi >= 1080 ? 0.82 : toi >= 780 ? 1.0 : toi >= 540 ? 1.2 : 1.45
+    }
+  }
+
+  // ── injury load: a long current absence, or a body that keeps breaking ──
+  if ((input.injuryGamesRemaining ?? 0) >= 20) mult *= 1.3
+  if ((input.injuryProneness ?? 0) >= 70) mult *= 1.1
+
+  // Diminishing returns. Five reasons to keep playing should not multiply into
+  // immortality — but every one of them must still move the number, so this is a
+  // compression, never a floor that swallows the weaker signals whole.
+  mult = Math.pow(clamp(mult, 0.05, 6), 0.7)
+  // And every reason to keep playing is worth less the older he gets: being good
+  // at 43 does not buy what being good at 35 buys. Without this taper the signals
+  // compound into a protected elite who simply never ages out — the mirror image
+  // of the bug this replaces.
+  if (mult < 1) mult = 1 - (1 - mult) * clamp((44 - age) / 8, 0, 1)
+
+  return clamp(base * mult, 0.004, retirementCeiling(age))
+}
+
+// A sub-replacement pro (below this overall) drifts out of the league — the
+// classic AHL/ECHL tweener who never sticks and stops getting NHL looks. It
+// starts in his late 20s and only gets likelier; genuine roster players (55+)
+// never wash out this way. Distinct from retirement: he is not old, he is done.
 const WASHOUT_OVR_CEIL = 55
 const WASHOUT_MIN_AGE = 28
-const WASHOUT_MAX_AGE = 32
 
-/** Annual chance a fringe 28–32 player leaves pro hockey (goes to Europe, retires,
+/** Annual chance a fringe player leaves pro hockey (goes to Europe, retires,
  *  falls off the map). Rises the weaker he is and the older he gets. */
-function washoutProbability(age: number, ovr: number): number {
-  if (ovr >= WASHOUT_OVR_CEIL) return 0
+export function washoutProbability(age: number, ovr: number): number {
+  if (ovr >= WASHOUT_OVR_CEIL || age < WASHOUT_MIN_AGE) return 0
   const p = 0.04 + (WASHOUT_OVR_CEIL - ovr) * 0.01 + (age - WASHOUT_MIN_AGE) * 0.015
   return Math.min(0.35, p)
 }
 
+/** Last recorded season line, used as the form fallback when the caller has no
+ *  live season to hand us. Skips AHL lines for an NHL player's workload read. */
+export function retirementFormFromStats(p: Player): RetirementForm | undefined {
+  let latest: SeasonStats | undefined
+  for (const s of p.stats) {
+    if ((s.league ?? 'nhl') === 'ahl') continue
+    if (!latest || s.season >= latest.season) latest = s
+  }
+  if (!latest) return undefined
+  const gp = latest.gamesPlayed
+  const points =
+    latest.ev.goals + latest.pp.goals + latest.pk.goals +
+    latest.ev.assists + latest.pp.assists + latest.pk.assists
+  const shots = latest.shotsAgainst
+  return {
+    gamesPlayed: gp,
+    points,
+    savePct: shots > 0 ? latest.saves / shots : undefined,
+    toiPerGame: gp > 0 ? (latest.ev.timeOnIce + latest.pp.timeOnIce + latest.pk.timeOnIce) / gp : undefined,
+  }
+}
+
 /**
- * Roll retirements for everyone 33+. Retirees are removed from their team's
- * roster array but stay in the players map so history screens keep working —
- * the caller is responsible for excluding returned ids from future passes.
- * Players under contract for 2+ more years never retire before 38.
+ * Roll retirements. Retirees are removed from their team's roster array but
+ * stay in the players map so history screens keep working — the caller is
+ * responsible for excluding returned ids from future passes.
+ *
+ * Two exits, and a player takes whichever is likelier: the age hazard above
+ * (33+), and the fringe washout (28+, sub-replacement). Neither is ever a
+ * certainty before the mid-40s.
  */
 export function processRetirements(args: {
   players: Map<PlayerId, Player>
   teams: Map<TeamId, Team>
   year: number
   rng: Rng
+  /** Optional: the season just finished, which `p.stats` does not yet hold at
+   *  rollover time. Absent → fall back to his most recent recorded season. */
+  form?: (p: Player) => RetirementForm | undefined
 }): { retired: PlayerId[] } {
   const { players, teams, rng } = args
 
@@ -501,19 +644,23 @@ export function processRetirements(args: {
   }
   for (const p of players.values()) {
     if (p.retiredYear !== undefined) continue // already retired — never re-process
+    if (p.age < WASHOUT_MIN_AGE) continue
     const ovr = overall(p.composites, p.position)
-    if (p.age >= 33) {
-      // Age-driven retirement curve.
-      if (p.contract.yearsRemaining >= 2 && p.age < 38) continue
-      if (!rng.chance(retirementProbability(p.age, ovr))) continue
-      retire(p)
-    } else if (p.age >= WASHOUT_MIN_AGE && p.age <= WASHOUT_MAX_AGE) {
-      // Fringe washout: marginal pros drift out before the usual retirement age.
-      // A live 2-year deal keeps them around (someone's paying them to play).
-      if (p.contract.yearsRemaining >= 2) continue
-      if (!rng.chance(washoutProbability(p.age, ovr))) continue
-      retire(p)
-    }
+    const washout = p.contract.yearsRemaining >= 2 ? 0 : washoutProbability(p.age, ovr)
+    const byAge =
+      p.age >= RETIREMENT_MIN_AGE
+        ? retirementProbability({
+            age: p.age,
+            ovr,
+            position: p.position,
+            role: p.role,
+            yearsRemaining: p.contract.yearsRemaining,
+            form: args.form ? args.form(p) : retirementFormFromStats(p),
+            injuryGamesRemaining: p.injuryStatus?.gamesRemaining,
+            injuryProneness: p.injuryProneness,
+          })
+        : 0
+    if (rng.chance(Math.max(byAge, washout))) retire(p)
   }
   return { retired }
 }
