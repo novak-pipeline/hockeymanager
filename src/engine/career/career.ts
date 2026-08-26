@@ -362,6 +362,8 @@ import {
 } from '@engine/league/agentRapport'
 import {
   buildTeamProfile,
+  clubDepthOf,
+  describeClubValue,
   describePickValue,
   describePlayerValue,
   evaluateProposal,
@@ -374,7 +376,10 @@ import {
   solicitOffersForPlayer,
   askingPriceText,
   MIN_SHOP_VALUE,
+  type ClubLens,
   type StoredTradeOffer,
+  type TradeAsset,
+  type ValueDriver,
   type AiAiTradeResult,
 } from '@engine/league/trades'
 import {
@@ -11473,6 +11478,25 @@ export class Career {
     const fog = this.fogCtx()
     const r1 = (v: number): number => Math.round(v * 10) / 10
 
+    // A2: the partner's own book, so the builder can show WHY a paper-even deal
+    // still draws a no. Absent when there's no reachable partner club.
+    const partnerId = asTeamId(proposal.partnerTeamId)
+    const partnerClub = this.data.teams.get(partnerId)
+    const lens: ClubLens | null = partnerClub
+      ? {
+          philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
+          posture: this.clubPostureFor(partnerId).posture,
+          depth: clubDepthOf(partnerClub, this.data.players),
+          capSpace: partnerClub.finances.salaryCap - rosterCapUsed(partnerClub, this.data.players),
+          deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
+        }
+      : null
+    const throughLens = (asset: TradeAsset): { partnerValue: number; partnerDrivers: ValueDriver[] } | null => {
+      if (!lens) return null
+      const { value, drivers } = describeClubValue(asset, lens, { year })
+      return { partnerValue: r1(value), partnerDrivers: drivers }
+    }
+
     const playerAsset = (p: Player, useFog: boolean): TradeDraftAsset => {
       const b = badge(p, useFog ? fog : undefined)
       const estimated = !!b.scouted && !b.scouted.exact
@@ -11485,6 +11509,7 @@ export class Career {
         value: r1(value),
         estimated,
         drivers,
+        ...(throughLens({ kind: 'player', player: p }) ?? {}),
       }
     }
     const pickAssetDraft = (pk: DraftPick): TradeDraftAsset => {
@@ -11500,6 +11525,7 @@ export class Career {
         ...(via ? { viaAbbr: via } : {}),
         value: r1(value),
         drivers,
+        ...(throughLens({ kind: 'pick', pick: pk }) ?? {}),
       }
     }
 
@@ -11535,6 +11561,24 @@ export class Career {
       }
     }
 
+    // A2: the same two packages on the PARTNER'S book. Where they diverge from
+    // the market totals, the two front offices genuinely disagree — and that
+    // disagreement, not a hidden fudge factor, is why an even deal gets a no.
+    const hasLens = lens !== null && give.every((a) => a.partnerValue !== undefined) &&
+      receive.every((a) => a.partnerValue !== undefined)
+    const partnerGiveTotal = hasLens ? r1(give.reduce((s, a) => s + (a.partnerValue ?? 0), 0)) : undefined
+    const partnerReceiveTotal = hasLens ? r1(receive.reduce((s, a) => s + (a.partnerValue ?? 0), 0)) : undefined
+    let lensLine: string | undefined
+    if (hasLens && partnerClub && giveTotal > 0 && partnerGiveTotal !== undefined) {
+      const POSTURE_WORD = { contend: 'chasing a Cup', retool: 'retooling on the fly', rebuild: 'rebuilding' } as const
+      const stance = POSTURE_WORD[this.clubPostureFor(partnerId).posture]
+      const delta = (partnerGiveTotal - giveTotal) / giveTotal
+      lensLine =
+        Math.abs(delta) < 0.06
+          ? `${partnerClub.name} are ${stance} — they see your side about the way the market does.`
+          : `${partnerClub.name} are ${stance} — they price your side ~${Math.round(Math.abs(delta) * 100)}% ${delta > 0 ? 'above' : 'below'} the market.`
+    }
+
     // Reuse the assistant-GM read verbatim so the two panels never disagree.
     const agm = this.assessTrade(proposal)
     const { partnerVerdict, partnerLine } = this.partnerDraftVerdict(proposal, give.length > 0, receive.length > 0)
@@ -11548,6 +11592,9 @@ export class Career {
       marketVerdict,
       marketLine,
       ...(marketPct !== undefined ? { marketPct } : {}),
+      ...(partnerGiveTotal !== undefined ? { partnerGiveTotal } : {}),
+      ...(partnerReceiveTotal !== undefined ? { partnerReceiveTotal } : {}),
+      ...(lensLine !== undefined ? { lensLine } : {}),
       agmName: agm.agmName,
       agmLine: agm.line,
       agmTone: agm.tone,
@@ -11929,15 +11976,29 @@ export class Career {
     }
     if (assets.length === 0) return null
 
+    // A counter has to be one you could actually SAY YES to. Work out where the
+    // base deal leaves your cap, and only table sweeteners that keep you legal —
+    // a GM who asks for a sweetener you can't fit hasn't made an offer.
+    const salOf = (p: Player): number => p.contract.salary - (p.contract.retainedByOthers ?? 0)
+    const capAfterBase =
+      rosterCapUsed(this.userTeam, this.data.players) +
+      receive.players.reduce((s, p) => s + salOf(p), 0) -
+      give.players.reduce((s, p) => s + salOf(p), 0)
+    const ceiling = this.userTeam.finances.salaryCap
+    const fits = (picked: Array<{ player?: Player }>): boolean =>
+      capAfterBase - picked.reduce((s, a) => s + (a.player ? salOf(a.player) : 0), 0) <= ceiling
+
     // Prefer the least-overpaying single asset that covers the gap; failing
     // that, the two most valuable pieces — but only if together they get there.
     const covering = assets.filter((a) => a.value >= gap).sort((a, b) => a.value - b.value)
     let chosen: Array<{ value: number; player?: Player; pick?: DraftPick }>
-    if (covering.length > 0) {
-      chosen = [covering[0]]
+    const affordableSingle = covering.find((a) => fits([a]))
+    if (affordableSingle) {
+      chosen = [affordableSingle]
     } else {
       const top = [...assets].sort((a, b) => b.value - a.value).slice(0, 2)
       if (top.reduce((s, a) => s + a.value, 0) < gap * 0.9) return null
+      if (!fits(top)) return null
       chosen = top
     }
 
@@ -11992,6 +12053,10 @@ export class Career {
       expiresOnDay: this.currentDay + 4,
       aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
       userDeadCap: this.userDeadCap,
+      // A2: each bidder prices him through its own lens, so the packages that
+      // come back genuinely differ front office to front office.
+      postureOf: (tid) => this.clubPostureFor(tid).posture,
+      deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
       maxOffers: 4,
     })
     for (const o of offers) this.tradeOffers.push(o)

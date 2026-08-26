@@ -13,6 +13,7 @@ import type {
   TradeRumorView,
   ValueDriver,
 } from '../../engine/career/views'
+import { assetValueTier } from '../../engine/league/trades'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { TeamCrest } from '../components/Crest'
@@ -48,33 +49,62 @@ function driversTitle(drivers?: ValueDriver[], header?: string): string {
   return [header, ...rows].filter(Boolean).join('\n')
 }
 
-/** Compact mono value pill; hover reveals the drivers. Shows "~" when the value
- *  is a fog-of-war estimate for an unscouted opponent. */
-function ValuePill(props: {
-  value?: number
-  drivers?: ValueDriver[]
-  estimated?: boolean
-  title?: string
+/**
+ * Trade value, read as a METER rather than a decimal.
+ *
+ * A bare `22.9` reads like a spreadsheet and implies a precision the model does
+ * not have. The primary read is a tier word ("Core piece", "Star") over a
+ * segmented bar, EA-NHL style; the exact number stays one hover away for anyone
+ * who wants it, alongside the factors behind it.
+ */
+const TIER_COLOR = (tier: number): string =>
+  tier >= 6 ? 'var(--success)'
+  : tier >= 5 ? 'var(--accent, #f5b301)'
+  : tier >= 3 ? 'var(--accent2, #e0b341)'
+  : 'var(--muted)'
+
+const METER_SEGMENTS = 6
+
+function ValueMeter(props: {
+  value?: number | undefined
+  drivers?: ValueDriver[] | undefined
+  estimated?: boolean | undefined
+  title?: string | undefined
+  /** Hide the tier word — for tight rows where the bar alone carries it. */
+  compact?: boolean | undefined
 }): JSX.Element | null {
   if (props.value === undefined) return null
+  const { tier, label, fill } = assetValueTier(props.value)
+  const color = TIER_COLOR(tier)
+  const lit = Math.max(1, Math.round(fill * METER_SEGMENTS))
+  const hoverHead = [
+    props.title,
+    `${props.estimated ? '~' : ''}${props.value.toFixed(1)} trade points · ${label}`,
+  ].filter(Boolean).join('\n')
   return (
     <span
-      className="mono"
-      title={driversTitle(props.drivers, props.title)}
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        padding: '1px 6px',
-        borderRadius: 4,
-        background: 'rgba(var(--accent-rgb),0.12)',
-        border: '1px solid rgba(var(--accent-rgb),0.3)',
-        color: 'var(--accent)',
-        whiteSpace: 'nowrap',
-        cursor: 'help',
-      }}
+      title={driversTitle(props.drivers, hoverHead)}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'help', whiteSpace: 'nowrap' }}
     >
-      {props.estimated ? '~' : ''}
-      {props.value.toFixed(1)}
+      {!props.compact && (
+        <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: '0.2px' }}>
+          {props.estimated ? '~' : ''}{label}
+        </span>
+      )}
+      <span style={{ display: 'inline-flex', gap: 1.5, alignItems: 'center' }} aria-hidden>
+        {Array.from({ length: METER_SEGMENTS }, (_, i) => (
+          <span
+            key={i}
+            style={{
+              width: 4,
+              height: 9,
+              borderRadius: 1,
+              background: i < lit ? color : 'var(--line)',
+              opacity: i < lit ? (props.estimated ? 0.6 : 1) : 0.55,
+            }}
+          />
+        ))}
+      </span>
     </span>
   )
 }
@@ -84,14 +114,13 @@ function PlayerChip(props: {
   playerId: string
   salary: number
   yearsRemaining: number
-  noTradeClause?: boolean
+  noTradeClause?: boolean | undefined
   /** Trade value on the shared asset-value scale (same currency as pick value). */
-  value?: number
-  badge?: PlayerBadge
+  value?: number | undefined
+  badge?: PlayerBadge | undefined
 }): JSX.Element {
   return (
     <div
-      title={props.value !== undefined ? `Trade value: ${props.value}` : undefined}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -109,9 +138,7 @@ function PlayerChip(props: {
       <span style={{ color: 'var(--muted)' }}>
         {fmtMoney(props.salary)} / {props.yearsRemaining}yr
       </span>
-      {props.value !== undefined && (
-        <span style={{ color: 'var(--muted)', fontSize: 10 }}>· {props.value}</span>
-      )}
+      <ValueMeter value={props.value} compact title="Trade value" />
       {props.noTradeClause && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
     </div>
   )
@@ -139,7 +166,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
       {pick.viaAbbr && (
         <span style={{ color: 'var(--muted)', fontSize: 10 }}>(via {pick.viaAbbr})</span>
       )}
-      <span className="mono" style={{ color: 'var(--muted)', fontSize: 10 }}>{pick.value.toFixed(1)}</span>
+      <ValueMeter value={pick.value} drivers={pick.drivers} compact />
     </span>
   )
 }
@@ -827,7 +854,7 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
-                        <ValuePill
+                        <ValueMeter
                           value={p.tradeValue}
                           drivers={p.valueDrivers}
                           estimated={p.valueEstimated}
@@ -881,7 +908,9 @@ function ProposeTab(props: {
                         <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
                           {pk.label}
                           {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
-                          <span className="mono" style={{ marginLeft: 5, opacity: 0.7, fontSize: 10 }}>{pk.value.toFixed(1)}</span>
+                          <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
+                            <ValueMeter value={pk.value} compact />
+                          </span>
                         </span>
                       </button>
                     )
@@ -946,7 +975,7 @@ function ProposeTab(props: {
                         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
                           {fmtMoney(p.salary)} / {p.yearsRemaining}yr
                         </span>
-                        <ValuePill
+                        <ValueMeter
                           value={p.tradeValue}
                           drivers={p.valueDrivers}
                           estimated={p.valueEstimated}
@@ -983,7 +1012,9 @@ function ProposeTab(props: {
                         <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
                           {pk.label}
                           {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
-                          <span className="mono" style={{ marginLeft: 5, opacity: 0.7, fontSize: 10 }}>{pk.value.toFixed(1)}</span>
+                          <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
+                            <ValueMeter value={pk.value} compact />
+                          </span>
                         </span>
                       </button>
                     )
@@ -1109,7 +1140,7 @@ function DealColumn(props: {
         <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: props.color }}>
           {props.label}
         </span>
-        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: props.color }}>{props.total.toFixed(1)}</span>
+        <ValueMeter value={props.total} title={`${props.label} — package total`} />
       </div>
       <div className="stack" style={{ gap: 3 }}>
         {props.assets.length === 0 && <span className="muted small">—</span>}
@@ -1124,7 +1155,28 @@ function DealColumn(props: {
                 {a.viaAbbr && <span className="muted" style={{ fontSize: 10 }}> (via {a.viaAbbr})</span>}
               </span>
             </span>
-            <ValuePill value={a.value} drivers={a.drivers} estimated={a.estimated} />
+            <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
+              <ValueMeter value={a.value} drivers={a.drivers} estimated={a.estimated} />
+              {/* A2: the partner's own read, shown only where it actually
+                  differs — a silent agreement needs no annotation. */}
+              {a.partnerValue !== undefined && Math.abs(a.partnerValue - a.value) / Math.max(a.value, 1) >= 0.08 && (
+                <span
+                  title={driversTitle(a.partnerDrivers, `Their book: ${a.partnerValue.toFixed(1)}`)}
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: '0 4px',
+                    borderRadius: 3,
+                    cursor: 'help',
+                    color: a.partnerValue > a.value ? 'var(--success)' : 'var(--danger)',
+                    border: `1px solid ${a.partnerValue > a.value ? 'var(--success)' : 'var(--danger)'}`,
+                    opacity: 0.85,
+                  }}
+                >
+                  THEM {a.partnerValue > a.value ? '▲' : '▼'}
+                </span>
+              )}
+            </span>
           </div>
         ))}
       </div>
@@ -1162,14 +1214,30 @@ function DealDeskPanel(props: {
           <div className="row-between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: MARKET_TONE[draft.marketVerdict] }}>{draft.marketLine}</span>
             <span
-              className="mono"
-              style={{ fontSize: 13, fontWeight: 700, color: draft.net >= 0 ? 'var(--success)' : 'var(--danger)' }}
-              title="Net value swing in your favour (in trade points)"
+              style={{ fontSize: 11, fontWeight: 700, color: draft.net >= 0 ? 'var(--success)' : 'var(--danger)' }}
+              title={`Net value swing in your favour: ${draft.net >= 0 ? '+' : ''}${draft.net.toFixed(1)} trade points`}
             >
-              NET {draft.net >= 0 ? '+' : ''}{draft.net.toFixed(1)}
+              {draft.net >= 0 ? 'IN YOUR FAVOUR' : 'AGAINST YOU'}
             </span>
           </div>
           {total > 0 && <ValueBalance give={draft.giveTotal / total} receive={draft.receiveTotal / total} />}
+
+          {/* A2: the same deal on the partner's book. A market-even package can
+              still be a loser to a club whose posture prices your side down —
+              this is the line that says so out loud. */}
+          {draft.lensLine && draft.partnerGiveTotal !== undefined && draft.partnerReceiveTotal !== undefined && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--line)' }}>
+              <div className="row-between" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>
+                <span style={{ fontWeight: 700, letterSpacing: '0.4px' }}>THEIR BOOK</span>
+                <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <ValueMeter value={draft.partnerGiveTotal} compact title="What they think your side is worth" />
+                  <span style={{ opacity: 0.5 }}>vs</span>
+                  <ValueMeter value={draft.partnerReceiveTotal} compact title="What they think their side is worth" />
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{draft.lensLine}</div>
+            </div>
+          )}
 
           {draft.marketVerdict !== 'empty' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10 }}>
