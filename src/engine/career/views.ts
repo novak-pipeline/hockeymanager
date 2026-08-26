@@ -46,6 +46,7 @@ import type {
   SeasonArchive,
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
+import type { PressureState } from '@engine/league/pressure'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { PlayerInteraction, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
 export type { PlayerInteraction, InteractionKind, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
@@ -2533,6 +2534,14 @@ export interface CareerSnapshot {
   arcs?: ArcsState
   records?: RecordsState
   expectations?: ExpectationsState
+  /** In-season fan mood + the pressure beats already told (E3). Optional/additive:
+   *  an older save reseeds it from carry-over fan interest on the next check. */
+  pressure?: PressureState
+  /** Completed seasons each club's current head coach has served (E3 carousel).
+   *  Optional/additive; an absent entry reads as a first-year bench. */
+  coachTenure?: Array<[string, number]>
+  /** Benches already changed league-wide this season (E3 carousel cap). */
+  midSeasonCoachFirings?: number
   /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
   chronicle?: ChronicleState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */
@@ -3470,6 +3479,16 @@ export interface BoardView {
   currentRank: number
   /** True when the GM has been fired. */
   fired: boolean
+  /** Consecutive disappointing seasons before this one (E3). */
+  missStreak: number
+  /** Plain sentence describing how exposed the job is right now (E3). */
+  jeopardyLabel: string
+  /** 0–100 in-season fan mood (E3). */
+  fanMood: number
+  /** Human phrase for the mood — "Restless — the grumbling has started". */
+  fanMoodLabel: string
+  /** Benches changed elsewhere in the league this season (E3 carousel). */
+  benchChanges: number
 }
 
 /* ────────────────────────── club info view ────────────────────────── */

@@ -333,13 +333,16 @@ describe('seasonReview', () => {
     expect(state.rebuildSanctioned).toBe(false)
   })
 
-  it('contend: missed playoffs + no patience = fired', () => {
+  it('contend: missed playoffs + no patience, on the back of a bad year = fired', () => {
+    // missStreak 1 = last season also disappointed. A single failed mandate with
+    // one warning is NOT enough on its own — see the "realistic bounds" block.
     const state = makeBoardState({
       mandate: 'contend',
       targetRank: 4,
       confidence: 20,
       patience: 5,
       warnings: 1,
+      missStreak: 1,
     })
     const { verdict, fired } = seasonReview({ state, finalRank: 24, madePlayoffs: false, wonCup: false, year: 2026 })
     expect(verdict).toBe('failed')
@@ -530,5 +533,112 @@ describe('determinism', () => {
     expect(a.verdict).toBe(b.verdict)
     expect(a.fired).toBe(b.fired)
     expect(a.newsSeeds[0]?.headline).toBe(b.newsSeeds[0]?.headline)
+  })
+})
+
+/* ─────────────────── E3: firing within realistic bounds ─────────────────── */
+
+describe('firing is a trend, not a single bad year (Playtest 2026-08-26 E3)', () => {
+  /** The worst possible first season: cup-or-bust, no playoffs, no patience,
+   *  two ultimatums. A real GM still gets a second year. */
+  const catastrophicFirstYear = () =>
+    makeBoardState({
+      mandate: 'cupOrBust',
+      targetRank: 1,
+      confidence: 5,
+      patience: 0,
+      warnings: 3,
+      missStreak: 0,
+    })
+
+  it('never fires a GM in his first season with a club, however bad it was', () => {
+    const state = catastrophicFirstYear()
+    const { verdict, fired } = seasonReview({
+      state, finalRank: 32, madePlayoffs: false, wonCup: false, year: 2026, seasonsWithClub: 1,
+    })
+    expect(verdict).toBe('failed')
+    expect(fired).toBe(false)
+    expect(state.firedAtYear).toBeNull()
+  })
+
+  it('records the miss so the SECOND bad year is the one that ends it', () => {
+    const state = catastrophicFirstYear()
+    seasonReview({ state, finalRank: 32, madePlayoffs: false, wonCup: false, year: 2026, seasonsWithClub: 1 })
+    expect(state.missStreak).toBe(1)
+
+    // Year two, same catastrophe, now with the run on the record.
+    state.firedAtYear = null
+    state.patience = 0
+    state.warnings = 2
+    const second = seasonReview({
+      state, finalRank: 32, madePlayoffs: false, wonCup: false, year: 2027, seasonsWithClub: 2,
+    })
+    expect(second.fired).toBe(true)
+    expect(state.firedAtYear).toBe(2027)
+  })
+
+  it('does not fire on a single failed mandate in year two after a GOOD first year', () => {
+    const state = makeBoardState({
+      mandate: 'contend', targetRank: 4, confidence: 20, patience: 5, warnings: 1, missStreak: 0,
+    })
+    const { verdict, fired } = seasonReview({
+      state, finalRank: 24, madePlayoffs: false, wonCup: false, year: 2027, seasonsWithClub: 2,
+    })
+    expect(verdict).toBe('failed')
+    expect(fired).toBe(false)
+  })
+
+  it('a formal ultimatum inside the season DOES make one failed year fireable (year 2+)', () => {
+    const state = makeBoardState({
+      mandate: 'contend', targetRank: 4, confidence: 12, patience: 8, warnings: 2, missStreak: 0,
+    })
+    const { fired } = seasonReview({
+      state, finalRank: 26, madePlayoffs: false, wonCup: false, year: 2027, seasonsWithClub: 3,
+    })
+    expect(fired).toBe(true)
+  })
+
+  it('a good season wipes the run of misses clean', () => {
+    const state = makeBoardState({
+      mandate: 'makePlayoffs', targetRank: 10, confidence: 40, patience: 30, warnings: 0, missStreak: 2,
+    })
+    const { verdict } = seasonReview({
+      state, finalRank: 6, madePlayoffs: true, wonCup: false, year: 2027, seasonsWithClub: 3,
+    })
+    expect(['met', 'exceeded']).toContain(verdict)
+    expect(state.missStreak).toBe(0)
+  })
+
+  it('three straight "missed" seasons on an exhausted board still ends the tenure', () => {
+    const state = makeBoardState({
+      mandate: 'competeRespectably', targetRank: 14, confidence: 10, patience: 2, warnings: 2, missStreak: 2,
+    })
+    const { verdict, fired } = seasonReview({
+      state, finalRank: 20, madePlayoffs: false, wonCup: false, year: 2029, seasonsWithClub: 4,
+    })
+    expect(verdict).toBe('missed')
+    expect(fired).toBe(true)
+  })
+
+  it('carries the run of misses into the next September, and it costs patience', () => {
+    const clean = setSeasonMandate({
+      teamStrengthRank: 10, teamsInLeague: 32, rng: freshRng(7), year: 2028,
+    }).state
+    const burned = setSeasonMandate({
+      teamStrengthRank: 10, teamsInLeague: 32, rng: freshRng(7), year: 2028, carryMissStreak: 2,
+    }).state
+    expect(clean.missStreak).toBe(0)
+    expect(burned.missStreak).toBe(2)
+    expect(burned.patience).toBeLessThan(clean.patience)
+    expect(burned.confidence).toBeLessThan(clean.confidence)
+  })
+
+  it('boardSummary names the jeopardy in words', () => {
+    expect(boardSummary(makeBoardState({ missStreak: 0, warnings: 0 })).jeopardyLabel)
+      .toMatch(/no case against you/i)
+    expect(boardSummary(makeBoardState({ missStreak: 1 })).jeopardyLabel)
+      .toMatch(/second one in a row/i)
+    expect(boardSummary(makeBoardState({ missStreak: 3 })).jeopardyLabel)
+      .toMatch(/3 straight seasons/i)
   })
 })

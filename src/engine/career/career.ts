@@ -440,6 +440,19 @@ import {
   type BoardState,
 } from '@engine/league/board'
 import {
+  bandOf,
+  freshPressure,
+  pressureLabel,
+  updatePressure,
+  type PressureState,
+} from '@engine/league/pressure'
+import {
+  midSeasonFirings,
+  offseasonFirings,
+  type CoachFiring,
+  type CoachSeat,
+} from '@engine/league/coachCarousel'
+import {
   decayIntensity,
   gameIntensity,
   registerGame,
@@ -1162,6 +1175,14 @@ export class Career {
   /* ── franchise drama + League hub (Wave 4) ── */
   /** Owner/board expectations for the user's team. */
   private boardState!: BoardState
+  /** In-season fan mood for the user's club (Playtest 2026-08-26 §E3). Optional
+   *  on old saves; rebuilt lazily from carry-over fan interest. */
+  private pressureState: PressureState | null = null
+  /** Completed seasons each club's current head coach has served behind that
+   *  bench. Feeds the coaching carousel; keyed by teamId. */
+  private coachTenure = new Map<string, number>()
+  /** Benches changed league-wide so far this season — the carousel's cap. */
+  private midSeasonCoachFirings = 0
   /** League-wide rivalry pairs. */
   private rivalriesState!: RivalriesState
   /** Per-team special-teams accumulators (JSON-safe entry array). */
@@ -4027,6 +4048,11 @@ export class Career {
         teamsInLeague: this.data.league.teams.length,
       })
       this.pushSeeds(confResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+
+      /* ── E3: the building has an opinion, and the owner can hear it ── */
+      this.tickPressure(currentRank, gamesPlayed, totalGames, sorted)
+      /* ── E3: other clubs fire people too ── */
+      this.tickCoachCarousel(sorted, totalGames, day)
     }
 
     /* ── all-time record pace watch every ~5 match days ── */
@@ -6679,6 +6705,10 @@ export class Career {
           // commitments already weigh on confidence/patience when the board
           // renders its season verdict.
           this.evaluateBoardPromises(userFinalRank, madePlayoffs)
+          // E3: the firing rule needs to know how long you have actually been
+          // here. recordSeasonResult has not run yet, so the current stint's
+          // season count is the number of PRIOR seasons — add the one just done.
+          const seasonsWithClub = (currentStint(this.ensureGM())?.seasons ?? 0) + 1
           const reviewResult = seasonReview({
             state: this.boardState,
             finalRank: userFinalRank,
@@ -6687,6 +6717,7 @@ export class Career {
             year: this.year,
             teamId: this.userTeamId as string,
             teamName: this.userTeam.name,
+            seasonsWithClub,
           })
           this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
@@ -8307,6 +8338,23 @@ export class Career {
     this.assignRosters()
     // Number this year's new arrivals (draft picks, signings) who lack a jersey.
     this.ensureJerseyNumbers()
+
+    /* ── E3: the summer carousel. Every surviving bench serves another year;
+     *  the clubs that finished well below their September projection move on.
+     *  Done BEFORE applyCoachSystems so the new men's systems take hold. ── */
+    {
+      for (const teamId of this.data.league.teams) {
+        const key = teamId as string
+        this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
+      }
+      const firings = offseasonFirings({
+        seats: this.coachSeats(sorted),
+        teamsInLeague: this.data.league.teams.length,
+        rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
+      })
+      firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i))
+    }
+
     // Re-derive each team's system from its head coach for the new roster.
     this.applyCoachSystems()
 
@@ -8368,6 +8416,8 @@ export class Career {
           wonCup: wonCupLastYear,
         }
       }
+      // E3: a run of disappointing seasons is not wiped clean every September.
+      const carryMissStreak = this.boardState.missStreak ?? 0
       const boardResult = setSeasonMandate({
         teamStrengthRank: this.userStrengthRank(),
         teamsInLeague: this.data.league.teams.length,
@@ -8377,9 +8427,14 @@ export class Career {
         year: newYear,
         teamId: this.userTeamId as string,
         teamName: this.userTeam.name,
+        carryMissStreak,
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
+      // E3: a fresh fanbase mood for the new year, seeded from where they were
+      // left, plus a clean carousel budget and one more year on every bench.
+      this.pressureState = freshPressure(newYear, this.fanInterest)
+      this.midSeasonCoachFirings = 0
       // Season Rhythm M1: schedule next preseason's board meeting; perks lapse.
       this.boardMeetingYear = newYear
       this.ownerPerk = null
@@ -14956,6 +15011,178 @@ export class Career {
    *    display numbers, so staffMeetingScene.ts stays pure. ── */
 
   /** State-of-the-team briefing: record, last-10, goals-for/against per game. */
+  /* ══════════════════ E3: PRESSURE — fans, owner, and the carousel ══════════════════ */
+
+  private static readonly PRESSURE_NS = 9411
+  private static readonly CAROUSEL_NS = 9412
+
+  /** Most-recent-first W/L/O string for a club's played games this season. */
+  private recentFormFor(teamId: TeamId, limit = 10): string {
+    const out: Array<'W' | 'L' | 'O'> = []
+    for (const g of this.data.league.schedule) {
+      if (!g.result) continue
+      const home = g.homeTeamId === teamId
+      if (!home && g.awayTeamId !== teamId) continue
+      const us = home ? g.result.homeGoals : g.result.awayGoals
+      const them = home ? g.result.awayGoals : g.result.homeGoals
+      out.push(us > them ? 'W' : g.result.decidedBy === 'regulation' ? 'L' : 'O')
+    }
+    return out.slice(-limit).reverse().join('')
+  }
+
+  /** Which clubs would make the field if the season ended today. Uses the same
+   *  divisional qualifier rule as the odds screen, so the two can never drift. */
+  private currentPlayoffField(sorted: ReturnType<typeof sortStandings>): Set<string> {
+    const teamIds = [...this.data.league.teams]
+    const confOf = new Map<TeamId, string>()
+    const divOf = new Map<TeamId, string>()
+    for (const t of teamIds) {
+      const team = this.data.teams.get(t)
+      confOf.set(t, team?.conferenceId ?? '')
+      divOf.set(t, team?.divisionId ?? '')
+    }
+    const confs = [...new Set(teamIds.map((t) => confOf.get(t) ?? ''))]
+    const minConfSize = Math.min(...confs.map((c) => teamIds.filter((t) => confOf.get(t) === c).length))
+    const qual = minConfSize >= 12 ? 8 : 4
+    const useDivisional =
+      qual === 8 &&
+      confs.every((c) => new Set(teamIds.filter((t) => confOf.get(t) === c).map((t) => divOf.get(t))).size >= 2)
+    const field = new Set<string>()
+    for (const c of confs) {
+      const members = sorted.map((s) => s.teamId).filter((t) => confOf.get(t) === c)
+      for (const t of qualifiersInConference(members, (t) => divOf.get(t) ?? '', qual, useDivisional)) {
+        field.add(t as string)
+      }
+    }
+    return field
+  }
+
+  /** Ensure a pressure state exists for the current season (old saves, restores). */
+  private ensurePressure(): PressureState {
+    if (!this.pressureState || this.pressureState.year !== this.year) {
+      this.pressureState = freshPressure(this.year, this.fanInterest)
+    }
+    return this.pressureState
+  }
+
+  /**
+   * Sample the fanbase, publish a beat if the mood has crossed into a band it
+   * has not visited this season, and hand the owner the bill. An angry building
+   * costs board patience — which is what eventually costs the GM his job.
+   */
+  private tickPressure(
+    currentRank: number,
+    gamesPlayed: number,
+    totalGames: number,
+    sorted: ReturnType<typeof sortStandings>
+  ): void {
+    const state = this.ensurePressure()
+    const standing = this.standings.get(this.userTeamId)
+    const field = this.currentPlayoffField(sorted)
+    const res = updatePressure({
+      state,
+      teamName: this.userTeam.name,
+      teamId: this.userTeamId as string,
+      currentRank: Math.max(1, currentRank),
+      targetRank: this.boardState.targetRank,
+      teamsInLeague: this.data.league.teams.length,
+      gamesPlayed,
+      totalGames,
+      points: standing?.points ?? 0,
+      recentForm: this.recentFormFor(this.userTeamId),
+      inPlayoffSpot: field.has(this.userTeamId as string),
+      rebuilding: this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true,
+      rng: this.rngFor(Career.PRESSURE_NS, gamesPlayed),
+    })
+    if (!res.checked) return
+    this.pushSeeds(res.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+    if (res.patienceDrain > 0) {
+      this.boardState.patience = Math.max(0, this.boardState.patience - res.patienceDrain)
+      // Three straight hostile checkpoints and the owner says it out loud once.
+      if (state.hostileChecks === 3) {
+        this.pushNews(
+          'league',
+          `The owner is hearing it too`,
+          `A third straight check-in with the building against you. Ownership has stopped talking about the standings and started ` +
+            `talking about the fanbase — ticket renewals, the tone on the broadcasts, the phone calls they take. ` +
+            `${pressureLabel(res.band)}.`,
+          { teamId: this.userTeamId as string, salience: 70 }
+        )
+      }
+    }
+  }
+
+  /** Build one carousel seat per AI club from live standings + media picks. */
+  private coachSeats(sorted: ReturnType<typeof sortStandings>): CoachSeat[] {
+    const seats: CoachSeat[] = []
+    sorted.forEach((s, i) => {
+      const teamId = s.teamId as string
+      if (teamId === (this.userTeamId as string)) return // the GM fires his own coach
+      const team = this.data.teams.get(s.teamId)
+      if (!team) return
+      const ts = this.getTeamStaff(teamId)
+      const predicted = expectedRankOf(this.expectationsState, teamId) ?? i + 1
+      seats.push({
+        teamId,
+        teamName: team.name,
+        teamAbbr: team.abbreviation,
+        coachId: ts.headCoach.id,
+        coachName: ts.headCoach.name,
+        tenure: this.coachTenure.get(teamId) ?? 0,
+        predictedRank: predicted,
+        currentRank: i + 1,
+        pointsPct: s.gamesPlayed > 0 ? s.points / (s.gamesPlayed * 2) : 0.5,
+        gamesPlayed: s.gamesPlayed,
+      })
+    })
+    return seats
+  }
+
+  /** Replace a fired coach with a deterministic interim and tell the league. */
+  private applyCoachFiring(f: CoachFiring, salt: number): void {
+    const team = this.data.teams.get(asTeamId(f.teamId))
+    if (!team) return
+    const ts = this.getTeamStaff(f.teamId)
+    const rng = new Rng(deriveSeed(this.seed, Career.CAROUSEL_NS, this.year, salt, f.teamId.length))
+    const replacement = generateTeamStaff(rng).headCoach
+    replacement.id = `bench-${f.teamId}-${this.year}-${salt}`
+    replacement.profile = buildCoachProfile(replacement, rng)
+    ts.headCoach = replacement
+    this.coachTenure.set(f.teamId, 0)
+    // The new man's system takes hold immediately — that is the point of the change.
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(replacement.profile, roster, team.tactics)
+    team.coachFit = coachFit(replacement.profile, roster)
+    this.pushNews(f.category, f.headline, `${f.body} ${replacement.name} takes the room.`, {
+      teamId: f.teamId,
+      salience: 58,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [f.teamId],
+      summary: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over.`,
+    })
+    this.transactionLedger = tx.ledger
+  }
+
+  /** Mid-season bench changes around the league. Rare, capped, and earned. */
+  private tickCoachCarousel(sorted: ReturnType<typeof sortStandings>, totalGames: number, day: number): void {
+    if (this.midSeasonCoachFirings >= 3) return
+    const firings = midSeasonFirings({
+      seats: this.coachSeats(sorted),
+      totalGames,
+      teamsInLeague: this.data.league.teams.length,
+      alreadyFiredThisSeason: this.midSeasonCoachFirings,
+      rng: this.rngFor(Career.CAROUSEL_NS, day),
+    })
+    for (const f of firings) {
+      this.applyCoachFiring(f, day)
+      this.midSeasonCoachFirings += 1
+    }
+  }
+
   private teamFormFinding(): StaffFinding {
     const s = this.standings.get(this.userTeamId)
     const gp = Math.max(1, s?.gamesPlayed ?? 0)
@@ -19698,10 +19925,16 @@ export class Career {
     const summary = boardSummary(this.boardState)
     const sorted = sortStandings([...this.standings.values()])
     const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    const mood = this.pressureState?.year === this.year
+      ? this.pressureState.mood
+      : freshPressure(this.year, this.fanInterest).mood
     return {
       ...summary,
       currentRank,
       fired: this.boardState.firedAtYear !== null,
+      fanMood: mood,
+      fanMoodLabel: pressureLabel(bandOf(mood)),
+      benchChanges: this.midSeasonCoachFirings,
     }
   }
 
@@ -20005,6 +20238,9 @@ export class Career {
       boxScoreHistory: structuredClone(this.boxScoreHistory),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
+      ...(this.pressureState ? { pressure: structuredClone(this.pressureState) } : {}),
+      coachTenure: [...this.coachTenure.entries()],
+      midSeasonCoachFirings: this.midSeasonCoachFirings,
       lockerRooms: [...this.lockerRooms.entries()].map(
         ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
       ),
@@ -20260,6 +20496,11 @@ export class Career {
         rng: career.rngFor(9101),
       }).state
     }
+    // E3 pressure + carousel: additive, so an older save simply reseeds the
+    // fan mood from carry-over interest at the next checkpoint.
+    career.pressureState = snapshot.pressure ? structuredClone(snapshot.pressure) : null
+    career.coachTenure = new Map(snapshot.coachTenure ?? [])
+    career.midSeasonCoachFirings = snapshot.midSeasonCoachFirings ?? 0
     if (snapshot.storyMisc) {
       for (const [k, v] of snapshot.storyMisc.pointStreaks) career.pointStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)
