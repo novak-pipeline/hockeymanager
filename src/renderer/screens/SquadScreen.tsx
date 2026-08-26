@@ -455,9 +455,9 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         <SortTh label="Role" sortKey="line" {...sharedSortProps} title="Depth role / assigned line" />
                         {colView === 'general' && (
                           <>
-                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Overall ability (0–100)" />
-                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition / fitness (0–100)" />
-                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale (0–100)" />
+                            <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Ability, as your staff grade him (5 stars = elite)" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition — how fresh he is right now" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale — how happy he is at the club" />
                             <th title="Recent form trend">Form</th>
                             <th title="Injury status">Inj</th>
                           </>
@@ -465,7 +465,11 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         {colView === 'contract' && (
                           <>
                             <SortTh label="Salary" sortKey="salary" {...sharedSortProps} align="right" title="Annual cap hit" />
-                            <th className="num" title="Years remaining on the contract">Years</th>
+                            {/* `years` was already a SortKey with a working case in
+                              * sortRows() — it just had no header wired to it, so the
+                              * sort shipped unreachable and the column read as an inert
+                              * click target next to five sortable neighbours. */}
+                            <SortTh label="Years" sortKey="years" {...sharedSortProps} align="right" title="Years remaining on the contract" />
                             <th className="num" title="Season the contract expires">Expires</th>
                             <th title="No-trade / no-movement clauses">Clauses</th>
                           </>

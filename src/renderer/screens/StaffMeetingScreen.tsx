@@ -130,7 +130,7 @@ export function StaffMeetingScreen(): JSX.Element {
               <div className="row-between" style={{ marginBottom: 4 }}>
                 <span className="muted small">Roster fit</span>
                 <span style={{ fontWeight: 700, color: fitColor(summary.rosterFit) }}>
-                  {summary.fitLabel} · {summary.rosterFit}/100
+                  {summary.fitLabel}
                 </span>
               </div>
               <div style={{ height: 6, borderRadius: 3, background: 'var(--bg0)', overflow: 'hidden', marginBottom: 6 }}>

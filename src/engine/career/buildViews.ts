@@ -116,6 +116,11 @@ export interface ViewCtx {
   /** The label imported career histories use for THIS league (null = none/
    *  fictional). Lets the profile count a man's real pre-save career. */
   historyLeagueLabel?: string | null
+  /** The league's CURRENT cap ceiling. Optional so older ctx builders and tests
+   *  keep compiling; views that show a cap fall back to a static figure, which is
+   *  exactly the bug this replaced — the player profile hardcoded $83.5M and went
+   *  on saying it years after the cap had grown past it. */
+  salaryCap?: number
 }
 
 /* ────────────────────────── fog helpers ────────────────────────── */
@@ -613,7 +618,7 @@ function buildHonours(p: Player): PlayerHonoursView {
  * UFA: yearsRemaining === 0 and age >= 27.
  * Under contract: yearsRemaining > 0 → null status.
  */
-function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false): ProfileContractView | null {
+function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false, salaryCap?: number): ProfileContractView | null {
   if (!hasTeam) return null
   const c = p.contract
   // Amateurs (junior/college/Europe) hold no NHL deal — surface a zeroed,
@@ -623,6 +628,7 @@ function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false): P
     return {
       salary: 0, yearsRemaining: 0, expiryYear: 0, noTradeClause: false,
       twoWay: false, capHit: 0, freeAgentStatus: null, amateur: true,
+      ...(salaryCap !== undefined ? { salaryCap } : {}),
     }
   }
   let freeAgentStatus: 'RFA' | 'UFA' | null = null
@@ -641,6 +647,7 @@ function buildProfileContract(p: Player, hasTeam: boolean, isAmateur = false): P
     // rights; UFA → free to leave). Drives both the engine's re-sign logic and the
     // profile label so they agree.
     rightsStatus: contractStatus(p),
+    ...(salaryCap !== undefined ? { salaryCap } : {}),
   }
   // Two-way contracts: buried cap hit is the minor-league minimum (approximation).
   // EHM uses actual minor-league salary; we approximate as half the NHL salary,
@@ -992,7 +999,7 @@ export function buildPlayerProfile(
       const badges = careerMilestoneBadges(p, ctx.historyLeagueLabel)
       return badges.length ? { careerAchievements: badges } : {}
     })(),
-    profileContract: buildProfileContract(p, teamId !== null, isAmateur),
+    profileContract: buildProfileContract(p, teamId !== null, isAmateur, ctx.salaryCap),
     scoutReport,
     ...(scoutPanel !== undefined ? { scoutPanel } : {}),
     ...(mindset !== undefined ? { mindset } : {}),

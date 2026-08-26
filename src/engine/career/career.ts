@@ -1836,6 +1836,7 @@ export class Career {
       shAssists: this.shAssists,
       standingsSorted: sortStandings([...this.standings.values()]),
       historyLeagueLabel: this.historyLeagueLabel(),
+      salaryCap: this.userTeam.finances.salaryCap,
     }
   }
 

@@ -194,7 +194,7 @@ function LeaderCard(props: {
         {props.title}
       </div>
 
-      {!leader && <span className="muted small">No data yet.</span>}
+      {!leader && <span className="muted small">Nobody has played a game yet this season.</span>}
 
       {leader && (
         <>

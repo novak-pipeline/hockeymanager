@@ -79,6 +79,22 @@ export function moraleWord(morale: number): string {
   return 'Miserable'
 }
 
+/**
+ * Coach/system roster fit (0–100) → the word the engine itself uses.
+ *
+ * Mirrors the `fitLabel` thresholds in career.ts so the screens that receive a
+ * bare number (the Tactics header, the current-coach line on the Job Market)
+ * read the same as the ones handed a pre-computed label. Surfacing "63/100" to a
+ * GM is the spreadsheet tell the house rule exists to prevent — the number stays,
+ * in the tooltip, for anyone who wants it.
+ */
+export function rosterFitWord(fit: number): string {
+  if (fit >= 78) return 'Strong'
+  if (fit >= 66) return 'Good'
+  if (fit >= 55) return 'Adequate'
+  return 'Poor'
+}
+
 /** Color for a morale mood word, for colored text. */
 export function moraleColor(morale: number): string {
   if (morale >= 70) return 'var(--success)'

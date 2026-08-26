@@ -1721,6 +1721,8 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
   const capHit = pc?.capHit ?? salary
   const yearsRem = pc?.yearsRemaining ?? c?.yearsRemaining ?? 0
   const expiryYear = pc?.expiryYear ?? c?.expiryYear ?? 0
+  // Live league ceiling; the old literal is only a floor for pre-cap-growth saves.
+  const cap = pc?.salaryCap ?? 83_500_000
 
   return (
     <div className="stack">
@@ -1741,11 +1743,14 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
       </Panel>
 
       <Panel title="Cap Usage">
+        {/* The ceiling used to be hardcoded at $83.5M, so once the cap grew this
+          * panel quoted a figure the league had not used for years — and the bar
+          * was wrong with it. It now comes from the live league cap. */}
         <div className="meter" style={{ marginBottom: 8 }}>
-          <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, capHit / 83_500_000 * 100))}%` }} />
+          <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, (capHit / cap) * 100))}%` }} />
         </div>
         <span className="muted small">
-          {fmtMoney(capHit)} of $83.5M cap · {((capHit / 83_500_000) * 100).toFixed(1)}%
+          {fmtMoney(capHit)} of {fmtMoney(cap)} cap · {((capHit / cap) * 100).toFixed(1)}%
         </span>
       </Panel>
     </div>

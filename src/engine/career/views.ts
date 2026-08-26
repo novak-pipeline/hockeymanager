@@ -689,6 +689,9 @@ export interface ProfileContractView extends ContractView {
   /** True when the player skates in a non-pro loop (junior/college/Europe) and so
    *  carries no NHL contract — the salary/term fields are not a pro deal. */
   amateur?: boolean
+  /** The league's cap ceiling THIS season, so the profile's cap-usage read tracks
+   *  cap growth instead of quoting a frozen number. */
+  salaryCap?: number
 }
 
 /** EHM-style position proficiency for one position. */

@@ -15,10 +15,27 @@ import { _electron } from 'playwright-core'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { auditNav, auditControls, formatFindings } from './ui-audit.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const outDir = process.argv[2] ?? join(root, 'scripts', 'dev', 'ui-snaps')
+const argv = process.argv.slice(2).filter((a) => !a.startsWith('--'))
+const outDir = argv[0] ?? join(root, 'scripts', 'dev', 'ui-snaps')
 mkdirSync(outDir, { recursive: true })
+
+/**
+ * `--audit-only` (npm run ui:audit) skips the long season walk and runs only the
+ * interaction audit (nav + controls) right after the shell loads. That is the
+ * fast gate — minutes instead of an hour — and it is the one that catches dead
+ * controls, so it should be cheap enough to run on every UI change. A plain flag
+ * rather than an env var because npm scripts run through cmd.exe on Windows,
+ * where `VAR=1 node …` is not a thing.
+ */
+const AUDIT_ONLY = process.argv.includes('--audit-only') || process.env.UI_SNAP_AUDIT_ONLY === '1'
+/** Every interaction finding from every audit pass, written to ui-audit.txt. */
+const auditFindings = []
+/** Coverage, reported alongside the findings: a run that examined nothing and a
+ *  run that found nothing look identical without this. */
+const auditCounters = { navVisited: 0, hitTested: 0, exercised: 0 }
 
 /** Sidebar destinations to photograph once the shell is up (label → slug). */
 const SIDEBAR_STOPS = [
@@ -201,6 +218,45 @@ try {
   // give it minutes. The shell appears at the start of the offseason.
   await win.waitForSelector('text=Continue', { timeout: 300000 })
   await snap(win, 'shell-first-load')
+
+  // ── INTERACTION AUDIT (runs before anything else touches the career) ──
+  // The screenshot walk below proves screens LOOK right; this proves they can be
+  // REACHED and their controls DO something. Both of the 2026-07-31 playtest's
+  // worst bugs — every destination rendering the dashboard, and an inert Roster
+  // dropdown — were invisible to a clean typecheck, 2264 green tests AND a full
+  // screenshot run, because nothing ever clicked. This is that missing click.
+  try {
+    await dismissOverlay(win)
+    const { findings, visited } = await auditNav(win)
+    auditFindings.push(...findings)
+    auditCounters.navVisited += visited.length
+    console.log(`  ▶ nav audit: ${visited.length} destinations, ${findings.length} finding(s)`)
+    for (const f of findings) console.log(`    ${f.severity === 'dead' ? '✗' : '·'} [${f.where}] ${f.what}`)
+    // Then exercise the controls on each destination, one pass round the rail.
+    const labels = await win
+      .$$eval('nav.sidebar button.sidebar-item .sidebar-label', (els) => els.map((e) => e.textContent?.trim() ?? ''))
+      .catch(() => [])
+    for (let i = 0; i < labels.length; i++) {
+      try {
+        await dismissOverlay(win)
+        await win.locator('nav.sidebar button.sidebar-item').nth(i).click({ timeout: 3000 })
+        await win.waitForTimeout(400)
+        const f = await auditControls(win, labels[i], { counters: auditCounters })
+        auditFindings.push(...f)
+        for (const x of f) console.log(`    · [${x.where}] ${x.control}: ${x.what}`)
+      } catch { /* destination already reported dead by auditNav */ }
+    }
+    console.log(
+      `  ▶ control audit: ${auditCounters.hitTested} controls hit-tested, ` +
+      `${auditCounters.exercised} operated, ${auditFindings.length} finding(s)`,
+    )
+  } catch (e) {
+    console.log(`  ⚠ interaction audit failed — ${String(e.message ?? e).split('\n')[0]}`)
+  }
+  if (AUDIT_ONLY) {
+    console.log('  ▶ UI_SNAP_AUDIT_ONLY=1 — skipping the season walk')
+    throw new Error('__audit_only_done__') // caught by the finally block below
+  }
 
   // ── the dev-camp week: first Continue routes onto the rink ──
   try {
@@ -432,6 +488,10 @@ try {
       await win.click(`text="${label}"`, { timeout: 4000 })
       await win.waitForTimeout(500)
       await snap(win, slug)
+      // Second control pass, now with a MID-SEASON state behind it. The offseason
+      // pass above walks mostly-empty screens; a control that only appears once
+      // there are standings, stats and injuries to switch between is audited here.
+      auditFindings.push(...(await auditControls(win, `${label} (mid-season)`, { counters: auditCounters })))
       // On the trade centre, also photograph the Build-a-Trade tab (partner
       // dropdown + asset lists) and the Trade Block tab.
       if (slug === 'transfers') {
@@ -534,9 +594,28 @@ try {
     console.log('  ⚠ media circuit not reachable — skipped')
   }
 
+} catch (e) {
+  // The audit-only short-circuit unwinds through here; anything else is real.
+  if (String(e?.message) !== '__audit_only_done__') throw e
 } finally {
   writeFileSync(join(outDir, 'console-errors.txt'), consoleErrors.join('\n') || '(none)')
+  writeFileSync(join(outDir, 'ui-audit.txt'), formatFindings(auditFindings, auditCounters))
   console.log(`\n${shot} screenshots → ${outDir}`)
   console.log(`console errors: ${consoleErrors.length} (see console-errors.txt)`)
+  const dead = auditFindings.filter((f) => f.severity === 'dead').length
+  console.log(
+    `interaction findings: ${auditFindings.length} (${dead} DEAD) — see ui-audit.txt
+` +
+    `coverage: ${auditCounters.navVisited} destinations, ${auditCounters.hitTested} controls hit-tested, ` +
+    `${auditCounters.exercised} operated`,
+  )
+  // Zero coverage means the audit proved nothing, which must not read as a pass.
+  if (auditCounters.exercised === 0 || auditCounters.navVisited === 0) {
+    console.log('⚠ the interaction audit examined nothing — treat this run as INCONCLUSIVE, not clean')
+    process.exitCode = 1
+  }
   await app.close()
+  // A dead destination is a ship-blocker, so make it fail the run rather than
+  // sit in a log nobody opens. This is the gate the nav bug walked through.
+  if (dead > 0) process.exitCode = 1
 }
