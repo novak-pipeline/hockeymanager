@@ -3,6 +3,7 @@ import { motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { shouldHoldOverlay } from '@renderer/lib/cadence'
+import { routeContinue, type LastRoute } from '@engine/career/beatGates'
 import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
@@ -340,6 +341,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   /** B6.1: which match day the pregame frame was already shown for — the next
    *  Continue on that day plays the game instead of re-showing the frame. */
   const pregameShownRef = useRef<number | null>(null)
+  /** The beat screen the previous Continue press routed to, and the label it
+   *  routed for. If the GM is still not there on the next press, the screen
+   *  bounced him and the gate is spent instead (see engine/career/beatGates.ts). */
+  const lastGateRouteRef = useRef<LastRoute | null>(null)
 
   /** FM-style day-advance: pop the processing overlay, tick the sim, then fill it
    *  with the mail that streamed in, a trending headline, and the month calendar.
@@ -428,111 +433,40 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     () => ({
       busy,
       continueGame: () => {
-        // Interactive beats route to their own screens; each dismisses the
-        // processing overlay first so it never lingers over a beat screen.
-        // On draft day the offseason is parked on the entry draft — Continue
-        // cannot sim past it. Route the GM into the Draft screen to conduct it.
-        if (dashboard?.draftPending) {
-          setProcessing(null)
-          navigate('draft')
-          return
-        }
-        // Preseason: the season can't open until the GM names a captain. Block
-        // Continue outright while it's unset — routing to the Leadership screen
-        // if you're not already there. (Enforced here, not in the engine, so a
-        // headless advance can still roll a season.)
-        if (dashboard?.captainsPending) {
-          setProcessing(null)
-          if (nav.screen !== 'leadership') navigate('leadership')
-          else toast('Name a captain to open the season — pick the C on this screen.')
-          return
-        }
-        // Cut day: camp's verdicts await before opening night. Continuing from
-        // the camp screen itself lets the coach apply his plan.
-        if (dashboard?.campPending && nav.screen !== 'trainingCamp') {
-          setProcessing(null)
-          navigate('trainingCamp')
-          return
-        }
-        // Development camp (July): the first Continue after the draft walks you
-        // onto the rink. Skipping from there mails the staff report instead.
-        if (dashboard?.devCampPending && nav.screen !== 'devCamp') {
-          setProcessing(null)
-          navigate('devCamp')
-          return
-        }
-        // Preseason board meeting: the first Continue of the year walks you into
-        // the boardroom. Skipping from there sends the AGM (engine-safe defaults).
-        if (dashboard?.boardMeetingPending && nav.screen !== 'boardMeeting') {
-          setProcessing(null)
-          navigate('boardMeeting')
-          return
-        }
-        // End-of-season review: one Continue press walks you in; continuing
-        // FROM the review screen (or anywhere twice) lets it lapse engine-side.
-        if (dashboard?.reviewPending && nav.screen !== 'seasonReview') {
-          setProcessing(null)
-          navigate('seasonReview')
-          return
-        }
-        // Deadline day (playtest A7): the season's biggest decision point. The
-        // engine holds the sim; Continue walks the GM into the war room instead
-        // of quietly spending the hold. Continuing FROM the deadline screen is
-        // the escape — the window closes and the roster you have is the one you
-        // ride. Ordered to match `continueLabel`: after the review, before the
-        // meetings.
-        if (dashboard?.deadlinePending && nav.screen !== 'deadlineDay') {
-          setProcessing(null)
-          navigate('deadlineDay')
-          return
-        }
-        // Standing trade offer (playtest A6): a rival GM is holding for an answer
-        // on one of your players. Continue routes to the trade desk; continuing
-        // FROM it delegates — the AGM passes on the lot (engine-side).
-        if ((dashboard?.tradeOffersPending ?? 0) > 0 && nav.screen !== 'trades') {
-          setProcessing(null)
-          navigate('trades')
-          return
-        }
-        // Bi-weekly staff meeting: the coaches convene with live-roster proposals.
-        // Skipping (delegate) hands the meeting to the AGM (engine-safe defaults).
-        if (dashboard?.staffMeetingDue && nav.screen !== 'staffBriefing') {
-          setProcessing(null)
-          navigate('staffBriefing')
-          return
-        }
-        // Monthly scout meeting: the recruitment desk convenes with the board.
-        // Skipping (delegate) hands it to the Head of Scouting (safe defaults).
-        if (dashboard?.scoutMeetingDue && nav.screen !== 'scoutMeeting') {
-          setProcessing(null)
-          navigate('scoutMeeting')
-          return
-        }
-        // Weekly scout digest with fresh finds (playtest #10): Continue walks
-        // you into the briefing — its prospect cards want a call. Continuing
-        // from the inbox delegates ("the scouts keep the queue", engine-side).
-        if (dashboard?.scoutDigestPending && nav.screen !== 'inbox') {
-          setProcessing(null)
-          navigate('inbox', dashboard.scoutDigestNewsId ? { newsId: dashboard.scoutDigestNewsId } : {})
-          return
-        }
-        // When the GM is attending a beat ON its own screen (camp, dev camp, board
-        // meeting, season review, staff/scout meeting), a Continue press ADVANCES
-        // that sub-flow in place — no processing overlay, no calendar detour (that
-        // detour swallowed the advance and left camp stuck on Day 1).
-        const resolvingBeat = !!(
-          dashboard?.campPending || dashboard?.devCampPending ||
-          dashboard?.boardMeetingPending || dashboard?.reviewPending ||
-          dashboard?.staffMeetingDue || dashboard?.scoutMeetingDue ||
-          dashboard?.scoutDigestPending ||
-          // A7/A6: the deadline and the trade desk resolve in place too — a
-          // Continue pressed ON the beat's own screen spends the gate.
-          dashboard?.deadlinePending || (dashboard?.tradeOffersPending ?? 0) > 0
-        )
-        if (resolvingBeat) {
-          setProcessing(null)
-          void run(() => client.continueGame())
-          return
+        // ── THE BEAT-GATE LAW (Gap #1 / bar B2.2) ────────────────────────────
+        // One decision, taken by the pure `routeContinue` in engine/career/beatGates.ts:
+        // walk into a beat, or spend one, never neither. Deciding gate-by-gate
+        // here is what softlocked the game whenever two gates were live at once
+        // (each press bounced to the other's screen and the sim never ticked).
+        const decision = routeContinue({
+          dashboard,
+          screen: nav.screen,
+          lastRoute: lastGateRouteRef.current,
+        })
+        if (decision.kind !== 'advance') setProcessing(null)
+        switch (decision.kind) {
+          // Hard gates: the engine cannot sim past them, so the escape lives on
+          // the screen (auto-pick the draft; "let the coach name him").
+          case 'hardGate':
+            lastGateRouteRef.current = null
+            if (!decision.alreadyThere) navigate(decision.screen)
+            else if (decision.screen === 'leadership')
+              toast('Name a captain to open the season — pick the C on this screen.')
+            else if (decision.message) toast(decision.message, 'error')
+            return
+          case 'route':
+            lastGateRouteRef.current = { screen: decision.gate.screen, label: dashboard?.continueLabel ?? '' }
+            navigate(decision.gate.screen, decision.gate.params ?? {})
+            return
+          // Attending (or bounced off) a beat: the press ADVANCES the sub-flow in
+          // place — no processing overlay, no calendar detour (that detour
+          // swallowed the advance and left camp stuck on Day 1).
+          case 'spend':
+            lastGateRouteRef.current = null
+            void run(() => client.continueGame())
+            return
+          default:
+            lastGateRouteRef.current = null
         }
         // Normal day-advance: FM-style — pop the processing overlay that streams
         // the day's incoming mail, a trending headline, and the month calendar
@@ -556,7 +490,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, advanceWithOverlay, dashboard?.draftPending, dashboard?.captainsPending, dashboard?.campPending, dashboard?.devCampPending, dashboard?.boardMeetingPending, dashboard?.reviewPending, dashboard?.staffMeetingDue, dashboard?.scoutMeetingDue, dashboard?.scoutDigestPending, dashboard?.scoutDigestNewsId, dashboard?.deadlinePending, dashboard?.tradeOffersPending, nav.screen, navigate]
+    [busy, client, run, advanceWithOverlay, dashboard, nav.screen, navigate]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is

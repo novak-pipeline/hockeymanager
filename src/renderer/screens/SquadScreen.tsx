@@ -1,5 +1,5 @@
 import { Fragment, useState, useMemo } from 'react'
-import type { AhlSquadView, SquadView } from '../../worker/protocol'
+import type { AhlSquadView, DashboardView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import type { SquadStatus } from '../../domain/player'
 import { PlayerLink } from '../components/NavContext'
@@ -305,6 +305,29 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
       setSettingRoster(false)
     }
   }
+  /* ── Bar B2.2: the lineup gate's one-click way out. When the club cannot
+     dress a legal team the sim is HELD, Continue names the hole and routes
+     here — so the fix has to be on this screen, not in a thrown error. ── */
+  const { data: dash, refetch: refetchDash } = useScreenData<DashboardView>(
+    () => client.getDashboard(),
+    (r) => (r.type === 'dashboard' ? r.dashboard : null)
+  )
+  const [signingCover, setSigningCover] = useState(false)
+  async function handleEmergencyCover(): Promise<void> {
+    if (signingCover) return
+    setSigningCover(true)
+    try {
+      const res = await client.signEmergencyCover()
+      if (res.type === 'error') { toast(res.message, 'error'); return }
+      if (res.type === 'emergencyCoverSigned') toast(`Emergency cover signed — ${res.signed.join(', ')}.`, 'success')
+      bump()
+      refetchAhl()
+      refetchDash()
+    } finally {
+      setSigningCover(false)
+    }
+  }
+
   async function handleUndoCoachRoster(): Promise<void> {
     const res = await client.undoCoachRoster()
     if (res.type === 'error') { toast(res.message, 'error'); return }
@@ -348,6 +371,22 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
           )}
         </div>
       </ScreenHeader>
+
+      {!isReadOnly && dash?.lineupShortfall && (
+        <Notice kind="warn">
+          <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ flex: 1, minWidth: 260 }}>{dash.lineupShortfall}</span>
+            <button
+              className="btn btn-sm btn-primary"
+              disabled={signingCover}
+              onClick={() => void handleEmergencyCover()}
+              title="The AGM signs the best free body available at each missing position, one year at the league minimum"
+            >
+              {signingCover ? 'Signing…' : 'Let the AGM sign emergency cover'}
+            </button>
+          </div>
+        </Notice>
+      )}
 
       {/* What the coach just did — explicit report of the auto-set moves. */}
       {!isReadOnly && coachMoves && (

@@ -902,6 +902,12 @@ export class SimClient {
   }
 
   /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  /** Bar B2.2: the AGM signs league-minimum cover for a lineup that cannot
+   *  legally be dressed — the one-click way out of the lineup gate. */
+  signEmergencyCover(): Promise<WorkerResponse> {
+    return this.send({ type: 'signEmergencyCover' })
+  }
+
   setCoachRoster(): Promise<WorkerResponse> {
     return this.send({ type: 'setCoachRoster' })
   }
