@@ -583,6 +583,22 @@ export const CORNERSTONE_VALUE = 52
  */
 export const HEADLINE_MIN_VALUE = 26
 
+/**
+ * Where an asset actually sits in the organisation that holds him — the one
+ * fact the club lens needs about the PIECE rather than about the club.
+ *
+ * Playtest A4 opened the futures half of the market: an AHL skater or a
+ * rights-held junior is now tradeable, and he carries his full value. But he is
+ * not on anybody's NHL roster tonight, and two of the lens's multipliers price
+ * exactly that — which hole he fills, and how much of the cap he eats. Neither
+ * applies to a man in Wilkes-Barre. Absent → an NHL roster player, which is how
+ * every call site behaved before the farm existed.
+ */
+export interface AssetPlacement {
+  /** True for an asset outside the NHL roster: AHL affiliate or held rights. */
+  farm?: boolean
+}
+
 /** Everything a club needs to price an asset as ITSELF rather than as "the market". */
 export interface ClubLens {
   philosophy: TeamPhilosophy
@@ -679,8 +695,15 @@ export function upsidePremium(player: Player, lens: ClubLens): number {
  * for a body at that spot. Goalies swing hardest — a club with one is a club in
  * trouble — and defence is priced by shot side, because two right-shot pairs is
  * not a blue line.
+ *
+ * A4 — a {@link AssetPlacement.farm} asset is priced flat here. A club thin on
+ * the right side does not solve tonight's blue line by acquiring an AHL
+ * right-shot, so the scarcity premium is one he has not earned; and by the same
+ * token a club already deep at his spot does not discount him, because his value
+ * is what he becomes, not the slot he would take this evening.
  */
-export function positionalFitMultiplier(player: Player, lens: ClubLens): number {
+export function positionalFitMultiplier(player: Player, lens: ClubLens, placement?: AssetPlacement): number {
+  if (placement?.farm) return 1
   const g = groupOf(player.position)
   let m = 1
   const have = lens.depth.group[g]
@@ -707,16 +730,21 @@ export function positionalFitMultiplier(player: Player, lens: ClubLens): number 
  *  - A rebuilder does not want long money on an old player at any discount —
  *    those years land squarely in the seasons he is trying to be good again.
  */
-export function contractLensMultiplier(player: Player, lens: ClubLens): number {
+export function contractLensMultiplier(player: Player, lens: ClubLens, placement?: AssetPlacement): number {
   const yrs = player.contract.yearsRemaining
   const fair = fairSalaryFor(ratedOverall(player))
   const richness = player.contract.salary / Math.max(fair, 1e6) // >1 = paid above the curve
   let m = 1
 
-  const bite = player.contract.salary / Math.max(lens.capSpace, 1e6)
-  if (lens.capSpace <= 0) m *= 0.80
-  else if (bite >= 1) m *= 0.86
-  else if (bite >= 0.6) m *= 0.93
+  // Cap bite is a TONIGHT'S-ROSTER cost, so a farm asset does not pay it: his
+  // salary is not on the NHL sheet, and a cap-strapped club is therefore just as
+  // able to take him on as a club with room (A4).
+  if (!placement?.farm) {
+    const bite = player.contract.salary / Math.max(lens.capSpace, 1e6)
+    if (lens.capSpace <= 0) m *= 0.80
+    else if (bite >= 1) m *= 0.86
+    else if (bite >= 0.6) m *= 0.93
+  }
 
   if (yrs >= 3) m *= clamp(1 + (1 - richness) * 0.10, 0.82, 1.14)
   if (lens.posture === 'rebuild' && yrs >= 3 && player.age >= 30) m *= 0.85
@@ -738,12 +766,12 @@ export function contractLensMultiplier(player: Player, lens: ClubLens): number {
  * What THIS club would pay for THIS player, in the shared trade currency.
  * Never equals `playerValue` except by coincidence — that is the point.
  */
-export function clubPlayerValue(player: Player, lens: ClubLens): number {
+export function clubPlayerValue(player: Player, lens: ClubLens, placement?: AssetPlacement): number {
   const base = playerValue(player)
   const m =
     lerpCurve(POSTURE_AGE_CURVE[lens.posture], player.age) *
-    positionalFitMultiplier(player, lens) *
-    contractLensMultiplier(player, lens) *
+    positionalFitMultiplier(player, lens, placement) *
+    contractLensMultiplier(player, lens, placement) *
     philosophyGainBias(lens.philosophy, { kind: 'player', player })
   return base * m + upsidePremium(player, lens)
 }
@@ -771,9 +799,14 @@ export function clubPickValue(
  * seen through one club's eyes. Use this anywhere a specific front office is
  * deciding; use `assetValue` only where you genuinely mean "the market".
  */
-export function clubAssetValue(asset: TradeAsset, lens: ClubLens, ctx: AssetValueContext): number {
+export function clubAssetValue(
+  asset: TradeAsset,
+  lens: ClubLens,
+  ctx: AssetValueContext,
+  placement?: AssetPlacement,
+): number {
   return asset.kind === 'player'
-    ? clubPlayerValue(asset.player, lens)
+    ? clubPlayerValue(asset.player, lens, placement)
     : clubPickValue(asset.pick, lens, ctx)
 }
 
@@ -786,8 +819,9 @@ export function describeClubValue(
   asset: TradeAsset,
   lens: ClubLens,
   ctx: AssetValueContext,
+  placement?: AssetPlacement,
 ): { value: number; drivers: ValueDriver[] } {
-  const value = clubAssetValue(asset, lens, ctx)
+  const value = clubAssetValue(asset, lens, ctx, placement)
   const market = assetValue(asset, ctx)
   const drivers: ValueDriver[] = []
   const POSTURE_WORD: Record<ClubPostureKind, string> = {
@@ -804,7 +838,9 @@ export function describeClubValue(
     const up = upsidePremium(p, lens)
     if (up >= market * 0.12) drivers.push({ label: 'They pay for the ceiling', tone: 'up' })
 
-    const fit = positionalFitMultiplier(p, lens)
+    if (placement?.farm) drivers.push({ label: 'Not on tonight’s roster', tone: 'flat' })
+
+    const fit = positionalFitMultiplier(p, lens, placement)
     if (fit >= 1.05) {
       drivers.push({
         label: p.position === 'D'
@@ -814,7 +850,7 @@ export function describeClubValue(
       })
     } else if (fit <= 0.95) drivers.push({ label: 'Already deep there', tone: 'down' })
 
-    const con = contractLensMultiplier(p, lens)
+    const con = contractLensMultiplier(p, lens, placement)
     if (con <= 0.92) {
       drivers.push({
         label: lens.capSpace < p.contract.salary ? 'They cannot fit the money' : 'The term scares them',
@@ -1030,8 +1066,17 @@ export function evaluateProposal(args: {
    *  sign-off / an acceptable-destination list). Absent → no waivers (identical
    *  to the original behaviour). */
   waivedNtcIds?: ReadonlySet<string>
+  /** Playtest A4: ids in either package that are ORG assets rather than NHL
+   *  roster players — an AHL affiliate skater or a rights-held junior. They
+   *  carry full trade value (that is the point of a futures market) but they
+   *  occupy no NHL roster slot and no cap space, so they must be kept out of the
+   *  cap fit and the "don't leave yourself short" roster check. Absent → every
+   *  named player is treated as an NHL roster player (the original behaviour). */
+  nonRosterIds?: ReadonlySet<string>
 }): ProposalEvaluation {
   const { give, receive, partnerTeam, partnerPlayers, rng } = args
+  /** True for a farm/prospect asset: real value, no cap hit, no roster slot. */
+  const isFarm = (p: Player): boolean => args.nonRosterIds?.has(p.id as string) ?? false
 
   // Draw the mood wiggle up front so rng consumption is identical on every
   // path — repeat evaluations with the same seed must match exactly.
@@ -1057,8 +1102,8 @@ export function evaluateProposal(args: {
   // finances.capUsed — that field goes stale across a season (retirements,
   // departures, ELCs, call-ups) and a stale-high value wrongly rejects deals
   // that actually shed salary. Matches how applyTrade recomputes cap.
-  const incomingSalary = sumSalary(give.players, give.retainedAmounts)
-  const outgoingSalary = sumSalary(receive.players)
+  const incomingSalary = sumSalary(give.players.filter((p) => !isFarm(p)), give.retainedAmounts)
+  const outgoingSalary = sumSalary(receive.players.filter((p) => !isFarm(p)))
   const partnerCapUsed = rosterCapUsed(partnerTeam, partnerPlayers)
   const capAfter = partnerCapUsed + incomingSalary - outgoingSalary
   if (capAfter > partnerTeam.finances.salaryCap) {
@@ -1081,13 +1126,13 @@ export function evaluateProposal(args: {
       const pl = partnerPlayers.get(id)
       if (pl) post[groupOf(pl.position)]++
     }
-    for (const pl of give.players) post[groupOf(pl.position)]++
+    for (const pl of give.players) if (!isFarm(pl)) post[groupOf(pl.position)]++
     // One short up front is recallable from the farm; gutted is gutted.
     const MIN: Record<PositionGroup, number> = { F: 8, D: 4, G: 2 }
     for (const g of ['F', 'D', 'G'] as const) {
       const netOut =
-        receive.players.filter((pl) => groupOf(pl.position) === g).length -
-        give.players.filter((pl) => groupOf(pl.position) === g).length
+        receive.players.filter((pl) => !isFarm(pl) && groupOf(pl.position) === g).length -
+        give.players.filter((pl) => !isFarm(pl) && groupOf(pl.position) === g).length
       if (netOut > 0 && post[g] < MIN[g]) {
         const short = g === 'G' ? 'in the crease' : g === 'D' ? 'on the blue line' : 'up front'
         return {
@@ -1119,7 +1164,10 @@ export function evaluateProposal(args: {
     deadlineProximity: ctx?.deadlineProximity ?? 0,
   }
   const lensCtx: AssetValueContext = { year }
-  const lensPlayer = (p: Player): number => clubPlayerValue(p, lens)
+  // Every lens read of a player goes through here, so the farm flag reaches the
+  // valuation on BOTH sides of the deal — the prospect the partner is buying and
+  // the one it is selling are priced by the same rule (A4).
+  const lensPlayer = (p: Player): number => clubPlayerValue(p, lens, { farm: isFarm(p) })
   const lensPick = (p: DraftPick): number => clubPickValue(p, lens, lensCtx)
 
   // Gain = what the partner receives (the user's "give" side).
