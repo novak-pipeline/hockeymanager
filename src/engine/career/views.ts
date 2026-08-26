@@ -473,6 +473,9 @@ export interface DashboardView {
   reviewPending?: boolean
   /** True while the sim is held on deadline day (last chance to trade). */
   deadlinePending?: boolean
+  /** Playtest A6: how many standing inbound offers are waiting on a yes or a no.
+   *  Non-zero holds Continue on the trade desk and flags the topbar. Additive. */
+  tradeOffersPending?: number
   userTeam: {
     teamId: string
     name: string

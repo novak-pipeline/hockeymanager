@@ -17,6 +17,7 @@ import type { DeadlineDayView, ShoppedPlayerView, TradeOfferView } from '../../e
 import { Backdrop } from './BoardMeetingScreen'
 import { PlayerFace } from '../components/PlayerFace'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { useShellActions } from '../components/ActionsContext'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
@@ -113,6 +114,7 @@ function ShoppedRow(props: { p: ShoppedPlayerView }): JSX.Element {
 export function DeadlineDayScreen(): JSX.Element {
   const client = useClient()
   const nav = useNav()
+  const actions = useShellActions()
   const { data: dd, loading, refetch } = useScreenData<DeadlineDayView>(
     () => client.getDeadlineDay(),
     (r) => (r.type === 'deadlineDay' ? r.deadlineDay : null),
@@ -204,8 +206,16 @@ export function DeadlineDayScreen(): JSX.Element {
 
         <div className="row" style={{ gap: 'var(--sp-3)' }}>
           <button className="btn btn-primary" onClick={() => nav.navigate('trades')}>Open the trade office →</button>
-          <button className="btn btn-ghost" onClick={() => nav.navigate('dashboard')} title="The deadline passes when you next continue">
-            Stand pat — let the day ride
+          {/* A7 escape (bar B2.2): the hard gate needs one click that actually
+              SPENDS it. This used to just navigate away, leaving the hold armed
+              and the next Continue bouncing the GM back here. */}
+          <button
+            className="btn btn-ghost"
+            onClick={actions.continueGame}
+            disabled={actions.busy}
+            title="Let the deadline pass — the roster you have is the roster you ride"
+          >
+            Stand pat — let the deadline pass
           </button>
         </div>
       </Backdrop>

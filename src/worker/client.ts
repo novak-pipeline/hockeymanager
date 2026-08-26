@@ -516,6 +516,11 @@ export class SimClient {
     return this.send({ type: 'rejectTrade', offerId })
   }
 
+  /** A6 escape hatch: the AGM passes on every standing offer in one click. */
+  declineAllTradeOffers(): Promise<WorkerResponse> {
+    return this.send({ type: 'declineAllTradeOffers' })
+  }
+
   resignPlayer(playerId: string, salary: number, years: number): Promise<WorkerResponse> {
     return this.send({ type: 'resignPlayer', playerId, salary, years })
   }

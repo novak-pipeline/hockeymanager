@@ -874,6 +874,27 @@ a:hover { text-decoration: underline; }
 }
 .topnav-next strong { color: var(--text); }
 
+/* beat flags — a gate that is holding Continue, clickable straight to its desk */
+.topnav-beats {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+  border-left: 1px solid var(--line);
+  padding-left: var(--sp-3);
+  margin-left: var(--sp-2);
+}
+button.topnav-beat {
+  border: 1px solid currentColor;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+button.topnav-beat:hover { filter: brightness(1.25); }
+
 /* right-side action cluster */
 .topnav-actions {
   display: flex;

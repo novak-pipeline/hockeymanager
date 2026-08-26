@@ -360,6 +360,9 @@ export type WorkerRequestBody =
   | { type: 'shopPlayer'; playerId: string }
   | { type: 'acceptTrade'; offerId: string }
   | { type: 'rejectTrade'; offerId: string }
+  /** Playtest A6: the one-click escape from the trade-offer gate — the AGM
+   *  works the phones and passes on every standing offer. */
+  | { type: 'declineAllTradeOffers' }
   | { type: 'resignPlayer'; playerId: string; salary: number; years: number }
   | { type: 'releasePlayer'; playerId: string }
   | { type: 'signFreeAgent'; playerId: string; salary: number; years: number }

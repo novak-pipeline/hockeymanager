@@ -1525,6 +1525,18 @@ export function TradesScreen(): JSX.Element {
     void client.rejectTrade(offer.offerId).then(refetch)
   }
 
+  /** A6 escape (bar B2.2): the AGM works the phones and passes on the lot, so a
+   *  desk full of offers can be cleared without answering each card. */
+  const [declining, setDeclining] = useState(false)
+  async function declineAll(): Promise<void> {
+    setDeclining(true)
+    const r = await client.declineAllTradeOffers()
+    setDeclining(false)
+    if (r.type === 'error') toast(r.message, 'error')
+    else if (r.type === 'shopResult') toast(r.message)
+    refetch()
+  }
+
   // infer currentDay from expiry info — use 0 as fallback
   const currentDay = 0
   const incomingCount = data?.incoming.length ?? 0
@@ -1578,9 +1590,23 @@ export function TradesScreen(): JSX.Element {
                   No offers on your desk right now. Shop a player from <b>Build a Trade</b>, or watch the <b>Trade Block</b> for names on the move.
                 </Notice>
               ) : (
-                data.incoming.map((offer) => (
-                  <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} onCounter={counterOffer} />
-                ))
+                <>
+                  {/* Playtest A6 / bar B2.2: a standing offer holds Continue, so it
+                      needs a one-click way out that isn't "answer every card". */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-ghost"
+                      disabled={declining}
+                      onClick={() => { void declineAll() }}
+                      title="Hand the phones to your Assistant GM — he passes on every standing offer"
+                    >
+                      {declining ? 'Calling back…' : 'Let the AGM handle it — decline all'}
+                    </button>
+                  </div>
+                  {data.incoming.map((offer) => (
+                    <OfferCard key={offer.offerId} offer={offer} currentDay={currentDay} onAction={refetch} onCounter={counterOffer} />
+                  ))}
+                </>
               )}
             </div>
           )}
