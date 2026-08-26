@@ -444,11 +444,24 @@ function reviewIncoming(ctx: Ctx): void {
   const sideValue = (side: { players: Array<{ tradeValue?: number }>; picks: Array<{ value: number }> }): number =>
     side.players.reduce((n, p) => n + (p.tradeValue ?? 0), 0) + side.picks.reduce((n, p) => n + p.value, 0)
   for (const offer of tv.incoming.slice(0, 6)) {
+    // A deal the club can't legally complete isn't on the table, however good the
+    // paper value looks — the view says why, so a real GM would move on.
+    if (offer.blockedReason) continue
     const get = sideValue(offer.receive)
     const give = sideValue(offer.give)
     if (get >= give * 1.15 && get - give >= 3) {
-      guarded(ctx, 'acceptTrade', () => ctx.career.acceptTrade(offer.offerId))
-      log(ctx, { kind: 'trade-in', summary: `Accepted an offer from ${offer.receive.teamName}`, drivers: [`we get ${get.toFixed(0)} value for ${give.toFixed(0)}`, 'clear win on paper'], result: 'accepted', ok: true })
+      const res = guarded(ctx, 'acceptTrade', () => ctx.career.acceptTrade(offer.offerId))
+      log(ctx, {
+        kind: 'trade-in',
+        summary: res?.ok ? `Accepted an offer from ${offer.receive.teamName}` : `Tried to accept ${offer.receive.teamName}'s offer, too late`,
+        drivers: [`we get ${get.toFixed(0)} value for ${give.toFixed(0)}`, 'clear win on paper'],
+        result: res?.ok ? 'accepted' : (res?.message ?? 'error'),
+        ok: !!res?.ok,
+      })
+      // One deal per pass. Taking a player off this roster can kill the offers
+      // below (two clubs bidding for the same man is normal), and no GM works a
+      // list he already knows is out of date.
+      return
     }
   }
 }

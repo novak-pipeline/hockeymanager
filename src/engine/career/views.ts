@@ -1409,6 +1409,11 @@ export interface TradeOfferView {
   /** AI's one-line pitch. */
   message: string
   expiresOnDay: number
+  /** Why this deal cannot be completed RIGHT NOW (cap room, roster limit), in
+   *  plain English. The offer stays on the desk — the club could shed salary and
+   *  make it legal — but Accept must be disabled while this is set. Absent when
+   *  the deal is completable. */
+  blockedReason?: string
 }
 
 /** UI → worker proposal: asset ids only. */

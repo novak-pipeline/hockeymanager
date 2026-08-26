@@ -288,9 +288,17 @@ function OfferCard(props: {
       </div>
 
       {mutErr && <Notice kind="warn">{mutErr}</Notice>}
+      {/* A deal the club cannot legally complete stays on the desk — it may fit
+          again once salary moves — but the button that would throw is closed. */}
+      {offer.blockedReason && <Notice kind="warn">{offer.blockedReason}</Notice>}
 
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-primary" disabled={busy} onClick={doAccept}>
+        <button
+          className="btn btn-primary"
+          disabled={busy || !!offer.blockedReason}
+          title={offer.blockedReason}
+          onClick={doAccept}
+        >
           Accept
         </button>
         <button

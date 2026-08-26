@@ -5549,6 +5549,10 @@ export class Career {
       }
     }
     this.tradeOffers = this.tradeOffers.filter((o) => o.expiresOnDay > day)
+    // Expiry is not validity: an offer well inside its window dies the moment one
+    // of its named assets changes hands. Clear those every day so the desk only
+    // ever holds paper that could actually be signed.
+    this.pruneDeadOffers()
     if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
       // Living World LW3: postures + GM personas drive who calls and how hard,
       // and the offer rate ramps toward the deadline. Ranks computed once.
@@ -5574,6 +5578,7 @@ export class Career {
         deadlineDay: this.deadlineDay,
         postureOf,
         aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
+        userDeadCap: this.userDeadCap,
       })
       for (const o of offers) {
         this.tradeOffers.push(o)
@@ -11267,12 +11272,14 @@ export class Career {
       }
     }
 
-    // Practical flag: can WE fit the money coming back?
-    const incoming = receivePlayers.reduce((s, p) => s + p.contract.salary, 0)
-    const outgoing = givePlayers.reduce((s, p) => s + p.contract.salary, 0)
-    const capAfter = rosterCapUsed(this.userTeam, this.data.players) + incoming - outgoing
-    if (capAfter > this.userTeam.finances.salaryCap) {
-      const over = capAfter - this.userTeam.finances.salaryCap
+    // Practical flag: can WE fit the money coming back? Same arithmetic the
+    // engine will actually enforce, so the AGM never blesses a deal the club is
+    // then refused.
+    const over = this.userTradeOverage(
+      receivePlayers.map((p) => p.id),
+      givePlayers.map((p) => p.id),
+    )
+    if (over > 0) {
       return {
         agmName, tone: 'blocked',
         line: `The hockey’s one thing, but this puts us about $${(over / 1e6).toFixed(1)}M over the cap. We’d have to shed salary first.`,
@@ -11521,6 +11528,14 @@ export class Career {
         counter: null,
       }
     }
+    // Your own cap is a fast-no as well: there is no point tabling a deal your
+    // club could not complete if he said yes on the spot. Told now, not two days
+    // from now when the answer comes back and the money doesn't work.
+    const capBlocked = this.userTradeBlockReason(
+      receive.players.map((p) => p.id),
+      give.players.map((p) => p.id),
+    )
+    if (capBlocked) return { verdict: 'reject', message: capBlocked, counter: null }
     const waivedNtcIds = new Set(
       give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
     )
@@ -11665,6 +11680,17 @@ export class Career {
     if (!partner) return { ok: false }
     const give = { players: proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.givePickIds) }
     const receive = { players: proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(proposal.receivePickIds) }
+    // The GM's OWN deals are bound by the ceiling too. This path — propose, sleep
+    // on it, execute two days later — had no cap check at all, which is how a club
+    // ended a season $6.5M over: every incoming offer was guarded, and the trades
+    // the GM initiated himself walked straight through. The deal simply falls
+    // through (the caller already reports that as news), exactly as a real one
+    // does when the money doesn't work.
+    const blocked = this.userTradeBlockReason(
+      receive.players.map((p) => p.id),
+      give.players.map((p) => p.id),
+    )
+    if (blocked) return { ok: false, message: blocked }
     try {
       executeTrade({
         teams: this.data.teams,
@@ -11802,6 +11828,7 @@ export class Career {
       nextOfferId: () => `s${this.offerCounter++}`,
       expiresOnDay: this.currentDay + 4,
       aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
+      userDeadCap: this.userDeadCap,
       maxOffers: 4,
     })
     for (const o of offers) this.tradeOffers.push(o)
@@ -11926,24 +11953,115 @@ export class Career {
     return { ok: true, teams, message: `${p.name} would waive his clause for ${teams.length} clubs.` }
   }
 
-  acceptTrade(offerId: string): void {
-    const offer = this.tradeOffers.find((o) => o.offerId === offerId)
-    if (!offer) throw new Error('offer no longer available')
-    const partner = this.data.teams.get(offer.partnerTeamId)!
-    // Cap guard: you can't complete a deal that puts you over the ceiling — the
-    // same check the AGM shows in his read. Salary in minus salary out, netted
-    // against a former club's retained share.
-    const salOf = (id: string): number => {
-      const p = this.data.players.get(asPlayerId(id))
+  /**
+   * What a package would do to the user's cap sheet: salary in minus salary out,
+   * netted against a former club's retained share, measured against the SAME
+   * ceiling the finance screen shows (buyout dead cap counted, exactly as
+   * {@link callUp} and every signing path do it). Positive = the overage in
+   * dollars; zero or less = the deal fits.
+   */
+  private userTradeOverage(receiveIds: readonly PlayerId[], giveIds: readonly PlayerId[]): number {
+    const salOf = (id: PlayerId): number => {
+      const p = this.data.players.get(id)
       return p ? p.contract.salary - (p.contract.retainedByOthers ?? 0) : 0
     }
-    const incoming = offer.userReceivesPlayerIds.reduce((s, id) => s + salOf(id as string), 0)
-    const outgoing = offer.userGivesPlayerIds.reduce((s, id) => s + salOf(id as string), 0)
-    const capAfter = rosterCapUsed(this.userTeam, this.data.players) + incoming - outgoing
-    if (capAfter > this.userTeam.finances.salaryCap) {
-      const over = capAfter - this.userTeam.finances.salaryCap
-      throw new Error(`Accepting would put you $${(over / 1e6).toFixed(1)}M over the cap — shed salary or move a contract first.`)
+    const incoming = receiveIds.reduce((s, id) => s + salOf(id), 0)
+    const outgoing = giveIds.reduce((s, id) => s + salOf(id), 0)
+    // `userCapUsed` is the club's own number — retained salary netted both ways
+    // and LTIR relief applied — so the guard agrees with the finance screen the
+    // GM is looking at, and with every signing path.
+    const capAfter = this.userCapUsed() + this.userDeadCap + incoming - outgoing
+    return capAfter - this.userTeam.finances.salaryCap
+  }
+
+  /** Plain-English "you cannot complete this right now" for a package the user
+   *  would be on one side of, or null when it is legal. Cap only — a club can
+   *  shed salary and make the very same deal legal an hour later, so this is a
+   *  BLOCK, not a death sentence (see {@link offerDeadReason} for those). */
+  private userTradeBlockReason(
+    receiveIds: readonly PlayerId[],
+    giveIds: readonly PlayerId[],
+  ): string | null {
+    const over = this.userTradeOverage(receiveIds, giveIds)
+    if (over > 0) {
+      return `Completing this would put you $${(over / 1e6).toFixed(1)}M over the cap — shed salary or move a contract first.`
     }
+    return null
+  }
+
+  /**
+   * Why a standing offer is DEAD rather than merely blocked: one of the assets it
+   * names has changed hands since it was tabled. Expiry is not validity — an
+   * offer inside its window still goes stale the moment the player it wants is
+   * traded away, sent down, retired or claimed, and a dead offer must never be
+   * presented as live (it used to throw out of `acceptTrade`).
+   */
+  private offerDeadReason(o: StoredTradeOffer): string | null {
+    const partner = this.data.teams.get(o.partnerTeamId)
+    if (!partner) return 'the club is no longer in the league'
+    const nameOf = (id: PlayerId): string => this.data.players.get(id)?.name ?? 'A player'
+    for (const id of o.userGivesPlayerIds) {
+      if (!this.userTeam.roster.includes(id)) return `${nameOf(id)} is no longer on your NHL roster`
+    }
+    for (const id of o.userReceivesPlayerIds) {
+      if (!partner.roster.includes(id)) return `${nameOf(id)} is no longer on ${partner.name}'s roster`
+    }
+    const owns = (picks: readonly DraftPick[], teamId: TeamId): boolean =>
+      picks.every((want) =>
+        this.picks.some(
+          (p) =>
+            p.year === want.year &&
+            p.round === want.round &&
+            p.originalTeamId === want.originalTeamId &&
+            p.ownerTeamId === teamId,
+        ),
+      )
+    if (!owns(o.userGivesPicks, this.userTeamId)) return 'a pick in the deal has already been traded'
+    if (!owns(o.userReceivesPicks, o.partnerTeamId)) return `a pick ${partner.abbreviation} offered has already been traded`
+    return null
+  }
+
+  /** Retire every offer whose assets have moved on, with a call from the GM who
+   *  tabled it so the desk clearing itself reads as news rather than a vanish.
+   *  Cheap; run on every advance and before any read of the offer list. */
+  private pruneDeadOffers(): void {
+    if (this.tradeOffers.length === 0) return
+    const live: StoredTradeOffer[] = []
+    for (const o of this.tradeOffers) {
+      const dead = this.offerDeadReason(o)
+      if (!dead) { live.push(o); continue }
+      const partner = this.data.teams.get(o.partnerTeamId)
+      if (partner) {
+        this.pushNews(
+          'trade',
+          `${partner.abbreviation} pull their offer`,
+          `${this.gmPersonaFor(o.partnerTeamId).name} withdraws the proposal — ${dead}.`,
+          { teamId: o.partnerTeamId as string },
+        )
+      }
+    }
+    this.tradeOffers = live
+  }
+
+  /**
+   * Take a standing offer. Returns a result rather than throwing: an offer going
+   * dead under you is an ordinary race (two clubs bid for the same man; you take
+   * one and the other card is still on your screen), not an invariant violation.
+   * The worker turns `ok: false` into the error banner the GM sees, exactly as it
+   * does for a signing that doesn't fit.
+   */
+  acceptTrade(offerId: string): { ok: boolean; message?: string } {
+    // The desk is cleared of dead paper before anything is read off it, so an
+    // offer naming a player who has since moved is gone rather than fatal.
+    this.pruneDeadOffers()
+    const offer = this.tradeOffers.find((o) => o.offerId === offerId)
+    if (!offer) return { ok: false, message: 'That offer is no longer on the table.' }
+    const partner = this.data.teams.get(offer.partnerTeamId)!
+    // Cap guard: you can't complete a deal that puts you over the ceiling — the
+    // same check the AGM shows in his read, and the same one that greys out the
+    // Accept button (`TradeOfferView.blockedReason`).
+    const blocked = this.userTradeBlockReason(offer.userReceivesPlayerIds, offer.userGivesPlayerIds)
+    if (blocked) return { ok: false, message: blocked }
     executeTrade({
       teams: this.data.teams,
       players: this.data.players,
@@ -12017,6 +12135,7 @@ export class Career {
       bGivesPicks: offer.userReceivesPicks,
     })
     this.tradeWriteup(offer.userReceivesPlayerIds, offer.userGivesPlayerIds, offer.partnerTeamId)
+    return { ok: true }
   }
 
   rejectTrade(offerId: string): void {
@@ -12319,6 +12438,7 @@ export class Career {
         nextOfferId: () => `d${this.offerCounter++}`,
         expiresOnDay: this.deadlineDay + 1,
         aggressionOf: (tid) => this.gmPersonaFor(tid).aggression,
+        userDeadCap: this.userDeadCap,
         maxOffers: 2,
       })
       for (const o of offers) {
@@ -12421,6 +12541,7 @@ export class Career {
    *  on deadline day; everything is read live from the market. */
   getDeadlineDay(): DeadlineDayView | null {
     if (!this.deadlineHold) return null
+    this.pruneDeadOffers()
     const staff = this.getTeamStaff(this.userTeamId as string)
     const ranks = this.strengthRanks()
     const myPosture = this.clubPostureFor(this.userTeamId, ranks)
@@ -17390,16 +17511,19 @@ export class Career {
   }
 
   private offerView(o: StoredTradeOffer): TradeOfferView {
+    const blocked = this.userTradeBlockReason(o.userReceivesPlayerIds, o.userGivesPlayerIds)
     return {
       offerId: o.offerId,
       receive: this.tradeSide(o.partnerTeamId, o.userReceivesPlayerIds, o.userReceivesPicks),
       give: this.tradeSide(this.userTeamId, o.userGivesPlayerIds, o.userGivesPicks),
       message: o.message,
       expiresOnDay: o.expiresOnDay,
+      ...(blocked ? { blockedReason: blocked } : {}),
     }
   }
 
   getTrades(): TradesView {
+    this.pruneDeadOffers()
     const fog = this.fogCtx()
     const tradable = (teamId: TeamId) => {
       const team = this.data.teams.get(teamId)!

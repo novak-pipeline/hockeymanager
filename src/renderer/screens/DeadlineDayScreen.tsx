@@ -72,8 +72,10 @@ function OfferCall(props: { offer: TradeOfferView; onAction: () => void }): JSX.
         <span style={{ color: 'var(--success)' }}>You get:</span> {receiveBits.join(', ') || 'future considerations'}
       </div>
       {err && <Notice kind="warn">{err}</Notice>}
+      {/* Can't be completed as it stands (cap) — say so and close the button. */}
+      {offer.blockedReason && <Notice kind="warn">{offer.blockedReason}</Notice>}
       <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-        <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act('accept')}>Accept</button>
+        <button className="btn btn-sm btn-primary" disabled={busy || !!offer.blockedReason} title={offer.blockedReason} onClick={() => act('accept')}>Accept</button>
         <button className="btn btn-sm" disabled={busy} onClick={() => nav.navigate('trades')} title="Open the trade office to counter">Counter →</button>
         <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => act('decline')}>Pass</button>
       </div>

@@ -1072,6 +1072,9 @@ export function generateAiOffers(args: {
   postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
   /** GM aggression lookup, 0–1 — aggressive GMs overpay more. */
   aggressionOf?: (teamId: TeamId) => number
+  /** The user's buyout dead cap, which counts against his ceiling like any other
+   *  money. Absent → 0. */
+  userDeadCap?: number
 }): StoredTradeOffer[] {
   const { day, userTeamId, teams, players, picks, rng, nextOfferId } = args
 
@@ -1190,6 +1193,15 @@ export function generateAiOffers(args: {
     partner.finances.capUsed + target.player.contract.salary - salaryOut
   if (partnerCapAfter > partner.finances.salaryCap) return []
 
+  // ...and so must the user. Only the partner's cap was ever checked, so clubs
+  // rang up offering more money than the GM had room for; the offer sat on his
+  // desk looking live and threw the moment he hit Accept. A deal he cannot
+  // legally complete is not an offer — don't make it. (Cap room can still shrink
+  // between now and the click, which is what `blockedReason` covers.)
+  const userCapAfter =
+    rosterCapUsed(user, players) + (args.userDeadCap ?? 0) + salaryOut - target.player.contract.salary
+  if (userCapAfter > user.finances.salaryCap) return []
+
   const offer: StoredTradeOffer = {
     offerId: nextOfferId(),
     partnerTeamId: partner.id,
@@ -1226,8 +1238,11 @@ export function solicitOffersForPlayer(args: {
   aggressionOf?: (teamId: TeamId) => number
   /** Cap on how many offers come back (default 4). */
   maxOffers?: number
+  /** The user's buyout dead cap, counted against his ceiling. Absent → 0. */
+  userDeadCap?: number
 }): StoredTradeOffer[] {
   const { target, userTeamId, teams, players, picks, rng, nextOfferId, expiresOnDay } = args
+  const user = teams.get(userTeamId)
   const tgtGroup = groupOf(target.position)
   const tgtValue = playerValue(target)
   const ranks = strengthRanks(teams, players)
@@ -1276,6 +1291,13 @@ export function solicitOffersForPlayer(args: {
 
     const salaryOut = chosen.reduce((s, c) => s + (c.kind === 'player' ? c.player.contract.salary : 0), 0)
     if (partner.finances.capUsed + target.contract.salary - salaryOut > partner.finances.salaryCap) continue
+    // Both cap sheets have to work — an offer the user could not legally accept
+    // is noise on his desk (see generateAiOffers).
+    if (user) {
+      const userCapAfter =
+        rosterCapUsed(user, players) + (args.userDeadCap ?? 0) + salaryOut - target.contract.salary
+      if (userCapAfter > user.finances.salaryCap) continue
+    }
 
     built.push({
       total,
