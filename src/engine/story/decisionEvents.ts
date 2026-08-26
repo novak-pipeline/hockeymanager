@@ -43,6 +43,12 @@ export interface DecisionOption {
   outcome: string
 }
 
+/** Who does the talking in a scene. Most dilemmas are the player himself; a few
+ *  are brought to you by his agent, the owner, or a reporter. The living phone
+ *  reads this to know whose face and voice to put on the call — without it a
+ *  beat writer's question came out of the winger's mouth. */
+export type SceneSpeaker = 'player' | 'agent' | 'owner' | 'press'
+
 export interface DecisionEvent {
   id: string
   /** Conditions on the ctx the career layer builds (min/max prefixes + equality). */
@@ -51,6 +57,8 @@ export interface DecisionEvent {
   weight?: number
   /** The scene. Slots: {name} {last} {age} {gp} {team}. */
   scene: string
+  /** Whose voice says the dialogue in `scene`. Defaults to the player. */
+  speaker?: SceneSpeaker
   options: DecisionOption[]
 }
 
@@ -198,6 +206,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
     id: 'ev.contract.young-star-early-extension',
     conditions: { maxAge: 24, minImportance: 75, contractYearsRemaining: 1 },
     weight: 3,
+    speaker: 'agent',
     scene:
       `{last}'s agent floated something unusual: sign the extension NOW, a year early, below what he'll be worth ` +
       `if the season continues like this. "He likes it here. That discount has an expiry date, and it's June."`,
@@ -254,6 +263,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
     id: 'ev.media.trade-block-question',
     conditions: { formerlyShopped: true, minMediaHeat: 55 },
     weight: 3,
+    speaker: 'press',
     scene:
       `The beat writer skips the warm-up. "We hear {name} was available. Is he in your plans, or is he a rental ` +
       `for somebody else?" The recorder is already running.`,
@@ -310,6 +320,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
     id: 'ev.owner.streak-ultimatum',
     conditions: { minLosingStreak: 6, minMediaHeat: 60 },
     weight: 4,
+    speaker: 'owner',
     scene:
       `The owner called at seven in the morning, which is never good. Six straight, and he named {name} twice ` +
       `without being asked. "I'm not telling you how to do your job — but I want to hear that somebody is ` +

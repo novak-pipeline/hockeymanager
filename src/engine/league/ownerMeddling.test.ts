@@ -23,6 +23,25 @@ describe('ownerMeddling — generateOwnerRequest', () => {
     expect(['pushForPlayoffs', 'signMarketableStar', 'extendFanFavourite']).toContain(req!.kind)
   })
 
+  it('every ask carries a first-person line the owner can actually say on the phone', () => {
+    // The `body` is card prose — it describes the owner in the third person and
+    // ends with UI consequence hints. Voicing that in his own mouth is what made
+    // the living phone nonsense, so every template must also carry `spoken`.
+    const MANDATES = [
+      'cupOrBust', 'contend', 'makePlayoffs', 'competeRespectably', 'developYouth', 'rebuild', 'cutCosts',
+    ] as const
+    for (const mandate of MANDATES) {
+      for (let seed = 0; seed < 12; seed++) {
+        const req = generateOwnerRequest({ mandate, year: 2025, day: 30, rng: new Rng(seed), chance: 1 })
+        if (!req) continue
+        expect(req.spoken.length).toBeGreaterThan(60)
+        expect(req.spoken).not.toMatch(/\bThe owner\b/)
+        expect(req.spoken).not.toMatch(/pleases (him|ownership)|tests his patience|good PR/)
+        expect(req.spoken).toMatch(/\b(I|I'm|I've|my)\b/)
+      }
+    }
+  })
+
   it('is deterministic for the same seed', () => {
     const a = generateOwnerRequest({ mandate: 'makePlayoffs', year: 2025, day: 30, rng: new Rng(42), chance: 1 })
     const b = generateOwnerRequest({ mandate: 'makePlayoffs', year: 2025, day: 30, rng: new Rng(42), chance: 1 })

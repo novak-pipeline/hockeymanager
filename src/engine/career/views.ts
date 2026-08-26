@@ -47,8 +47,8 @@ import type {
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
-import type { PlayerInteraction, PlayerPromise } from '@engine/league/interactions'
-export type { PlayerInteraction, InteractionKind, PlayerPromise } from '@engine/league/interactions'
+import type { PlayerInteraction, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
+export type { PlayerInteraction, InteractionKind, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
 import type { FeedAuthor, StoryPriors } from '@engine/story/salience'
 export type { FeedAuthor, FeedChannel, StoryPriors, PostFacts } from '@engine/story/salience'
 import type { NegotiationState } from '@engine/league/negotiation'
@@ -1415,6 +1415,11 @@ export interface TradeOfferView {
   give: TradeSideView
   /** AI's one-line pitch. */
   message: string
+  /** The rival GM's name — he's a person with a persona, not "the front office". */
+  gmName?: string
+  /** The same offer as he'd put it to you on the phone: first person, naming the
+   *  man he wants and what he's offering. `message` is card prose. Optional. */
+  spoken?: string
   expiresOnDay: number
   /** Why this deal cannot be completed RIGHT NOW (cap room, roster limit), in
    *  plain English. The offer stays on the desk — the club could shed salary and
@@ -1941,6 +1946,11 @@ export interface OwnerRequestView {
   kind: string
   title: string
   body: string
+  /** The ask in the owner's own first-person words, for the living phone. The
+   *  `body` is card prose (third person + consequence hints) and must never be
+   *  voiced. Optional/additive: absent on pre-existing saves, and the phone
+   *  simply doesn't ring for those. */
+  spoken?: string
   /** Human hint for the accept choice incl. the board-confidence consequence. */
   acceptHint: string
   declineHint: string
@@ -2333,6 +2343,12 @@ export interface PlayerInteractionView {
   kind: string
   severity: 'mild' | 'serious'
   message: string
+  /** True when `message` is an authored office SCENE (narrated prose) rather than
+   *  the player's own first-person words — the phone must lift the dialogue out
+   *  of it, and must not ring at all if there is none. Optional/additive. */
+  scene?: true
+  /** Whose voice speaks the dialogue in a scene. Absent = the player. */
+  speaker?: SceneSpeaker
   day: number
   year: number
   options: InteractionOptionView[]

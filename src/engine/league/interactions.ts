@@ -16,7 +16,10 @@
 
 import type { Player } from '@domain'
 import type { Rng } from '@engine/shared/rng'
+import type { SceneSpeaker } from '@engine/story/decisionEvents'
 import type { LockerRoomState, Relationship } from './lockerRoom'
+
+export type { SceneSpeaker }
 
 /* ─────────────────────────── public types ─────────────────────────── */
 
@@ -46,6 +49,14 @@ export interface PlayerInteraction {
   severity: 'mild' | 'serious'
   /** What the player says to you, in plain English. */
   message: string
+  /** True when `message` is an authored SCENE (narrated prose with dialogue set
+   *  in it) rather than the player's own first-person words. The living phone
+   *  reads this to know it must lift the dialogue out before voicing it — and to
+   *  leave a scene with no dialogue in the office, where it belongs.
+   *  Optional/additive: absent = a plain first-person concern. */
+  scene?: true
+  /** Whose voice speaks the dialogue in a `scene`. Absent = the player. */
+  speaker?: SceneSpeaker
   options: InteractionOption[]
   status: 'open' | 'resolved'
   chosenOptionId?: string

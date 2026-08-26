@@ -9,11 +9,12 @@ import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
-import { Announcer } from './lib/announcer'
+import type { Announcer } from './lib/announcer'
 import { MatchSfx } from './lib/sfx'
 import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/playbackDirector'
 import type { SpeedSegment } from '../render2d/playbackDirector'
-import { loadKokoro, kokoroState } from './lib/kokoroVoice'
+import { kokoroState } from './lib/kokoroVoice'
+import { sharedAnnouncer, isAutoNeuralEnabled, setAutoNeuralEnabled } from './lib/speak'
 import { EventCursor } from '../render2d/eventCursor'
 import type { GoalEvent, StoppageReason } from '@domain'
 import { Volume2, VolumeX, Mic, Check, Disc } from 'lucide-react'
@@ -26,7 +27,6 @@ const PANEL = 'var(--bg1)'
 
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
 const LS_RENDERER = 'hockeyMatchRenderer'
-const LS_KOKORO   = 'hockeyKokoroEnabled'
 
 // Plan-relative nudge multipliers (relative to current plan speed)
 const NUDGE_MULTIPLIERS = [0.5, 1, 2] as const
@@ -36,7 +36,10 @@ type Phase = 'hero' | 'playing'
 
 // ── Module-level singletons (survive re-renders, disposed on unmount) ──────────
 
-const announcer = new Announcer()
+/** The app-wide Announcer. Resolved per call, never cached: this is also the hook
+ *  that swaps in the neural engine once its background download lands, so match
+ *  commentary rides the app-wide default instead of needing its own button. */
+const announcer = (): Announcer => sharedAnnouncer()
 const sfx = new MatchSfx()
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -50,13 +53,6 @@ function readRendererPref(): '2d' | '3d' {
 }
 function writeRendererPref(v: '2d' | '3d'): void {
   try { localStorage.setItem(LS_RENDERER, v) } catch { /* ignore */ }
-}
-
-function readKokoroPref(): boolean {
-  try { return localStorage.getItem(LS_KOKORO) === 'true' } catch { return false }
-}
-function writeKokoroPref(v: boolean): void {
-  try { localStorage.setItem(LS_KOKORO, String(v)) } catch { /* ignore */ }
 }
 
 /** Find the goal event closest to (but not after) a given absT. */
@@ -193,12 +189,11 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
 
   // Controls
-  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer.isEnabled)
+  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer().isEnabled)
   const [sfxEnabled, setSfxEnabled]             = useState<boolean>(true)
 
   // Enhanced voice
-  const [kokoroWanted, setKokoroWanted]         = useState<boolean>(readKokoroPref)
-  const [kokoroProgress, setKokoroProgress]     = useState<number | null>(null) // 0..100 while downloading
+  const [kokoroWanted, setKokoroWanted]         = useState<boolean>(isAutoNeuralEnabled)
   const [kokoroStatus, setKokoroStatus]         = useState<ReturnType<typeof kokoroState>>(kokoroState())
 
   // Sync refs
@@ -303,7 +298,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       renderer?.destroy()
       rendererRef.current    = null
       renderer3dRef.current  = null
-      announcer.cancel()
+      announcer().cancel()
       sfx.dispose()
       if (goalBannerTimerRef.current)  clearTimeout(goalBannerTimerRef.current)
       if (stoppageTimerRef.current)    clearTimeout(stoppageTimerRef.current)
@@ -344,7 +339,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
               // by the goal-detection block below — skip them here so the spoken
               // "GOAL!" lands exactly on the goal, not behind queued chatter.
               if (line.importance >= minImp && line.importance < 3) {
-                announcer.speak(line.speech, line.importance)
+                announcer().speak(line.speech, line.importance)
               }
             }
           }
@@ -395,8 +390,8 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
         const goalLine = commentaryLinesRef.current.find(
           (l) => l.importance === 3 && Math.abs(l.absT - currentAbsT) <= 4,
         )
-        announcer.cancel()
-        announcer.speak(goalLine?.speech ?? `Goal! Scored by ${scorerName}.`, 3)
+        announcer().cancel()
+        announcer().speak(goalLine?.speech ?? `Goal! Scored by ${scorerName}.`, 3)
 
         // Banner stays up through the celebration + the replay.
         setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
@@ -414,7 +409,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             if (!replaySkipRef.current) return // superseded / left
             setReplayActive(true)
             replayActiveRef.current = true
-            announcer.cancel() // go silent for the replay
+            announcer().cancel() // go silent for the replay
             const r = rendererRef.current
             if (!r) return
             r.seekFraction(replayStart)
@@ -476,7 +471,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     ffActiveRef.current = true
     rendererRef.current?.pause()
-    announcer.cancel()
+    announcer().cancel()
 
     const SPIN_MS = 900
     let startTs: number | null = null
@@ -554,7 +549,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       extended: 'Here are the extended highlights.',
       key:      'Key moments, coming up.',
     }
-    announcer.speak(greets[mode], 2)
+    announcer().speak(greets[mode], 2)
 
     // Set initial speed and play. In extended/key, cut straight to the first
     // highlight so we open on the action, not on a 30× skip.
@@ -580,7 +575,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     setView(null)
     setErr(null)
     setPhase('hero')
-    announcer.cancel()
+    announcer().cancel()
   }
 
   function handleCamPreset(preset: CameraPreset): void {
@@ -589,8 +584,8 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   }
 
   function handleAnnouncerToggle(): void {
-    announcer.toggle()
-    setAnnouncerEnabled(announcer.isEnabled)
+    announcer().toggle()
+    setAnnouncerEnabled(announcer().isEnabled)
   }
 
   function handleSfxToggle(): void {
@@ -614,12 +609,12 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
   function handlePause(): void {
     rendererRef.current?.toggle()
-    announcer.cancel()
+    announcer().cancel()
   }
 
   function handleSeek(fraction: number): void {
     rendererRef.current?.seekFraction(fraction)
-    announcer.cancel()
+    announcer().cancel()
     const dur = gameDurationRef.current
     if (dur > 0) {
       const at = fraction * dur
@@ -645,7 +640,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     replaySkipRef.current = true
     setReplayActive(true)
     replayActiveRef.current = true
-    announcer.cancel() // silent during the replay
+    announcer().cancel() // silent during the replay
     rendererRef.current?.seekFraction(replayStart)
     rendererRef.current?.setSpeed(0.6)
     rendererRef.current?.play()
@@ -654,50 +649,26 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     }, 8000)
   }
 
-  // ── Enhanced-voice (Kokoro) opt-in ────────────────────────────────────────────
+  // ── Enhanced voice ────────────────────────────────────────────────────────────
+  // Neural voices are the app-wide default and download themselves in the
+  // background; this is an opt-OUT, not the switch that turns them on. It used to
+  // be a private per-screen preference (default off) over a private Announcer,
+  // which is why commentary stayed robotic until you found this button.
   function handleKokoroToggle(): void {
     const next = !kokoroWanted
     setKokoroWanted(next)
-    writeKokoroPref(next)
-
-    if (next) {
-      setKokoroStatus('downloading')
-      setKokoroProgress(0)
-      loadKokoro((info) => {
-        // transformers.js ProgressInfo: { status, progress? }
-        const raw = info as Record<string, unknown>
-        if (typeof raw['progress'] === 'number') {
-          setKokoroProgress(Math.round(raw['progress'] as number))
-        }
-      })
-        .then((engine) => {
-          announcer.useEngine('kokoro', engine)
-          setKokoroStatus('ready')
-          setKokoroProgress(null)
-        })
-        .catch(() => {
-          setKokoroStatus('failed')
-          setKokoroProgress(null)
-        })
-    } else {
-      // Switch back to system
-      announcer.useEngine('system')
-      setKokoroStatus('unloaded')
-      setKokoroProgress(null)
-    }
+    setAutoNeuralEnabled(next)
+    if (!next) announcer().useEngine('system')
   }
 
-  // On mount: if kokoro was previously enabled, try to restore it
+  // Track the shared engine's download so the match screen can report it. The
+  // switch-over itself is the shared announcer's job, not this screen's.
   useEffect(() => {
-    if (readKokoroPref() && kokoroState() === 'ready') {
-      // Already loaded in a previous session (cache hit)
-      loadKokoro().then((engine) => {
-        announcer.useEngine('kokoro', engine)
-        setKokoroStatus('ready')
-      }).catch(() => { /* ignore */ })
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!kokoroWanted) return
+    const id = window.setInterval(() => setKokoroStatus(kokoroState()), 1000)
+    setKokoroStatus(kokoroState())
+    return () => clearInterval(id)
+  }, [kokoroWanted])
 
   const userSide = game.userIsHome ? 'home' : 'away'
 
@@ -724,7 +695,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           </div>
 
           {/* Announcer toggle */}
-          {announcer.available && (
+          {announcer().available && (
             <button className="btn btn-ghost" onClick={handleAnnouncerToggle}
               title={announcerEnabled ? 'Mute commentary' : 'Enable commentary'}
               style={announcerEnabled ? modeActiveStyle : { opacity: 0.5 }}>
@@ -927,12 +898,12 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             <button className="btn btn-ghost"
               style={{ fontSize: 12, padding: '4px 12px', ...(kokoroWanted ? modeActiveStyle : { opacity: 0.7 }) }}
               onClick={handleKokoroToggle}
-              title="Neural TTS voice — downloads ~90 MB on first use; cached after that"
+              title="Neural voices — on by default, downloaded in the background and cached. Turn off to use the system voice."
             >
-              <Icon size={14}><Mic /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(~90 MB once)'}
+              <Icon size={14}><Mic /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(off)'}
             </button>
-            {kokoroWanted && kokoroStatus === 'downloading' && kokoroProgress !== null && (
-              <span style={{ color: MUTED, fontSize: 11 }}>Downloading… {kokoroProgress}%</span>
+            {kokoroWanted && kokoroStatus === 'downloading' && (
+              <span style={{ color: MUTED, fontSize: 11 }}>Downloading…</span>
             )}
             {kokoroWanted && kokoroStatus === 'ready' && (
               <span style={{ color: 'var(--green)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Check /></Icon> Neural voice active</span>

@@ -1,20 +1,27 @@
 /**
  * PhoneCallOverlay — the "living phone".
  *
- * When something serious needs the GM's ear, the phone rings in the corner. You
- * answer and the caller SPEAKS it in their own voice; you can take it into the
- * room (deep-links to where you respond) or hang up. Callers ring in priority
- * order:
+ * When somebody needs the GM's ear, the phone rings in the corner. You answer and
+ * the caller SPEAKS — in his own voice, saying only what he'd actually say — and
+ * you can take it into the room (deep-links to where you respond) or hang up.
+ * Callers ring in priority order:
  *   • the club OWNER, when he has a directive (rare, top stakes);
  *   • a rival GM with a BLOCKBUSTER trade offer (a deal touching a ≥78-OVR
  *     piece — routine offers stay in the Trades tab, only these ring); and
- *   • a PLAYER with a serious concern.
+ *   • a PLAYER (or his agent, the owner, a reporter) with something to say.
  *
- * Self-contained and renderer-only: reads the inbox / owner desk / staff via
- * useScreenData, tracks a "seen" set in localStorage so a call rings once, and
- * voices through speakAs.
+ * Two rules keep it honest, both enforced in lib/phoneCalls.ts:
+ *   1. It rings only when someone is genuinely on the line. An authored dilemma
+ *      that is pure narration ("Two clubs have called about him…") is a scene in
+ *      your office, not a call, and stays in the inbox where its news item points.
+ *   2. It speaks only spoken words — never the card's narration or its UI hints.
+ *
+ * Latency: neural synthesis runs on the renderer's main thread, so the opening of
+ * the line is synthesised WHILE THE PHONE IS RINGING and the card is painted
+ * before speech is started. Answering is then immediate rather than a multi-second
+ * freeze (see lib/kokoroVoice.ts for the measurements).
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { InboxView, OwnerRequestView } from '../../worker/protocol'
 import type { StaffView, TradesView } from '@engine/career/views'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -22,16 +29,44 @@ import { useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
 import { Icon } from './primitives'
 import { Icons } from './icons'
-import { speakAs, cancelSpeech } from '../lib/speak'
-import type { VoiceRole } from '../lib/voiceCast'
+import { speakAs, cancelSpeech, prewarmSpeech } from '../lib/speak'
+import { pickCall, type PhoneCall } from '../lib/phoneCalls'
 
 const SEEN_KEY = 'hockey.phone.seen'
 
-/** Stable, compact hash of a string — for a seen-key on callers without an id. */
-function hashStr(s: string): string {
-  let h = 5381
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
-  return h.toString(36)
+/** Quiet time after you put the handset down before anyone else may ring. Without
+ *  it, hanging up on one caller instantly rang the next in priority order — which
+ *  is how three open items turned into the phone never leaving your ear. */
+const COOLDOWN_MS = 45_000
+
+/** How long after the phone appears before we synthesise the opening line. Long
+ *  enough for the card's entrance animation to finish (synthesis blocks the main
+ *  thread), short enough that a fast answer still lands on a warm cache. */
+const PREWARM_DELAY_MS = 700
+
+/**
+ * Call ids are per-career counters (`i0`, `o1`, …) that restart from zero every
+ * time you begin a new game — so a seen-set carried across careers silently
+ * swallowed the new one's calls. Cleared when a career starts (see App).
+ */
+export function resetPhoneSeen(): void {
+  try { localStorage.removeItem(SEEN_KEY) } catch { /* ignore */ }
+}
+
+function seenSet(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[])
+  } catch {
+    return new Set()
+  }
+}
+function markSeen(id: string): void {
+  const s = seenSet()
+  s.add(id)
+  try {
+    // Keep the set bounded so it can't grow forever.
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...s].slice(-200)))
+  } catch { /* ignore */ }
 }
 
 /** A gentle two-note "brring" via WebAudio — no asset, deliberately soft and
@@ -74,34 +109,6 @@ function playPhoneRing(): () => void {
   }
 }
 
-function seenSet(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[])
-  } catch {
-    return new Set()
-  }
-}
-function markSeen(id: string): void {
-  const s = seenSet()
-  s.add(id)
-  try {
-    // Keep the set bounded so it can't grow forever.
-    localStorage.setItem(SEEN_KEY, JSON.stringify([...s].slice(-200)))
-  } catch { /* ignore */ }
-}
-
-/** A unified incoming call, whoever is on the line. */
-interface Call {
-  id: string
-  callerName: string
-  callerRole: string
-  faceId?: string
-  voice: VoiceRole
-  message: string
-  actionLabel: string
-  actionTarget: string
-}
-
 export function PhoneCallOverlay(): JSX.Element | null {
   const client = useClient()
   const nav = useNav()
@@ -122,87 +129,88 @@ export function PhoneCallOverlay(): JSX.Element | null {
     (r) => (r.type === 'trades' ? r.trades : null),
   )
   const [answered, setAnswered] = useState(false)
-  const [dismissedId, setDismissedId] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState<string[]>([])
+  // Bumped when the cooldown expires so the next caller can come through.
+  const [, setCooldownTick] = useState(0)
+  const quietUntil = useRef(0)
 
-  // Who's on the line? The owner outranks a routine player concern.
-  const call = useMemo<Call | null>(() => {
+  const call = useMemo<PhoneCall | null>(() => {
     const seen = seenSet()
-    if (ownerReq) {
-      const id = `owner:${hashStr(ownerReq.title + ownerReq.body)}`
-      if (!seen.has(id) && id !== dismissedId) {
-        return {
-          id,
-          callerName: staff?.owner.name ?? 'The Owner',
-          callerRole: 'Club Owner',
-          faceId: staff?.owner.faceId,
-          voice: 'owner',
-          message: ownerReq.body,
-          actionLabel: 'Take it upstairs →',
-          actionTarget: 'board',
-        }
-      }
-    }
-    // A rival GM on the line with a BLOCKBUSTER — an offer whose deal touches a
-    // genuine piece (≥78 OVR on either side). Routine offers stay in the Trades
-    // tab; only the phone-blowing-up ones ring. Highest business stakes after the
-    // owner.
-    const blockbuster = (trades?.incoming ?? []).find((o) => {
-      const id = `trade:${o.offerId}`
-      if (seen.has(id) || id === dismissedId) return false
-      return [...o.receive.players, ...o.give.players].some((p) => p.overall >= 78)
-    })
-    if (blockbuster) {
-      const headliner = [...blockbuster.receive.players, ...blockbuster.give.players]
-        .sort((a, b) => b.overall - a.overall)[0]
-      return {
-        id: `trade:${blockbuster.offerId}`,
-        callerName: `${blockbuster.receive.teamName} — front office`,
-        callerRole: headliner ? `Trade offer · ${headliner.name}` : 'Trade offer',
-        faceId: undefined,
-        voice: 'gm',
-        message: blockbuster.message,
-        actionLabel: 'See the offer →',
-        actionTarget: 'trades',
-      }
-    }
-    const concern = (inbox?.interactions ?? []).find(
-      (c) => c.severity === 'serious' && !seen.has(c.id) && c.id !== dismissedId,
-    )
-    if (concern) {
-      return {
-        id: concern.id,
-        callerName: concern.playerName,
-        callerRole: 'Player',
-        faceId: concern.faceId,
-        voice: 'player',
-        message: concern.message,
-        actionLabel: 'Talk it out →',
-        actionTarget: 'inbox',
-      }
-    }
-    return null
-  }, [inbox, ownerReq, staff, trades, dismissedId])
+    for (const id of dismissed) seen.add(id)
+    return pickCall({ ownerReq: ownerReq ?? null, trades, inbox, staff, seen })
+  }, [inbox, ownerReq, staff, trades, dismissed])
 
-  // Ring a gentle tone when a new call arrives; stop the moment it's answered.
+  // Hold the line for the cooldown after a hang-up, then re-check.
+  const now = Date.now()
+  const quiet = now < quietUntil.current
+  useEffect(() => {
+    if (!quiet) return
+    const t = window.setTimeout(() => setCooldownTick((n) => n + 1), quietUntil.current - Date.now() + 50)
+    return () => clearTimeout(t)
+  }, [quiet])
+
+  const live = quiet ? null : call
+
+  // A different caller means a different call: never leave the card sitting in
+  // the "on the line" state showing a man who was never answered (and who would
+  // then never ring or speak).
+  const shownId = useRef<string | null>(null)
+  if (shownId.current !== (live?.id ?? null)) {
+    shownId.current = live?.id ?? null
+    if (answered) setAnswered(false)
+  }
+
+  // Ring while it's unanswered — and spend the ring synthesising the opening of
+  // what he's about to say, so Answer doesn't pay for it. Held back a beat so the
+  // synthesis (which blocks the main thread) lands after the card has animated in
+  // rather than stuttering its entrance.
   const ringStopRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     ringStopRef.current?.()
-    ringStopRef.current = call && !answered ? playPhoneRing() : null
+    if (!live || answered) { ringStopRef.current = null; return }
+    const stopRing = playPhoneRing()
+    const warm = window.setTimeout(
+      () => prewarmSpeech(live.voice, live.spoken, { seed: live.callerName }),
+      PREWARM_DELAY_MS,
+    )
+    ringStopRef.current = () => { stopRing(); clearTimeout(warm) }
     return () => { ringStopRef.current?.(); ringStopRef.current = null }
-  }, [call?.id, answered])
+  }, [live?.id, live?.voice, live?.spoken, live?.callerName, answered])
 
-  if (!call) return null
+  const speakIt = useCallback((c: PhoneCall) => {
+    speakAs(c.voice, c.spoken, { seed: c.callerName, importance: 3 })
+  }, [])
+
+  // A deferred "speak on answer" that a hang-up in the same beat must be able to
+  // call off, or the handset talks after you've put it down.
+  const deferredSpeak = useRef<number | null>(null)
+  const cancelDeferredSpeak = (): void => {
+    if (deferredSpeak.current !== null) { clearTimeout(deferredSpeak.current); deferredSpeak.current = null }
+  }
+
+  if (!live) return null
 
   const answer = (): void => {
     setAnswered(true)
-    speakAs(call.voice, call.message, { seed: call.callerName, importance: 3 })
+    // Paint the answered card BEFORE synthesis starts. Neural synthesis blocks
+    // the main thread; starting it inside the click handler meant React's render
+    // was queued behind it and the card visibly hung until the whole message had
+    // been synthesised. Two frames' grace is inaudible and keeps the UI honest
+    // even on a cold (un-prewarmed) line.
+    cancelDeferredSpeak()
+    deferredSpeak.current = window.setTimeout(() => {
+      deferredSpeak.current = null
+      speakIt(live)
+    }, 32)
   }
   const hangUp = (act: boolean): void => {
+    cancelDeferredSpeak()
     cancelSpeech()
-    markSeen(call.id)
+    markSeen(live.id)
     setAnswered(false)
-    setDismissedId(call.id)
-    if (act) nav.navigate(call.actionTarget)
+    setDismissed((d) => [...d, live.id])
+    quietUntil.current = Date.now() + COOLDOWN_MS
+    if (act) nav.navigate(live.actionTarget)
   }
 
   return (
@@ -211,26 +219,26 @@ export function PhoneCallOverlay(): JSX.Element | null {
       <div className={answered ? 'phone-card' : 'phone-card phone-ringing'} style={CARD}>
         <div style={{ textAlign: 'center' }}>
           <div className={answered ? '' : 'phone-face'} style={{ display: 'inline-block' }}>
-            <PlayerFace faceId={call.faceId} name={call.callerName} size={72} />
+            <PlayerFace faceId={live.faceId} name={live.callerName} size={72} />
           </div>
-          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 8 }}>{call.callerName}</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 8 }}>{live.callerName}</div>
           <div className="muted" style={{ fontSize: 12 }}>
             {answered
-              ? `${call.callerRole} · on the line`
-              : <><Icon size={14}><Icons.Phone /></Icon> Incoming call · {call.callerRole}</>}
+              ? `${live.callerRole} · on the line`
+              : <><Icon size={14}><Icons.Phone /></Icon> Incoming call · {live.callerRole}</>}
           </div>
         </div>
         {answered ? (
           <>
             <div style={{ fontSize: 13.5, lineHeight: 1.55, fontStyle: 'italic', marginTop: 10, maxHeight: 220, overflowY: 'auto' }}>
-              “{call.message}”
+              “{live.spoken}”
             </div>
             <div className="row" style={{ gap: 8, marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button className="btn btn-sm btn-primary" onClick={() => hangUp(true)}>{call.actionLabel}</button>
+              <button className="btn btn-sm btn-primary" onClick={() => hangUp(true)}>{live.actionLabel}</button>
               <button
                 className="btn btn-sm btn-ghost"
                 title="Hear it again"
-                onClick={() => speakAs(call.voice, call.message, { seed: call.callerName })}
+                onClick={() => speakIt(live)}
               ><Icon size={16}><Icons.Volume /></Icon></button>
               <button className="btn btn-sm btn-ghost" onClick={() => hangUp(false)}>Hang up</button>
             </div>

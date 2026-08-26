@@ -52,6 +52,9 @@ export interface VoiceEngine {
   readonly name: string
   /** Optional: engine to delegate to when this one fails to produce audio. */
   setFallback?(engine: VoiceEngine | null): void
+  /** Optional: synthesise the opening of a line ahead of time without playing it,
+   *  so speaking it later starts instantly (see KokoroVoiceEngine.prewarm). */
+  prewarm?(line: Pick<SpeakLine, 'speech' | 'voice' | 'rate'>): Promise<void>
 }
 
 // ── localStorage helpers ───────────────────────────────────────────────────
