@@ -14134,6 +14134,9 @@ export class Career {
       }
     }
 
+    // Asked once and reused: the label and the dashboard flag must agree, and
+    // the question walks the schedule.
+    const lineupGate = this.lineupGateMessage()
     const continueLabel = (() => {
       if (this.phase === 'regularSeason') {
         // Pre-opening beats name themselves (beat-gate law, B2.2): camp week,
@@ -14144,7 +14147,7 @@ export class Career {
         // The hardest gate of all: a club that cannot legally dress a team. It
         // outranks every beat below because the engine refuses to play the game
         // at all — no meeting is reachable, let alone spendable, until it's fixed.
-        if (this.lineupGateMessage() !== null) return 'Continue — your lineup is short'
+        if (lineupGate !== null) return 'Continue — your lineup is short'
         if (this.currentDay === 0 && this.boardMeetingYear !== null) return 'Continue — board meeting'
         // Review outranks the in-season gates but NOT camp/boardroom — the same
         // order the shell routes them in. Getting this backwards would name a
@@ -14306,7 +14309,7 @@ export class Career {
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
-      ...(this.lineupGateMessage() !== null ? { lineupShortfall: this.lineupGateMessage()! } : {}),
+      ...(lineupGate !== null ? { lineupShortfall: lineupGate } : {}),
       tradeOffersPending: this.pendingTradeOffers().length,
       userTeam: {
         teamId: this.userTeamId as string,
