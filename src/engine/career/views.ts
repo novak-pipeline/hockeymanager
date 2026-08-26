@@ -1039,6 +1039,13 @@ export interface TacticsView {
   coachSuggestion: CoachSuggestionView
   /** How well the current tactics match the roster. */
   styleFit: StyleFitView
+  /**
+   * #154: what this board is worth, in standings points. Each figure comes from
+   * a lever the audit measured against tens of thousands of mirror games (see
+   * docs/LEVER-AUDIT.md), interpolated onto the club's own players. Optional —
+   * absent on views built before the receipt existed.
+   */
+  receipts?: import('@engine/league/leverReceipts').LeverReceipts
 }
 
 /** Sent UI → worker to apply the coach's tactical suggestion to the user team. */
@@ -3396,6 +3403,23 @@ export interface PracticePlanView {
   coachTier: 'elite' | 'strong' | 'adequate' | 'weak'
   /** How much slower non-targeted attributes develop (opportunity cost, %). */
   opportunityCostPct: number
+  /**
+   * #154: who the regimen actually reaches, and how much room those players
+   * have left to grow. The lever audit found the focus was pointed only at the
+   * NHL club — the one group of young players with nothing left to learn — so
+   * the GM deserves to see that it now covers the farm too, and roughly what
+   * that is worth. Optional (absent on older views).
+   */
+  reach?: {
+    /** Skaters and goalies the regimen currently applies to. */
+    players: number
+    /** How many of them are U24 with real room to their ceiling. */
+    developing: number
+    /** Mean overall points those developing players have left to gain. */
+    headroom: number
+    /** Human summary, e.g. "NHL club + Harbor Seals (AHL)". */
+    label: string
+  }
 }
 
 /* ────────────────────────── league leaders view ────────────────────────── */

@@ -193,6 +193,28 @@ export function goaliePullWindow(deficit: number, aggressiveness: number | undef
 }
 
 // Passing tempo: base per-tick chance, raised by defensive pressure and pace.
+/**
+ * How far the `passing` slider may move pass frequency (#154).
+ *
+ * MEASURED DEFECT: this band used to be 0.6 … 1.5, and the lever audit priced
+ * that span at **−66 standings points over 82 games** with a 24-shot-per-game
+ * collapse. That is not a stylistic tradeoff, it is a self-destruct button — and
+ * it was live, because coach profiles set `passing` from their offence and risk
+ * axes, so hiring a puck-movement coach quietly cost a club ~26 points.
+ *
+ * The cause is one-sidedness: the model charges the COST of passing more (ticks
+ * burned, turnover exposure) and pays none of the BENEFIT (real puck movement
+ * buys shot quality, not just fewer shots). Until the danger model pays that
+ * benefit — a modelling change, not an audit fix — the honest move is to keep
+ * the slider a stylistic nudge rather than a season-ending one. See
+ * docs/LEVER-AUDIT.md §3.
+ *
+ * Neutral-preserving: at the default 0.5 the multiplier is exactly 1.0, so a
+ * club that never touches the slider sims byte-identically to before.
+ */
+const PASS_SLIDER_LOW = 0.9
+const PASS_SLIDER_HIGH = 1.12
+
 const PASS_BASE = 0.06
 // Force the carrier to move the puck if he holds it longer than this (ticks).
 const MAX_HOLD_TICKS = 20
@@ -2295,7 +2317,7 @@ function simPeriod(
       if (flowing && !beat.breakaway) {
         const tempoPace = atk.team.tactics.tempo.pace
         // passing slider (default 0.5→1.0) multiplies pass frequency.
-        const passMult = sliderMult(atk.team.tactics.passing, 0.6, 1.5)
+        const passMult = sliderMult(atk.team.tactics.passing, PASS_SLIDER_LOW, PASS_SLIDER_HIGH)
         const forced = heldTicks >= MAX_HOLD_TICKS
         if (forced || rng.chance((PASS_BASE + pressure * 0.12) * (0.8 + tempoPace * 0.4) * passMult)) {
           doPass(cs, pressure)
