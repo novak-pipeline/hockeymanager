@@ -10,6 +10,7 @@
  * whole 15-season campaigns; the policy itself is a reusable AI-GM brain.
  */
 import { Career } from '../career'
+import { auditSeason, type DayText, type FlavourReport } from './flavorAudit'
 import type { CareerPhase } from '../views'
 
 /* ────────────────────────────── trace shapes ────────────────────────────── */
@@ -76,6 +77,9 @@ export interface AutopilotTrace {
    *  sufficient, well-organised? Friction, not just data. The persona reporter turns
    *  these into per-feature UX/feel judgments. One note per feature per campaign. */
   featureNotes: string[]
+  /** Per-season immersion audit: repetition, silence, and dramatic games that
+   *  nobody wrote about. Measured, so 'the prose feels flat' becomes a number. */
+  flavour?: FlavourReport[]
   /** Raw snapshots of what each major screen actually serves (scouting, trades, FA,
    *  draft, a player profile, the dashboard), trimmed. Lets the persona reporter
    *  critique each screen's information design directly, as a player would see it. */
@@ -218,6 +222,41 @@ function checkInboxText(ctx: Ctx): void {
 
 function runSanity(ctx: Ctx): void {
   checkStandings(ctx); checkRostersAndCap(ctx); checkPlayerStats(ctx); checkInboxText(ctx)
+}
+
+/* ─────────────────────── flavour audit (immersion) ─────────────────────── */
+
+/** Every story the world told, and every dramatic game it played, so the season
+ *  can be judged on whether the two line up. See flavorAudit.ts for the why. */
+const flavourTexts: DayText[] = []
+const flavourNotable: Array<{ day: number; what: string }> = []
+const seenNewsIds = new Set<string>()
+
+/** Harvest anything new the world said today, and note whether today's game was
+ *  the kind of night that deserves a story. Cheap enough to run every day. */
+function collectFlavour(ctx: Ctx): void {
+  const day = safeDay(ctx)
+  const inbox = guarded(ctx, 'getInbox', () => ctx.career.getInbox())
+  for (const it of inbox?.items ?? []) {
+    if (seenNewsIds.has(it.id)) continue
+    seenNewsIds.add(it.id)
+    flavourTexts.push({ day, headline: it.headline ?? '', body: it.body ?? '' })
+  }
+  const box = guarded(ctx, 'getLastBoxScore', () => ctx.career.getLastBoxScore())
+  if (!box) return
+  const h = box.homeGoals ?? 0, a = box.awayGoals ?? 0
+  const margin = Math.abs(h - a)
+  // What a fan would call a night worth talking about.
+  const what =
+    margin === 0 ? null
+      : (h === 0 || a === 0) ? 'shutout'
+        : margin === 1 ? 'one-goal game'
+          : margin >= 5 ? `${margin}-goal rout`
+            : null
+  if (what) {
+    const last = flavourNotable[flavourNotable.length - 1]
+    if (!last || last.day !== day) flavourNotable.push({ day, what })
+  }
 }
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -614,6 +653,19 @@ function doFreeAgency(ctx: Ctx): void {
 /* ────────────────────────────── season driver ────────────────────────────── */
 
 function recordSeasonEnd(ctx: Ctx, s: SeasonRecord): void {
+  // Judge the season's PROSE before the counters reset. A world that played 82
+  // games and told six stories is a finding, and nothing else here would catch it.
+  const report = auditSeason(s.year, flavourTexts, flavourNotable)
+  ;(ctx.trace.flavour ??= []).push(report)
+  for (const f of report.findings) {
+    // Flavour gaps are not crashes; they are the reason a mechanically-correct
+    // game reviews as lifeless. Logged at minor so they never mask a real bug.
+    issue(ctx, 'minor', `flavour:${f.kind}`, f.detail, `season ${s.year}`)
+  }
+  flavourTexts.length = 0
+  flavourNotable.length = 0
+  seenNewsIds.clear()
+
   const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
   if (dash) {
     s.rank = dash.userTeam.rank
@@ -737,6 +789,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     }
 
     if (hardGuard % 25 === 0) runSanity(ctx)
+    collectFlavour(ctx)
 
     const afterKey = `${career.year}|${career.seasonPhase}|${safeDay(ctx)}|${phaseLabel(ctx)}`
     if (!advanced && afterKey === beforeKey) {
