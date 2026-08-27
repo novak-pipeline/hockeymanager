@@ -90,6 +90,9 @@ export type StaffFinding =
   | { kind: 'lineChemistryInfo'; bestLine: string; bestScore: number; bestReason: string; worstLine: string; worstScore: number; worstReason: string }
   | { kind: 'capRosterInfo'; capSpaceM: number; usedPct: number; rosterSize: number }
   | { kind: 'slumpingStarInfo'; name: string; ppg: number; expectedPpg: number; games: number; pointsBehind: number }
+  // E1: the org's prospects, read out loud. A club is bigger than the twenty
+  // men who dress, and the room should sound like it knows that.
+  | { kind: 'farmReportInfo'; headline: string; facts: string[] }
 
 /** Info briefings are titled `*Info`; everything else is a decision the GM makes. */
 export function isInfoFinding(f: StaffFinding): boolean {
@@ -134,6 +137,10 @@ function severity(f: StaffFinding): number {
       return 36
     case 'devFocusUnset':
       return 35 + f.potential / 4
+    // The system report is real content, not filler, but it never outranks a
+    // decision the GM has to make about this Saturday.
+    case 'farmReportInfo':
+      return 41
   }
 }
 
@@ -379,6 +386,15 @@ function proposalFor(f: StaffFinding, cast: StaffCast, idx: number): StaffPropos
         `${f.ppg.toFixed(2)} pts/game over ${f.games} games`,
         `We'd expect closer to ${f.expectedPpg.toFixed(2)} — about ${f.pointsBehind} points light of pace`,
       ])
+    case 'farmReportInfo':
+      // E1: the AGM owns the system, so the system report is his.
+      return info(
+        id,
+        cast.asstGM.id,
+        f.headline,
+        `Before we get to Saturday — the kids. This is where the next roster comes from.`,
+        f.facts,
+      )
   }
 }
 

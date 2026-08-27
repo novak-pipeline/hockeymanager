@@ -170,6 +170,19 @@ export function NegotiationScreen(): JSX.Element {
     }
   }
 
+  /** E1: tell his camp what he is here to do — before he signs, not after. */
+  async function promiseRole(pitch: NonNullable<NegotiationView['rolePitch']>): Promise<void> {
+    if (!playerId || !view || busy) return
+    setBusy(true)
+    const r = await client.setNegotiationRole(playerId, pitch)
+    setBusy(false)
+    if (r.type === 'error') { toast(r.message, 'error'); return }
+    if (r.type === 'negotiation') {
+      if (r.negotiation) setView(r.negotiation)
+      if (r.message) setNote(r.message)
+    }
+  }
+
   if (loading) return <Notice kind="info">Setting up the meeting…</Notice>
   if (!playerId || !view) {
     return (
@@ -221,6 +234,16 @@ export function NegotiationScreen(): JSX.Element {
           </div>
           <button className="btn btn-ghost" onClick={() => nav.goBack()}>← Leave the room</button>
         </div>
+
+        {/* E2: an extension spends NEXT season's cap, so say so before he offers. */}
+        {view.kind === 'extension' && view.extensionNote && (
+          <div className="notice notice-info" style={{ marginBottom: 'var(--sp-3)' }}>
+            {view.extensionNote}
+            {view.nextSeasonCapRoom !== undefined && (
+              <> <b>{fmtMoney(view.nextSeasonCapRoom)}</b> of room is uncommitted next season.</>
+            )}
+          </div>
+        )}
 
         <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           {/* ── the conversation ── */}
@@ -281,6 +304,34 @@ export function NegotiationScreen(): JSX.Element {
                 {view.askClause === 'full' ? 'wants full no-move protection' : view.askClause === 'modified' ? 'wants a modified no-trade' : 'no clause demands'}
               </div>
             </div>
+
+            {/* ── E1: the role conversation, held BEFORE he signs ── */}
+            {!done && view.roleOptions && view.roleOptions.length > 0 && (
+              <div style={{ ...CARD }}>
+                <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>
+                  What is he here to do?
+                </div>
+                <div className="muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
+                  Players sign for less to be the guy. Say it and it is priced into every round — and it becomes a
+                  promise the lineup card has to keep.
+                </div>
+                <div className="stack" style={{ gap: 4 }}>
+                  {view.roleOptions.map((o) => (
+                    <button
+                      key={o.key}
+                      className={`btn ${view.rolePitch === o.key ? 'btn-primary' : 'btn-ghost'}`}
+                      style={{ textAlign: 'left', fontSize: 12, padding: '6px 10px', lineHeight: 1.4 }}
+                      disabled={busy}
+                      title={o.effect}
+                      onClick={() => void promiseRole(o.key)}
+                    >
+                      <b>{o.label}</b>
+                      <div className="muted" style={{ fontSize: 11 }}>{o.effect}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!done && (
               <div style={{ ...CARD }}>

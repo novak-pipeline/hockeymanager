@@ -313,6 +313,18 @@ import {
 import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
 import { oneSentence, prosaicList, renderStable } from '@engine/story/prose'
 import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionEffects } from '@engine/story/decisionEvents'
+import {
+  ARRIVAL_EVENTS,
+  CLUB_SCENES,
+  DRAFT_CALL_EVENTS,
+  FARM_TRIP_EVENTS,
+} from '@engine/story/clubScenes'
+import {
+  farmRecap,
+  runFarmPlayoffs,
+  type FarmPlayoffResult,
+  type FarmSeed,
+} from '@engine/league/farmPlayoffs'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
@@ -364,9 +376,13 @@ import {
   openingLines,
   priorityHints,
   priorityWeights,
+  ROLE_PITCH_LABEL,
+  rolePitchLine,
+  rolePitchValue,
   type Comparable,
   type ContractOffer,
   type NegotiationState,
+  type RolePitch,
 } from '@engine/league/negotiation'
 import {
   seedAgentRapport,
@@ -457,6 +473,29 @@ import {
   type BoardState,
 } from '@engine/league/board'
 import {
+  bandOf,
+  freshPressure,
+  pressureLabel,
+  updatePressure,
+  type PressureState,
+} from '@engine/league/pressure'
+import {
+  midSeasonFirings,
+  offseasonFirings,
+  type CoachFiring,
+  type CoachSeat,
+} from '@engine/league/coachCarousel'
+import {
+  MAX_EXTENSION_YEARS,
+  describeExtension,
+  discountMultiplier,
+  extensionEligibility,
+  fitsNextSeason,
+  pruneDiscounts,
+  type ExtensionDiscount,
+  type PendingExtension,
+} from '@engine/league/extension'
+import {
   decayIntensity,
   gameIntensity,
   registerGame,
@@ -497,6 +536,15 @@ import {
 import { deserializeLeagueData, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
 import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
+import {
+  CLUB_BEAT_CHECK_EVERY_DAYS,
+  CLUB_BEAT_COOLDOWN_DAYS,
+  MAX_CLUB_BEATS_PER_SEASON,
+  farmBriefing,
+  pickClubBeat,
+  type ProspectFact,
+  type ProspectWhere,
+} from './clubBeats'
 import { buildScoutVerdict } from './scoutVerdict'
 import { buildRosterProjection, buildCoachReports, type SeasonForm } from './playerProjection'
 import { recordOpinions, shiftHeadline, type OpinionSnapshot } from './opinionTracker'
@@ -1220,6 +1268,30 @@ export class Career {
   /* ── franchise drama + League hub (Wave 4) ── */
   /** Owner/board expectations for the user's team. */
   private boardState!: BoardState
+  /** In-season fan mood for the user's club (Playtest 2026-08-26 §E3). Optional
+   *  on old saves; rebuilt lazily from carry-over fan interest. */
+  private pressureState: PressureState | null = null
+  /** Completed seasons each club's current head coach has served behind that
+   *  bench. Feeds the coaching carousel; keyed by teamId. */
+  private coachTenure = new Map<string, number>()
+  /** Benches changed league-wide so far this season — the carousel's cap. */
+  private midSeasonCoachFirings = 0
+  /** Deals signed in-season that start NEXT season (Playtest 2026-08-26 §E2).
+   *  They do not touch the running contract; the rollover writes them on. */
+  private pendingExtensions: PendingExtension[] = []
+  /** Time-limited concessions planted by an authored scene — an agent's early
+   *  extension overture. Lapse when the season turns. */
+  private extensionDiscounts: ExtensionDiscount[] = []
+  /* ── E1: the club beyond the twenty who dress ── */
+  /** Farm/prospect beats already told, this career. Keys are `<pid>:<kind>`, so
+   *  a story is told once about a man and never again. */
+  private clubBeatsTold: string[] = []
+  /** Day of the last farm beat — the cooldown's anchor. */
+  private lastClubBeatDay = -999
+  /** Farm beats told this season — the ceiling. */
+  private clubBeatsThisSeason = 0
+  /** Last day the organisation was actually walked looking for a beat. */
+  private lastClubBeatCheckDay = -999
   /** League-wide rivalry pairs. */
   private rivalriesState!: RivalriesState
   /** Per-team special-teams accumulators (JSON-safe entry array). */
@@ -2910,6 +2982,10 @@ export class Career {
     const p = this.data.players.get(playerId)
     if (!p) return
     onPlayerArrived(lr, p, this.rngFor(7108, this.currentDay, Career.pidNum(playerId as string)), this.year)
+    // E1: a man arriving at YOUR club, by trade or by contract, earns a
+    // conversation about what he is here to do. Queued, not raised — it belongs
+    // on a quiet day, not on top of whatever else the desk is holding.
+    if ((teamId as string) === (this.userTeamId as string)) this.noteArrival(playerId as string)
   }
 
   /** Tick one team's locker room after a match day. */
@@ -3367,6 +3443,9 @@ export class Career {
         // Season save % as a whole number; non-goalies sit at 100 so the
         // crease dilemma can never latch onto a skater.
         savePct: gt && gt.shotsAgainst > 0 ? Math.round((gt.saves / gt.shotsAgainst) * 100) : 100,
+        // How far through the schedule we are — some scenes sell an action that
+        // has its own window (E2 extensions open at the halfway mark).
+        seasonPct: Math.round(this.seasonFraction() * 100),
       }
       const ev = pickDecisionEvent({
         ctx, rng,
@@ -3445,6 +3524,42 @@ export class Career {
         playerId: player.id as string, kind: e.residue,
         year: this.year, day, actionId: `dec:${chosen.id}`, known: true,
       })
+    }
+    // E1: the farm-trip scene has a consequence no generic effect can express —
+    // the GM either spent the week in that building or he did not.
+    if (this.decisionEventFor.get(interaction.id) === 'ev.farm.playoff-trip') {
+      if (chosen.id === 'go') {
+        this.farmTripAttended = this.year
+        // You watched them, so you KNOW them: the fog lifts on the affiliate.
+        this.learnAffiliateProspects(100)
+        this.pushNews(
+          'league',
+          `You spent the week with the farm club`,
+          `Four games in a building that seats five thousand, standing behind the glass at morning skate. ` +
+            `Your reads on those players are now first-hand, and the development staff have a general manager who has ` +
+            `actually seen the group he keeps being told about.`,
+          { teamId: this.userTeamId as string, salience: 55 }
+        )
+      } else if (chosen.id === 'send-agm') {
+        this.learnAffiliateProspects(75)
+      }
+    }
+    if (e.extensionDiscount !== undefined && e.extensionDiscount < 1) {
+      // E2: the concession is a real number the extension table honours, and it
+      // dies with the season. The scene now sells something the engine can sell.
+      const off = Math.round((1 - e.extensionDiscount) * 100)
+      this.grantExtensionDiscount(
+        player.id as string,
+        e.extensionDiscount,
+        `His camp is holding an early-signing number roughly ${off}% under his market ask — until this season ends.`
+      )
+      this.pushNews(
+        'contract',
+        `${player.name}'s camp holds the number`,
+        `The discount is on the table for the rest of the season: about ${off}% under what he will be worth. ` +
+          `Open extension talks from his profile to take it. The deal starts in ${this.year + 1}.`,
+        { playerId: player.id as string, teamId: this.userTeamId as string, salience: 62 }
+      )
     }
     if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
       this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
@@ -3576,7 +3691,11 @@ export class Career {
     // so they bypass the generic tone model entirely (Narrative Engine L2).
     const decisionId = this.decisionEventFor.get(interactionId)
     if (decisionId) {
-      const ev = DECISION_EVENTS.find((e) => e.id === decisionId)
+      // Scanned dilemmas and summoned club scenes share the same model, so the
+      // same resolver answers both.
+      const ev =
+        DECISION_EVENTS.find((e) => e.id === decisionId) ??
+        CLUB_SCENES.find((e) => e.id === decisionId)
       const chosen = ev?.options.find((o) => o.id === optionId)
       if (ev && chosen) {
         this.applyDecisionEffects(interaction, player, chosen)
@@ -4299,6 +4418,11 @@ export class Career {
         teamsInLeague: this.data.league.teams.length,
       })
       this.pushSeeds(confResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+
+      /* ── E3: the building has an opinion, and the owner can hear it ── */
+      this.tickPressure(currentRank, gamesPlayed, sorted)
+      /* ── E3: other clubs fire people too ── */
+      this.tickCoachCarousel(sorted, totalGames, day)
     }
 
     /* ── all-time record pace watch every ~5 match days ── */
@@ -4325,6 +4449,11 @@ export class Career {
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.maybeRaiseInteractions(day)
     this.maybeRaiseDecisionEvent(day)
+    // E1: the farm and the juniors get onto the GM's desk — at most one story a
+    // month, five a season, and never the same one twice.
+    this.tickClubBeats(day)
+    // E1: a player who just arrived wants to know what he is here to do.
+    this.tickArrivalMeeting(day)
     this.evaluatePlayerPromises(day)
     // Living Ledger: leaks break, confrontations walk in, agents call — the
     // world responding to what the GM did (docs/NARRATIVE-ENGINE.md layer 0).
@@ -6833,6 +6962,127 @@ export class Career {
         ? `The ${this.userTeam.name} qualified for the postseason. Best-of-${this.playoffs.bestOf} series, win ${seriesWinsNeeded(this.playoffs)} to advance.`
         : `The ${this.userTeam.name} missed the playoffs. The draft order smiles on the fallen.`
     )
+    // E1: the farm has its own spring. Resolve it here, so a GM whose NHL club
+    // is out still has something at stake — his next roster is playing.
+    this.runFarmPostseason()
+  }
+
+  /* ── E1: the affiliate's playoff run ── */
+
+  private static readonly FARM_PO_NS = 9421
+  /** Season in which the affiliate's playoff trip was offered (once a year). */
+  private farmTripYear: number | null = null
+  /** Season the GM actually travelled to watch the farm run. Drives a real
+   *  development tailwind in the summer pass — you saw them, you know them. */
+  private farmTripAttended: number | null = null
+  /** Last completed farm bracket, for the League/World screens and the recap. */
+  private lastFarmPlayoffs: FarmPlayoffResult | null = null
+
+  /**
+   * Seed and resolve the farm bracket in one deterministic pass, then tell the
+   * GM about it — and, if his own affiliate is going deep, ask him whether he
+   * is getting on the plane.
+   */
+  private runFarmPostseason(): void {
+    const ahlIds = this.data.league.ahlTeams ?? []
+    if (ahlIds.length < 4) return
+    const ranked = sortStandings([...this.ahlStandings.values()])
+      .map((s, i) => {
+        const t = this.data.teams.get(s.teamId)
+        return t ? { teamId: s.teamId as string, name: t.name, abbr: t.abbreviation, seed: i + 1 } : null
+      })
+      .filter((x): x is FarmSeed => x !== null)
+    if (ranked.length < 4) return
+
+    const affiliateId = this.userTeam.affiliateId ? (this.userTeam.affiliateId as string) : undefined
+    const result = runFarmPlayoffs({
+      year: this.year,
+      seeds: ranked,
+      userAffiliateId: affiliateId,
+      rng: this.rngFor(Career.FARM_PO_NS, this.year),
+      playGame: (homeId, awayId, gameIndex) => {
+        const home = this.data.teams.get(asTeamId(homeId))
+        const away = this.data.teams.get(asTeamId(awayId))
+        if (!home || !away) return homeId
+        const res = quickSimGame(home, away, this.resolve, {
+          seed: gameSeed(this.seed ^ 0x5eed11, this.year, `farm-po-${gameIndex}`),
+          rules: 'playoff',
+        })
+        // Playoff rules never end level, but be defensive: home ice breaks a tie.
+        if (res.awayGoals > res.homeGoals) return awayId
+        return homeId
+      },
+    })
+    if (!result) return
+    this.lastFarmPlayoffs = result
+
+    const recap = farmRecap(result, affiliateId ? this.data.teams.get(asTeamId(affiliateId))?.name : undefined)
+    this.pushNews('playoffs', recap.headline, recap.body, {
+      ...(affiliateId ? { teamId: affiliateId } : {}),
+      salience: result.userRun && result.userRun.finish !== 'missed' ? 70 : 45,
+    })
+
+    // The Dubas beat: a real run down there earns the question of whether you go.
+    const run = result.userRun
+    if (
+      run &&
+      (run.finish === 'semi' || run.finish === 'final' || run.finish === 'champion') &&
+      this.farmTripYear !== this.year
+    ) {
+      this.farmTripYear = this.year
+      const face = this.bestFarmProspect()
+      if (face) {
+        this.summonClubScene({
+          pool: FARM_TRIP_EVENTS,
+          eventId: 'ev.farm.playoff-trip',
+          player: face,
+          day: this.currentDay,
+          slots: {
+            ahl: run.name,
+            round: run.finish === 'champion' ? 'the final' : run.finish === 'final' ? 'the final' : 'the semi-final',
+          },
+          headline: `Your affiliate is going deep — are you going?`,
+          allowBusy: true,
+        })
+      }
+    }
+  }
+
+  /** Raise scouting knowledge on every young player at the affiliate to at
+   *  least `floor` — what a week of watching them actually buys you. */
+  private learnAffiliateProspects(floor: number): void {
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    if (!ahl) return
+    const knowledge = new Map(this.scouting.knowledge)
+    for (const id of ahl.roster) {
+      const p = this.data.players.get(id)
+      if (!p || p.age > 24) continue
+      knowledge.set(id as string, Math.max(knowledge.get(id as string) ?? 0, floor))
+    }
+    this.scouting.knowledge = [...knowledge.entries()]
+  }
+
+  /** The best young player on the affiliate — the face of the farm's run. */
+  private bestFarmProspect(): Player | null {
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    if (!ahl) return null
+    const rows = ahl.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.age <= 23)
+      .sort((a, b) => ratedPotential(b) - ratedPotential(a))
+    return rows[0] ?? null
+  }
+
+  /**
+   * The development tailwind a GM who went and watched actually earns. Small,
+   * organisation-only, and gone the next year unless he goes again — the point
+   * is attention, not a permanent buff.
+   */
+  private farmTripDevBonus(id: PlayerId): number {
+    if (this.farmTripAttended !== this.year) return 1
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    if (!ahl) return 1
+    return ahl.roster.some((r) => (r as string) === (id as string)) ? 1.08 : 1
   }
 
   /** One playoff "day": every unfinished series in the round plays one game. */
@@ -7118,6 +7368,10 @@ export class Career {
           // commitments already weigh on confidence/patience when the board
           // renders its season verdict.
           this.evaluateBoardPromises(userFinalRank, madePlayoffs)
+          // E3: the firing rule needs to know how long you have actually been
+          // here. recordSeasonResult has not run yet, so the current stint's
+          // season count is the number of PRIOR seasons — add the one just done.
+          const seasonsWithClub = (currentStint(this.ensureGM())?.seasons ?? 0) + 1
           const reviewResult = seasonReview({
             state: this.boardState,
             finalRank: userFinalRank,
@@ -7126,6 +7380,7 @@ export class Career {
             year: this.year,
             teamId: this.userTeamId as string,
             teamName: this.userTeam.name,
+            seasonsWithClub,
           })
           this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
@@ -7386,7 +7641,9 @@ export class Career {
             // Owner-investment perk: a funded development-staff upgrade gives
             // the user's own organisation a modest tailwind this season.
             const perkMod = this.ownerPerk === 'development' && tid === this.userTeamId ? 1.15 : 1
-            return lockerMod * this.mentorshipDevBonus(id as string) * perkMod
+            // E1: a GM who actually went and watched the farm's run gets a small
+            // tailwind on those players — attention is a development input.
+            return lockerMod * this.mentorshipDevBonus(id as string) * perkMod * this.farmTripDevBonus(id)
           },
           // #170: the practice focus reallocates the summer pass toward its
           // targeted attributes (scaled by the head coach's dev competence).
@@ -7419,6 +7676,12 @@ export class Career {
           const [cat, headline, body] = texts[seed.kind]
           this.pushNews(cat, headline, body, { playerId: seed.playerId as string })
         }
+
+        /* ── E2: extensions signed in-season start paying now. developPlayers
+         *  has just ticked every contract down, so a man on a signed extension
+         *  would otherwise show up as expiring — this writes his new deal on
+         *  before the re-sign window is ever built. ── */
+        this.applyPendingExtensions(this.year + 1)
 
         /* ── retirements → legends ledger → Hall of Fame ── */
         const rosterTeamOf = new Map<string, TeamId>()
@@ -7675,6 +7938,8 @@ export class Career {
         // offseason resume. Returning false halts advance() / step() cleanly.
         if (os.draft && os.draft.selections.length < os.draft.order.length) return false
         this.pushDraftRecap()
+        // E1: the call to your best pick, made from the floor.
+        this.raisePostDraftCall()
         const rng = this.rngFor(8003)
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         this.resignStatus.clear()
@@ -8755,6 +9020,23 @@ export class Career {
     this.assignRosters()
     // Number this year's new arrivals (draft picks, signings) who lack a jersey.
     this.ensureJerseyNumbers()
+
+    /* ── E3: the summer carousel. Every surviving bench serves another year;
+     *  the clubs that finished well below their September projection move on.
+     *  Done BEFORE applyCoachSystems so the new men's systems take hold. ── */
+    {
+      for (const teamId of this.data.league.teams) {
+        const key = teamId as string
+        this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
+      }
+      const firings = offseasonFirings({
+        seats: this.coachSeats(sorted),
+        teamsInLeague: this.data.league.teams.length,
+        rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
+      })
+      firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i))
+    }
+
     // Re-derive each team's system from its head coach for the new roster.
     this.applyCoachSystems()
 
@@ -8816,6 +9098,8 @@ export class Career {
           wonCup: wonCupLastYear,
         }
       }
+      // E3: a run of disappointing seasons is not wiped clean every September.
+      const carryMissStreak = this.boardState.missStreak ?? 0
       const boardResult = setSeasonMandate({
         teamStrengthRank: this.userStrengthRank(),
         teamsInLeague: this.data.league.teams.length,
@@ -8825,9 +9109,18 @@ export class Career {
         year: newYear,
         teamId: this.userTeamId as string,
         teamName: this.userTeam.name,
+        carryMissStreak,
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
+      // E3: a fresh fanbase mood for the new year, seeded from where they were
+      // left, plus a clean carousel budget and one more year on every bench.
+      this.pressureState = freshPressure(newYear, this.fanInterest)
+      this.midSeasonCoachFirings = 0
+      // E1: a new season of farm stories. The told-keys persist (a man's
+      // breakout is told once in a career), the season budget resets.
+      this.clubBeatsThisSeason = 0
+      this.lastClubBeatDay = -999
       // Season Rhythm M1: schedule next preseason's board meeting; perks lapse.
       this.boardMeetingYear = newYear
       this.ownerPerk = null
@@ -12045,14 +12338,150 @@ export class Career {
   /* ─────────────── contract negotiation sessions (DEPTH 1) ─────────────── */
 
   /** Can talks be held with this player right now, and in what capacity? */
-  private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | null {
+  private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | 'extension' | null {
     // The FA market is open year-round: any club-less player can be signed
     // whenever the roster isn't frozen (offseason, or regular season). Re-sign
     // talks with your own expiring RFAs are the offseason resign stage.
     const os = this.offseason
     if (os?.stage === 'resign' && this.resignStatus.get(asPlayerId(playerId)) === 'pending') return 'resign'
     if (this.phase !== 'playoffs' && this.faPool.some((f) => (f as string) === playerId)) return 'freeAgent'
+    // E2: your own man, last year of his deal, past the turn of the calendar.
+    if (this.extensionEligibilityFor(playerId).eligible) return 'extension'
     return null
+  }
+
+  /* ────────────────────────── E2: in-season extensions ────────────────────────── */
+
+  /** How many games the user's club is scheduled to play this season. Counted
+   *  from the schedule (never assumed), cached per season. NOT the same as
+   *  matchDays.length, which counts league-wide dates. */
+  private userGamesScheduledCache: { year: number; n: number } | null = null
+  private userGamesScheduled(): number {
+    if (this.userGamesScheduledCache?.year === this.year) return this.userGamesScheduledCache.n
+    let n = 0
+    for (const g of this.data.league.schedule) {
+      if (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId) n++
+    }
+    this.userGamesScheduledCache = { year: this.year, n: Math.max(1, n) }
+    return this.userGamesScheduledCache.n
+  }
+
+  /** Fraction of the regular season the user's club has played, 0–1. */
+  private seasonFraction(): number {
+    const gp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
+    return Math.min(1, gp / this.userGamesScheduled())
+  }
+
+  /** Every player in the org whose contract the club actually holds. */
+  private ownRosterPlayers(): Player[] {
+    const out: Player[] = []
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p) out.push(p)
+    }
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    for (const id of ahl?.roster ?? []) {
+      const p = this.data.players.get(id)
+      if (p) out.push(p)
+    }
+    return out
+  }
+
+  /** Public-facing eligibility read for one player (drives the UI and the kind). */
+  extensionEligibilityFor(playerId: string): ReturnType<typeof extensionEligibility> {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) {
+      return { eligible: false, block: 'notYourPlayer', reason: 'No such player.' }
+    }
+    const onRoster =
+      this.userTeam.roster.some((r) => (r as string) === playerId) ||
+      (this.userTeam.affiliateId
+        ? (this.data.teams.get(this.userTeam.affiliateId)?.roster ?? []).some((r) => (r as string) === playerId)
+        : false)
+    return extensionEligibility({
+      player: p,
+      onOwnRoster: onRoster,
+      seasonFraction: this.seasonFraction(),
+      inRegularSeason: this.phase === 'regularSeason' && !this.offseason,
+      alreadyExtended: this.pendingExtensions.some((e) => e.playerId === playerId),
+    })
+  }
+
+  /** The live early-signing concession on this man, if his camp offered one. */
+  private extensionDiscountFor(playerId: string): number {
+    return discountMultiplier(this.extensionDiscounts, playerId, this.year)
+  }
+
+  /**
+   * Plant a time-limited discount on a player's extension ask. Called by the
+   * authored scene whose whole premise is "below what he'll be worth" — the
+   * concession is now a real number the negotiation table honours.
+   */
+  private grantExtensionDiscount(playerId: string, mult: number, note: string): void {
+    this.extensionDiscounts = this.extensionDiscounts.filter(
+      (d) => !(d.playerId === playerId && d.year === this.year)
+    )
+    this.extensionDiscounts.push({ playerId, year: this.year, mult, note })
+  }
+
+  /** Next season's committed payroll vs the cap, for the extension cap check. */
+  private extensionCapCheck(salary: number): ReturnType<typeof fitsNextSeason> {
+    return fitsNextSeason({
+      roster: this.ownRosterPlayers(),
+      pending: this.pendingExtensions,
+      salary,
+      cap: this.userTeam.finances.salaryCap,
+      deadCapNextSeason: this.deadCapSchedule
+        .filter((e) => e.year > this.year)
+        .reduce((n, e) => n + e.amount, 0),
+    })
+  }
+
+  /**
+   * Write every extension whose start year has arrived onto the contract, and
+   * lapse any discount that was never taken. Called once at season rollover,
+   * AFTER developAndAge has ticked contracts down (so the expiring year is
+   * genuinely spent) and BEFORE the re-sign window is built (so an extended
+   * player never appears on it).
+   */
+  private applyPendingExtensions(newYear: number): void {
+    if (this.pendingExtensions.length === 0) {
+      this.extensionDiscounts = pruneDiscounts(this.extensionDiscounts, newYear)
+      return
+    }
+    const due = this.pendingExtensions.filter((e) => e.startYear <= newYear)
+    this.pendingExtensions = this.pendingExtensions.filter((e) => e.startYear > newYear)
+    for (const e of due) {
+      const p = this.data.players.get(asPlayerId(e.playerId))
+      // A man who retired before his extension started never collects on it.
+      if (!p || p.retiredYear !== undefined) continue
+      p.contract = {
+        salary: e.salary,
+        yearsRemaining: e.years,
+        expiryYear: newYear + e.years,
+        noTradeClause: e.noTradeClause,
+        twoWay: false,
+        clause: e.clause,
+        ...(e.signingBonusPct > 0 ? { signingBonusPct: e.signingBonusPct } : {}),
+      }
+      // A man on a signed extension is never an expiring contract.
+      this.resignStatus.delete(asPlayerId(e.playerId))
+      this.pushNews(
+        'contract',
+        `${p.name}'s extension kicks in`,
+        `The deal signed last season starts today: $${(e.salary / 1e6).toFixed(2)}M × ${e.years} year${e.years === 1 ? '' : 's'}.`,
+        { playerId: e.playerId, teamId: this.userTeamId as string }
+      )
+    }
+    this.extensionDiscounts = pruneDiscounts(this.extensionDiscounts, newYear)
+  }
+
+  /** The extensions on the books, for the UI. */
+  getPendingExtensions(): Array<PendingExtension & { name: string }> {
+    return this.pendingExtensions.map((e) => ({
+      ...e,
+      name: this.data.players.get(asPlayerId(e.playerId))?.name ?? e.playerId,
+    }))
   }
 
   /** Signed NHL contracts the agent can argue from — real deals, never invented. */
@@ -12122,6 +12551,49 @@ export class Career {
       ...(state.status === 'paused'
         ? { pausedNote: 'His camp has pulled out of talks. They are not returning your calls this window.' }
         : {}),
+      ...(state.kind === 'extension' ? this.extensionNoteFor(state.playerId) : {}),
+      ...(state.rolePitch !== undefined ? { rolePitch: state.rolePitch } : {}),
+      roleOptions: this.roleOptionsFor(player),
+    }
+  }
+
+  /** E1: the role you can promise him, and what each one is worth at the table. */
+  private roleOptionsFor(player: Player): NonNullable<NegotiationView['roleOptions']> {
+    const ovr = ratedOverall(player)
+    const keys: RolePitch[] = ['star', 'topSix', 'middleSix', 'specialist', 'depth', 'none']
+    return keys.map((key) => {
+      const v = rolePitchValue(key, ovr)
+      const effect =
+        key === 'none'
+          ? 'No commitment, no discount — this is a pure money conversation.'
+          : v >= 0.09
+            ? 'Worth real money to him. He will sign for less to be that.'
+            : v > 0
+              ? 'Moves him a little. Not enough on its own.'
+              : v === 0
+                ? 'Exactly where he already sees himself. Neutral.'
+                : v > -0.1
+                  ? 'Below what he thinks he is. The number goes up.'
+                  : 'An insult with a price tag. Expect the ask to jump.'
+      return { key, label: ROLE_PITCH_LABEL[key], effect }
+    })
+  }
+
+  /** The two extension-only lines the negotiation screen shows: what the club
+   *  is buying, and how much of next year's cap is left to buy it with. */
+  private extensionNoteFor(playerId: string): { extensionNote: string; nextSeasonCapRoom: number } {
+    const check = this.extensionCapCheck(0)
+    const discount = this.extensionDiscountFor(playerId)
+    const camp = this.extensionDiscounts.find((d) => d.playerId === playerId && d.year === this.year)
+    const base =
+      `This deal does not touch his current contract — it begins in ${this.year + 1}, ` +
+      `and the money comes out of next season's sheet.`
+    return {
+      extensionNote:
+        discount < 1 && camp
+          ? `${base} ${camp.note}`
+          : `${base} There is no early-signing concession on the table: he is priced at what he is worth.`,
+      nextSeasonCapRoom: check.room,
     }
   }
 
@@ -12142,6 +12614,9 @@ export class Career {
     // A free agent still on the market softens his ask the longer he waits, so a
     // GM can hold out on a player who is overpricing himself. Only in the FA window.
     const faDecay = kind === 'freeAgent' ? faAskDecay(this.offseason?.faDay ?? 0) : 1
+    // E2: an early-extension overture is a real concession — it multiplies the
+    // ask down for as long as it stands. This is what the authored scene sold.
+    const earlyDiscount = kind === 'extension' ? this.extensionDiscountFor(playerId) : 1
     // Living Ledger: what you did to this man follows him to the table. Known
     // residue (shopped/scratched/demoted, this year or last) hardens the ask,
     // shortens patience, and the agent SAYS why — the receipt is explicit.
@@ -12150,7 +12625,7 @@ export class Career {
       player,
       year: this.year,
       kind,
-      marketHeat: (1 + heat * 0.08) * faDecay * grudge.askMult,
+      marketHeat: (1 + heat * 0.08) * faDecay * grudge.askMult * earlyDiscount,
       rapportTilt: rapportTilt(this.agentRapport, agentFor(player).name),
     })
     if (grudge.patienceHit > 0) {
@@ -12163,6 +12638,35 @@ export class Career {
     }
     this.negotiations.set(playerId, state)
     return this.buildNegotiationView(state)
+  }
+
+  /**
+   * E1: tell his camp what he is here to do, mid-negotiation.
+   *
+   * This is the same conversation as the arrival meeting, moved to where it
+   * actually belongs — before he signs, when it is still a bargaining chip. A
+   * role above what his ability has earned buys a discount; one below it costs
+   * you. And whatever you say here becomes a PROMISE the moment he signs.
+   */
+  setNegotiationRole(playerId: string, pitch: RolePitch): { view: NegotiationView; message: string } {
+    const state = this.negotiations.get(playerId)
+    if (!state || state.year !== this.year) throw new Error('no open negotiation with this player')
+    if (state.status !== 'open') {
+      return { view: this.buildNegotiationView(state), message: 'Talks are closed — nothing left to promise.' }
+    }
+    const player = this.resolve(asPlayerId(playerId))
+    state.rolePitch = pitch
+    const last = player.name.split(' ').slice(-1)[0] ?? player.name
+    const line = rolePitchLine(pitch, ratedOverall(player), last)
+    // The agent's reaction is a round of the conversation, not a silent flag.
+    state.rounds.push({
+      offer: { ...state.ask },
+      verdict: 'close',
+      agentLines: [`You told them: ${ROLE_PITCH_LABEL[pitch]}`, line],
+      askAfter: { ...state.ask },
+      patienceAfter: state.patience,
+    })
+    return { view: this.buildNegotiationView(state), message: line }
   }
 
   getNegotiation(playerId: string): NegotiationView | null {
@@ -12202,12 +12706,34 @@ export class Career {
     // Cap sanity BEFORE the round: an offer you cannot execute is not an offer.
     const player = this.resolve(asPlayerId(playerId))
     const capUsedNow = this.userCapUsed()
-    const replacing = kind === 'resign' ? player.contract.salary : 0
-    if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
-      return {
-        view: this.buildNegotiationView(state),
-        signed: false,
-        message: 'That offer does not fit under your cap — clear space before you table it.',
+    if (kind === 'extension') {
+      // E2: an extension spends NEXT season's cap, not this one's. Term is
+      // capped at what a club may give its own player.
+      if (!Number.isInteger(offer.years) || offer.years < 1 || offer.years > MAX_EXTENSION_YEARS) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message: `An extension runs 1–${MAX_EXTENSION_YEARS} years.`,
+        }
+      }
+      const check = this.extensionCapCheck(offer.salary)
+      if (!check.fits) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message:
+            `That does not fit under NEXT season's cap — you have $${(Math.max(0, check.room) / 1e6).toFixed(2)}M ` +
+            `of room committed against ${this.year + 1}.`,
+        }
+      }
+    } else {
+      const replacing = kind === 'resign' ? player.contract.salary : 0
+      if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message: 'That offer does not fit under your cap — clear space before you table it.',
+        }
       }
     }
 
@@ -12220,6 +12746,8 @@ export class Career {
       marketHeat: kind === 'freeAgent' ? this.marketHeatFor(player) : 0,
       teamName: this.userTeam.name,
       rapportTilt: rapportTilt(this.agentRapport, agentName),
+      // E1: what you told him he'd be here is part of the deal.
+      rolePitch: state.rolePitch,
     })
     state.rounds.push(result.round)
     state.ask = result.ask
@@ -12255,6 +12783,29 @@ export class Career {
         this.year
       )
       this.commitNegotiatedContract(player, offer, kind)
+      // E1: a role promised at the table is a debt from the day he signs. The
+      // LW5 promise machinery already knows how to collect on ice time.
+      if (state.rolePitch !== undefined && rolePitchValue(state.rolePitch, ratedOverall(player)) > 0) {
+        const cur = player.stats.find((s) => s.season === this.year)
+        this.playerPromises.push({
+          id: `pp${this.interactionCounter++}`,
+          playerId: player.id as string,
+          kind: 'iceTime',
+          text: `Promised at the table: ${ROLE_PITCH_LABEL[state.rolePitch]}`,
+          year: this.year,
+          day: this.currentDay,
+          ...(cur ? { baselineGp: cur.gamesPlayed } : {}),
+          baselineYears: player.contract.yearsRemaining,
+          status: 'open',
+        })
+        this.pushNews(
+          'contract',
+          `What you promised ${player.name}`,
+          `${ROLE_PITCH_LABEL[state.rolePitch]}. He signed partly on that sentence, and his camp wrote it down. ` +
+            `The lineup card is the only thing that can prove it.`,
+          { playerId: player.id as string, teamId: this.userTeamId as string, salience: 52 }
+        )
+      }
       return {
         view: this.buildNegotiationView(state),
         signed: true,
@@ -12282,8 +12833,16 @@ export class Career {
   }
 
   /** Execute a negotiated deal: sign, stamp clause/bonus structure, tell the world. */
-  private commitNegotiatedContract(player: Player, offer: ContractOffer, kind: 'resign' | 'freeAgent'): void {
+  private commitNegotiatedContract(
+    player: Player,
+    offer: ContractOffer,
+    kind: 'resign' | 'freeAgent' | 'extension'
+  ): void {
     const playerId = player.id as string
+    if (kind === 'extension') {
+      this.commitExtension(player, offer)
+      return
+    }
     signPlayer({
       team: this.userTeam,
       player,
@@ -12344,6 +12903,62 @@ export class Career {
     })
     this.transactionLedger = txResult.ledger
     // FEED-V2-1: pen hits paper, the man posts about it.
+    this.queueVoice({ kind: 'signed', playerId, numbers: { years: offer.years }, relevant: true })
+  }
+
+  /**
+   * E2: bank an in-season extension. The running contract is untouched — he
+   * finishes this year on the money he already had — and the new deal is a
+   * commitment against next season that the rollover writes on. This is the
+   * action the "sign him a year early" scene was promising all along.
+   */
+  private commitExtension(player: Player, offer: ContractOffer): void {
+    const playerId = player.id as string
+    const ntcEligible = player.age >= 27 || player.stats.length >= 7
+    const pending: PendingExtension = {
+      playerId,
+      salary: offer.salary,
+      years: offer.years,
+      signedYear: this.year,
+      startYear: this.year + 1,
+      clause: offer.clause,
+      signingBonusPct: offer.signingBonusPct,
+      noTradeClause: offer.clause !== 'none' && ntcEligible,
+    }
+    this.pendingExtensions.push(pending)
+    // The concession is spent the moment it is taken.
+    this.extensionDiscounts = this.extensionDiscounts.filter(
+      (d) => !(d.playerId === playerId && d.year === this.year)
+    )
+    // LW5: a "we'll get a deal done" promise is now literally kept.
+    for (const pr of this.playerPromises) {
+      if (pr.status === 'open' && pr.playerId === playerId && pr.kind === 'newDeal') pr.status = 'kept'
+    }
+    player.morale = Math.max(0, Math.min(100, player.morale + 8))
+
+    const receipt = describeExtension(pending, player.name)
+    this.pushNews('contract', `${player.name} signs an extension`, receipt, {
+      playerId,
+      teamId: this.userTeamId as string,
+    })
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: this.currentDay,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      playerIds: [playerId],
+      headline: `${this.userTeam.abbreviation} extend ${player.position} ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}y, from ${pending.startYear})`,
+      details: { salary: offer.salary, years: offer.years },
+      userInvolved: true,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${this.userTeam.abbreviation} extend ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}, from ${pending.startYear}).`,
+    })
+    this.transactionLedger = tx.ledger
     this.queueVoice({ kind: 'signed', playerId, numbers: { years: offer.years }, relevant: true })
   }
 
@@ -14950,6 +15565,31 @@ export class Career {
       profile.avgRating = Math.round((seasonRating.sum / seasonRating.n) * 100) / 100
     }
 
+    /* ── E2: extensions. What the club has already committed to, and whether it
+     *  can commit today — stated on the contract block so the GM never has to
+     *  guess whether an offer he was made is actionable. ── */
+    if (profile.profileContract) {
+      const idStr = pid as string
+      const signed = this.pendingExtensions.find((e) => e.playerId === idStr)
+      if (signed) {
+        profile.profileContract.extension = {
+          salary: signed.salary, years: signed.years, startYear: signed.startYear,
+        }
+      }
+      const ownPlayer =
+        this.userTeam.roster.some((r) => (r as string) === idStr) ||
+        (this.userTeam.affiliateId
+          ? (this.data.teams.get(this.userTeam.affiliateId)?.roster ?? []).some((r) => (r as string) === idStr)
+          : false)
+      if (ownPlayer) {
+        const elig = this.extensionEligibilityFor(idStr)
+        profile.profileContract.canExtend = elig.eligible
+        profile.profileContract.extensionStatus = elig.reason
+        const camp = this.extensionDiscounts.find((d) => d.playerId === idStr && d.year === this.year)
+        if (camp) profile.profileContract.extensionDiscountNote = camp.note
+      }
+    }
+
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
     // Re-point the current season at the totals for the league he actually plays
@@ -15624,6 +16264,9 @@ export class Career {
     findings.push(this.capRosterFinding(team))
     const slump = this.slumpingStarFinding(roster, used)
     if (slump) findings.push(slump)
+    // E1: the system report — the farm and the juniors, in the room, by name.
+    const farm = this.farmReportFinding()
+    if (farm) findings.push(farm)
 
     return findings
   }
@@ -15632,6 +16275,418 @@ export class Career {
    *    display numbers, so staffMeetingScene.ts stays pure. ── */
 
   /** State-of-the-team briefing: record, last-10, goals-for/against per game. */
+  /* ══════════════════ E3: PRESSURE — fans, owner, and the carousel ══════════════════ */
+
+  private static readonly PRESSURE_NS = 9411
+  private static readonly CAROUSEL_NS = 9412
+
+  /** Most-recent-first W/L/O string for a club's played games this season. */
+  private recentFormFor(teamId: TeamId, limit = 10): string {
+    const out: Array<'W' | 'L' | 'O'> = []
+    for (const g of this.data.league.schedule) {
+      if (!g.result) continue
+      const home = g.homeTeamId === teamId
+      if (!home && g.awayTeamId !== teamId) continue
+      const us = home ? g.result.homeGoals : g.result.awayGoals
+      const them = home ? g.result.awayGoals : g.result.homeGoals
+      out.push(us > them ? 'W' : g.result.decidedBy === 'regulation' ? 'L' : 'O')
+    }
+    return out.slice(-limit).reverse().join('')
+  }
+
+  /** Which clubs would make the field if the season ended today. Uses the same
+   *  divisional qualifier rule as the odds screen, so the two can never drift. */
+  private currentPlayoffField(sorted: ReturnType<typeof sortStandings>): Set<string> {
+    const teamIds = [...this.data.league.teams]
+    const confOf = new Map<TeamId, string>()
+    const divOf = new Map<TeamId, string>()
+    for (const t of teamIds) {
+      const team = this.data.teams.get(t)
+      confOf.set(t, team?.conferenceId ?? '')
+      divOf.set(t, team?.divisionId ?? '')
+    }
+    const confs = [...new Set(teamIds.map((t) => confOf.get(t) ?? ''))]
+    const minConfSize = Math.min(...confs.map((c) => teamIds.filter((t) => confOf.get(t) === c).length))
+    const qual = minConfSize >= 12 ? 8 : 4
+    const useDivisional =
+      qual === 8 &&
+      confs.every((c) => new Set(teamIds.filter((t) => confOf.get(t) === c).map((t) => divOf.get(t))).size >= 2)
+    const field = new Set<string>()
+    for (const c of confs) {
+      const members = sorted.map((s) => s.teamId).filter((t) => confOf.get(t) === c)
+      for (const t of qualifiersInConference(members, (t) => divOf.get(t) ?? '', qual, useDivisional)) {
+        field.add(t as string)
+      }
+    }
+    return field
+  }
+
+  /** Ensure a pressure state exists for the current season (old saves, restores). */
+  private ensurePressure(): PressureState {
+    if (!this.pressureState || this.pressureState.year !== this.year) {
+      this.pressureState = freshPressure(this.year, this.fanInterest)
+    }
+    return this.pressureState
+  }
+
+  /**
+   * Sample the fanbase, publish a beat if the mood has crossed into a band it
+   * has not visited this season, and hand the owner the bill. An angry building
+   * costs board patience — which is what eventually costs the GM his job.
+   */
+  private tickPressure(
+    currentRank: number,
+    gamesPlayed: number,
+    sorted: ReturnType<typeof sortStandings>
+  ): void {
+    const state = this.ensurePressure()
+    const standing = this.standings.get(this.userTeamId)
+    const field = this.currentPlayoffField(sorted)
+    const res = updatePressure({
+      state,
+      teamName: this.userTeam.name,
+      teamId: this.userTeamId as string,
+      currentRank: Math.max(1, currentRank),
+      targetRank: this.boardState.targetRank,
+      teamsInLeague: this.data.league.teams.length,
+      gamesPlayed,
+      // The fans measure the season in GAMES, not in league-wide dates.
+      totalGames: this.userGamesScheduled(),
+      points: standing?.points ?? 0,
+      recentForm: this.recentFormFor(this.userTeamId),
+      inPlayoffSpot: field.has(this.userTeamId as string),
+      rebuilding: this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true,
+      rng: this.rngFor(Career.PRESSURE_NS, gamesPlayed),
+    })
+    if (!res.checked) return
+    this.pushSeeds(res.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+    if (res.patienceDrain > 0) {
+      this.boardState.patience = Math.max(0, this.boardState.patience - res.patienceDrain)
+      // Three straight hostile checkpoints and the owner says it out loud once.
+      if (state.hostileChecks === 3) {
+        this.pushNews(
+          'league',
+          `The owner is hearing it too`,
+          `A third straight check-in with the building against you. Ownership has stopped talking about the standings and started ` +
+            `talking about the fanbase — ticket renewals, the tone on the broadcasts, the phone calls they take. ` +
+            `${pressureLabel(res.band)}.`,
+          { teamId: this.userTeamId as string, salience: 70 }
+        )
+      }
+    }
+  }
+
+  /** Build one carousel seat per AI club from live standings + media picks. */
+  private coachSeats(sorted: ReturnType<typeof sortStandings>): CoachSeat[] {
+    const seats: CoachSeat[] = []
+    sorted.forEach((s, i) => {
+      const teamId = s.teamId as string
+      if (teamId === (this.userTeamId as string)) return // the GM fires his own coach
+      const team = this.data.teams.get(s.teamId)
+      if (!team) return
+      const ts = this.getTeamStaff(teamId)
+      const predicted = expectedRankOf(this.expectationsState, teamId) ?? i + 1
+      seats.push({
+        teamId,
+        teamName: team.name,
+        teamAbbr: team.abbreviation,
+        coachId: ts.headCoach.id,
+        coachName: ts.headCoach.name,
+        tenure: this.coachTenure.get(teamId) ?? 0,
+        predictedRank: predicted,
+        currentRank: i + 1,
+        pointsPct: s.gamesPlayed > 0 ? s.points / (s.gamesPlayed * 2) : 0.5,
+        gamesPlayed: s.gamesPlayed,
+      })
+    })
+    return seats
+  }
+
+  /** Replace a fired coach with a deterministic interim and tell the league. */
+  private applyCoachFiring(f: CoachFiring, salt: number): void {
+    const team = this.data.teams.get(asTeamId(f.teamId))
+    if (!team) return
+    const ts = this.getTeamStaff(f.teamId)
+    const rng = new Rng(deriveSeed(this.seed, Career.CAROUSEL_NS, this.year, salt, f.teamId.length))
+    const replacement = generateTeamStaff(rng).headCoach
+    replacement.id = `bench-${f.teamId}-${this.year}-${salt}`
+    replacement.profile = buildCoachProfile(replacement, rng)
+    ts.headCoach = replacement
+    this.coachTenure.set(f.teamId, 0)
+    // The new man's system takes hold immediately — that is the point of the change.
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(replacement.profile, roster, team.tactics)
+    team.coachFit = coachFit(replacement.profile, roster)
+    this.pushNews(f.category, f.headline, `${f.body} ${replacement.name} takes the room.`, {
+      teamId: f.teamId,
+      salience: 58,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [f.teamId],
+      summary: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over.`,
+    })
+    this.transactionLedger = tx.ledger
+  }
+
+  /** Mid-season bench changes around the league. Rare, capped, and earned. */
+  private tickCoachCarousel(sorted: ReturnType<typeof sortStandings>, totalGames: number, day: number): void {
+    if (this.midSeasonCoachFirings >= 3) return
+    const firings = midSeasonFirings({
+      seats: this.coachSeats(sorted),
+      totalGames,
+      teamsInLeague: this.data.league.teams.length,
+      alreadyFiredThisSeason: this.midSeasonCoachFirings,
+      rng: this.rngFor(Career.CAROUSEL_NS, day),
+    })
+    for (const f of firings) {
+      this.applyCoachFiring(f, day)
+      this.midSeasonCoachFirings += 1
+    }
+  }
+
+  /* ══════════════════ E1: the club beyond the twenty who dress ══════════════════ */
+
+  /**
+   * Every player the organisation controls who is still developing — the NHL
+   * kids, the farm, and the juniors whose rights you hold — digested into the
+   * facts the beat detectors and the farm briefing both read. One gatherer, so
+   * the inbox and the meeting room can never tell different stories.
+   */
+  private orgProspectFacts(maxAge = 23): ProspectFact[] {
+    const out: ProspectFact[] = []
+    const worldInfo = this.worldClubInfoByPid()
+    const ahlTeam = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const onFarm = new Set((ahlTeam?.roster ?? []).map((id) => id as string))
+    const onNhl = new Set(this.userTeam.roster.map((id) => id as string))
+
+    const push = (p: Player, where: ProspectWhere): void => {
+      if (p.retiredYear !== undefined) return
+      if (p.age > maxAge) return
+      const totals = where === 'nhl' ? this.totals : where === 'ahl' ? this.ahlTotals : this.worldSim.totals
+      const gpMap = where === 'nhl' ? this.gp : where === 'ahl' ? this.ahlGp : this.worldSim.gp
+      const t = totals.get(p.id)
+      const games = gpMap.get(p.id) ?? 0
+      const world = worldInfo.get(p.id as string)
+      const leagueLabel = where === 'nhl' ? 'NHL' : where === 'ahl' ? 'AHL' : world?.leagueAbbr ?? 'junior'
+      const sa = t?.shotsAgainst ?? 0
+      out.push({
+        playerId: p.id as string,
+        name: p.name,
+        position: p.position,
+        age: p.age,
+        where,
+        leagueLabel,
+        ...(where === 'junior' && world?.club ? { clubLabel: world.club } : {}),
+        gamesPlayed: games,
+        goals: t?.goals ?? 0,
+        points: (t?.goals ?? 0) + (t?.assists ?? 0),
+        ...(p.position === 'G' && sa > 0 ? { savePct: (t?.saves ?? 0) / sa } : {}),
+        ...(p.draftRound !== undefined ? { draftRound: p.draftRound } : {}),
+        ...(p.draftOverall !== undefined ? { draftOverall: p.draftOverall } : {}),
+        ...(p.draftYear !== undefined ? { draftYear: p.draftYear } : {}),
+        potential: ratedPotential(p),
+        overall: ratedOverall(p),
+      })
+    }
+
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p) push(p, 'nhl')
+    }
+    for (const id of ahlTeam?.roster ?? []) {
+      const p = this.data.players.get(id)
+      if (p) push(p, 'ahl')
+    }
+    // Rights held, playing somewhere else entirely — the half of the system a
+    // GM never used to hear about.
+    for (const p of this.data.players.values()) {
+      if ((p.rightsTeamId as string | undefined) !== (this.userTeamId as string)) continue
+      const idStr = p.id as string
+      if (onFarm.has(idStr) || onNhl.has(idStr)) continue
+      push(p, 'junior')
+    }
+    return out
+  }
+
+  /**
+   * Raise at most one farm beat, subject to the anti-spam contract the user set:
+   * a quiet month behind it, a season ceiling, and never the same story twice.
+   */
+  private tickClubBeats(day: number): void {
+    if (this.phase !== 'regularSeason') return
+    if (day - this.lastClubBeatDay < CLUB_BEAT_COOLDOWN_DAYS) return
+    if (this.clubBeatsThisSeason >= MAX_CLUB_BEATS_PER_SEASON) return
+    // Gathering the whole organisation is a walk over every player in the world,
+    // so it happens on a cadence of its own. Without this the scan ran every
+    // single day the cooldown had already elapsed and nothing had qualified.
+    if (day - this.lastClubBeatCheckDay < CLUB_BEAT_CHECK_EVERY_DAYS) return
+    this.lastClubBeatCheckDay = day
+    const beat = pickClubBeat({
+      prospects: this.orgProspectFacts(),
+      told: new Set(this.clubBeatsTold),
+      daysSinceLast: day - this.lastClubBeatDay,
+      toldThisSeason: this.clubBeatsThisSeason,
+    })
+    if (!beat) return
+    this.clubBeatsTold.push(beat.key)
+    if (this.clubBeatsTold.length > 400) this.clubBeatsTold.splice(0, this.clubBeatsTold.length - 300)
+    this.lastClubBeatDay = day
+    this.clubBeatsThisSeason += 1
+    this.pushNews(beat.category, beat.headline, beat.body, {
+      playerId: beat.playerId,
+      teamId: this.userTeamId as string,
+      salience: beat.salience,
+    })
+  }
+
+  /**
+   * Summon a named club scene about a specific man and put it on the GM's desk.
+   *
+   * Unlike the scanned dilemmas this is called at a MOMENT — the hour after a
+   * draft pick, the morning after a trade, the week the affiliate goes deep —
+   * so there are no conditions to evaluate. Everything downstream (the options,
+   * the receipt, the effects, the save/load) is the machinery that already
+   * exists; only the trigger is different.
+   *
+   * Returns the interaction id, or null when the desk is already occupied.
+   */
+  private summonClubScene(args: {
+    pool: readonly (typeof CLUB_SCENES)[number][]
+    eventId: string
+    player: Player
+    day: number
+    /** Extra slot fills beyond name/last/age/gp/team. */
+    slots?: Record<string, string>
+    /** Inbox headline announcing the scene. */
+    headline: string
+    /**
+     * Raise it even if another conversation is already open. Only for beats
+     * that exist at ONE moment and can never be re-offered — the call from the
+     * draft floor, the affiliate's run. An open concern the GM has been sitting
+     * on for weeks must not silently eat those.
+     */
+    allowBusy?: boolean
+  }): string | null {
+    const ev = args.pool.find((e) => e.id === args.eventId)
+    if (!ev) return null
+    // One conversation at a time — a GM's desk is not a queue of dilemmas.
+    if (args.allowBusy !== true && this.interactions.some((i) => i.status === 'open')) return null
+
+    const careerGp = args.player.stats.reduce((n, s) => n + s.gamesPlayed, 0)
+    const slots = {
+      ...decisionSlots(args.player, careerGp, this.userTeam.name),
+      ...(args.slots ?? {}),
+    }
+    const id = `i${this.interactionCounter++}`
+    this.interactions.unshift({
+      id,
+      playerId: args.player.id as string,
+      teamId: this.userTeamId as string,
+      year: this.year,
+      day: args.day,
+      kind: 'unhappy',
+      severity: 'serious',
+      message: renderTemplate(ev.scene, slots),
+      scene: true,
+      ...(ev.speaker ? { speaker: ev.speaker } : {}),
+      options: ev.options.map((o) => ({ id: o.id, label: o.label, tone: 'firm' as const })),
+      status: 'open',
+    })
+    this.decisionEventFor.set(id, ev.id)
+    this.pushNews('contract', args.headline, renderTemplate(ev.scene, slots), {
+      playerId: args.player.id as string,
+      teamId: this.userTeamId as string,
+      salience: 68,
+    })
+    return id
+  }
+
+  /**
+   * E1: the call you make to a kid an hour after you draft him. Once a draft,
+   * about your best pick — the one moment in the summer that is purely about a
+   * player nobody has seen play for you yet.
+   */
+  private raisePostDraftCall(): void {
+    const os = this.offseason
+    if (!os?.draft) return
+    const mine = os.draft.selections
+      .filter((s) => (s.teamId as string) === (this.userTeamId as string))
+      .sort((a, b) => a.overallPick - b.overallPick)
+    const top = mine[0]
+    if (!top) return
+    const p = this.data.players.get(top.playerId)
+    if (!p) return
+
+    // A player who slid well past where the board had him gets the other call.
+    const cls = this.data.league.draftClasses.find((c) => c.year === os.draft?.year)
+    const consensus = cls?.prospects.find((x) => (x.playerId as string) === (top.playerId as string))?.rank
+    const slid = consensus !== undefined && top.overallPick - consensus >= 8
+    const eventId = slid ? 'ev.draft.slid-to-us-call' : 'ev.draft.first-pick-call'
+
+    this.summonClubScene({
+      pool: DRAFT_CALL_EVENTS,
+      eventId,
+      player: p,
+      day: this.currentDay,
+      slots: { pick: `#${top.overallPick}` },
+      headline: `${p.name} is on the phone`,
+      allowBusy: true,
+    })
+  }
+
+  /**
+   * E1: the first conversation with a player you just acquired — the one the
+   * user asked for, about role, needs and wants. Raised the day after he
+   * arrives, and only for a man who is actually going to matter (a depth
+   * signing does not get a summit).
+   */
+  private queuedArrivalMeeting: string | null = null
+  private noteArrival(playerId: string): void {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return
+    // A fringe body arriving is not a scene. This is the bar EHM's own inbox
+    // uses: does this man change the lineup?
+    if (ratedOverall(p) < 68) return
+    // If you already had this conversation at the negotiating table, you do not
+    // get to have it again a week later. That is the spam the user warned about.
+    const alreadyDiscussed = this.playerPromises.some(
+      (pr) => pr.playerId === playerId && pr.year === this.year && pr.text.startsWith('Promised at the table')
+    )
+    if (alreadyDiscussed) return
+    this.queuedArrivalMeeting = playerId
+  }
+
+  /** Fire any queued arrival meeting on the next quiet day. */
+  private tickArrivalMeeting(day: number): void {
+    const pid = this.queuedArrivalMeeting
+    if (pid === null) return
+    if (this.phase !== 'regularSeason') return
+    const p = this.data.players.get(asPlayerId(pid))
+    // He must still be ours for the conversation to make sense.
+    if (!p || !this.userTeam.roster.some((r) => (r as string) === pid)) {
+      this.queuedArrivalMeeting = null
+      return
+    }
+    const raised = this.summonClubScene({
+      pool: ARRIVAL_EVENTS,
+      eventId: 'ev.arrival.role-and-wants',
+      player: p,
+      day,
+      headline: `${p.name} wants to know what he is here to do`,
+    })
+    if (raised) this.queuedArrivalMeeting = null
+  }
+
+  /** The prospect-group briefing the staff meeting opens the farm section with. */
+  private farmReportFinding(): StaffFinding | null {
+    const brief = farmBriefing(this.orgProspectFacts())
+    if (!brief) return null
+    return { kind: 'farmReportInfo', headline: brief.headline, facts: brief.facts }
+  }
+
   private teamFormFinding(): StaffFinding {
     const s = this.standings.get(this.userTeamId)
     const gp = Math.max(1, s?.gamesPlayed ?? 0)
@@ -20722,10 +21777,16 @@ export class Career {
     const summary = boardSummary(this.boardState)
     const sorted = sortStandings([...this.standings.values()])
     const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    const mood = this.pressureState?.year === this.year
+      ? this.pressureState.mood
+      : freshPressure(this.year, this.fanInterest).mood
     return {
       ...summary,
       currentRank,
       fired: this.boardState.firedAtYear !== null,
+      fanMood: mood,
+      fanMoodLabel: pressureLabel(bandOf(mood)),
+      benchChanges: this.midSeasonCoachFirings,
     }
   }
 
@@ -21031,6 +22092,20 @@ export class Career {
       boxScoreHistory: structuredClone(this.boxScoreHistory),
       records: structuredClone(this.recordsState),
       expectations: structuredClone(this.expectationsState),
+      ...(this.pressureState ? { pressure: structuredClone(this.pressureState) } : {}),
+      coachTenure: [...this.coachTenure.entries()],
+      midSeasonCoachFirings: this.midSeasonCoachFirings,
+      pendingExtensions: this.pendingExtensions.map((e) => ({ ...e })),
+      extensionDiscounts: this.extensionDiscounts.map((d) => ({ ...d })),
+      clubBeats: {
+        told: [...this.clubBeatsTold],
+        lastDay: this.lastClubBeatDay,
+        thisSeason: this.clubBeatsThisSeason,
+        ...(this.queuedArrivalMeeting !== null ? { queuedArrival: this.queuedArrivalMeeting } : {}),
+        farmTripYear: this.farmTripYear,
+        farmTripAttended: this.farmTripAttended,
+        ...(this.lastFarmPlayoffs ? { farmPlayoffs: structuredClone(this.lastFarmPlayoffs) } : {}),
+      },
       lockerRooms: [...this.lockerRooms.entries()].map(
         ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
       ),
@@ -21290,6 +22365,24 @@ export class Career {
         rng: career.rngFor(9101),
       }).state
     }
+    // E3 pressure + carousel: additive, so an older save simply reseeds the
+    // fan mood from carry-over interest at the next checkpoint.
+    career.pressureState = snapshot.pressure ? structuredClone(snapshot.pressure) : null
+    career.coachTenure = new Map(snapshot.coachTenure ?? [])
+    career.midSeasonCoachFirings = snapshot.midSeasonCoachFirings ?? 0
+    // E2: an extension answered before the save survives it, with its teeth.
+    career.pendingExtensions = (snapshot.pendingExtensions ?? []).map((e) => ({ ...e }))
+    career.extensionDiscounts = (snapshot.extensionDiscounts ?? []).map((d) => ({ ...d }))
+    // E1: which farm stories have already been told, so a reload never repeats one.
+    career.clubBeatsTold = [...(snapshot.clubBeats?.told ?? [])]
+    career.lastClubBeatDay = snapshot.clubBeats?.lastDay ?? -999
+    career.clubBeatsThisSeason = snapshot.clubBeats?.thisSeason ?? 0
+    career.queuedArrivalMeeting = snapshot.clubBeats?.queuedArrival ?? null
+    career.farmTripYear = snapshot.clubBeats?.farmTripYear ?? null
+    career.farmTripAttended = snapshot.clubBeats?.farmTripAttended ?? null
+    career.lastFarmPlayoffs = snapshot.clubBeats?.farmPlayoffs
+      ? structuredClone(snapshot.clubBeats.farmPlayoffs)
+      : null
     if (snapshot.storyMisc) {
       for (const [k, v] of snapshot.storyMisc.pointStreaks) career.pointStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)

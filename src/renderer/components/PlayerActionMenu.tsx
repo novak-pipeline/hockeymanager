@@ -116,7 +116,9 @@ export function PlayerActionMenu(): JSX.Element | null {
           >{profile?.watched ? '★ Stop watching' : '☆ Watch this player'}</button>
           {own && (
             <>
-              <button className="menu-item" style={itemStyle} onClick={() => go('negotiation')}>Offer new contract…</button>
+              <button className="menu-item" style={itemStyle} onClick={() => go('negotiation')}>
+                {profile?.profileContract?.canExtend === true ? 'Open extension talks…' : 'Offer new contract…'}
+              </button>
               <button className="menu-item" style={itemStyle} onClick={() => setSub('squad')}>
                 Set squad role{profile?.squadStatusLabel ? ` (${profile.squadStatusLabel})` : ''} ▸
               </button>

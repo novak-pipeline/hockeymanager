@@ -290,6 +290,8 @@ export type WorkerRequestBody =
   | { type: 'getNegotiation'; playerId: string }
   | { type: 'startNegotiation'; playerId: string }
   | { type: 'submitNegotiationOffer'; playerId: string; offer: ContractOffer }
+  /** E1: tell his camp what role he'll have here — priced at the table. */
+  | { type: 'setNegotiationRole'; playerId: string; pitch: 'star' | 'topSix' | 'middleSix' | 'specialist' | 'depth' | 'none' }
   | { type: 'getFaHub' }
   | { type: 'toggleFaShortlist'; playerId: string }
   | { type: 'askFaAgent'; playerId: string }

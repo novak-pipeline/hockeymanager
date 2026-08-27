@@ -63,6 +63,11 @@ export interface BoardState {
    *  can't get the GM fired (they knew the plan). Consumed at the season review,
    *  so the GM re-declares each year. Absent/false = normal expectations. */
   rebuildSanctioned?: boolean
+  /** Consecutive seasons ending 'missed' or 'failed' BEFORE the current one.
+   *  This is what makes a firing about a TREND rather than a single bad year —
+   *  see seasonReview. Carried across seasons by setSeasonMandate; absent on
+   *  older saves and read as 0. (Playtest 2026-08-26 §E3.) */
+  missStreak?: number
 }
 
 export interface NewsSeed {
@@ -188,6 +193,10 @@ export interface SetSeasonMandateArgs {
   year: number
   teamId?: string
   teamName?: string
+  /** Run of consecutive disappointing seasons carried in from the last review.
+   *  Absent on a fresh hire — a new GM starts with a clean sheet, which is
+   *  exactly what makes changing clubs worth something. */
+  carryMissStreak?: number
 }
 
 export interface SetSeasonMandateResult {
@@ -259,6 +268,13 @@ export function setSeasonMandate(args: SetSeasonMandateArgs): SetSeasonMandateRe
     patience,
     firedAtYear: null,
     warnings: 0,
+    missStreak: args.carryMissStreak ?? 0,
+  }
+  // A GM already on a run of bad years does not get his patience meter reset to
+  // full every September. Each prior disappointment is money already spent.
+  if ((state.missStreak ?? 0) > 0) {
+    state.patience = Math.max(10, state.patience - (state.missStreak ?? 0) * 18)
+    state.confidence = Math.max(8, state.confidence - (state.missStreak ?? 0) * 10)
   }
 
   // Preseason board announcement.
@@ -417,6 +433,12 @@ export interface SeasonReviewArgs {
   year: number
   teamId?: string
   teamName?: string
+  /**
+   * How many seasons the GM has now completed with THIS club, counting the one
+   * being reviewed. 1 = his first year. Defaults to a large number so existing
+   * callers and tests that only care about the verdict keep their behaviour.
+   */
+  seasonsWithClub?: number
 }
 
 export interface SeasonReviewResult {
@@ -547,9 +569,31 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
   }
   state.rebuildSanctioned = false
 
-  // Firing logic: 'failed' verdict triggers firing when patience is exhausted OR
-  // there was already an ultimatum in place.
-  const fired = verdict === 'failed' && (state.patience <= 20 || state.warnings >= 1)
+  /* ── Firing: a TREND, never a single bad year (Playtest 2026-08-26 §E3) ──
+   *
+   * The old rule fired on one failed mandate with one warning, which is not how
+   * the job works — a GM hired in September is not dismissed the following May
+   * because the roster he inherited underperformed. Two conditions now gate it:
+   *
+   *   TENURE   — never in your first season with a club. You get a year.
+   *   SUSTAINED— either last season also disappointed (missStreak), or the board
+   *              escalated to a formal ultimatum DURING this season and you
+   *              failed anyway. One quiet bad year is not enough.
+   *
+   * The other direction stays honest: a GM who grinds out three straight
+   * disappointing seasons on an exhausted board goes even without a 'failed'.
+   */
+  const priorMisses = state.missStreak ?? 0
+  const tenureOk = (args.seasonsWithClub ?? 99) >= 2
+  const sustained = priorMisses >= 1 || state.warnings >= 2
+  const fired =
+    tenureOk &&
+    ((verdict === 'failed' && sustained && (state.patience <= 20 || state.warnings >= 1)) ||
+      (verdict === 'missed' && priorMisses >= 2 && state.patience <= 5 && state.warnings >= 2))
+
+  // The run of disappointment carries into next September (see setSeasonMandate).
+  state.missStreak =
+    verdict === 'missed' || verdict === 'failed' ? priorMisses + 1 : 0
 
   if (fired) {
     state.firedAtYear = year
@@ -588,11 +632,13 @@ function buildSeasonReviewNews(
   let body: string
 
   if (fired) {
+    const run = state.missStreak ?? 1
     headline = `GM dismissed after ${year} season falls short of mandate`
     body =
       `Following a ${actualLabel}-place finish (target: ${targetLabel}) and ${playoffs}${cup}, ` +
       `the ownership group has relieved the GM of duties. ` +
-      `The mandate was "${state.mandateText}" — the board judged it unmet with ${state.warnings} warning${state.warnings === 1 ? '' : 's'} issued during the season.`
+      `The mandate was "${state.mandateText}" — the board judged it unmet with ${state.warnings} warning${state.warnings === 1 ? '' : 's'} issued during the season` +
+      (run >= 2 ? `, the ${run === 2 ? 'second' : run === 3 ? 'third' : `${run}th`} disappointing campaign in a row.` : `.`)
   } else {
     switch (verdict) {
       case 'exceeded':
@@ -619,7 +665,9 @@ function buildSeasonReviewNews(
         body =
           `Despite a failed mandate (${actualLabel} vs target ${targetLabel}, ${playoffs}${cup}), ` +
           `ownership has decided against a change this offseason. ` +
-          `The GM is on notice: next season must show marked improvement.`
+          ((state.missStreak ?? 0) >= 1
+            ? `The GM keeps his desk for one more year, and everyone in the building knows the terms: another season like this one ends it.`
+            : `The GM is on notice: next season must show marked improvement.`)
         break
     }
   }
@@ -644,6 +692,11 @@ export interface BoardSummaryView {
   warnings: number
   firedAtYear: number | null
   statusLabel: string
+  /** Consecutive disappointing seasons before this one — the thing that
+   *  actually costs a GM his job. 0 = a clean sheet. */
+  missStreak: number
+  /** Plain sentence describing how exposed the job is right now. */
+  jeopardyLabel: string
 }
 
 /**
@@ -672,6 +725,18 @@ export function boardSummary(state: BoardState): BoardSummaryView {
             : 'Hot Seat'
           : 'In Position'
 
+  const missStreak = state.missStreak ?? 0
+  const jeopardyLabel =
+    state.firedAtYear !== null
+      ? 'Your time here is over.'
+      : missStreak >= 2
+        ? `${missStreak} straight seasons short of the mandate. A third will not be survivable.`
+        : missStreak === 1
+          ? 'Last season fell short. A second one in a row is what ends tenures here.'
+          : state.warnings >= 2
+            ? 'A formal ultimatum is on the record. Fail this mandate and the board will act.'
+            : 'The board has no case against you. Keep it that way.'
+
   return {
     mandate: state.mandate,
     mandateText: state.mandateText,
@@ -682,5 +747,7 @@ export function boardSummary(state: BoardState): BoardSummaryView {
     warnings: state.warnings,
     firedAtYear: state.firedAtYear,
     statusLabel,
+    missStreak,
+    jeopardyLabel,
   }
 }

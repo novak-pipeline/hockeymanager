@@ -33,6 +33,16 @@ export interface DecisionEffects {
   residue?: ResidueKind
   /** Chance (0–1) the choice leaks to the press as a story. */
   leakChance?: number
+  /**
+   * An early-extension concession the player's camp will honour for the rest of
+   * this season: a multiplier (<1) on his asking price at the extension table.
+   *
+   * This exists because a scene must never promise an action the engine
+   * refuses (Playtest 2026-08-26 §E2). Taking this option opens a REAL
+   * extension negotiation at a REAL discount; letting the season end lets it
+   * lapse, exactly as the agent said it would.
+   */
+  extensionDiscount?: number
 }
 
 export interface DecisionOption {
@@ -90,6 +100,10 @@ export const DECISION_CTX_KEYS = [
   'formerlyDismissed',
   'deadlineWeek',
   'savePct',
+  // Percent of the regular season played, 0–100. Gates any scene whose promised
+  // action has its own calendar window — extension talks open at the halfway
+  // mark, so the scene that sells an extension must not fire before it.
+  'seasonPct',
 ] as const
 
 /* ────────────────────────── the library ────────────────────────── */
@@ -204,7 +218,9 @@ export const DECISION_EVENTS: DecisionEvent[] = [
   },
   {
     id: 'ev.contract.young-star-early-extension',
-    conditions: { maxAge: 24, minImportance: 75, contractYearsRemaining: 1 },
+    // minSeasonPct 50: extension talks are not legal before the turn of the
+    // calendar year, and a scene must never offer an action the game refuses.
+    conditions: { maxAge: 24, minImportance: 75, contractYearsRemaining: 1, minSeasonPct: 50 },
     weight: 3,
     speaker: 'agent',
     scene:
@@ -213,9 +229,11 @@ export const DECISION_EVENTS: DecisionEvent[] = [
     options: [
       {
         id: 'sign-now',
-        label: `Take the discount — lock him up early`,
-        effects: { morale: 8, promise: 'newDeal', roomRespect: 3 },
-        outcome: `You bought low on a rising player, and committed real money before you had to. If he plateaus, this is the deal they'll cite.`,
+        label: `Take the discount — open extension talks today`,
+        effects: { morale: 8, promise: 'newDeal', roomRespect: 3, extensionDiscount: 0.87 },
+        outcome:
+          `His camp will hold the number until the season ends. Go to his profile and open extension talks — ` +
+          `the deal starts next season, and it comes out of next season's cap, not this one. Let June arrive and the discount goes with it.`,
       },
       {
         id: 'wait',

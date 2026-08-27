@@ -39,6 +39,14 @@ function patienceColor(p: number): string {
   return 'var(--red)'
 }
 
+/** Return CSS color for a 0–100 fan-mood value (E3 pressure). */
+function moodColor(m: number): string {
+  if (m >= 75) return 'var(--green)'
+  if (m >= 58) return 'var(--cyan)'
+  if (m >= 40) return 'var(--amber)'
+  return 'var(--red)'
+}
+
 /* ════════════════════════════════════════════════════════════════
    Meter bar
    ════════════════════════════════════════════════════════════════ */
@@ -58,7 +66,7 @@ function Meter(props: {
   color: string
   /** Attitude phrase shown instead of a raw number. */
   valueLabel: string
-  sublabel?: string
+  sublabel?: string | undefined
 }): JSX.Element {
   const pct = Math.max(0, Math.min(100, props.value))
   return (
@@ -342,8 +350,18 @@ function BoardBody(props: { board: BoardView }): JSX.Element {
             valueLabel={patienceWord(board.patience)}
             sublabel={board.patience <= 20 ? 'Nearly exhausted — one more miss could end things' : undefined}
           />
+
+          <Meter
+            label="The building"
+            value={board.fanMood}
+            color={moodColor(board.fanMood)}
+            valueLabel={board.fanMoodLabel.split('—')[0]!.trim()}
+            sublabel={board.fanMoodLabel.includes('—') ? board.fanMoodLabel.split('—')[1]!.trim() : undefined}
+          />
         </Panel>
       </div>
+
+      <JobSecurityPanel board={board} />
 
       {/* ── What matters this season ── */}
       <MandateGuidance board={board} />
@@ -402,6 +420,38 @@ function FiredState(props: { board: BoardView }): JSX.Element {
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Job security (E3): the one thing every other number on this screen feeds
+ * into. States plainly what would have to happen for the GM to lose the job,
+ * and how many benches have already changed elsewhere this season.
+ */
+function JobSecurityPanel(props: { board: BoardView }): JSX.Element {
+  const { board } = props
+  const tone =
+    board.missStreak >= 2 ? 'var(--red)' : board.missStreak === 1 || board.warnings >= 2 ? 'var(--amber)' : 'var(--muted)'
+  return (
+    <Panel title="Job security">
+      <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div className="stat">
+          <div className="stat-value" style={{ color: tone, fontSize: 28 }}>{board.missStreak}</div>
+          <div className="stat-label">Straight seasons short</div>
+        </div>
+        <div className="stat">
+          <div className="stat-value" style={{ color: 'var(--muted)', fontSize: 28 }}>{board.benchChanges}</div>
+          <div className="stat-label">Benches changed league-wide</div>
+        </div>
+        <div style={{ flex: '1 1 320px', minWidth: 260 }}>
+          <div style={{ color: tone, lineHeight: 1.6 }}>{board.jeopardyLabel}</div>
+          <div className="muted small" style={{ marginTop: 'var(--sp-2)', lineHeight: 1.6 }}>
+            Ownership does not act on one disappointing year, and never on your first. It acts on a run of
+            them — and an angry building shortens the board&apos;s patience while that run is happening.
+          </div>
+        </div>
+      </div>
+    </Panel>
   )
 }
 

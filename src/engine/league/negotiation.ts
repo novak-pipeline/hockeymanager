@@ -202,6 +202,10 @@ export interface NegotiationState {
   status: NegotiationStatus
   /** Priority hints revealed so far (indexes into priorityHints order). */
   revealedHints: number[]
+  /** E1: the role the GM has told this camp the player will have. Absent until
+   *  he says it; once said it is priced into every round AND becomes a promise
+   *  the lineup card has to keep. Optional/additive for save compatibility. */
+  rolePitch?: RolePitch
   /** FA day (freeAgent kind) or offseason press count after which paused
    *  talks can be reopened. */
   pausedUntil?: number
@@ -332,6 +336,65 @@ export interface RoundContext {
   /** Persistent GM↔agent rapport, −1…+1 (0 = neutral/none). A trusted agent
    *  burns less patience on a lowball and concedes a touch faster. */
   rapportTilt?: number
+  /** E1: what the GM has told this camp the player's ROLE will be. A promise
+   *  of real minutes is worth money at the table — see rolePitchValue. */
+  rolePitch?: RolePitch | undefined
+}
+
+/* ────────────────────── the role pitch (E1) ────────────────────── */
+
+/**
+ * The conversation the user asked for: "a meeting with a newly acquired player
+ * about role, needs and wants — AND that conversation should also exist inside
+ * NEGOTIATION beforehand."
+ *
+ * A player will sign for less to be the guy, and more to be a spare part. That
+ * is not flavour — it is the single most reliable discount in the sport. So the
+ * pitch is priced, and (in the career layer) it becomes a PROMISE the lineup
+ * card has to honour.
+ */
+export type RolePitch = 'star' | 'topSix' | 'middleSix' | 'specialist' | 'depth' | 'none'
+
+export const ROLE_PITCH_LABEL: Record<RolePitch, string> = {
+  star: 'The man we build around',
+  topSix: 'A top-six / top-pair role',
+  middleSix: 'A middle-six regular',
+  specialist: 'A defined job — special teams, hard minutes',
+  depth: 'Depth. You compete for a spot.',
+  none: 'No promises about deployment',
+}
+
+/**
+ * What the pitch is worth as a fraction of his ask — added to the offer's value
+ * at the table. A role ABOVE what his ability says he should get is worth real
+ * money; one below it costs you.
+ *
+ * `overall` is his rated ability, so the same words mean different things said
+ * to a 62 and to an 88.
+ */
+export function rolePitchValue(pitch: RolePitch, overall: number): number {
+  if (pitch === 'none') return 0
+  // What role his ability alone entitles him to, on the same 0–4 ladder.
+  const earned = overall >= 84 ? 4 : overall >= 76 ? 3 : overall >= 69 ? 2 : overall >= 63 ? 1 : 0
+  const offered: Record<Exclude<RolePitch, 'none'>, number> = {
+    star: 4, topSix: 3, middleSix: 2, specialist: 1, depth: 0,
+  }
+  const gap = offered[pitch] - earned
+  // Each rung above what he has earned is worth ~4.5 % of his ask; each rung
+  // below costs a little more than it gives, because being told you are depth
+  // is not a negotiating position, it is an insult with a number attached.
+  return gap >= 0 ? Math.min(0.135, gap * 0.045) : Math.max(-0.16, gap * 0.055)
+}
+
+/** The agent's one-line reaction to being told the role. */
+export function rolePitchLine(pitch: RolePitch, overall: number, playerLast: string): string {
+  const v = rolePitchValue(pitch, overall)
+  if (pitch === 'none') return `"You won't commit to a role. Fine — then we're only talking about money."`
+  if (v >= 0.09) return `"Now that is worth something to him. ${playerLast} has never been asked to be that."`
+  if (v > 0) return `"He likes the sound of that. It doesn't sign the contract, but it moves us."`
+  if (v === 0) return `"That's about where he sees himself. No argument, and no discount either."`
+  if (v > -0.1) return `"You're offering him less than he is. He heard it, and the number just went up."`
+  return `"Depth? For him? Then we're done pretending this is a hometown discount."`
 }
 
 const fmtM = (n: number): string => `$${(n / 1e6).toFixed(2)}M`
@@ -349,7 +412,10 @@ export function evaluateRound(
 ): { round: NegotiationRound; status: NegotiationStatus; ask: ContractOffer; patience: number; revealedHints: number[] } {
   const agent = agentFor(player)
   const tilt = ctx.rapportTilt ?? 0
-  const value = offerValue(player, offer, state.ask)
+  // E1: the role you have promised him is part of the offer, whether or not it
+  // is written on the paper.
+  const roleWorth = ctx.rolePitch ? rolePitchValue(ctx.rolePitch, ratedOverall(player)) : 0
+  const value = offerValue(player, offer, state.ask) + roleWorth
   const threshold = acceptThreshold(player, state.kind, ctx.rng)
   const lines: string[] = []
   const revealed = [...state.revealedHints]
