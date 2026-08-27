@@ -43,6 +43,36 @@ export interface StaffAttributes {
   developingYoungsters?: number
 }
 
+/**
+ * Display names for the EHM discipline attributes. One source of truth so a
+ * staff member's prose sketch and the personnel table call the same number by
+ * the same name.
+ */
+export const STAFF_ATTRIBUTE_LABELS: Record<keyof StaffAttributes, string> = {
+  attacking: 'attacking play',
+  directness: 'direct play',
+  freeRoles: 'free roles',
+  lineMatching: 'line matching',
+  penaltyKill: 'the penalty kill',
+  physical: 'physical play',
+  powerplay: 'the power play',
+  coachingGoaltenders: 'coaching goaltenders',
+  coachingDefensemen: 'coaching defensemen',
+  coachingForwards: 'coaching forwards',
+  coachingTechnique: 'technique',
+  judgingPlayers: 'judging players',
+  judgingPotential: 'judging potential',
+  tactics: 'tactics',
+  physiotherapy: 'physiotherapy',
+  business: 'the business side',
+  patience: 'patience',
+  resources: 'working his resources',
+  discipline: 'discipline',
+  manManagement: 'man-management',
+  motivating: 'motivating',
+  developingYoungsters: 'developing young players',
+}
+
 export interface StaffMember {
   id: string
   name: string

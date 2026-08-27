@@ -68,6 +68,14 @@ export interface SeasonStats {
   shotsAgainst: number
   goalsAgainst: number
   shutouts: number
+  /**
+   * Goalie decisions for the season. Optional/additive: absent on every season
+   * archived before this existed and on imported rows (which carry their own
+   * wins). Without them an archived goalie season read 0–0 forever, which the
+   * History tab showed and the career biography would have had to repeat.
+   */
+  wins?: number
+  losses?: number
   /** Season average match rating (EHM "Avr", 0–10), accumulated from game one.
    *  Absent on imported pre-career seasons (no in-game ratings exist for them). */
   avgRating?: number

@@ -214,6 +214,14 @@ import {
   isTrueRookieSeason,
   type ImportedCareer,
 } from '@engine/story/careerLedger'
+import {
+  buildBiography,
+  splitClubName,
+  type BioMove,
+  type BioSeason,
+  type BiographyFacts,
+} from '@engine/story/biography'
+import { buildStaffBiography } from '@engine/story/staffBiography'
 import { detectGameStory, detectPlayerStory, type PlayerGameLine } from '@engine/story/gameStory'
 import { buildMatchReport, type MatchReportGoal } from '@engine/story/matchReport'
 import {
@@ -434,6 +442,7 @@ import {
   generateDataAnalysts,
   buildAgmReport,
   hireRetiredPlayer,
+  STAFF_ATTRIBUTE_LABELS,
   type StaffMember,
   type TeamStaff,
 } from '@engine/league/staff'
@@ -2981,6 +2990,171 @@ export class Career {
       return `a name this organisation called at the ${prov.draftYear} draft`
     }
     return null
+  }
+
+  /**
+   * A1 — assemble everything the game has ACTUALLY recorded about a man's
+   * career, and hand it to the content engine to word.
+   *
+   * The sources, in the order a reader would want them: the imported database's
+   * real season-by-season history (a man who arrives mid-career arrives with his
+   * career), our own archived seasons, the season in progress, the chronicle's
+   * provenance (which club moved him, and how), the record book (awards, marks
+   * he holds), and his present state (injury, retirement).
+   *
+   * Nothing is inferred here. A club change we cannot attribute goes in without
+   * a `via`, and the prose then states the move rather than its cause.
+   */
+  private playerBiographyFacts(pid: PlayerId): BiographyFacts | null {
+    const p = this.data.players.get(pid)
+    if (p === undefined) return null
+    const pidStr = pid as string
+    const historyLabel = this.historyLeagueLabel()
+    const leagueShort = this.leagueAbbrevForPlayer(p)
+
+    const seasons: BioSeason[] = []
+
+    // 1. The career the database recorded before this save began.
+    for (const h of [...(p.careerHistory ?? [])].sort((a, b) => a.year - b.year)) {
+      if (h.gamesPlayed <= 0) continue
+      const shots = h.saves + h.goalsAgainst
+      seasons.push({
+        year: h.year,
+        clubShort: splitClubName(h.club).nickname,
+        league: h.league,
+        // Null label = the histories don't cover our league, so no row can be
+        // claimed as one of ours.
+        top: historyLabel !== null && h.league === historyLabel,
+        gamesPlayed: h.gamesPlayed,
+        goals: h.goals,
+        assists: h.assists,
+        wins: h.wins,
+        shutouts: h.shutouts,
+        ...(shots > 0 ? { savePct: h.saves / shots } : {}),
+      })
+    }
+
+    // 2. The seasons we simmed and archived.
+    for (const s of [...p.stats].sort((a, b) => a.season - b.season)) {
+      const team = this.data.teams.get(s.teamId as TeamId)
+      seasons.push({
+        year: s.season,
+        clubShort: splitClubName(team?.name ?? s.teamId).nickname,
+        league: s.league === 'ahl' ? 'AHL' : leagueShort,
+        top: s.league !== 'ahl',
+        gamesPlayed: s.gamesPlayed,
+        goals: s.ev.goals + s.pp.goals + s.pk.goals,
+        assists: s.ev.assists + s.pp.assists + s.pk.assists,
+        wins: s.wins ?? 0,
+        shutouts: s.shutouts,
+        ...(s.shotsAgainst > 0 ? { savePct: s.saves / s.shotsAgainst } : {}),
+      })
+    }
+
+    // 3. Every change of organisation the chronicle witnessed, with its cause.
+    const prov = chronicleProvenanceOf(this.chronicle, pidStr)
+    const clubName = (tid?: string): string | undefined =>
+      tid !== undefined ? this.data.teams.get(tid as TeamId)?.name : undefined
+    const moves: BioMove[] = []
+    for (const a of prov?.acquisitions ?? []) {
+      if (a.via === 'draft') continue // the draft beat already tells that story
+      const to = clubName(a.teamId)
+      if (to === undefined) continue
+      const from = clubName(a.fromTeamId)
+      moves.push({
+        year: a.year,
+        via: a.via,
+        toClubShort: splitClubName(to).nickname,
+        ...(from !== undefined ? { fromClubShort: splitClubName(from).nickname } : {}),
+      })
+    }
+
+    // 4. Honours: won in this save (dated) plus imported championship counts.
+    const awards = this.recordsState.awards
+      .filter((a) => a.playerId === pidStr && a.award !== 'Stanley Cup')
+      .sort((a, b) => a.year - b.year)
+      .map((a) => ({ award: a.award, year: a.year }))
+    const cups =
+      (p.stanleyCups ?? 0) +
+      this.recordsState.awards.filter((a) => a.playerId === pidStr && a.award === 'Stanley Cup').length
+
+    // 5. League marks he holds outright — the top of a record list, not a
+    //    top-three placing, so "the record is his" is literally true.
+    const recordsHeld: Array<{ label: string; value: string; year: number }> = []
+    const topOf = (list: RecordsState['career']['goals'], label: string, suffix: string): void => {
+      const first = list[0]
+      if (first !== undefined && first.playerId === pidStr) {
+        recordsHeld.push({ label, value: `${first.value.toLocaleString('en-US')} ${suffix}`, year: first.year })
+      }
+    }
+    topOf(this.recordsState.singleSeason.goals, 'single-season goals', 'goals')
+    topOf(this.recordsState.singleSeason.points, 'single-season points', 'points')
+    topOf(this.recordsState.career.points, 'career points', 'points')
+    topOf(this.recordsState.career.goals, 'career goals', 'goals')
+
+    // 6. The season in progress, from whichever sim is actually running him.
+    const teamId = this.teamOf(pid)
+    const team = teamId !== null && teamId !== undefined ? this.data.teams.get(teamId) : undefined
+    const tier = team?.tier
+    const totals = tier === 'ahl' ? this.ahlTotals : tier === 'world' ? this.worldSim.totals : this.totals
+    const gpMap = tier === 'ahl' ? this.ahlGp : tier === 'world' ? this.worldSim.gp : this.gp
+    const curGp = gpMap.get(pid) ?? 0
+    const curTot = totals.get(pid)
+    const club = team !== undefined ? splitClubName(team.name) : undefined
+
+    return {
+      playerId: pidStr,
+      name: p.name,
+      age: p.age,
+      position: p.position,
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      ...(p.birthplace !== undefined ? { birthplace: p.birthplace } : {}),
+      ...(p.heightCm !== undefined ? { heightCm: p.heightCm } : {}),
+      ...(p.weightKg !== undefined ? { weightKg: p.weightKg } : {}),
+      currentYear: this.year,
+      leagueShort,
+      seasons,
+      ...(curGp > 0 && club !== undefined ? {
+        current: {
+          year: this.year,
+          clubShort: club.nickname,
+          // A prospect on the farm has games this season, but not in THIS
+          // league — and must not be introduced as a man playing in it.
+          top: tier !== 'ahl' && tier !== 'world',
+          gamesPlayed: curGp,
+          goals: curTot?.goals ?? 0,
+          assists: curTot?.assists ?? 0,
+          wins: this.goalieWins.get(pid) ?? 0,
+          shutouts: this.shutouts.get(pid) ?? 0,
+        },
+      } : {}),
+      ...(p.draftYear !== undefined ? {
+        draft: {
+          year: p.draftYear,
+          ...(p.draftRound !== undefined ? { round: p.draftRound } : {}),
+          ...(p.draftOverall !== undefined ? { overall: p.draftOverall } : {}),
+          ...(p.draftClub !== undefined ? { club: splitClubName(p.draftClub).nickname } : {}),
+        },
+      } : {}),
+      // "We hold no record" must never be read as "he has no career": only a
+      // man the database actually covers can be spoken about in the negative.
+      historyKnown: hasImportedHistory(p) || p.stats.length > 0,
+      awards,
+      cups,
+      ...(p.intlApps !== undefined && p.intlApps > 0 ? {
+        intl: { apps: p.intlApps, goals: p.intlGoals ?? 0, assists: p.intlAssists ?? 0 },
+      } : {}),
+      moves,
+      recordsHeld,
+      ...(p.retiredYear !== undefined ? { retiredYear: p.retiredYear } : {}),
+      ...(p.injuryStatus !== null ? {
+        injury: {
+          description: p.injuryStatus.description,
+          gamesRemaining: p.injuryStatus.gamesRemaining,
+        },
+      } : {}),
+      ...(club !== undefined ? { clubShort: club.nickname, clubCity: club.city } : {}),
+    }
   }
 
   /** Fire the reactions that come due today. Each lands with explicit
@@ -8184,6 +8358,12 @@ export class Career {
         shotsAgainst: t.shotsAgainst,
         goalsAgainst: t.goalsAgainst,
         shutouts: this.shutouts.get(pid) ?? 0,
+        // Goalie decisions were dropped on the way into the archive, so every
+        // past season read 0–0 on the History tab forever after.
+        ...(p.position === 'G' ? {
+          wins: this.goalieWins.get(pid) ?? 0,
+          losses: this.goalieLosses.get(pid) ?? 0,
+        } : {}),
         ...(ratingAcc && ratingAcc.n > 0 ? { avgRating: Math.round((ratingAcc.sum / ratingAcc.n) * 100) / 100 } : {}),
       })
     }
@@ -14703,6 +14883,14 @@ export class Career {
     for (let i = 0; i < priorCups; i++) playerAwards.push({ award: 'Stanley Cup' })
     if (playerAwards.length > 0) profile.awards = playerAwards
 
+    // A1: the career as prose, over recorded facts only. Sits at the top of the
+    // History tab so every sentence is auditable against the table beneath it.
+    const bioFacts = this.playerBiographyFacts(pid)
+    if (bioFacts !== null) {
+      const bio = buildBiography(bioFacts)
+      if (bio !== null) profile.biography = bio.paragraphs
+    }
+
     // This season's average match rating (EHM "Avr") — cumulative from game one,
     // so there's no Avr before the season's first game.
     const seasonRating = this.seasonRatingTotals.get(pid as string)
@@ -18489,7 +18677,28 @@ export class Career {
       dataAnalyst:    'Data Analyst',
     }
 
-    function toRow(m: import('@engine/league/staff').StaffMember): StaffRowView {
+    const club = splitClubName(teamName)
+    // The playing career of a hired retiree — the only career record the game
+    // holds for a staff member, so it is the only one his sketch may cite.
+    const legendOf = (m: import('@engine/league/staff').StaffMember):
+      { position: string; gamesPlayed: number; points: number; retiredYear: number } | undefined => {
+      if (m.formerPlayerId === undefined) return undefined
+      const rec = this.recordsState.retiredLegends.find((l) => l.playerId === m.formerPlayerId)
+      if (rec === undefined || rec.careerGames <= 0) return undefined
+      const pos = this.data.players.get(asPlayerId(m.formerPlayerId))?.position
+      return {
+        position: pos === 'G' ? 'goaltender' : pos === 'D' ? 'defenseman' : 'forward',
+        gamesPlayed: rec.careerGames,
+        points: rec.careerPoints,
+        retiredYear: rec.retiredYear,
+      }
+    }
+
+    // ONE no-repeat ledger for the whole personnel list: a club's scouts sit
+    // stacked on the same screen, so the variant one of them used must not be
+    // the one the next man takes.
+    const sketchLedger: import('@engine/story/contentEngine').ContentUse[] = []
+    const toRow = (m: import('@engine/league/staff').StaffMember): StaffRowView => {
       const row: StaffRowView = {
         id:        m.id,
         name:      m.name,
@@ -18501,6 +18710,34 @@ export class Career {
       if (m.demeanor !== undefined) row.demeanorLabel = DEMEANOR_LABELS[m.demeanor]
       if (m.faceId !== undefined) row.faceId = m.faceId
       if (m.attributes !== undefined) row.attributes = m.attributes
+      // A1: the prose sketch — attributes named rather than tabulated, plus how
+      // he wants the game played and what he did before this.
+      const attrs = m.attributes ?? {}
+      const legend = legendOf(m)
+      const sketch = buildStaffBiography({
+        staffId: m.id,
+        name: m.name,
+        role: m.role,
+        roleLabel: ROLE_LABELS[m.role],
+        clubShort: club.nickname,
+        clubCity: club.city,
+        rating: m.rating,
+        judgment: m.judgment,
+        ...(m.demeanor !== undefined ? { demeanor: m.demeanor } : {}),
+        ...(m.specialty !== undefined ? { specialty: m.specialty } : {}),
+        attributes: (Object.keys(STAFF_ATTRIBUTE_LABELS) as Array<keyof typeof STAFF_ATTRIBUTE_LABELS>)
+          .filter((k) => attrs[k] !== undefined)
+          .map((k) => ({ label: STAFF_ATTRIBUTE_LABELS[k], value: attrs[k] as number })),
+        ...(m.profile !== undefined ? {
+          system: {
+            label: m.profile.meta.label,
+            philosophy: m.profile.philosophy,
+            blurb: m.profile.meta.blurb,
+          },
+        } : {}),
+        ...(legend !== undefined ? { formerPlayer: legend } : {}),
+      }, sketchLedger)
+      if (sketch !== null) row.biography = sketch.paragraphs
       return row
     }
 

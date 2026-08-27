@@ -532,7 +532,10 @@ function StaffRow(props: { m: StaffView['scouts'][number] }): JSX.Element {
   const { m } = props
   const [open, setOpen] = useState(false)
   const attrs = m.attributes
-  const hasAttrs = attrs && Object.keys(attrs).length > 0
+  const bio = m.biography
+  // A1: a prose sketch expands alongside the attribute grid — the numbers say
+  // what he scores, the sketch says what he is like to work with.
+  const hasAttrs = (attrs && Object.keys(attrs).length > 0) || (bio !== undefined && bio.length > 0)
   return (
     <div style={{ borderBottom: '1px solid var(--line)' }}>
       <button
@@ -566,7 +569,19 @@ function StaffRow(props: { m: StaffView['scouts'][number] }): JSX.Element {
           )}
         </div>
       </button>
-      {open && hasAttrs && (
+      {open && bio !== undefined && bio.length > 0 && (
+        <div
+          className="stack"
+          style={{
+            gap: 8, padding: '0 0 var(--sp-3) 56px', maxWidth: 760,
+          }}
+        >
+          {bio.map((para, i) => (
+            <p key={i} style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>{para}</p>
+          ))}
+        </div>
+      )}
+      {open && attrs && Object.keys(attrs).length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)', padding: '0 0 var(--sp-3) 56px' }}>
           {STAFF_ATTR_GROUPS.map((g) => {
             const rows = g.attrs.filter(([k]) => attrs![k] !== undefined)
