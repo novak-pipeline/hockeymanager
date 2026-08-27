@@ -575,6 +575,18 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) return { id: req.id, type: 'error', message: 'No scout available to send.' }
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
     }
+    case 'toggleWatchPlayer': {
+      const res = must().toggleWatchPlayer(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not update your watch list.' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'setWatchNote': {
+      const res = must().setWatchNote(req.playerId, req.note)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not save that note.' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'searchPlayers':
+      return { id: req.id, type: 'playerSearch', playerSearch: must().searchPlayers(req.query) }
     case 'resolveScoutDigest':
       must().resolveScoutDigest()
       return { id: req.id, type: 'ok' }

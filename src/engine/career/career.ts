@@ -415,6 +415,8 @@ import {
   scoutSalary,
   SCOUT_SPECIALTY_NATIONS,
   DISCOVERY_THRESHOLD,
+  SCOUT_SEEN_THRESHOLD,
+  MAX_WATCH_LIST,
   YOUTH_MAX_AGE,
   selectNeedWeighted,
   scoutPosGroup,
@@ -422,6 +424,7 @@ import {
   type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
+import { searchPlayers as runPlayerSearch } from './playerSearch'
 import { buildTeamDynamics } from '@engine/career/dynamics'
 import {
   generateStaff,
@@ -596,6 +599,8 @@ import {
   type RivalriesView,
   type ScheduleView,
   type ScoreboardView,
+  type PlayerSearchQuery,
+  type PlayerSearchView,
   type ScoutingView,
   type SeasonSummary,
   type SeriesView,
@@ -1264,7 +1269,7 @@ export class Career {
         teams: data.teams as Map<TeamId, { roster: PlayerId[] }>,
         players: data.players,
         rng: new Rng(deriveSeed(seed, 9001)),
-        draftProspectIds: this.allDraftProspectIds(),
+        draftProspectIds: this.allAmateurProspectIds(),
       })
       this.arcsState = createInitialArcsState()
       // Seed a plausible franchise past so the record book + banner rafters
@@ -1533,6 +1538,35 @@ export class Career {
     }
     for (const cls of this.data.league.draftClasses) {
       for (const p of cls.prospects) ids.add(p.playerId as string)
+    }
+    return ids
+  }
+
+  /**
+   * Every amateur young enough to be a scouting DISCOVERY — the draft-eligible
+   * class plus the 14–16 "radar" cohort behind it.
+   *
+   * C5: this is the set that starts in the fog. The eligible class always did;
+   * the radar cohort did not, because `allDraftProspectIds` deliberately drops
+   * them (they can't be drafted yet, so they don't belong in a scout's draft
+   * scope). The side effect was that every 15-year-old in the world started at
+   * renown knowledge — known well enough to hold an opinion on — which is why
+   * "on the radar" arrived pre-filled with the next two classes' best players
+   * sorted by ceiling. Finding a 15-year-old nobody else has found is the job;
+   * the game was doing it for you before the first day was simmed.
+   */
+  private allAmateurProspectIds(): Set<string> {
+    const ids = this.allDraftProspectIds()
+    for (const c of this.data.league.competitions ?? []) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (p && draftEligibility(p.age, !!p.nhlDrafted) === 'radar') ids.add(pid as string)
+        }
+      }
     }
     return ids
   }
@@ -5688,6 +5722,7 @@ export class Career {
       ownProspectIds: [...this.ownOrgIds()],
       rng: this.rngFor(7008, day),
     })
+    this.logScoutCoverage()
     // Games reveal players: anyone who suits up becomes better known, so the
     // league's read sharpens as the season is played. Own-org players clear all
     // the way (you know your guys); the rest of the league climbs to "well known"
@@ -13692,6 +13727,20 @@ export class Career {
 
   /* ────────────────────────── view builders ────────────────────────── */
 
+  /**
+   * TODAY, on the fiction clock the user can see in the topbar. The three phase
+   * clocks (summer stages, camp week, match days) are stitched together here so
+   * anything that DATES something — a watch-list pin, a coverage snapshot — agrees
+   * with the date on screen. Stamping `dayToDateISO(year, 0)` instead reads as
+   * "1 October" while the topbar says 27 June, which is how a pin made in the
+   * offseason ended up filed three months in the future.
+   */
+  private todayISO(): string {
+    return this.phase === 'offseason'
+      ? this.offseasonDateISO()
+      : this.preseasonDateISO() ?? dayToDateISO(this.year, Math.max(1, this.currentDay))
+  }
+
   /** The summer calendar: offseason stages map to real dates. July 1 is the
    *  anchor — free agency opens exactly there, day by day. */
   private offseasonDateISO(): string {
@@ -14265,6 +14314,9 @@ export class Career {
       .map((a) => ({ award: a.award, year: a.year }))
     const priorCups = this.data.players.get(pid)?.stanleyCups ?? 0
     for (let i = 0; i < priorCups; i++) playerAwards.push({ award: 'Stanley Cup' })
+    // C1: own players are built without a fog context, so the watch flag is set
+    // here from the one source of truth — the GM can pin his own prospects too.
+    profile.watched = this.isWatched(playerId)
     if (playerAwards.length > 0) profile.awards = playerAwards
 
     // This season's average match rating (EHM "Avr") — cumulative from game one,
@@ -16772,7 +16824,13 @@ export class Career {
   /* ─────────────────── Scouting Centre triage (FM-style) ─────────────────── */
 
   /** TRACK a flagged prospect — pin him to the shortlist so he isn't lost in the
-   *  queue. Idempotent; a tracked prospect stays in `recommendations` too. */
+   *  queue. Idempotent; a tracked prospect stays in `recommendations` too.
+   *
+   *  Tracking a find is the same act as watching a player (C1): there is one
+   *  watch list in this game, and "★ Track him" in the Centre is one of the doors
+   *  into it. So this also pins him — his file stops decaying and your scouts give
+   *  him the front of their day. If the watch list is full the triage still
+   *  happens; you just don't get the extra eyes until you free a slot. */
   shortlistProspect(playerId: string): { ok: boolean } {
     const st = this.scouting
     const list = new Set(st.shortlist ?? [])
@@ -16780,6 +16838,7 @@ export class Career {
     st.shortlist = [...list]
     // A tracked prospect is never "passed".
     if (st.dismissed) st.dismissed = st.dismissed.filter((id) => id !== playerId)
+    this.watchPlayer(playerId)
     return { ok: true }
   }
 
@@ -16787,10 +16846,13 @@ export class Career {
   unshortlistProspect(playerId: string): { ok: boolean } {
     const st = this.scouting
     if (st.shortlist) st.shortlist = st.shortlist.filter((id) => id !== playerId)
+    this.unwatchPlayer(playerId)
     return { ok: true }
   }
 
-  /** PASS on a prospect — drop him from the queue and don't re-surface him. */
+  /** PASS on a prospect — drop him from the queue and don't re-surface him.
+   *  Passing also takes him off the watch list: a name you have decided against
+   *  should not keep eating a scout's day (or a watch-list slot). */
   dismissProspect(playerId: string): { ok: boolean } {
     const st = this.scouting
     const dis = new Set(st.dismissed ?? [])
@@ -16798,7 +16860,164 @@ export class Career {
     st.dismissed = [...dis]
     if (st.recommendations) st.recommendations = st.recommendations.filter((r) => r.playerId !== playerId)
     if (st.shortlist) st.shortlist = st.shortlist.filter((id) => id !== playerId)
+    this.unwatchPlayer(playerId)
     return { ok: true }
+  }
+
+  /* ─────────────────── Whole-database player search (C3) ─────────────────── */
+
+  /**
+   * Run a GM-driven search over every player in the world. This is the Players
+   * tab: a tool, not a pre-answered list. Fog is enforced inside `searchPlayers`
+   * — an unscouted player comes back with null stars and an "Unscouted" label,
+   * so the search can never be used to shortcut the scouting department.
+   */
+  searchPlayers(query: PlayerSearchQuery): PlayerSearchView {
+    const leagueOfTeam = new Map<string, { id: string; abbrev: string; name: string; nation: string }>()
+    for (const tid of this.data.league.teams) {
+      leagueOfTeam.set(tid as string, { id: 'nhl', abbrev: 'NHL', name: 'NHL', nation: 'North America' })
+    }
+    for (const tid of this.data.league.ahlTeams ?? []) {
+      leagueOfTeam.set(tid as string, { id: 'ahl', abbrev: 'AHL', name: 'AHL', nation: 'North America' })
+    }
+    for (const c of this.data.league.competitions ?? []) {
+      for (const tid of c.teamIds) {
+        leagueOfTeam.set(tid as string, { id: c.id, abbrev: c.abbrev, name: c.name, nation: c.nation })
+      }
+    }
+    // Mid-season production lives in the live accumulators, not p.stats (which is
+    // only written at rollover) — read both so a search mid-November shows this
+    // season's scoresheet rather than last season's.
+    const liveLine = (pid: string): { gp: number; goals: number; assists: number; points: number } | undefined => {
+      const id = asPlayerId(pid)
+      const nhlGp = this.gp.get(id) ?? 0
+      if (nhlGp > 0) {
+        const t = this.totals.get(id)
+        const g = t?.goals ?? 0, a = t?.assists ?? 0
+        return { gp: nhlGp, goals: g, assists: a, points: g + a }
+      }
+      const wGp = this.worldSim.gp.get(id) ?? 0
+      if (wGp > 0) {
+        const t = this.worldSim.totals.get(id)
+        const g = t?.goals ?? 0, a = t?.assists ?? 0
+        return { gp: wGp, goals: g, assists: a, points: g + a }
+      }
+      return undefined
+    }
+    return runPlayerSearch({
+      players: this.data.players,
+      teams: this.data.teams,
+      scouting: this.scouting,
+      leagueOfTeam,
+      draftProspectIds: this.allDraftProspectIds(),
+      ownIds: this.ownOrgIds(),
+      liveLine,
+    }, query)
+  }
+
+  /* ─────────────────── The GM's watch list (C1) ─────────────────── */
+
+  /**
+   * Pin a player to the watch list. The list is the GM's own — it starts EMPTY
+   * and only ever grows by this call, because a list the game pre-fills tells you
+   * nothing you didn't already know.
+   *
+   * A pin is an ORDER, not a bookmark: `tickScouting` gives watched players the
+   * front of every scout's day (up to half his capacity) whatever his brief says,
+   * and shields them from knowledge decay. That is real bandwidth taken off your
+   * regional coverage — which is exactly why the list has a size cap and why
+   * pinning the whole draft class is a bad idea rather than a free win.
+   */
+  watchPlayer(playerId: string, note?: string): { ok: boolean; message?: string } {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Unknown player.' }
+    const st = this.scouting
+    const list = st.watchList ?? []
+    if (list.some((w) => w.playerId === playerId)) {
+      if (note !== undefined) return this.setWatchNote(playerId, note)
+      return { ok: true, message: `${p.name} is already on your watch list.` }
+    }
+    if (list.length >= MAX_WATCH_LIST) {
+      return { ok: false, message: `Your watch list is full (${MAX_WATCH_LIST}). Your scouts can only follow so many names — drop someone first.` }
+    }
+    st.watchList = [...list, {
+      playerId,
+      addedDate: this.todayISO(),
+      knowledgeAtAdd: Math.round(knowledgeOf(st, playerId)),
+      ...(note ? { note } : {}),
+    }]
+    return { ok: true, message: `${p.name} added to your watch list — your scouts will keep eyes on him.` }
+  }
+
+  /** Un-pin a player. */
+  unwatchPlayer(playerId: string): { ok: boolean; message?: string } {
+    const st = this.scouting
+    if (!st.watchList?.some((w) => w.playerId === playerId)) return { ok: true }
+    st.watchList = st.watchList.filter((w) => w.playerId !== playerId)
+    const name = this.data.players.get(asPlayerId(playerId))?.name ?? 'He'
+    return { ok: true, message: `${name} removed from your watch list.` }
+  }
+
+  /** Pin/un-pin in one call — what the right-click menu and the star buttons use. */
+  toggleWatchPlayer(playerId: string): { ok: boolean; watching: boolean; message?: string } {
+    const on = this.isWatched(playerId)
+    const res = on ? this.unwatchPlayer(playerId) : this.watchPlayer(playerId)
+    // A rejected add (list full) leaves him un-watched — report the real state.
+    return { ok: res.ok, watching: res.ok ? !on : on, ...(res.message ? { message: res.message } : {}) }
+  }
+
+  /** Attach (or clear) the GM's own note on a watched player. */
+  setWatchNote(playerId: string, note: string): { ok: boolean; message?: string } {
+    const st = this.scouting
+    const entry = st.watchList?.find((w) => w.playerId === playerId)
+    if (!entry) return { ok: false, message: 'He is not on your watch list.' }
+    const trimmed = note.trim()
+    if (trimmed) entry.note = trimmed
+    else delete entry.note
+    return { ok: true }
+  }
+
+  /** Is this player on the GM's watch list? */
+  isWatched(playerId: string): boolean {
+    return (this.scouting.watchList ?? []).some((w) => w.playerId === playerId)
+  }
+
+  /* ─────────────────── Coverage paper trail (C2) ─────────────────── */
+
+  /**
+   * Take a month-start snapshot of where the department's eyes were, so the
+   * Scouting Centre can report what CHANGED rather than only what is true now.
+   * Cheap: one aggregate per league, not a per-player dump. Idempotent within a
+   * month — called from the daily advance.
+   */
+  private logScoutCoverage(): void {
+    const iso = this.todayISO()
+    const month = iso.slice(0, 7)
+    const log = this.scouting.coverageLog ?? []
+    if (log.length && log[log.length - 1]!.date.slice(0, 7) === month) return
+    const leagues: Array<[string, number]> = []
+    for (const c of this.scoutingCompetitions()) {
+      let sum = 0, n = 0
+      for (const tid of c.teamIds) {
+        const t = this.data.teams.get(tid as unknown as TeamId)
+        if (!t) continue
+        for (const pid of t.roster) { sum += knowledgeOf(this.scouting, pid as string); n++ }
+      }
+      if (n > 0) leagues.push([c.id, Math.round((sum / n) * 10) / 10])
+    }
+    let world = 0, wn = 0, filed = 0
+    for (const [, k] of this.scouting.knowledge) {
+      world += k; wn++
+      if (k >= SCOUT_SEEN_THRESHOLD) filed++
+    }
+    log.push({
+      date: iso,
+      world: wn ? Math.round((world / wn) * 10) / 10 : 0,
+      leagues,
+      filed,
+    })
+    // Keep just over a season's worth — this rides in every save.
+    this.scouting.coverageLog = log.slice(-14)
   }
 
   /** "Take another look" — put the best-fit scout (a nation specialist first,
@@ -17100,11 +17319,21 @@ export class Career {
 
   getScouting(): ScoutingView {
     this.syncScoutRoster()
+    const ranks = this.getDraftRankings()
     return buildScoutingView({
       ...this.ctx(),
       scouting: this.scouting,
       draftProspectIds: this.allDraftProspectIds(),
-      draftRankById: this.getDraftRankings().fullRankById,
+      draftRankById: ranks.fullRankById,
+      // The briefing's "who does the room disagree about" panel reads the same
+      // per-scout boards the Draft Rankings screen shows, so the two can never
+      // tell different stories.
+      scoutBoards: ranks.scoutBoards.map((b) => ({
+        scoutId: b.scoutId,
+        scoutName: b.scoutName,
+        rows: b.rows.map((r) => ({ playerId: r.playerId, rank: r.rank })),
+      })),
+      todayISO: dayToDateISO(this.year, this.currentDay),
       competitions: this.scoutingCompetitions(),
       competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
       nextOpponentId: this.nextOpponentTeamId(),
@@ -17780,6 +18009,7 @@ export class Career {
             currentStars: overallToStars(ratedOverall(p)),
             potentialStars: overallToStars(perceived),
             perceivedCeiling: Math.round(perceived),
+            analystRole: ceilingRoleShort(perceived, p.position),
             ...(isSkater ? { pNHLer: evalRes.projection.pNHLer, pStar: evalRes.projection.pStar } : {}),
           }
           if (elig === 'radar') radarRows.push(row)
@@ -17821,8 +18051,14 @@ export class Career {
       const movement = wasRanked !== undefined ? wasRanked - rank : 0
       return { rank, movement, ...board.get(id)!.row }
     })
-    // Radar: youngest standouts by projected ceiling — they're "on the radar".
-    const radar: DraftRankRowView[] = radarRows
+    // Radar: the U17s YOUR STAFF has actually watched (C5). This list used to be
+    // every 14–16-year-old in the world sorted by projected ceiling — i.e. the
+    // answer to "who are the next two drafts' best players", handed over on day
+    // one for free. A kid nobody in your building has seen does not belong on
+    // your radar; he belongs in the count of work you haven't done.
+    const radarSeen = radarRows.filter((row) => knowledgeOf(this.scouting, row.playerId) >= SCOUT_SEEN_THRESHOLD)
+    const radarUnseen = radarRows.length - radarSeen.length
+    const radar: DraftRankRowView[] = radarSeen
       .sort((a, b) => b.potentialStars - a.potentialStars || b.currentStars - a.currentStars)
       .slice(0, 20)
       .map((row, i) => ({ rank: i + 1, ...row }))
@@ -17900,7 +18136,7 @@ export class Career {
           const consensusRank = consensusRankOf.get(id) ?? yourRank
           const movement = consensusRank - yourRank
           const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
-          const seen = (meta.get(id)?.knowledge ?? 0) >= 35
+          const seen = (meta.get(id)?.knowledge ?? 0) >= SCOUT_SEEN_THRESHOLD
           const ourCeiling = ceilingById.get(id) ?? agedPotential(c.player)
           // E2: the arrow alone made a 5★ grade next to a "▼" look like a bug. Say
           // the position in words, from the same signal parts the profile blurb and
@@ -17913,7 +18149,10 @@ export class Career {
           })
           // The Potential column on OUR board shows OUR fog-aware read (c.row's is
           // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
-          return { rank: yourRank, ...c.row, potentialStars: overallToStars(ourCeiling), consensusRank, movement, verdict, seen, note }
+          // And where we have NOT seen him there is no read to show: 0 means "we
+          // don't know", which the board renders as a dash rather than inventing a
+          // grade off the public book (C5).
+          return { rank: yourRank, ...c.row, potentialStars: seen ? overallToStars(ourCeiling) : 0, consensusRank, movement, verdict, seen, note }
         })
 
     // Staff consensus board: department signal breaks ties between equal-value
@@ -17937,7 +18176,16 @@ export class Career {
 
     const fullRankById: Record<string, number> = {}
     ordered.forEach((id, i) => { fullRankById[id] = i + 1 })
-    const view = { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards, fullRankById }
+    // How much of the class the department has actually filed on — the honest
+    // headline for both boards.
+    let classFiled = 0
+    for (const c of cands) if ((meta.get(c.row.playerId)?.knowledge ?? 0) >= SCOUT_SEEN_THRESHOLD) classFiled++
+    const classCoverage = {
+      filed: classFiled,
+      total: cands.length,
+      pct: cands.length ? Math.round((classFiled / cands.length) * 100) : 0,
+    }
+    const view = { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, radarUnseen, classCoverage, scoutBoard, scoutBoards, fullRankById }
     this.draftRankCache = { key: cacheKey, view }
     return view
   }
@@ -19983,6 +20231,8 @@ export class Career {
         scoutHistory: (this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, [...pids]] as [string, string[]]),
         shortlist: [...(this.scouting.shortlist ?? [])],
         dismissed: [...(this.scouting.dismissed ?? [])],
+        watchList: (this.scouting.watchList ?? []).map((w) => ({ ...w })),
+        coverageLog: (this.scouting.coverageLog ?? []).map((c) => ({ ...c, leagues: c.leagues.map((l) => [...l] as [string, number]) })),
       },
       arcs: structuredClone(this.arcsState),
       chronicle: structuredClone(this.chronicle),
@@ -20152,6 +20402,10 @@ export class Career {
         scoutHistory: [...(snapshot.scouting.scoutHistory ?? [])],
         shortlist: [...(snapshot.scouting.shortlist ?? [])],
         dismissed: [...(snapshot.scouting.dismissed ?? [])],
+        // C1/C2: the GM's own pins and the department's paper trail survive a
+        // reload — a watch list you rebuilt every session would be worthless.
+        watchList: [...(snapshot.scouting.watchList ?? [])],
+        coverageLog: [...(snapshot.scouting.coverageLog ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({
@@ -20159,7 +20413,7 @@ export class Career {
         teams: data.teams as Map<TeamId, { roster: PlayerId[] }>,
         players: data.players,
         rng: new Rng(deriveSeed(snapshot.seed, 9001)),
-        draftProspectIds: career.allDraftProspectIds(),
+        draftProspectIds: career.allAmateurProspectIds(),
       })
     }
 

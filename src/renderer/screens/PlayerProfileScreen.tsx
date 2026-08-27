@@ -2406,6 +2406,20 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               {d.captaincy}
             </span>
           )}
+          {/* C1: the only way onto the watch list is a GM putting him there. */}
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ color: d.watched ? 'var(--accent, #f5b301)' : 'var(--muted)', fontWeight: 700 }}
+            title={d.watched
+              ? 'On your watch list — your scouts prioritise him. Click to stop watching.'
+              : 'Add to your watch list — your scouts will give him the front of their day whatever their brief says'}
+            onClick={() => {
+              void client.toggleWatchPlayer(d.playerId).then((r) => {
+                if (r.type === 'error') toast(r.message, 'error')
+                else { bumpRefresh(); refetch() }
+              })
+            }}
+          >{d.watched ? '★ Watching' : '☆ Watch'}</button>
           <PlayerRoleControl d={d} client={client} onChanged={refetch} />
           {hasPrevNext && (
             <button
