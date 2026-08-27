@@ -320,7 +320,15 @@ function assessPlan(ctx: Ctx): Plan {
   // planned CONTEND for five straight years at 70 points. Before a puck is
   // dropped the only honest evidence is how LAST season finished.
   const played = dash?.userTeam.standing?.gamesPlayed ?? 0
-  const lastFinish = ctx.trace.seasons[ctx.trace.seasons.length - 1]?.conferenceRank
+  // Scan BACK for the last season that actually finished. `beginSeason` has
+  // already pushed the current (empty) record by the time the plan is struck, so
+  // seasons[last] is this year with a zeroed rank — reading it reproduced the
+  // very bug this is here to fix.
+  let lastFinish: number | undefined
+  for (let i = ctx.trace.seasons.length - 1; i >= 0; i--) {
+    const r = ctx.trace.seasons[i]?.conferenceRank
+    if (r !== undefined && r > 0) { lastFinish = r; break }
+  }
   const cRank = played >= 10
     ? (dash?.userTeam.conferenceRank ?? 8)
     : (lastFinish ?? dash?.userTeam.conferenceRank ?? 8)
@@ -746,7 +754,13 @@ function doFreeAgency(ctx: Ctx): void {
     if (fa.askSalary > remaining) continue
     if (hub.windowOpen) {
       const res = guarded(ctx, 'submitFaOffer', () => ctx.career.submitFaOffer(fa.playerId, fa.askSalary, fa.askYears))
-      if (res?.ok) remaining -= fa.askSalary
+      // Count the offer. Free agency went ASYNC (the camp answers days later), so
+      // the old counter — which only ticked on an immediate signing — reported
+      // "0 signings" for a season in which the GM tabled 26 offers. A metric that
+      // says a busy GM did nothing is worse than no metric: it was about to be
+      // read as a behaviour regression.
+      const sa = ctx.trace.seasons.at(-1)
+      if (res?.ok && sa) { sa.signings++; remaining -= fa.askSalary }
       log(ctx, { kind: 'sign-fa', summary: `Tabled ${money(fa.askSalary)}×${fa.askYears} for UFA ${fa.name} (${fa.overall} OVR)`, drivers: ['roster spot open', `fits cap (${money(remaining)} left)`], result: res?.message ?? 'tabled', ok: !!res?.ok })
     } else {
       const res = trySign(ctx, remaining, fa.askSalary, () => ctx.career.signFreeAgent(fa.playerId, fa.askSalary, fa.askYears), 'signFreeAgent')
