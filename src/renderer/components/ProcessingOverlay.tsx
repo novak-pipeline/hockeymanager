@@ -102,12 +102,15 @@ export function ProcessingOverlay({
   const ng = data.nextGame
   const trending = data.trending
 
-  // FM-style keyboard flow: Enter rolls to the next day, Esc drops back to your
-  // screen — but only once the day has finished processing (never mid-tick).
+  // FM-style keyboard flow: Enter or Space rolls to the next day, Esc drops back
+  // to your screen — but only once the day has finished processing (never
+  // mid-tick). Space is bound because that is what the inbox uses for "next",
+  // and reaching a postgame receipt and finding the spacebar dead is exactly
+  // what made the screen feel like it wanted clicking away from.
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (running) return
-      if (e.key === 'Enter') { e.preventDefault(); onContinue() }
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); onContinue() }
       else if (e.key === 'Escape') { e.preventDefault(); onClose() }
     }
     window.addEventListener('keydown', onKey)
@@ -366,7 +369,17 @@ export function ProcessingOverlay({
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', marginTop: 'auto', paddingTop: 'var(--sp-2)' }}>
+          {/* Stuck to the bottom of the scrolling column. A postgame receipt plus
+              the month grid is taller than the panel, and with `marginTop: auto`
+              alone the Continue button was simply below the fold — so the way out
+              of the screen was to click the backdrop, which is what it looked
+              like the GM was being asked to do. */}
+          <div style={{
+            display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)',
+            marginTop: 'auto', paddingTop: 'var(--sp-3)',
+            position: 'sticky', bottom: 0,
+            background: 'linear-gradient(to top, var(--bg1) 65%, transparent)',
+          }}>
             <button className="btn btn-ghost" onClick={onClose} disabled={running}>Close</button>
             {/* aria-label distinguishes THIS Continue from the topbar's — the
                 overlay is modal, so it's the only one clickable while open. */}
