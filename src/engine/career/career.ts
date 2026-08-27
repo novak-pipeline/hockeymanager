@@ -453,6 +453,16 @@ import {
   type CoachSeat,
 } from '@engine/league/coachCarousel'
 import {
+  MAX_EXTENSION_YEARS,
+  describeExtension,
+  discountMultiplier,
+  extensionEligibility,
+  fitsNextSeason,
+  pruneDiscounts,
+  type ExtensionDiscount,
+  type PendingExtension,
+} from '@engine/league/extension'
+import {
   decayIntensity,
   gameIntensity,
   registerGame,
@@ -1183,6 +1193,12 @@ export class Career {
   private coachTenure = new Map<string, number>()
   /** Benches changed league-wide so far this season — the carousel's cap. */
   private midSeasonCoachFirings = 0
+  /** Deals signed in-season that start NEXT season (Playtest 2026-08-26 §E2).
+   *  They do not touch the running contract; the rollover writes them on. */
+  private pendingExtensions: PendingExtension[] = []
+  /** Time-limited concessions planted by an authored scene — an agent's early
+   *  extension overture. Lapse when the season turns. */
+  private extensionDiscounts: ExtensionDiscount[] = []
   /** League-wide rivalry pairs. */
   private rivalriesState!: RivalriesState
   /** Per-team special-teams accumulators (JSON-safe entry array). */
@@ -3116,6 +3132,9 @@ export class Career {
         // Season save % as a whole number; non-goalies sit at 100 so the
         // crease dilemma can never latch onto a skater.
         savePct: gt && gt.shotsAgainst > 0 ? Math.round((gt.saves / gt.shotsAgainst) * 100) : 100,
+        // How far through the schedule we are — some scenes sell an action that
+        // has its own window (E2 extensions open at the halfway mark).
+        seasonPct: Math.round(this.seasonFraction() * 100),
       }
       const ev = pickDecisionEvent({
         ctx, rng,
@@ -3194,6 +3213,23 @@ export class Career {
         playerId: player.id as string, kind: e.residue,
         year: this.year, day, actionId: `dec:${chosen.id}`, known: true,
       })
+    }
+    if (e.extensionDiscount !== undefined && e.extensionDiscount < 1) {
+      // E2: the concession is a real number the extension table honours, and it
+      // dies with the season. The scene now sells something the engine can sell.
+      const off = Math.round((1 - e.extensionDiscount) * 100)
+      this.grantExtensionDiscount(
+        player.id as string,
+        e.extensionDiscount,
+        `His camp is holding an early-signing number roughly ${off}% under his market ask — until this season ends.`
+      )
+      this.pushNews(
+        'contract',
+        `${player.name}'s camp holds the number`,
+        `The discount is on the table for the rest of the season: about ${off}% under what he will be worth. ` +
+          `Open extension talks from his profile to take it. The deal starts in ${this.year + 1}.`,
+        { playerId: player.id as string, teamId: this.userTeamId as string, salience: 62 }
+      )
     }
     if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
       this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
@@ -4050,7 +4086,7 @@ export class Career {
       this.pushSeeds(confResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
       /* ── E3: the building has an opinion, and the owner can hear it ── */
-      this.tickPressure(currentRank, gamesPlayed, totalGames, sorted)
+      this.tickPressure(currentRank, gamesPlayed, sorted)
       /* ── E3: other clubs fire people too ── */
       this.tickCoachCarousel(sorted, totalGames, day)
     }
@@ -7011,6 +7047,12 @@ export class Career {
           const [cat, headline, body] = texts[seed.kind]
           this.pushNews(cat, headline, body, { playerId: seed.playerId as string })
         }
+
+        /* ── E2: extensions signed in-season start paying now. developPlayers
+         *  has just ticked every contract down, so a man on a signed extension
+         *  would otherwise show up as expiring — this writes his new deal on
+         *  before the re-sign window is ever built. ── */
+        this.applyPendingExtensions(this.year + 1)
 
         /* ── retirements → legends ledger → Hall of Fame ── */
         const rosterTeamOf = new Map<string, TeamId>()
@@ -11631,14 +11673,150 @@ export class Career {
   /* ─────────────── contract negotiation sessions (DEPTH 1) ─────────────── */
 
   /** Can talks be held with this player right now, and in what capacity? */
-  private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | null {
+  private negotiationKindFor(playerId: string): 'resign' | 'freeAgent' | 'extension' | null {
     // The FA market is open year-round: any club-less player can be signed
     // whenever the roster isn't frozen (offseason, or regular season). Re-sign
     // talks with your own expiring RFAs are the offseason resign stage.
     const os = this.offseason
     if (os?.stage === 'resign' && this.resignStatus.get(asPlayerId(playerId)) === 'pending') return 'resign'
     if (this.phase !== 'playoffs' && this.faPool.some((f) => (f as string) === playerId)) return 'freeAgent'
+    // E2: your own man, last year of his deal, past the turn of the calendar.
+    if (this.extensionEligibilityFor(playerId).eligible) return 'extension'
     return null
+  }
+
+  /* ────────────────────────── E2: in-season extensions ────────────────────────── */
+
+  /** How many games the user's club is scheduled to play this season. Counted
+   *  from the schedule (never assumed), cached per season. NOT the same as
+   *  matchDays.length, which counts league-wide dates. */
+  private userGamesScheduledCache: { year: number; n: number } | null = null
+  private userGamesScheduled(): number {
+    if (this.userGamesScheduledCache?.year === this.year) return this.userGamesScheduledCache.n
+    let n = 0
+    for (const g of this.data.league.schedule) {
+      if (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId) n++
+    }
+    this.userGamesScheduledCache = { year: this.year, n: Math.max(1, n) }
+    return this.userGamesScheduledCache.n
+  }
+
+  /** Fraction of the regular season the user's club has played, 0–1. */
+  private seasonFraction(): number {
+    const gp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
+    return Math.min(1, gp / this.userGamesScheduled())
+  }
+
+  /** Every player in the org whose contract the club actually holds. */
+  private ownRosterPlayers(): Player[] {
+    const out: Player[] = []
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p) out.push(p)
+    }
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    for (const id of ahl?.roster ?? []) {
+      const p = this.data.players.get(id)
+      if (p) out.push(p)
+    }
+    return out
+  }
+
+  /** Public-facing eligibility read for one player (drives the UI and the kind). */
+  extensionEligibilityFor(playerId: string): ReturnType<typeof extensionEligibility> {
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) {
+      return { eligible: false, block: 'notYourPlayer', reason: 'No such player.' }
+    }
+    const onRoster =
+      this.userTeam.roster.some((r) => (r as string) === playerId) ||
+      (this.userTeam.affiliateId
+        ? (this.data.teams.get(this.userTeam.affiliateId)?.roster ?? []).some((r) => (r as string) === playerId)
+        : false)
+    return extensionEligibility({
+      player: p,
+      onOwnRoster: onRoster,
+      seasonFraction: this.seasonFraction(),
+      inRegularSeason: this.phase === 'regularSeason' && !this.offseason,
+      alreadyExtended: this.pendingExtensions.some((e) => e.playerId === playerId),
+    })
+  }
+
+  /** The live early-signing concession on this man, if his camp offered one. */
+  private extensionDiscountFor(playerId: string): number {
+    return discountMultiplier(this.extensionDiscounts, playerId, this.year)
+  }
+
+  /**
+   * Plant a time-limited discount on a player's extension ask. Called by the
+   * authored scene whose whole premise is "below what he'll be worth" — the
+   * concession is now a real number the negotiation table honours.
+   */
+  private grantExtensionDiscount(playerId: string, mult: number, note: string): void {
+    this.extensionDiscounts = this.extensionDiscounts.filter(
+      (d) => !(d.playerId === playerId && d.year === this.year)
+    )
+    this.extensionDiscounts.push({ playerId, year: this.year, mult, note })
+  }
+
+  /** Next season's committed payroll vs the cap, for the extension cap check. */
+  private extensionCapCheck(salary: number): ReturnType<typeof fitsNextSeason> {
+    return fitsNextSeason({
+      roster: this.ownRosterPlayers(),
+      pending: this.pendingExtensions,
+      salary,
+      cap: this.userTeam.finances.salaryCap,
+      deadCapNextSeason: this.deadCapSchedule
+        .filter((e) => e.year > this.year)
+        .reduce((n, e) => n + e.amount, 0),
+    })
+  }
+
+  /**
+   * Write every extension whose start year has arrived onto the contract, and
+   * lapse any discount that was never taken. Called once at season rollover,
+   * AFTER developAndAge has ticked contracts down (so the expiring year is
+   * genuinely spent) and BEFORE the re-sign window is built (so an extended
+   * player never appears on it).
+   */
+  private applyPendingExtensions(newYear: number): void {
+    if (this.pendingExtensions.length === 0) {
+      this.extensionDiscounts = pruneDiscounts(this.extensionDiscounts, newYear)
+      return
+    }
+    const due = this.pendingExtensions.filter((e) => e.startYear <= newYear)
+    this.pendingExtensions = this.pendingExtensions.filter((e) => e.startYear > newYear)
+    for (const e of due) {
+      const p = this.data.players.get(asPlayerId(e.playerId))
+      // A man who retired before his extension started never collects on it.
+      if (!p || p.retiredYear !== undefined) continue
+      p.contract = {
+        salary: e.salary,
+        yearsRemaining: e.years,
+        expiryYear: newYear + e.years,
+        noTradeClause: e.noTradeClause,
+        twoWay: false,
+        clause: e.clause,
+        ...(e.signingBonusPct > 0 ? { signingBonusPct: e.signingBonusPct } : {}),
+      }
+      // A man on a signed extension is never an expiring contract.
+      this.resignStatus.delete(asPlayerId(e.playerId))
+      this.pushNews(
+        'contract',
+        `${p.name}'s extension kicks in`,
+        `The deal signed last season starts today: $${(e.salary / 1e6).toFixed(2)}M × ${e.years} year${e.years === 1 ? '' : 's'}.`,
+        { playerId: e.playerId, teamId: this.userTeamId as string }
+      )
+    }
+    this.extensionDiscounts = pruneDiscounts(this.extensionDiscounts, newYear)
+  }
+
+  /** The extensions on the books, for the UI. */
+  getPendingExtensions(): Array<PendingExtension & { name: string }> {
+    return this.pendingExtensions.map((e) => ({
+      ...e,
+      name: this.data.players.get(asPlayerId(e.playerId))?.name ?? e.playerId,
+    }))
   }
 
   /** Signed NHL contracts the agent can argue from — real deals, never invented. */
@@ -11708,6 +11886,25 @@ export class Career {
       ...(state.status === 'paused'
         ? { pausedNote: 'His camp has pulled out of talks. They are not returning your calls this window.' }
         : {}),
+      ...(state.kind === 'extension' ? this.extensionNoteFor(state.playerId) : {}),
+    }
+  }
+
+  /** The two extension-only lines the negotiation screen shows: what the club
+   *  is buying, and how much of next year's cap is left to buy it with. */
+  private extensionNoteFor(playerId: string): { extensionNote: string; nextSeasonCapRoom: number } {
+    const check = this.extensionCapCheck(0)
+    const discount = this.extensionDiscountFor(playerId)
+    const camp = this.extensionDiscounts.find((d) => d.playerId === playerId && d.year === this.year)
+    const base =
+      `This deal does not touch his current contract — it begins in ${this.year + 1}, ` +
+      `and the money comes out of next season's sheet.`
+    return {
+      extensionNote:
+        discount < 1 && camp
+          ? `${base} ${camp.note}`
+          : `${base} There is no early-signing concession on the table: he is priced at what he is worth.`,
+      nextSeasonCapRoom: check.room,
     }
   }
 
@@ -11728,6 +11925,9 @@ export class Career {
     // A free agent still on the market softens his ask the longer he waits, so a
     // GM can hold out on a player who is overpricing himself. Only in the FA window.
     const faDecay = kind === 'freeAgent' ? faAskDecay(this.offseason?.faDay ?? 0) : 1
+    // E2: an early-extension overture is a real concession — it multiplies the
+    // ask down for as long as it stands. This is what the authored scene sold.
+    const earlyDiscount = kind === 'extension' ? this.extensionDiscountFor(playerId) : 1
     // Living Ledger: what you did to this man follows him to the table. Known
     // residue (shopped/scratched/demoted, this year or last) hardens the ask,
     // shortens patience, and the agent SAYS why — the receipt is explicit.
@@ -11736,7 +11936,7 @@ export class Career {
       player,
       year: this.year,
       kind,
-      marketHeat: (1 + heat * 0.08) * faDecay * grudge.askMult,
+      marketHeat: (1 + heat * 0.08) * faDecay * grudge.askMult * earlyDiscount,
       rapportTilt: rapportTilt(this.agentRapport, agentFor(player).name),
     })
     if (grudge.patienceHit > 0) {
@@ -11788,12 +11988,34 @@ export class Career {
     // Cap sanity BEFORE the round: an offer you cannot execute is not an offer.
     const player = this.resolve(asPlayerId(playerId))
     const capUsedNow = this.userCapUsed()
-    const replacing = kind === 'resign' ? player.contract.salary : 0
-    if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
-      return {
-        view: this.buildNegotiationView(state),
-        signed: false,
-        message: 'That offer does not fit under your cap — clear space before you table it.',
+    if (kind === 'extension') {
+      // E2: an extension spends NEXT season's cap, not this one's. Term is
+      // capped at what a club may give its own player.
+      if (!Number.isInteger(offer.years) || offer.years < 1 || offer.years > MAX_EXTENSION_YEARS) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message: `An extension runs 1–${MAX_EXTENSION_YEARS} years.`,
+        }
+      }
+      const check = this.extensionCapCheck(offer.salary)
+      if (!check.fits) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message:
+            `That does not fit under NEXT season's cap — you have $${(Math.max(0, check.room) / 1e6).toFixed(2)}M ` +
+            `of room committed against ${this.year + 1}.`,
+        }
+      }
+    } else {
+      const replacing = kind === 'resign' ? player.contract.salary : 0
+      if (capUsedNow - replacing + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
+        return {
+          view: this.buildNegotiationView(state),
+          signed: false,
+          message: 'That offer does not fit under your cap — clear space before you table it.',
+        }
       }
     }
 
@@ -11868,8 +12090,16 @@ export class Career {
   }
 
   /** Execute a negotiated deal: sign, stamp clause/bonus structure, tell the world. */
-  private commitNegotiatedContract(player: Player, offer: ContractOffer, kind: 'resign' | 'freeAgent'): void {
+  private commitNegotiatedContract(
+    player: Player,
+    offer: ContractOffer,
+    kind: 'resign' | 'freeAgent' | 'extension'
+  ): void {
     const playerId = player.id as string
+    if (kind === 'extension') {
+      this.commitExtension(player, offer)
+      return
+    }
     signPlayer({
       team: this.userTeam,
       player,
@@ -11930,6 +12160,62 @@ export class Career {
     })
     this.transactionLedger = txResult.ledger
     // FEED-V2-1: pen hits paper, the man posts about it.
+    this.queueVoice({ kind: 'signed', playerId, numbers: { years: offer.years }, relevant: true })
+  }
+
+  /**
+   * E2: bank an in-season extension. The running contract is untouched — he
+   * finishes this year on the money he already had — and the new deal is a
+   * commitment against next season that the rollover writes on. This is the
+   * action the "sign him a year early" scene was promising all along.
+   */
+  private commitExtension(player: Player, offer: ContractOffer): void {
+    const playerId = player.id as string
+    const ntcEligible = player.age >= 27 || player.stats.length >= 7
+    const pending: PendingExtension = {
+      playerId,
+      salary: offer.salary,
+      years: offer.years,
+      signedYear: this.year,
+      startYear: this.year + 1,
+      clause: offer.clause,
+      signingBonusPct: offer.signingBonusPct,
+      noTradeClause: offer.clause !== 'none' && ntcEligible,
+    }
+    this.pendingExtensions.push(pending)
+    // The concession is spent the moment it is taken.
+    this.extensionDiscounts = this.extensionDiscounts.filter(
+      (d) => !(d.playerId === playerId && d.year === this.year)
+    )
+    // LW5: a "we'll get a deal done" promise is now literally kept.
+    for (const pr of this.playerPromises) {
+      if (pr.status === 'open' && pr.playerId === playerId && pr.kind === 'newDeal') pr.status = 'kept'
+    }
+    player.morale = Math.max(0, Math.min(100, player.morale + 8))
+
+    const receipt = describeExtension(pending, player.name)
+    this.pushNews('contract', `${player.name} signs an extension`, receipt, {
+      playerId,
+      teamId: this.userTeamId as string,
+    })
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: this.currentDay,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      playerIds: [playerId],
+      headline: `${this.userTeam.abbreviation} extend ${player.position} ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}y, from ${pending.startYear})`,
+      details: { salary: offer.salary, years: offer.years },
+      userInvolved: true,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${this.userTeam.abbreviation} extend ${player.name} ($${(offer.salary / 1e6).toFixed(1)}M × ${offer.years}, from ${pending.startYear}).`,
+    })
+    this.transactionLedger = tx.ledger
     this.queueVoice({ kind: 'signed', playerId, numbers: { years: offer.years }, relevant: true })
   }
 
@@ -14329,6 +14615,31 @@ export class Career {
       profile.avgRating = Math.round((seasonRating.sum / seasonRating.n) * 100) / 100
     }
 
+    /* ── E2: extensions. What the club has already committed to, and whether it
+     *  can commit today — stated on the contract block so the GM never has to
+     *  guess whether an offer he was made is actionable. ── */
+    if (profile.profileContract) {
+      const idStr = pid as string
+      const signed = this.pendingExtensions.find((e) => e.playerId === idStr)
+      if (signed) {
+        profile.profileContract.extension = {
+          salary: signed.salary, years: signed.years, startYear: signed.startYear,
+        }
+      }
+      const ownPlayer =
+        this.userTeam.roster.some((r) => (r as string) === idStr) ||
+        (this.userTeam.affiliateId
+          ? (this.data.teams.get(this.userTeam.affiliateId)?.roster ?? []).some((r) => (r as string) === idStr)
+          : false)
+      if (ownPlayer) {
+        const elig = this.extensionEligibilityFor(idStr)
+        profile.profileContract.canExtend = elig.eligible
+        profile.profileContract.extensionStatus = elig.reason
+        const camp = this.extensionDiscounts.find((d) => d.playerId === idStr && d.year === this.year)
+        if (camp) profile.profileContract.extensionDiscountNote = camp.note
+      }
+    }
+
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
     // Re-point the current season at the totals for the league he actually plays
@@ -15073,7 +15384,6 @@ export class Career {
   private tickPressure(
     currentRank: number,
     gamesPlayed: number,
-    totalGames: number,
     sorted: ReturnType<typeof sortStandings>
   ): void {
     const state = this.ensurePressure()
@@ -15087,7 +15397,8 @@ export class Career {
       targetRank: this.boardState.targetRank,
       teamsInLeague: this.data.league.teams.length,
       gamesPlayed,
-      totalGames,
+      // The fans measure the season in GAMES, not in league-wide dates.
+      totalGames: this.userGamesScheduled(),
       points: standing?.points ?? 0,
       recentForm: this.recentFormFor(this.userTeamId),
       inPlayoffSpot: field.has(this.userTeamId as string),
@@ -20241,6 +20552,8 @@ export class Career {
       ...(this.pressureState ? { pressure: structuredClone(this.pressureState) } : {}),
       coachTenure: [...this.coachTenure.entries()],
       midSeasonCoachFirings: this.midSeasonCoachFirings,
+      pendingExtensions: this.pendingExtensions.map((e) => ({ ...e })),
+      extensionDiscounts: this.extensionDiscounts.map((d) => ({ ...d })),
       lockerRooms: [...this.lockerRooms.entries()].map(
         ([k, v]) => [k as string, structuredClone(v)] as [string, LockerRoomState]
       ),
@@ -20501,6 +20814,9 @@ export class Career {
     career.pressureState = snapshot.pressure ? structuredClone(snapshot.pressure) : null
     career.coachTenure = new Map(snapshot.coachTenure ?? [])
     career.midSeasonCoachFirings = snapshot.midSeasonCoachFirings ?? 0
+    // E2: an extension answered before the save survives it, with its teeth.
+    career.pendingExtensions = (snapshot.pendingExtensions ?? []).map((e) => ({ ...e }))
+    career.extensionDiscounts = (snapshot.extensionDiscounts ?? []).map((d) => ({ ...d }))
     if (snapshot.storyMisc) {
       for (const [k, v] of snapshot.storyMisc.pointStreaks) career.pointStreaks.set(k, v)
       for (const [k, v] of snapshot.storyMisc.scorelessStreaks) career.scorelessStreaks.set(k, v)

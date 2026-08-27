@@ -203,3 +203,41 @@ describe('decisionEvents — trigger selection', () => {
     expect(a).toBe(b)
   })
 })
+
+/* ── E2: a scene may never offer an action the engine refuses ── */
+
+describe('decisionEvents — promised actions must be real', () => {
+  it('any option that tells the GM to open extension talks carries a real discount', () => {
+    for (const ev of DECISION_EVENTS) {
+      for (const o of ev.options) {
+        if (!/extension talks/i.test(o.outcome)) continue
+        expect(
+          o.effects.extensionDiscount,
+          `${ev.id}/${o.id} points the GM at extension talks but grants nothing`,
+        ).toBeDefined()
+        expect(o.effects.extensionDiscount!).toBeGreaterThan(0.5)
+        expect(o.effects.extensionDiscount!).toBeLessThan(1)
+      }
+    }
+  })
+
+  it('any event granting an extension discount is gated to the extension window', () => {
+    // Extension talks are illegal before the halfway mark of the season. A
+    // scene that sells one earlier would be selling something the engine
+    // refuses — exactly the bug this whole feature closes.
+    for (const ev of DECISION_EVENTS) {
+      const grants = ev.options.some((o) => o.effects.extensionDiscount !== undefined)
+      if (!grants) continue
+      const gate = (ev.conditions as Record<string, unknown> | undefined)?.['minSeasonPct']
+      expect(typeof gate, `${ev.id} grants an extension discount without a minSeasonPct gate`).toBe('number')
+      expect(gate as number).toBeGreaterThanOrEqual(50)
+    }
+  })
+
+  it('an extension-selling event also requires the man to be in his final year', () => {
+    for (const ev of DECISION_EVENTS) {
+      if (!ev.options.some((o) => o.effects.extensionDiscount !== undefined)) continue
+      expect((ev.conditions as Record<string, unknown> | undefined)?.['contractYearsRemaining']).toBe(1)
+    }
+  })
+})

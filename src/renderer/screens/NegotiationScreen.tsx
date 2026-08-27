@@ -222,6 +222,16 @@ export function NegotiationScreen(): JSX.Element {
           <button className="btn btn-ghost" onClick={() => nav.goBack()}>← Leave the room</button>
         </div>
 
+        {/* E2: an extension spends NEXT season's cap, so say so before he offers. */}
+        {view.kind === 'extension' && view.extensionNote && (
+          <div className="notice notice-info" style={{ marginBottom: 'var(--sp-3)' }}>
+            {view.extensionNote}
+            {view.nextSeasonCapRoom !== undefined && (
+              <> <b>{fmtMoney(view.nextSeasonCapRoom)}</b> of room is uncommitted next season.</>
+            )}
+          </div>
+        )}
+
         <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           {/* ── the conversation ── */}
           <div className="stack" style={{ flex: '1 1 520px', gap: 'var(--sp-2)', minWidth: 0 }}>

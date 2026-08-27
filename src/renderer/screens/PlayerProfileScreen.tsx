@@ -1691,6 +1691,45 @@ function currentRepTier(rep: number, overall: number): string {
   return repTier(rep * 0.6 + overallToRep(overall) * 0.4)
 }
 
+/**
+ * E2: the extension block. Either a deal already signed for future seasons, or
+ * a plain statement of whether talks can be opened today — so an inbox scene
+ * that offers an early extension always points at something the game will do.
+ */
+function ExtensionPanel(
+  { pc, playerId }: { pc: NonNullable<PlayerProfileView['profileContract']>; playerId: string },
+): JSX.Element {
+  const nav = useNav()
+  return (
+    <Panel title="Extension">
+      {pc.extension ? (
+        <>
+          <InfoRow label="Signed extension" value={`${fmtMoney(pc.extension.salary)} × ${pc.extension.years}y`} />
+          <InfoRow label="Begins" value={String(pc.extension.startYear)} />
+          <p className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
+            His current deal runs to the end of this season untouched. The extension money lands on next
+            season&apos;s cap sheet.
+          </p>
+        </>
+      ) : (
+        <>
+          <p style={{ marginTop: 0, lineHeight: 1.6 }}>{pc.extensionStatus}</p>
+          {pc.extensionDiscountNote && (
+            <div className="notice notice-info" style={{ marginBottom: 'var(--sp-3)' }}>
+              {pc.extensionDiscountNote}
+            </div>
+          )}
+          {pc.canExtend && (
+            <button className="btn btn-primary" onClick={() => nav.navigate('negotiation', { playerId })}>
+              Open extension talks
+            </button>
+          )}
+        </>
+      )}
+    </Panel>
+  )
+}
+
 function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
   const pc = d.profileContract
   const c = d.contract
@@ -1741,6 +1780,8 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
         <InfoRow label="No-trade clause" value={(pc?.noTradeClause ?? c?.noTradeClause) ? 'Yes' : null} />
         <InfoRow label="Two-way contract" value={(pc?.twoWay ?? c?.twoWay) ? 'Yes' : null} />
       </Panel>
+
+      {pc && (pc.extension || pc.extensionStatus) && <ExtensionPanel pc={pc} playerId={d.playerId} />}
 
       <Panel title="Cap Usage">
         {/* The ceiling used to be hardcoded at $83.5M, so once the cap grew this

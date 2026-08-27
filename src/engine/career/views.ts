@@ -47,6 +47,7 @@ import type {
 } from '@engine/story/records'
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { PressureState } from '@engine/league/pressure'
+import type { ExtensionDiscount, PendingExtension } from '@engine/league/extension'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { PlayerInteraction, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
 export type { PlayerInteraction, InteractionKind, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
@@ -338,6 +339,16 @@ export interface ContractView {
   expiryYear: number
   noTradeClause: boolean
   twoWay: boolean
+  /** E2: a deal already signed for FUTURE seasons — the running contract is
+   *  untouched until it starts. Optional/additive. */
+  extension?: { salary: number; years: number; startYear: number }
+  /** E2: one sentence on whether extension talks can be opened today, and why
+   *  not when they can't. Present only for the user's own players. */
+  extensionStatus?: string
+  /** E2: true when the club may open extension talks with him right now. */
+  canExtend?: boolean
+  /** E2: a live early-signing concession his camp is holding, if any. */
+  extensionDiscountNote?: string
 }
 
 export interface SkaterSeasonLine {
@@ -1903,6 +1914,11 @@ export interface NegotiationView {
   capSpace: number
   /** When paused: the label the UI shows ("talks resume in a few days"). */
   pausedNote?: string
+  /** E2: when this is an in-season extension, the sentence explaining what the
+   *  club is actually buying — and any early-signing concession on the table. */
+  extensionNote?: string
+  /** E2: cap room NEXT season, which is the money an extension actually spends. */
+  nextSeasonCapRoom?: number
 }
 
 /* ── Convened staff meeting (bi-weekly war-room). Action stays engine-side; the
@@ -2542,6 +2558,10 @@ export interface CareerSnapshot {
   coachTenure?: Array<[string, number]>
   /** Benches already changed league-wide this season (E3 carousel cap). */
   midSeasonCoachFirings?: number
+  /** In-season extensions signed but not yet started (E2). Optional/additive. */
+  pendingExtensions?: PendingExtension[]
+  /** Live early-signing concessions from authored scenes (E2). Optional/additive. */
+  extensionDiscounts?: ExtensionDiscount[]
   /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
   chronicle?: ChronicleState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */
