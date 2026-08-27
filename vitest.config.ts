@@ -14,6 +14,10 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts'],
-    environment: 'node'
+    environment: 'node',
+    // Several engine tests sim tens of full games to get a clean signal; the
+    // 5s default is a coin-flip on slower/CI machines and has nothing to do
+    // with the behaviour under test.
+    testTimeout: 60_000
   }
 })

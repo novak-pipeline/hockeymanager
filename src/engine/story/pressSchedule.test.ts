@@ -176,6 +176,40 @@ function pressItems(items: ReturnType<Career['getInbox']>['items']) {
   return items.filter((n) => n.press !== undefined)
 }
 
+/**
+ * Count press reports by kind as they are published during the REGULAR SEASON.
+ *
+ * Reading the inbox after the season is over cannot see them: the inbox keeps
+ * only the most recent 200 items, and the offseason alone (signings, trades,
+ * draft, awards) generates enough news to evict everything published before it.
+ * A test that ran the full year and then looked for a mid-season report was
+ * really asserting "the offseason was quiet", and it broke the moment league
+ * calibration changed how much news a season produces.
+ *
+ * Sampling each step while the phase is still `regularSeason` — and
+ * accumulating by id so an item is not counted twice — asserts what the test
+ * is actually about: that the report fires when it is scheduled to.
+ */
+function regularSeasonPressKinds(seed: number): Map<string, number> {
+  const data = generateLeague({ seed })
+  const career = new Career(data, seed, data.league.teams[0]!)
+  const seen = new Set<string>()
+  const byKind = new Map<string, number>()
+  let guard = 0
+  while (guard++ < 2000) {
+    if (career.getDashboard().phase !== 'regularSeason') break
+    for (const n of pressItems(career.getInbox().items)) {
+      const key = `${n.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const kind = n.press!.kind
+      byKind.set(kind, (byKind.get(kind) ?? 0) + 1)
+    }
+    if (!career.step()) break
+  }
+  return byKind
+}
+
 describe('pressSchedule — integration: season produces scheduled reports', () => {
   it('produces a seasonPreview early in the season', () => {
     // Run only the first 20 steps so the first-day seasonPreview is not pushed out
@@ -191,15 +225,11 @@ describe('pressSchedule — integration: season produces scheduled reports', () 
   })
 
   it('produces at least one powerRankings report mid-season', () => {
-    const items = pressItems(runFullSeason(42))
-    const rankings = items.filter((n) => n.press?.kind === 'powerRankings')
-    expect(rankings.length, 'expected at least one powerRankings report').toBeGreaterThanOrEqual(1)
+    expect(regularSeasonPressKinds(42).get('powerRankings') ?? 0).toBeGreaterThanOrEqual(1)
   })
 
   it('produces at least one monthlyReport during the regular season', () => {
-    const items = pressItems(runFullSeason(42))
-    const monthly = items.filter((n) => n.press?.kind === 'monthlyReport')
-    expect(monthly.length, 'expected at least one monthlyReport').toBeGreaterThanOrEqual(1)
+    expect(regularSeasonPressKinds(42).get('monthlyReport') ?? 0).toBeGreaterThanOrEqual(1)
   })
 
   it('produces a playoffPreview when playoffs begin', () => {

@@ -71,7 +71,7 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -888,16 +888,17 @@ function simPeriod(
         if (gStat) gStat.goalsAgainst++
         stat(ctx, shooterSk.player.id).goals++
         for (const as of assists) stat(ctx, as).assists++
-        // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
-        if (gs !== 'pp') {
-          for (const r of atk.unit.skaters) stat(ctx, r.player.id).plusMinus += 1
-          for (const r of def.unit.skaters) stat(ctx, r.player.id).plusMinus -= 1
-        }
         // Credit the primary assister (first in list) xA = shooter's xG value.
         if (assists.length > 0) {
           const primaryA = stat(ctx, assists[0])
           primaryA.xA = (primaryA.xA ?? 0) + xg
         }
+        creditPlusMinus(
+          gs,
+          atk.unit.skaters.map((r) => r.player.id),
+          def.unit.skaters.map((r) => r.player.id),
+          (id) => stat(ctx, id)
+        )
         // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91
         puck.y = 0

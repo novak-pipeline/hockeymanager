@@ -24,8 +24,9 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
+import { CALIBRATION_TARGETS } from '@calibrate/index'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -34,11 +35,31 @@ const REGULATION_PERIODS = 3
 const SHIFT_SECONDS = 40
 const OT_SECONDS = 300
 
-// League-average targets the coefficients aim at (calibration will refine).
-const SHOTS_PER_TEAM_PER_GAME = 30
+// League-average targets the coefficients aim at, read from the NHL-derived
+// calibration data rather than hardcoded.
+const SHOTS_PER_TEAM_PER_GAME = CALIBRATION_TARGETS.perTeamPerGame.shotsOnGoal
 const SHIFTS_PER_GAME = (PERIOD_SECONDS * REGULATION_PERIODS) / SHIFT_SECONDS
-const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME
-const BASE_SHOT_CONVERSION = 0.095 // ~ league shooting %
+
+/**
+ * Per-shift rate and per-shot conversion are NOT simply the league averages.
+ *
+ * Both get multiplied by ratio terms built from the on-ice units — shot rate by
+ * (offense/50)·(50/defense), conversion by the shooter's finishing and the
+ * danger draw. Those ratios do not average to 1 across a league: E[x/50 · 50/y]
+ * exceeds 1 whenever x and y vary (Jensen), and the danger and finishing terms
+ * add their own positive bias. Feeding in the raw league average therefore
+ * overshoots — measured at 31.5 shots and 11.3 sh% against targets of 30.0 and
+ * 10.2%.
+ *
+ * These two constants divide that bias back out. They are calibration outputs,
+ * measured by `quickSim.calibration.test.ts`, not free parameters: if the rate
+ * model changes, re-measure and update them, and that test will hold the result
+ * to within 10% of the NHL targets.
+ */
+const SHOT_RATE_BIAS = 1.05
+const CONVERSION_BIAS = 1.206
+const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME / SHOT_RATE_BIAS
+const BASE_SHOT_CONVERSION = CALIBRATION_TARGETS.shooting.shootingPct / CONVERSION_BIAS
 const PENALTY_CHANCE_PER_SHIFT = 0.045
 const PENALTY_SECONDS = 120
 const PP_SHOT_MULT = 1.6
@@ -283,16 +304,17 @@ function simShift(
       const assists = pickAssists(rng, atk.skaters, shooter)
       stat(ctx, shooter.id).goals++
       for (const a of assists) stat(ctx, a.id).assists++
-      // Plus/minus: on-ice skaters get ±1 on EV/SH goals (NHL rule excludes PP).
-      if (goalStrength !== 'pp') {
-        for (const sk of atk.skaters) stat(ctx, sk.id).plusMinus += 1
-        for (const sk of def.skaters) stat(ctx, sk.id).plusMinus -= 1
-      }
       // Credit the primary assister xA = shooter's xG for this shot.
       if (assists.length > 0) {
         const primaryA = stat(ctx, assists[0].id)
         primaryA.xA = (primaryA.xA ?? 0) + shotXgApprox
       }
+      creditPlusMinus(
+        goalStrength,
+        atk.skaters.map((p) => p.id),
+        def.skaters.map((p) => p.id),
+        (id) => stat(ctx, id)
+      )
       ctx.stream.push({
         t: tShot,
         period,
@@ -471,9 +493,13 @@ function simEmptyNetPhase(
     leading.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
-    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus += 1
-    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
     stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
+    creditPlusMinus(
+      'en',
+      leadingOn.skaters.map((p) => p.id),
+      trailingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,
@@ -490,10 +516,16 @@ function simEmptyNetPhase(
     trailing.goals++
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
-    for (const sk of trailingOn.skaters) stat(ctx, sk.id).plusMinus += 1
-    for (const sk of leadingOn.skaters) stat(ctx, sk.id).plusMinus -= 1
     stat(ctx, leadingOn.goalie.id).shotsAgainst++
     stat(ctx, leadingOn.goalie.id).goalsAgainst++
+    // The trailing side scores 6-on-5 with its own net empty: even strength for
+    // scoring purposes, so both sides take the swing.
+    creditPlusMinus(
+      'ev',
+      trailingOn.skaters.map((p) => p.id),
+      leadingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,
