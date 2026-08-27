@@ -59,6 +59,7 @@ export type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
   CompetitionsView,
   InternationalView,
@@ -88,6 +89,14 @@ export type { DevelopmentCenterView, DevelopmentRow } from '@engine/career/views
 import type { DevelopmentCenterView } from '@engine/career/views'
 export type { SquadPlannerView, PlannerPlayer, PositionDepth, CareerStage, PosGroup } from '@engine/career/views'
 import type { SquadPlannerView } from '@engine/career/views'
+export type { LeagueComparisonView, LeagueComparisonCard } from '@engine/career/views'
+import type { LeagueComparisonView } from '@engine/career/views'
+export type { StaffMeetingSummaryView, StaffMeetingFlaggedPlayer } from '@engine/career/views'
+import type { StaffMeetingSummaryView } from '@engine/career/views'
+export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
+import type { CoachMarketView } from '@engine/career/views'
+export type { PlayoffOddsView, PlayoffOddsRow } from '@engine/career/views'
+import type { PlayoffOddsView } from '@engine/career/views'
 export type { LeagueStatTableView, LeagueSkaterStatRow, LeagueGoalieStatRow } from '@engine/career/views'
 import type { LeagueStatTableView } from '@engine/career/views'
 export type { AgendaItem, AgendaTopic, AgendaTopicOption, DiscussionResult } from '@engine/career/views'
@@ -124,6 +133,7 @@ import type {
   ScheduleView,
   ScoreboardView,
   ScoutingView,
+  ScoutProfileView,
   SquadView,
   CompetitionsView,
   InternationalView,
@@ -139,7 +149,7 @@ import type {
   TeamPlayerStatsView,
 } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView, StaffView, StaffRowView } from '@engine/career/views'
@@ -184,6 +194,12 @@ export type WorkerRequestBody =
   | { type: 'getMedical' }
   | { type: 'getDevelopment' }
   | { type: 'getSquadPlanner' }
+  | { type: 'getLeagueComparison' }
+  | { type: 'getPlayoffOdds' }
+  | { type: 'getStaffMeetingSummary' }
+  | { type: 'getCoachMarket' }
+  | { type: 'fireCoach' }
+  | { type: 'hireCoach'; coachId: string }
   | { type: 'getLeagueStatTable'; teamId?: string }
   | { type: 'getAgenda' }
   | { type: 'markForMeeting'; playerId: string; topic: string }
@@ -217,7 +233,10 @@ export type WorkerRequestBody =
   | { type: 'importSave'; snapshot: CareerSnapshot }
   /* ── scouting ── */
   | { type: 'getScouting' }
-  | { type: 'assignScout'; scoutId: string; target: ScoutTarget }
+  | { type: 'getScoutProfile'; scoutId: string }
+  | { type: 'assignScout'; scoutId: string; target: ScoutTarget; focus?: ScoutFocus; positionFilter?: 'any' | 'F' | 'D' | 'G'; minPotentialStars?: number }
+  | { type: 'hireScout'; candidateId: string }
+  | { type: 'fireScout'; scoutId: string }
   /* ── story layer ── */
   /** All-time record boards, season archive, awards, legends/Hall of Fame. */
   | { type: 'getHistory' }
@@ -282,6 +301,8 @@ export type WorkerRequestBody =
   | { type: 'callUp'; playerId: string }
   /** Assign an NHL player to the user's AHL affiliate. */
   | { type: 'sendDown'; playerId: string }
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  | { type: 'setCoachRoster' }
   /* ── Phase B: player profile view layer ── */
   /** Six-axis radar comparison for two players (Phase C compare UI). */
   | { type: 'compareRadar'; playerIdA: string; playerIdB: string }
@@ -334,6 +355,11 @@ export type WorkerResponse = { id: number } & (
   | { type: 'medical'; medical: MedicalView }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }
+  | { type: 'leagueComparison'; comparison: LeagueComparisonView }
+  | { type: 'playoffOdds'; odds: PlayoffOddsView }
+  | { type: 'staffMeetingSummary'; summary: StaffMeetingSummaryView }
+  | { type: 'coachMarket'; market: CoachMarketView }
+  | { type: 'coachHireResult'; ok: boolean; message: string }
   | { type: 'leagueStatTable'; table: LeagueStatTableView }
   | { type: 'coachResponse'; accepted: boolean; response: string }
   | { type: 'agenda'; items: AgendaItem[] }
@@ -345,8 +371,11 @@ export type WorkerResponse = { id: number } & (
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Generic acknowledgement for mutations; screens refetch what they need. */
   | { type: 'ok' }
+  /** Result of an auto-applied coach roster: the player names moved each way. */
+  | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
+  | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
   /* ── story layer ── */
   | { type: 'history'; history: HistoryView }
   | { type: 'lockerRoom'; lockerRoom: LockerRoomView }

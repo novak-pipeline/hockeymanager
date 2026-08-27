@@ -56,4 +56,28 @@ describe('buildScoutDraftRead', () => {
     const deep = buildScoutDraftRead({ player: p, knowledge: 90, analystRank: 60, interviews: 3 })!
     expect(Math.abs(deep.delta)).toBeGreaterThan(Math.abs(top.delta))
   })
+
+  it('a higher ceiling read never reads as "more cautious" (verdict matches the displayed role)', () => {
+    // A sleeper: our scouts grade his ceiling clearly above the board, but he has
+    // makeup concerns. The ceiling read must drive the verdict — we can't show a
+    // higher ceiling role AND call ourselves more cautious.
+    const p = mk({ professionalism: 18, determination: 22, ambition: 25, temperament: 22 })
+    const r = buildScoutDraftRead({
+      player: p, knowledge: 90, analystRank: 50, interviews: 1,
+      scoutsCeiling: 74, scoutsRole: '2nd-pair D',
+      analystCeiling: 66, analystRole: 'Depth D',
+    })!
+    expect(r.verdict).not.toBe('lower')
+    expect(r.blurb).toMatch(/higher|ceiling/)
+  })
+
+  it('a clearly lower ceiling read reads as more cautious', () => {
+    const p = mk({ professionalism: 60, determination: 60, ambition: 55 })
+    const r = buildScoutDraftRead({
+      player: p, knowledge: 90, analystRank: 30, interviews: 1,
+      scoutsCeiling: 62, scoutsRole: 'Depth D',
+      analystCeiling: 76, analystRole: 'Top-pair D',
+    })!
+    expect(r.verdict).toBe('lower')
+  })
 })

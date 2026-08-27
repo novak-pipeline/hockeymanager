@@ -27,7 +27,7 @@ export interface RawCompetition {
 
 /** Feeder/major leagues simulated by default regardless of raw reputation. */
 const SIMULATED_ABBREVS = new Set([
-  'AHL', 'ECHL', 'OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL', 'NCAA',
+  'AHL', 'ECHL', 'OHL', 'WHL', 'QMJHL', 'LHJMQ', 'USHL', 'NTDP', 'USNTDP', 'NCAA',
   'KHL', 'SHL', 'LIIGA', 'NL', 'DEL', 'EXTRALIGA', 'MESTIS', 'VHL',
 ])
 

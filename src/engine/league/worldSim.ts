@@ -28,6 +28,10 @@ export interface WorldSimState {
   gp: Map<PlayerId, number>
   /** Player → accumulated stat line across all simulated competitions. */
   totals: Map<PlayerId, GamePlayerStat>
+  /** competitionId → average skater rating, the baseline its scoring is judged
+   *  against (so a weaker league's stars still produce realistic totals).
+   *  Computed lazily on first sim day and cleared each season (ratings drift). */
+  leagueAvg: Map<string, number>
 }
 
 /** Build sim state from the world's competitions, reusing each league's own
@@ -38,7 +42,40 @@ export function initWorldSimState(competitions: Competition[]): WorldSimState {
     if (comp.tier !== 'simulated') continue
     standings.set(comp.id, new Map(comp.standings.map((s) => [s.teamId, s])))
   }
-  return { standings, gp: new Map(), totals: new Map() }
+  return { standings, gp: new Map(), totals: new Map(), leagueAvg: new Map() }
+}
+
+/** Average skater offensive rating across a competition's rosters — the baseline
+ *  its scoring is judged against. Clamped so a degenerate pool can't push scoring
+ *  off the rails; falls back to the NHL average when a comp has no resolvable
+ *  skaters. Mirrors the quick-sim's `offense` metric (scoring 0.6 / playmaking 0.4). */
+function competitionLeagueAvg(
+  standings: Map<TeamId, Standing>,
+  teams: Map<TeamId, Team>,
+  resolve: (id: PlayerId) => Player
+): number {
+  let sum = 0
+  let n = 0
+  for (const teamId of standings.keys()) {
+    const team = teams.get(teamId)
+    if (!team) continue
+    for (const pid of team.roster) {
+      let p: Player | undefined
+      try { p = resolve(pid) } catch { p = undefined }
+      if (!p || p.position === 'G') continue
+      sum += p.composites.scoring * 0.6 + p.composites.playmaking * 0.4
+      n++
+    }
+  }
+  if (n === 0) return 50
+  // PARTIAL normalization: blend the league's own average toward the global NHL
+  // baseline rather than using it raw. Full normalization makes every league score
+  // alike and over-credits weak-league producers (it inverted the draft board's
+  // mid/late outcome ordering); a 0.6 blend still lifts a junior loop's leaders to
+  // realistic totals without destabilising the calibrated draft model.
+  const raw = sum / n
+  const blended = 50 + (raw - 50) * 0.6
+  return Math.max(40, Math.min(52, blended))
 }
 
 /** Zero a Standing row in place (season rollover). */
@@ -60,6 +97,7 @@ export function resetWorldSim(state: WorldSimState, competitions: Competition[])
   }
   state.gp.clear()
   state.totals.clear()
+  state.leagueAvg.clear()
 }
 
 export interface SimWorldDayArgs {
@@ -86,6 +124,13 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
     if (comp.tier !== 'simulated') continue
     const standings = args.state.standings.get(comp.id)
     if (!standings) continue
+    // Per-league scoring baseline (lazily computed, cached for the season) so a
+    // weaker league's best players still put up realistic point totals.
+    let lgAvg = args.state.leagueAvg.get(comp.id)
+    if (lgAvg === undefined) {
+      lgAvg = competitionLeagueAvg(standings, args.teams, args.resolve)
+      args.state.leagueAvg.set(comp.id, lgAvg)
+    }
     for (const game of comp.schedule) {
       if (game.day !== args.day) continue
       const home = args.teams.get(game.homeTeamId)
@@ -93,6 +138,7 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
       if (!home || !away) continue
       const res = quickSimGame(home, away, args.resolve, {
         seed: gameSeed(args.seedBase, args.year, game.id),
+        leagueAvg: lgAvg,
       })
       game.result = { homeGoals: res.homeGoals, awayGoals: res.awayGoals, decidedBy: res.decidedBy }
       applyGameResult(standings, res)

@@ -1,4 +1,4 @@
-import type { PlayerId } from './ids'
+import type { PlayerId, TeamId } from './ids'
 import type { RawAttributes, CompositeRatings } from './ratings'
 import type { PlayerRole } from './tactics'
 
@@ -52,6 +52,9 @@ export interface SeasonStats {
   shotsAgainst: number
   goalsAgainst: number
   shutouts: number
+  /** Season average match rating (EHM "Avr", 0–10), accumulated from game one.
+   *  Absent on imported pre-career seasons (no in-game ratings exist for them). */
+  avgRating?: number
 }
 
 export interface Player {
@@ -200,6 +203,14 @@ export interface Player {
   draftRound?: number
   draftOverall?: number
   draftClub?: string
+
+  /**
+   * The NHL club that holds this player's signing rights — set when he's drafted
+   * (in-game) or imported. A prospect can play in junior/the AHL while his rights
+   * are held by an NHL club. This is the spine for junior age-out, a deeper draft,
+   * and offer sheets. Absent for undrafted players / free agents with no holder.
+   */
+  rightsTeamId?: TeamId
 
   /**
    * Real season-by-season career history imported from the source DB. Newest

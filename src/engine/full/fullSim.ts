@@ -71,7 +71,7 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
 import { CALIBRATION_TARGETS, lookupXg } from '@calibrate'
 import {
   FRAME_DT,
@@ -94,6 +94,7 @@ import { steer, type MoveOrder } from './movement'
 import { defenderOrders, faceoffOrders, faceoffSpot } from './formations'
 import { attackPlayOrders, phaseForPlay, type PlayId } from './playbook'
 import { Director } from './director'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
 
 const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
@@ -870,9 +871,11 @@ function simPeriod(
 
     const finish = shooterSk.player.composites.scoring / LEAGUE_AVG
     const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge), 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf, 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
     const gs = goalStrengthNow(atk, def)
@@ -890,6 +893,12 @@ function simPeriod(
           const primaryA = stat(ctx, assists[0])
           primaryA.xA = (primaryA.xA ?? 0) + xg
         }
+        creditPlusMinus(
+          gs,
+          atk.unit.skaters.map((r) => r.player.id),
+          def.unit.skaters.map((r) => r.player.id),
+          (id) => stat(ctx, id)
+        )
         // Puck stays IN/AT the net for the whole celebration — pin it here.
         puck.x = a * 0.91
         puck.y = 0

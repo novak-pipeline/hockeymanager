@@ -37,7 +37,7 @@ import {
   type TeamId,
   type TeamTactics,
 } from '@domain'
-import { overall, ratedOverall, overallToStars, agedPotential } from '@engine/ratings/composites'
+import { overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
@@ -72,15 +72,19 @@ import {
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { runWorldJuniors } from '@engine/league/worldJuniors'
-import { analystProjection, analystRank, draftEligibility, perceivedCeiling, productionPremium, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
+import { analystEdge, analystProjection, analystRank, ceilingRoleShort, draftEligibility, draftRoundLabel, perceivedCeiling, positionFactor, productionPremium, reentryPenalty, type DraftRankPhase, type RankInput } from '@engine/league/draftRankings'
 import { buildPlayerComp } from '@engine/career/playerComp'
 import { buildSeasonBio } from '@engine/career/seasonBio'
+import { buildScoutSummary } from '@engine/career/scoutSummary'
+import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutSignalParts } from '@engine/career/scoutDraftRead'
+import { farmSplit } from '@engine/career/farmReassign'
+import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
-import { nhleFactorByAbbrev } from '@engine/league/leagueStrength'
+import { nhleFactorByAbbrev, isProLeagueAbbrev } from '@engine/league/leagueStrength'
 import { scoutDraftBias } from '@engine/career/multiScout'
-import { selectNationalTeam, nationInfo } from '@engine/league/nationalTeam'
+import { selectNationalTeam, nationInfo, runWorldChampionship } from '@engine/league/nationalTeam'
 import {
   createArc,
   createInitialArcsState,
@@ -150,7 +154,7 @@ import {
   INTERACTION_COOLDOWN_DAYS,
   type PlayerInteraction,
 } from '@engine/league/interactions'
-import { lineSynergy, pairSynergy, playerStyleFit } from '@engine/league/archetypes'
+import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
 import {
   discussPlayerTopic,
@@ -195,13 +199,25 @@ import {
   rollInjuries,
   tickRecovery,
 } from '@engine/league/condition'
-import { repairLines, coachSetLineup } from '@engine/league/lineup'
+import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
+import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection, SYSTEM_FAVORS } from '@engine/league/coachProfile'
 import {
   addKnowledge,
   assignScout,
   createInitialScouting,
   knowledgeOf,
+  accuracyOf,
+  maskedCeiling,
+  scoutFormBias,
+  playersSeenByScout,
   tickScouting,
+  generateScoutCandidates,
+  syncAssignmentsToScouts,
+  scoutSalary,
+  SCOUT_SPECIALTY_NATIONS,
+  DISCOVERY_THRESHOLD,
+  YOUTH_MAX_AGE,
+  type ScoutingCompetition,
 } from '@engine/league/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
 import { buildTeamDynamics } from '@engine/career/dynamics'
@@ -326,6 +342,13 @@ import {
   type LeagueSkaterStatRow,
   type LeagueGoalieStatRow,
   type LeagueLeadersView,
+  type LeagueComparisonView,
+  type LeagueComparisonCard,
+  type StaffMeetingSummaryView,
+  type CoachMarketView,
+  type CoachMarketEntry,
+  type PlayoffOddsView,
+  type PlayoffOddsRow,
   type LeagueStatsView,
   type LeagueTeamsView,
   type LinesUpdate,
@@ -357,7 +380,7 @@ import {
   type StaffView,
   type StaffRowView,
 } from './views'
-import type { ScoutingState, ScoutTarget } from '@domain/scouting'
+import type { ScoutingState, ScoutTarget, ScoutFocus, ScoutRecommendation } from '@domain/scouting'
 
 /* ────────────────────────── legacy v1 view types (kept for compat) ────────────────────────── */
 
@@ -451,18 +474,40 @@ export interface ManagerView {
 }
 
 /** Team list for the club picker, built without starting a career. */
+/**
+ * Team strength rating (~0–100) for the club picker and preseason odds.
+ *
+ * A flat average of the top-15 skaters (the old formula) ignored goaltending
+ * entirely and treated a fourth-liner the same as a franchise centre, so a
+ * top-heavy-but-thin, weakly-goaltended club could float up the table. This
+ * weights the best players more heavily and folds goaltending in at ~a quarter,
+ * which is roughly its real influence on results.
+ */
+export function teamStrengthRating(roster: Player[]): number {
+  const skaters = roster
+    .filter((p) => p.position !== 'G')
+    .map((p) => overall(p.composites, p.position))
+    .sort((a, b) => b - a)
+  const goalies = roster
+    .filter((p) => p.position === 'G')
+    .map((p) => overall(p.composites, p.position))
+    .sort((a, b) => b - a)
+  const mean = (xs: number[], fallback: number): number =>
+    xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : fallback
+  const core = mean(skaters.slice(0, 9), 50) // top ~3 lines + top pair
+  const depth = mean(skaters.slice(9, 18), core) // bottom six + depth D
+  const starter = goalies[0] ?? 50
+  const backup = goalies[1] ?? starter
+  const goalie = starter * 0.7 + backup * 0.3
+  return Math.round(0.55 * core + 0.2 * depth + 0.25 * goalie)
+}
+
 export function buildTeamList(data: LeagueData): TeamInfo[] {
   const divName = new Map(data.league.divisions.map((d) => [d.id, d.name]))
   const confName = new Map(data.league.conferences.map((c) => [c.id, c.name]))
   return data.league.teams.map((teamId) => {
     const team = data.teams.get(teamId)!
-    const skaters = team.roster
-      .map((id) => data.players.get(id)!)
-      .filter((p) => p.position !== 'G')
-      .map((p) => overall(p.composites, p.position))
-      .sort((a, b) => b - a)
-      .slice(0, 15)
-    const strength = Math.round(skaters.reduce((s, v) => s + v, 0) / skaters.length)
+    const strength = teamStrengthRating(team.roster.map((id) => data.players.get(id)!))
     return {
       teamId,
       name: team.name,
@@ -491,13 +536,17 @@ function freshStanding(teamId: TeamId): Standing {
 
 const NEWS_LIMIT = 200
 const ROUND_ROBINS = 4
-const DRAFT_ROUNDS = 2
+const DRAFT_ROUNDS = 7
+/** Floor for the prospect board; the actual class scales to cover all 7 rounds
+ *  of every team (+ a margin of undrafted prospects). See draft-class generation. */
 const DRAFT_CLASS_SIZE = 64
 const PICK_YEARS_AHEAD = 3
 const FA_WINDOW_DAYS = 8
 const ROSTER_HARD_CAP = 26
 /** Rolling per-game ratings window (last N games stored). */
 const RATINGS_WINDOW = 10
+/** Calendar days between recurring staff-meeting prompts. */
+const STAFF_MEETING_INTERVAL = 14
 
 type ResignStatus = 'pending' | 'signed' | 'walked'
 
@@ -520,7 +569,7 @@ export class Career {
   private readonly ahlTotals = new Map<PlayerId, GamePlayerStat>()
   /** Wider-world quick-sim state (other leagues' standings + player stats).
    *  Empty for the generated league / mods without competitions. */
-  private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map() }
+  private worldSim: WorldSimState = { standings: new Map(), gp: new Map(), totals: new Map(), leagueAvg: new Map() }
   private readonly goalieWins = new Map<PlayerId, number>()
   private readonly goalieLosses = new Map<PlayerId, number>()
   private readonly ppGoals = new Map<PlayerId, number>()
@@ -561,6 +610,8 @@ export class Career {
   /** Players already reported on in the inbox (avoids re-reporting). Seeded lazily. */
   private scoutReported = new Set<string>()
   private scoutReportSeeded = false
+  /** `${oppId}:${gameDay}` matchups already given an advance-scout report (transient). */
+  private oppReported = new Set<string>()
   /** Per-player opinion timeline (rating/stars/knowledge over the season). */
   private opinionHistory = new Map<string, OpinionSnapshot[]>()
 
@@ -614,6 +665,13 @@ export class Career {
    * (newest at end, capped at RATINGS_WINDOW).
    */
   private readonly playerRatings = new Map<string, number[]>()
+  /**
+   * Cumulative season match-rating accumulator (sum + games), from game one of the
+   * current season — the true season "Avr". Unlike playerRatings (a rolling 10-game
+   * form window), this never drops games. Cleared each season rollover, so a player
+   * has NO Avr before the season's first game (and imported pre-career seasons none).
+   */
+  private readonly seasonRatingTotals = new Map<string, { sum: number; n: number }>()
   /** Practice / scratch state for the user's team. */
   private practiceState: TeamPracticeState = createInitialPracticeState()
   /**
@@ -626,6 +684,11 @@ export class Career {
    * Keyed by TeamId string; built at career construction, persisted in snapshots.
    */
   private readonly teamStaffMap = new Map<string, TeamStaff>()
+  /**
+   * Available head coaches the GM can hire. Lazily generated per (seed, year),
+   * persisted so a hire removes the entry across saves. Null = regenerate.
+   */
+  private coachMarket: CoachMarketEntry[] | null = null
 
   constructor(data: LeagueData, seed: number, userTeamId: TeamId, restored = false) {
     this.data = data
@@ -674,6 +737,11 @@ export class Career {
       // that namespace; the existing this.staff (headCoach + agm) continues to be
       // the user-facing accessor for backward compat.
       this.generateAllTeamStaff()
+      // Make every staff scout deployable (replaces the placeholder scout roster).
+      this.syncScoutRoster()
+      // The coach owns the system: derive each NHL team's tactics from its head
+      // coach's tactical profile, adapted to that roster.
+      this.applyCoachSystems()
 
       const odds = buildPreseasonOdds({
         teams: this.teamDescriptors(),
@@ -788,8 +856,36 @@ export class Career {
   }
 
   /** Collect all prospect ids across all known draft classes. */
+  /**
+   * The draft class scouts can target — every draft-eligible / re-entry player
+   * across the NHL, AHL and feeder/junior leagues (the same pool the analyst
+   * board ranks), plus any formal offseason draft classes. This is what makes
+   * the "Draft Class" scope cover the real class year-round, not just at the
+   * offseason when `league.draftClasses` is populated.
+   */
   private allDraftProspectIds(): Set<string> {
     const ids = new Set<string>()
+    const consider = (teamIds: readonly TeamId[]): void => {
+      for (const tid of teamIds) {
+        const t = this.data.teams.get(tid)
+        if (!t) continue
+        for (const pid of t.roster) {
+          const p = this.data.players.get(pid)
+          if (!p) continue
+          const elig = draftEligibility(p.age, !!p.nhlDrafted)
+          if (elig && elig !== 'radar') ids.add(pid as string)
+        }
+      }
+    }
+    // Draft prospects are AMATEURS only — players in junior/college/European feeder
+    // leagues. A player on an NHL or AHL roster is a signed pro and is NOT in the
+    // draft pool (you can't draft someone already under a pro contract). So we scan
+    // the wider-world competitions, EXCLUDING the pro tiers (NHL/AHL), plus any
+    // generated draft classes — never the NHL roster or the AHL farm.
+    for (const c of this.data.league.competitions ?? []) {
+      if (isProLeagueAbbrev(c.abbrev)) continue
+      consider(c.teamIds as readonly TeamId[])
+    }
     for (const cls of this.data.league.draftClasses) {
       for (const p of cls.prospects) ids.add(p.playerId as string)
     }
@@ -876,6 +972,8 @@ export class Career {
       this.scoutReportSeeded = true
       return
     }
+    const orgIds = this.ownOrgIds()
+    const surfaced = new Set((this.scouting.recommendations ?? []).map((r) => r.playerId))
     const fresh: Array<{ id: string; p: Player; pot: number }> = []
     for (const [pid, k] of this.scouting.knowledge) {
       if (k < KNOWN) continue
@@ -884,9 +982,10 @@ export class Career {
       this.scoutReported.add(id) // mark regardless so we never re-scan
       const p = this.data.players.get(pid as PlayerId)
       if (!p) continue
-      // Don't report the user's own players — this is acquisition intel.
-      if (this.userTeam.roster.includes(pid as PlayerId)) continue
-      const pot = potentialStars(p)
+      // Don't report our own org's players (this is acquisition intel), and don't
+      // double-report a prospect the Scouting Centre already surfaced as a find.
+      if (orgIds.has(id) || surfaced.has(id)) continue
+      const pot = overallToStars(this.scoutedCeilingOf(p))
       const ovr = ratedOverall(p)
       if (pot >= 4 || ovr >= 78) fresh.push({ id, p, pot })
     }
@@ -903,6 +1002,54 @@ export class Career {
         { playerId: f.id },
       )
     }
+  }
+
+  /**
+   * If a scout is advance-scouting the next opponent, file a pre-match opposition
+   * report to the inbox when the game is within two days — once per matchup.
+   */
+  private emitOppositionReport(day: number): void {
+    const advanceScout = this.scouting.assignments.find((s) => s.target.kind === 'nextOpponent')
+    if (!advanceScout || this.phase !== 'regularSeason') return
+    const nextSched = this.data.league.schedule.find(
+      (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId),
+    )
+    if (!nextSched) return
+    const daysUntil = nextSched.day - day
+    if (daysUntil < 0 || daysUntil > 2) return
+    const oppId = (nextSched.homeTeamId === this.userTeamId ? nextSched.awayTeamId : nextSched.homeTeamId) as string
+    const key = `${oppId}:${nextSched.day}`
+    if (this.oppReported.has(key)) return
+    this.oppReported.add(key)
+
+    const opp = this.data.teams.get(oppId as TeamId)
+    if (!opp) return
+    const standing = this.standings.get(oppId as TeamId)
+    const stx = finalizeSpecialTeams(this.specialTeams).find((t) => t.teamId === oppId)
+    const keyPlayers = opp.roster
+      .map((pid) => {
+        const p = this.data.players.get(pid)
+        const t = this.totals.get(pid)
+        const goals = t?.goals ?? 0, assists = t?.assists ?? 0
+        return p ? { name: p.name, goals, assists, points: goals + assists } : null
+      })
+      .filter((x): x is { name: string; goals: number; assists: number; points: number } => !!x && x.points > 0)
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 3)
+
+    const { headline, body } = buildOppositionReport({
+      opponentName: opp.name,
+      opponentAbbr: opp.abbreviation,
+      scoutName: advanceScout.name,
+      record: {
+        wins: standing?.wins ?? 0, losses: standing?.losses ?? 0, otl: standing?.overtimeLosses ?? 0,
+        goalsFor: standing?.goalsFor ?? 0, goalsAgainst: standing?.goalsAgainst ?? 0, gamesPlayed: standing?.gamesPlayed ?? 0,
+      },
+      keyPlayers,
+      ppPct: stx?.ppPct ?? 0,
+      pkPct: stx?.pkPct ?? 0,
+    })
+    this.pushNews('scouting', headline, body, { teamId: oppId })
   }
 
   /**
@@ -960,16 +1107,7 @@ export class Career {
   private teamDescriptors(lastRanks?: Map<string, number>): TeamDescriptor[] {
     return [...this.data.league.teams].map((teamId) => {
       const team = this.data.teams.get(teamId)!
-      const skaters = team.roster
-        .map((id) => this.resolve(id))
-        .filter((p) => p.position !== 'G')
-        .map((p) => overall(p.composites, p.position))
-        .sort((a, b) => b - a)
-        .slice(0, 15)
-      const strength =
-        skaters.length > 0
-          ? Math.round(skaters.reduce((s, v) => s + v, 0) / skaters.length)
-          : 50
+      const strength = teamStrengthRating(team.roster.map((id) => this.resolve(id)))
       const last = lastRanks?.get(teamId as string)
       return {
         teamId: teamId as string,
@@ -989,6 +1127,14 @@ export class Career {
    * We use 9260 which is used nowhere else in the codebase.
    */
   private static readonly TEAM_STAFF_NS = 9260
+
+  /** Rng namespace for lazy head-coach tactical-profile synthesis. Unused elsewhere. */
+  private static readonly COACH_PROFILE_NS = 9261
+
+  /** Rng namespace for the coach hiring market. Unused elsewhere. */
+  private static readonly COACH_MARKET_NS = 9262
+  /** How many available coaches to surface in the hiring market. */
+  private static readonly COACH_MARKET_SIZE = 8
 
   /**
    * Generate a full TeamStaff for every NHL-tier team.
@@ -1028,12 +1174,46 @@ export class Career {
    */
   getTeamStaff(teamId: string): TeamStaff {
     const existing = this.teamStaffMap.get(teamId)
-    if (existing) return existing
+    if (existing) {
+      this.ensureCoachProfile(teamId, existing)
+      return existing
+    }
     const idx = this.data.league.teams.indexOf(teamId as unknown as typeof this.data.league.teams[number])
     const teamRng = new Rng(deriveSeed(this.seed, Career.TEAM_STAFF_NS, Math.max(0, idx)))
     const ts = generateTeamStaff(teamRng)
+    this.ensureCoachProfile(teamId, ts)
     this.teamStaffMap.set(teamId, ts)
     return ts
+  }
+
+  /**
+   * Guarantee a head coach carries a tactical profile, regenerating it
+   * deterministically when absent (old saves, mod-imported staff). Idempotent.
+   */
+  private ensureCoachProfile(teamId: string, ts: TeamStaff): void {
+    if (ts.headCoach.profile) return
+    const idx = Math.max(0, this.data.league.teams.indexOf(teamId as unknown as typeof this.data.league.teams[number]))
+    const rng = new Rng(deriveSeed(this.seed, Career.COACH_PROFILE_NS, idx))
+    ts.headCoach.profile = buildCoachProfile(ts.headCoach, rng)
+  }
+
+  /**
+   * The coach owns the system: set every NHL team's tactics from its head coach's
+   * tactical profile, adapted to that roster. Run at career start and each season
+   * rollover (NOT on restore — saved/influenced tactics are preserved there).
+   */
+  private applyCoachSystems(): void {
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const ts = this.getTeamStaff(teamId as string)
+      const profile = ts.headCoach.profile
+      if (!profile) continue
+      const roster = team.roster.map((id) => this.resolve(id))
+      team.tactics = profileToTactics(profile, roster, team.tactics)
+      // How well the coach's system suits this roster → small on-ice edge in the sim.
+      team.coachFit = coachFit(profile, roster)
+    }
   }
 
   private initLockerRooms(): void {
@@ -2209,7 +2389,7 @@ export class Career {
           blockedShots: s.blockedShots,
           takeaways: s.takeaways,
           giveaways: s.giveaways,
-          plusMinus: 0, // plus/minus is a placeholder per CLAUDE.md
+          plusMinus: s.plusMinus ?? 0,
           toi: s.toi,
         })
       }
@@ -2218,6 +2398,11 @@ export class Career {
       existing.push(rating)
       if (existing.length > RATINGS_WINDOW) existing.shift()
       this.playerRatings.set(pid_str, existing)
+      // Cumulative season Avr (never windowed).
+      const acc = this.seasonRatingTotals.get(pid_str) ?? { sum: 0, n: 0 }
+      acc.sum += rating
+      acc.n += 1
+      this.seasonRatingTotals.set(pid_str, acc)
     }
   }
 
@@ -2421,12 +2606,86 @@ export class Career {
   }
 
   private prepareTeamsForDay(): void {
+    this.emergencyRecalls()
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
+    this.refreshCoachFit()
+  }
+
+  /**
+   * Keep every NHL team's coach roster-fit current as rosters evolve (trades,
+   * call-ups, injuries) so the small on-ice coach-fit edge tracks reality rather
+   * than the season-opening snapshot. Measures the tactics actually in use.
+   */
+  private refreshCoachFit(): void {
+    for (const teamId of this.data.league.teams) {
+      const team = this.data.teams.get(teamId)
+      if (!team) continue
+      const roster = team.roster.map((id) => this.resolve(id))
+      if (roster.length === 0) continue
+      team.coachFit = styleMatch(roster, team.tactics).fit
+    }
+  }
+
+  /**
+   * Re-optimise every AI club's lines from its head coach's read (skill + form +
+   * morale + condition), so combinations evolve through the season. Runs weekly;
+   * never touches the user's lineup (the GM owns that). Deterministic per (seed, day).
+   */
+  private reoptimizeAiLines(day: number): void {
+    this.data.league.teams.forEach((teamId, idx) => {
+      if ((teamId as string) === (this.userTeamId as string)) return
+      const team = this.data.teams.get(teamId)
+      if (!team) return
+      const coach = this.getTeamStaff(teamId as string).headCoach
+      const roster = team.roster.map((id) => this.resolve(id))
+      if (roster.length < 18) return // too thin to bother; repairLines will cope
+      const res = coachSetLineup({ roster, coach, rng: new Rng(deriveSeed(this.seed, 9271, day * 100 + idx)) })
+      team.lines = res.lines
+    })
+  }
+
+  /**
+   * Emergency call-ups: when injuries drop a club below the HEALTHY bodies needed
+   * to dress full lines (12F + 6D + 2G), pull up the best healthy AHL players of
+   * the short position so the coach never has to ice a defenceman at wing. Bounded
+   * by a roster ceiling so it can't balloon; healthy depth is restored at the
+   * season rollover via assignRosters. Silent (no inbox spam) and deterministic.
+   */
+  private emergencyRecalls(): void {
+    const NEED: Record<'F' | 'D' | 'G', number> = { F: 12, D: 6, G: 2 }
+    const CEILING = 28
+    const grpOf = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+
+    for (const nhlId of this.data.league.teams) {
+      const nhl = this.data.teams.get(nhlId)
+      const ahl = nhl?.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+      if (!nhl || !ahl) continue
+
+      const healthyCount = (roster: PlayerId[], grp: 'F' | 'D' | 'G'): number =>
+        roster.reduce((n, id) => {
+          const p = this.data.players.get(id)
+          return p && p.injuryStatus === null && grpOf(p) === grp ? n + 1 : n
+        }, 0)
+
+      for (const grp of ['G', 'D', 'F'] as const) {
+        while (healthyCount(nhl.roster, grp) < NEED[grp] && nhl.roster.length < CEILING) {
+          const cand = ahl.roster
+            .map((id) => this.data.players.get(id))
+            .filter((p): p is Player => !!p && p.injuryStatus === null && grpOf(p) === grp)
+            .sort((a, b) => ratedOverall(b) - ratedOverall(a) || (a.id < b.id ? -1 : 1))[0]
+          if (!cand) break // no healthy AHL body at this position — repairLines copes
+          ahl.roster = ahl.roster.filter((id) => id !== cand.id)
+          nhl.roster.push(cand.id)
+        }
+      }
+    }
   }
 
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
+    this.syncScoutRoster()
     tickScouting({
       state: this.scouting,
       userTeamId: this.userTeamId as string,
@@ -2434,6 +2693,9 @@ export class Career {
       players: this.data.players,
       draftProspectIds: this.allDraftProspectIds(),
       freeAgentIds: this.currentFaIds(),
+      competitions: this.scoutingCompetitions(),
+      nextOpponentId: this.nextOpponentTeamId(),
+      protectedIds: this.ownOrgIds(),
       rng: this.rngFor(7008, day),
     })
     // Games reveal players: anyone who suits up becomes better known, so the
@@ -2453,6 +2715,8 @@ export class Career {
       const cur = knowledgeOf(this.scouting, id)
       if (cur < cap) addKnowledge(this.scouting, id, Math.min(own ? 6 : 1, cap - cur))
     }
+    this.surfaceScoutFinds(day)
+    this.emitOppositionReport(day)
     this.emitScoutReports()
     this.resolveDueInterviews(day)
     // Snapshot the analyst draft board at each phase boundary so the mid-season
@@ -2605,6 +2869,20 @@ export class Career {
     }
     // ── wider world: sim other leagues' games on this match day ──────────
     this.tickWorld(nextDay)
+    // ── AI coaches re-jig their lines weekly so combinations evolve with form,
+    //    morale and health (the user's own lines are never touched). ───────────
+    if (Math.floor(nextDay / 7) > Math.floor(this.currentDay / 7)) {
+      this.reoptimizeAiLines(nextDay)
+    }
+    // ── recurring staff meeting: nudge the GM roughly every two weeks ──────
+    if (Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)) {
+      this.pushNews(
+        'league',
+        'Staff meeting: time to review how we play',
+        'Two weeks on, your coaching staff are ready to sit down. Review the head coach’s system and roster fit, push for tactical changes, and flag any players whose form or morale needs addressing.',
+        { teamId: this.userTeamId as string }
+      )
+    }
     // ────────────────────────────────────────────────────────────────────
     this.finishDay(nextDay, played, outcomes)
     return true
@@ -3088,6 +3366,51 @@ export class Career {
           }).newsSeeds
         )
 
+        // Stanley Cup honours: every player on the champion's roster gets a Cup
+        // award for this season, so it shows as a trophy badge on his profile and
+        // counts toward his career haul.
+        if (champTeam) {
+          for (const id of champTeam.roster) {
+            const pl = this.data.players.get(id)
+            if (!pl) continue
+            this.recordsState.awards.push({
+              year: this.year,
+              award: 'Stanley Cup',
+              playerId: id as string,
+              playerName: pl.name,
+              teamAbbr: champTeam.abbreviation,
+              value: 'Champion',
+            })
+          }
+        }
+
+        // International honours: an annual World Championship hands Gold/Silver/
+        // Bronze to the three strongest nations; every player on a medal roster
+        // earns a medal (→ medal badge on his profile). No-ops on single-nation DBs.
+        const worlds = runWorldChampionship({ players: this.data.players.values(), rng: this.rngFor(8013) })
+        for (const m of worlds.medals) {
+          for (const id of m.playerIds) {
+            const pl = this.data.players.get(id)
+            if (!pl) continue
+            this.recordsState.awards.push({
+              year: this.year,
+              award: `World Championship ${m.medal}`,
+              playerId: id as string,
+              playerName: pl.name,
+              teamAbbr: m.nation,
+              value: `${m.medal} medal`,
+            })
+          }
+        }
+        const goldNation = worlds.medals.find((m) => m.medal === 'Gold')
+        if (goldNation) {
+          this.pushNews(
+            'league',
+            `${goldNation.nation} win World Championship gold`,
+            `${goldNation.nation} top the podium, with ${worlds.medals.find((m) => m.medal === 'Silver')?.nation ?? '—'} taking silver and ${worlds.medals.find((m) => m.medal === 'Bronze')?.nation ?? '—'} bronze.`,
+          )
+        }
+
         /* ── world tournament for everyone whose season is over ── */
         const eligible: Array<{ player: Player; teamId: TeamId }> = []
         for (const team of this.data.teams.values()) {
@@ -3270,7 +3593,9 @@ export class Career {
         const draftYear = this.year + 1
         const cls = generateDraftClass({
           year: draftYear,
-          count: DRAFT_CLASS_SIZE,
+          // Enough prospects for all 7 rounds of every team, plus a margin who go
+          // undrafted (realistic — not every eligible is picked).
+          count: Math.max(DRAFT_CLASS_SIZE, this.data.league.teams.length * DRAFT_ROUNDS + 30),
           rng: this.rngFor(8002),
           nextPlayerNumber: () => this.playerCounter++,
         })
@@ -3433,6 +3758,11 @@ export class Career {
         return true
       }
       case 'preseason': {
+        // Development gate: sort each club's NHL roster vs its AHL affiliate by
+        // ability so the best players are up and the rest develop down. AI clubs
+        // apply it automatically; the user's club gets a SUGGESTION (he keeps
+        // manual control of his own call-ups/send-downs).
+        this.reassignFarmSystems()
         // Fire season review report before rolling over (once per season).
         for (const kind of checkPreseasonStage(this.pressScheduleState)) {
           this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
@@ -3464,16 +3794,38 @@ export class Career {
     const team = this.data.teams.get(pick.ownerTeamId)!
     const player = this.resolve(playerId)
     d.selections.push({ overallPick: idx + 1, teamId: pick.ownerTeamId, playerId })
+    // Record the rights + draft pedigree on the player so his profile reflects how
+    // he entered the league (previously only imported players carried this) and so
+    // the org that drafted him holds his rights wherever he plays.
+    player.rightsTeamId = pick.ownerTeamId
+    player.nhlDrafted = true
+    player.nhlDraftEligible = false
+    player.draftYear = d.year
+    player.draftRound = pick.round
+    player.draftOverall = idx + 1
+    player.draftClub = team.name
+    const elc = {
+      salary: 900000,
+      yearsRemaining: 3,
+      expiryYear: this.year + 1 + 3,
+      noTradeClause: false,
+      twoWay: true,
+    }
     if (team.roster.length < ROSTER_HARD_CAP) {
       team.roster.push(playerId)
-      player.contract = {
-        salary: 900000,
-        yearsRemaining: 3,
-        expiryYear: this.year + 1 + 3,
-        noTradeClause: false,
-        twoWay: true,
-      }
+      player.contract = elc
       this.lockerArrival(pick.ownerTeamId, playerId)
+    } else {
+      // NHL roster is full — a drafted teenager belongs in the system, not in
+      // limbo. Assign him to the club's AHL affiliate (where the offseason farm
+      // sort will place him correctly). Without this he was drafted with no team
+      // and no contract — an orphaned record.
+      const affiliate = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+      if (affiliate) {
+        affiliate.roster.push(playerId)
+        player.contract = elc
+        repairLines(affiliate, this.data.players)
+      }
     }
     if (pick.ownerTeamId === this.userTeamId) {
       this.pushNews(
@@ -3508,9 +3860,35 @@ export class Career {
       const choice =
         pick.ownerTeamId === this.userTeamId
           ? remaining[0]
-          : aiSelectProspect({ remaining, rng })
+          : aiSelectProspect({ remaining, rng, needBonus: (p) => this.draftNeedBonus(pick.ownerTeamId, p) })
       this.makeSelection(choice.playerId)
     }
+  }
+
+  /**
+   * How much an AI club wants a prospect for positional need (0+). Counts org
+   * depth (NHL + AHL) at the prospect's position group against a target; the
+   * thinner the group, the bigger the nudge, capped so it never trumps a clearly
+   * better player. Deterministic.
+   */
+  private draftNeedBonus(teamId: TeamId, prospect: DraftProspect): number {
+    const p = this.data.players.get(asPlayerId(prospect.playerId as string))
+    if (!p) return 0
+    const grpOf = (pos: Position): 'F' | 'D' | 'G' =>
+      pos === 'G' ? 'G' : pos === 'D' || pos === 'LD' || pos === 'RD' ? 'D' : 'F'
+    const team = this.data.teams.get(teamId)
+    if (!team) return 0
+    const ids = [...team.roster]
+    if (team.affiliateId) ids.push(...(this.data.teams.get(team.affiliateId)?.roster ?? []))
+    const count: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
+    for (const id of ids) {
+      const pl = this.data.players.get(id)
+      if (pl) count[grpOf(pl.position)]++
+    }
+    const target: Record<'F' | 'D' | 'G', number> = { F: 16, D: 9, G: 4 }
+    const grp = grpOf(p.position)
+    const scarcity = Math.max(0, target[grp] - count[grp])
+    return Math.min(6, scarcity * 1.5)
   }
 
   /** UI: the user makes their selection while on the clock. */
@@ -3542,6 +3920,7 @@ export class Career {
       const teamId = this.teamOf(pid)
       const ppG = this.ppGoals.get(pid) ?? 0
       const ppA = this.ppAssists.get(pid) ?? 0
+      const ratingAcc = this.seasonRatingTotals.get(pid as string)
       p.stats.push({
         season: this.year,
         teamId: (teamId as string) ?? 'FA',
@@ -3554,12 +3933,13 @@ export class Career {
         },
         pp: { goals: ppG, assists: ppA, shots: 0, timeOnIce: 0 },
         pk: { goals: 0, assists: 0, shots: 0, timeOnIce: 0 },
-        plusMinus: 0,
+        plusMinus: t.plusMinus ?? 0,
         penaltyMinutes: t.penaltyMinutes,
         saves: t.saves,
         shotsAgainst: t.shotsAgainst,
         goalsAgainst: t.goalsAgainst,
         shutouts: 0,
+        ...(ratingAcc && ratingAcc.n > 0 ? { avgRating: Math.round((ratingAcc.sum / ratingAcc.n) * 100) / 100 } : {}),
       })
     }
   }
@@ -3654,6 +4034,8 @@ export class Career {
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Re-balance rosters across NHL/AHL pairs for the new season.
     this.assignRosters()
+    // Re-derive each team's system from its head coach for the new roster.
+    this.applyCoachSystems()
 
     /* ── story layer rollover ── */
     this.tentpoles = createInitialTentpolesState()
@@ -3665,7 +4047,9 @@ export class Career {
     this.prevRanks.clear()
     /* ── plumbing module rollover ── */
     this.playerRatings.clear()
+    this.seasonRatingTotals.clear()
     this.hireableStaff = []
+    this.coachMarket = null // fresh slate of available coaches each offseason
     // Keep practiceState team focus across seasons (intentional persistence)
     // Season-scoped arcs close; feuds/mentorships/milestone chases carry over.
     for (const arc of this.arcsState.arcs) {
@@ -3826,6 +4210,115 @@ export class Career {
       else f++
     }
     return { f, d, g }
+  }
+
+  /**
+   * Offseason development gate: for every NHL club with an AHL affiliate, sort the
+   * combined NHL+AHL pool by current ability so the best players are on the NHL
+   * roster and the rest develop in the AHL. AI clubs apply it; the user's club
+   * gets a SUGGESTION in the inbox instead (he keeps manual roster control).
+   */
+  private reassignFarmSystems(): void {
+    // Waiver-required veterans aren't dumped to the farm over a small ability dip.
+    const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
+    for (const team of this.data.teams.values()) {
+      if (team.tier === 'ahl' || team.tier === 'world') continue
+      const ahlId = team.affiliateId
+      const ahl = ahlId ? this.data.teams.get(ahlId) : undefined
+      if (!ahl) continue
+
+      const split = farmSplit({
+        nhlRoster: team.roster,
+        ahlRoster: ahl.roster,
+        resolve: (id) => this.data.players.get(id),
+        score: scorer,
+      })
+      if (split.promoted.length === 0 && split.demoted.length === 0) continue
+
+      if (team.id === this.userTeamId) {
+        // Suggest, don't apply — surface the staff's recommendation to the GM.
+        const name = (id: PlayerId): string => this.data.players.get(id)?.name ?? 'a player'
+        const ups = split.promoted.slice(0, 4).map(name)
+        const downs = split.demoted.slice(0, 4).map(name)
+        const parts: string[] = []
+        if (ups.length) parts.push(`Call up: ${ups.join(', ')}`)
+        if (downs.length) parts.push(`Send down: ${downs.join(', ')}`)
+        this.pushNews(
+          'contract',
+          'Staff roster recommendation',
+          `Your hockey staff suggest some farm moves based on how the roster developed. ${parts.join('. ')}. (Manage them yourself on the squad and farm screens.)`
+        )
+        continue
+      }
+
+      // AI club: apply the split and rebuild both rosters' lines.
+      team.roster = split.nhl
+      ahl.roster = split.ahl
+      repairLines(team, this.data.players)
+      repairLines(ahl, this.data.players)
+    }
+  }
+
+  /**
+   * "Ask the coach to set the roster" — auto-applies the coach's recommended NHL
+   * roster for the USER's club: the best players by ability (regardless of contract
+   * type) fill a standard 14F/7D/2G NHL roster, the rest develop in the AHL. Returns
+   * the player NAMES moved each way so the screen can report exactly what he did.
+   */
+  /**
+   * Roster-keep protection for waiver-required players. A one-way veteran can't be
+   * sent to the AHL without clearing waivers (risking losing him for nothing), so
+   * the auto-roster must have a VERY good reason — a big ability gap — before it
+   * demotes him. Two-way contracts and young (often waiver-exempt) players carry
+   * no protection. Bigger contracts and older vets are protected more.
+   */
+  private waiverProtection(p: Player): number {
+    if (p.contract.twoWay !== false) return 0 // two-way → free to move
+    if (p.age < 23) return 0 // young one-way deals are usually still waiver-exempt
+    let bonus = 10
+    if (p.contract.salary >= 4_000_000) bonus += 4
+    if (p.age >= 32) bonus += 3
+    return bonus
+  }
+
+  applyCoachRoster(): { promoted: string[]; demoted: string[] } {
+    const nhl = this.data.teams.get(this.userTeamId)
+    const ahlId = this.userTeam.affiliateId
+    const ahl = ahlId ? this.data.teams.get(ahlId as TeamId) : undefined
+    if (!nhl || !ahl) return { promoted: [], demoted: [] }
+
+    const grp = (p: Player): 'F' | 'D' | 'G' =>
+      p.position === 'G' ? 'G' : p.position === 'D' || p.position === 'LD' || p.position === 'RD' ? 'D' : 'F'
+    const resolveAll = (ids: PlayerId[]): Player[] =>
+      ids.map((id) => this.data.players.get(id)).filter((p): p is Player => p !== undefined)
+
+    const wasNhl = new Set(nhl.roster.map((id) => id as string))
+
+    // The user's head coach weighs form/morale/condition alongside skill, so a
+    // hot AHL player can earn a call-up over a cold NHL regular within a band.
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const targets: Record<'F' | 'D' | 'G', number> = { F: 14, D: 7, G: 2 }
+    const byGroup: Record<'F' | 'D' | 'G', Player[]> = { F: [], D: [], G: [] }
+    for (const p of [...resolveAll(nhl.roster), ...resolveAll(ahl.roster)]) byGroup[grp(p)].push(p)
+    const keep = (p: Player): number => coachAdjustedScore(p, coach) + this.waiverProtection(p)
+    for (const key of ['F', 'D', 'G'] as const) byGroup[key].sort((a, b) => keep(b) - keep(a))
+
+    const newNhl: PlayerId[] = []
+    const newAhl: PlayerId[] = []
+    for (const key of ['F', 'D', 'G'] as const) {
+      byGroup[key].forEach((p, i) => (i < targets[key] ? newNhl : newAhl).push(p.id))
+    }
+
+    nhl.roster = newNhl
+    ahl.roster = newAhl
+    repairLines(nhl, this.data.players)
+    repairLines(ahl, this.data.players)
+
+    const nameOf = (id: PlayerId): string => this.data.players.get(id)?.name ?? ''
+    return {
+      promoted: newNhl.filter((id) => !wasNhl.has(id as string)).map(nameOf).filter(Boolean),
+      demoted: newAhl.filter((id) => wasNhl.has(id as string)).map(nameOf).filter(Boolean),
+    }
   }
 
   /**
@@ -4295,6 +4788,8 @@ export class Career {
       const home = nextSched.homeTeamId === this.userTeamId
       const opp = this.data.teams.get(home ? nextSched.awayTeamId : nextSched.homeTeamId)!
       const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+      const os = this.standings.get(opp.id)
+      const oppCoach = this.getTeamStaff(opp.id as string).headCoach
       nextGame = {
         day: nextSched.day,
         date: dayToDateISO(this.year, nextSched.day),
@@ -4303,6 +4798,8 @@ export class Career {
         opponentAbbr: opp.abbreviation,
         home,
         opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+        opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
+        opponentSystem: oppCoach.profile?.meta.label ?? '—',
         rivalryLabel: gi.label,
       }
     } else if (this.phase === 'playoffs' && this.playoffs) {
@@ -4313,6 +4810,8 @@ export class Career {
         const home = pending.homeTeamId === this.userTeamId
         const opp = this.data.teams.get(home ? pending.awayTeamId : pending.homeTeamId)!
         const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+        const os = this.standings.get(opp.id)
+        const oppCoach = this.getTeamStaff(opp.id as string).headCoach
         nextGame = {
           day: this.currentDay + 1,
           date: dayToDateISO(this.year, this.currentDay + 1),
@@ -4321,6 +4820,8 @@ export class Career {
           opponentAbbr: opp.abbreviation,
           home,
           opponentRank: sorted.findIndex((s) => s.teamId === opp.id) + 1,
+          opponentRecord: os ? `${os.wins}-${os.losses}-${os.overtimeLosses}` : '0-0-0',
+          opponentSystem: oppCoach.profile?.meta.label ?? '—',
           rivalryLabel: gi.label,
         }
       }
@@ -4389,7 +4890,7 @@ export class Career {
         goals: t?.goals ?? 0,
         assists: t?.assists ?? 0,
         points: (t?.goals ?? 0) + (t?.assists ?? 0),
-        plusMinus: 0,
+        plusMinus: t?.plusMinus ?? 0,
         gamesPlayed: gp,
         avgRating: seasonAvgRating(ratings),
         savePct: sa > 0 ? t!.saves / sa : undefined,
@@ -4509,7 +5010,39 @@ export class Career {
     }
 
     const userScouts = this.getTeamStaff(this.userTeamId as string).scouts
-    const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts)
+    const playerForLeague = this.data.players.get(pid)
+    const leagueAbbrev = playerForLeague ? this.leagueAbbrevForPlayer(playerForLeague) : 'NHL'
+    // Scoring pace from the league he ACTUALLY plays in (world/AHL prospects keep
+    // their stats in the world/AHL sim, not the user-league totals) — feeds the
+    // scouts' "what I saw in a recent viewing" line on the profile.
+    const paceTier = (playerTeamId ? this.data.teams.get(playerTeamId) : undefined)?.tier
+    const paceTotals = paceTier === 'ahl' ? this.ahlTotals : paceTier === 'world' ? this.worldSim.totals : this.totals
+    const paceGpMap = paceTier === 'ahl' ? this.ahlGp : paceTier === 'world' ? this.worldSim.gp : this.gp
+    const paceGp = paceGpMap.get(pid) ?? 0
+    const paceTot = paceTotals.get(pid)
+    const observedPace = paceGp > 0 ? ((paceTot?.goals ?? 0) + (paceTot?.assists ?? 0)) / paceGp : undefined
+    const profile = buildPlayerProfile(this.ctx(), pid, fog, mindsetCtx, userScouts, {
+      factor: nhleFactorByAbbrev(leagueAbbrev),
+      name: leagueAbbrev,
+    }, observedPace)
+
+    // Career honours — trophies won during this career (Hart, Cup, medals, etc.),
+    // shown as badges on the History tab, plus pre-career honours imported from the
+    // source DB. In-career awards carry their year; imported ones are a count only.
+    const playerAwards: Array<{ award: string; year?: number }> = this.recordsState.awards
+      .filter((a) => a.playerId === (pid as string))
+      .sort((a, b) => b.year - a.year)
+      .map((a) => ({ award: a.award, year: a.year }))
+    const priorCups = this.data.players.get(pid)?.stanleyCups ?? 0
+    for (let i = 0; i < priorCups; i++) playerAwards.push({ award: 'Stanley Cup' })
+    if (playerAwards.length > 0) profile.awards = playerAwards
+
+    // This season's average match rating (EHM "Avr") — cumulative from game one,
+    // so there's no Avr before the season's first game.
+    const seasonRating = this.seasonRatingTotals.get(pid as string)
+    if (seasonRating && seasonRating.n > 0) {
+      profile.avgRating = Math.round((seasonRating.sum / seasonRating.n) * 100) / 100
+    }
 
     // Current-season line fix: buildPlayerProfile reads NHL totals only, so an
     // AHL or wider-world player shows 0 GP even though his league is simulated.
@@ -4538,7 +5071,7 @@ export class Career {
           goals: t?.goals ?? 0,
           assists: t?.assists ?? 0,
           points: (t?.goals ?? 0) + (t?.assists ?? 0),
-          plusMinus: 0,
+          plusMinus: t?.plusMinus ?? 0,
           penaltyMinutes: t?.penaltyMinutes ?? 0,
           shots: t?.shots ?? 0,
           toiPerGame: g > 0 ? Math.round((t?.toi ?? 0) / g) : 0,
@@ -4567,6 +5100,23 @@ export class Career {
       if (team?.tactics) {
         const fit = playerStyleFit(player, team.tactics)
         if (fit) profile.systemFit = fit
+      }
+
+      // Composite prospect grade — weighs talent + OUR team's need, system fit,
+      // position scarcity, risk and value into one verdict + pros/cons (FM-style).
+      // Only meaningful for prospects/young developmentals — a "PROSPECT GRADE" on a
+      // 30-year-old veteran reads wrong, so gate it to draft-age-and-developmental.
+      if (player.age <= 23) {
+        const ourFit = player.position !== 'G' && this.userTeam.tactics ? playerStyleFit(player, this.userTeam.tactics) : null
+        profile.prospectGrade = buildProspectGrade({
+          potentialStars: profile.potentialStars,
+          currentStars: overallToStars(profile.overall),
+          position: player.position,
+          age: player.age,
+          ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
+          need: this.positionNeed(player.position),
+          ...(ourFit ? { styleFitScore: ourFit.score, styleLabel: ourFit.styleLabel } : {}),
+        })
       }
 
       // EHM-style roster projection + per-coach reports. Same gate as the scout
@@ -4602,28 +5152,59 @@ export class Career {
 
       // Analyst draft projection — the pundit consensus read for draft-relevant
       // prospects (rank + projected ceiling role), shown under the scout report.
+      // Our scouts' projected ceiling role (fog-aware read) — a real role label
+      // ("Top-pair D", "Middle-six F", "Starter"), never a vague "Prospect". Uses
+      // the same fogged ceiling as the POTENTIAL stars/grade, so they agree.
+      const scoutedCeil = this.scoutedCeilingOf(player)
+      profile.scoutsCeilingRole = ceilingRoleShort(scoutedCeil, player.position)
+
       const elig = draftEligibility(player.age, !!player.nhlDrafted)
       if (elig) {
         const board = this.getDraftRankings()
-        const rank = board.rankings.find((r) => r.playerId === playerId)?.rank
+        // The analysts' published row (eligible board, else the radar list) — its
+        // potentialStars is the hype-inflated PERCEIVED ceiling, kept distinct
+        // from the profile's grounded `potentialStars` (our scouts' read).
+        const analystRow = board.rankings.find((r) => r.playerId === playerId)
+          ?? board.radar.find((r) => r.playerId === playerId)
+        const rank = analystRow?.eligibility === 'radar' ? undefined : analystRow?.rank
+        // The analyst's FULL-ordering rank (past the published top-64) — lets an
+        // off-board prospect read as a concrete "projected Nth-round pick" and shows
+        // his draft standing in the profile/info + list views.
+        const fullRank = board.fullRankById[playerId]
+        if (elig !== 'radar' && fullRank !== undefined) {
+          profile.analystRank = fullRank
+          profile.analystDraftLabel = draftRoundLabel(fullRank, elig)
+        }
+        if (analystRow) profile.analystPotentialStars = analystRow.potentialStars
+        // Off the published board, the analysts rate him as an unranked longshot —
+        // a LOW ceiling, not his true upside. So a prospect your scouts like reads
+        // as you being HIGHER than the board (a sleeper), not "more cautious".
+        const ourCeiling = scoutedCeil
+        const theirCeiling = analystRow?.perceivedCeiling ?? Math.min(62, ourCeiling - 4)
         const proj = analystProjection({
           name: player.name,
           position: player.position,
-          ceiling: agedPotential(player),
+          ceiling: theirCeiling,
           eligibility: elig,
           ...(rank !== undefined ? { rank } : {}),
+          ...(fullRank !== undefined ? { fullRank } : {}),
           phaseLabel: board.phaseLabel,
           draftYear: board.draftYear,
         })
         if (proj) profile.analystProjection = proj
 
         // Your scouts' own read — can diverge from the consensus (more so the
-        // deeper the prospect is ranked), driven by intangibles + underlying game.
+        // deeper the prospect is ranked), driven by intangibles + underlying game
+        // + how their grounded ceiling read compares to the board's optimism.
         const read = buildScoutDraftRead({
           player,
           knowledge: profile.scoutReport.knowledge,
           ...(rank !== undefined ? { analystRank: rank } : {}),
           interviews: (this.interviews.get(playerId) ?? []).length,
+          scoutsCeiling: ourCeiling,
+          scoutsRole: ceilingRoleShort(ourCeiling, player.position),
+          analystCeiling: theirCeiling,
+          analystRole: ceilingRoleShort(theirCeiling, player.position),
         })
         if (read) profile.scoutDraftRead = { verdict: read.verdict, confidence: read.confidence, blurb: read.blurb }
       }
@@ -4662,6 +5243,43 @@ export class Career {
           final: finalPhase,
         })
         if (bio) profile.seasonBio = bio
+      }
+
+      // Living scouting report — the synthesized, always-present write-up that
+      // deepens + shifts as our scouts' collective read sharpens. Production comes
+      // from the league he actually plays in (pace* computed above).
+      const { leagueLabel: sumLeague, teamIds: sumTeamIds } = this.leagueContextOf(playerTeamId)
+      const sumRank = player.position !== 'G' && sumTeamIds.length > 0 ? this.scoringRankOf(pid, sumTeamIds) : undefined
+      const summaryArgs = {
+        player,
+        knowledge: profile.scoutReport.knowledge,
+        gamesPlayed: paceGp,
+        goals: paceTot?.goals ?? 0,
+        assists: paceTot?.assists ?? 0,
+        leagueName: sumLeague || leagueAbbrev,
+        ...(sumRank !== undefined ? { leagueScoringRank: sumRank } : {}),
+        ...(profile.scoutsCeilingRole !== undefined ? { ceilingRole: profile.scoutsCeilingRole } : {}),
+        ...(profile.scoutPanel?.risk?.band !== undefined ? { riskBand: profile.scoutPanel.risk.band } : {}),
+        ...(profile.scoutComp?.names !== undefined ? { compNames: profile.scoutComp.names } : {}),
+        ...(elig ? { eligibility: elig } : {}),
+        ...(profile.analystDraftLabel !== undefined ? { draftLabel: profile.analystDraftLabel } : {}),
+        draftYear: this.year + 1,
+      }
+      profile.scoutSummary = buildScoutSummary(summaryArgs)
+      // A formal end-of-season pre-draft edition for draft-eligible prospects.
+      const seasonEnd = this.phase === 'offseason' || this.phase === 'playoffs' || this.draftRankPhase() === 'final'
+      if (seasonEnd && elig && elig !== 'radar') {
+        profile.preDraftSummary = buildScoutSummary({ ...summaryArgs, preDraft: true })
+      }
+    }
+
+    // Show the running Avr on the in-progress season's row too (completed seasons
+    // already carry it from SeasonStats; the current season isn't archived yet).
+    if (profile.avgRating !== undefined) {
+      const cur = profile.seasons[0]
+      if (cur && cur.year === this.year) {
+        if (cur.skater) cur.skater.avgRating = profile.avgRating
+        if (cur.goalie) cur.goalie.avgRating = profile.avgRating
       }
     }
 
@@ -4881,8 +5499,210 @@ export class Career {
     })
     if (evalResult.accepted && evalResult.newTactics) {
       team.tactics = evalResult.newTactics
+      // The coach's beliefs shift gradually toward what he agreed to, so the
+      // influence persists into future seasons — and his roster-fit edge updates.
+      const ts = this.getTeamStaff(this.userTeamId as string)
+      if (ts.headCoach.profile) {
+        ts.headCoach.profile = nudgeProfileForDirection(ts.headCoach.profile, direction)
+      }
+      team.coachFit = styleMatch(roster, team.tactics).fit
     }
     return { accepted: evalResult.accepted, response: evalResult.response }
+  }
+
+  /**
+   * Staff-meeting summary: the head coach's tactical identity, how well his system
+   * fits the roster, and the players whose form/morale the coach (and GM) should
+   * address. Drives the Staff Meeting screen's overview.
+   */
+  getStaffMeetingSummary(): StaffMeetingSummaryView {
+    const team = this.data.teams.get(this.userTeamId)!
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const coach = ts.headCoach
+    const profile = coach.profile ?? buildCoachProfile(coach)
+    const roster = team.roster.map((id) => this.resolve(id))
+    const sm = styleMatch(roster, team.tactics)
+    const fit = Math.round(sm.fit)
+    const fitLabel = fit >= 78 ? 'Strong' : fit >= 66 ? 'Good' : fit >= 55 ? 'Adequate' : 'Poor'
+    const m = profile.meta
+
+    const flagged: StaffMeetingSummaryView['flagged'] = []
+    for (const p of roster) {
+      if (p.injuryStatus !== null) continue
+      const condition = Math.round(100 - p.fatigue)
+      let issue: 'slumping' | 'unhappy' | 'tired' | null = null
+      let detail = ''
+      if (condition < 40) { issue = 'tired'; detail = `Worn down — condition ${condition}` }
+      else if (p.morale < 30) { issue = 'unhappy'; detail = 'Unhappy with his role or situation' }
+      else if (p.form <= -3) { issue = 'slumping'; detail = 'Cold stretch — production has dried up' }
+      if (issue) {
+        flagged.push({
+          playerId: p.id as unknown as string,
+          name: p.name,
+          issue,
+          detail,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        })
+      }
+    }
+    flagged.sort((a, b) => (a.issue === 'tired' ? -1 : 0) - (b.issue === 'tired' ? -1 : 0))
+
+    return {
+      coachName: coach.name,
+      ...(coach.faceId !== undefined ? { coachFaceId: coach.faceId } : {}),
+      systemLabel: m.label,
+      systemBlurb: m.blurb,
+      systemFavors: SYSTEM_FAVORS[profile.system],
+      philosophy: profile.philosophy,
+      forecheckName: m.forecheckName,
+      breakoutName: m.breakoutName,
+      nzName: m.nzName,
+      dZoneName: m.dZoneName,
+      ppName: m.ppName,
+      pkName: m.pkName,
+      paceName: m.paceName,
+      rosterFit: fit,
+      fitLabel,
+      fitAdvice: sm.advice,
+      flagged: flagged.slice(0, 8),
+    }
+  }
+
+  /* ────────────────────── coach hiring market ────────────────────── */
+
+  /** Lazily build the available-coach pool for the current season. Deterministic. */
+  private ensureCoachMarket(): CoachMarketEntry[] {
+    if (this.coachMarket) return this.coachMarket
+    const taken = new Set<string>()
+    // Avoid duplicating the user's current head coach's name.
+    taken.add(this.getTeamStaff(this.userTeamId as string).headCoach.name)
+    const list: CoachMarketEntry[] = []
+    for (let i = 0; i < Career.COACH_MARKET_SIZE; i++) {
+      const rng = new Rng(deriveSeed(this.seed, Career.COACH_MARKET_NS, this.year * 100 + i))
+      const coach = generateTeamStaff(rng, { existingNames: taken }).headCoach
+      coach.id = `mktcoach-${this.year}-${i}`
+      coach.profile = buildCoachProfile(coach, new Rng(deriveSeed(this.seed, Career.COACH_PROFILE_NS, 5000 + i)))
+      list.push({ coach, askingRating: coach.rating })
+    }
+    this.coachMarket = list
+    return list
+  }
+
+  /** The coach hiring market, with each candidate's fit against the user roster. */
+  getCoachMarket(): CoachMarketView {
+    const team = this.data.teams.get(this.userTeamId)!
+    const roster = team.roster.map((id) => this.resolve(id))
+    const current = this.getTeamStaff(this.userTeamId as string).headCoach
+    const currentProfile = current.profile ?? buildCoachProfile(current)
+    const fitLabelOf = (f: number): string => (f >= 78 ? 'Strong' : f >= 66 ? 'Good' : f >= 55 ? 'Adequate' : 'Poor')
+    const fitBlurbOf = (f: number, label: string): string =>
+      f >= 78 ? `${label} fit — his system suits this roster`
+        : f >= 66 ? `${label} fit — workable with this group`
+        : f >= 55 ? `${label} fit — some friction with the personnel`
+        : `${label} fit — his style clashes with this roster`
+
+    const entries = this.ensureCoachMarket().map((e) => {
+      const profile = e.coach.profile ?? buildCoachProfile(e.coach)
+      const fit = Math.round(coachFit(profile, roster))
+      const label = fitLabelOf(fit)
+      return {
+        coachId: e.coach.id,
+        name: e.coach.name,
+        ...(e.coach.faceId !== undefined ? { faceId: e.coach.faceId } : {}),
+        rating: e.coach.rating,
+        demeanor: e.coach.demeanor ?? 'calm',
+        systemLabel: profile.meta.label,
+        philosophy: profile.philosophy,
+        rosterFit: fit,
+        fitLabel: label,
+        fitBlurb: fitBlurbOf(fit, label),
+      }
+    }).sort((a, b) => b.rosterFit - a.rosterFit)
+
+    return {
+      currentCoachName: current.name,
+      currentSystemLabel: currentProfile.meta.label,
+      currentRosterFit: Math.round(coachFit(currentProfile, roster)),
+      entries,
+    }
+  }
+
+  /**
+   * Hire a coach from the market. Installs him as the user's head coach, re-derives
+   * the team's system + roster fit, removes him from the market, and logs it.
+   */
+  hireCoach(coachId: string): { ok: boolean; message: string } {
+    const market = this.ensureCoachMarket()
+    const idx = market.findIndex((e) => e.coach.id === coachId)
+    if (idx < 0) return { ok: false, message: 'That coach is no longer available.' }
+    const entry = market[idx]!
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return { ok: false, message: 'No team.' }
+
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const outgoing = ts.headCoach.name
+    ts.headCoach = entry.coach
+    if (!ts.headCoach.profile) ts.headCoach.profile = buildCoachProfile(ts.headCoach)
+    market.splice(idx, 1)
+
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(ts.headCoach.profile, roster, team.tactics)
+    team.coachFit = styleMatch(roster, team.tactics).fit
+
+    this.pushNews(
+      'contract',
+      `${team.name} hire ${entry.coach.name} as head coach`,
+      `${entry.coach.name} takes over from ${outgoing}, bringing a ${ts.headCoach.profile.meta.label.toLowerCase()} approach.`,
+      { teamId: this.userTeamId as string }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${team.abbreviation} hire ${entry.coach.name} as head coach.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, message: `${entry.coach.name} hired as head coach.` }
+  }
+
+  /**
+   * Fire the user's head coach. A caretaker takes over until the GM hires a
+   * replacement from the market. The team's system re-derives to the caretaker's.
+   */
+  fireCoach(): { ok: boolean; message: string } {
+    const team = this.data.teams.get(this.userTeamId)
+    if (!team) return { ok: false, message: 'No team.' }
+    const ts = this.getTeamStaff(this.userTeamId as string)
+    const outgoing = ts.headCoach.name
+
+    // Caretaker: a modest interim coach, deterministically generated.
+    const rng = new Rng(deriveSeed(this.seed, Career.COACH_MARKET_NS, this.year * 100 + 9000 + this.currentDay))
+    const caretaker = generateTeamStaff(rng).headCoach
+    caretaker.id = `caretaker-${this.year}-${this.currentDay}`
+    caretaker.rating = Math.max(40, caretaker.rating - 8) // interim discount
+    caretaker.profile = buildCoachProfile(caretaker, rng)
+    ts.headCoach = caretaker
+
+    const roster = team.roster.map((id) => this.resolve(id))
+    team.tactics = profileToTactics(caretaker.profile, roster, team.tactics)
+    team.coachFit = styleMatch(roster, team.tactics).fit
+
+    this.pushNews(
+      'contract',
+      `${team.name} part ways with head coach ${outgoing}`,
+      `${outgoing} has been relieved of his duties. ${caretaker.name} steps in as interim bench boss while the club searches for a permanent hire.`,
+      { teamId: this.userTeamId as string }
+    )
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [this.userTeamId as string],
+      summary: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis.`,
+    })
+    this.transactionLedger = tx.ledger
+    return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
   /* ────────────────────── staff-meeting agenda ────────────────────── */
@@ -4993,19 +5813,266 @@ export class Career {
       overallToStars(ratedOverall(p)),
       potentialStars(p),
     ]
+
+    // Coach's "set the roster" recommendation: ability-sort the combined NHL+AHL
+    // pool and surface the call-ups/send-downs that would optimise the NHL roster.
+    const split = ahlTeam
+      ? farmSplit({
+          nhlRoster: team?.roster ?? [],
+          ahlRoster: ahlTeam.roster,
+          resolve: (id) => this.data.players.get(id),
+          // Match applyCoachRoster: protect waiver-required veterans from demotion.
+          score: (p) => ratedOverall(p) + this.waiverProtection(p),
+        })
+      : { promoted: [], demoted: [] }
+    const adviceMove = (id: PlayerId, kind: 'callup' | 'senddown'): import('./developmentCenter').RosterAdviceMove | null => {
+      const p = this.data.players.get(id)
+      if (!p) return null
+      return {
+        playerId: id as string,
+        name: p.name,
+        position: p.position,
+        currentStars: overallToStars(ratedOverall(p)),
+        kind,
+        reason: kind === 'callup'
+          ? 'Outrates current NHL depth at his position.'
+          : 'Bettered by NHL options — more value developing in the AHL.',
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      }
+    }
+    const callUps = split.promoted.map((id) => adviceMove(id, 'callup')).filter((m): m is import('./developmentCenter').RosterAdviceMove => m !== null)
+    const sendDowns = split.demoted.map((id) => adviceMove(id, 'senddown')).filter((m): m is import('./developmentCenter').RosterAdviceMove => m !== null)
+
+    // Rights-held prospects playing outside the NHL/AHL (e.g. juniors we drafted).
+    const onFarm = new Set<string>([...(team?.roster ?? []), ...(ahlTeam?.roster ?? [])].map((id) => id as string))
+    const systemElsewhere: Array<{ player: Player; clubAbbrev: string }> = []
+    for (const p of this.data.players.values()) {
+      if (p.rightsTeamId !== this.userTeamId) continue
+      if (onFarm.has(p.id as string)) continue
+      let clubAbbrev = '—'
+      for (const t of this.data.teams.values()) {
+        if (t.roster.includes(p.id)) { clubAbbrev = t.abbreviation; break }
+      }
+      systemElsewhere.push({ player: p, clubAbbrev })
+    }
+
     return buildDevelopmentCenter({
       teamName: team?.name ?? 'Team',
       roster,
       affiliate,
       stars,
+      rosterAdvice: { callUps, sendDowns },
+      systemElsewhere,
     })
+  }
+
+  /**
+   * Monte-Carlo playoff odds: simulate the remaining schedule many times from a
+   * lightweight strength-based win model and report each club's chance of making
+   * the playoffs (top 4 per conference, matching the bracket) plus its projected
+   * final points. Deterministic per (seed, day) so the number is stable until the
+   * next game is played.
+   */
+  getPlayoffOdds(): PlayoffOddsView {
+    const userId = this.userTeamId as string
+    if (this.phase !== 'regularSeason') {
+      return { available: false, simulations: 0, userTeamId: userId, rows: [] }
+    }
+    const N = 600
+    const QUAL = 4 // matches QUALIFIERS_PER_CONFERENCE in seedBracket
+    const teamIds = [...this.data.league.teams]
+
+    const strength = new Map<TeamId, number>()
+    const basePts = new Map<TeamId, number>()
+    const gamesPlayed = new Map<TeamId, number>()
+    const gamesRemaining = new Map<TeamId, number>()
+    const confOf = new Map<TeamId, string>()
+    for (const t of teamIds) {
+      const team = this.data.teams.get(t)
+      strength.set(t, teamStrengthRating((team?.roster ?? []).map((id) => this.resolve(id))))
+      const st = this.standings.get(t)
+      basePts.set(t, st?.points ?? 0)
+      gamesPlayed.set(t, st?.gamesPlayed ?? 0)
+      gamesRemaining.set(t, 0)
+      confOf.set(t, team?.conferenceId ?? '')
+    }
+
+    const remaining = this.data.league.schedule.filter((g) => g.day > this.currentDay)
+    for (const g of remaining) {
+      gamesRemaining.set(g.homeTeamId, (gamesRemaining.get(g.homeTeamId) ?? 0) + 1)
+      gamesRemaining.set(g.awayTeamId, (gamesRemaining.get(g.awayTeamId) ?? 0) + 1)
+    }
+
+    const confs = [...new Set(teamIds.map((t) => confOf.get(t)!))]
+    const sig = (x: number): number => 1 / (1 + Math.exp(-x))
+    const rng = new Rng(deriveSeed(this.seed, 9270, this.currentDay))
+
+    const playoffCount = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
+    const ptsTotal = new Map<TeamId, number>(teamIds.map((t) => [t, 0]))
+
+    for (let s = 0; s < N; s++) {
+      const pts = new Map<TeamId, number>(basePts)
+      for (const g of remaining) {
+        const sh = strength.get(g.homeTeamId) ?? 55
+        const sa = strength.get(g.awayTeamId) ?? 55
+        const pHome = sig((sh - sa) / 8 + 0.18) // home-ice edge
+        const otGame = rng.chance(0.23) // ~NHL share of games past regulation
+        if (rng.chance(pHome)) {
+          pts.set(g.homeTeamId, (pts.get(g.homeTeamId) ?? 0) + 2)
+          if (otGame) pts.set(g.awayTeamId, (pts.get(g.awayTeamId) ?? 0) + 1)
+        } else {
+          pts.set(g.awayTeamId, (pts.get(g.awayTeamId) ?? 0) + 2)
+          if (otGame) pts.set(g.homeTeamId, (pts.get(g.homeTeamId) ?? 0) + 1)
+        }
+      }
+      for (const t of teamIds) ptsTotal.set(t, (ptsTotal.get(t) ?? 0) + (pts.get(t) ?? 0))
+      for (const c of confs) {
+        const members = teamIds.filter((t) => confOf.get(t) === c)
+        members.sort((a, b) =>
+          (pts.get(b)! - pts.get(a)!) || (strength.get(b)! - strength.get(a)!) || (a < b ? -1 : 1)
+        )
+        for (let i = 0; i < QUAL && i < members.length; i++) {
+          playoffCount.set(members[i]!, playoffCount.get(members[i]!)! + 1)
+        }
+      }
+    }
+
+    const rows: PlayoffOddsRow[] = teamIds.map((t) => {
+      const team = this.data.teams.get(t)!
+      const confName = this.data.league.conferences.find((c) => c.id === confOf.get(t))?.name ?? ''
+      return {
+        teamId: t as string,
+        name: team.name,
+        abbreviation: team.abbreviation,
+        conference: confName,
+        points: basePts.get(t) ?? 0,
+        gamesPlayed: gamesPlayed.get(t) ?? 0,
+        gamesRemaining: gamesRemaining.get(t) ?? 0,
+        projectedPoints: Math.round((ptsTotal.get(t) ?? 0) / N),
+        playoffPct: Math.round(((playoffCount.get(t) ?? 0) / N) * 100),
+        isUser: (t as string) === userId,
+      }
+    })
+    rows.sort((a, b) => b.projectedPoints - a.projectedPoints || b.playoffPct - a.playoffPct)
+    return { available: true, simulations: N, userTeamId: userId, rows }
   }
 
   /** Squad Planner: experience matrix + depth/age/contract report for the user club. */
   getSquadPlanner(): SquadPlannerView {
     const team = this.data.teams.get(this.userTeamId)
     const roster = (team?.roster ?? []).map((id) => this.resolve(id))
-    return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster })
+    // Every NHL team's roster, so the depth report can judge each position group
+    // RELATIVE to the rest of the league rather than by absolute headcount.
+    const leagueRosters = this.data.league.teams.map((tid) =>
+      (this.data.teams.get(tid)?.roster ?? []).map((id) => this.resolve(id))
+    )
+    return buildSquadPlanner({ teamName: team?.name ?? 'Team', roster, leagueRosters })
+  }
+
+  /**
+   * "How your club stacks up" — ranks the user's NHL team against every other
+   * NHL club across a spread of dimensions (on-ice quality, pipeline, staff,
+   * money, arena, physical traits). Powers the dashboard comparison card.
+   */
+  getLeagueComparison(): LeagueComparisonView {
+    const teamIds = [...this.data.league.teams]
+    const outOf = teamIds.length
+
+    const nhlRoster = (tid: TeamId): Player[] =>
+      (this.data.teams.get(tid)?.roster ?? []).map((id) => this.resolve(id))
+
+    // Prospects = under-24 players across the NHL roster + AHL affiliate.
+    const prospectsOf = (tid: TeamId): Player[] => {
+      const team = this.data.teams.get(tid)
+      const ids = [...(team?.roster ?? [])]
+      const aff = team?.affiliateId
+      if (aff) ids.push(...(this.data.teams.get(aff)?.roster ?? []))
+      return ids.map((id) => this.resolve(id)).filter((p) => p.age <= 23)
+    }
+
+    const skatersOf = (tid: TeamId): Player[] => nhlRoster(tid).filter((p) => p.position !== 'G')
+    const mean = (xs: number[]): number => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : 0)
+    const heightCm = (p: Player): number => p.heightCm ?? 165 + p.ratings.physical.height * 0.35
+    const weightKg = (p: Player): number => p.weightKg ?? 75 + p.ratings.physical.strength * 0.25
+    const speedOf = (p: Player): number => (p.ratings.physical.speed + p.ratings.physical.acceleration) / 2
+
+    const staffQuality = (ts: TeamStaff): number => {
+      const avg = (xs: StaffMember[]): number => (xs.length ? mean(xs.map((s) => s.rating)) : 0)
+      const ac = avg(ts.assistantCoaches)
+      const sc = avg(ts.scouts)
+      const ph = avg(ts.physios)
+      return (
+        ts.headCoach.rating * 0.34 +
+        (ac || ts.headCoach.rating) * 0.18 +
+        (sc || 50) * 0.2 +
+        ts.assistantGM.rating * 0.16 +
+        (ph || 50) * 0.12
+      )
+    }
+
+    const money = (v: number): string =>
+      v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : `$${Math.round(v / 1000)}K`
+    const ftIn = (cm: number): string => {
+      const totalIn = Math.round(cm / 2.54)
+      return `${Math.floor(totalIn / 12)}'${totalIn % 12}"`
+    }
+
+    interface Metric {
+      key: string
+      label: string
+      blurb: string
+      better: 'high' | 'low'
+      value: (tid: TeamId) => number
+      fmt: (v: number) => string
+    }
+
+    const metrics: Metric[] = [
+      { key: 'squad', label: 'Squad rating', blurb: 'Overall on-ice quality, star-weighted and including goaltending.', better: 'high',
+        value: (tid) => teamStrengthRating(nhlRoster(tid)), fmt: (v) => String(Math.round(v)) },
+      { key: 'prospects', label: 'Prospect pipeline', blurb: 'Ceiling of your best under-24 talent (NHL roster + AHL affiliate).', better: 'high',
+        value: (tid) => mean(prospectsOf(tid).map((p) => ratedPotential(p)).sort((a, b) => b - a).slice(0, 8)), fmt: (v) => String(Math.round(v)) },
+      { key: 'staff', label: 'Coaching & scouting', blurb: 'Combined quality of your coaches, scouts, AGM and medical staff.', better: 'high',
+        value: (tid) => staffQuality(this.getTeamStaff(tid as string)), fmt: (v) => String(Math.round(v)) },
+      { key: 'capspace', label: 'Cap space', blurb: 'Room left under the salary cap to add or extend players.', better: 'high',
+        value: (tid) => { const f = this.data.teams.get(tid)!.finances; return f.salaryCap - f.capUsed }, fmt: money },
+      { key: 'revenue', label: 'Revenue', blurb: 'Annual club revenue — your financial muscle in the market.', better: 'high',
+        value: (tid) => this.data.teams.get(tid)?.finances.revenue ?? 0, fmt: money },
+      { key: 'arena', label: 'Arena capacity', blurb: 'Home-rink seats — a proxy for the size of your fanbase.', better: 'high',
+        value: (tid) => this.data.teams.get(tid)?.arenaCapacity ?? 0, fmt: (v) => v > 0 ? Math.round(v).toLocaleString() : '—' },
+      { key: 'tallest', label: 'Biggest team', blurb: 'Average height of your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(heightCm)), fmt: ftIn },
+      { key: 'fastest', label: 'Fastest skaters', blurb: 'Average skating speed + acceleration across your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(speedOf)), fmt: (v) => String(Math.round(v)) },
+      { key: 'heaviest', label: 'Heaviest team', blurb: 'Average weight of your skaters.', better: 'high',
+        value: (tid) => mean(skatersOf(tid).map(weightKg)), fmt: (v) => v > 0 ? `${Math.round(v)} kg` : '—' },
+      { key: 'youngest', label: 'Youngest roster', blurb: 'Average age — rank 1 is the youngest, most up-and-coming roster.', better: 'low',
+        value: (tid) => mean(nhlRoster(tid).map((p) => p.age)), fmt: (v) => `${v.toFixed(1)}y` },
+    ]
+
+    const cards: LeagueComparisonCard[] = metrics.map((m) => {
+      const all = teamIds.map((tid) => ({ tid, v: m.value(tid) }))
+      const sorted = [...all].sort((a, b) => (m.better === 'high' ? b.v - a.v : a.v - b.v))
+      const rank = sorted.findIndex((x) => x.tid === this.userTeamId) + 1
+      const leader = sorted[0]!
+      const leaderTeam = this.data.teams.get(leader.tid)!
+      const mine = all.find((x) => x.tid === this.userTeamId)!.v
+      const percentile = outOf > 1 ? (outOf - rank) / (outOf - 1) : 1
+      return {
+        key: m.key,
+        label: m.label,
+        blurb: m.blurb,
+        rank: rank > 0 ? rank : outOf,
+        outOf,
+        percentile,
+        display: m.fmt(mine),
+        leaderTeamId: leader.tid as string,
+        leaderAbbr: leaderTeam.abbreviation,
+        leaderDisplay: m.fmt(leader.v),
+        isUserLeader: leader.tid === this.userTeamId,
+      }
+    })
+
+    return { teamName: this.userTeam.name, cards }
   }
 
   /** Legends registry for a club, most recent first. */
@@ -5024,16 +6091,324 @@ export class Career {
     return buildCompareRadar(this.ctx(), playerIdA, playerIdB)
   }
 
+  /** Leagues the scouting engine can target — synthetic NHL + AHL + every
+   *  feeder/international competition, each with its host nation and teams. */
+  private scoutingCompetitions(): ScoutingCompetition[] {
+    const out: ScoutingCompetition[] = []
+    out.push({ id: 'nhl', nation: 'North America', teamIds: this.data.league.teams.map((id) => id as string) })
+    const comps = this.data.league.competitions ?? []
+    const hasAhlComp = comps.some((c) => c.abbrev === 'AHL')
+    if (!hasAhlComp && this.data.league.ahlTeams?.length) {
+      out.push({ id: 'ahl', nation: 'North America', teamIds: this.data.league.ahlTeams.map((id) => id as string) })
+    }
+    for (const c of comps) {
+      out.push({ id: c.id, nation: c.nation, teamIds: c.teamIds.map((id) => id as string) })
+    }
+    return out
+  }
+
+  /** The user's next scheduled opponent (regular season or playoffs), or null. */
+  private nextOpponentTeamId(): string | null {
+    const sched = this.data.league.schedule.find(
+      (g) => !g.result && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
+    )
+    if (!sched) return null
+    return (sched.homeTeamId === this.userTeamId ? sched.awayTeamId : sched.homeTeamId) as string
+  }
+
+  /** Daily pass: surface newly-discovered prospects into the Scouting Centre.
+   *  A player is evaluated once, the first time his knowledge crosses the
+   *  discovery threshold during play — so the list starts empty and fills up. */
+  private surfaceScoutFinds(day: number): void {
+    const st = this.scouting
+    if (!st.recommendations) st.recommendations = []
+    if (!st.seen) st.seen = []
+    // `seen` = players we will NOT surface (known at start, our own org, or
+    // evaluated-and-rejected). Players we ACCEPT live in `recommendations`, not
+    // `seen`, so the cap below can never permanently bury an accepted find.
+    const seen = new Set(st.seen)
+    const recIds = new Set(st.recommendations.map((r) => r.playerId))
+    const own = this.ownOrgIds()
+    let added = false
+    for (const [pid, k] of st.knowledge) {
+      if (k < DISCOVERY_THRESHOLD || seen.has(pid) || recIds.has(pid)) continue
+      if (own.has(pid)) { seen.add(pid); continue } // don't "discover" our own org
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) { seen.add(pid); continue }
+      const rec = this.evaluateForRecommendation(p, day)
+      if (rec) { st.recommendations.push(rec); recIds.add(pid); added = true }
+      else seen.add(pid)
+    }
+    if (added) {
+      const rank = { 'A+': 0, A: 1, B: 2, C: 3 } as const
+      st.recommendations.sort((a, b) => rank[a.grade] - rank[b.grade])
+      // Cap generously; dropped finds are NOT marked seen, so they can return.
+      if (st.recommendations.length > 120) st.recommendations.length = 120
+    }
+    st.seen = [...seen]
+  }
+
+  /** Decide whether a freshly-known player is worth flagging — primarily youth
+   *  prospects with real upside, plus clearly-undervalued young players. Returns
+   *  the recommendation (and fires an inbox note) or null. */
+  private evaluateForRecommendation(p: Player, day: number): ScoutRecommendation | null {
+    if (p.age > YOUTH_MAX_AGE) return null
+    const elig = draftEligibility(p.age, !!p.nhlDrafted)
+    const evalRes = this.prospectEval(p, this.leagueAbbrevForPlayer(p), this.analystProjectionNoise())
+    // Grade the find on OUR scouts' (fog-aware) ceiling read — the same number the
+    // profile/grade and the find card show — so a flagged player is one our staff
+    // actually rates, and the grade can't contradict his displayed potential.
+    const ourCeiling = this.scoutedCeilingOf(p)
+    const potStars = overallToStars(ourCeiling)
+    // The public board's read, to spot genuine sleepers (we see more than the book).
+    const analystPerceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium)
+    // Absolute quality floor: only flag prospects who project as a genuine NHL
+    // player (≥3★ = bottom-six / 3rd-pair regular). An AHL/fringe ceiling is never
+    // "one to watch", no matter how he's trending.
+    if (potStars < 3) return null
+    const highCeiling = potStars >= 3.5                 // middle-six / 2nd-pair and up
+    const sleeper = ourCeiling - analystPerceived >= 5  // our read sits above the book
+    if (!highCeiling && !sleeper) return null
+
+    // Respect the covering scout's recruitment-focus bar — he won't bother
+    // flagging a prospect below the minimum potential the GM set for him.
+    const scout = this.scoutCovering(p)
+    if (scout && potStars < scout.minPotentialStars) return null
+
+    const role = ceilingRoleShort(ourCeiling, p.position)
+    const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
+    const reason =
+      sleeper ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
+      : `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
+    const scoutName = scout?.name ?? 'Your scouts'
+    const foundDate = dayToDateISO(this.year, day)
+
+    this.pushNews('scouting', `Scout report: ${p.name}`,
+      `${scoutName} flagged ${p.name} (${p.age}, ${p.position}) as one to watch — ${reason} Open the Scouting Centre for the full report.`,
+      { playerId: p.id as string })
+    return { playerId: p.id as string, ...(scout ? { scoutId: scout.scoutId } : {}), scoutName, foundDate, reason, grade }
+  }
+
+  /** The scout whose current assignment scope+focus+position covers this player. */
+  private scoutCovering(p: Player): { scoutId: string; name: string; minPotentialStars: number } | null {
+    const comps = this.scoutingCompetitions()
+    const pid = p.id as string
+    const teamOfPlayer = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+    const tid = teamOfPlayer ? (teamOfPlayer.id as string) : null
+    const nationOf = (cid: string): string | undefined => comps.find((c) => c.id === cid)?.nation
+    const oppId = this.nextOpponentTeamId()
+    const faIds = this.currentFaIds()
+    const matchesFocus = (focus: ScoutFocus | undefined): boolean => {
+      if (!focus || focus === 'all') return true
+      const youth = p.age <= YOUTH_MAX_AGE
+      return focus === 'youth' ? youth : !youth
+    }
+    const pos = p.position as string
+    const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
+    const matchesPosition = (f: 'any' | 'F' | 'D' | 'G' | undefined): boolean =>
+      !f || f === 'any' ? true : f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
+    for (const s of this.scouting.assignments) {
+      const t = s.target
+      let inScope = false
+      if (t.kind === 'player') inScope = t.playerId === pid
+      else if (t.kind === 'draftClass') inScope = !!draftEligibility(p.age, !!p.nhlDrafted)
+      else if (t.kind === 'freeAgents') inScope = faIds.has(pid)
+      else if (t.kind === 'nextOpponent') inScope = !!tid && tid === oppId
+      else if (tid && t.kind === 'team') inScope = t.teamId === tid
+      else if (tid && t.kind === 'competition') { const c = comps.find((x) => x.id === t.competitionId); inScope = !!c?.teamIds.includes(tid) }
+      else if (tid && t.kind === 'nation') { const c = comps.find((x) => x.teamIds.includes(tid)); inScope = !!c && nationOf(c.id) === t.nation }
+      if (inScope && matchesFocus(s.focus) && matchesPosition(s.positionFilter)) {
+        return { scoutId: s.scoutId, name: s.name, minPotentialStars: s.minPotentialStars ?? 0 }
+      }
+    }
+    return null
+  }
+
+  /** Best-guess league abbreviation for a player, for NHLe-based projection. */
+  private leagueAbbrevForPlayer(p: Player): string {
+    const team = [...this.data.teams.values()].find((t) => t.roster.includes(p.id as PlayerId))
+    if (!team) return 'NHL'
+    const tid = team.id as string
+    if (this.data.league.teams.some((id) => id as string === tid)) return 'NHL'
+    const comp = (this.data.league.competitions ?? []).find((c) => c.teamIds.some((id) => id as string === tid))
+    return comp?.abbrev ?? 'NHL'
+  }
+
+  /** Max scouts the club will carry (soft cap for the Job Market). */
+  private maxScouts(): number {
+    return Math.max(12, this.userScoutStaff().length)
+  }
+
+  /** The user club's staff scouts — the deployable scouting roster. */
+  private userScoutStaff(): StaffMember[] {
+    return this.getTeamStaff(this.userTeamId as string).scouts
+  }
+
+  /** Keep the deployable assignment roster in lock-step with the staff scouts,
+   *  so every hired scout (incl. imported ones) is assignable. */
+  private syncScoutRoster(): void {
+    const nations = SCOUT_SPECIALTY_NATIONS as readonly string[]
+    syncAssignmentsToScouts(this.scouting, this.userScoutStaff().map((s) => ({
+      id: s.id,
+      name: s.name,
+      rating: s.rating,
+      judgment: s.judgment,
+      ...(s.specialty && nations.includes(s.specialty) ? { specialtyNation: s.specialty } : {}),
+      salary: scoutSalary(s.rating),
+    })))
+  }
+
   getScouting(): ScoutingView {
+    this.syncScoutRoster()
     return buildScoutingView({
       ...this.ctx(),
       scouting: this.scouting,
       draftProspectIds: this.allDraftProspectIds(),
+      draftRankById: this.getDraftRankings().fullRankById,
+      competitions: this.scoutingCompetitions(),
+      competitionMeta: (this.data.league.competitions ?? []).map((c) => ({ id: c.id, name: c.name, abbrev: c.abbrev, nation: c.nation })),
+      nextOpponentId: this.nextOpponentTeamId(),
+      maxScouts: this.maxScouts(),
+      scoutMarket: generateScoutCandidates(this.rngFor(7720), 6).filter(
+        (c) => !this.scouting.assignments.some((s) => s.scoutId === c.id)
+      ),
     })
   }
 
-  assignScoutTarget(scoutId: string, target: ScoutTarget): void {
-    assignScout(this.scouting, scoutId, target)
+  assignScoutTarget(
+    scoutId: string, target: ScoutTarget, focus?: ScoutFocus,
+    positionFilter?: 'any' | 'F' | 'D' | 'G', minPotentialStars?: number,
+  ): void {
+    assignScout(this.scouting, scoutId, target, focus, {
+      ...(positionFilter !== undefined ? { positionFilter } : {}),
+      ...(minPotentialStars !== undefined ? { minPotentialStars } : {}),
+    })
+  }
+
+  /** Hire a scout from the market — joins the club's staff and becomes deployable. */
+  hireScoutFromMarket(candidateId: string): { ok: boolean; message?: string } {
+    if (this.userScoutStaff().length >= this.maxScouts()) {
+      return { ok: false, message: `Your scouting department is full (max ${this.maxScouts()} scouts).` }
+    }
+    const cand = generateScoutCandidates(this.rngFor(7720), 6).find((c) => c.id === candidateId)
+    if (!cand || this.userScoutStaff().some((s) => s.id === candidateId)) {
+      return { ok: false, message: 'That scout is no longer available.' }
+    }
+    this.userScoutStaff().push({
+      id: cand.id,
+      name: cand.name,
+      role: 'scout',
+      rating: cand.rating,
+      judgment: cand.judgment,
+      ...(cand.specialtyNation ? { specialty: cand.specialtyNation } : {}),
+      demeanor: 'analytical',
+    })
+    this.syncScoutRoster()
+    this.pushNews('scouting', `Hired ${cand.name} as a scout`,
+      `${cand.name} joins the scouting department${cand.specialtyNation ? ` (specialises in ${cand.specialtyNation})` : ''}. Assign him a region or league from the Scouting screen.`,
+      {})
+    return { ok: true }
+  }
+
+  /** Resolve a scout's assignment scope to the player ids it covers. */
+  private resolveScopeIds(target: ScoutTarget): string[] {
+    const comps = this.scoutingCompetitions()
+    const rostersOf = (teamIds: Iterable<string>): string[] => {
+      const out: string[] = []
+      for (const tid of teamIds) { const t = this.data.teams.get(tid as TeamId); if (t) for (const id of t.roster) out.push(id as string) }
+      return out
+    }
+    switch (target.kind) {
+      case 'team': return rostersOf([target.teamId])
+      case 'division': {
+        const ids: string[] = []
+        for (const [tid, t] of this.data.teams) if ((t as { divisionId?: string }).divisionId === target.divisionId) ids.push(...rostersOf([tid as string]))
+        return ids
+      }
+      case 'competition': { const c = comps.find((x) => x.id === target.competitionId); return c ? rostersOf(c.teamIds) : [] }
+      case 'nation': { const set = new Set<string>(); for (const c of comps) if (c.nation === target.nation) for (const t of c.teamIds) set.add(t); return rostersOf(set) }
+      case 'player': return [target.playerId]
+      case 'nextOpponent': { const opp = this.nextOpponentTeamId(); return opp ? rostersOf([opp]) : [] }
+      case 'draftClass': return [...this.allDraftProspectIds()]
+      case 'freeAgents': return [...this.currentFaIds()]
+      default: return []
+    }
+  }
+
+  /** Full profile for one of the club's scouts (attributes, assignment, intel). */
+  getScoutProfile(scoutId: string): import('./views').ScoutProfileView | null {
+    this.syncScoutRoster()
+    const staff = this.userScoutStaff().find((s) => s.id === scoutId)
+    const asg = this.scouting.assignments.find((a) => a.scoutId === scoutId)
+    if (!staff || !asg) return null
+    const card = this.getScouting().scouts.find((s) => s.scoutId === scoutId)
+
+    const a = staff.attributes ?? {}
+    const ATTR: Array<[keyof typeof a, string]> = [
+      ['judgingPlayers', 'Judging Ability'], ['judgingPotential', 'Judging Potential'],
+      ['tactics', 'Tactical Knowledge'], ['developingYoungsters', 'Working w/ Youth'],
+      ['patience', 'Patience'], ['discipline', 'Discipline'],
+      ['manManagement', 'Man Management'], ['motivating', 'Determination'],
+    ]
+    const attributes = ATTR
+      .filter(([k]) => typeof a[k] === 'number')
+      .map(([k, label]) => ({ label, value: a[k] as number }))
+
+    // The full, real history of every player THIS scout has personally watched —
+    // not the current-scope aggregate (which made one in-scope name show up on
+    // every scout's list). The client filters/sorts this list.
+    const teamByPlayer = new Map<string, { abbr: string }>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) teamByPlayer.set(id as string, { abbr: t.abbreviation })
+    const scouted = playersSeenByScout(this.scouting, scoutId)
+      .map((id) => ({ id, k: knowledgeOf(this.scouting, id) }))
+      .sort((x, y) => y.k - x.k)
+      .map(({ id, k }) => {
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p) return null
+        return {
+          playerId: id, name: p.name, position: p.position, age: p.age,
+          teamAbbr: teamByPlayer.get(id)?.abbr ?? 'FA',
+          ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+          knowledge: Math.round(k),
+          currentStars: overallToStars(ratedOverall(p)),
+          potentialStars: overallToStars(this.scoutedCeilingOf(p)),
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+
+    const finds = (this.scouting.recommendations ?? [])
+      .filter((r) => (r.scoutId ? r.scoutId === scoutId : r.scoutName === staff.name))
+      .map((r) => ({ playerId: r.playerId, name: this.data.players.get(asPlayerId(r.playerId))?.name ?? '—', grade: r.grade, reason: r.reason, foundDate: r.foundDate }))
+
+    return {
+      scoutId,
+      name: staff.name,
+      ...(staff.faceId !== undefined ? { faceId: staff.faceId } : {}),
+      rating: staff.rating,
+      judgment: staff.judgment,
+      ...(asg.specialtyNation ? { specialtyNation: asg.specialtyNation } : {}),
+      ...(asg.salary !== undefined ? { salary: asg.salary } : {}),
+      ...(staff.demeanor ? { demeanor: staff.demeanor } : {}),
+      attributes,
+      assignmentLabel: card?.assignmentLabel ?? '—',
+      focusLabel: card?.focusLabel ?? 'All players',
+      coverage: card?.coverage ?? scopeIds.length,
+      scouted,
+      finds,
+    }
+  }
+
+  /** Release a scout from the club's staff. */
+  fireScoutFromStaff(scoutId: string): { ok: boolean; message?: string } {
+    const staff = this.userScoutStaff()
+    if (staff.length <= 1) return { ok: false, message: 'You must keep at least one scout.' }
+    const i = staff.findIndex((s) => s.id === scoutId)
+    if (i < 0) return { ok: false, message: 'No such scout.' }
+    staff.splice(i, 1)
+    this.scouting.assignments = this.scouting.assignments.filter((s) => s.scoutId !== scoutId)
+    this.syncScoutRoster()
+    return { ok: true }
   }
 
   getTactics(): TacticsView {
@@ -5222,7 +6597,7 @@ export class Career {
         position: p.position,
         age: p.age,
         currentStars: overallToStars(ratedOverall(p)),
-        potentialStars: overallToStars(agedPotential(p)),
+        potentialStars: overallToStars(this.scoutedCeilingOf(p)),
       })
       const notables = [...pool]
         .sort((a, b) => ratedOverall(b) - ratedOverall(a))
@@ -5292,7 +6667,7 @@ export class Career {
         position: p.position,
         age: p.age,
         currentStars: overallToStars(ratedOverall(p)),
-        potentialStars: overallToStars(agedPotential(p)),
+        potentialStars: overallToStars(this.scoutedCeilingOf(p)),
       }
     }
 
@@ -5377,6 +6752,45 @@ export class Career {
    *  outcome projection (P(NHLer) / P(star)). Early in the year it leans on last
    *  season (so the preliminary board already reflects production); it shifts to
    *  the current campaign as games accrue. */
+  /** Our scouts' fog-aware read of a player's ceiling (overall pts). Exact for
+   *  own/fully-scouted players; a biased, knowledge+judgment-narrowed estimate
+   *  otherwise — the same read the profile's POTENTIAL stars and grade show, so
+   *  the ceiling role and draft verdict never reveal the hidden true potential. */
+  private scoutedCeilingOf(p: Player): number {
+    const pid = p.id as string
+    if (this.userTeam.roster.includes(asPlayerId(pid))) return agedPotential(p)
+    return this.scoutedCeilingWith(p, knowledgeOf(this.scouting, pid), accuracyOf(this.scouting, pid))
+  }
+
+  /** How badly the user's roster needs a position group — quality bodies (overall
+   *  ≥ 68) at that group vs a target depth, for the prospect-grade need term. */
+  private positionNeed(position: string): NeedLevel {
+    const group: 'C' | 'W' | 'D' | 'G' =
+      position === 'G' ? 'G' : (position === 'D' || position === 'LD' || position === 'RD') ? 'D' : position === 'C' ? 'C' : 'W'
+    const target = group === 'C' ? 3 : group === 'W' ? 5 : group === 'D' ? 5 : 2
+    let quality = 0
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (!p || ratedOverall(p) < 68) continue
+      const g = p.position === 'G' ? 'G' : (p.position === 'D' || p.position === 'LD' || p.position === 'RD') ? 'D' : p.position === 'C' ? 'C' : 'W'
+      if (g === group) quality++
+    }
+    if (quality < target - 1) return 'urgent'
+    if (quality < target) return 'need'
+    if (quality > target + 2) return 'surplus'
+    return 'ok'
+  }
+
+  /** scoutedCeilingOf when knowledge + accuracy are already in hand — avoids the
+   *  O(n) knowledgeOf/accuracyOf linear scans in hot loops (e.g. the draft board). */
+  private scoutedCeilingWith(p: Player, knowledge: number, accuracy: number): number {
+    const ceiling = agedPotential(p)
+    if (knowledge >= 95) return ceiling
+    const { lo, hi } = maskedCeiling(ceiling, knowledge, p.id as string, accuracy)
+    const biased = (lo + hi) / 2 + scoutFormBias(p.form ?? 0, knowledge, accuracy)
+    return Math.max(1, Math.min(99, Math.round(biased)))
+  }
+
   private prospectEval(p: Player, abbrev: string, noise: number): { premium: number; projection: ProspectProjection } {
     const pid = p.id as PlayerId
     const liveGp = this.worldSim.gp.get(pid) ?? 0
@@ -5390,7 +6804,7 @@ export class Career {
     const isD = p.position === 'D'
     const leagueFactor = nhleFactorByAbbrev(abbrev)
     return {
-      premium: productionPremium(ppg, isD, leagueFactor),
+      premium: productionPremium(ppg, isD, leagueFactor, p.age),
       projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: pid as string }),
     }
   }
@@ -5410,12 +6824,20 @@ export class Career {
     board: Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>
     radarRows: Array<Omit<DraftRankRowView, 'rank'>>
   } {
-    const comps = this.data.league.competitions ?? []
     const board = new Map<string, { row: Omit<DraftRankRowView, 'rank'>; input: RankInput; player: Player }>()
     const radarRows: Array<Omit<DraftRankRowView, 'rank'>> = []
     const hasAnalyst = this.hasDataAnalyst()
     const analystNoise = this.analystProjectionNoise()
-    for (const c of comps) {
+    // The board ranks the AMATEUR draft pool only — junior / college / European
+    // feeder leagues. Players on NHL or AHL rosters are signed pros and are not in
+    // the draft (you can't draft a contracted player), so the pro tiers are never
+    // scanned. This matches the pool the scouts surface from (allDraftProspectIds).
+    const compsRaw = this.data.league.competitions ?? []
+    const boardLeagues: Array<{ abbrev: string; teamIds: readonly TeamId[] }> =
+      compsRaw
+        .filter((c) => !isProLeagueAbbrev(c.abbrev))
+        .map((c) => ({ abbrev: c.abbrev, teamIds: c.teamIds }))
+    for (const c of boardLeagues) {
       for (const tid of c.teamIds) {
         const t = this.data.teams.get(tid)
         if (!t) continue
@@ -5434,10 +6856,15 @@ export class Career {
           // ding (missed viewings + health questions) — injuries move the board.
           const injuryDing = p.injuryStatus ? 4 : 0
           const evalRes = this.prospectEval(p, c.abbrev, analystNoise)
-          // Consensus scouting error: even the aggregate board misreads talent —
-          // a persistent per-player miss (±~16 ceiling pts) that, with development
-          // variance, brings draft-rank↔outcome down to the real ~0.45 range.
-          const consensusError = hashSigned(id + ':consensus') * 16
+          // How the public board deviates from a prospect's raw tools. It is NOT all
+          // noise: part is a real "analyst edge" — a stable factor the market reads
+          // that actually pays out in development (see driftYouthCeiling) — so the
+          // analysts legitimately beat your scouts on some prospects and whiff on
+          // others, rather than being a uniformly over-hyped wrong version. The rest
+          // is genuine misread. Both shrink the louder a prospect's production is
+          // (analysts aren't blind to a monster season).
+          const errorScale = Math.max(0.4, 1 - Math.max(0, evalRes.premium) / 24 * 0.6)
+          const consensusError = (analystEdge(id) * 6 + hashSigned(id + ':consensus') * 13) * errorScale
           const perceived = perceivedCeiling(agedPotential(p), p.age, evalRes.premium - injuryDing + consensusError)
           // Projection probabilities are the Data Analyst's product — shown only
           // when one is on staff, and noisier the weaker the analyst.
@@ -5454,6 +6881,7 @@ export class Career {
             eligibility: elig,
             currentStars: overallToStars(ratedOverall(p)),
             potentialStars: overallToStars(perceived),
+            perceivedCeiling: Math.round(perceived),
             ...(isSkater ? { pNHLer: evalRes.projection.pNHLer, pStar: evalRes.projection.pStar } : {}),
           }
           if (elig === 'radar') radarRows.push(row)
@@ -5498,30 +6926,60 @@ export class Career {
       : 'Final pre-draft ranking'
 
     // ── Your scouts' own board ──────────────────────────────────────────────
-    // Consensus value (noise-free, ceiling-weighted) gives the baseline rank;
-    // your staff's signal (intangibles + underlying game, knowledge-scaled)
-    // re-ranks it. Because elite prospects sit on big value gaps, the same
-    // signal barely moves them but swings the bunched mid/late board — so your
-    // edge naturally grows the deeper you go. Each individual scout then layers
-    // their own specialty bias + judgment-scaled noise on top → distinct boards.
+    // The public CONSENSUS value (analyst perceived ceiling) is only the baseline
+    // we measure AGAINST — the movement arrows show how far our staff moves a
+    // prospect off the public board. Our own board ranks on the GROUNDED value:
+    // the hidden TRUE ceiling where we've put eyes on him, deferring to the public
+    // read only where we haven't scouted. This is the same grounded ceiling that
+    // drives his prospect grade and the per-player "Your scouts" verdict, so the
+    // board can never contradict them — a prospect we grade a depth player can't
+    // sit above one we grade a franchise talent just because the book is high on
+    // him. Each scout then layers their own specialty bias + judgment-scaled noise
+    // on top → distinct boards, but always anchored to what our staff has seen.
     const cands = [...board.values()]
-    const consensusValueOf = (c: Cand): number => c.input.ceiling * 0.74 + c.input.current * 0.26
+    // PERF: precompute knowledge + ceiling + VALUE once per candidate (the O(n)
+    // knowledgeOf/accuracyOf scans run n times here, never inside the sort). The
+    // sort + every board then read O(1) map lookups — without this, the comparator
+    // recomputed scoutedCeilingOf (→ knowledgeOf linear scan) ~n·log n × boards,
+    // which is what made the rankings + every player profile crawl.
+    const ownIds = new Set(this.userTeam.roster.map((x) => x as string))
     const meta = new Map<string, { knowledge: number; deptRaw: number; composites: Record<string, number> }>()
+    const ceilingById = new Map<string, number>()
+    const valueById = new Map<string, number>()
     for (const c of cands) {
       const id = c.row.playerId
-      const isOwn = this.userTeam.roster.includes(asPlayerId(id))
+      const isOwn = ownIds.has(id)
       const knowledge = isOwn ? 100 : knowledgeOf(this.scouting, id)
+      const accuracy = isOwn ? 1 : accuracyOf(this.scouting, id)
+      // The Potential column shows OUR fog-aware read.
+      const ceil = isOwn || knowledge >= 95 ? agedPotential(c.player) : this.scoutedCeilingWith(c.player, knowledge, accuracy)
+      ceilingById.set(id, ceil)
+      // VALUE (the sort key) blends our read toward the PUBLIC consensus ceiling by
+      // how much we've actually seen him: a well-scouted prospect is ranked on our
+      // own read (so he moves off the board), but a prospect nobody has watched
+      // sits at consensus — your staff has no independent reason to move him. This
+      // is what keeps the board from flinging unseen names 100+ spots. Faded for
+      // goalies + docked for re-entries like a real board; current ability folded in.
+      const kw = isOwn ? 1 : Math.max(0, Math.min(1, knowledge / 100))
+      const valueCeil = ceil * kw + c.input.ceiling * (1 - kw)
+      const base = valueCeil * 0.74 + c.input.current * 0.26
+      valueById.set(id, base * positionFactor(c.input.position) - reentryPenalty(c.input.eligibility))
       const deptRaw = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length).raw
       meta.set(id, { knowledge, deptRaw, composites: c.player.composites as unknown as Record<string, number> })
     }
+    const valueOf = (c: Cand): number => valueById.get(c.row.playerId) ?? 0
+    // The "Cons." column = the ACTUAL analyst board order (same `ordered` the
+    // published rankings use), so the movement arrows compare our board against
+    // the exact consensus the user sees on the Analyst tab — not a parallel
+    // re-derivation that could disagree.
     const consensusRankOf = new Map<string, number>()
-    ;[...cands].sort((a, b) => consensusValueOf(b) - consensusValueOf(a))
-      .forEach((c, i) => consensusRankOf.set(c.row.playerId, i + 1))
+    ordered.forEach((id, i) => consensusRankOf.set(id, i + 1))
 
-    // Build a board (top 64) from a per-candidate value function.
-    const buildBoard = (valueOf: (c: Cand) => number): ScoutBoardRowView[] =>
+    // Build a board (top 64): VALUE first (guarantees the monotonicity rule), then
+    // the scout signal as a tie-breaker for near-equal prospects only.
+    const buildBoard = (signalOf: (c: Cand) => number): ScoutBoardRowView[] =>
       [...cands]
-        .sort((a, b) => valueOf(b) - valueOf(a))
+        .sort((a, b) => valueOf(b) - valueOf(a) || signalOf(b) - signalOf(a))
         .slice(0, 64)
         .map((c, i) => {
           const id = c.row.playerId
@@ -5529,16 +6987,19 @@ export class Career {
           const consensusRank = consensusRankOf.get(id) ?? yourRank
           const movement = consensusRank - yourRank
           const verdict: ScoutBoardRowView['verdict'] = movement >= 3 ? 'higher' : movement <= -3 ? 'lower' : 'inline'
-          return { rank: yourRank, ...c.row, consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
+          // The Potential column on OUR board shows OUR fog-aware read (c.row's is
+          // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
+          return { rank: yourRank, ...c.row, potentialStars: overallToStars(ceilingById.get(id) ?? agedPotential(c.player)), consensusRank, movement, verdict, seen: (meta.get(id)?.knowledge ?? 0) >= 35 }
         })
 
-    // Staff consensus board: department signal, knowledge-scaled.
+    // Staff consensus board: department signal breaks ties between equal-value
+    // prospects (intangibles + underlying game), knowledge-scaled.
     const scoutBoard = buildBoard((c) => {
       const m = meta.get(c.row.playerId)!
-      return consensusValueOf(c) + m.deptRaw * (m.knowledge / 100)
+      return m.deptRaw * (m.knowledge / 100)
     })
 
-    // Per-scout boards: each scout adds their own bias + judgment-scaled noise.
+    // Per-scout boards: each scout's own bias + judgment-scaled noise as the tie-break.
     const scouts = this.getTeamStaff(this.userTeamId as string).scouts
     const scoutBoards = scouts.map((s) => ({
       scoutId: s.id as string,
@@ -5546,11 +7007,13 @@ export class Career {
       rows: buildBoard((c) => {
         const m = meta.get(c.row.playerId)!
         const bias = scoutDraftBias(s, c.player, m.composites)
-        return consensusValueOf(c) + (m.deptRaw + bias) * (m.knowledge / 100)
+        return (m.deptRaw + bias) * (m.knowledge / 100)
       }),
     }))
 
-    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards }
+    const fullRankById: Record<string, number> = {}
+    ordered.forEach((id, i) => { fullRankById[id] = i + 1 })
+    return { phase, phaseLabel, draftYear: this.year + 1, rankings, radar, scoutBoard, scoutBoards, fullRankById }
   }
 
   getStats(): StatsView {
@@ -5909,11 +7372,17 @@ export class Career {
         onClockIndex >= 0 && d.order[onClockIndex].ownerTeamId === this.userTeamId,
       prospects: (cls?.prospects ?? []).map((pr) => {
         const p = this.resolve(pr.playerId)
+        const pid = pr.playerId as string
+        // Fog-gate potential by YOUR scouting: a prospect you watched all year
+        // reads sharply; one you ignored is a guess. Makes scouting matter at the draft.
+        const know = knowledgeOf(this.scouting, pid)
+        const band = maskedCeiling(agedPotential(p), know, pid, accuracyOf(this.scouting, pid))
         return {
           ...badge(p),
           rank: pr.rank,
-          potentialStars: potentialStars(p),
-          drafted: taken.has(pr.playerId as string),
+          potentialStars: overallToStars(Math.round((band.lo + band.hi) / 2)),
+          knowledge: Math.round(know),
+          drafted: taken.has(pid),
         }
       }),
       complete: d.selections.length >= d.order.length,
@@ -6218,7 +7687,7 @@ export class Career {
         goals: t.goals,
         assists: t.assists,
         points: t.goals + t.assists,
-        plusMinus: 0,
+        plusMinus: t.plusMinus ?? 0,
         savePct: sa > 0 ? t.saves / sa : 0,
         toi: t.toi,
         goalsAgainst: t.goalsAgainst,
@@ -6693,6 +8162,10 @@ export class Career {
       scouting: {
         knowledge: [...this.scouting.knowledge],
         assignments: [...this.scouting.assignments],
+        recommendations: [...(this.scouting.recommendations ?? [])],
+        seen: [...(this.scouting.seen ?? [])],
+        judgment: [...(this.scouting.judgment ?? [])],
+        scoutHistory: (this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, [...pids]] as [string, string[]]),
       },
       arcs: structuredClone(this.arcsState),
       records: structuredClone(this.recordsState),
@@ -6731,8 +8204,10 @@ export class Career {
         ? [...this.teamStaffMap.entries()].map(([k, v]) => [k, structuredClone(v)] as [string, TeamStaff])
         : undefined,
       playerRatings: [...this.playerRatings.entries()].map(([k, v]) => [k, [...v]] as [string, number[]]),
+      seasonRatingTotals: [...this.seasonRatingTotals.entries()].map(([k, v]) => [k, { ...v }] as [string, { sum: number; n: number }]),
       practiceState: structuredClone(this.practiceState),
       hireableStaff: [...this.hireableStaff],
+      ...(this.coachMarket ? { coachMarket: structuredClone(this.coachMarket) } : {}),
       boardState: structuredClone(this.boardState),
       rivalriesState: structuredClone(this.rivalriesState),
       specialTeams: structuredClone(this.specialTeams),
@@ -6782,6 +8257,10 @@ export class Career {
       career.scouting = {
         knowledge: [...snapshot.scouting.knowledge],
         assignments: [...snapshot.scouting.assignments],
+        recommendations: [...(snapshot.scouting.recommendations ?? [])],
+        seen: [...(snapshot.scouting.seen ?? [])],
+        judgment: [...(snapshot.scouting.judgment ?? [])],
+        scoutHistory: [...(snapshot.scouting.scoutHistory ?? [])],
       }
     } else {
       career.scouting = createInitialScouting({
@@ -6881,11 +8360,19 @@ export class Career {
         career.playerRatings.set(k, [...v])
       }
     }
+    if (snapshot.seasonRatingTotals) {
+      for (const [k, v] of snapshot.seasonRatingTotals) {
+        career.seasonRatingTotals.set(k, { ...v })
+      }
+    }
     if (snapshot.practiceState) {
       career.practiceState = structuredClone(snapshot.practiceState)
     }
     if (snapshot.hireableStaff) {
       career.hireableStaff = [...snapshot.hireableStaff]
+    }
+    if (snapshot.coachMarket) {
+      career.coachMarket = structuredClone(snapshot.coachMarket)
     }
 
     // Restore Wave 4 franchise drama + league hub state (all optional for backward compat).
@@ -6980,6 +8467,8 @@ export class Career {
         return !!p && p.age < 38
       })
     }
+    // Ensure every staff scout is deployable (adds any not yet in the roster).
+    career.syncScoutRoster()
     return career
   }
 }

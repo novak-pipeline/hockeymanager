@@ -24,7 +24,9 @@ import type {
 } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import type { GameRules } from '@engine/shared/rules'
-import { emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { creditPlusMinus, emptyStat, type GameOutcome, type GamePlayerStat } from '@engine/shared/outcome'
+import { coachFitMultiplier } from '@engine/league/coachProfile'
+import { CALIBRATION_TARGETS } from '@calibrate/index'
 
 export type { GamePlayerStat } from '@engine/shared/outcome'
 
@@ -33,11 +35,31 @@ const REGULATION_PERIODS = 3
 const SHIFT_SECONDS = 40
 const OT_SECONDS = 300
 
-// League-average targets the coefficients aim at (calibration will refine).
-const SHOTS_PER_TEAM_PER_GAME = 30
+// League-average targets the coefficients aim at, read from the NHL-derived
+// calibration data rather than hardcoded.
+const SHOTS_PER_TEAM_PER_GAME = CALIBRATION_TARGETS.perTeamPerGame.shotsOnGoal
 const SHIFTS_PER_GAME = (PERIOD_SECONDS * REGULATION_PERIODS) / SHIFT_SECONDS
-const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME
-const BASE_SHOT_CONVERSION = 0.095 // ~ league shooting %
+
+/**
+ * Per-shift rate and per-shot conversion are NOT simply the league averages.
+ *
+ * Both get multiplied by ratio terms built from the on-ice units — shot rate by
+ * (offense/50)·(50/defense), conversion by the shooter's finishing and the
+ * danger draw. Those ratios do not average to 1 across a league: E[x/50 · 50/y]
+ * exceeds 1 whenever x and y vary (Jensen), and the danger and finishing terms
+ * add their own positive bias. Feeding in the raw league average therefore
+ * overshoots — measured at 31.5 shots and 11.3 sh% against targets of 30.0 and
+ * 10.2%.
+ *
+ * These two constants divide that bias back out. They are calibration outputs,
+ * measured by `quickSim.calibration.test.ts`, not free parameters: if the rate
+ * model changes, re-measure and update them, and that test will hold the result
+ * to within 10% of the NHL targets.
+ */
+const SHOT_RATE_BIAS = 1.05
+const CONVERSION_BIAS = 1.206
+const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME / SHOT_RATE_BIAS
+const BASE_SHOT_CONVERSION = CALIBRATION_TARGETS.shooting.shootingPct / CONVERSION_BIAS
 const PENALTY_CHANCE_PER_SHIFT = 0.045
 const PENALTY_SECONDS = 120
 const PP_SHOT_MULT = 1.6
@@ -148,6 +170,12 @@ interface Ctx {
   rng: Rng
   stream: GameEvent[]
   stats: Map<PlayerId, GamePlayerStat>
+  /** Baseline rating this game's scoring is judged against. Defaults to the global
+   *  LEAGUE_AVG (NHL). A weaker league passes its OWN lower average so its best
+   *  players read as stars RELATIVE to their competition and produce realistic
+   *  point totals — otherwise a junior loop of sub-50 skaters scores almost
+   *  nothing and its leader tops out around 0.4 PPG. */
+  leagueAvg: number
 }
 
 function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
@@ -226,8 +254,9 @@ function simShift(
   const offense = avg(atk.skaters, (c) => c.scoring * 0.6 + c.playmaking * 0.4)
   const defense = avg(def.skaters, (c) => c.defensiveZone * 0.6 + c.takeaway * 0.4)
 
+  const lgAvg = ctx.leagueAvg
   const rate =
-    BASE_SHOTS_PER_SHIFT * (offense / LEAGUE_AVG) * (LEAGUE_AVG / Math.max(20, defense)) * strengthMult
+    BASE_SHOTS_PER_SHIFT * (offense / lgAvg) * (lgAvg / Math.max(20 * lgAvg / LEAGUE_AVG, defense)) * strengthMult
   const shots = poisson(rng, rate)
 
   for (let s = 0; s < shots; s++) {
@@ -260,11 +289,13 @@ function simShift(
     goalieStat.shotsAgainst++
     goalieStat.xgAgainst = (goalieStat.xgAgainst ?? 0) + shotXgApprox
 
-    const finish = shooter.composites.scoring / LEAGUE_AVG
-    const goaliePull = (goalie.composites.goaltending - LEAGUE_AVG) / 220
+    const finish = shooter.composites.scoring / lgAvg
+    const goaliePull = (goalie.composites.goaltending - lgAvg) / 220
+    // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
+    const cf = attacking.team.coachFit === undefined ? 1 : coachFitMultiplier(attacking.team.coachFit)
     const pGoal = Math.max(
       0.01,
-      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull))
+      Math.min(0.6, BASE_SHOT_CONVERSION * (0.4 + danger * 1.3) * finish * (1 - goaliePull) * cf)
     )
 
     if (rng.chance(pGoal)) {
@@ -278,6 +309,12 @@ function simShift(
         const primaryA = stat(ctx, assists[0].id)
         primaryA.xA = (primaryA.xA ?? 0) + shotXgApprox
       }
+      creditPlusMinus(
+        goalStrength,
+        atk.skaters.map((p) => p.id),
+        def.skaters.map((p) => p.id),
+        (id) => stat(ctx, id)
+      )
       ctx.stream.push({
         t: tShot,
         period,
@@ -382,11 +419,11 @@ function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
   const rng = ctx.rng
   const shooterSkill = (t: TeamSim): number => {
     const shooters = t.team.lines.forwards.flat().map(t.resolve)
-    return avg(shooters, (c) => c.scoring) / LEAGUE_AVG
+    return avg(shooters, (c) => c.scoring) / ctx.leagueAvg
   }
   const goalieSkill = (t: TeamSim): number => {
     const g = t.resolve(t.team.lines.goalies[0])
-    return g.composites.goaltending / LEAGUE_AVG
+    return g.composites.goaltending / ctx.leagueAvg
   }
   let h = 0
   let a = 0
@@ -416,6 +453,13 @@ export interface QuickSimOptions {
    * shootout with repeated 20-minute 5v5 sudden-death periods until a goal.
    */
   rules?: GameRules
+  /**
+   * Average skater rating of THIS game's league, used as the baseline scoring is
+   * judged against. Defaults to the global NHL average (50) — pass a weaker
+   * league's own average so its stars produce realistic totals relative to their
+   * competition (juniors/Europe). NHL and AHL keep the default.
+   */
+  leagueAvg?: number
 }
 
 /**
@@ -450,6 +494,12 @@ function simEmptyNetPhase(
     stat(ctx, scorer.id).goals++
     for (const a of assists) stat(ctx, a.id).assists++
     stat(ctx, leadingOn.goalie.id).shotsAgainst++ // trailing goalie is pulled; no goalie stat
+    creditPlusMinus(
+      'en',
+      leadingOn.skaters.map((p) => p.id),
+      trailingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,
@@ -468,6 +518,14 @@ function simEmptyNetPhase(
     for (const a of assists) stat(ctx, a.id).assists++
     stat(ctx, leadingOn.goalie.id).shotsAgainst++
     stat(ctx, leadingOn.goalie.id).goalsAgainst++
+    // The trailing side scores 6-on-5 with its own net empty: even strength for
+    // scoring purposes, so both sides take the swing.
+    creditPlusMinus(
+      'ev',
+      trailingOn.skaters.map((p) => p.id),
+      leadingOn.skaters.map((p) => p.id),
+      (id) => stat(ctx, id)
+    )
     ctx.stream.push({
       t: tEN,
       period,
@@ -488,7 +546,7 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const ctx: Ctx = { rng, stream: [], stats: new Map() }
+  const ctx: Ctx = { rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG }
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
 

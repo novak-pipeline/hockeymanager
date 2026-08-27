@@ -84,11 +84,11 @@ function coachOpenness(coach: StaffMember): number {
   const demeanor = coach.demeanor ?? ''
   let base: number
   switch (demeanor) {
-    case 'Analytical': base = 0.72; break
-    case 'Pragmatic':  base = 0.68; break
-    case 'Calm':       base = 0.60; break
-    case 'Motivator':  base = 0.52; break
-    case 'Fiery':      base = 0.40; break
+    case 'analytical': base = 0.72; break
+    case 'pragmatic':  base = 0.68; break
+    case 'calm':       base = 0.60; break
+    case 'motivator':  base = 0.52; break
+    case 'fiery':      base = 0.40; break
     default:           base = 0.55
   }
   // A very accomplished tactician trusts his own system a little more.
@@ -114,10 +114,15 @@ export function evaluateCoachSuggestion(args: {
   const fitGain = after - before
   const openness = coachOpenness(coach)
 
+  // A skilled tactician trusts his own read: he still embraces a clear
+  // improvement, but resists being pushed AWAY from what fits the roster.
+  const knowledge = coach.profile?.tacticsKnowledge ?? clamp01((coach.rating - 40) / 50)
+  const stubborn = knowledge >= 0.6
+
   const accepted =
     fitGain > 6 ||
-    (fitGain >= 0 && openness >= 0.6) ||
-    (fitGain > -4 && openness >= 0.7)
+    (fitGain >= 0 && openness >= 0.55) ||
+    (fitGain > -4 && openness >= 0.7 && !stubborn)
 
   const first = coach.name.split(' ')[0] ?? coach.name
   let response: string

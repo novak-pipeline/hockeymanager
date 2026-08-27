@@ -19,6 +19,7 @@ import type {
 import type { PracticeFocus } from '../../worker/protocol'
 import { PlayerLink, useNav } from '../components/NavContext'
 import type { ScreenId } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -389,7 +390,7 @@ function TeamHistoryTab(props: { teamId: string }): JSX.Element {
                   <div className="muted small">{l.blurb}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="mono" style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{l.peakOverall}</div>
+                  <div title="Peak ability"><OverallStars value={l.peakOverall} /></div>
                   <div className="muted small">Retired {l.retiredYear}</div>
                   <div className="small" style={{ color: l.status === 'Retired' ? 'var(--muted)' : 'var(--success)' }}>{l.status}</div>
                 </div>
@@ -648,7 +649,7 @@ function PracticeTab(): JSX.Element {
                     <tr key={row.playerId} style={{ opacity: scratched ? 0.6 : undefined }}>
                       <td><PlayerLink playerId={row.playerId} name={row.name} /></td>
                       <td className="num muted">{row.position}</td>
-                      <td className="num">{row.overall}</td>
+                      <td className="num"><OverallStars value={row.overall} /></td>
                       <td className="num">{row.condition}</td>
                       <td>
                         <button

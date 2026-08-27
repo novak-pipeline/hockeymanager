@@ -56,6 +56,7 @@ const NHLE_BY_ABBREV: Record<string, number> = {
   WHL: 0.29,
   QMJHL: 0.26, // a.k.a. LHJMQ / QMJHL
   USHL: 0.19,
+  NTDP: 0.18, // USA Hockey National Team Development Program (plays USHL + exhibitions)
   J20: 0.15, // Swedish/Finnish U20
 }
 
@@ -71,6 +72,7 @@ const NAME_KEYWORDS: Array<[RegExp, string]> = [
   [/western hockey/i, 'WHL'],
   [/quebec|lhjmq|maritimes/i, 'QMJHL'],
   [/united states hockey|\bUSHL\b/i, 'USHL'],
+  [/national team development|\bUSNTDP\b|\bNTDP\b/i, 'NTDP'],
   [/\bNCAA\b|college/i, 'NCAA'],
   [/national league|\bNL\b/i, 'NL'],
   [/extraliga/i, 'EXTRALIGA'],
@@ -131,4 +133,12 @@ export function nhlEquivalent(value: number, factor: number): number {
 export function nhleFactorByAbbrev(abbrev: string): number {
   const key = (abbrev || '').trim().toUpperCase()
   return NHLE_BY_ABBREV[key] ?? 0.30
+}
+
+/** NHL-system PRO tiers whose players are signed (drafted/contracted) and so are
+ *  NOT part of the amateur draft pool. The NHL and its AHL farm — every other
+ *  league (junior, college, European) can hold draft-eligible amateurs. */
+const PRO_LEAGUE_ABBREVS = new Set(['NHL', 'AHL'])
+export function isProLeagueAbbrev(abbrev: string): boolean {
+  return PRO_LEAGUE_ABBREVS.has((abbrev || '').trim().toUpperCase())
 }

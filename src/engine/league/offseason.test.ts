@@ -810,4 +810,27 @@ describe('aiSelectProspect', () => {
     }
     expect(run(5)).toEqual(run(5))
   })
+
+  it('needBonus drafts for need without abandoning best-available', () => {
+    // "need" is a worse-ranked prospect (rank 4) the club wants; "bpa" is rank 1.
+    const remaining: DraftProspect[] = [
+      { playerId: asPlayerId('bpa'), rank: 1 },
+      { playerId: asPlayerId('need'), rank: 4 },
+    ]
+    const needBonus = (p: DraftProspect): number => ((p.playerId as string) === 'need' ? 5 : 0)
+    const countNeed = (withBonus: boolean): number => {
+      let n = 0
+      for (let s = 0; s < 200; s++) {
+        const pick = aiSelectProspect({
+          remaining,
+          rng: new Rng(s),
+          ...(withBonus ? { needBonus } : {}),
+        })
+        if ((pick.playerId as string) === 'need') n++
+      }
+      return n
+    }
+    // The need bias lifts the thin-position prospect up the board far more often.
+    expect(countNeed(true)).toBeGreaterThan(countNeed(false))
+  })
 })

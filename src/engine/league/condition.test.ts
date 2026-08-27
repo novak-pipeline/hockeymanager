@@ -951,6 +951,38 @@ describe('repairLines', () => {
     }
   })
 
+  it('never dresses a defenceman at a forward slot while a forward can double-shift', () => {
+    // 5 healthy forwards, plenty of healthy D. Two forwards are hurt — far fewer
+    // than the 12 forward slots — so the only way to fill them all is to
+    // double-shift forwards. A D must NOT be slotted at wing/centre.
+    const fwds = Array.from({ length: 5 }, () => makePlayer('C'))
+    const defs = Array.from({ length: 8 }, () => makePlayer('D'))
+    const goalies = [makeGoalie(), makeGoalie()]
+    fwds[0].injuryStatus = { kind: 'lowerBody', gamesRemaining: 5, description: 'x' }
+    fwds[1].injuryStatus = { kind: 'upperBody', gamesRemaining: 5, description: 'y' }
+    const all = [...fwds, ...defs, ...goalies]
+    const players = new Map(all.map((p) => [p.id, p]))
+    const team = makeTeam(all.map((p) => p.id), makeLines({}))
+
+    repairLines(team, players)
+
+    for (const line of team.lines.forwards) {
+      for (const id of line) {
+        if (!id) continue
+        const p = players.get(id)!
+        expect(p.position).not.toBe('D')
+        expect(p.injuryStatus).toBeNull()
+      }
+    }
+    // And the defence pairs are still all defencemen.
+    for (const pair of team.lines.defensePairs) {
+      for (const id of pair) {
+        if (!id) continue
+        expect(players.get(id)!.position).toBe('D')
+      }
+    }
+  })
+
   it('repairLines returns false when lineup was already valid and nothing changed', () => {
     const { players, team } = buildRoster(18)
     // First repair builds a valid lineup

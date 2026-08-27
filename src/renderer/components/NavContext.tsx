@@ -23,6 +23,7 @@ export type ScreenId =
   | 'teamStats'
   | 'report'
   | 'personnel'
+  | 'jobMarket'
   | 'practice'
   | 'tactics'
   | 'finances'
@@ -46,7 +47,12 @@ export type ScreenId =
   | 'world'
   | 'worldInternational'
   | 'scouting'
+  | 'scoutingCentre'
+  | 'scoutingPlayers'
+  | 'scoutingFocus'
+  | 'scoutingCoverage'
   | 'scoutingDraft'
+  | 'scoutProfile'
   | 'dataHub'
   // Contextual (phase-gated)
   | 'draft'
@@ -74,6 +80,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'teamStats':
     case 'report':
     case 'personnel':
+    case 'jobMarket':
     case 'practice':
     case 'tactics':
     case 'finances':
@@ -97,7 +104,12 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'world':
     case 'worldInternational':
     case 'scouting':
+    case 'scoutingCentre':
+    case 'scoutingPlayers':
+    case 'scoutingFocus':
+    case 'scoutingCoverage':
     case 'scoutingDraft':
+    case 'scoutProfile':
     case 'dataHub':
     case 'draft':
     case 'offseason':
@@ -115,6 +127,8 @@ export interface NavParams {
   playerId?: string
   /** Team being browsed in the Team section. Absent = user's own club. */
   teamId?: string
+  /** Scout being viewed in the scout profile screen. */
+  scoutId?: string
 }
 
 export interface NavApi {

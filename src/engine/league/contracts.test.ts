@@ -18,6 +18,7 @@ import {
   askTerms,
   capSpace,
   capUsedFor,
+  contractStatus,
   initialPicks,
   offerAcceptable,
   processExpiries,
@@ -168,25 +169,37 @@ function giveHeadroom(team: Team, players: Map<PlayerId, Player>, extra: number)
 }
 
 describe('signPlayer', () => {
-  it('generated teams may start over the hard cap; capSpace can be negative', () => {
-    // This is real: league generation fills rosters by salary curve without
-    // enforcing the hard cap. The offseason / FA system must tolerate negative
-    // cap space (teams shed contracts during the offseason). This test
-    // documents that contract.ts never silently hides the overage.
+  it('reports negative cap space rather than hiding an overage', () => {
+    // League generation fills rosters by salary curve without enforcing the
+    // hard cap, and the offseason / FA system must tolerate negative cap space
+    // (teams shed contracts during the offseason). Drop the ceiling under an
+    // existing payroll to make the overage unambiguous — this asserts the
+    // property of capSpace itself rather than relying on generation happening
+    // to stack a team past the cap, which it no longer does.
     const data = gen()
-    // Check all four teams — at least one will be over the cap with seed 7.
-    const overCap = data.league.teams.some((id) => {
-      const t = data.teams.get(id)!
-      return capSpace(t, data.players) < 0
-    })
-    expect(overCap).toBe(true)
-    // capSpace returns the raw value; it is the caller's responsibility to act
-    // on a negative number (e.g. refuse new signings, trigger buyouts).
     const team = teamAt(data, 0)
-    const space = capSpace(team, data.players)
-    expect(typeof space).toBe('number')
+    const payroll = capUsedFor(team, data.players)
+    team.finances.salaryCap = payroll - 5_000_000
+    expect(capSpace(team, data.players)).toBe(-5_000_000)
     // capUsed is the true sum of roster salaries regardless of the cap ceiling.
     expect(capUsedFor(team, data.players)).toBe(team.finances.capUsed)
+  })
+
+  it('starts every generated team under the hard cap', () => {
+    // Before the team-caliber spread was narrowed, generation stacked talent
+    // hard enough that the salary curve (convex in overall) pushed one or two
+    // rosters past the cap on day one. Nothing enforces the cap during roster
+    // construction, so this is the regression test for that.
+    //
+    // NOTE: teams now start a long way *under* the cap — payrolls run roughly
+    // 22-59M against an 88M ceiling. That is its own calibration gap (real
+    // clubs sit within a few million of the ceiling) and is tracked as debt in
+    // CLAUDE.md; this test only pins the side that breaks the rules.
+    const data = generateLeague({ seed: 4242 })
+    for (const id of data.league.teams) {
+      const team = data.teams.get(id)!
+      expect(capSpace(team, data.players)).toBeGreaterThanOrEqual(0)
+    }
   })
 
   it('adds a free agent to the roster, sets the contract, updates capUsed', () => {
@@ -386,6 +399,57 @@ describe('aiResignDay', () => {
 
     expect(signings.find((s) => s.playerId === top.id)).toBeUndefined()
     expect(top.contract.yearsRemaining).toBe(0)
+  })
+})
+
+describe('contractStatus', () => {
+  it('classifies by age and pro service (ELC / RFA / UFA)', () => {
+    expect(contractStatus(mkSkater('a', 60, 21))).toBe('ELC') // young, no pro record
+    expect(contractStatus(mkSkater('b', 60, 25))).toBe('RFA') // under 27
+    expect(contractStatus(mkSkater('c', 60, 28))).toBe('UFA') // 27+
+    // 7+ pro seasons makes a sub-27 player a UFA on service.
+    const veteranYoung = mkSkater('d', 60, 25)
+    ;(veteranYoung as unknown as { stats: unknown[] }).stats = new Array(8).fill({})
+    expect(contractStatus(veteranYoung)).toBe('UFA')
+  })
+})
+
+describe('aiResignDay — restricted free agents', () => {
+  it('retains an expiring RFA the club would otherwise let walk as a UFA', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000 // headroom
+
+    // ovr ~52: below the UFA keeper bar (55) and not in the young-keeper branch
+    // (age > 23), so as a UFA he'd walk — but as a 25-year-old he's an RFA.
+    const rfa = mkSkater('rfa-keep', 52, 25)
+    rfa.contract.yearsRemaining = 0
+    expect(contractStatus(rfa)).toBe('RFA')
+    team.roster.push(rfa.id)
+    data.players.set(rfa.id, rfa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(rfa.contract.yearsRemaining).toBeGreaterThan(0)
+    expect(team.roster).toContain(rfa.id)
+  })
+
+  it('still lets a comparable UFA walk', () => {
+    const data = gen()
+    const userTeamId = data.league.teams[0]
+    const team = teamAt(data, 1)
+    team.finances.salaryCap = capUsedFor(team, data.players) + 10_000_000
+
+    const ufa = mkSkater('ufa-walk', 52, 30) // same ovr, but 30 → UFA, not a keeper
+    ufa.contract.yearsRemaining = 0
+    expect(contractStatus(ufa)).toBe('UFA')
+    team.roster.push(ufa.id)
+    data.players.set(ufa.id, ufa)
+
+    aiResignDay({ teams: data.teams, players: data.players, userTeamId, year: 2026, rng: new Rng(5) })
+
+    expect(ufa.contract.yearsRemaining).toBe(0)
   })
 })
 

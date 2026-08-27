@@ -196,23 +196,32 @@ export function repairLines(team: Team, players: Map<PlayerId, Player>): boolean
     else holes.push(s)
   }
 
-  // Pass 2: fill holes — best healthy unused first (position-preferred), then
-  // double-shift the best healthy skater outside the slot's own line, then
-  // (only when zero healthy skaters exist) a goalie.
+  // Pass 2: fill holes. A position-correct body ALWAYS beats a miscast one — we
+  // would sooner double-shift a forward onto a wing than drop a defenceman there
+  // (and vice versa), so a D never ends up at LW while any forward is available.
+  // Tiers per hole: (1) unused, right position; (2) double-shift, right position;
+  // (3) unused, wrong position; (4) double-shift, anyone; (5) emergency goalie.
+  const isFwd = (p: Player): boolean =>
+    p.position !== 'G' && p.position !== 'D' && p.position !== 'LD' && p.position !== 'RD'
+  const isDef = (p: Player): boolean =>
+    p.position === 'D' || p.position === 'LD' || p.position === 'RD'
+
   let unused = healthySkaters.filter((p) => !used.has(p.id))
   for (const s of holes) {
     const current = s.row[s.col]
     const lineMates = new Set(s.row.filter((id, i) => i !== s.col && id))
-    let replacement: Player | undefined
-    const fresh = unused.filter((p) => !lineMates.has(p.id)).sort(bySlotPreference(s.prefer))
-    if (fresh.length > 0) {
-      replacement = fresh[0]
-    } else {
-      const doubleShift = healthySkaters
-        .filter((p) => !lineMates.has(p.id))
-        .sort(bySlotPreference(s.prefer))
-      replacement = doubleShift[0] ?? healthyGoalies[0]
-    }
+    const wantFwd = s.prefer === 'C' || s.prefer === 'W'
+    const rightPos = (p: Player): boolean => (wantFwd ? isFwd(p) : isDef(p))
+    const pref = bySlotPreference(s.prefer)
+    const free = (pool: Player[]): Player[] => pool.filter((p) => !lineMates.has(p.id))
+
+    const replacement: Player | undefined =
+      free(unused.filter(rightPos)).sort(pref)[0] ??
+      free(healthySkaters.filter(rightPos)).sort(pref)[0] ??
+      free(unused.filter((p) => !rightPos(p))).sort(pref)[0] ??
+      free(healthySkaters).sort(pref)[0] ??
+      healthyGoalies[0]
+
     if (!replacement) continue // nobody healthy at all; leave the hole
     if (replacement.id !== current) {
       s.row[s.col] = replacement.id
@@ -318,6 +327,62 @@ export interface CoachLineupResult {
   lines: Lines
   /** Player ids who were left out (healthy but not dressed). */
   scratchIds: PlayerId[]
+  /**
+   * Why a healthy player was scratched, when it was for cause (not just depth).
+   * Surfaced to the UI so the GM understands the coach's call.
+   */
+  scratchReasons?: Record<string, 'slumping' | 'unhappy' | 'tired'>
+}
+
+/** Stable per-id float (same hash as staff.ts) for reproducible coach noise. */
+function lineupStableFloat(id: string, salt: number): number {
+  let h = 5381
+  for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) >>> 0
+  h = (Math.imul(h ^ (salt >>> 0), 0x9e3779b1) + 0x85ebca77) >>> 0
+  return (h >>> 0) / 4294967296
+}
+
+/**
+ * How much a coach moves a player up/down the depth chart for current form,
+ * morale and condition — on top of raw skill. Exactly 0 at neutral inputs
+ * (form 0, morale 50, full condition) so a roster of neutral players reproduces
+ * the old skill-only ordering. Form is the loudest lever (the drama lever);
+ * morale next; tiredness is a one-sided penalty. Form/morale scale by coach
+ * rating — a poor coach under-reacts and leaves a slumping player in too long.
+ */
+export function coachFormMoraleConditionAdj(p: Player, coach: StaffMember): number {
+  const react = Math.max(0, Math.min(1, coach.rating / 90))
+  const formAdj = Math.max(-6, Math.min(6, (p.form / 5) * 6)) * react // form is -5..5
+  const moraleAdj = Math.max(-4, Math.min(4, ((p.morale - 50) / 50) * 4)) * react
+  const condition = 100 - p.fatigue
+  const conditionAdj = condition >= 60 ? 0 : -((60 - condition) / 60) * 10
+  return formAdj + moraleAdj + conditionAdj
+}
+
+/**
+ * The coach's full evaluation of a player for lineup/roster purposes: true
+ * overall + specialty lean + form/morale/condition + a stable judgment-scaled
+ * noise. Shared by coachSetLineup and the career NHL/AHL split so both reflect
+ * the same realistic read. Deterministic.
+ */
+export function coachAdjustedScore(p: Player, coach: StaffMember): number {
+  const trueOvr = ratedOverall(p)
+  let specialtyBonus = 0
+  const spec = coach.specialty ?? ''
+  if (p.position !== 'G') {
+    if (spec === 'Offense' || spec === 'Power Play') {
+      specialtyBonus = (p.composites.scoring + p.composites.playmaking) / 2 - trueOvr
+    } else if (spec === 'Defense' || spec === 'Penalty Kill') {
+      specialtyBonus = (p.composites.defensiveZone + p.composites.takeaway) / 2 - trueOvr
+    } else if (spec === 'Player Development') {
+      specialtyBonus = p.age < 26 ? 3 : 0
+    }
+    specialtyBonus *= (90 - coach.rating) / 50
+    specialtyBonus = Math.max(-4, Math.min(4, specialtyBonus))
+  }
+  const noiseBudget = 6 * (1 - coach.judgment / 100)
+  const noise = (lineupStableFloat(p.id as string, 42) * 2 - 1) * noiseBudget
+  return trueOvr + specialtyBonus + noise + coachFormMoraleConditionAdj(p, coach)
 }
 
 /**
@@ -347,50 +412,11 @@ export function coachSetLineup(args: {
 }): CoachLineupResult {
   const { roster, coach, rng } = args
 
-  /* ── 1. Stable per-player noise from judgment ── */
-
-  // Noise budget: judgment 100 → 0, judgment 0 → 6. Kept small on purpose — a
-  // coach reshuffles borderline calls, but no coach buries a clear star two
-  // lines down. With a typical judgment (~50) this is ±3, so a 9-point overall
-  // gap (e.g. an 83 vs a 74) is never flipped.
-  const noiseBudget = 6 * (1 - coach.judgment / 100)
-
-  // Stable hash identical to staff.ts stableFloat
-  function stableFloat(playerId: string, salt: number): number {
-    let h = 5381
-    for (let i = 0; i < playerId.length; i++) {
-      h = ((h << 5) + h + playerId.charCodeAt(i)) >>> 0
-    }
-    h = (Math.imul(h ^ (salt >>> 0), 0x9e3779b1) + 0x85ebca77) >>> 0
-    return (h >>> 0) / 4294967296
-  }
-
-  function coachScore(p: Player): number {
-    const trueOvr = ratedOverall(p)
-    // Base composite weighting — specialty shifts this
-    let specialtyBonus = 0
-    const spec = coach.specialty ?? ''
-    if (p.position !== 'G') {
-      if (spec === 'Offense' || spec === 'Power Play') {
-        specialtyBonus = (p.composites.scoring + p.composites.playmaking) / 2 - trueOvr
-      } else if (spec === 'Defense' || spec === 'Penalty Kill') {
-        specialtyBonus = (p.composites.defensiveZone + p.composites.takeaway) / 2 - trueOvr
-      } else if (spec === 'Player Development') {
-        // Slightly prefer younger players with upside (potential proxy: age < 26)
-        specialtyBonus = p.age < 26 ? 3 : 0
-      }
-      // Scale specialty bonus by coach rating (weaker coaches have larger bias),
-      // then clamp so a stylistic lean nudges the order rather than upending it.
-      specialtyBonus *= (90 - coach.rating) / 50
-      specialtyBonus = Math.max(-4, Math.min(4, specialtyBonus))
-    }
-
-    // Perturb with stable noise
-    const bias = stableFloat(p.id as string, 42) * 2 - 1
-    const noise = bias * noiseBudget
-
-    return trueOvr + specialtyBonus + noise
-  }
+  /* ── 1. The coach's read of each player ── */
+  // True overall + specialty lean + form/morale/condition + judgment noise.
+  // Form/morale slide borderline players up or down and can scratch a slumping
+  // or unhappy depth player; a clear star is never buried (the swing is capped).
+  const coachScore = (p: Player): number => coachAdjustedScore(p, coach)
 
   /* ── 2. Split by position and filter healthy ── */
   const healthy = roster.filter((p) => p.injuryStatus === null)
@@ -422,22 +448,56 @@ export function coachSetLineup(args: {
     .filter((p) => !dressed.has(p.id as string))
     .map((p) => p.id)
 
-  /* ── 5. Build lines from dressed players ── */
-  // Divide 12 forwards into 4 lines of 3, alternating C/W/W.
-  // Centres first (sort centres to C slots), then fill remaining with W.
-  const centres = dressedForwards.filter((p) => p.position === 'C')
-  const wings = dressedForwards.filter((p) => p.position === 'W')
-
-  // We need 4 centres (one per line); if insufficient, promote best wing
-  while (centres.length < 4 && wings.length > 0) {
-    centres.push(wings.shift()!)
+  // Label healthy scratches that sat for cause (not just depth), so the GM sees
+  // the coach's reasoning. Tiredness > unhappiness > slump in priority.
+  const scratchReasons: Record<string, 'slumping' | 'unhappy' | 'tired'> = {}
+  for (const p of roster) {
+    if (p.injuryStatus !== null || dressed.has(p.id as string)) continue
+    if (100 - p.fatigue < 35) scratchReasons[p.id as string] = 'tired'
+    else if (p.morale < 25) scratchReasons[p.id as string] = 'unhappy'
+    else if (p.form <= -3) scratchReasons[p.id as string] = 'slumping'
   }
+
+  /* ── 5. Build lines from dressed players (position-aware) ── */
+  // Use natural centres first. If short of four, promote the most CENTRE-CAPABLE
+  // depth winger (high versatility, lowest score) — never a top scoring winger,
+  // who stays on the wing. Surplus natural centres slide out to the wing.
+  const naturalC = dressedForwards.filter((p) => p.position === 'C')
+  const naturalW = dressedForwards.filter((p) => p.position === 'W')
+  const canPlayCentre = (p: Player): boolean => (p.versatility ?? 50) >= 50
+
+  // Centre-role fitness: skill PLUS a pivot bonus for the things that make a
+  // centre rather than a winger (faceoffs, defensive responsibility). So when a
+  // club is centre-deep, its best two-way pivots take the dot and a pure
+  // playmaking centre slides to the wing where his offence plays up.
+  const pivotBonus = (p: Player): number =>
+    Math.max(-4, Math.min(4, (p.composites.faceoffWin - 50) * 0.05 + (p.composites.defensiveZone - 50) * 0.04))
+  const centreFitness = (p: Player): number => coachScore(p) + pivotBonus(p)
+
+  // Pick the four best CENTRES by pivot fitness; surplus centres join the wings.
+  const centresByFitness = [...naturalC].sort((a, b) => centreFitness(b) - centreFitness(a) || (a.id < b.id ? -1 : 1))
+  const centres: Player[] = centresByFitness.slice(0, 4)
+  let wingPool: Player[] = [...naturalW, ...centresByFitness.slice(4)]
+  if (centres.length < 4) {
+    const need = 4 - centres.length
+    const capable = wingPool.filter(canPlayCentre)
+    const promote = (capable.length >= need ? capable : wingPool)
+      .slice()
+      .sort((a, b) => coachScore(a) - coachScore(b)) // worst-first → a depth (4th-line) centre
+      .slice(0, need)
+    const promoted = new Set(promote.map((p) => p.id))
+    centres.push(...promote)
+    wingPool = wingPool.filter((p) => !promoted.has(p.id))
+  }
+  // Best centre anchors line 1; a promoted depth winger lands on line 4.
+  centres.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
+  wingPool.sort((a, b) => coachScore(b) - coachScore(a) || (a.id < b.id ? -1 : 1))
 
   const fwdLines: PlayerId[][] = []
   for (let i = 0; i < 4; i++) {
     const c = centres[i]
-    const lw = wings[i * 2]
-    const rw = wings[i * 2 + 1]
+    const lw = wingPool[i * 2]
+    const rw = wingPool[i * 2 + 1]
     fwdLines.push([
       lw?.id ?? asPlayerId(''),
       c?.id ?? asPlayerId(''),
@@ -507,5 +567,9 @@ export function coachSetLineup(args: {
   // future tie-breaking extensions; it's seeded so callers can rely on stability)
   void rng
 
-  return { lines: tempTeam.lines, scratchIds }
+  return {
+    lines: tempTeam.lines,
+    scratchIds,
+    ...(Object.keys(scratchReasons).length > 0 ? { scratchReasons } : {}),
+  }
 }

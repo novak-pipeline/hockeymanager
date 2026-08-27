@@ -141,6 +141,8 @@ export interface SkaterSeasonLine {
   toiPerGame: number
   ppGoals: number
   ppAssists: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 export interface GoalieSeasonLine {
@@ -152,6 +154,8 @@ export interface GoalieSeasonLine {
   shutouts: number
   saves: number
   shotsAgainst: number
+  /** Season average match rating (Avr). Absent for imported pre-career seasons. */
+  avgRating?: number
 }
 
 /** ISO date string for a given season year + match day (Oct 1 + (day-1) days),
@@ -190,6 +194,10 @@ export interface NextGameView {
   home: boolean
   /** Opponent's league rank for the pre-match blurb. */
   opponentRank: number
+  /** Opponent record, e.g. "24-12-4". */
+  opponentRecord: string
+  /** Opponent head coach's named system, e.g. "Heavy Forecheck". */
+  opponentSystem: string
   /** Non-null when this is a rivalry game (intensity >= 60). */
   rivalryLabel: string | null
 }
@@ -269,6 +277,8 @@ export interface DashboardView {
 export interface SquadRowView extends PlayerBadge {
   role: string
   handedness: 'L' | 'R'
+  /** Positions the player can fill, natural first, e.g. "C, LW, RW" or "LD, RD". */
+  positions: string
   /** 0–100; 100 = fully fresh. */
   condition: number
   morale: number
@@ -294,6 +304,9 @@ export interface SquadView {
   /** Total roster size / currently dressed players. */
   rosterCount: number
   dressedCount: number
+  /** Summed roster salary and the club's cap ceiling (for the header cap chip). */
+  capUsed: number
+  salaryCap: number
 }
 
 export interface AttributeGroupView {
@@ -353,6 +366,9 @@ export interface ProfileContractView extends ContractView {
   buriedCapHit?: number
   /** 'RFA' | 'UFA' | null if under contract with years remaining. */
   freeAgentStatus: 'RFA' | 'UFA' | null
+  /** Rights status he'll carry at contract's end: ELC/RFA (club retains rights) or
+   *  UFA (free to leave). Present whenever he's on a club. */
+  rightsStatus?: 'ELC' | 'RFA' | 'UFA'
 }
 
 /** EHM-style position proficiency for one position. */
@@ -392,6 +408,15 @@ export interface PlayerProfileView extends PlayerBadge {
     goalie: GoalieSeasonLine | null
   }>
 
+  /** Career honours — pre-career honours imported from the source DB (no year)
+   *  plus trophies won during this career (with a year). Shown as trophy badges
+   *  on the History tab. Absent when none. */
+  awards?: Array<{ award: string; year?: number }>
+
+  /** This season's average match rating (EHM "Avr", 0–10). Absent before he's
+   *  played a game this season. */
+  avgRating?: number
+
   /* ── Phase B additions (view-layer only, additive) ── */
 
   /** Six-axis radar model derived from composites. */
@@ -412,6 +437,25 @@ export interface PlayerProfileView extends PlayerBadge {
    * draft-eligible / on-the-radar young players; omitted for everyone else.
    */
   analystProjection?: string
+  /** Analyst FULL-ordering draft rank (1-based, past the published board too).
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystRank?: number
+  /** Compact draft-standing label, e.g. "R1 · #11" or "R3 · #96" / "Undrafted proj.".
+   *  Present only for draft-eligible / re-entry prospects. */
+  analystDraftLabel?: string
+  /**
+   * The NHL draft analysts' PERCEIVED potential (1–5 stars) — the hype-inflated
+   * consensus ceiling that drives the public draft board, kept separate from
+   * `potentialStars` (your own scouts' grounded read). Lets the profile show
+   * both reads side by side. Present only for draft-relevant prospects.
+   */
+  analystPotentialStars?: number
+  /**
+   * Your scouts' projected ceiling ROLE in plain hockey terms (e.g. "Top-pair D",
+   * "Middle-six F", "Starter") from their grounded read — replaces the vague
+   * "Prospect" projection label. Always present.
+   */
+  scoutsCeilingRole?: string
   /**
    * Your scouts' OWN draft read — can differ from the analyst consensus. Present
    * for draft-relevant prospects once your staff has seen enough of him.
@@ -429,10 +473,33 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   seasonBio?: string
   /**
-   * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
-   * Always present when PlayerProfileView is built.
+   * Living scouting report — the synthesized, always-present write-up that deepens
+   * and shifts its verdict as our scouts' collective read sharpens. Replaces the
+   * thin one-liner prose.
    */
-  scoutPanel: import('@engine/career/multiScout').ScoutPanel
+  scoutSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
+   * Composite prospect grade — weighs talent, our team's need + system fit,
+   * position scarcity, risk and value into one letter (A+…F) with the pros/cons
+   * the scouts weighed. Present for draft-relevant / scouted prospects.
+   */
+  prospectGrade?: {
+    grade: 'A+' | 'A' | 'A-' | 'B+' | 'B' | 'B-' | 'C+' | 'C' | 'C-' | 'D' | 'F'
+    score: number
+    pros: string[]
+    cons: string[]
+  }
+  /**
+   * Formal end-of-season pre-draft edition of the report — present only for
+   * draft-eligible prospects once the class is set (final ranking / offseason).
+   */
+  preDraftSummary?: { paragraphs: string[]; confidence: 'low' | 'medium' | 'high' }
+  /**
+   * Multi-scout panel: per-scout reads, consensus, dissent, NHL comp, boom/bust risk.
+   * Only the scouts who have actually watched this player are included; omitted
+   * entirely when no scout has seen an opponent (nothing to report).
+   */
+  scoutPanel?: import('@engine/career/multiScout').ScoutPanel
   /**
    * Staff-gathered mindset: plain-English thoughts on this player's outlook.
    * Present for own players always; present for scouted opponents when knowledge ≥ 40.
@@ -794,6 +861,9 @@ export interface DraftRankRowView {
   pNHLer?: number
   /** NHLe projection: probability (0–100) he becomes an impact/"star" player. Skaters only. */
   pStar?: number
+  /** Raw perceived ceiling (0–100) behind the analyst stars — used to derive the
+   *  analysts' projected role consistently with their ranking. */
+  perceivedCeiling?: number
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
@@ -823,6 +893,10 @@ export interface DraftRankingsView {
   scoutBoard: ScoutBoardRowView[]
   /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
   scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[] }[]
+  /** Analyst FULL-ordering rank (1-based) for every eligible prospect — past the
+   *  published top board too, so off-board prospects get a concrete "Nth-round"
+   *  projection. playerId → rank. */
+  fullRankById: Record<string, number>
 }
 
 export interface StatsView {
@@ -992,7 +1066,11 @@ export interface TradesView {
 export interface ProspectRowView extends PlayerBadge {
   /** Scouting consensus, 1 = best. */
   rank: number
+  /** Fog-aware potential (your scouts' read) — uncertain for prospects you
+   *  haven't scouted, sharp for ones you have. */
   potentialStars: number
+  /** 0–100 how well YOUR scouts know him (gates how trustworthy potentialStars is). */
+  knowledge: number
   drafted: boolean
 }
 
@@ -1378,6 +1456,8 @@ export interface CareerSnapshot {
    * [playerId, number[]][] — JSON-safe entry array.
    */
   playerRatings?: Array<[string, number[]]>
+  /** Cumulative season match-rating accumulator (true season Avr). JSON-safe. */
+  seasonRatingTotals?: Array<[string, { sum: number; n: number }]>
   /**
    * Team practice state for the user's team.
    * Optional for backward compat; defaults to balanced on load.
@@ -1388,6 +1468,11 @@ export interface CareerSnapshot {
    * Optional for backward compat.
    */
   hireableStaff?: string[]
+  /**
+   * Coach hiring market — available head coaches with profiles. Optional for
+   * backward compat; regenerated deterministically when absent.
+   */
+  coachMarket?: CoachMarketEntry[]
   /**
    * Owner/board expectations state (franchise drama). Optional for backward compat.
    */
@@ -1440,9 +1525,107 @@ export interface ScoutCardView {
   scoutId: string
   name: string
   rating: number
-  /** Human-readable label for current assignment. */
+  /** 0–100 judgment of the qualitative read. */
+  judgment?: number
+  /** Nation the scout knows best. */
+  specialtyNation?: string
+  /** Annual salary. */
+  salary?: number
+  /** Human-readable label for current assignment scope. */
   assignmentLabel: string
+  /** Human-readable focus ('Youth' / 'Senior' / 'All players'). */
+  focusLabel: string
   target: ScoutAssignment['target']
+  focus: 'youth' | 'senior' | 'all'
+  /** Position brief: 'any' | 'F' | 'D' | 'G'. */
+  positionFilter: 'any' | 'F' | 'D' | 'G'
+  /** Only surface prospects projecting ≥ this many stars (0 = any). */
+  minPotentialStars: number
+  /** How many players currently fall under his assignment (post-focus+position). */
+  coverage: number
+  /** Read speed given the scope size — Fast (focused) / Steady / Thin (spread). */
+  readSpeed: 'Fast' | 'Steady' | 'Thin'
+  /** Nation his scope maps to (for the map + flag), or null if global/unassigned. */
+  focusNation: string | null
+}
+
+/** A surfaced prospect/target in the Scouting Centre (fills over the career). */
+export interface ScoutFindView {
+  playerId: string
+  name: string
+  age: number
+  position: string
+  teamAbbr: string
+  nationality?: string
+  faceId?: string
+  currentStars: number
+  potentialStars: number
+  knowledge: number
+  grade: 'A+' | 'A' | 'B' | 'C'
+  reason: string
+  scoutName: string
+  foundDate: string
+  /** True if he plays a position your roster is currently thin at. */
+  fitsNeed: boolean
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
+}
+
+/** A scope option for the assignment dropdowns. */
+export interface ScoutScopeOption {
+  /** 'nation' | 'competition' | 'team' | 'nextOpponent' | 'draftClass' | 'freeAgents' */
+  kind: string
+  /** Stable id (nation name, competition id, team id) — empty for singletons. */
+  id: string
+  label: string
+}
+
+/** Average scouting knowledge across a league/nation, with a youth split. */
+export interface ScoutCoverageRow {
+  id: string
+  label: string
+  nation?: string
+  avgKnowledge: number
+  youthAvgKnowledge: number
+  playerCount: number
+}
+
+/** A hireable scout in the job market. */
+export interface ScoutMarketRow {
+  id: string
+  name: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary: number
+}
+
+/** Full scout profile — attributes, current assignment, and who he's watching. */
+export interface ScoutProfileView {
+  scoutId: string
+  name: string
+  faceId?: string
+  rating: number
+  judgment: number
+  specialtyNation?: string
+  salary?: number
+  demeanor?: string
+  /** Discipline attributes (label/value out of 20), display-only. */
+  attributes: Array<{ label: string; value: number }>
+  assignmentLabel: string
+  focusLabel: string
+  /** Players currently in his scope (post-focus). */
+  coverage: number
+  /** Players he has real intel on (in his scope), most-known first. */
+  scouted: Array<{
+    playerId: string; name: string; position: string; age: number
+    teamAbbr: string; nationality?: string; knowledge: number
+    currentStars: number; potentialStars: number; faceId?: string
+  }>
+  /** Prospects he has surfaced to the Scouting Centre. */
+  finds: Array<{ playerId: string; name: string; grade: string; reason: string; foundDate: string }>
 }
 
 /** Per-team knowledge summary for the scouting overview panel. */
@@ -1472,11 +1655,18 @@ export interface ScoutedPlayerRow {
   potentialStars: number
   /** 0–100 scouting knowledge. */
   knowledge: number
-  /** Recommendation grade. */
+  /** Recommendation grade — a TARGET grade (youth + upside + acquirability),
+   *  not raw quality. An ageing star you can't pry loose grades low. */
   rec: 'A+' | 'A' | 'B' | 'C' | 'D'
+  /** Acquisition-target score backing the grade; sorts the list. */
+  targetScore: number
   /** Current salary (≈ transfer/asset value proxy). */
   salary: number
   faceId?: string
+  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  draftEligible: boolean
+  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  draftLabel?: string
 }
 
 export interface ScoutingView {
@@ -1487,12 +1677,36 @@ export interface ScoutingView {
   teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
   /** All divisions as assignment options. */
   divisions: Array<{ divisionId: string; divisionName: string }>
+  /** Nations (regions) you can assign a scout to cover. */
+  nations: ScoutScopeOption[]
+  /** Leagues/competitions you can assign a scout to (incl. NHL/AHL). */
+  competitions: ScoutScopeOption[]
+  /** The user's next opponent's name (for the Next Opponent scope label), or null. */
+  nextOpponentName: string | null
+  /** Nations currently covered by at least one scout (for the world map). */
+  scoutedNations: string[]
+  /** Average knowledge across all non-trivially-known players, 0–100. */
+  worldKnowledge: number
+  /** Scouts currently on a concrete assignment (vs idle). */
+  activeScouts: number
+  /** Scouts the surfaced recommendations came from + the finds themselves. */
+  recommendations: ScoutFindView[]
+  /** Position groups your roster is currently thin at (e.g. ['Defense','Centre']). */
+  rosterNeeds: string[]
   /** Whether draft-class assignment is currently meaningful (draft class exists). */
   hasDraftClass: boolean
+  /** Knowledge coverage by league (avg + youth split). */
+  leagueCoverage: ScoutCoverageRow[]
+  /** Knowledge coverage by nation (avg + youth split). */
+  nationCoverage: ScoutCoverageRow[]
   /** Per-team knowledge summary. */
   teamKnowledge: TeamKnowledgeSummary[]
   /** Recently improved players (highest delta-knowledge), for watch-list panel. */
   topGains: Array<PlayerBadge & { knowledge: number }>
+  /** Hireable scouts on the market. */
+  scoutMarket: ScoutMarketRow[]
+  /** Cap on active scouts. */
+  maxScouts: number
 }
 
 /* ────────────────────────── story layer: history / locker room / tentpoles ────────────────────────── */
@@ -1575,6 +1789,127 @@ export type {
   CareerStage,
   PosGroup,
 } from './squadPlanner'
+
+/** One league-wide leaderboard the user's club is ranked within. */
+export interface LeagueComparisonCard {
+  key: string
+  label: string
+  /** Plain-English explanation of what the metric measures. */
+  blurb: string
+  /** User club's rank, 1 = best. */
+  rank: number
+  /** League size ranked against. */
+  outOf: number
+  /** 0–1 fraction of the league the user outranks (1 = top). */
+  percentile: number
+  /** User club's value, preformatted for display. */
+  display: string
+  /** League leader for this metric. */
+  leaderTeamId: string
+  leaderAbbr: string
+  leaderDisplay: string
+  /** True when the user's club is itself the leader. */
+  isUserLeader: boolean
+}
+
+/** "How your club stacks up" — dashboard comparison card. Response to 'getLeagueComparison'. */
+export interface LeagueComparisonView {
+  teamName: string
+  cards: LeagueComparisonCard[]
+}
+
+/** A player the coach is likely to act on (form/morale/condition) — staff meeting. */
+export interface StaffMeetingFlaggedPlayer {
+  playerId: string
+  name: string
+  faceId?: string
+  issue: 'slumping' | 'unhappy' | 'tired'
+  detail: string
+}
+
+/** Head-coach tactical identity + roster fit + flagged players. Response to 'getStaffMeetingSummary'. */
+export interface StaffMeetingSummaryView {
+  coachName: string
+  coachFaceId?: string
+  /** Named system, e.g. "Low-Event Trap". */
+  systemLabel: string
+  /** One-line description of how the system plays. */
+  systemBlurb: string
+  /** What roster composition the system favours. */
+  systemFavors: string
+  philosophy: string
+  forecheckName: string
+  breakoutName: string
+  nzName: string
+  dZoneName: string
+  ppName: string
+  pkName: string
+  paceName: string
+  /** 0–100 roster fit (styleMatch). */
+  rosterFit: number
+  fitLabel: string
+  fitAdvice: string[]
+  flagged: StaffMeetingFlaggedPlayer[]
+}
+
+/** A stored available coach in the hiring market (snapshot-serialised). */
+export interface CoachMarketEntry {
+  coach: StaffMember
+  /** Quality the coach is asking to be measured by (~rating). */
+  askingRating: number
+}
+
+/** One candidate row in the coach hiring market. */
+export interface CoachMarketCandidateView {
+  coachId: string
+  name: string
+  faceId?: string
+  rating: number
+  /** Demeanour label, e.g. "analytical". */
+  demeanor: string
+  systemLabel: string
+  philosophy: string
+  /** Roster fit vs the USER's current roster (0–100). */
+  rosterFit: number
+  fitLabel: string
+  fitBlurb: string
+}
+
+/** Coach hiring market. Response to 'getCoachMarket'. */
+export interface CoachMarketView {
+  currentCoachName: string
+  currentSystemLabel: string
+  currentRosterFit: number
+  entries: CoachMarketCandidateView[]
+}
+
+/** One team's Monte-Carlo playoff projection. */
+export interface PlayoffOddsRow {
+  teamId: string
+  name: string
+  abbreviation: string
+  conference: string
+  /** Current standings points. */
+  points: number
+  gamesPlayed: number
+  gamesRemaining: number
+  /** Mean simulated final points. */
+  projectedPoints: number
+  /** 0–100 chance of making the playoffs. */
+  playoffPct: number
+  isUser: boolean
+}
+
+/** Monte-Carlo playoff odds for the league. Response to 'getPlayoffOdds'. */
+export interface PlayoffOddsView {
+  /** False outside the regular season (no projection to make). */
+  available: boolean
+  /** Number of season simulations run. */
+  simulations: number
+  userTeamId: string
+  /** All teams, best projected points first. */
+  rows: PlayoffOddsRow[]
+}
 
 /** The user club's locker room. Response to 'getLockerRoom'. */
 export interface LockerRoomView {

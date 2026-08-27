@@ -139,6 +139,22 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'development', development: must().getDevelopment() }
     case 'getSquadPlanner':
       return { id: req.id, type: 'squadPlanner', squadPlanner: must().getSquadPlanner() }
+    case 'getLeagueComparison':
+      return { id: req.id, type: 'leagueComparison', comparison: must().getLeagueComparison() }
+    case 'getPlayoffOdds':
+      return { id: req.id, type: 'playoffOdds', odds: must().getPlayoffOdds() }
+    case 'getStaffMeetingSummary':
+      return { id: req.id, type: 'staffMeetingSummary', summary: must().getStaffMeetingSummary() }
+    case 'getCoachMarket':
+      return { id: req.id, type: 'coachMarket', market: must().getCoachMarket() }
+    case 'fireCoach': {
+      const r = must().fireCoach()
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
+    case 'hireCoach': {
+      const r = must().hireCoach(req.coachId)
+      return { id: req.id, type: 'coachHireResult', ok: r.ok, message: r.message }
+    }
     case 'getLeagueStatTable':
       return { id: req.id, type: 'leagueStatTable', table: must().getLeagueStatTable(req.teamId) }
     case 'suggestToCoach': {
@@ -220,9 +236,21 @@ function handle(req: WorkerRequest): WorkerResponse {
     /* ── scouting ── */
     case 'getScouting':
       return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'getScoutProfile':
+      return { id: req.id, type: 'scoutProfile', scoutProfile: must().getScoutProfile(req.scoutId) }
     case 'assignScout':
-      must().assignScoutTarget(req.scoutId, req.target)
-      return { id: req.id, type: 'ok' }
+      must().assignScoutTarget(req.scoutId, req.target, req.focus, req.positionFilter, req.minPotentialStars)
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    case 'hireScout': {
+      const res = must().hireScoutFromMarket(req.candidateId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not hire scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
+    case 'fireScout': {
+      const res = must().fireScoutFromStaff(req.scoutId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message ?? 'Could not release scout' }
+      return { id: req.id, type: 'scouting', scouting: must().getScouting() }
+    }
 
     /* ── story layer ── */
     case 'getHistory':
@@ -307,6 +335,10 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().sendDown(req.playerId)
       if (!res.ok) throw new Error(res.reason)
       return { id: req.id, type: 'ok' }
+    }
+    case 'setCoachRoster': {
+      const res = must().applyCoachRoster()
+      return { id: req.id, type: 'coachRosterSet', promoted: res.promoted, demoted: res.demoted }
     }
 
     /* ── Phase B: player profile view layer ── */

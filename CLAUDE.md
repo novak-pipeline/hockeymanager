@@ -41,10 +41,31 @@ Timeline estimate (focused sessions): watchable v1 prototype ~1–2 weeks; deep 
 
 Playable v1 (June 2026). Build order #1–#7 all have first implementations:
 - Engines: calibrated full-fidelity tick engine (real 5v4 PP, 3v3 OT, goalie pulls, playoff multi-OT) + quick-sim; shared GameEvent stream.
-- Career: full year cycle — regular season → best-of-7 playoffs → offseason (awards, development/aging, retirements, 2-round entry draft, re-signing, free agency) → season rollover. Injuries/fatigue/morale/form, salary cap, AI trades with pick assets.
-- UI: FM-style dark shell (sidebar + topbar + continue), 14 screens (dashboard, squad, player profile, tactics/line editor, schedule, standings, stats, trades, draft, offseason, finances, inbox, playoffs, match center). Worker protocol v2 in `src/worker/protocol.ts`.
+- Career: full year cycle — regular season → best-of-7 playoffs → offseason (awards, development/aging, retirements, full 7-round entry draft (AI teams pick for need), re-signing, free agency) → season rollover. Injuries/fatigue/morale/form, salary cap, AI trades with pick assets.
+- UI: FM-style dark shell (sidebar + topbar + continue), 34 screens across the FM nav sections — overview (dashboard, staff meeting, inbox), team (squad, squad planner, dynamics, tactics line board), development (data hub, staff, job market, training, medical, dev centre), competition (schedule/match centre, competitions, world, scouting hub, scout profile, transfers, draft) and club (info, vision/board, finances). Sidebar layout lives in `src/renderer/components/navConfig.ts`. Worker protocol v2 in `src/worker/protocol.ts`.
+- Staff: coaches are modelled (`src/engine/league/coachProfile.ts`) — a CoachProfile derives tactics, sets lines weighing form/morale/condition, re-optimises weekly, and coach-fit gives a subtle on-ice edge; hire/fire through the job market.
 - Renderers: 2D PixiJS and 3D three.js (procedural rink/players, broadcast cameras, event cues) behind one `MatchRenderer` contract; toggle in MatchViewer.
 - Save/load: JSON snapshots via Electron IPC (`src/main/saves.ts`, versioned `CareerSnapshot`). SQLite dropped in favor of JSON saves (supply-chain: no native postinstall deps).
-- 261 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
+- 1608 vitest tests. `npm run typecheck && npm test` must stay green. Frozen contracts: `src/domain/events.ts`, `src/engine/career/views.ts`, `src/worker/protocol.ts`, `src/render2d/rendererContract.ts`.
 
-Known tuning debt: generated payrolls can exceed the cap (displayed honestly); plus/minus and PK stat splits are placeholders; 3D uses procedural primitives pending Blender glTF assets.
+Two calibration gates now guard the league world, and both must stay green:
+`src/engine/quick/competitiveBalance.test.ts` (standings spread) and
+`src/engine/quick/quickSim.calibration.test.ts` (rates vs `calibrate/targets.json`).
+The full engine's equivalent is `src/engine/full/calibration.test.ts`. Retune
+with data from those tests — the dials are `TEAM_CALIBER_SPREAD` in
+`src/data/generate.ts` and `SHOT_RATE_BIAS` / `CONVERSION_BIAS` in `quickSim.ts`.
+
+Known tuning debt, most important first:
+1. **Payrolls are not anchored to the cap.** Generated teams now start 29-66M under an 88M ceiling; real clubs sit within a few million of it, so cap management — a core mechanic — is currently trivial. The cause is the salary curve in `makeContract` (`0.7 + ((ovr-45)/45)^2.2 × 11` millions), which is not calibrated against the cap. Note this cannot be fixed by scaling alone: 1.85× would put stars above the 20%-of-cap maximum, so the curve's shape needs work, not just its height.
+2. Top-10 picks never become stars inside the 3 seasons `draftCalibration.test.ts` simulates (0% at the 76+ threshold). Rank↔outcome and NHLer rates are in the real band, so this is about the *shape* of the development curve — elite prospects should break out, not just accumulate.
+3. PK stat splits are placeholders (`pk: { goals: 0, ... }` in archived season stats); AHL squad rows carry games played but no stat line.
+4. 3D uses procedural primitives pending Blender glTF assets.
+
+The draft-calibration gate samples 5 seeds and asserts on the mean. One draft
+class is ~64 ranked players, so a single-seed rank↔outcome correlation carries a
+standard error near ±0.07 and lands anywhere in 0.41-0.65 on the same model —
+the earlier "top-10 picks become NHLers 80% of the time" reading was that
+artifact. Measured across seeds: rank↔outcome 0.49 (real ≈ 0.45), top-10 NHLer
+66% (real ≈ 70%), 11-32 35%, 33+ 14%.
+
+Plus/minus is real as of July 2026 — see `creditPlusMinus` in `src/engine/shared/outcome.ts` (NHL rules: no credit on power-play goals, skaters only, shootout excluded), credited by both engines and merged into season totals.

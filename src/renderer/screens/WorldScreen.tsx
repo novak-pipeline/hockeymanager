@@ -48,7 +48,7 @@ function StrengthBar({ pct }: { pct: number }): JSX.Element {
   )
 }
 
-function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showAge?: boolean }): JSX.Element {
+function NotableTable({ rows, showAge, hideRatings }: { rows: CompetitionNotableView[]; showAge?: boolean; hideRatings?: boolean }): JSX.Element {
   return (
     <table className="data-table" style={{ width: '100%' }}>
       <thead>
@@ -57,8 +57,8 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
           <th style={{ textAlign: 'left' }}>Team</th>
           <th>Pos</th>
           {showAge && <th>Age</th>}
-          <th style={{ textAlign: 'left' }}>Ability</th>
-          <th style={{ textAlign: 'left' }}>Potential</th>
+          {!hideRatings && <th style={{ textAlign: 'left' }}>Ability</th>}
+          {!hideRatings && <th style={{ textAlign: 'left' }}>Potential</th>}
         </tr>
       </thead>
       <tbody>
@@ -68,8 +68,8 @@ function NotableTable({ rows, showAge }: { rows: CompetitionNotableView[]; showA
             <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
             <td style={{ textAlign: 'center' }}>{p.position}</td>
             {showAge && <td style={{ textAlign: 'center' }}>{p.age}</td>}
-            <td><Stars value={p.currentStars} /></td>
-            <td><Stars value={p.potentialStars} /></td>
+            {!hideRatings && <td><Stars value={p.currentStars} /></td>}
+            {!hideRatings && <td><Stars value={p.potentialStars} /></td>}
           </tr>
         ))}
       </tbody>
@@ -247,7 +247,6 @@ function InternationalPanel(): JSX.Element {
   const [selected, setSelected] = useState<string | null>(null)
 
   const nations = data?.nations ?? []
-  const wj = data?.worldJuniors ?? null
   const current = nations.find((n) => n.nation === selected) ?? nations[0] ?? null
 
   return (
@@ -258,34 +257,6 @@ function InternationalPanel(): JSX.Element {
         empty={!loading && nations.length === 0}
         emptyText="No nationality data in this database. Load a multi-league database to see national-team power rankings."
       />
-
-      {wj && (
-        <Panel title="World Juniors (U20) — projected">
-          <div style={{ display: 'flex', gap: 'var(--sp-4)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 180 }}>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥇 <strong>{wj.gold ?? '—'}</strong></div>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>🥈 {wj.silver ?? '—'}</div>
-              <div style={{ fontSize: 13, marginBottom: 8 }}>🥉 {wj.bronze ?? '—'}</div>
-              <div className="muted small">Projected from current U20 pools.</div>
-            </div>
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <div className="muted small" style={{ marginBottom: 4 }}>All-tournament team</div>
-              <table className="data-table" style={{ width: '100%' }}>
-                <tbody>
-                  {wj.allStars.map((s) => (
-                    <tr key={s.playerId}>
-                      <td><PlayerLink playerId={s.playerId} name={s.name} /></td>
-                      <td className="muted" style={{ textAlign: 'center' }}>{s.position}</td>
-                      <td className="muted">{s.nation}</td>
-                      <td><Stars value={s.stars} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Panel>
-      )}
 
       {nations.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
@@ -404,13 +375,13 @@ function NationDetail({ nation }: { nation: NationView }): JSX.Element {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
             <div>
               <div className="muted small" style={{ marginBottom: 4 }}>Top players</div>
-              <NotableTable rows={nation.topPlayers} />
+              <NotableTable rows={nation.topPlayers} hideRatings />
             </div>
             <div>
               <div className="muted small" style={{ marginBottom: 4 }}>Top youth players</div>
               {nation.topYouth.length === 0
                 ? <div className="muted small">No notable youth.</div>
-                : <NotableTable rows={nation.topYouth} showAge />}
+                : <NotableTable rows={nation.topYouth} showAge hideRatings />}
             </div>
           </div>
         </div>
