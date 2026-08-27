@@ -47,7 +47,7 @@ export function DraftRankingsScreen(): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
       <ScreenHeader title="Draft Prospect Rankings">
-        <span className="muted small">Analyst consensus of the draft-eligible class — it shifts as they play out the season</span>
+        <span className="muted small">The public book on the draft-eligible class. Every club reads it — your edge is what your own scouts see that it doesn&apos;t.</span>
       </ScreenHeader>
       <ScreenStateNotices
         loading={loading}
@@ -94,7 +94,7 @@ export function DraftRankingsScreen(): JSX.Element {
                 </select>
               </div>
             )}
-            <ScoutBoardPanel rows={rows} draftYear={data.draftYear} who={who} />
+            <ScoutBoardPanel rows={rows} draftYear={data.draftYear} who={who} coverage={data.classCoverage} />
           </>
         )
       })()}
@@ -120,7 +120,7 @@ export function DraftRankingsScreen(): JSX.Element {
                 <th style={{ textAlign: 'left' }}>League</th>
                 <th style={{ textAlign: 'left' }}>Team</th>
                 <th style={{ textAlign: 'left' }}>Ability</th>
-                <th style={{ textAlign: 'left' }}>Potential</th>
+                <th style={{ textAlign: 'left' }} title="What the published board projects him as. A rank and a role is what a public service gives you — a ceiling GRADE is your own department's product, and lives on Your Scouts' Board.">Projection</th>
                 <th title="NHLe projection: chance of becoming a regular NHLer">NHLer</th>
                 <th title="NHLe projection: chance of becoming an impact/star player">Star</th>
               </tr>
@@ -144,7 +144,7 @@ export function DraftRankingsScreen(): JSX.Element {
                   <td className="muted">{p.leagueAbbr}</td>
                   <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
                   <td><Stars value={p.currentStars} /></td>
-                  <td><Stars value={p.potentialStars} /></td>
+                  <td className="muted" style={{ fontSize: 11.5 }}>{p.analystRole ?? '—'}</td>
                   <td style={{ textAlign: 'center' }}><Pct value={p.pNHLer} /></td>
                   <td style={{ textAlign: 'center' }}><Pct value={p.pStar} accent /></td>
                 </tr>
@@ -154,10 +154,27 @@ export function DraftRankingsScreen(): JSX.Element {
         </Panel>
       )}
 
+      {data && board === 'analyst' && data.radar.length === 0 && (
+        <Panel title="On the radar — U17s your staff has watched">
+          <div className="muted small" style={{ lineHeight: 1.6 }}>
+            {data.radarUnseen === 0 ? (
+              <>This database has no 14–16-year-olds in it — load a multi-league world and the
+              radar becomes the place your scouts find players two drafts early.</>
+            ) : (
+              <>Nobody. There are <b>{data.radarUnseen.toLocaleString()}</b> players aged 14–16 in the
+              database and your department has not watched one of them closely enough to have an
+              opinion. Point a scout at a junior league or a nation under <b>Recruitment Focus</b> and
+              the names you find here will be names nobody else has.</>
+            )}
+          </div>
+        </Panel>
+      )}
+
       {data && board === 'analyst' && data.radar.length > 0 && (
-        <Panel title="On the radar — U17 watch list (not yet draft-eligible)">
+        <Panel title="On the radar — U17s your staff has watched">
           <div className="muted small" style={{ marginBottom: 8 }}>
-            Tracked early (14–16) for future drafts — ranked by projected ceiling.
+            The 14–16s <b>your own scouts</b> have filed on, best projected ceiling first. This list is
+            yours, not the public book&apos;s — {data.radarUnseen.toLocaleString()} more are out there unwatched.
           </div>
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
@@ -212,7 +229,12 @@ function Movement({ value }: { value: number }): JSX.Element {
   )
 }
 
-function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; draftYear: number; who: string }): JSX.Element {
+function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
+  rows: ScoutBoardRowView[]; draftYear: number; who: string
+  coverage: { filed: number; total: number; pct: number }
+}): JSX.Element {
+  const [seenOnly, setSeenOnly] = useState(false)
+  const shown = seenOnly ? rows.filter((r) => r.seen) : rows
   if (rows.length === 0) {
     return (
       <Panel title="Your Scouts’ Board">
@@ -225,10 +247,23 @@ function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; 
   }
   return (
     <Panel title={`${who} — ${draftYear} class`}>
-      <div className="muted small" style={{ marginBottom: 8 }}>
+      <div className="muted small" style={{ marginBottom: 8, lineHeight: 1.6 }}>
         {who === 'Staff consensus' ? 'Your staff’s' : `${who}’s`} own ranking, re-ordered from the consensus by what they’ve
         seen — intangibles, interviews, and the underlying game. <strong style={{ color: 'var(--success, #4caf72)' }}>▲</strong> means
-        higher than the board; <strong style={{ color: 'var(--danger, #d8584f)' }}>▼</strong> lower. Unseen prospects sit at consensus.
+        higher than the board; <strong style={{ color: 'var(--danger, #d8584f)' }}>▼</strong> lower.
+        <br />
+        A prospect nobody has watched sits at consensus with <b>no ceiling grade at all</b> — a dash,
+        not a guess. Your department has filed on{' '}
+        <b style={{ color: coverage.pct >= 45 ? 'var(--success, #4caf72)' : coverage.pct >= 15 ? 'var(--accent2, #e0b341)' : 'var(--danger, #d8584f)' }}>
+          {coverage.filed} of {coverage.total}
+        </b>{' '}
+        eligibles ({coverage.pct}%).
+      </div>
+      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', marginBottom: 8 }}>
+        <button type="button" className={`btn btn-sm${seenOnly ? ' btn-primary' : ''}`} onClick={() => setSeenOnly((v) => !v)}>
+          {seenOnly ? 'Showing only prospects we have seen' : 'Show only prospects we have seen'}
+        </button>
+        <span className="muted small">{shown.length} row{shown.length === 1 ? '' : 's'}</span>
       </div>
       <table className="data-table" style={{ width: '100%' }}>
         <thead>
@@ -244,7 +279,7 @@ function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; 
           </tr>
         </thead>
         <tbody>
-          {rows.map((p) => (
+          {shown.map((p) => (
             <tr key={p.playerId} style={p.verdict === 'higher'
               ? { background: 'rgba(76,175,114,0.07)' }
               : p.verdict === 'lower' ? { background: 'rgba(216,88,79,0.07)' } : undefined}>
@@ -265,7 +300,11 @@ function ScoutBoardPanel({ rows, draftYear, who }: { rows: ScoutBoardRowView[]; 
               <td style={{ textAlign: 'center' }}>{p.position}</td>
               <td className="muted">{p.leagueAbbr}</td>
               <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
-              <td><Stars value={p.potentialStars} /></td>
+              <td>
+                {p.seen
+                  ? <Stars value={p.potentialStars} />
+                  : <span className="muted" style={{ fontSize: 11 }} title="Nobody in your building has watched him — there is no read to show">no read</span>}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -105,6 +105,15 @@ export function PlayerActionMenu(): JSX.Element | null {
       {sub === null && (
         <>
           <button className="menu-item" style={itemStyle} onClick={() => go('player')}>View profile</button>
+          {/* C1: the watch list is only ever built by hand — this is the hand. */}
+          <button
+            className="menu-item" style={itemStyle} disabled={busy}
+            title="Watched players get the front of every scout's day, whatever his brief says"
+            onClick={() => void run(
+              () => client.toggleWatchPlayer(playerId),
+              profile?.watched ? `${name} removed from your watch list.` : `${name} added to your watch list.`,
+            )}
+          >{profile?.watched ? '★ Stop watching' : '☆ Watch this player'}</button>
           {own && (
             <>
               <button className="menu-item" style={itemStyle} onClick={() => go('negotiation')}>Offer new contract…</button>

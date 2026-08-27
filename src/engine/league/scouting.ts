@@ -463,6 +463,18 @@ export function createInitialScouting(args: CreateScoutingArgs): ScoutingState {
 /** Knowledge a scout needs before he'll surface a player as a recommendation. */
 export const DISCOVERY_THRESHOLD = 55
 
+/**
+ * The knowledge at which the department is credited with an actual READ on a
+ * player — enough viewings to hold an opinion worth publishing. Below it the
+ * only honest answer to "what's his ceiling?" is "we haven't seen him", which is
+ * what the draft boards and the search now say instead of inventing a star grade.
+ */
+export const SCOUT_SEEN_THRESHOLD = 35
+
+/** How many names the GM may pin at once. Scouts have finite days; an unbounded
+ *  watch list would just be a second, free scouting department. */
+export const MAX_WATCH_LIST = 40
+
 /* ────────────────────────── tick ────────────────────────── */
 
 /** A league/competition as the scouting engine sees it (incl. synthetic NHL/AHL). */
@@ -506,6 +518,12 @@ export const SCOUT_DILUTION_FLOOR = 0.25
  *  this many of your scouts have filed a read, extra looks add little — spread the
  *  bandwidth to less-seen players instead. */
 export const SCOUT_MAX_OPINIONS = 3
+
+/** The share of a scout's daily capacity the GM's WATCH LIST may claim. A pin is
+ *  a real instruction — the department goes and looks — but it can never eat the
+ *  whole day, so a brief still makes progress underneath it. This cap is what
+ *  keeps the watch list a TRADE-OFF rather than a free knowledge tap. */
+export const WATCH_PRIORITY_SHARE = 0.5
 
 /** A position group, for coverage/selection that must span the whole roster. */
 export type ScoutPosGroup = 'C' | 'W' | 'D' | 'G'
@@ -589,6 +607,16 @@ export function tickScouting(args: TickScoutingArgs): void {
   const nextOpponentId = args.nextOpponentId ?? null
   const protectedIds = args.protectedIds ?? new Set<string>()
   const watchedToday = new Set<string>()
+
+  // The GM's watch list is an ORDER, not a bookmark: every scout spends the front
+  // of his day on the pinned players (up to WATCH_PRIORITY_SHARE of his capacity)
+  // regardless of his brief. Pinning someone in Russia while your staff covers the
+  // OHL genuinely diverts the department — which is the cost that makes the pin
+  // mean something.
+  const watchIds = (state.watchList ?? [])
+    .map((w) => w.playerId)
+    .filter((pid) => players.has(pid as PlayerId))
+  const watchSlots = Math.max(0, Math.floor(SCOUT_CAPACITY * WATCH_PRIORITY_SHARE))
 
   // Rostered player set (for freeAgents target)
   const rosteredIds = new Set<string>()
@@ -675,7 +703,15 @@ export function tickScouting(args: TickScoutingArgs): void {
       }
     })
     overflow.sort((a, b) => opinions(a) - opinions(b) || knowAt(a) - knowAt(b))
-    const inScope = [...mine, ...overflow].slice(0, SCOUT_CAPACITY)
+    // Pinned players first (least-known first, so the list levels up rather than
+    // re-reading the one name at the top), then his own brief in the rest of the day.
+    const pinned = watchIds
+      .filter((pid) => (kIndex.get(pid) ?? 0) < 100 || !iHaveSeen(pid))
+      .sort((a, b) => knowAt(a) - knowAt(b))
+      .slice(0, watchSlots)
+    const pinnedSet = new Set(pinned)
+    const rest = [...mine, ...overflow].filter((pid) => !pinnedSet.has(pid))
+    const inScope = [...pinned, ...rest].slice(0, SCOUT_CAPACITY)
     for (const pid of inScope) watchedToday.add(pid)
     // Bandwidth dilutes per-player gain by his RESPONSIBILITY LOAD (the size of his
     // slice of the brief), not the capped daily working set — so a tight brief (one
@@ -701,7 +737,11 @@ export function tickScouting(args: TickScoutingArgs): void {
 
       const baseGain = scout.rating / 25
       const noise = (rng.range(0, 40) - 20) / 10  // -2.0 .. +2.0
-      let gain = (baseGain + noise) * dilution
+      // A pinned player is a named order, not part of a sprawling brief — the
+      // scout goes and watches HIM, so he reads at full rate even when the rest
+      // of that scout's day is spread across a whole draft class. That speed IS
+      // the reward for spending a watch-list slot.
+      let gain = (baseGain + noise) * (pinnedSet.has(pid) ? 1 : dilution)
       // Knows his home market: faster reads on players from his specialty nation.
       if (scout.specialtyNation && player.nationality === scout.specialtyNation) gain *= 1.2
 
@@ -728,9 +768,10 @@ export function tickScouting(args: TickScoutingArgs): void {
   // not on your own org) drift back toward what their reputation alone sustains.
   // This makes scouting an ongoing job, not one-and-done. Mutate entries in place
   // (the array IS the store) to avoid O(n) setKnowledge scans per player.
+  const pinnedSetAll = new Set(watchIds)
   for (const entry of state.knowledge) {
     const pid = entry[0]
-    if (watchedToday.has(pid) || protectedIds.has(pid)) continue
+    if (watchedToday.has(pid) || protectedIds.has(pid) || pinnedSetAll.has(pid)) continue
     const player = players.get(pid as PlayerId)
     if (!player) continue
     const floor = renownFloor(player)

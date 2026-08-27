@@ -13,6 +13,7 @@ import type {
 import type { TeamTactics } from '@domain'
 import type { SquadStatus, TradeStatus } from '@domain/player'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
+import type { PlayerSearchQuery } from '@engine/career/views'
 
 /**
  * Minimal worker surface the client needs; lets tests inject a fake without a
@@ -741,6 +742,15 @@ export class SimClient {
   }
   dismissProspect(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'dismissProspect', playerId })
+  }
+  toggleWatchPlayer(playerId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'toggleWatchPlayer', playerId })
+  }
+  setWatchNote(playerId: string, note: string): Promise<WorkerResponse> {
+    return this.send({ type: 'setWatchNote', playerId, note })
+  }
+  searchPlayers(query: PlayerSearchQuery): Promise<WorkerResponse> {
+    return this.send({ type: 'searchPlayers', query })
   }
   rescoutProspect(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'rescoutProspect', playerId })

@@ -905,6 +905,8 @@ export interface PlayerProfileView extends PlayerBadge {
    * GM-only role/trade-status controls on the profile.
    */
   isOwn: boolean
+  /** C1: true when the GM has pinned him to his own watch list. */
+  watched: boolean
   /**
    * #188: the GM's declared squad status (key player, core, prospect, …) and a
    * plain-English label for it. Absent = unassigned. Only meaningful/settable for
@@ -1265,6 +1267,11 @@ export interface DraftRankRowView {
   /** Raw perceived ceiling (0–100) behind the analyst stars — used to derive the
    *  analysts' projected role consistently with their ranking. */
   perceivedCeiling?: number
+  /** The PUBLIC board's projection in words ("Top-six F", "2nd-pair D").
+   *  Deliberately coarse: the published book gives you a rank and a role, it does
+   *  not hand you a ceiling grade. Star potential is your own department's product
+   *  and is only shown where your staff has actually filed (C5). */
+  analystRole?: string
 }
 
 /** A row on YOUR scouts' board — the consensus rank vs your staff's rank. */
@@ -1292,8 +1299,15 @@ export interface DraftRankingsView {
   draftYear: number
   /** The draft board proper — draft-eligible + re-entry, analyst-ranked. */
   rankings: DraftRankRowView[]
-  /** Younger talent (14–16) on the radar but not yet draft-eligible. */
+  /** Younger talent (14–16) YOUR SCOUTS have actually watched. Gated on a real
+   *  read (C5): a pre-filled list of the next two classes' best kids, sorted by
+   *  ceiling, was the single biggest way the game did the scouting for you. */
   radar: DraftRankRowView[]
+  /** How many U17s exist that nobody in your building has watched — the size of
+   *  the work still to do. */
+  radarUnseen: number
+  /** How much of the eligible class your department has filed a real read on. */
+  classCoverage: { filed: number; total: number; pct: number }
   /** YOUR scouts' own board — the staff consensus, re-ranked by what they've seen. */
   scoutBoard: ScoutBoardRowView[]
   /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
@@ -2896,6 +2910,10 @@ export interface ScoutCoverageRow {
   avgKnowledge: number
   youthAvgKnowledge: number
   playerCount: number
+  /** Draft-age (U24) players in the pool — what a blind spot actually costs. */
+  youthCount: number
+  /** Scouts whose current brief reaches this beat (empty = nobody is watching). */
+  scoutNames: string[]
 }
 
 /** A hireable scout in the job market. */
@@ -2947,42 +2965,195 @@ export interface TeamKnowledgeSummary {
  * Full scouting hub view — scout cards, assignment options, knowledge summaries.
  * Carried as the response to a 'getScouting' request.
  */
-/** One row in the scouted-players recommendations table. */
-export interface ScoutedPlayerRow {
+/* ── whole-database player search (C3) ── */
+
+/** What the department's read of a player is worth, in bands. */
+export type PlayerReadBand = 'exact' | 'strong' | 'partial' | 'glimpse' | 'unscouted'
+
+/** A query the GM drives — every field optional, all of them ANDed. */
+export interface PlayerSearchQuery {
+  /** Name substring, case-insensitive. */
+  text?: string
+  /** Position tokens: exact ('C','LW','RW','D','G') or groups ('F','W','D'). */
+  positions?: string[]
+  ageMin?: number
+  ageMax?: number
+  nations?: string[]
+  /** Competition ids (incl. the synthetic 'nhl' / 'ahl'). */
+  leagueIds?: string[]
+  handedness?: string
+  /** Contract situations to keep. */
+  contracts?: Array<'signed' | 'expiring' | 'freeAgent' | 'unsigned'>
+  maxSalary?: number
+  /** Floors on OUR read — a player we can't see can never pass these. */
+  minCurrentStars?: number
+  minPotentialStars?: number
+  minKnowledge?: number
+  /** Only players the department actually has a read on. */
+  scoutedOnly?: boolean
+  /** Only players on the GM's watch list. */
+  watchedOnly?: boolean
+  /** Only current-class draft eligibles. */
+  draftEligibleOnly?: boolean
+  /** Drop our own org from the results. */
+  excludeOwn?: boolean
+  sort?: 'name' | 'age' | 'current' | 'potential' | 'knowledge' | 'salary' | 'points'
+  /** Descending by default; pass false for ascending. */
+  desc?: boolean
+  limit?: number
+  offset?: number
+}
+
+/** One result row. Ability fields are `null` when we have no read — never a
+ *  plausible-looking guess. Public facts are always present. */
+export interface PlayerSearchRow {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  handedness: string
+  nationality?: string
+  faceId?: string
+  teamId?: string
+  teamAbbr: string
+  teamName: string
+  leagueAbbr?: string
+  knowledge: number
+  read: PlayerReadBand
+  readLabel: string
+  /** Fog-aware current ability in stars; null when unscouted. */
+  currentStars: number | null
+  /** Fog-aware ceiling in stars; null when unscouted. */
+  potentialStars: number | null
+  salary: number
+  contractLabel: string
+  contractBucket: 'signed' | 'expiring' | 'freeAgent' | 'unsigned'
+  gp: number
+  goals: number
+  assists: number
+  points: number
+  draftEligible: boolean
+  watched: boolean
+  /** Asset value once we have a read; null otherwise. */
+  value: number | null
+}
+
+/** Filter options derived from the live database (so the UI offers real values). */
+export interface PlayerSearchFacets {
+  nations: string[]
+  leagues: Array<{ id: string; label: string }>
+}
+
+export interface PlayerSearchView {
+  rows: PlayerSearchRow[]
+  /** Matches before paging. */
+  total: number
+  /** How many matches the department actually has a read on. */
+  scoutedCount: number
+  facets: PlayerSearchFacets
+  /** One sentence naming the fog over this result set. */
+  fogNote: string
+  offset: number
+  limit: number
+}
+
+/* ── the GM's watch list (C1) ── */
+
+/** One pinned player, as the Scouting overview renders him. */
+export interface WatchListRow {
   playerId: string
   name: string
   position: string
   age: number
   teamAbbr: string
   nationality?: string
-  /** Fog-aware current ability, 0–5 stars. */
-  currentStars: number
-  /** Fog-aware potential, 0–5 stars. */
-  potentialStars: number
-  /** 0–100 scouting knowledge. */
-  knowledge: number
-  /** Recommendation grade — a TARGET grade (youth + upside + acquirability),
-   *  not raw quality. An ageing star you can't pry loose grades low. */
-  rec: 'A+' | 'A' | 'B' | 'C' | 'D'
-  /** Acquisition-target score backing the grade; sorts the list. */
-  targetScore: number
-  /** Current salary (≈ transfer/asset value proxy). */
-  salary: number
-  /** Trade/market value — the same asset-value currency the trade AI evaluates
-   *  with (fog-aware: youth + upside + acquirability, discounted for age/contract).
-   *  0 for a player we know too little about to value. */
-  tradeValue: number
   faceId?: string
-  /** True if he's a current-class draft-eligible amateur (for filtering). */
+  /** Fog-aware read; null when we still have nothing on him. */
+  currentStars: number | null
+  potentialStars: number | null
+  knowledge: number
+  /** Knowledge the day he was pinned — the delta is what watching has bought. */
+  knowledgeAtAdd: number
+  addedDate: string
+  /** GM's own note. */
+  note?: string
+  /** Which of your scouts have personally filed on him. */
+  scoutNames: string[]
+  contractLabel: string
   draftEligible: boolean
-  /** Compact analyst draft standing, e.g. "R1 · #11"; absent if not on the board. */
+  /** Compact analyst draft standing, e.g. "R1 · #11". */
   draftLabel?: string
+  /** One line on what watching him has produced so far. */
+  progressNote: string
+}
+
+/* ── Scouting Centre briefing (C2) ── */
+
+/** A league/nation the department covers, or conspicuously does not. */
+export interface CoverageBeatRow {
+  id: string
+  label: string
+  nation?: string
+  playerCount: number
+  knowledge: number
+  /** Knowledge delta since the last month-start snapshot (0 when no history). */
+  delta: number
+  /** Scouts whose brief currently covers this beat. */
+  scoutNames: string[]
+}
+
+/** Two of your scouts, far apart on the same prospect. */
+export interface ScoutDisagreementRow {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  teamAbbr: string
+  highScout: string
+  highRank: number
+  lowScout: string
+  lowRank: number
+  /** Rank spread between them. */
+  spread: number
+  line: string
+}
+
+/** Something that actually changed since the last month-start snapshot. */
+export interface ScoutingChangeRow {
+  kind: 'finds' | 'coverage' | 'knowledge' | 'watch' | 'board'
+  text: string
+  /** Signed magnitude, for the arrow/colour. */
+  delta?: number
+}
+
+/**
+ * The Scouting Centre's real briefing: what the department covers, what it is
+ * blind to, who it argues about, and what moved since last month. Replaces the
+ * single "your roster is thin at X" line.
+ */
+export interface ScoutingBriefingView {
+  /** Headline sentence on department bandwidth. */
+  headline: string
+  /** Supporting sentence — the load each scout is carrying. */
+  strain: string
+  /** How much of the current draft class the department has filed on. */
+  classCoverage: { filed: number; total: number; pct: number; line: string }
+  /** Beats we cover best. */
+  covering: CoverageBeatRow[]
+  /** Big talent pools nobody is watching. */
+  blindSpots: CoverageBeatRow[]
+  /** Prospects our own scouts rank very differently. */
+  disagreements: ScoutDisagreementRow[]
+  /** Month-over-month movement. */
+  changes: ScoutingChangeRow[]
+  /** Position groups: roster need vs how much intel we hold there. */
+  needCoverage: Array<{ group: string; need: boolean; tracked: number; knowledge: number; line: string }>
+  /** Date of the snapshot the deltas are measured against, if any. */
+  since?: string
 }
 
 export interface ScoutingView {
   scouts: ScoutCardView[]
-  /** Scouted players with recommendation grades (most recommendable first). */
-  scoutedPlayers: ScoutedPlayerRow[]
   /** All teams as assignment options. */
   teams: Array<{ teamId: string; teamName: string; teamAbbr: string }>
   /** All divisions as assignment options. */
@@ -3014,8 +3185,12 @@ export interface ScoutingView {
   nationCoverage: ScoutCoverageRow[]
   /** Per-team knowledge summary. */
   teamKnowledge: TeamKnowledgeSummary[]
-  /** Recently improved players (highest delta-knowledge), for watch-list panel. */
-  topGains: Array<PlayerBadge & { knowledge: number }>
+  /** The GM's OWN watch list — empty until he pins someone (C1). */
+  watchList: WatchListRow[]
+  /** Cap on the watch list, so the UI can say when it's full. */
+  watchCap: number
+  /** The department briefing that replaced the one-line Scouting Centre note (C2). */
+  briefing: ScoutingBriefingView
   /** Hireable scouts on the market. */
   scoutMarket: ScoutMarketRow[]
   /** Cap on active scouts. */

@@ -107,4 +107,38 @@ export interface ScoutingState {
   /** Prospects the GM PASSED on — hidden from the recommendation queue so a
    *  triaged player doesn't keep re-surfacing. Absent on old saves. */
   dismissed?: string[]
+  /** The GM's own WATCH LIST — players HE put a pin in. Starts empty and only
+   *  ever grows by an explicit act (a list the game hands you tells you nothing).
+   *  It is not a bookmark: watched players take priority in every scout's day
+   *  (capped, so the brief still progresses) and are shielded from knowledge
+   *  decay while they sit on it. Absent on old saves. */
+  watchList?: WatchListEntry[]
+  /** Month-start coverage snapshots — the department's own paper trail, so the
+   *  Scouting Centre can say what actually CHANGED since last month rather than
+   *  only what is true today. Capped to the last 14 months. Absent on old saves. */
+  coverageLog?: CoverageSnapshot[]
+}
+
+/** One pinned player on the GM's watch list. */
+export interface WatchListEntry {
+  playerId: string
+  /** ISO date the GM pinned him — "watching since". */
+  addedDate: string
+  /** Knowledge at the moment he was pinned, so the panel can show what watching
+   *  him has actually bought you. */
+  knowledgeAtAdd: number
+  /** Optional GM note ("PP QB if he adds a step"). */
+  note?: string
+}
+
+/** A month-start snapshot of where the department's eyes were. */
+export interface CoverageSnapshot {
+  /** ISO date of the snapshot (always a month boundary). */
+  date: string
+  /** Department-wide average knowledge, 0–100. */
+  world: number
+  /** [competitionId, avgKnowledge] for every league with players. */
+  leagues: Array<[string, number]>
+  /** How many prospects the department had filed a real read on. */
+  filed: number
 }

@@ -94,10 +94,13 @@ describe('getScouting view stability', () => {
     expect(JSON.stringify(b)).toBe(JSON.stringify(a))
 
     // A knowledge change must show up in the very next view (no stale caching).
-    const target = a.scoutedPlayers[0]!
+    // The scouted-players table is now the whole-database SEARCH (C3), so the
+    // freshness check runs through that instead.
+    const first = career.searchPlayers({ excludeOwn: true, sort: 'knowledge', limit: 5 })
+    const target = first.rows[0]!
     addKnowledge(scouting, target.playerId, -5)
-    const c = career.getScouting()
-    const row = c.scoutedPlayers.find((r) => r.playerId === target.playerId)
+    const after = career.searchPlayers({ text: target.name, limit: 5 })
+    const row = after.rows.find((r) => r.playerId === target.playerId)
     expect(row?.knowledge).toBe(target.knowledge - 5)
 
     // A scout reassignment shows up too.

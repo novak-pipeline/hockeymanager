@@ -163,6 +163,7 @@ import type { StaffMeetingSummaryView } from '@engine/career/views'
 export type { StaffMeetingView, StaffMeetingProposalView, StaffMeetingOptionView } from '@engine/career/views'
 import type { StaffMeetingView } from '@engine/career/views'
 export type { ScoutMeetingView, ScoutBoardLineView } from '@engine/career/views'
+export type { PlayerSearchQuery, PlayerSearchRow, PlayerSearchView, PlayerSearchFacets, PlayerReadBand, WatchListRow, ScoutingBriefingView } from '@engine/career/views'
 import type { ScoutMeetingView } from '@engine/career/views'
 export type { CoachMarketView, CoachMarketCandidateView } from '@engine/career/views'
 import type { CoachMarketView } from '@engine/career/views'
@@ -231,6 +232,7 @@ import type {
 export type { ShoppedPlayerView, DeadlineFeedItemView } from '@engine/career/views'
 import type { TeamTactics } from '@domain'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
+import type { PlayerSearchQuery, PlayerSearchView } from '@engine/career/views'
 import type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { TeamPracticeState, PracticeFocus } from '@engine/league/practice'
 export type { ArchetypeInfo, LineSynergyView, CoachSuggestionView, StyleFitView, StaffView, StaffRowView } from '@engine/career/views'
@@ -435,6 +437,11 @@ export type WorkerRequestBody =
   | { type: 'unshortlistProspect'; playerId: string }
   | { type: 'dismissProspect'; playerId: string }
   | { type: 'rescoutProspect'; playerId: string }
+  /** The GM's own watch list (C1) — pin / un-pin / annotate. */
+  | { type: 'toggleWatchPlayer'; playerId: string }
+  | { type: 'setWatchNote'; playerId: string; note: string }
+  /** Whole-database player search (C3) — the Players tab is a tool, not a list. */
+  | { type: 'searchPlayers'; query: PlayerSearchQuery }
   /** Playtest #10: release the scout-digest hold (GM interacted or delegated). */
   | { type: 'resolveScoutDigest' }
   /** Global search for the command palette (players + teams by name). */
@@ -655,6 +662,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'emergencyCoverSigned'; signed: string[]; message: string }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
+  | { type: 'playerSearch'; playerSearch: PlayerSearchView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }
   | {
       type: 'searchResults'

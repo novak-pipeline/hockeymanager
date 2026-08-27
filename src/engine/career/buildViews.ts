@@ -43,7 +43,6 @@ import {
 } from '@engine/league/archetypes'
 import { deploymentProfile } from '@engine/league/deployment'
 import { leverReceipts } from '@engine/league/leverReceipts'
-import { playerValue } from '@engine/league/trades'
 import type {
   ArchetypeInfo,
   AttributeGroupView,
@@ -83,8 +82,9 @@ import type {
 } from './views'
 import { dayToDateISO } from './views'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutFormBias, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, maskedOverall, maskedCeiling, scoutFormBias, scoutsWhoSaw, YOUTH_MAX_AGE, scoutReadSpeed, SCOUT_SEEN_THRESHOLD, MAX_WATCH_LIST, type ScoutingCompetition, type ScoutCandidate } from '@engine/league/scouting'
 import { draftRoundLabel } from '@engine/league/draftRankings'
+import { buildScoutingBriefing } from './scoutBriefing'
 import {
   finalizeSpecialTeams,
   type SpecialTeamsEntries,
@@ -966,6 +966,8 @@ export function buildPlayerProfile(
 
   return {
     ...badge(p, fog),
+    // C1: whether the GM has pinned him himself — drives the ☆/★ button.
+    watched: (fog?.scouting.watchList ?? []).some((w) => w.playerId === (p.id as string)),
     teamId,
     teamName,
     positions: buildPositions(p),
@@ -1302,6 +1304,10 @@ export interface ScoutingViewCtx extends ViewCtx {
   scoutMarket: ScoutCandidate[]
   /** Soft cap on the scouting department size. */
   maxScouts: number
+  /** Per-scout draft boards — feeds the briefing's "who disagrees" panel. */
+  scoutBoards?: Array<{ scoutId: string; scoutName: string; rows: Array<{ playerId: string; rank: number }> }>
+  /** Today's ISO date, for dating the month-over-month briefing. */
+  todayISO?: string
 }
 
 function assignmentLabel(
@@ -1431,6 +1437,31 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     return null
   }
 
+  // Which scouts' briefs actually reach each league — so a coverage row can name
+  // the man responsible, and a row with nobody on it reads as a real blind spot.
+  const scoutsOnLeague = new Map<string, string[]>()
+  const scoutsOnNation = new Map<string, string[]>()
+  const addBeat = (m: Map<string, string[]>, key: string, name: string): void => {
+    const arr = m.get(key)
+    if (arr) { if (!arr.includes(name)) arr.push(name) }
+    else m.set(key, [name])
+  }
+  for (const a of scouting.assignments) {
+    const t = a.target as { kind: string; competitionId?: string; nation?: string; teamId?: string }
+    const reach: ScoutingCompetition[] =
+      t.kind === 'competition' ? competitions.filter((c) => c.id === t.competitionId)
+      : t.kind === 'nation' ? competitions.filter((c) => c.nation === t.nation)
+      : t.kind === 'team' ? competitions.filter((c) => !!t.teamId && c.teamIds.includes(t.teamId))
+      : t.kind === 'draftClass' ? competitions.filter((c) => c.id !== 'nhl' && c.id !== 'ahl')
+      : t.kind === 'nextOpponent' ? competitions.filter((c) => c.id === 'nhl')
+      : t.kind === 'ownProspects' ? competitions.filter((c) => c.id === 'nhl' || c.id === 'ahl')
+      : []
+    for (const c of reach) {
+      addBeat(scoutsOnLeague, c.id, a.name)
+      if (c.nation) addBeat(scoutsOnNation, c.nation, a.name)
+    }
+  }
+
   // Scout cards
   const scouts = scouting.assignments.map((s) => {
     const focus = (s.focus ?? 'all') as 'youth' | 'senior' | 'all'
@@ -1454,23 +1485,14 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
       focusNation: scopeNation(s.target as { kind: string }),
     }
   })
-  // Nations covered: a WORLD brief covers every scouted nation; league/team/
-  // draft briefs cover North America; narrow briefs contribute their nation.
-  const allCompNations = [...new Set(competitions.map((c) => c.nation).filter((n) => n !== 'North America'))]
-  const coveredNations = new Set<string>()
-  for (const s of scouts) {
-    const kind = (s.target as { kind: string }).kind
-    if (kind === 'world') {
-      for (const n of allCompNations) coveredNations.add(n)
-      coveredNations.add('North America')
-    } else if (s.focusNation) {
-      coveredNations.add(s.focusNation)
-    } else {
-      // League / division / NA team / own prospects / draft class / next opp.
-      coveredNations.add('North America')
-    }
-  }
-  const scoutedNations = [...coveredNations]
+  // Nations covered: exactly the nations some scout's brief actually REACHES,
+  // from the same reach map the coverage rows and the globe read. The old rule
+  // credited any non-national brief to "North America" on principle, so three
+  // scouts on a draft class that spans Russia and Sweden read as North American
+  // coverage — and in a world with no feeder leagues at all they read as covering
+  // a continent nobody was watching. The header card, the globe's lit nodes and
+  // the blind-spot list now cannot disagree, because they share one source.
+  const scoutedNations = [...scoutsOnNation.keys()].sort()
   const activeScouts = scouting.assignments.length
 
   // Teams list for dropdown options
@@ -1498,20 +1520,25 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   }))
 
   // Coverage by league + nation (avg knowledge, plus a youth-only split).
-  const coverageRow = (id: string, label: string, nation: string | undefined, teamIds: string[]): import('./views').ScoutCoverageRow => {
+  const coverageRow = (id: string, label: string, nation: string | undefined, teamIds: string[], scoutNames: string[]): import('./views').ScoutCoverageRow => {
     const ids = rostersOf(teamIds)
     const ks = ids.map((pid) => knowledgeOf(scouting, pid))
-    const youthKs = ids.filter(isYouth).map((pid) => knowledgeOf(scouting, pid))
+    const youthIds = ids.filter(isYouth)
+    const youthKs = youthIds.map((pid) => knowledgeOf(scouting, pid))
     const mean = (arr: number[]): number => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0)
-    return { id, label, ...(nation ? { nation } : {}), avgKnowledge: mean(ks), youthAvgKnowledge: mean(youthKs), playerCount: ids.length }
+    return {
+      id, label, ...(nation ? { nation } : {}),
+      avgKnowledge: mean(ks), youthAvgKnowledge: mean(youthKs),
+      playerCount: ids.length, youthCount: youthIds.length, scoutNames,
+    }
   }
   const leagueCoverage = competitions
-    .map((c) => coverageRow(c.id, c.id === 'nhl' ? 'NHL' : c.id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === c.id)?.name ?? compLabel(c.id)), c.nation, c.teamIds))
+    .map((c) => coverageRow(c.id, c.id === 'nhl' ? 'NHL' : c.id === 'ahl' ? 'AHL' : (competitionMeta.find((m) => m.id === c.id)?.name ?? compLabel(c.id)), c.nation, c.teamIds, scoutsOnLeague.get(c.id) ?? []))
     .filter((r) => r.playerCount > 0)
   const nationCoverage = [...nationSet].sort().map((n) => {
     const teamIds = new Set<string>()
     for (const c of competitions) if (c.nation === n) for (const t of c.teamIds) teamIds.add(t)
-    return coverageRow(n, n, n, [...teamIds])
+    return coverageRow(n, n, n, [...teamIds], scoutsOnNation.get(n) ?? [])
   }).filter((r) => r.playerCount > 0)
 
   const scoutMarketRows: import('./views').ScoutMarketRow[] = scoutMarket.map((c) => ({
@@ -1612,92 +1639,75 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
   }
   teamKnowledge.sort((a, b) => b.avgKnowledge - a.avgKnowledge)
 
-  // Top gains — players with highest current knowledge not at 100 or 0
-  const topGains: Array<PlayerBadge & { knowledge: number }> = []
-  for (const [pid, k] of scouting.knowledge) {
-    if (k <= 5 || k >= 100) continue
-    const p = players.get(pid as PlayerId)
-    if (!p) continue
-    topGains.push({ ...badge(p), knowledge: Math.round(k) })
+  // ── The GM's watch list (C1) ─────────────────────────────────────────────
+  // Not a list of "players whose knowledge went up" — that is the game telling
+  // you who to care about. This is only ever what the GM pinned himself, and it
+  // reports what the pin has BOUGHT: knowledge then vs knowledge now, who has
+  // filed on him, and whether the read has hardened enough to act on.
+  const scoutNameById = new Map(scouting.assignments.map((a) => [a.scoutId, a.name]))
+  const sawByPlayer = new Map<string, string[]>()
+  for (const [sid, pids] of scouting.scoutHistory ?? []) {
+    const nm = scoutNameById.get(sid)
+    if (!nm) continue
+    for (const pid of pids) {
+      const arr = sawByPlayer.get(pid)
+      if (arr) arr.push(nm)
+      else sawByPlayer.set(pid, [nm])
+    }
   }
-  topGains.sort((a, b) => b.knowledge - a.knowledge)
-  topGains.splice(20)
+  const yearsWord = (n: number): string => (n <= 0 ? 'expiring' : n === 1 ? '1 yr left' : `${n} yrs left`)
+  const watchList: import('./views').WatchListRow[] = []
+  for (const w of scouting.watchList ?? []) {
+    const p = players.get(w.playerId as PlayerId)
+    if (!p) continue
+    const k = ownRoster.has(w.playerId) ? 100 : knowledgeOf(scouting, w.playerId)
+    const hasRead = k >= SCOUT_SEEN_THRESHOLD
+    const gained = Math.round(k - w.knowledgeAtAdd)
+    const scoutNames = [...new Set(sawByPlayer.get(w.playerId) ?? [])]
+    const progressNote =
+      !hasRead && gained <= 1
+        ? 'No real read yet — nobody has been close enough often enough.'
+      : !hasRead
+        ? `Building a file — ${gained} points of read since you pinned him, still short of an opinion.`
+      : gained >= 25
+        ? `Your staff has done the work: ${gained} points of read since you pinned him.`
+      : gained > 0
+        ? `${gained} points sharper than the day you pinned him.`
+        : 'Read is holding steady — he is being watched, not studied.'
+    watchList.push({
+      playerId: w.playerId,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      teamAbbr: teamAbbrOf.get(w.playerId) ?? 'FA',
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      currentStars: hasRead ? overallToStars(ratedOverall(p)) : null,
+      potentialStars: hasRead ? overallToStars(scoutedCeilingK(p, k, accFor(w.playerId))) : null,
+      knowledge: Math.round(k),
+      knowledgeAtAdd: Math.round(w.knowledgeAtAdd),
+      addedDate: w.addedDate,
+      ...(w.note ? { note: w.note } : {}),
+      scoutNames,
+      contractLabel: teamAbbrOf.has(w.playerId) ? yearsWord(p.contract.yearsRemaining) : 'Free agent',
+      draftEligible: draftProspectIds.has(w.playerId),
+      ...(ctx.draftRankById?.[w.playerId] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[w.playerId]) } : {}),
+      progressNote,
+    })
+  }
+  // Least-known first: the list should point at the work still to do.
+  watchList.sort((a, b) => a.knowledge - b.knowledge || a.name.localeCompare(b.name))
 
-  // Scouted-players recommendations table: everyone the user has meaningful
-  // knowledge of, graded. Fog-aware (stars from scouting confidence).
-  const abbrOf = new Map<string, string>()
-  for (const [, team] of teams) {
-    for (const id of team.roster) abbrOf.set(id as string, team.abbreviation)
-  }
-  // PERF: two passes. The first computes only what the RANKING needs (stars +
-  // target score) for every known player; the expensive per-row extras
-  // (playerValue — the trade-AI valuation — badge fields, draft labels) are
-  // built in the second pass for just the 300 rows that survive the cut.
-  // Byte-identical to the single-pass version: none of the deferred fields
-  // participate in the sort.
-  type ScoutedCand = { pid: string; p: Player; k: number; cur: number; pot: number; rec: 'A+' | 'A' | 'B' | 'C' | 'D'; targetScore: number }
-  const scoutedCands: ScoutedCand[] = []
-  for (const [pid, k] of scouting.knowledge) {
-    if (k < 15) continue
-    if (ownRoster.has(pid as string)) continue // your own players aren't acquisition targets
-    const p = players.get(pid as PlayerId)
-    if (!p) continue
-    const cur = overallToStars(ratedOverall(p))
-    const pot = overallToStars(scoutedCeilingK(p, k, accFor(pid as string)))
-    const headroom = Math.max(0, pot - cur)
-    // TARGET value (FM-style): a recommendation is about who's worth PURSUING, not
-    // raw quality. Youth + remaining upside drive it; value fades hard with age
-    // (you don't "target" a 30-year-old — for established NHLers scouting just keeps
-    // your knowledge current), and elite CURRENT players are near-impossible to
-    // acquire so they're discounted too. A 19-year-old with a high ceiling and room
-    // to grow is the prize; a world-class veteran on another roster is not.
-    const ageFactor = p.age <= 20 ? 1 : p.age <= 23 ? 0.9 : p.age <= 26 ? 0.6 : p.age <= 29 ? 0.4 : 0.25
-    const acquirability = cur >= 4.5 ? 0.5 : cur >= 4 ? 0.7 : cur >= 3 ? 0.9 : 1
-    const targetScore = (pot * 0.55 + headroom * 1.2) * ageFactor * acquirability
-    // Thresholds calibrated against the formula's real range so the column actually
-    // DISCRIMINATES. A pool filtered to young prospects (all high ageFactor + low
-    // current → big headroom) previously landed everyone at A+; only the genuinely
-    // elite (≥4★ ceiling with room to grow) should earn the top grade.
-    const rec: 'A+' | 'A' | 'B' | 'C' | 'D' =
-      targetScore >= 5.5 ? 'A+'
-      : targetScore >= 4.2 ? 'A'
-      : targetScore >= 3.2 ? 'B'
-      : targetScore >= 2.2 ? 'C'
-      : 'D'
-    // The row (and the sort) publish the ROUNDED score — rank on the same value.
-    scoutedCands.push({ pid: pid as string, p, k, cur, pot, rec, targetScore: Math.round(targetScore * 100) / 100 })
-  }
-  // Best targets first — young, high-upside, acquirable.
-  scoutedCands.sort((a, b) =>
-    b.targetScore - a.targetScore ||
-    b.pot - a.pot ||
-    b.cur - a.cur,
-  )
-  scoutedCands.splice(300)
-  const scoutedPlayers: import('./views').ScoutedPlayerRow[] = scoutedCands.map(({ pid, p, k, cur, pot, rec, targetScore }) => ({
-    playerId: pid,
-    name: p.name,
-    position: p.position,
-    age: p.age,
-    teamAbbr: abbrOf.get(pid) ?? 'FA',
-    ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
-    currentStars: cur,
-    potentialStars: pot,
-    knowledge: Math.round(k),
-    rec,
-    targetScore,
-    salary: p.contract.salary,
-    // Market value on the trade AI's own asset-value currency — shown only once
-    // we have a real read (fog-of-war), so an unknown player doesn't leak a value.
-    tradeValue: k >= 40 ? Math.round(playerValue(p)) : 0,
-    ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-    draftEligible: draftProspectIds.has(pid),
-    ...(ctx.draftRankById?.[pid] !== undefined ? { draftLabel: draftRoundLabel(ctx.draftRankById[pid]) } : {}),
-  }))
+  const briefing = buildScoutingBriefing({
+    scouting, players, teams, competitions, leagueCoverage, nationCoverage,
+    scouts, recommendations, watchList, draftProspectIds, rosterNeeds, needGroups,
+    groupOf, groupLabel: GROUP_LABEL, ownRoster,
+    ...(ctx.scoutBoards ? { scoutBoards: ctx.scoutBoards } : {}),
+    todayISO: ctx.todayISO ?? '',
+  })
 
   return {
     scouts,
-    scoutedPlayers,
     teams: teamsOpts,
     divisions: divisionsOpts,
     nations,
@@ -1713,7 +1723,9 @@ export function buildScoutingView(ctx: ScoutingViewCtx): ScoutingView {
     leagueCoverage,
     nationCoverage,
     teamKnowledge,
-    topGains,
+    watchList,
+    watchCap: MAX_WATCH_LIST,
+    briefing,
     scoutMarket: scoutMarketRows,
     maxScouts: ctx.maxScouts,
   }
