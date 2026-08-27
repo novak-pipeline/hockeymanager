@@ -603,6 +603,21 @@ export function buildWeightedSchedule(
   }))
 }
 
+/**
+ * Fallback NHL salary ceiling, in dollars.
+ *
+ * The fictional/vanilla league generates its contracts against this number, so
+ * it is internally consistent and must not move. Imported mods carry their own
+ * ceiling in `ModDatabase.rules.salaryCap` (the real-roster DB is priced
+ * against the real cap of its season); this is only the value used when a mod
+ * does not say.
+ */
+export const DEFAULT_SALARY_CAP = 88e6
+
+/** An owner's operating budget sits a little above the ceiling. Derived so the
+ *  Finances screen shows a sane balance whatever the ceiling turns out to be. */
+export const budgetForCap = (salaryCap: number): number => salaryCap + 2e6
+
 export const freshStanding = (teamId: TeamId): Standing => ({
   teamId,
   gamesPlayed: 0,
@@ -710,7 +725,7 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
       roster: roster.map((p) => p.id),
       lines,
       tactics: structuredClone(DEFAULT_TACTICS),
-      finances: { budget: 90e6, salaryCap: 88e6, capUsed: 0, revenue: 0 },
+      finances: { budget: budgetForCap(DEFAULT_SALARY_CAP), salaryCap: DEFAULT_SALARY_CAP, capUsed: 0, revenue: 0 },
       staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] }
     }
     // #176: rescale the roster to a realistic payroll band, then tally cap used.
@@ -826,7 +841,7 @@ export function generateLeague(opts: GenerateOptions): LeagueData {
       roster: ahlRoster.map((p) => p.id),
       lines: ahlLines,
       tactics: structuredClone(DEFAULT_TACTICS),
-      finances: { budget: 12e6, salaryCap: 88e6, capUsed: ahlCapUsed, revenue: 0 },
+      finances: { budget: 12e6, salaryCap: DEFAULT_SALARY_CAP, capUsed: ahlCapUsed, revenue: 0 },
       staff: { headCoachId: null, assistantCoachIds: [], scoutIds: [] },
       tier: 'ahl',
       parentTeamId: nhlTeamId,

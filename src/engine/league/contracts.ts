@@ -39,10 +39,37 @@ const NTC_MIN_SALARY = 4_500_000
 const NTC_MIN_YEARS = 3
 /** Hard roster ceiling enforced by signPlayer. */
 export const MAX_ROSTER_SIZE = 26
-/** Salary floor — the minimum payroll a club is expected to ice (~74% of the
- *  $88M ceiling, mirroring the NHL's lower limit). AI clubs spend up to it in
- *  free agency; the UI flags a user club that sits below it. */
-export const CAP_FLOOR = 65_000_000
+/**
+ * Year-over-year growth of the ceiling. The NHL's long-run rate is ~4–5%; the
+ * current 9%/yr jump ($95.5M → $104.0M → $113.5M) is a one-off escrow catch-up,
+ * not a rate to compound forever. Applied at every season rollover.
+ *
+ * Sanity check from the real 2026-27 base of $104.0M: 108.7 / 113.6 / 118.7 /
+ * 124.0 / 129.6 five years out. Compounding off the old hardcoded $88.0M base
+ * instead, the league would not have reached today's real ceiling until 2030.
+ */
+export const CAP_GROWTH = 1.045
+
+/** Next season's ceiling, rounded to the nearest $100k. */
+export const grownCap = (salaryCap: number): number =>
+  Math.round((salaryCap * CAP_GROWTH) / 100_000) * 100_000
+
+/**
+ * The NHL's lower limit tracks its upper limit — 2025-26 was $95.5M/$70.6M and
+ * 2026-27 is $104.0M/$77.1M, both ~73.9%. So the floor is a RATIO of a club's
+ * own ceiling, never a constant: a mod that declares a $104M cap must get a
+ * $77M floor, not the $65M one the fictional league happens to use.
+ */
+export const CAP_FLOOR_RATIO = 0.739
+
+/** The floor for a given ceiling, rounded to the nearest $100k.
+ *  `capFloorFor(88e6) === 65_000_000` — the vanilla league does not move. */
+export const capFloorFor = (salaryCap: number): number =>
+  Math.round((salaryCap * CAP_FLOOR_RATIO) / 100_000) * 100_000
+
+/** Salary floor for the fictional league's $88M ceiling. Prefer
+ *  {@link capFloorFor} anywhere a club's own ceiling is in hand. */
+export const CAP_FLOOR = capFloorFor(88e6)
 
 type PositionGroup = 'F' | 'D' | 'G'
 
