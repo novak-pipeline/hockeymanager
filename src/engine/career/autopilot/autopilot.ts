@@ -315,9 +315,18 @@ function assessPlan(ctx: Ctx): Plan {
   const coreQ = top6.length ? top6.reduce((s, p) => s + p.overall, 0) / top6.length : 72
   const coreAge = top6.length ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
   const cRank = dash?.userTeam.conferenceRank ?? 8
+  // How big is the conference? The rebuild penalty used to read `cRank >= 20`,
+  // which is unreachable in a 16-team conference — so a club that finished DEAD
+  // LAST in its conference still scored no penalty and planned to CONTEND for
+  // five straight seasons at 70 points, never once selling. Thresholds have to
+  // scale to the league they are judging.
+  const confSize = guarded(ctx, 'getStandings', () => ctx.career.getStandings())
+    ?.conferences.find((c) => c.rows.some((r) => r.teamId === dash?.userTeam.teamId))?.rows.length ?? 16
   let score = 0
   if (coreQ >= 83) score += 2; else if (coreQ >= 79) score += 1; else if (coreQ < 76) score -= 2
-  if (cRank <= 4) score += 2; else if (cRank <= 8) score += 1; else if (cRank >= 20) score -= 2
+  if (cRank <= confSize * 0.25) score += 2
+  else if (cRank <= confSize * 0.5) score += 1
+  else if (cRank >= confSize * 0.75) score -= 2
   if (coreAge >= 31) score -= 1              // aging core → lean away from all-in
   if (coreAge <= 25 && coreQ >= 78) score += 1 // young and good → window opening
   return score >= 2 ? 'contend' : score <= -2 ? 'rebuild' : 'retool'
@@ -527,8 +536,12 @@ function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
       // and the old form (salary > space + 1.5M) then passed every player alive
       // while intending the opposite — a club $19M over signed off on anything.
       // Over the ceiling, the only defensible answer is: buy nothing.
+      // No slack. The old `+1.5e6` allowance tabled offers the engine then
+      // refused outright — "Completing this would put you $0.8M over the cap"
+      // appeared repeatedly in the log. Proposing a deal you cannot complete is
+      // not aggression, it is noise.
       if (tv.myCapSpace <= 0) continue
-      if (p.salary > tv.myCapSpace + 1.5e6) continue
+      if (p.salary > tv.myCapSpace) continue
       cands.push({ partnerId: partner.teamId, partnerName: partner.teamName, posture: partner.posture ?? '', pid: p.playerId, name: p.name, ovr: p.overall, val: p.tradeValue, salary: p.salary, years: p.yearsRemaining })
     }
   }

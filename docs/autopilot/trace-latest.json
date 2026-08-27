@@ -104,6 +104,19 @@
     {
       "seq": 8,
       "season": 2025,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "plan",
+      "summary": "Diagnosis: cannot score — 3.50/game, 22th of 31",
+      "drivers": [
+        "F: 3.50 goals/game, 22th of 31"
+      ],
+      "result": "F",
+      "ok": true
+    },
+    {
+      "seq": 9,
+      "season": 2025,
       "day": 30,
       "phase": "regularSeason",
       "kind": "interaction",
@@ -115,7 +128,7 @@
       "ok": true
     },
     {
-      "seq": 9,
+      "seq": 10,
       "season": 2025,
       "day": 36,
       "phase": "regularSeason",
@@ -128,7 +141,7 @@
       "ok": true
     },
     {
-      "seq": 10,
+      "seq": 11,
       "season": 2025,
       "day": 42,
       "phase": "regularSeason",
@@ -141,7 +154,7 @@
       "ok": true
     },
     {
-      "seq": 11,
+      "seq": 12,
       "season": 2025,
       "day": 46,
       "phase": "regularSeason",
@@ -154,7 +167,7 @@
       "ok": true
     },
     {
-      "seq": 13,
+      "seq": 14,
       "season": 2025,
       "day": 56,
       "phase": "regularSeason",
@@ -167,7 +180,7 @@
       "ok": true
     },
     {
-      "seq": 14,
+      "seq": 15,
       "season": 2025,
       "day": 63,
       "phase": "regularSeason",
@@ -180,7 +193,7 @@
       "ok": true
     },
     {
-      "seq": 15,
+      "seq": 16,
       "season": 2025,
       "day": 66,
       "phase": "regularSeason",
@@ -193,7 +206,7 @@
       "ok": true
     },
     {
-      "seq": 16,
+      "seq": 17,
       "season": 2025,
       "day": 70,
       "phase": "regularSeason",
@@ -206,7 +219,7 @@
       "ok": true
     },
     {
-      "seq": 18,
+      "seq": 19,
       "season": 2025,
       "day": 84,
       "phase": "regularSeason",
@@ -219,7 +232,7 @@
       "ok": true
     },
     {
-      "seq": 19,
+      "seq": 20,
       "season": 2025,
       "day": 91,
       "phase": "regularSeason",
@@ -232,7 +245,7 @@
       "ok": true
     },
     {
-      "seq": 20,
+      "seq": 21,
       "season": 2025,
       "day": 92,
       "phase": "regularSeason",
@@ -245,7 +258,7 @@
       "ok": true
     },
     {
-      "seq": 21,
+      "seq": 22,
       "season": 2025,
       "day": 96,
       "phase": "regularSeason",
@@ -258,7 +271,7 @@
       "ok": true
     },
     {
-      "seq": 22,
+      "seq": 23,
       "season": 2025,
       "day": 98,
       "phase": "regularSeason",
@@ -271,7 +284,7 @@
       "ok": true
     },
     {
-      "seq": 24,
+      "seq": 25,
       "season": 2025,
       "day": 112,
       "phase": "regularSeason",
@@ -284,7 +297,7 @@
       "ok": true
     },
     {
-      "seq": 25,
+      "seq": 26,
       "season": 2025,
       "day": 119,
       "phase": "regularSeason",
@@ -297,7 +310,7 @@
       "ok": true
     },
     {
-      "seq": 27,
+      "seq": 28,
       "season": 2025,
       "day": 126,
       "phase": "regularSeason",
@@ -310,7 +323,7 @@
       "ok": true
     },
     {
-      "seq": 28,
+      "seq": 29,
       "season": 2025,
       "day": 131,
       "phase": "regularSeason",
@@ -323,7 +336,7 @@
       "ok": true
     },
     {
-      "seq": 29,
+      "seq": 30,
       "season": 2025,
       "day": 138,
       "phase": "regularSeason",
@@ -337,7 +350,7 @@
       "ok": false
     },
     {
-      "seq": 30,
+      "seq": 31,
       "season": 2025,
       "day": 140,
       "phase": "regularSeason",
@@ -350,7 +363,7 @@
       "ok": true
     },
     {
-      "seq": 31,
+      "seq": 32,
       "season": 2025,
       "day": 147,
       "phase": "regularSeason",
@@ -363,7 +376,7 @@
       "ok": true
     },
     {
-      "seq": 33,
+      "seq": 34,
       "season": 2025,
       "day": 154,
       "phase": "regularSeason",
@@ -376,7 +389,7 @@
       "ok": true
     },
     {
-      "seq": 34,
+      "seq": 35,
       "season": 2025,
       "day": 158,
       "phase": "regularSeason",
@@ -389,7 +402,7 @@
       "ok": true
     },
     {
-      "seq": 35,
+      "seq": 36,
       "season": 2025,
       "day": 168,
       "phase": "regularSeason",
@@ -402,7 +415,7 @@
       "ok": true
     },
     {
-      "seq": 37,
+      "seq": 38,
       "season": 2025,
       "day": 175,
       "phase": "regularSeason",
@@ -415,7 +428,7 @@
       "ok": true
     },
     {
-      "seq": 38,
+      "seq": 39,
       "season": 2025,
       "day": 175,
       "phase": "regularSeason",
@@ -428,7 +441,7 @@
       "ok": true
     },
     {
-      "seq": 39,
+      "seq": 40,
       "season": 2025,
       "day": 182,
       "phase": "regularSeason",
@@ -441,7 +454,7 @@
       "ok": true
     },
     {
-      "seq": 56,
+      "seq": 57,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -454,7 +467,7 @@
       "ok": true
     },
     {
-      "seq": 57,
+      "seq": 58,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -467,7 +480,7 @@
       "ok": true
     },
     {
-      "seq": 58,
+      "seq": 59,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -480,7 +493,7 @@
       "ok": true
     },
     {
-      "seq": 59,
+      "seq": 60,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -493,7 +506,7 @@
       "ok": true
     },
     {
-      "seq": 60,
+      "seq": 61,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -506,7 +519,7 @@
       "ok": true
     },
     {
-      "seq": 61,
+      "seq": 62,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -519,7 +532,7 @@
       "ok": true
     },
     {
-      "seq": 62,
+      "seq": 63,
       "season": 2025,
       "day": 212,
       "phase": "offseason:draft",
@@ -532,7 +545,7 @@
       "ok": true
     },
     {
-      "seq": 64,
+      "seq": 65,
       "season": 2025,
       "day": 212,
       "phase": "offseason:preseason",
@@ -546,7 +559,7 @@
       "ok": true
     },
     {
-      "seq": 65,
+      "seq": 66,
       "season": 2026,
       "day": 0,
       "phase": "regularSeason",
@@ -559,7 +572,7 @@
       "ok": true
     },
     {
-      "seq": 66,
+      "seq": 67,
       "season": 2026,
       "day": 3,
       "phase": "regularSeason",
@@ -572,7 +585,7 @@
       "ok": true
     },
     {
-      "seq": 67,
+      "seq": 68,
       "season": 2026,
       "day": 7,
       "phase": "regularSeason",
@@ -585,7 +598,7 @@
       "ok": true
     },
     {
-      "seq": 69,
+      "seq": 70,
       "season": 2026,
       "day": 14,
       "phase": "regularSeason",
@@ -598,7 +611,7 @@
       "ok": true
     },
     {
-      "seq": 70,
+      "seq": 71,
       "season": 2026,
       "day": 17,
       "phase": "regularSeason",
@@ -611,7 +624,7 @@
       "ok": true
     },
     {
-      "seq": 71,
+      "seq": 72,
       "season": 2026,
       "day": 28,
       "phase": "regularSeason",
@@ -624,7 +637,22 @@
       "ok": true
     },
     {
-      "seq": 72,
+      "seq": 73,
+      "season": 2026,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "plan",
+      "summary": "Diagnosis: cannot defend — 4.25 against/game, 23th of 31",
+      "drivers": [
+        "D: 4.25 against/game, 23th of 31",
+        "G: starter grades 69 — no better than the defence in front of him",
+        "F: 3.83 goals/game, 13th of 31"
+      ],
+      "result": "D>G>F",
+      "ok": true
+    },
+    {
+      "seq": 74,
       "season": 2026,
       "day": 31,
       "phase": "regularSeason",
@@ -637,7 +665,7 @@
       "ok": true
     },
     {
-      "seq": 74,
+      "seq": 76,
       "season": 2026,
       "day": 36,
       "phase": "regularSeason",
@@ -650,7 +678,7 @@
       "ok": true
     },
     {
-      "seq": 75,
+      "seq": 77,
       "season": 2026,
       "day": 42,
       "phase": "regularSeason",
@@ -663,7 +691,7 @@
       "ok": true
     },
     {
-      "seq": 76,
+      "seq": 78,
       "season": 2026,
       "day": 46,
       "phase": "regularSeason",
@@ -676,7 +704,7 @@
       "ok": true
     },
     {
-      "seq": 77,
+      "seq": 79,
       "season": 2026,
       "day": 56,
       "phase": "regularSeason",
@@ -689,7 +717,7 @@
       "ok": true
     },
     {
-      "seq": 79,
+      "seq": 81,
       "season": 2026,
       "day": 63,
       "phase": "regularSeason",
@@ -702,7 +730,7 @@
       "ok": true
     },
     {
-      "seq": 80,
+      "seq": 82,
       "season": 2026,
       "day": 68,
       "phase": "regularSeason",
@@ -715,7 +743,7 @@
       "ok": true
     },
     {
-      "seq": 81,
+      "seq": 83,
       "season": 2026,
       "day": 70,
       "phase": "regularSeason",
@@ -728,7 +756,7 @@
       "ok": true
     },
     {
-      "seq": 82,
+      "seq": 84,
       "season": 2026,
       "day": 82,
       "phase": "regularSeason",
@@ -741,7 +769,7 @@
       "ok": true
     },
     {
-      "seq": 83,
+      "seq": 85,
       "season": 2026,
       "day": 84,
       "phase": "regularSeason",
@@ -754,7 +782,7 @@
       "ok": true
     },
     {
-      "seq": 85,
+      "seq": 87,
       "season": 2026,
       "day": 91,
       "phase": "regularSeason",
@@ -767,7 +795,7 @@
       "ok": true
     },
     {
-      "seq": 86,
+      "seq": 88,
       "season": 2026,
       "day": 97,
       "phase": "regularSeason",
@@ -780,7 +808,7 @@
       "ok": true
     },
     {
-      "seq": 87,
+      "seq": 89,
       "season": 2026,
       "day": 98,
       "phase": "regularSeason",
@@ -793,7 +821,7 @@
       "ok": true
     },
     {
-      "seq": 89,
+      "seq": 91,
       "season": 2026,
       "day": 112,
       "phase": "regularSeason",
@@ -806,7 +834,7 @@
       "ok": true
     },
     {
-      "seq": 90,
+      "seq": 92,
       "season": 2026,
       "day": 112,
       "phase": "regularSeason",
@@ -819,7 +847,7 @@
       "ok": true
     },
     {
-      "seq": 91,
+      "seq": 93,
       "season": 2026,
       "day": 119,
       "phase": "regularSeason",
@@ -832,7 +860,7 @@
       "ok": true
     },
     {
-      "seq": 92,
+      "seq": 94,
       "season": 2026,
       "day": 126,
       "phase": "regularSeason",
@@ -845,7 +873,7 @@
       "ok": true
     },
     {
-      "seq": 93,
+      "seq": 95,
       "season": 2026,
       "day": 129,
       "phase": "regularSeason",
@@ -858,7 +886,7 @@
       "ok": true
     },
     {
-      "seq": 95,
+      "seq": 97,
       "season": 2026,
       "day": 138,
       "phase": "regularSeason",
@@ -872,7 +900,7 @@
       "ok": false
     },
     {
-      "seq": 96,
+      "seq": 98,
       "season": 2026,
       "day": 140,
       "phase": "regularSeason",
@@ -885,7 +913,7 @@
       "ok": true
     },
     {
-      "seq": 97,
+      "seq": 99,
       "season": 2026,
       "day": 143,
       "phase": "regularSeason",
@@ -898,7 +926,7 @@
       "ok": true
     },
     {
-      "seq": 98,
+      "seq": 100,
       "season": 2026,
       "day": 147,
       "phase": "regularSeason",
@@ -911,7 +939,7 @@
       "ok": true
     },
     {
-      "seq": 99,
+      "seq": 101,
       "season": 2026,
       "day": 152,
       "phase": "regularSeason",
@@ -924,7 +952,7 @@
       "ok": true
     },
     {
-      "seq": 100,
+      "seq": 102,
       "season": 2026,
       "day": 154,
       "phase": "regularSeason",
@@ -937,7 +965,7 @@
       "ok": true
     },
     {
-      "seq": 102,
+      "seq": 104,
       "season": 2026,
       "day": 166,
       "phase": "regularSeason",
@@ -950,7 +978,7 @@
       "ok": true
     },
     {
-      "seq": 103,
+      "seq": 105,
       "season": 2026,
       "day": 168,
       "phase": "regularSeason",
@@ -963,7 +991,7 @@
       "ok": true
     },
     {
-      "seq": 104,
+      "seq": 106,
       "season": 2026,
       "day": 173,
       "phase": "regularSeason",
@@ -976,7 +1004,7 @@
       "ok": true
     },
     {
-      "seq": 105,
+      "seq": 107,
       "season": 2026,
       "day": 175,
       "phase": "regularSeason",
@@ -989,7 +1017,7 @@
       "ok": true
     },
     {
-      "seq": 106,
+      "seq": 108,
       "season": 2026,
       "day": 182,
       "phase": "regularSeason",
@@ -1002,7 +1030,7 @@
       "ok": true
     },
     {
-      "seq": 124,
+      "seq": 126,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1015,7 +1043,7 @@
       "ok": true
     },
     {
-      "seq": 125,
+      "seq": 127,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1028,7 +1056,7 @@
       "ok": true
     },
     {
-      "seq": 126,
+      "seq": 128,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1041,7 +1069,7 @@
       "ok": true
     },
     {
-      "seq": 127,
+      "seq": 129,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1054,7 +1082,7 @@
       "ok": true
     },
     {
-      "seq": 128,
+      "seq": 130,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1067,7 +1095,7 @@
       "ok": true
     },
     {
-      "seq": 129,
+      "seq": 131,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1080,7 +1108,7 @@
       "ok": true
     },
     {
-      "seq": 130,
+      "seq": 132,
       "season": 2026,
       "day": 209,
       "phase": "offseason:draft",
@@ -1093,7 +1121,7 @@
       "ok": true
     },
     {
-      "seq": 131,
+      "seq": 133,
       "season": 2026,
       "day": 209,
       "phase": "offseason:freeAgency",
@@ -1107,7 +1135,7 @@
       "ok": true
     },
     {
-      "seq": 132,
+      "seq": 134,
       "season": 2026,
       "day": 209,
       "phase": "offseason:freeAgency",
@@ -1121,7 +1149,7 @@
       "ok": true
     },
     {
-      "seq": 133,
+      "seq": 135,
       "season": 2026,
       "day": 209,
       "phase": "offseason:freeAgency",
@@ -1135,7 +1163,7 @@
       "ok": true
     },
     {
-      "seq": 134,
+      "seq": 136,
       "season": 2026,
       "day": 209,
       "phase": "offseason:freeAgency",
@@ -1149,7 +1177,7 @@
       "ok": true
     },
     {
-      "seq": 135,
+      "seq": 137,
       "season": 2027,
       "day": 0,
       "phase": "regularSeason",
@@ -1162,7 +1190,7 @@
       "ok": true
     },
     {
-      "seq": 136,
+      "seq": 138,
       "season": 2027,
       "day": 1,
       "phase": "regularSeason",
@@ -1175,7 +1203,7 @@
       "ok": true
     },
     {
-      "seq": 137,
+      "seq": 139,
       "season": 2027,
       "day": 7,
       "phase": "regularSeason",
@@ -1188,7 +1216,7 @@
       "ok": true
     },
     {
-      "seq": 138,
+      "seq": 140,
       "season": 2027,
       "day": 14,
       "phase": "regularSeason",
@@ -1201,7 +1229,7 @@
       "ok": true
     },
     {
-      "seq": 139,
+      "seq": 141,
       "season": 2027,
       "day": 18,
       "phase": "regularSeason",
@@ -1214,7 +1242,7 @@
       "ok": true
     },
     {
-      "seq": 140,
+      "seq": 142,
       "season": 2027,
       "day": 28,
       "phase": "regularSeason",
@@ -1227,23 +1255,37 @@
       "ok": true
     },
     {
-      "seq": 141,
+      "seq": 143,
+      "season": 2027,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "plan",
+      "summary": "Diagnosis: cannot defend — 4.17 against/game, 21th of 31",
+      "drivers": [
+        "D: 4.17 against/game, 21th of 31",
+        "G: starter grades 52 — no better than the defence in front of him"
+      ],
+      "result": "D>G",
+      "ok": true
+    },
+    {
+      "seq": 144,
       "season": 2027,
       "day": 28,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Made an offer for Brandon Bussi (70 OVR G)",
+      "summary": "Made an offer for Kashawn Aitcheson (78 OVR D)",
       "drivers": [
-        "need at G (my tier ~52 OVR)",
-        "Brandon Bussi is 70 OVR, 1yr @ $1.9M",
-        "paper value -17.8 my way",
-        "Carolina Hurricanes (contend) → pending"
+        "need at D (my tier ~64 OVR)",
+        "Kashawn Aitcheson is 78 OVR, 1yr @ $1.1M",
+        "paper value -15.3 my way",
+        "New York Islanders (contend) → pending"
       ],
-      "result": "pending: Zane Gallagher is considering it — expect an answer in about 2 days.",
+      "result": "pending: Derek Carlsson is considering it — expect an answer in about 2 days.",
       "ok": false
     },
     {
-      "seq": 142,
+      "seq": 145,
       "season": 2027,
       "day": 36,
       "phase": "regularSeason",
@@ -1256,20 +1298,20 @@
       "ok": true
     },
     {
-      "seq": 143,
+      "seq": 146,
       "season": 2027,
-      "day": 37,
+      "day": 36,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Sandis Vilmanis: \"Say it depends on his form\"",
+      "summary": "Answered Kashawn Aitcheson: \"Say it depends on his form\"",
       "drivers": [
         "future"
       ],
-      "result": "Vilmanis appreciated being heard, even if nothing was promised.",
+      "result": "Aitcheson appreciated being heard, even if nothing was promised.",
       "ok": true
     },
     {
-      "seq": 144,
+      "seq": 147,
       "season": 2027,
       "day": 42,
       "phase": "regularSeason",
@@ -1282,80 +1324,38 @@
       "ok": true
     },
     {
-      "seq": 145,
+      "seq": 148,
       "season": 2027,
       "day": 42,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Offered for Arseni Gritsyuk (75 OVR F)",
+      "summary": "Offered for Ryan McDonagh (77 OVR D)",
       "drivers": [
-        "need at F (my tier ~60 OVR)",
-        "Arseni Gritsyuk is 75 OVR, 1yr @ $3.3M",
-        "paper value -5.2 my way",
-        "New Jersey Devils (rebuild) → reject"
+        "need at D (my tier ~71 OVR)",
+        "Ryan McDonagh is 77 OVR, 1yr @ $4.1M",
+        "paper value -8.9 my way",
+        "Tampa Bay Lightning (retool) → reject"
       ],
       "result": "reject: Completing this would put you $1.5M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
-      "seq": 146,
-      "season": 2027,
-      "day": 52,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Carter Verhaeghe: \"Dismiss his concerns\"",
-      "drivers": [
-        "iceTime"
-      ],
-      "result": "Verhaeghe was clearly unhappy with how the conversation went.",
-      "ok": true
-    },
-    {
-      "seq": 147,
-      "season": 2027,
-      "day": 56,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 148,
-      "season": 2027,
-      "day": 56,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Made an offer for Victor Eklund (75 OVR F)",
-      "drivers": [
-        "need at F (my tier ~60 OVR)",
-        "Victor Eklund is 75 OVR, 1yr @ $1.0M",
-        "paper value -16.6 my way",
-        "New York Islanders (contend) → pending"
-      ],
-      "result": "pending: Derek Carlsson is considering it — expect an answer in about 2 days.",
-      "ok": false
-    },
-    {
       "seq": 149,
       "season": 2027,
-      "day": 63,
+      "day": 54,
       "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the scout meeting",
+      "kind": "interaction",
+      "summary": "Answered Sandis Vilmanis: \"Brush off the conversation\"",
       "drivers": [
-        "recurring scout meeting was blocking Continue"
+        "future"
       ],
-      "result": "Delegated — 0 decisions handled by the staff.",
+      "result": "Vilmanis was clearly unhappy with how the conversation went.",
       "ok": true
     },
     {
       "seq": 150,
       "season": 2027,
-      "day": 70,
+      "day": 56,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1368,36 +1368,36 @@
     {
       "seq": 151,
       "season": 2027,
-      "day": 70,
+      "day": 56,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Offered for Olen Zellweger (76 OVR D)",
+      "summary": "Offered for Alexei Protas (78 OVR F)",
       "drivers": [
-        "need at D (my tier ~64 OVR)",
-        "Olen Zellweger is 76 OVR, 1yr @ $3.1M",
-        "paper value -8.5 my way",
-        "Buffalo Sabres (contend) → reject"
+        "need at F (my tier ~60 OVR)",
+        "Alexei Protas is 78 OVR, 1yr @ $3.4M",
+        "paper value -7.9 my way",
+        "Los Angeles Kings (retool) → reject"
       ],
-      "result": "reject: Completing this would put you $1.4M over the cap — shed salary or move a contract first.",
+      "result": "reject: Completing this would put you $0.8M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
       "seq": 152,
       "season": 2027,
-      "day": 75,
+      "day": 63,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Brandon Bussi: \"Promise a new deal is coming\"",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
       "drivers": [
-        "future"
+        "recurring scout meeting was blocking Continue"
       ],
-      "result": "Bussi left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "result": "Delegated — 0 decisions handled by the staff.",
       "ok": true
     },
     {
       "seq": 153,
       "season": 2027,
-      "day": 84,
+      "day": 70,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1410,21 +1410,63 @@
     {
       "seq": 154,
       "season": 2027,
-      "day": 84,
+      "day": 70,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Made an offer for Leo Sahlin Wallenius (74 OVR D)",
+      "summary": "Offered for Olen Zellweger (76 OVR D)",
       "drivers": [
-        "need at D (my tier ~64 OVR)",
-        "Leo Sahlin Wallenius is 74 OVR, 1yr @ $1.0M",
-        "paper value -11.6 my way",
-        "San Jose Sharks (retool) → pending"
+        "need at D (my tier ~71 OVR)",
+        "Olen Zellweger is 76 OVR, 1yr @ $3.1M",
+        "paper value -12.6 my way",
+        "Buffalo Sabres (contend) → reject"
       ],
-      "result": "pending: Jakob Yablonski is considering it — expect an answer in about 2 days.",
+      "result": "reject: Completing this would put you $0.5M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
       "seq": 155,
+      "season": 2027,
+      "day": 78,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Kashawn Aitcheson: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Aitcheson left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 156,
+      "season": 2027,
+      "day": 84,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 157,
+      "season": 2027,
+      "day": 84,
+      "phase": "regularSeason",
+      "kind": "trade",
+      "summary": "Made an offer for Radim Mrtka (74 OVR D)",
+      "drivers": [
+        "need at D (my tier ~71 OVR)",
+        "Radim Mrtka is 74 OVR, 1yr @ $1.0M",
+        "paper value -12.6 my way",
+        "Buffalo Sabres (contend) → pending"
+      ],
+      "result": "pending: Quinn Jokinen is considering it — expect an answer in about 2 days.",
+      "ok": false
+    },
+    {
+      "seq": 158,
       "season": 2027,
       "day": 91,
       "phase": "regularSeason",
@@ -1437,7 +1479,7 @@
       "ok": true
     },
     {
-      "seq": 156,
+      "seq": 159,
       "season": 2027,
       "day": 98,
       "phase": "regularSeason",
@@ -1450,7 +1492,7 @@
       "ok": true
     },
     {
-      "seq": 157,
+      "seq": 160,
       "season": 2027,
       "day": 98,
       "phase": "regularSeason",
@@ -1464,80 +1506,38 @@
       "ok": true
     },
     {
-      "seq": 158,
+      "seq": 161,
       "season": 2027,
       "day": 98,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Offered for Igor Chernyshov (82 OVR F)",
+      "summary": "Made an offer for Simon Edvinsson (82 OVR D)",
       "drivers": [
-        "need at F (my tier ~60 OVR)",
-        "Igor Chernyshov is 82 OVR, 7yr @ $7.1M",
-        "paper value -9.6 my way",
-        "Boston Bruins (retool) → reject"
+        "need at D (my tier ~72 OVR)",
+        "Simon Edvinsson is 82 OVR, 1yr @ $5.6M",
+        "paper value -10.2 my way",
+        "Detroit Red Wings (contend) → pending"
       ],
-      "result": "reject: Completing this would put you $0.4M over the cap — shed salary or move a contract first.",
+      "result": "pending: Anton Novak is considering it — expect an answer in about 2 days.",
       "ok": false
-    },
-    {
-      "seq": 159,
-      "season": 2027,
-      "day": 112,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 160,
-      "season": 2027,
-      "day": 112,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Josh Doan (80 OVR F)",
-      "drivers": [
-        "need at F (my tier ~60 OVR)",
-        "Josh Doan is 80 OVR, 5yr @ $7.0M",
-        "paper value -7.4 my way",
-        "Buffalo Sabres (contend) → reject"
-      ],
-      "result": "reject: Completing this would put you $1.2M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 161,
-      "season": 2027,
-      "day": 114,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Victor Eklund: \"Say it depends on his form\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Eklund appreciated being heard, even if nothing was promised.",
-      "ok": true
     },
     {
       "seq": 162,
       "season": 2027,
-      "day": 119,
+      "day": 105,
       "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the scout meeting",
+      "kind": "interaction",
+      "summary": "Answered Carter Verhaeghe: \"Tell him to earn it\"",
       "drivers": [
-        "recurring scout meeting was blocking Continue"
+        "iceTime"
       ],
-      "result": "Delegated — 0 decisions handled by the staff.",
+      "result": "Verhaeghe left the meeting reassured and in good spirits.",
       "ok": true
     },
     {
       "seq": 163,
       "season": 2027,
-      "day": 126,
+      "day": 112,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1550,50 +1550,49 @@
     {
       "seq": 164,
       "season": 2027,
-      "day": 126,
+      "day": 112,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Offered for Quinton Byfield (80 OVR F)",
+      "summary": "Offered for Arseni Gritsyuk (75 OVR F)",
       "drivers": [
-        "need at F (my tier ~60 OVR)",
-        "Quinton Byfield is 80 OVR, 1yr @ $6.3M",
-        "paper value -9.3 my way",
-        "Los Angeles Kings (retool) → reject"
+        "need at F (my tier ~59 OVR)",
+        "Arseni Gritsyuk is 75 OVR, 1yr @ $3.3M",
+        "paper value -6.7 my way",
+        "New Jersey Devils (rebuild) → reject"
       ],
-      "result": "reject: Completing this would put you $0.5M over the cap — shed salary or move a contract first.",
+      "result": "reject: Completing this would put you $1.1M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
       "seq": 165,
       "season": 2027,
-      "day": 132,
+      "day": 119,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Brandon Bussi: \"Brush off the conversation\"",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
       "drivers": [
-        "future"
+        "recurring scout meeting was blocking Continue"
       ],
-      "result": "Bussi was clearly unhappy with how the conversation went.",
+      "result": "Delegated — 0 decisions handled by the staff.",
       "ok": true
     },
     {
       "seq": 166,
       "season": 2027,
-      "day": 138,
+      "day": 120,
       "phase": "regularSeason",
-      "kind": "deadline-buy",
-      "summary": "Deadline: went for Janis Moser (60 val, asking \"a 1st-round pick and a mid-round pick\")",
+      "kind": "interaction",
+      "summary": "Answered Simon Edvinsson: \"Brush off the conversation\"",
       "drivers": [
-        "contending (contend, conf #13, 6% playoff odds)",
-        "buying for a playoff run"
+        "future"
       ],
-      "result": "reject: Completing this would put you $1.0M over the cap — shed salary or move a contract first.",
-      "ok": false
+      "result": "Edvinsson was clearly unhappy with how the conversation went.",
+      "ok": true
     },
     {
       "seq": 167,
       "season": 2027,
-      "day": 140,
+      "day": 126,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1606,33 +1605,37 @@
     {
       "seq": 168,
       "season": 2027,
-      "day": 147,
+      "day": 126,
       "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the scout meeting",
+      "kind": "trade",
+      "summary": "Offered for Ridly Greig (74 OVR F)",
       "drivers": [
-        "recurring scout meeting was blocking Continue"
+        "need at F (my tier ~59 OVR)",
+        "Ridly Greig is 74 OVR, 1yr @ $3.3M",
+        "paper value -7.9 my way",
+        "Ottawa Senators (contend) → reject"
       ],
-      "result": "Delegated — 0 decisions handled by the staff.",
-      "ok": true
+      "result": "reject: Completing this would put you $1.1M over the cap — shed salary or move a contract first.",
+      "ok": false
     },
     {
       "seq": 169,
       "season": 2027,
-      "day": 147,
+      "day": 138,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Victor Eklund: \"Promise a new deal is coming\"",
+      "kind": "deadline-buy",
+      "summary": "Deadline: went for Janis Moser (60 val, asking \"a 1st-round pick and a mid-round pick\")",
       "drivers": [
-        "future"
+        "contending (contend, conf #15, 0% playoff odds)",
+        "buying for a playoff run"
       ],
-      "result": "Eklund left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
-      "ok": true
+      "result": "reject: Completing this would put you $4.6M over the cap — shed salary or move a contract first.",
+      "ok": false
     },
     {
       "seq": 170,
       "season": 2027,
-      "day": 154,
+      "day": 140,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1645,20 +1648,20 @@
     {
       "seq": 171,
       "season": 2027,
-      "day": 161,
+      "day": 147,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Gustav Forsling: \"Tell him to earn it\"",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
       "drivers": [
-        "iceTime"
+        "recurring scout meeting was blocking Continue"
       ],
-      "result": "Forsling left the meeting reassured and in good spirits.",
+      "result": "Delegated — 0 decisions handled by the staff.",
       "ok": true
     },
     {
       "seq": 172,
       "season": 2027,
-      "day": 168,
+      "day": 154,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -1671,6 +1674,32 @@
     {
       "seq": 173,
       "season": 2027,
+      "day": 168,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 174,
+      "season": 2027,
+      "day": 168,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Gustav Forsling: \"Promise a bigger role\"",
+      "drivers": [
+        "iceTime"
+      ],
+      "result": "Forsling left the meeting reassured and in good spirits. Your words — “a bigger role and more ice time” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 175,
+      "season": 2027,
       "day": 175,
       "phase": "regularSeason",
       "kind": "meeting",
@@ -1682,20 +1711,7 @@
       "ok": true
     },
     {
-      "seq": 174,
-      "season": 2027,
-      "day": 175,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Matthew Tkachuk: \"Tell him to earn it\"",
-      "drivers": [
-        "iceTime"
-      ],
-      "result": "Tkachuk appreciated being heard, even if nothing was promised.",
-      "ok": true
-    },
-    {
-      "seq": 175,
+      "seq": 176,
       "season": 2027,
       "day": 182,
       "phase": "regularSeason",
@@ -1708,25 +1724,12 @@
       "ok": true
     },
     {
-      "seq": 191,
-      "season": 2027,
-      "day": 209,
-      "phase": "offseason:draft",
-      "kind": "draft",
-      "summary": "Drafted Kasper Aalto (analyst #9999)",
-      "drivers": [
-        "best available on the scouts’ board"
-      ],
-      "result": "selected",
-      "ok": true
-    },
-    {
       "seq": 192,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Finn Voronov (analyst #9999)",
+      "summary": "Drafted Wade Johansson (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -1736,10 +1739,10 @@
     {
       "seq": 193,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Isaac Sundstrom (analyst #9999)",
+      "summary": "Drafted Alex Ulmer (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -1749,10 +1752,10 @@
     {
       "seq": 194,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Jakob Forsberg (analyst #9999)",
+      "summary": "Drafted Zane Tavares (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -1762,7 +1765,7 @@
     {
       "seq": 195,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
       "summary": "Drafted Reid Jokinen (analyst #9999)",
@@ -1775,10 +1778,10 @@
     {
       "seq": 196,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Rasmus Granlund (analyst #9999)",
+      "summary": "Drafted Finn Eriksson (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -1788,159 +1791,271 @@
     {
       "seq": 197,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
       "drivers": [
         "core piece worth keeping",
-        "$6.4M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $6.4M space",
+      "result": "skipped — $7.1M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 198,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Re-signed Brandon Bussi (71 OVR) 2yr @ $3.9M",
+      "summary": "Passed on Simon Edvinsson (80 OVR) 6yr @ $7.8M",
       "drivers": [
         "core piece worth keeping",
-        "$2.4M cap room"
+        "$2.8M cap room"
       ],
-      "result": "Brandon Bussi signs for $3.92M × 2.",
-      "ok": true
+      "result": "skipped — $7.8M doesn't fit $2.8M space",
+      "ok": false
     },
     {
       "seq": 199,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.1M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 200,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Simon Edvinsson (80 OVR) 6yr @ $7.8M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.8M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 201,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.1M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 202,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Simon Edvinsson (80 OVR) 6yr @ $7.8M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.8M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 203,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.1M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 204,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Victor Eklund (78 OVR) 4yr @ $6.4M",
+      "summary": "Passed on Simon Edvinsson (80 OVR) 6yr @ $7.8M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$2.8M cap room"
       ],
-      "result": "skipped — $6.4M doesn't fit $4.3M space",
+      "result": "skipped — $7.8M doesn't fit $2.8M space",
       "ok": false
     },
     {
       "seq": 205,
       "season": 2027,
-      "day": 209,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $5.6M×1 for UFA Shayne Gostisbehere (82 OVR)",
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
       "drivers": [
-        "roster spot open",
-        "fits cap ($2.5M left)"
+        "core piece worth keeping",
+        "$2.8M cap room"
       ],
-      "result": "Offer tabled — Shayne Gostisbehere's camp decides by free-agency day 3.",
-      "ok": true
+      "result": "skipped — $7.1M doesn't fit $2.8M space",
+      "ok": false
     },
     {
       "seq": 206,
       "season": 2027,
-      "day": 209,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $7.0M×7 for UFA Kale Nicol (81 OVR)",
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Simon Edvinsson (80 OVR) 6yr @ $7.8M",
       "drivers": [
-        "roster spot open",
-        "fits cap ($1.1M left)"
+        "core piece worth keeping",
+        "$2.8M cap room"
       ],
-      "result": "Offer tabled — Kale Nicol's camp decides by free-agency day 4.",
-      "ok": true
+      "result": "skipped — $7.8M doesn't fit $2.8M space",
+      "ok": false
     },
     {
       "seq": 207,
       "season": 2027,
-      "day": 209,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
+      "drivers": [
+        "core piece worth keeping",
+        "$8.3M cap room"
+      ],
+      "result": "Entry-level contracts are capped at $0.95M base salary.",
+      "ok": false
+    },
+    {
+      "seq": 208,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Kashawn Aitcheson (80 OVR) 7yr @ $7.1M",
+      "drivers": [
+        "core piece worth keeping",
+        "$8.3M cap room"
+      ],
+      "result": "Entry-level contracts are capped at $0.95M base salary.",
+      "ok": false
+    },
+    {
+      "seq": 209,
+      "season": 2027,
+      "day": 208,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
-      "summary": "Tabled $7.3M×4 for UFA Ukko-Pekka Luukkonen (81 OVR)",
+      "summary": "Tabled $9.3M×6 for UFA Ivar Stenberg (86 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.9M left)"
+      ],
+      "result": "Offer tabled — Ivar Stenberg's camp decides by free-agency day 3.",
+      "ok": true
+    },
+    {
+      "seq": 210,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $5.5M×1 for UFA Shayne Gostisbehere (82 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($4.8M left)"
+      ],
+      "result": "Offer tabled — Shayne Gostisbehere's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 211,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $10.1M×5 for UFA Adam Fox (88 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.1M left)"
+      ],
+      "result": "Offer tabled — Adam Fox's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 212,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $8.8M×6 for UFA Ivar Stenberg (86 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($1.5M left)"
+      ],
+      "result": "Offer tabled — Ivar Stenberg's camp decides by free-agency day 6.",
+      "ok": true
+    },
+    {
+      "seq": 213,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.7M×5 for UFA Tij Iginla (75 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.1M left)"
+      ],
+      "result": "Offer tabled — Tij Iginla's camp decides by free-agency day 9.",
+      "ok": true
+    },
+    {
+      "seq": 214,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.6M×6 for UFA Bradly Nadeau (74 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.1M left)"
+      ],
+      "result": "Offer tabled — Bradly Nadeau's camp decides by free-agency day 9.",
+      "ok": true
+    },
+    {
+      "seq": 215,
+      "season": 2027,
+      "day": 208,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.0M×5 for UFA Elias Salomonsson (72 OVR)",
       "drivers": [
         "roster spot open",
         "fits cap ($0.8M left)"
       ],
-      "result": "Offer tabled — Ukko-Pekka Luukkonen's camp decides by free-agency day 6.",
+      "result": "Offer tabled — Elias Salomonsson's camp decides by free-agency day 10.",
       "ok": true
     },
     {
-      "seq": 208,
+      "seq": 216,
       "season": 2028,
       "day": 0,
       "phase": "regularSeason",
@@ -1953,36 +2068,20 @@
       "ok": true
     },
     {
-      "seq": 209,
-      "season": 2028,
-      "day": 0,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Dylan Cozens (82 OVR F)",
-      "drivers": [
-        "need at F (my tier ~58 OVR)",
-        "Dylan Cozens is 82 OVR, 1yr @ $7.1M",
-        "paper value -8.2 my way",
-        "Ottawa Senators (contend) → reject"
-      ],
-      "result": "reject: Completing this would put you $0.3M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 210,
+      "seq": 217,
       "season": 2028,
       "day": 3,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Linus Eriksson: \"Reassure him he’s valued\"",
+      "summary": "Answered Linus Eriksson: \"Say it depends on his form\"",
       "drivers": [
         "future"
       ],
-      "result": "Eriksson left the meeting reassured and in good spirits.",
+      "result": "Eriksson wasn't thrilled with the answer but accepted it.",
       "ok": true
     },
     {
-      "seq": 211,
+      "seq": 218,
       "season": 2028,
       "day": 7,
       "phase": "regularSeason",
@@ -1995,7 +2094,7 @@
       "ok": true
     },
     {
-      "seq": 212,
+      "seq": 219,
       "season": 2028,
       "day": 14,
       "phase": "regularSeason",
@@ -2004,41 +2103,38 @@
       "drivers": [
         "bi-weekly staff meeting was blocking Continue"
       ],
-      "result": "Delegated — 1 decision handled by staff.",
+      "result": "Delegated — 0 decisions handled by staff.",
       "ok": true
     },
     {
-      "seq": 213,
+      "seq": 220,
       "season": 2028,
       "day": 14,
       "phase": "regularSeason",
       "kind": "trade-in",
       "summary": "Accepted an offer from Chicago Blackhawks",
       "drivers": [
-        "we get 11 value for 0",
+        "we get 15 value for 0",
         "clear win on paper"
       ],
       "result": "accepted",
       "ok": true
     },
     {
-      "seq": 214,
+      "seq": 221,
       "season": 2028,
-      "day": 14,
+      "day": 17,
       "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Adam Fantilli (79 OVR F)",
+      "kind": "interaction",
+      "summary": "Answered Grigori Denisenko: \"Say it depends on his form\"",
       "drivers": [
-        "need at F (my tier ~55 OVR)",
-        "Adam Fantilli is 79 OVR, 4yr @ $6.9M",
-        "paper value -8.2 my way",
-        "Columbus Blue Jackets (contend) → reject"
+        "future"
       ],
-      "result": "reject: Completing this would put you $1.4M over the cap — shed salary or move a contract first.",
-      "ok": false
+      "result": "Denisenko appreciated being heard, even if nothing was promised.",
+      "ok": true
     },
     {
-      "seq": 215,
+      "seq": 222,
       "season": 2028,
       "day": 28,
       "phase": "regularSeason",
@@ -2051,23 +2147,50 @@
       "ok": true
     },
     {
-      "seq": 216,
+      "seq": 223,
+      "season": 2028,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "plan",
+      "summary": "Diagnosis: cannot defend — 5.42 against/game, 29th of 31",
+      "drivers": [
+        "D: 5.42 against/game, 29th of 31",
+        "G: starter grades 52 — no better than the defence in front of him"
+      ],
+      "result": "D>G",
+      "ok": true
+    },
+    {
+      "seq": 224,
       "season": 2028,
       "day": 28,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Made an offer for Anton Lundell (78 OVR F)",
+      "summary": "Offered for Luke Hughes (82 OVR D)",
       "drivers": [
-        "need at F (my tier ~55 OVR)",
-        "Anton Lundell is 78 OVR, 1yr @ $5.0M",
-        "paper value -13.6 my way",
-        "Ottawa Senators (contend) → pending"
+        "need at D (my tier ~71 OVR)",
+        "Luke Hughes is 82 OVR, 3yr @ $9.0M",
+        "paper value -6.9 my way",
+        "New Jersey Devils (rebuild) → reject"
       ],
-      "result": "pending: Owen Petrov is considering it — expect an answer in about 2 days.",
+      "result": "reject: Completing this would put you $0.8M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
-      "seq": 217,
+      "seq": 225,
+      "season": 2028,
+      "day": 31,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Shayne Gostisbehere: \"Reassure him he’s valued\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Gostisbehere left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 226,
       "season": 2028,
       "day": 36,
       "phase": "regularSeason",
@@ -2080,7 +2203,7 @@
       "ok": true
     },
     {
-      "seq": 218,
+      "seq": 227,
       "season": 2028,
       "day": 42,
       "phase": "regularSeason",
@@ -2093,36 +2216,20 @@
       "ok": true
     },
     {
-      "seq": 219,
+      "seq": 228,
       "season": 2028,
-      "day": 42,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Parker Kelly (71 OVR F)",
-      "drivers": [
-        "need at F (my tier ~58 OVR)",
-        "Parker Kelly is 71 OVR, 1yr @ $1.7M",
-        "paper value -4.8 my way",
-        "Colorado Avalanche (retool) → reject"
-      ],
-      "result": "reject: Completing this would put you $0.2M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 220,
-      "season": 2028,
-      "day": 54,
+      "day": 48,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Shayne Gostisbehere: \"Promise a new deal is coming\"",
+      "summary": "Answered Linus Eriksson: \"Promise a new deal is coming\"",
       "drivers": [
         "future"
       ],
-      "result": "Gostisbehere left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "result": "Eriksson left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
       "ok": true
     },
     {
-      "seq": 221,
+      "seq": 229,
       "season": 2028,
       "day": 56,
       "phase": "regularSeason",
@@ -2135,136 +2242,23 @@
       "ok": true
     },
     {
-      "seq": 222,
+      "seq": 230,
       "season": 2028,
       "day": 56,
       "phase": "regularSeason",
       "kind": "trade-in",
       "summary": "Accepted an offer from Buffalo Sabres",
       "drivers": [
-        "we get 11 value for 0",
+        "we get 14 value for 0",
         "clear win on paper"
       ],
       "result": "accepted",
       "ok": true
     },
     {
-      "seq": 223,
-      "season": 2028,
-      "day": 56,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Rutger McGroarty (74 OVR F)",
-      "drivers": [
-        "need at F (my tier ~58 OVR)",
-        "Rutger McGroarty is 74 OVR, 2yr @ $3.5M",
-        "paper value -4.2 my way",
-        "Los Angeles Kings (retool) → reject"
-      ],
-      "result": "reject: Completing this would put you $1.2M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 224,
-      "season": 2028,
-      "day": 63,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the scout meeting",
-      "drivers": [
-        "recurring scout meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by the staff.",
-      "ok": true
-    },
-    {
-      "seq": 225,
-      "season": 2028,
-      "day": 70,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 226,
-      "season": 2028,
-      "day": 70,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Brayden Yager (70 OVR F)",
-      "drivers": [
-        "need at F (my tier ~58 OVR)",
-        "Brayden Yager is 70 OVR, 1yr @ $2.9M",
-        "paper value -4.5 my way",
-        "Winnipeg Jets (rebuild) → reject"
-      ],
-      "result": "reject: Completing this would put you $1.4M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 227,
-      "season": 2028,
-      "day": 74,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Linus Eriksson: \"Say it depends on his form\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Eriksson wasn't thrilled with the answer but accepted it.",
-      "ok": true
-    },
-    {
-      "seq": 228,
-      "season": 2028,
-      "day": 84,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 229,
-      "season": 2028,
-      "day": 84,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Made an offer for Daniel Sprong (69 OVR F)",
-      "drivers": [
-        "need at F (my tier ~59 OVR)",
-        "Daniel Sprong is 69 OVR, 1yr @ $0.9M",
-        "paper value -7.2 my way",
-        "Pittsburgh Penguins (retool) → pending"
-      ],
-      "result": "pending: Aleksi Anderson is considering it — expect an answer in about 2 days.",
-      "ok": false
-    },
-    {
-      "seq": 230,
-      "season": 2028,
-      "day": 88,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Henrik Borgström: \"Reassure him he’s valued\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Borgström left the meeting reassured and in good spirits.",
-      "ok": true
-    },
-    {
       "seq": 231,
       "season": 2028,
-      "day": 91,
+      "day": 63,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the scout meeting",
@@ -2277,7 +2271,20 @@
     {
       "seq": 232,
       "season": 2028,
-      "day": 98,
+      "day": 64,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Shayne Gostisbehere: \"Say it depends on his form\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Gostisbehere left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 233,
+      "season": 2028,
+      "day": 70,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -2288,38 +2295,22 @@
       "ok": true
     },
     {
-      "seq": 233,
-      "season": 2028,
-      "day": 98,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Brett Howden (69 OVR F)",
-      "drivers": [
-        "need at F (my tier ~61 OVR)",
-        "Brett Howden is 69 OVR, 1yr @ $2.5M",
-        "paper value -6.8 my way",
-        "Vegas Golden Knights (rebuild) → reject"
-      ],
-      "result": "reject: Completing this would put you $1.0M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
       "seq": 234,
       "season": 2028,
-      "day": 102,
+      "day": 80,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Daniel Sprong: \"Promise a new deal is coming\"",
+      "summary": "Answered Grigori Denisenko: \"Reassure him he’s valued\"",
       "drivers": [
         "future"
       ],
-      "result": "Sprong left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "result": "Denisenko left the meeting reassured and in good spirits.",
       "ok": true
     },
     {
       "seq": 235,
       "season": 2028,
-      "day": 112,
+      "day": 84,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -2332,34 +2323,70 @@
     {
       "seq": 236,
       "season": 2028,
-      "day": 112,
+      "day": 91,
       "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Carter Bear (68 OVR F)",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
       "drivers": [
-        "need at F (my tier ~61 OVR)",
-        "Carter Bear is 68 OVR, 4yr @ $2.9M",
-        "paper value -3.8 my way",
-        "Detroit Red Wings (contend) → reject"
+        "recurring scout meeting was blocking Continue"
       ],
-      "result": "reject: Completing this would put you $1.4M over the cap — shed salary or move a contract first.",
-      "ok": false
+      "result": "Delegated — 0 decisions handled by the staff.",
+      "ok": true
     },
     {
       "seq": 237,
       "season": 2028,
-      "day": 118,
+      "day": 95,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Denis Malgin: \"Say it depends on his form\"",
+      "summary": "Answered Denis Malgin: \"Promise a new deal is coming\"",
       "drivers": [
         "future"
       ],
-      "result": "Malgin appreciated being heard, even if nothing was promised.",
+      "result": "Malgin left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
       "ok": true
     },
     {
       "seq": 238,
+      "season": 2028,
+      "day": 98,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 239,
+      "season": 2028,
+      "day": 110,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Henrik Borgström: \"Say it depends on his form\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Borgström appreciated being heard, even if nothing was promised.",
+      "ok": true
+    },
+    {
+      "seq": 240,
+      "season": 2028,
+      "day": 112,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 241,
       "season": 2028,
       "day": 119,
       "phase": "regularSeason",
@@ -2372,65 +2399,22 @@
       "ok": true
     },
     {
-      "seq": 239,
+      "seq": 242,
       "season": 2028,
-      "day": 126,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 0 decisions handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 240,
-      "season": 2028,
-      "day": 126,
-      "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Offered for Terik Parascak (68 OVR F)",
-      "drivers": [
-        "need at F (my tier ~61 OVR)",
-        "Terik Parascak is 68 OVR, 3yr @ $2.8M",
-        "paper value -3.6 my way",
-        "Washington Capitals (rebuild) → reject"
-      ],
-      "result": "reject: Completing this would put you $1.3M over the cap — shed salary or move a contract first.",
-      "ok": false
-    },
-    {
-      "seq": 241,
-      "season": 2028,
-      "day": 133,
+      "day": 124,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Shayne Gostisbehere: \"Reassure him he’s valued\"",
+      "summary": "Answered Matthew Tkachuk: \"Reassure him he’s valued\"",
       "drivers": [
         "future"
       ],
-      "result": "Gostisbehere left the meeting reassured and in good spirits.",
+      "result": "Tkachuk left the meeting reassured and in good spirits.",
       "ok": true
-    },
-    {
-      "seq": 242,
-      "season": 2028,
-      "day": 138,
-      "phase": "regularSeason",
-      "kind": "deadline-buy",
-      "summary": "Deadline: went for Brandt Clarke (59.4 val, asking \"a 1st-round pick and a mid-round pick\")",
-      "drivers": [
-        "contending (contend, conf #12, 2% playoff odds)",
-        "buying for a playoff run"
-      ],
-      "result": "reject: Completing this would put you $5.9M over the cap — shed salary or move a contract first.",
-      "ok": false
     },
     {
       "seq": 243,
       "season": 2028,
-      "day": 140,
+      "day": 126,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -2443,33 +2427,34 @@
     {
       "seq": 244,
       "season": 2028,
-      "day": 147,
+      "day": 138,
       "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the scout meeting",
+      "kind": "deadline-buy",
+      "summary": "Deadline: went for Brandt Clarke (59.4 val, asking \"a 1st-round pick and a mid-round pick\")",
       "drivers": [
-        "recurring scout meeting was blocking Continue"
+        "contending (contend, conf #13, 5% playoff odds)",
+        "buying for a playoff run"
       ],
-      "result": "Delegated — 0 decisions handled by the staff.",
-      "ok": true
+      "result": "reject: Los Angeles Kings pass. they need the best asset in the deal coming back their way, not depth pieces.",
+      "ok": false
     },
     {
       "seq": 245,
       "season": 2028,
-      "day": 147,
+      "day": 139,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Sam Reinhart: \"Dismiss his concerns\"",
+      "summary": "Answered Denis Malgin: \"Brush off the conversation\"",
       "drivers": [
-        "iceTime"
+        "future"
       ],
-      "result": "Reinhart was clearly unhappy with how the conversation went.",
+      "result": "Malgin was clearly unhappy with how the conversation went.",
       "ok": true
     },
     {
       "seq": 246,
       "season": 2028,
-      "day": 154,
+      "day": 140,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -2482,20 +2467,20 @@
     {
       "seq": 247,
       "season": 2028,
-      "day": 161,
+      "day": 147,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Seth Jones: \"Promise a new deal is coming\"",
+      "kind": "meeting",
+      "summary": "Delegated the scout meeting",
       "drivers": [
-        "future"
+        "recurring scout meeting was blocking Continue"
       ],
-      "result": "Jones left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "result": "Delegated — 0 decisions handled by the staff.",
       "ok": true
     },
     {
       "seq": 248,
       "season": 2028,
-      "day": 168,
+      "day": 154,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -2508,6 +2493,45 @@
     {
       "seq": 249,
       "season": 2028,
+      "day": 154,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Seth Jones: \"Promise a new deal is coming\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Jones left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
+      "ok": true
+    },
+    {
+      "seq": 250,
+      "season": 2028,
+      "day": 168,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 0 decisions handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 251,
+      "season": 2028,
+      "day": 169,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Matthew Tkachuk: \"Say it depends on his form\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Tkachuk appreciated being heard, even if nothing was promised.",
+      "ok": true
+    },
+    {
+      "seq": 252,
+      "season": 2028,
       "day": 175,
       "phase": "regularSeason",
       "kind": "meeting",
@@ -2519,20 +2543,7 @@
       "ok": true
     },
     {
-      "seq": 250,
-      "season": 2028,
-      "day": 175,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Anton Lundell: \"Say it depends on his form\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Lundell appreciated being heard, even if nothing was promised.",
-      "ok": true
-    },
-    {
-      "seq": 251,
+      "seq": 253,
       "season": 2028,
       "day": 182,
       "phase": "regularSeason",
@@ -2545,38 +2556,12 @@
       "ok": true
     },
     {
-      "seq": 268,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:draft",
-      "kind": "draft",
-      "summary": "Drafted Liam Sundstrom (analyst #9999)",
-      "drivers": [
-        "best available on the scouts’ board"
-      ],
-      "result": "selected",
-      "ok": true
-    },
-    {
-      "seq": 269,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:draft",
-      "kind": "draft",
-      "summary": "Drafted Owen Hughes (analyst #9999)",
-      "drivers": [
-        "best available on the scouts’ board"
-      ],
-      "result": "selected",
-      "ok": true
-    },
-    {
       "seq": 270,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Finn Berg (analyst #9999)",
+      "summary": "Drafted Bo Sundstrom (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -2586,10 +2571,10 @@
     {
       "seq": 271,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Nathan Zetterberg (analyst #9999)",
+      "summary": "Drafted Brett Quist (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -2599,10 +2584,10 @@
     {
       "seq": 272,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Liam Hughes (analyst #9999)",
+      "summary": "Drafted Zane Hughes (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -2612,10 +2597,10 @@
     {
       "seq": 273,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Ulf Fontaine (analyst #9999)",
+      "summary": "Drafted Sven Eriksson (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -2625,201 +2610,437 @@
     {
       "seq": 274,
       "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Aleksander Barkov (88 OVR) 3yr @ $8.2M",
+      "day": 210,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Jakob Eriksson (analyst #9999)",
       "drivers": [
-        "core piece worth keeping",
-        "$5.8M cap room"
+        "best available on the scouts’ board"
       ],
-      "result": "skipped — $8.2M doesn't fit $5.8M space",
-      "ok": false
+      "result": "selected",
+      "ok": true
     },
     {
       "seq": 275,
       "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $7.9M",
+      "day": 210,
+      "phase": "offseason:draft",
+      "kind": "draft",
+      "summary": "Drafted Liam Eriksson (analyst #9999)",
       "drivers": [
-        "core piece worth keeping",
-        "$5.8M cap room"
+        "best available on the scouts’ board"
       ],
-      "result": "skipped — $7.9M doesn't fit $5.8M space",
-      "ok": false
+      "result": "selected",
+      "ok": true
     },
     {
       "seq": 276,
       "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Re-signed Seth Jones (79 OVR) 1yr @ $4.8M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.0M cap room"
-      ],
-      "result": "Seth Jones signs for $4.85M × 1.",
-      "ok": true
-    },
-    {
-      "seq": 277,
-      "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:resign",
       "kind": "resign",
       "summary": "Re-signed Aleksander Barkov (88 OVR) 3yr @ $8.2M",
       "drivers": [
         "core piece worth keeping",
-        "$2.3M cap room"
+        "$5.5M cap room"
       ],
       "result": "Aleksander Barkov signs for $8.20M × 3.",
       "ok": true
     },
     {
-      "seq": 278,
+      "seq": 277,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:resign",
       "kind": "resign",
       "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $7.9M",
       "drivers": [
         "core piece worth keeping",
-        "$2.3M cap room"
+        "$5.5M cap room"
       ],
-      "result": "skipped — $7.9M doesn't fit $2.3M space",
+      "result": "skipped — $7.9M doesn't fit $5.5M space",
       "ok": false
+    },
+    {
+      "seq": 278,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Re-signed Seth Jones (79 OVR) 1yr @ $4.8M",
+      "drivers": [
+        "core piece worth keeping",
+        "$0.7M cap room"
+      ],
+      "result": "Seth Jones signs for $4.85M × 1.",
+      "ok": true
     },
     {
       "seq": 279,
       "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 1yr @ $5.8M",
-      "drivers": [
-        "core piece worth keeping",
-        "$2.3M cap room"
-      ],
-      "result": "skipped — $5.8M doesn't fit $2.3M space",
-      "ok": false
-    },
-    {
-      "seq": 280,
-      "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:resign",
       "kind": "resign",
       "summary": "Re-signed Matthew Tkachuk (83 OVR) 1yr @ $7.9M",
       "drivers": [
         "core piece worth keeping",
-        "$4.3M cap room"
+        "$12.2M cap room"
       ],
       "result": "Matthew Tkachuk signs for $7.92M × 1.",
       "ok": true
     },
     {
-      "seq": 281,
+      "seq": 280,
       "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 1yr @ $5.8M",
-      "drivers": [
-        "core piece worth keeping",
-        "$4.3M cap room"
-      ],
-      "result": "skipped — $5.8M doesn't fit $4.3M space",
-      "ok": false
-    },
-    {
-      "seq": 282,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Re-signed Anton Lundell (77 OVR) 1yr @ $5.8M",
-      "drivers": [
-        "core piece worth keeping",
-        "$8.0M cap room"
-      ],
-      "result": "Anton Lundell signs for $5.83M × 1.",
-      "ok": true
-    },
-    {
-      "seq": 283,
-      "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
       "summary": "Tabled $14.8M×4 for UFA Nick Suzuki (93 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($10.2M left)"
+        "fits cap ($18.8M left)"
       ],
       "result": "Offer tabled — Nick Suzuki's camp decides by free-agency day 3.",
       "ok": true
     },
     {
-      "seq": 284,
+      "seq": 281,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
-      "summary": "Tabled $7.6M×5 for UFA Mattias Samuelsson (82 OVR)",
+      "summary": "Tabled $13.3M×7 for UFA Cameron Reid (90 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($2.5M left)"
-      ],
-      "result": "Offer tabled — Mattias Samuelsson's camp decides by free-agency day 2.",
-      "ok": true
-    },
-    {
-      "seq": 285,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $13.9M×4 for UFA Matt Boldy (92 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($11.1M left)"
-      ],
-      "result": "Offer tabled — Matt Boldy's camp decides by free-agency day 5.",
-      "ok": true
-    },
-    {
-      "seq": 286,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $10.5M×4 for UFA Clayton Keller (89 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($0.6M left)"
-      ],
-      "result": "Offer tabled — Clayton Keller's camp decides by free-agency day 5.",
-      "ok": true
-    },
-    {
-      "seq": 287,
-      "season": 2028,
-      "day": 209,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $13.3M×7 for UFA Cameron Reid (91 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($4.0M left)"
+        "fits cap ($5.5M left)"
       ],
       "result": "Offer tabled — Cameron Reid's camp decides by free-agency day 4.",
       "ok": true
     },
     {
+      "seq": 282,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.7M×1 for UFA Shayne Gostisbehere (80 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.8M left)"
+      ],
+      "result": "Offer tabled — Shayne Gostisbehere's camp decides by free-agency day 3.",
+      "ok": true
+    },
+    {
+      "seq": 283,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $10.5M×4 for UFA Clayton Keller (89 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($23.1M left)"
+      ],
+      "result": "Offer tabled — Clayton Keller's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 284,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $7.5M×5 for UFA Mattias Samuelsson (82 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($15.6M left)"
+      ],
+      "result": "Offer tabled — Mattias Samuelsson's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 285,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $7.9M×5 for UFA Jakub Dobes (82 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($7.7M left)"
+      ],
+      "result": "Offer tabled — Jakub Dobes's camp decides by free-agency day 3.",
+      "ok": true
+    },
+    {
+      "seq": 286,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $7.3M×7 for UFA Beckett Sennecke (80 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.4M left)"
+      ],
+      "result": "Offer tabled — Beckett Sennecke's camp decides by free-agency day 3.",
+      "ok": true
+    },
+    {
+      "seq": 287,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $7.6M×4 for UFA Jacob Fowler (80 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($25.9M left)"
+      ],
+      "result": "Offer tabled — Jacob Fowler's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
       "seq": 288,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $6.6M×1 for UFA Alexei Protas (79 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($19.4M left)"
+      ],
+      "result": "Offer tabled — Alexei Protas's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 289,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $5.2M×5 for UFA Trevor Connelly (74 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($14.2M left)"
+      ],
+      "result": "Offer tabled — Trevor Connelly's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 290,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.5M×5 for UFA Tyson Orr (73 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($9.8M left)"
+      ],
+      "result": "Offer tabled — Tyson Orr's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 291,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.7M×4 for UFA Carter Yakemchuk (72 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($5.1M left)"
+      ],
+      "result": "Offer tabled — Carter Yakemchuk's camp decides by free-agency day 4.",
+      "ok": true
+    },
+    {
+      "seq": 292,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.6M×6 for UFA Sam Rinzel (72 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.5M left)"
+      ],
+      "result": "Offer tabled — Sam Rinzel's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 293,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.4M×1 for UFA Shayne Gostisbehere (80 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($6.5M left)"
+      ],
+      "result": "Offer tabled — Shayne Gostisbehere's camp decides by free-agency day 5.",
+      "ok": true
+    },
+    {
+      "seq": 294,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.5M×6 for UFA Elias Salomonsson (72 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($2.0M left)"
+      ],
+      "result": "Offer tabled — Elias Salomonsson's camp decides by free-agency day 7.",
+      "ok": true
+    },
+    {
+      "seq": 295,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $4.5M×4 for UFA Carter Yakemchuk (72 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($6.4M left)"
+      ],
+      "result": "Offer tabled — Carter Yakemchuk's camp decides by free-agency day 7.",
+      "ok": true
+    },
+    {
+      "seq": 296,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.6M×5 for UFA Blake Fiddler (71 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($2.8M left)"
+      ],
+      "result": "Offer tabled — Blake Fiddler's camp decides by free-agency day 6.",
+      "ok": true
+    },
+    {
+      "seq": 297,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $7.1M×4 for UFA Jacob Fowler (80 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($3.8M left)"
+      ],
+      "result": "Offer tabled — Jacob Fowler's camp decides by free-agency day 9.",
+      "ok": true
+    },
+    {
+      "seq": 298,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.6M×5 for UFA Filip Ruzicka (71 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.1M left)"
+      ],
+      "result": "Offer tabled — Filip Ruzicka's camp decides by free-agency day 9.",
+      "ok": true
+    },
+    {
+      "seq": 299,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.4M×1 for UFA Brandon Bussi (71 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($7.5M left)"
+      ],
+      "result": "Offer tabled — Brandon Bussi's camp decides by free-agency day 10.",
+      "ok": true
+    },
+    {
+      "seq": 300,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.7M×3 for UFA Niklas Kokko (70 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($3.8M left)"
+      ],
+      "result": "Offer tabled — Niklas Kokko's camp decides by free-agency day 10.",
+      "ok": true
+    },
+    {
+      "seq": 301,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.7M×5 for UFA Evan Gardner (70 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.1M left)"
+      ],
+      "result": "Offer tabled — Evan Gardner's camp decides by free-agency day 8.",
+      "ok": true
+    },
+    {
+      "seq": 302,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.5M×4 for UFA Artyom Levshunov (70 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($7.4M left)"
+      ],
+      "result": "Offer tabled — Artyom Levshunov's camp decides by free-agency day 11.",
+      "ok": true
+    },
+    {
+      "seq": 303,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.4M×4 for UFA Sebastian Cossa (70 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($4.0M left)"
+      ],
+      "result": "Offer tabled — Sebastian Cossa's camp decides by free-agency day 10.",
+      "ok": true
+    },
+    {
+      "seq": 304,
+      "season": 2028,
+      "day": 210,
+      "phase": "offseason:freeAgency",
+      "kind": "sign-fa",
+      "summary": "Tabled $3.3M×2 for UFA Mason Lohrei (70 OVR)",
+      "drivers": [
+        "roster spot open",
+        "fits cap ($0.7M left)"
+      ],
+      "result": "Offer tabled — Mason Lohrei's camp decides by free-agency day 9.",
+      "ok": true
+    },
+    {
+      "seq": 305,
       "season": 2029,
       "day": 0,
       "phase": "regularSeason",
@@ -2832,7 +3053,23 @@
       "ok": true
     },
     {
-      "seq": 289,
+      "seq": 306,
+      "season": 2029,
+      "day": 0,
+      "phase": "regularSeason",
+      "kind": "trade",
+      "summary": "Made an offer for Brandt Clarke (84 OVR D)",
+      "drivers": [
+        "need at D (my tier ~55 OVR)",
+        "Brandt Clarke is 84 OVR, 1yr @ $7.4M",
+        "paper value -14.9 my way",
+        "Los Angeles Kings (retool) → pending"
+      ],
+      "result": "pending: Oskar Forsberg is considering it — expect an answer in about 2 days.",
+      "ok": false
+    },
+    {
+      "seq": 307,
       "season": 2029,
       "day": 1,
       "phase": "regularSeason",
@@ -2845,7 +3082,7 @@
       "ok": true
     },
     {
-      "seq": 290,
+      "seq": 308,
       "season": 2029,
       "day": 7,
       "phase": "regularSeason",
@@ -2858,7 +3095,7 @@
       "ok": true
     },
     {
-      "seq": 291,
+      "seq": 309,
       "season": 2029,
       "day": 14,
       "phase": "regularSeason",
@@ -2871,37 +3108,23 @@
       "ok": true
     },
     {
-      "seq": 292,
-      "season": 2029,
-      "day": 14,
-      "phase": "regularSeason",
-      "kind": "trade-in",
-      "summary": "Accepted an offer from Ottawa Senators",
-      "drivers": [
-        "we get 6 value for 0",
-        "clear win on paper"
-      ],
-      "result": "accepted",
-      "ok": true
-    },
-    {
-      "seq": 293,
+      "seq": 310,
       "season": 2029,
       "day": 14,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Made an offer for Joey Daccord (76 OVR G)",
+      "summary": "Made an offer for Bryan Rust (77 OVR F)",
       "drivers": [
-        "need at G (my tier ~52 OVR)",
-        "Joey Daccord is 76 OVR, 1yr @ $4.3M",
-        "paper value -7.4 my way",
-        "Seattle Kraken (rebuild) → pending"
+        "need at F (my tier ~55 OVR)",
+        "Bryan Rust is 77 OVR, 2yr @ $3.4M",
+        "paper value -11.9 my way",
+        "Pittsburgh Penguins (contend) → pending"
       ],
-      "result": "pending: Elias Dahl is considering it — expect an answer in about 2 days.",
+      "result": "pending: Aleksi Anderson is considering it — expect an answer in about 2 days.",
       "ok": false
     },
     {
-      "seq": 294,
+      "seq": 311,
       "season": 2029,
       "day": 15,
       "phase": "regularSeason",
@@ -2914,7 +3137,7 @@
       "ok": true
     },
     {
-      "seq": 295,
+      "seq": 312,
       "season": 2029,
       "day": 28,
       "phase": "regularSeason",
@@ -2927,23 +3150,50 @@
       "ok": true
     },
     {
-      "seq": 296,
+      "seq": 313,
+      "season": 2029,
+      "day": 28,
+      "phase": "regularSeason",
+      "kind": "plan",
+      "summary": "Diagnosis: cannot score — 3.42/game, 21th of 31",
+      "drivers": [
+        "F: 3.42 goals/game, 21th of 31",
+        "D: 3.83 against/game, 17th of 31"
+      ],
+      "result": "F>D",
+      "ok": true
+    },
+    {
+      "seq": 314,
       "season": 2029,
       "day": 28,
       "phase": "regularSeason",
       "kind": "trade",
-      "summary": "Made an offer for Bjorn Nyberg (73 OVR F)",
+      "summary": "Made an offer for Zane Whitaker (69 OVR F)",
       "drivers": [
         "need at F (my tier ~58 OVR)",
-        "Bjorn Nyberg is 73 OVR, 1yr @ $0.9M",
-        "paper value -10.6 my way",
-        "Colorado Avalanche (retool) → pending"
+        "Zane Whitaker is 69 OVR, 1yr @ $0.9M",
+        "paper value -8.1 my way",
+        "Dallas Stars (rebuild) → pending"
       ],
-      "result": "pending: Xander Crosby is considering it — expect an answer in about 2 days.",
+      "result": "pending: Liam Carlsson is considering it — expect an answer in about 2 days.",
       "ok": false
     },
     {
-      "seq": 297,
+      "seq": 315,
+      "season": 2029,
+      "day": 29,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Sven Nyberg: \"Say it depends on his form\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Nyberg wasn't thrilled with the answer but accepted it.",
+      "ok": true
+    },
+    {
+      "seq": 316,
       "season": 2029,
       "day": 36,
       "phase": "regularSeason",
@@ -2956,20 +3206,7 @@
       "ok": true
     },
     {
-      "seq": 298,
-      "season": 2029,
-      "day": 39,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Joey Daccord: \"Say it depends on his form\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Daccord wasn't thrilled with the answer but accepted it.",
-      "ok": true
-    },
-    {
-      "seq": 299,
+      "seq": 317,
       "season": 2029,
       "day": 42,
       "phase": "regularSeason",
@@ -2982,23 +3219,20 @@
       "ok": true
     },
     {
-      "seq": 300,
+      "seq": 318,
       "season": 2029,
-      "day": 42,
+      "day": 45,
       "phase": "regularSeason",
-      "kind": "trade",
-      "summary": "Made an offer for Ulf Eriksson (69 OVR F)",
+      "kind": "interaction",
+      "summary": "Answered Brandt Clarke: \"Brush off the conversation\"",
       "drivers": [
-        "need at F (my tier ~66 OVR)",
-        "Ulf Eriksson is 69 OVR, 1yr @ $0.9M",
-        "paper value -4 my way",
-        "New Jersey Devils (retool) → pending"
+        "future"
       ],
-      "result": "pending: Hayden Carlsson is considering it — expect an answer in about 2 days.",
-      "ok": false
+      "result": "Clarke was clearly unhappy with how the conversation went.",
+      "ok": true
     },
     {
-      "seq": 301,
+      "seq": 319,
       "season": 2029,
       "day": 56,
       "phase": "regularSeason",
@@ -3011,20 +3245,20 @@
       "ok": true
     },
     {
-      "seq": 302,
+      "seq": 320,
       "season": 2029,
-      "day": 57,
+      "day": 61,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Ulf Eriksson: \"Brush off the conversation\"",
+      "summary": "Answered Zane Whitaker: \"Promise a new deal is coming\"",
       "drivers": [
         "future"
       ],
-      "result": "Eriksson wasn't thrilled with the answer but accepted it.",
+      "result": "Whitaker left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
       "ok": true
     },
     {
-      "seq": 303,
+      "seq": 321,
       "season": 2029,
       "day": 63,
       "phase": "regularSeason",
@@ -3037,35 +3271,9 @@
       "ok": true
     },
     {
-      "seq": 304,
+      "seq": 322,
       "season": 2029,
       "day": 70,
-      "phase": "regularSeason",
-      "kind": "meeting",
-      "summary": "Delegated the staff meeting to the AGM",
-      "drivers": [
-        "bi-weekly staff meeting was blocking Continue"
-      ],
-      "result": "Delegated — 1 decision handled by staff.",
-      "ok": true
-    },
-    {
-      "seq": 305,
-      "season": 2029,
-      "day": 72,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Joey Daccord: \"Promise a new deal is coming\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Daccord left the meeting reassured and in good spirits. Your words — “a new contract is coming” — went in the book.",
-      "ok": true
-    },
-    {
-      "seq": 306,
-      "season": 2029,
-      "day": 84,
       "phase": "regularSeason",
       "kind": "meeting",
       "summary": "Delegated the staff meeting to the AGM",
@@ -3076,20 +3284,63 @@
       "ok": true
     },
     {
-      "seq": 307,
+      "seq": 323,
       "season": 2029,
-      "day": 89,
+      "day": 70,
       "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Ulf Eriksson: \"Brush off the conversation\"",
+      "kind": "trade-in",
+      "summary": "Accepted an offer from Detroit Red Wings",
       "drivers": [
-        "future"
+        "we get 19 value for 0",
+        "clear win on paper"
       ],
-      "result": "Eriksson wasn't thrilled with the answer but accepted it.",
+      "result": "accepted",
       "ok": true
     },
     {
-      "seq": 308,
+      "seq": 324,
+      "season": 2029,
+      "day": 70,
+      "phase": "regularSeason",
+      "kind": "trade",
+      "summary": "Made an offer for Sven Holm (73 OVR D)",
+      "drivers": [
+        "need at D (my tier ~56 OVR)",
+        "Sven Holm is 73 OVR, 1yr @ $0.9M",
+        "paper value -5.4 my way",
+        "Winnipeg Jets (rebuild) → pending"
+      ],
+      "result": "pending: Casey Bergeron is considering it — expect an answer in about 2 days.",
+      "ok": false
+    },
+    {
+      "seq": 325,
+      "season": 2029,
+      "day": 78,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Teemu Doyle: \"Brush off the conversation\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Doyle was clearly unhappy with how the conversation went.",
+      "ok": true
+    },
+    {
+      "seq": 326,
+      "season": 2029,
+      "day": 84,
+      "phase": "regularSeason",
+      "kind": "meeting",
+      "summary": "Delegated the staff meeting to the AGM",
+      "drivers": [
+        "bi-weekly staff meeting was blocking Continue"
+      ],
+      "result": "Delegated — 1 decision handled by staff.",
+      "ok": true
+    },
+    {
+      "seq": 327,
       "season": 2029,
       "day": 91,
       "phase": "regularSeason",
@@ -3102,7 +3353,20 @@
       "ok": true
     },
     {
-      "seq": 309,
+      "seq": 328,
+      "season": 2029,
+      "day": 94,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Zane Whitaker: \"Say it depends on his form\"",
+      "drivers": [
+        "future"
+      ],
+      "result": "Whitaker appreciated being heard, even if nothing was promised.",
+      "ok": true
+    },
+    {
+      "seq": 329,
       "season": 2029,
       "day": 98,
       "phase": "regularSeason",
@@ -3111,24 +3375,11 @@
       "drivers": [
         "bi-weekly staff meeting was blocking Continue"
       ],
-      "result": "Delegated — 1 decision handled by staff.",
+      "result": "Delegated — 0 decisions handled by staff.",
       "ok": true
     },
     {
-      "seq": 310,
-      "season": 2029,
-      "day": 106,
-      "phase": "regularSeason",
-      "kind": "interaction",
-      "summary": "Answered Teemu Doyle: \"Say it depends on his form\"",
-      "drivers": [
-        "future"
-      ],
-      "result": "Doyle appreciated being heard, even if nothing was promised.",
-      "ok": true
-    },
-    {
-      "seq": 311,
+      "seq": 330,
       "season": 2029,
       "day": 112,
       "phase": "regularSeason",
@@ -3141,7 +3392,20 @@
       "ok": true
     },
     {
-      "seq": 312,
+      "seq": 331,
+      "season": 2029,
+      "day": 112,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Luke Evangelista: \"Encourage him to keep pushing\"",
+      "drivers": [
+        "iceTime"
+      ],
+      "result": "Evangelista left the meeting reassured and in good spirits.",
+      "ok": true
+    },
+    {
+      "seq": 332,
       "season": 2029,
       "day": 119,
       "phase": "regularSeason",
@@ -3154,7 +3418,7 @@
       "ok": true
     },
     {
-      "seq": 313,
+      "seq": 333,
       "season": 2029,
       "day": 126,
       "phase": "regularSeason",
@@ -3167,34 +3431,34 @@
       "ok": true
     },
     {
-      "seq": 314,
+      "seq": 334,
       "season": 2029,
-      "day": 127,
+      "day": 138,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Casey Bergeron: \"Reassure him he’s valued\"",
+      "summary": "Answered Nick Suzuki: \"Promise a bigger role\"",
       "drivers": [
-        "future"
+        "iceTime"
       ],
-      "result": "Bergeron left the meeting reassured and in good spirits.",
+      "result": "Suzuki left the meeting reassured and in good spirits. Your words — “a bigger role and more ice time” — went in the book.",
       "ok": true
     },
     {
-      "seq": 315,
+      "seq": 335,
       "season": 2029,
       "day": 138,
       "phase": "regularSeason",
       "kind": "deadline-buy",
       "summary": "Deadline: went for Janis Moser (53.7 val, asking \"a 1st-round pick and a mid-round pick\")",
       "drivers": [
-        "contending (contend, conf #16, 0% playoff odds)",
+        "contending (contend, conf #15, 0% playoff odds)",
         "buying for a playoff run"
       ],
-      "result": "reject: Completing this would put you $5.5M over the cap — shed salary or move a contract first.",
+      "result": "reject: Completing this would put you $5.8M over the cap — shed salary or move a contract first.",
       "ok": false
     },
     {
-      "seq": 316,
+      "seq": 336,
       "season": 2029,
       "day": 140,
       "phase": "regularSeason",
@@ -3207,7 +3471,7 @@
       "ok": true
     },
     {
-      "seq": 317,
+      "seq": 337,
       "season": 2029,
       "day": 147,
       "phase": "regularSeason",
@@ -3220,7 +3484,20 @@
       "ok": true
     },
     {
-      "seq": 318,
+      "seq": 338,
+      "season": 2029,
+      "day": 152,
+      "phase": "regularSeason",
+      "kind": "interaction",
+      "summary": "Answered Luke Evangelista: \"Tell him to earn it\"",
+      "drivers": [
+        "iceTime"
+      ],
+      "result": "Evangelista appreciated being heard, even if nothing was promised.",
+      "ok": true
+    },
+    {
+      "seq": 339,
       "season": 2029,
       "day": 154,
       "phase": "regularSeason",
@@ -3233,7 +3510,7 @@
       "ok": true
     },
     {
-      "seq": 319,
+      "seq": 340,
       "season": 2029,
       "day": 168,
       "phase": "regularSeason",
@@ -3246,20 +3523,20 @@
       "ok": true
     },
     {
-      "seq": 320,
+      "seq": 341,
       "season": 2029,
-      "day": 169,
+      "day": 170,
       "phase": "regularSeason",
       "kind": "interaction",
-      "summary": "Answered Bjorn Nyberg: \"Challenge him to respond on the ice\"",
+      "summary": "Answered Nick Suzuki: \"Encourage him to keep pushing\"",
       "drivers": [
-        "unhappy"
+        "iceTime"
       ],
-      "result": "Nyberg appreciated being heard, even if nothing was promised.",
+      "result": "Suzuki left the meeting reassured and in good spirits.",
       "ok": true
     },
     {
-      "seq": 321,
+      "seq": 342,
       "season": 2029,
       "day": 175,
       "phase": "regularSeason",
@@ -3272,7 +3549,7 @@
       "ok": true
     },
     {
-      "seq": 322,
+      "seq": 343,
       "season": 2029,
       "day": 182,
       "phase": "regularSeason",
@@ -3285,12 +3562,12 @@
       "ok": true
     },
     {
-      "seq": 338,
+      "seq": 359,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Viktor Kane (analyst #9999)",
+      "summary": "Drafted Pavel Olsen (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -3298,22 +3575,9 @@
       "ok": true
     },
     {
-      "seq": 339,
+      "seq": 360,
       "season": 2029,
-      "day": 211,
-      "phase": "offseason:draft",
-      "kind": "draft",
-      "summary": "Drafted Alex Xiong (analyst #9999)",
-      "drivers": [
-        "best available on the scouts’ board"
-      ],
-      "result": "selected",
-      "ok": true
-    },
-    {
-      "seq": 340,
-      "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
       "summary": "Drafted Tobias Forsberg (analyst #9999)",
@@ -3324,12 +3588,12 @@
       "ok": true
     },
     {
-      "seq": 341,
+      "seq": 361,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:draft",
       "kind": "draft",
-      "summary": "Drafted Jonas Kane (analyst #9999)",
+      "summary": "Drafted Reid Forsberg (analyst #9999)",
       "drivers": [
         "best available on the scouts’ board"
       ],
@@ -3337,675 +3601,353 @@
       "ok": true
     },
     {
-      "seq": 342,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 343,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 344,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 345,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 346,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 347,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 348,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 349,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 350,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 351,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 352,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 353,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 354,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 355,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 356,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 357,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 358,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 359,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 360,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 361,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
       "seq": 362,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
       "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 363,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 364,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 365,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
+      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 366,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 367,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 368,
       "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 369,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 370,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 371,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:resign",
-      "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
-      "drivers": [
-        "core piece worth keeping",
-        "$1.2M cap room"
-      ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
-      "ok": false
-    },
-    {
-      "seq": 372,
-      "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
       "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $6.9M doesn't fit $1.2M space",
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 369,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 370,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 371,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 372,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 373,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Anton Lundell (77 OVR) 3yr @ $6.0M",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $6.0M doesn't fit $1.2M space",
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 374,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Bjorn Nyberg (74 OVR) 5yr @ $5.0M",
+      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $5.0M doesn't fit $1.2M space",
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 375,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Joey Daccord (73 OVR) 1yr @ $3.7M",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $3.7M doesn't fit $1.2M space",
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 376,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:resign",
       "kind": "resign",
-      "summary": "Passed on Reid Ueda (71 OVR) 5yr @ $4.1M",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
       "drivers": [
         "core piece worth keeping",
-        "$1.2M cap room"
+        "$3.5M cap room"
       ],
-      "result": "skipped — $4.1M doesn't fit $1.2M space",
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
       "ok": false
     },
     {
       "seq": 377,
       "season": 2029,
-      "day": 211,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 378,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 379,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 380,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Matthew Tkachuk (83 OVR) 1yr @ $6.9M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $6.9M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 381,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Sven Holm (76 OVR) 4yr @ $5.7M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $5.7M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 382,
+      "season": 2029,
+      "day": 208,
+      "phase": "offseason:resign",
+      "kind": "resign",
+      "summary": "Passed on Zane Whitaker (72 OVR) 6yr @ $4.3M",
+      "drivers": [
+        "core piece worth keeping",
+        "$3.5M cap room"
+      ],
+      "result": "skipped — $4.3M doesn't fit $3.5M space",
+      "ok": false
+    },
+    {
+      "seq": 383,
+      "season": 2029,
+      "day": 208,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
       "summary": "Tabled $13.9M×2 for UFA Connor McDavid (94 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($15.4M left)"
+        "fits cap ($5.9M left)"
       ],
       "result": "Offer tabled — Connor McDavid's camp decides by free-agency day 2.",
       "ok": true
     },
     {
-      "seq": 378,
+      "seq": 384,
       "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $14.2M×5 for UFA Cole Caufield (92 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($1.1M left)"
-      ],
-      "result": "Offer tabled — Cole Caufield's camp decides by free-agency day 2.",
-      "ok": true
-    },
-    {
-      "seq": 379,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $10.2M×5 for UFA Jet Greaves (87 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($19.1M left)"
-      ],
-      "result": "Offer tabled — Jet Greaves's camp decides by free-agency day 4.",
-      "ok": true
-    },
-    {
-      "seq": 380,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $6.8M×1 for UFA Matthew Tkachuk (83 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($12.3M left)"
-      ],
-      "result": "Offer tabled — Matthew Tkachuk's camp decides by free-agency day 5.",
-      "ok": true
-    },
-    {
-      "seq": 381,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $7.1M×5 for UFA Ukko-Pekka Luukkonen (81 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($5.2M left)"
-      ],
-      "result": "Offer tabled — Ukko-Pekka Luukkonen's camp decides by free-agency day 4.",
-      "ok": true
-    },
-    {
-      "seq": 382,
-      "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
       "summary": "Tabled $4.0M×2 for UFA Seth Jones (78 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($1.3M left)"
+        "fits cap ($1.8M left)"
       ],
-      "result": "Offer tabled — Seth Jones's camp decides by free-agency day 3.",
-      "ok": true
-    },
-    {
-      "seq": 383,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $13.7M×5 for UFA Cole Caufield (92 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($1.7M left)"
-      ],
-      "result": "Offer tabled — Cole Caufield's camp decides by free-agency day 5.",
-      "ok": true
-    },
-    {
-      "seq": 384,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $5.7M×3 for UFA Anton Lundell (77 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($5.7M left)"
-      ],
-      "result": "Offer tabled — Anton Lundell's camp decides by free-agency day 6.",
+      "result": "Offer tabled — Seth Jones's camp decides by free-agency day 2.",
       "ok": true
     },
     {
       "seq": 385,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
-      "summary": "Tabled $5.2M×6 for UFA Rudy Guimond (74 OVR)",
+      "summary": "Tabled $10.2M×5 for UFA Jet Greaves (87 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($0.5M left)"
+        "fits cap ($9.6M left)"
       ],
-      "result": "Offer tabled — Rudy Guimond's camp decides by free-agency day 6.",
+      "result": "Offer tabled — Jet Greaves's camp decides by free-agency day 4.",
       "ok": true
     },
     {
       "seq": 386,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "phase": "offseason:freeAgency",
       "kind": "sign-fa",
-      "summary": "Tabled $3.4M×1 for UFA Joey Daccord (73 OVR)",
+      "summary": "Tabled $6.8M×1 for UFA Matthew Tkachuk (83 OVR)",
       "drivers": [
         "roster spot open",
-        "fits cap ($0.8M left)"
+        "fits cap ($2.9M left)"
       ],
-      "result": "Offer tabled — Joey Daccord's camp decides by free-agency day 8.",
-      "ok": true
-    },
-    {
-      "seq": 387,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $3.8M×4 for UFA Tobias Orlov (72 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($0.5M left)"
-      ],
-      "result": "Offer tabled — Tobias Orlov's camp decides by free-agency day 9.",
-      "ok": true
-    },
-    {
-      "seq": 388,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $3.5M×2 for UFA Niklas Kokko (70 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($0.8M left)"
-      ],
-      "result": "Offer tabled — Niklas Kokko's camp decides by free-agency day 10.",
-      "ok": true
-    },
-    {
-      "seq": 389,
-      "season": 2029,
-      "day": 211,
-      "phase": "offseason:freeAgency",
-      "kind": "sign-fa",
-      "summary": "Tabled $3.2M×3 for UFA Sebastian Cossa (70 OVR)",
-      "drivers": [
-        "roster spot open",
-        "fits cap ($1.1M left)"
-      ],
-      "result": "Offer tabled — Sebastian Cossa's camp decides by free-agency day 11.",
+      "result": "Offer tabled — Matthew Tkachuk's camp decides by free-agency day 5.",
       "ok": true
     }
   ],
@@ -4019,7 +3961,7 @@
       "message": "over the cap: used $107.5M vs ceiling $88.0M"
     },
     {
-      "seq": 12,
+      "seq": 13,
       "season": 2025,
       "day": 51,
       "severity": "major",
@@ -4027,7 +3969,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 17,
+      "seq": 18,
       "season": 2025,
       "day": 76,
       "severity": "major",
@@ -4035,7 +3977,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 23,
+      "seq": 24,
       "season": 2025,
       "day": 101,
       "severity": "major",
@@ -4043,7 +3985,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 26,
+      "seq": 27,
       "season": 2025,
       "day": 126,
       "severity": "major",
@@ -4051,7 +3993,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 32,
+      "seq": 33,
       "season": 2025,
       "day": 150,
       "severity": "major",
@@ -4059,7 +4001,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 36,
+      "seq": 37,
       "season": 2025,
       "day": 175,
       "severity": "major",
@@ -4067,7 +4009,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 40,
+      "seq": 41,
       "season": 2025,
       "day": 200,
       "severity": "major",
@@ -4075,7 +4017,7 @@
       "message": "over the cap: used $106.5M vs ceiling $88.0M"
     },
     {
-      "seq": 41,
+      "seq": 42,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4084,7 +4026,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 42,
+      "seq": 43,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4093,7 +4035,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 43,
+      "seq": 44,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4102,7 +4044,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 44,
+      "seq": 45,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4111,7 +4053,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 45,
+      "seq": 46,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4120,7 +4062,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 46,
+      "seq": 47,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4129,7 +4071,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 47,
+      "seq": 48,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4138,7 +4080,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 48,
+      "seq": 49,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4147,7 +4089,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 49,
+      "seq": 50,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4156,7 +4098,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 50,
+      "seq": 51,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4165,7 +4107,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 51,
+      "seq": 52,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4174,7 +4116,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 52,
+      "seq": 53,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4183,7 +4125,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 53,
+      "seq": 54,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4192,7 +4134,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 54,
+      "seq": 55,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4201,7 +4143,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 55,
+      "seq": 56,
       "season": 2025,
       "day": 212,
       "severity": "minor",
@@ -4210,7 +4152,7 @@
       "context": "season 2025"
     },
     {
-      "seq": 63,
+      "seq": 64,
       "season": 2025,
       "day": 212,
       "severity": "major",
@@ -4218,7 +4160,7 @@
       "message": "over the cap: used $102.2M vs ceiling $88.0M"
     },
     {
-      "seq": 68,
+      "seq": 69,
       "season": 2026,
       "day": 10,
       "severity": "major",
@@ -4226,7 +4168,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 73,
+      "seq": 75,
       "season": 2026,
       "day": 36,
       "severity": "major",
@@ -4234,7 +4176,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 78,
+      "seq": 80,
       "season": 2026,
       "day": 61,
       "severity": "major",
@@ -4242,7 +4184,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 84,
+      "seq": 86,
       "season": 2026,
       "day": 86,
       "severity": "major",
@@ -4250,7 +4192,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 88,
+      "seq": 90,
       "season": 2026,
       "day": 111,
       "severity": "major",
@@ -4258,7 +4200,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 94,
+      "seq": 96,
       "season": 2026,
       "day": 136,
       "severity": "major",
@@ -4266,7 +4208,7 @@
       "message": "over the cap: used $105.1M vs ceiling $92.0M"
     },
     {
-      "seq": 101,
+      "seq": 103,
       "season": 2026,
       "day": 160,
       "severity": "major",
@@ -4274,7 +4216,7 @@
       "message": "over the cap: used $105.9M vs ceiling $92.0M"
     },
     {
-      "seq": 107,
+      "seq": 109,
       "season": 2026,
       "day": 185,
       "severity": "major",
@@ -4282,7 +4224,7 @@
       "message": "over the cap: used $105.9M vs ceiling $92.0M"
     },
     {
-      "seq": 108,
+      "seq": 110,
       "season": 2026,
       "day": 209,
       "severity": "minor",
@@ -4291,30 +4233,12 @@
       "context": "season 2026"
     },
     {
-      "seq": 109,
-      "season": 2026,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 35x: \"X scouting digest\"",
-      "context": "season 2026"
-    },
-    {
-      "seq": 110,
-      "season": 2026,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 33x: \"X grow over X X ceiling\"",
-      "context": "season 2026"
-    },
-    {
       "seq": 111,
       "season": 2026,
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 30x: \"X X out # games\"",
+      "message": "one headline shape fired 35x: \"X scouting digest\"",
       "context": "season 2026"
     },
     {
@@ -4323,7 +4247,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 28x: \"# games without: X on X X dry spell\"",
+      "message": "one headline shape fired 33x: \"X grow over X X ceiling\"",
       "context": "season 2026"
     },
     {
@@ -4332,7 +4256,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 26x: \"X backs X X through the drought\"",
+      "message": "one headline shape fired 30x: \"X X out # games\"",
       "context": "season 2026"
     },
     {
@@ -4341,7 +4265,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 35x: \"Weekly scouting digest\"",
+      "message": "one headline shape fired 28x: \"# games without: X on X X dry spell\"",
       "context": "season 2026"
     },
     {
@@ -4350,7 +4274,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 19x: \"You left it to the staff\"",
+      "message": "one headline shape fired 26x: \"X backs X X through the drought\"",
       "context": "season 2026"
     },
     {
@@ -4359,7 +4283,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 18x: \"Rough night for Akira Schmid\"",
+      "message": "identical headline 35x: \"Weekly scouting digest\"",
       "context": "season 2026"
     },
     {
@@ -4368,7 +4292,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 12x: \"Breakdowns cost us — Coach postgame\"",
+      "message": "identical headline 19x: \"You left it to the staff\"",
       "context": "season 2026"
     },
     {
@@ -4377,7 +4301,7 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 10x: \"You left the board to the staff\"",
+      "message": "identical headline 18x: \"Rough night for Akira Schmid\"",
       "context": "season 2026"
     },
     {
@@ -4385,8 +4309,8 @@
       "season": 2026,
       "day": 209,
       "severity": "minor",
-      "category": "flavour:vocabulary",
-      "message": "\"the board\" appears 40x in one season's prose",
+      "category": "flavour:repetition",
+      "message": "identical headline 12x: \"Breakdowns cost us — Coach postgame\"",
       "context": "season 2026"
     },
     {
@@ -4394,8 +4318,8 @@
       "season": 2026,
       "day": 209,
       "severity": "minor",
-      "category": "flavour:vocabulary",
-      "message": "\"upside\" appears 69x in one season's prose",
+      "category": "flavour:repetition",
+      "message": "identical headline 10x: \"You left the board to the staff\"",
       "context": "season 2026"
     },
     {
@@ -4404,11 +4328,29 @@
       "day": 209,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"the room\" appears 38x in one season's prose",
+      "message": "\"the board\" appears 40x in one season's prose",
       "context": "season 2026"
     },
     {
       "seq": 122,
+      "season": 2026,
+      "day": 209,
+      "severity": "minor",
+      "category": "flavour:vocabulary",
+      "message": "\"upside\" appears 69x in one season's prose",
+      "context": "season 2026"
+    },
+    {
+      "seq": 123,
+      "season": 2026,
+      "day": 209,
+      "severity": "minor",
+      "category": "flavour:vocabulary",
+      "message": "\"the room\" appears 38x in one season's prose",
+      "context": "season 2026"
+    },
+    {
+      "seq": 124,
       "season": 2026,
       "day": 209,
       "severity": "minor",
@@ -4417,7 +4359,7 @@
       "context": "season 2026"
     },
     {
-      "seq": 123,
+      "seq": 125,
       "season": 2026,
       "day": 209,
       "severity": "major",
@@ -4425,417 +4367,417 @@
       "message": "over the cap: used $105.9M vs ceiling $92.0M"
     },
     {
-      "seq": 176,
+      "seq": 177,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 54x: \"X report: X X\"",
+      "message": "one headline shape fired 55x: \"X report: X X\"",
       "context": "season 2027"
     },
     {
-      "seq": 177,
+      "seq": 178,
       "season": 2027,
-      "day": 209,
+      "day": 208,
+      "severity": "minor",
+      "category": "flavour:repetition",
+      "message": "one headline shape fired 36x: \"# games without: X on X X dry spell\"",
+      "context": "season 2027"
+    },
+    {
+      "seq": 179,
+      "season": 2027,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "one headline shape fired 35x: \"X scouting digest\"",
       "context": "season 2027"
     },
     {
-      "seq": 178,
+      "seq": 180,
       "season": 2027,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 35x: \"X X out # games\"",
-      "context": "season 2027"
-    },
-    {
-      "seq": 179,
-      "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "one headline shape fired 35x: \"X X closing in on # career goals\"",
       "context": "season 2027"
     },
     {
-      "seq": 180,
-      "season": 2027,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 30x: \"X grow over X X ceiling\"",
-      "context": "season 2027"
-    },
-    {
       "seq": 181,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 28x: \"X X slump (# games) — X speaks\"",
+      "message": "one headline shape fired 32x: \"X X out # games\"",
       "context": "season 2027"
     },
     {
       "seq": 182,
       "season": 2027,
-      "day": 209,
+      "day": 208,
+      "severity": "minor",
+      "category": "flavour:repetition",
+      "message": "one headline shape fired 29x: \"X X slump (# games) — X speaks\"",
+      "context": "season 2027"
+    },
+    {
+      "seq": 183,
+      "season": 2027,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 35x: \"Weekly scouting digest\"",
       "context": "season 2027"
     },
     {
-      "seq": 183,
+      "seq": 184,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 19x: \"You left it to the staff\"",
       "context": "season 2027"
     },
     {
-      "seq": 184,
+      "seq": 185,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 14x: \"Breakdowns cost us — Coach postgame\"",
+      "message": "identical headline 12x: \"Breakdowns cost us — Coach postgame\"",
       "context": "season 2027"
     },
     {
-      "seq": 185,
+      "seq": 186,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 10x: \"You left the board to the staff\"",
       "context": "season 2027"
     },
     {
-      "seq": 186,
+      "seq": 187,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 10x: \"A team searching: Coach on the skid\"",
+      "message": "identical headline 9x: \"3 in a row — Coach addresses the slump\"",
       "context": "season 2027"
     },
     {
-      "seq": 187,
+      "seq": 188,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:vocabulary",
       "message": "\"the board\" appears 26x in one season's prose",
       "context": "season 2027"
     },
     {
-      "seq": 188,
-      "season": 2027,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:vocabulary",
-      "message": "\"upside\" appears 52x in one season's prose",
-      "context": "season 2027"
-    },
-    {
       "seq": 189,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"the room\" appears 28x in one season's prose",
+      "message": "\"upside\" appears 54x in one season's prose",
       "context": "season 2027"
     },
     {
       "seq": 190,
       "season": 2027,
-      "day": 209,
+      "day": 208,
       "severity": "minor",
-      "category": "flavour:undramatised",
-      "message": "30 dramatic game(s) passed with no story written — e.g. d51 one-goal game; d79 8-goal rout; d97 shutout",
+      "category": "flavour:vocabulary",
+      "message": "\"the room\" appears 36x in one season's prose",
       "context": "season 2027"
     },
     {
-      "seq": 252,
-      "season": 2028,
-      "day": 209,
+      "seq": 191,
+      "season": 2027,
+      "day": 208,
       "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 49x: \"X report: X X\"",
-      "context": "season 2028"
-    },
-    {
-      "seq": 253,
-      "season": 2028,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 38x: \"X X out # games\"",
-      "context": "season 2028"
+      "category": "flavour:undramatised",
+      "message": "35 dramatic game(s) passed with no story written — e.g. d51 one-goal game; d55 shutout; d83 one-goal game",
+      "context": "season 2027"
     },
     {
       "seq": 254,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 35x: \"X scouting digest\"",
+      "message": "one headline shape fired 50x: \"X report: X X\"",
       "context": "season 2028"
     },
     {
       "seq": 255,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 33x: \"X grow over X X ceiling\"",
+      "message": "one headline shape fired 38x: \"# games without: X on X X dry spell\"",
       "context": "season 2028"
     },
     {
       "seq": 256,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 33x: \"# games without: X on X X dry spell\"",
+      "message": "one headline shape fired 36x: \"X scouting digest\"",
       "context": "season 2028"
     },
     {
       "seq": 257,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 31x: \"X X plays his #,#th NHL game\"",
+      "message": "one headline shape fired 36x: \"X X plays his #,#th NHL game\"",
       "context": "season 2028"
     },
     {
       "seq": 258,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 35x: \"Weekly scouting digest\"",
+      "message": "one headline shape fired 32x: \"X X out # games\"",
       "context": "season 2028"
     },
     {
       "seq": 259,
       "season": 2028,
-      "day": 209,
+      "day": 210,
+      "severity": "minor",
+      "category": "flavour:repetition",
+      "message": "one headline shape fired 25x: \"X grow over X X ceiling\"",
+      "context": "season 2028"
+    },
+    {
+      "seq": 260,
+      "season": 2028,
+      "day": 210,
+      "severity": "minor",
+      "category": "flavour:repetition",
+      "message": "identical headline 36x: \"Weekly scouting digest\"",
+      "context": "season 2028"
+    },
+    {
+      "seq": 261,
+      "season": 2028,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 19x: \"You left it to the staff\"",
       "context": "season 2028"
     },
     {
-      "seq": 260,
+      "seq": 262,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 19x: \"Rough night for Louis-Antoine Denault\"",
       "context": "season 2028"
     },
     {
-      "seq": 261,
-      "season": 2028,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "identical headline 16x: \"Breakdowns cost us — Coach postgame\"",
-      "context": "season 2028"
-    },
-    {
-      "seq": 262,
-      "season": 2028,
-      "day": 209,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "identical headline 11x: \"1 year ago today\"",
-      "context": "season 2028"
-    },
-    {
       "seq": 263,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
-      "category": "flavour:vocabulary",
-      "message": "\"the board\" appears 26x in one season's prose",
+      "category": "flavour:repetition",
+      "message": "identical headline 15x: \"Breakdowns cost us — Coach postgame\"",
       "context": "season 2028"
     },
     {
       "seq": 264,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
-      "category": "flavour:vocabulary",
-      "message": "\"intrigue\" appears 16x in one season's prose",
+      "category": "flavour:repetition",
+      "message": "identical headline 10x: \"You left the board to the staff\"",
       "context": "season 2028"
     },
     {
       "seq": 265,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"upside\" appears 33x in one season's prose",
+      "message": "\"the board\" appears 23x in one season's prose",
       "context": "season 2028"
     },
     {
       "seq": 266,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"the room\" appears 23x in one season's prose",
+      "message": "\"intrigue\" appears 17x in one season's prose",
       "context": "season 2028"
     },
     {
       "seq": 267,
       "season": 2028,
-      "day": 209,
+      "day": 210,
       "severity": "minor",
-      "category": "flavour:undramatised",
-      "message": "4 dramatic game(s) passed with no story written — e.g. d25 6-goal rout; d89 one-goal game; d177 5-goal rout",
+      "category": "flavour:vocabulary",
+      "message": "\"upside\" appears 35x in one season's prose",
       "context": "season 2028"
     },
     {
-      "seq": 323,
+      "seq": 268,
+      "season": 2028,
+      "day": 210,
+      "severity": "minor",
+      "category": "flavour:vocabulary",
+      "message": "\"the room\" appears 36x in one season's prose",
+      "context": "season 2028"
+    },
+    {
+      "seq": 269,
+      "season": 2028,
+      "day": 210,
+      "severity": "minor",
+      "category": "flavour:undramatised",
+      "message": "9 dramatic game(s) passed with no story written — e.g. d27 one-goal game; d31 one-goal game; d67 one-goal game",
+      "context": "season 2028"
+    },
+    {
+      "seq": 344,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 50x: \"X report: X X\"",
+      "message": "one headline shape fired 51x: \"X report: X X\"",
       "context": "season 2029"
     },
     {
-      "seq": 324,
+      "seq": 345,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 41x: \"X X out # games\"",
+      "message": "one headline shape fired 40x: \"X X out # games\"",
       "context": "season 2029"
     },
     {
-      "seq": 325,
+      "seq": 346,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 38x: \"X X closing in on # career goals\"",
+      "message": "one headline shape fired 36x: \"X X plays his #,#th NHL game\"",
       "context": "season 2029"
     },
     {
-      "seq": 326,
+      "seq": 347,
       "season": 2029,
-      "day": 211,
-      "severity": "minor",
-      "category": "flavour:repetition",
-      "message": "one headline shape fired 35x: \"# games without: X on X X dry spell\"",
-      "context": "season 2029"
-    },
-    {
-      "seq": 327,
-      "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "one headline shape fired 35x: \"X scouting digest\"",
       "context": "season 2029"
     },
     {
-      "seq": 328,
+      "seq": 348,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "one headline shape fired 33x: \"X X plays his #,#th NHL game\"",
+      "message": "one headline shape fired 33x: \"X X closing in on # career goals\"",
       "context": "season 2029"
     },
     {
-      "seq": 329,
+      "seq": 349,
       "season": 2029,
-      "day": 211,
+      "day": 208,
+      "severity": "minor",
+      "category": "flavour:repetition",
+      "message": "one headline shape fired 32x: \"# games without: X on X X dry spell\"",
+      "context": "season 2029"
+    },
+    {
+      "seq": 350,
+      "season": 2029,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 35x: \"Weekly scouting digest\"",
       "context": "season 2029"
     },
     {
-      "seq": 330,
+      "seq": 351,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
       "message": "identical headline 18x: \"You left it to the staff\"",
       "context": "season 2029"
     },
     {
-      "seq": 331,
+      "seq": 352,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 12x: \"Breakdowns cost us — Coach postgame\"",
+      "message": "identical headline 13x: \"A team searching: Coach on the skid\"",
       "context": "season 2029"
     },
     {
-      "seq": 332,
+      "seq": 353,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 11x: \"Rough night for Louis-Antoine Denault\"",
+      "message": "identical headline 11x: \"Breakdowns cost us — Coach postgame\"",
       "context": "season 2029"
     },
     {
-      "seq": 333,
+      "seq": 354,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:repetition",
-      "message": "identical headline 11x: \"Rough night for Joey Daccord\"",
+      "message": "identical headline 10x: \"You left the board to the staff\"",
       "context": "season 2029"
     },
     {
-      "seq": 334,
+      "seq": 355,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"the board\" appears 24x in one season's prose",
+      "message": "\"the board\" appears 22x in one season's prose",
       "context": "season 2029"
     },
     {
-      "seq": 335,
+      "seq": 356,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"intrigue\" appears 19x in one season's prose",
+      "message": "\"intrigue\" appears 23x in one season's prose",
       "context": "season 2029"
     },
     {
-      "seq": 336,
+      "seq": 357,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:vocabulary",
-      "message": "\"the room\" appears 22x in one season's prose",
+      "message": "\"the room\" appears 36x in one season's prose",
       "context": "season 2029"
     },
     {
-      "seq": 337,
+      "seq": 358,
       "season": 2029,
-      "day": 211,
+      "day": 208,
       "severity": "minor",
       "category": "flavour:undramatised",
-      "message": "9 dramatic game(s) passed with no story written — e.g. d93 one-goal game; d95 one-goal game; d97 5-goal rout",
+      "message": "30 dramatic game(s) passed with no story written — e.g. d46 one-goal game; d47 one-goal game; d55 one-goal game",
       "context": "season 2029"
     }
   ],
@@ -4845,7 +4787,7 @@
       "madePlayoffs": true,
       "playoffResult": "First Round",
       "wonCup": false,
-      "decisions": 33,
+      "decisions": 34,
       "trades": 0,
       "signings": 0,
       "drafted": 7,
@@ -4881,7 +4823,7 @@
       "madePlayoffs": false,
       "playoffResult": "Missed",
       "wonCup": false,
-      "decisions": 35,
+      "decisions": 36,
       "trades": 0,
       "signings": 0,
       "drafted": 7,
@@ -4917,35 +4859,35 @@
       "madePlayoffs": false,
       "playoffResult": "Missed",
       "wonCup": false,
-      "decisions": 41,
+      "decisions": 40,
       "trades": 1,
-      "signings": 1,
-      "drafted": 6,
+      "signings": 0,
+      "drafted": 5,
       "critical": 0,
       "major": 0,
       "minor": 15,
       "rank": 26,
-      "conferenceRank": 13,
-      "record": "36-41-5",
-      "points": 77,
-      "champion": "Buffalo Sabres",
+      "conferenceRank": 15,
+      "record": "33-40-9",
+      "points": 75,
+      "champion": "Ottawa Senators",
       "newsSample": [
         "Denton Mateychuk wins the Norris Trophy (Best Defenceman)",
         "Cody Nyberg wins the Calder Trophy (Rookie of the Year)",
         "2027 awards: Jet Greaves takes MVP honours",
-        "Awards season: the front-runners and what they're chasing",
-        "WE DID IT — Florida Panthers ARE CHAMPIONS!!!",
-        "Buffalo Sabres win the championship!",
-        "A rivalry is born: MIN vs BUF",
-        "NSH vs MIN: a heated rivalry ignites",
-        "SJS vs ANA: a heated rivalry ignites",
+        "Awards night is here — celebrating the best of the 2027–2028 season",
+        "Florida Panthers raise the cup — and earn it",
+        "Ottawa Senators win the championship!",
+        "OTT vs MIN: a heated rivalry ignites",
+        "A rivalry is born: MIN vs OTT",
         "Playoffs begin",
-        "Stanley Cup Finals preview: who wants it more?",
-        "Teemu Doyle slump (5 games) — Coach speaks",
-        "Power rankings refresh: the league's pecking order after the early going",
-        "Day 184: Win 5-4 (SO) @ NYR",
-        "March was exactly what we needed — and the Florida Panthers delivered",
-        "What 3–2 week tells us about the Florida Panthers"
+        "Stanley Cup Finals preview: seeds are set, matchups drawn",
+        "Sandis Vilmanis slump (5 games) — Coach speaks",
+        "Power rankings: here's where YOUR Florida Panthers stand",
+        "Sam Reinhart on fire — 6-game point streak",
+        "Day 184: Win 2-1 @ NYR",
+        "March power report: who has separated — and who has fallen off",
+        "Off-ice questions shadow a 2–3 week for FLA"
       ]
     },
     {
@@ -4953,35 +4895,35 @@
       "madePlayoffs": false,
       "playoffResult": "Missed",
       "wonCup": false,
-      "decisions": 44,
+      "decisions": 38,
       "trades": 2,
-      "signings": 4,
+      "signings": 3,
       "drafted": 6,
       "critical": 0,
       "major": 0,
       "minor": 16,
-      "rank": 26,
-      "conferenceRank": 14,
-      "record": "34-39-9",
-      "points": 77,
-      "champion": "Ottawa Senators",
+      "rank": 30,
+      "conferenceRank": 15,
+      "record": "33-44-5",
+      "points": 71,
+      "champion": "Minnesota Wild",
       "newsSample": [
-        "Brock Faber wins the Norris Trophy (Best Defenceman)",
+        "Rasmus Dahlin wins the Norris Trophy (Best Defenceman)",
         "Kale Nicol wins the Calder Trophy (Rookie of the Year)",
         "2028 awards: Jesper Wallstedt takes MVP honours",
-        "Awards night preview: who wins, who gets robbed, and what it says about this league",
-        "Florida Panthers are champions",
-        "Ottawa Senators win the championship!",
-        "LAK vs OTT: a heated rivalry ignites",
-        "A rivalry is born: OTT vs LAK",
+        "Awards night is here — celebrating the best of the 2028–2029 season",
+        "Florida Panthers raise the cup — and earn it",
+        "Minnesota Wild win the championship!",
+        "CBJ vs MIN: a heated rivalry ignites",
+        "A rivalry is born: MIN vs CBJ",
+        "CBJ vs OTT: a heated rivalry ignites",
+        "A rivalry is born: OTT vs CBJ",
         "Playoffs begin",
-        "Stanley Cup Finals — and folks, THIS IS WHAT WE PLAY FOR!",
-        "Coach faces the slide head-on",
-        "Power rankings: the definitive list, explained",
+        "Stanley Cup Finals preview: seeds are set, matchups drawn",
+        "Brendan Gallagher plays his 1,000th NHL game",
+        "Power rankings: here's where YOUR Florida Panthers stand",
         "3 years ago today",
-        "Niko Mikkola out 12 games",
-        "Aleksander Barkov leaves the game — out 25 games",
-        "Day 184: Loss 3-5 @ NYR"
+        "Gustav Forsling out 12 games"
       ]
     },
     {
@@ -4989,35 +4931,35 @@
       "madePlayoffs": false,
       "playoffResult": "Missed",
       "wonCup": false,
-      "decisions": 35,
+      "decisions": 39,
       "trades": 1,
       "signings": 0,
-      "drafted": 4,
+      "drafted": 3,
       "critical": 0,
       "major": 0,
       "minor": 15,
-      "rank": 28,
+      "rank": 29,
       "conferenceRank": 16,
-      "record": "31-43-8",
+      "record": "32-44-6",
       "points": 70,
-      "champion": "St. Louis Blues",
+      "champion": "Philadelphia Flyers",
       "newsSample": [
         "Jake Sanderson wins the Norris Trophy (Best Defenceman)",
         "Tyson Orr wins the Calder Trophy (Rookie of the Year)",
         "2029 awards: Justus Annunen takes MVP honours",
-        "Awards night preview: who wins, who gets robbed, and what it says about this league",
-        "Florida Panthers are champions",
-        "St. Louis Blues win the championship!",
-        "DET vs STL: a heated rivalry ignites",
-        "A rivalry is born: STL vs DET",
-        "NSH vs STL: a heated rivalry ignites",
+        "Awards night is here — celebrating the best of the 2029–2030 season",
+        "Florida Panthers raise the cup — and earn it",
+        "Philadelphia Flyers win the championship!",
+        "A rivalry is born: PHI vs SJS",
+        "MIN vs NSH: a heated rivalry ignites",
         "Playoffs begin",
-        "Stanley Cup Finals — and folks, THIS IS WHAT WE PLAY FOR!",
-        "Blake Coleman plays his 1,000th NHL game",
-        "Power rankings: the definitive list, explained",
-        "Gloves off: Niko Mikkola answers the bell",
+        "Stanley Cup Finals preview: seeds are set, matchups drawn",
+        "Power rankings: here's where YOUR Florida Panthers stand",
+        "Gloves off: Zane Hughes answers the bell",
         "Collapse: a 3-goal lead slips away",
-        "Day 184: Loss 4-6 @ NYR"
+        "Day 184: Loss 5-6 @ NYR",
+        "April power report: who has separated — and who has fallen off",
+        "FLA splits the week, searching for consistency"
       ]
     }
   ],
@@ -10264,8 +10206,8 @@
     "cups": 0,
     "bestFinish": "—",
     "totalTrades": 4,
-    "totalSignings": 5,
-    "totalDrafted": 30,
+    "totalSignings": 3,
+    "totalDrafted": 28,
     "critical": 0,
     "major": 18,
     "minor": 76,
@@ -10442,15 +10384,20 @@
     },
     {
       "season": 2027,
-      "newsItems": 1102,
-      "distinctHeadlines": 827,
-      "distinctTemplates": 331,
-      "quietDays": 45,
+      "newsItems": 1101,
+      "distinctHeadlines": 838,
+      "distinctTemplates": 329,
+      "quietDays": 47,
       "findings": [
         {
           "kind": "repetition",
-          "count": 54,
-          "detail": "one headline shape fired 54x: \"X report: X X\""
+          "count": 55,
+          "detail": "one headline shape fired 55x: \"X report: X X\""
+        },
+        {
+          "kind": "repetition",
+          "count": 36,
+          "detail": "one headline shape fired 36x: \"# games without: X on X X dry spell\""
         },
         {
           "kind": "repetition",
@@ -10460,22 +10407,17 @@
         {
           "kind": "repetition",
           "count": 35,
-          "detail": "one headline shape fired 35x: \"X X out # games\""
-        },
-        {
-          "kind": "repetition",
-          "count": 35,
           "detail": "one headline shape fired 35x: \"X X closing in on # career goals\""
         },
         {
           "kind": "repetition",
-          "count": 30,
-          "detail": "one headline shape fired 30x: \"X grow over X X ceiling\""
+          "count": 32,
+          "detail": "one headline shape fired 32x: \"X X out # games\""
         },
         {
           "kind": "repetition",
-          "count": 28,
-          "detail": "one headline shape fired 28x: \"X X slump (# games) — X speaks\""
+          "count": 29,
+          "detail": "one headline shape fired 29x: \"X X slump (# games) — X speaks\""
         },
         {
           "kind": "repetition",
@@ -10489,8 +10431,8 @@
         },
         {
           "kind": "repetition",
-          "count": 14,
-          "detail": "identical headline 14x: \"Breakdowns cost us — Coach postgame\""
+          "count": 12,
+          "detail": "identical headline 12x: \"Breakdowns cost us — Coach postgame\""
         },
         {
           "kind": "repetition",
@@ -10499,8 +10441,8 @@
         },
         {
           "kind": "repetition",
-          "count": 10,
-          "detail": "identical headline 10x: \"A team searching: Coach on the skid\""
+          "count": 9,
+          "detail": "identical headline 9x: \"3 in a row — Coach addresses the slump\""
         },
         {
           "kind": "vocabulary",
@@ -10509,62 +10451,62 @@
         },
         {
           "kind": "vocabulary",
-          "count": 52,
-          "detail": "\"upside\" appears 52x in one season's prose"
+          "count": 54,
+          "detail": "\"upside\" appears 54x in one season's prose"
         },
         {
           "kind": "vocabulary",
-          "count": 28,
-          "detail": "\"the room\" appears 28x in one season's prose"
+          "count": 36,
+          "detail": "\"the room\" appears 36x in one season's prose"
         },
         {
           "kind": "undramatised",
-          "count": 30,
-          "detail": "30 dramatic game(s) passed with no story written — e.g. d51 one-goal game; d79 8-goal rout; d97 shutout"
+          "count": 35,
+          "detail": "35 dramatic game(s) passed with no story written — e.g. d51 one-goal game; d55 shutout; d83 one-goal game"
         }
       ]
     },
     {
       "season": 2028,
-      "newsItems": 1154,
-      "distinctHeadlines": 858,
-      "distinctTemplates": 354,
-      "quietDays": 38,
+      "newsItems": 1144,
+      "distinctHeadlines": 842,
+      "distinctTemplates": 345,
+      "quietDays": 41,
       "findings": [
         {
           "kind": "repetition",
-          "count": 49,
-          "detail": "one headline shape fired 49x: \"X report: X X\""
+          "count": 50,
+          "detail": "one headline shape fired 50x: \"X report: X X\""
         },
         {
           "kind": "repetition",
           "count": 38,
-          "detail": "one headline shape fired 38x: \"X X out # games\""
+          "detail": "one headline shape fired 38x: \"# games without: X on X X dry spell\""
         },
         {
           "kind": "repetition",
-          "count": 35,
-          "detail": "one headline shape fired 35x: \"X scouting digest\""
+          "count": 36,
+          "detail": "one headline shape fired 36x: \"X scouting digest\""
         },
         {
           "kind": "repetition",
-          "count": 33,
-          "detail": "one headline shape fired 33x: \"X grow over X X ceiling\""
+          "count": 36,
+          "detail": "one headline shape fired 36x: \"X X plays his #,#th NHL game\""
         },
         {
           "kind": "repetition",
-          "count": 33,
-          "detail": "one headline shape fired 33x: \"# games without: X on X X dry spell\""
+          "count": 32,
+          "detail": "one headline shape fired 32x: \"X X out # games\""
         },
         {
           "kind": "repetition",
-          "count": 31,
-          "detail": "one headline shape fired 31x: \"X X plays his #,#th NHL game\""
+          "count": 25,
+          "detail": "one headline shape fired 25x: \"X grow over X X ceiling\""
         },
         {
           "kind": "repetition",
-          "count": 35,
-          "detail": "identical headline 35x: \"Weekly scouting digest\""
+          "count": 36,
+          "detail": "identical headline 36x: \"Weekly scouting digest\""
         },
         {
           "kind": "repetition",
@@ -10578,67 +10520,62 @@
         },
         {
           "kind": "repetition",
-          "count": 16,
-          "detail": "identical headline 16x: \"Breakdowns cost us — Coach postgame\""
+          "count": 15,
+          "detail": "identical headline 15x: \"Breakdowns cost us — Coach postgame\""
         },
         {
           "kind": "repetition",
-          "count": 11,
-          "detail": "identical headline 11x: \"1 year ago today\""
-        },
-        {
-          "kind": "vocabulary",
-          "count": 26,
-          "detail": "\"the board\" appears 26x in one season's prose"
-        },
-        {
-          "kind": "vocabulary",
-          "count": 16,
-          "detail": "\"intrigue\" appears 16x in one season's prose"
-        },
-        {
-          "kind": "vocabulary",
-          "count": 33,
-          "detail": "\"upside\" appears 33x in one season's prose"
+          "count": 10,
+          "detail": "identical headline 10x: \"You left the board to the staff\""
         },
         {
           "kind": "vocabulary",
           "count": 23,
-          "detail": "\"the room\" appears 23x in one season's prose"
+          "detail": "\"the board\" appears 23x in one season's prose"
+        },
+        {
+          "kind": "vocabulary",
+          "count": 17,
+          "detail": "\"intrigue\" appears 17x in one season's prose"
+        },
+        {
+          "kind": "vocabulary",
+          "count": 35,
+          "detail": "\"upside\" appears 35x in one season's prose"
+        },
+        {
+          "kind": "vocabulary",
+          "count": 36,
+          "detail": "\"the room\" appears 36x in one season's prose"
         },
         {
           "kind": "undramatised",
-          "count": 4,
-          "detail": "4 dramatic game(s) passed with no story written — e.g. d25 6-goal rout; d89 one-goal game; d177 5-goal rout"
+          "count": 9,
+          "detail": "9 dramatic game(s) passed with no story written — e.g. d27 one-goal game; d31 one-goal game; d67 one-goal game"
         }
       ]
     },
     {
       "season": 2029,
-      "newsItems": 1140,
-      "distinctHeadlines": 835,
-      "distinctTemplates": 335,
-      "quietDays": 41,
+      "newsItems": 1209,
+      "distinctHeadlines": 898,
+      "distinctTemplates": 351,
+      "quietDays": 37,
       "findings": [
         {
           "kind": "repetition",
-          "count": 50,
-          "detail": "one headline shape fired 50x: \"X report: X X\""
+          "count": 51,
+          "detail": "one headline shape fired 51x: \"X report: X X\""
         },
         {
           "kind": "repetition",
-          "count": 41,
-          "detail": "one headline shape fired 41x: \"X X out # games\""
+          "count": 40,
+          "detail": "one headline shape fired 40x: \"X X out # games\""
         },
         {
           "kind": "repetition",
-          "count": 38,
-          "detail": "one headline shape fired 38x: \"X X closing in on # career goals\""
-        },
-        {
-          "kind": "repetition",
-          "count": 35,
-          "detail": "one headline shape fired 35x: \"# games without: X on X X dry spell\""
+          "count": 36,
+          "detail": "one headline shape fired 36x: \"X X plays his #,#th NHL game\""
         },
         {
           "kind": "repetition",
@@ -10648,7 +10585,12 @@
         {
           "kind": "repetition",
           "count": 33,
-          "detail": "one headline shape fired 33x: \"X X plays his #,#th NHL game\""
+          "detail": "one headline shape fired 33x: \"X X closing in on # career goals\""
+        },
+        {
+          "kind": "repetition",
+          "count": 32,
+          "detail": "one headline shape fired 32x: \"# games without: X on X X dry spell\""
         },
         {
           "kind": "repetition",
@@ -10662,38 +10604,38 @@
         },
         {
           "kind": "repetition",
-          "count": 12,
-          "detail": "identical headline 12x: \"Breakdowns cost us — Coach postgame\""
+          "count": 13,
+          "detail": "identical headline 13x: \"A team searching: Coach on the skid\""
         },
         {
           "kind": "repetition",
           "count": 11,
-          "detail": "identical headline 11x: \"Rough night for Louis-Antoine Denault\""
+          "detail": "identical headline 11x: \"Breakdowns cost us — Coach postgame\""
         },
         {
           "kind": "repetition",
-          "count": 11,
-          "detail": "identical headline 11x: \"Rough night for Joey Daccord\""
-        },
-        {
-          "kind": "vocabulary",
-          "count": 24,
-          "detail": "\"the board\" appears 24x in one season's prose"
-        },
-        {
-          "kind": "vocabulary",
-          "count": 19,
-          "detail": "\"intrigue\" appears 19x in one season's prose"
+          "count": 10,
+          "detail": "identical headline 10x: \"You left the board to the staff\""
         },
         {
           "kind": "vocabulary",
           "count": 22,
-          "detail": "\"the room\" appears 22x in one season's prose"
+          "detail": "\"the board\" appears 22x in one season's prose"
+        },
+        {
+          "kind": "vocabulary",
+          "count": 23,
+          "detail": "\"intrigue\" appears 23x in one season's prose"
+        },
+        {
+          "kind": "vocabulary",
+          "count": 36,
+          "detail": "\"the room\" appears 36x in one season's prose"
         },
         {
           "kind": "undramatised",
-          "count": 9,
-          "detail": "9 dramatic game(s) passed with no story written — e.g. d93 one-goal game; d95 one-goal game; d97 5-goal rout"
+          "count": 30,
+          "detail": "30 dramatic game(s) passed with no story written — e.g. d46 one-goal game; d47 one-goal game; d55 one-goal game"
         }
       ]
     }
