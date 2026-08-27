@@ -313,6 +313,13 @@ export class SimClient {
     return this.send({ type: 'submitNegotiationOffer', playerId, offer })
   }
 
+  setNegotiationRole(
+    playerId: string,
+    pitch: 'star' | 'topSix' | 'middleSix' | 'specialist' | 'depth' | 'none',
+  ): Promise<WorkerResponse> {
+    return this.send({ type: 'setNegotiationRole', playerId, pitch })
+  }
+
   getFaHub(): Promise<WorkerResponse> {
     return this.send({ type: 'getFaHub' })
   }

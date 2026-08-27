@@ -48,6 +48,7 @@ import type {
 import type { ExpectationsState } from '@engine/story/expectations'
 import type { PressureState } from '@engine/league/pressure'
 import type { ExtensionDiscount, PendingExtension } from '@engine/league/extension'
+import type { FarmPlayoffResult } from '@engine/league/farmPlayoffs'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import type { PlayerInteraction, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
 export type { PlayerInteraction, InteractionKind, PlayerPromise, SceneSpeaker } from '@engine/league/interactions'
@@ -1919,6 +1920,15 @@ export interface NegotiationView {
   extensionNote?: string
   /** E2: cap room NEXT season, which is the money an extension actually spends. */
   nextSeasonCapRoom?: number
+  /** E1: the role you have told his camp he'll have here, if you've said it. */
+  rolePitch?: 'star' | 'topSix' | 'middleSix' | 'specialist' | 'depth' | 'none'
+  /** E1: the roles you can offer, with what each is worth at this table. */
+  roleOptions?: Array<{
+    key: 'star' | 'topSix' | 'middleSix' | 'specialist' | 'depth' | 'none'
+    label: string
+    /** Plain read of the trade: "worth real money to him" / "he'll price it up". */
+    effect: string
+  }>
 }
 
 /* ── Convened staff meeting (bi-weekly war-room). Action stays engine-side; the
@@ -2562,6 +2572,20 @@ export interface CareerSnapshot {
   pendingExtensions?: PendingExtension[]
   /** Live early-signing concessions from authored scenes (E2). Optional/additive. */
   extensionDiscounts?: ExtensionDiscount[]
+  /** Farm/prospect beats already told + the cadence counters (E1). Optional/additive. */
+  clubBeats?: {
+    told: string[]
+    lastDay: number
+    thisSeason: number
+    /** A newly acquired player owed a role conversation on the next quiet day. */
+    queuedArrival?: string
+    /** Season in which the affiliate's playoff trip was already offered. */
+    farmTripYear?: number | null
+    /** Season the GM actually travelled to watch the farm's run. */
+    farmTripAttended?: number | null
+    /** Last resolved farm bracket (E1). */
+    farmPlayoffs?: FarmPlayoffResult | null
+  }
   /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
   chronicle?: ChronicleState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */

@@ -200,6 +200,10 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().submitNegotiationOffer(req.playerId, req.offer)
       return { id: req.id, type: 'negotiation', negotiation: res.view, signed: res.signed, message: res.message }
     }
+    case 'setNegotiationRole': {
+      const res = must().setNegotiationRole(req.playerId, req.pitch)
+      return { id: req.id, type: 'negotiation', negotiation: res.view, signed: false, message: res.message }
+    }
     case 'getFaHub':
       return { id: req.id, type: 'faHub', faHub: must().getFaHub() }
     case 'askFaAgent':

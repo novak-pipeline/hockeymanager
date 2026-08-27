@@ -20,9 +20,13 @@ import {
   openingLines,
   priorityHints,
   priorityWeights,
+  ROLE_PITCH_LABEL,
+  rolePitchLine,
+  rolePitchValue,
   type Comparable,
   type ContractOffer,
   type NegotiationState,
+  type RolePitch,
 } from './negotiation'
 
 function flat(value: number): RawAttributes {
@@ -301,5 +305,89 @@ describe('faAskDecay', () => {
     expect(faAskDecay(9)).toBeCloseTo(0.82, 5)
     expect(faAskDecay(30)).toBe(0.82) // floored
     expect(faAskDecay(-3)).toBe(1) // guards negative
+  })
+})
+
+/* ─────────────── E1: the role conversation, held at the table ─────────────── */
+
+describe('rolePitch — telling him what he is here to do', () => {
+  it('is worth nothing when you refuse to commit to a role', () => {
+    expect(rolePitchValue('none', 80)).toBe(0)
+  })
+
+  it('is worth real money when the role beats what his ability has earned', () => {
+    // A 65-overall told he is a top-six player is being handed something.
+    const v = rolePitchValue('topSix', 65)
+    expect(v).toBeGreaterThan(0.05)
+    expect(v).toBeLessThanOrEqual(0.135)
+  })
+
+  it('costs you when the role is beneath him', () => {
+    // Telling an 88-overall he is depth is an insult with a price tag.
+    expect(rolePitchValue('depth', 88)).toBeLessThan(-0.1)
+  })
+
+  it('is neutral when it matches what he already thinks he is', () => {
+    expect(rolePitchValue('star', 88)).toBe(0)
+    expect(rolePitchValue('middleSix', 71)).toBe(0)
+  })
+
+  it('means different things said to different players', () => {
+    expect(rolePitchValue('topSix', 60)).toBeGreaterThan(rolePitchValue('topSix', 80))
+  })
+
+  it('never runs away: the swing is bounded both ways', () => {
+    const pitches: RolePitch[] = ['star', 'topSix', 'middleSix', 'specialist', 'depth', 'none']
+    for (const p of pitches) {
+      for (let ovr = 40; ovr <= 99; ovr++) {
+        const v = rolePitchValue(p, ovr)
+        expect(v).toBeLessThanOrEqual(0.135)
+        expect(v).toBeGreaterThanOrEqual(-0.16)
+      }
+    }
+  })
+
+  it('every pitch has a label and an agent line', () => {
+    const pitches: RolePitch[] = ['star', 'topSix', 'middleSix', 'specialist', 'depth', 'none']
+    for (const p of pitches) {
+      expect(ROLE_PITCH_LABEL[p].length).toBeGreaterThan(5)
+      expect(rolePitchLine(p, 75, 'Ivanov').length).toBeGreaterThan(20)
+    }
+  })
+
+  it('moves a real negotiation: a promised role signs a deal money alone would not', () => {
+    const p = mkSkater('p-role', 62, 25)
+    const ask = askTerms(p, 2026)
+    const base = openNegotiation({ player: p, year: 2026, kind: 'freeAgent' })
+    // An offer a bit under his ask: rejected on money alone…
+    const offer = defaultOffer(Math.round(base.ask.salary * 0.9), base.ask.years)
+    const withoutRole = evaluateRound(base, p, offer, { rng: new Rng(5), comparables: [] })
+    // …and the SAME offer with a role above his station.
+    const withRole = evaluateRound(base, p, offer, {
+      rng: new Rng(5), comparables: [], rolePitch: 'star',
+    })
+    expect(ask.salary).toBeGreaterThan(0)
+    // The role can only ever help here; at minimum it must not hurt.
+    const rank = { walk: 0, reject: 1, close: 2, accept: 3 } as const
+    expect(rank[withRole.round.verdict]).toBeGreaterThanOrEqual(rank[withoutRole.round.verdict])
+  })
+
+  it('an insulting role makes the same offer land worse', () => {
+    const p = mkSkater('p-insult', 88, 26)
+    const base = openNegotiation({ player: p, year: 2026, kind: 'freeAgent' })
+    const offer = defaultOffer(base.ask.salary, base.ask.years)
+    const fair = evaluateRound(base, p, offer, { rng: new Rng(5), comparables: [] })
+    const insult = evaluateRound(base, p, offer, { rng: new Rng(5), comparables: [], rolePitch: 'depth' })
+    const rank = { walk: 0, reject: 1, close: 2, accept: 3 } as const
+    expect(rank[insult.round.verdict]).toBeLessThanOrEqual(rank[fair.round.verdict])
+  })
+
+  it('leaves the negotiation byte-identical when no role is pitched', () => {
+    const p = mkSkater('p-inert', 74, 27)
+    const base = openNegotiation({ player: p, year: 2026, kind: 'resign' })
+    const offer = defaultOffer(base.ask.salary, base.ask.years)
+    const a = evaluateRound(base, p, offer, { rng: new Rng(11), comparables: [] })
+    const b = evaluateRound(base, p, offer, { rng: new Rng(11), comparables: [], rolePitch: undefined })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })
