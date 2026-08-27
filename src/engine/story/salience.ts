@@ -27,18 +27,61 @@ export interface FeedAuthor {
   name: string
   handle: string
   /** Voice: insider = terse facts, analyst = takes, stats = numbers, wire = official.
-   *  FEED-V2-1 adds dynamic voices: player = the men themselves, gm = front offices. */
-  kind: 'insider' | 'analyst' | 'stats' | 'wire' | 'player' | 'gm'
+   *  FEED-V2-1 adds dynamic voices: player = the men themselves, gm = front offices.
+   *  F5 adds club = the official team account. The UI colour-codes the verified
+   *  badge by this, so a new kind must also get a colour there. */
+  kind: 'insider' | 'analyst' | 'stats' | 'wire' | 'player' | 'gm' | 'club'
   outlet: string
+  /** One line under the name on a profile/who-to-follow card. Optional/additive. */
+  bio?: string
+}
+
+/** Deterministic follower count for an account — a timeline where every
+ *  account looks equally big reads as a list of rows, not a social graph.
+ *  Pure function of the id, so it never drifts between renders or saves. */
+export function authorFollowers(author: FeedAuthor): number {
+  let h = 2166136261
+  for (let i = 0; i < author.id.length; i++) {
+    h ^= author.id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  const unit = (h >>> 0) / 4294967296
+  const band: Record<FeedAuthor['kind'], [number, number]> = {
+    insider: [640_000, 1_400_000],
+    analyst: [180_000, 520_000],
+    stats: [90_000, 260_000],
+    wire: [1_100_000, 2_200_000],
+    club: [420_000, 1_800_000],
+    gm: [40_000, 190_000],
+    player: [25_000, 900_000],
+  }
+  const [lo, hi] = band[author.kind] ?? [10_000, 60_000]
+  return Math.round((lo + unit * (hi - lo)) / 1000) * 1000
 }
 
 /** The launch author pool. Names continue the existing press-corps personas
  *  so the world stays coherent (Vic Mercer the byline IS Vic Mercer the account). */
 export const FEED_AUTHORS: Record<string, FeedAuthor> = {
-  insider: { id: 'insider', name: 'Vic Mercer', handle: 'MercerHockey', kind: 'insider', outlet: 'National Hockey Wire' },
-  analyst: { id: 'analyst', name: 'Sam Carver', handle: 'CarverNotes', kind: 'analyst', outlet: 'The Daily Gazette' },
-  stats: { id: 'stats', name: 'PuckModel', handle: 'puckmodel', kind: 'stats', outlet: 'model & viz' },
-  wire: { id: 'wire', name: 'League Wire', handle: 'TheWire', kind: 'wire', outlet: 'league sources' },
+  insider: {
+    id: 'insider', name: 'Vic Mercer', handle: 'MercerHockey', kind: 'insider',
+    outlet: 'National Hockey Wire',
+    bio: 'Breaking it first, then explaining it. Twenty-two years on the beat. DMs open, sources protected.',
+  },
+  analyst: {
+    id: 'analyst', name: 'Sam Carver', handle: 'CarverNotes', kind: 'analyst',
+    outlet: 'The Daily Gazette',
+    bio: 'Columns, arguments and the occasional apology. If you disagree you are probably right and I will not admit it.',
+  },
+  stats: {
+    id: 'stats', name: 'PuckModel', handle: 'puckmodel', kind: 'stats',
+    outlet: 'model & viz',
+    bio: 'Charts, priors and cold water. The model does not care how it looked on TV.',
+  },
+  wire: {
+    id: 'wire', name: 'League Wire', handle: 'TheWire', kind: 'wire',
+    outlet: 'league sources',
+    bio: 'Official transactions, rulings and releases. No takes, ever.',
+  },
 }
 
 /* ────────────────────────── facts & priors ────────────────────────── */
@@ -123,6 +166,24 @@ export interface SalienceCtx {
   teamGamesLeft?: Map<string, number>
 }
 
+/**
+ * Deterministic line picker (F5, "more flavour in the posts themselves").
+ *
+ * Detectors are pure and rng-free by design, so a detector that fires four
+ * times in a season used to publish the same sentence four times with only
+ * the numbers moved — on a timeline, side by side, that is the seam that
+ * gives the templates away. Hashing the candidate's own key picks a different
+ * line for each firing while staying a pure function of the world.
+ */
+function pickLine(seed: string, options: string[]): string {
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return options[(h >>> 0) % options.length] ?? options[0]!
+}
+
 /** Days on which the expectation-gap detector takes its readings. Checkpoints
  *  (not daily) so the story is "a month in, X is not who we thought" — and so
  *  one team's season produces beats, not a drumbeat. */
@@ -175,8 +236,16 @@ export function detectStreakOutlier(ctx: SalienceCtx): SalienceCandidate[] {
     if (!t) continue
     const hot = streak > 0
     const text = hot
-      ? `${t.name} have won ${len} straight. ${len >= 10 ? 'This is officially a problem for the rest of the league.' : 'The room believes, and the numbers are starting to agree.'}`
-      : `${len} in a row now for the ${t.name} — the wrong kind. ${len >= 10 ? 'Jobs get lost over stretches like this.' : 'Someone in that room needs to say something.'}`
+      ? pickLine(`streakw-${teamId}-${ctx.year}-${band}`, [
+          `${t.name} have won ${len} straight. ${len >= 10 ? 'This is officially a problem for the rest of the league.' : 'The room believes, and the numbers are starting to agree.'}`,
+          `${len} in a row for ${t.name}. ${len >= 10 ? 'Nobody wants them in a series right now.' : 'Whatever they changed, they have not changed it back.'}`,
+          `That is ${len} straight wins for ${t.name}. ${len >= 10 ? 'Streaks like this rewrite what a season was about.' : 'The bench is loose and the goaltending is holding. That is usually the whole recipe.'}`,
+        ])
+      : pickLine(`streakl-${teamId}-${ctx.year}-${band}`, [
+          `${len} in a row now for the ${t.name} — the wrong kind. ${len >= 10 ? 'Jobs get lost over stretches like this.' : 'Someone in that room needs to say something.'}`,
+          `${t.name} have lost ${len} straight — the wrong kind of run. ${len >= 10 ? 'At this length it stops being hockey and starts being a decision for somebody upstairs.' : 'The effort is not the issue yet. Give it two more.'}`,
+          `${len} consecutive defeats for ${t.name}, all the wrong kind. ${len >= 10 ? 'You can hear the building going quiet.' : 'A skid is a stretch of bad luck until it is a pattern. This one is deciding which it is.'}`,
+        ])
     out.push({
       key: `streak-${hot ? 'w' : 'l'}-${teamId}-${ctx.year}-${band}`,
       score: Math.min(88, 26 + len * 4 + (teamId === ctx.userTeamId ? 8 : 0)),
@@ -223,7 +292,13 @@ export function detectBreakoutSkater(ctx: SalienceCtx): SalienceCandidate[] {
       score: Math.min(92, 46 + (76 - s.ratedOverall) * 1.5 + (12 - i) + (s.age <= 23 ? 8 : 0)),
       channel: 'feed',
       authorId: 'stats',
-      text: `${s.name} check-in: ${s.points} points in ${s.gp} games — a ${Math.round(pace)}-point pace, ${ordinal(i + 1)} in the league. Nobody's model had him here. This is what a breakout looks like in the data.`,
+      text: pickLine(`breakout-${s.playerId}-${ctx.year}-${ctx.day}`, [
+        `${s.name} check-in: ${s.points} points in ${s.gp} games — a ${Math.round(pace)}-point pace, ${ordinal(i + 1)} in the league. Nobody's model had him here. This is what a breakout looks like in the data.`,
+        `Nobody drafted ${s.name} in your pool. ${s.points} in ${s.gp} — ${ordinal(i + 1)} in the league on a ${Math.round(pace)}-point pace. Rated ${s.ratedOverall}. The gap between those two numbers is the story of his season.`,
+        `${s.name}, ${s.gp} games in: ${s.points} points. That's ${ordinal(i + 1)} in the entire league from a player the book had at ${s.ratedOverall}. Either the book is wrong or he is playing over his head — and it has stopped looking like the second one.`,
+        `Quietly: ${s.name} is on a ${Math.round(pace)}-point pace. ${s.points} in ${s.gp}. ${s.age <= 23 ? 'He is ' + s.age + '. Nobody peaks at ' + s.age + ' — this is the floor.' : 'Late bloomers are real and this is what one looks like.'}`,
+        `Every model in the league is quietly refitting around ${s.name}. ${s.points} points in ${s.gp} games, ${ordinal(i + 1)} overall, on a ${Math.round(pace)}-point pace. Priors are supposed to move. His moved.`,
+      ]),
       facts: {
         kind: 'breakoutSkater',
         playerIds: [s.playerId],
@@ -412,9 +487,20 @@ export function detectPlayoffRace(ctx: SalienceCtx): SalienceCandidate[] {
     const left = ctx.teamGamesLeft?.get(bubble.id)
     const leftNote = left && left > 0 ? ` with ${left} to play` : ''
     const involvesUser = inSpot.id === ctx.userTeamId || bubble.id === ctx.userTeamId
+    const pts = `${gap} point${gap === 1 ? '' : 's'}`
     const text = gap === 0
-      ? `Deadlock for the final playoff spot: ${inTeam.name} and ${bubbleTeam.name} are level on points${leftNote}. Every night is a knife-edge now.`
-      : `The race for the last playoff spot is on — ${inTeam.name} cling to it by ${gap} point${gap === 1 ? '' : 's'} over ${bubbleTeam.name}${leftNote}. This is the stretch run that makes seasons.`
+      ? pickLine(`playoffrace-tie-${conf}-${ctx.year}-${ctx.day}`, [
+          `Deadlock for the final playoff spot: ${inTeam.name} and ${bubbleTeam.name} are level on points${leftNote}. Every night is a knife-edge now.`,
+          `Nothing separates ${inTeam.name} and ${bubbleTeam.name} for the last invitation${leftNote}. Tiebreakers are being read aloud in two buildings tonight.`,
+          `${inTeam.name}. ${bubbleTeam.name}. Same points, one spot${leftNote}. Somebody's summer starts early and neither room wants to hear it.`,
+        ])
+      : pickLine(`playoffrace-gap-${conf}-${ctx.year}-${ctx.day}`, [
+          `The race for the last playoff spot is on — ${inTeam.name} cling to it by ${pts} over ${bubbleTeam.name}${leftNote}. This is the stretch run that makes seasons.`,
+          `${pts}. That is all ${inTeam.name} have on ${bubbleTeam.name} for the final spot${leftNote}. Scoreboard-watching season is open.`,
+          `${bubbleTeam.name} are ${pts} back of ${inTeam.name} and the door is still open${leftNote}. Somebody in that room is doing the math after every result.`,
+          `Playoff picture: ${inTeam.name} hold the last spot by ${pts}${leftNote}, with ${bubbleTeam.name} breathing on them. One bad week decides it.`,
+          `The cutline: ${inTeam.name} in by ${pts}, ${bubbleTeam.name} out${leftNote}. Everything either club does from here is judged against that number.`,
+        ])
     out.push({
       key: `playoffrace-${conf}-${ctx.year}-${ctx.day}`,
       score: Math.min(86, 50 + (5 - gap) * 4 + (involvesUser ? 12 : 0)),

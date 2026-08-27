@@ -9,12 +9,17 @@ import type { Player } from '@domain'
 import { Rng } from '@engine/shared/rng'
 import { renderTemplate, type ContentUse } from './contentEngine'
 import {
+  CLUB_DAILY_CAP,
+  CLUB_POOL_LIST,
   GM_CONFIDENCE_POOL,
   GM_DEADLINE_POOL,
   VOICE_CTX_KEYS,
   VOICE_DAILY_CAP,
   VOICE_POOLS,
+  buildClubPosts,
   buildVoicePosts,
+  clubAuthorFor,
+  clubHandle,
   gmAuthorFor,
   playerHandle,
   type VoiceEvent,
@@ -384,5 +389,98 @@ describe('voices — career integration', () => {
     expect(restored.pendingVoiceEvents.length).toBe(c.pendingVoiceEvents.length)
     expect(restored.pendingVoiceEvents[0].kind).toBe(c.pendingVoiceEvents[0].kind)
     expect(restored.pendingVoiceEvents[0].playerId).toBe(c.pendingVoiceEvents[0].playerId)
+  })
+})
+
+/* ────────────────────────── the club accounts (F5) ────────────────────────── */
+
+describe('voices — the official club accounts', () => {
+  function runClub(ev: Partial<VoiceEvent> & { kind: VoiceEvent['kind'] }, subject: VoiceSubject | null, opts: {
+    ledger?: ContentUse[]
+    seed?: number
+  } = {}) {
+    return buildClubPosts({
+      events: [{ playerId: 'p1', day: 40, year: 2026, ...ev } as VoiceEvent],
+      resolve: () => subject,
+      rng: new Rng(opts.seed ?? 7),
+      ledger: opts.ledger ?? [],
+      year: 2026,
+      day: 40,
+    })
+  }
+
+  it('the club announces the transaction under its own account, not the player’s', () => {
+    const posts = runClub({ kind: 'signed', numbers: { years: 4 } }, subjectFor(makePlayer()))
+    expect(posts.length).toBe(1)
+    const p = posts[0]!
+    expect(p.authorId).toBe('club:t1')
+    expect(p.handle).toBe('AdmiralsPR')
+    expect(p.facts.kind).toBe('club.signed')
+    expect(p.facts.teamIds).toContain('t1')
+    expect(p.text).toContain('Tobias Dahl')
+  })
+
+  it('a club account and the man himself are two different voices on one event', () => {
+    const subject = subjectFor(makePlayer())
+    const mine = run({ kind: 'signed', numbers: { years: 4 } }, subject)[0]!
+    const club = runClub({ kind: 'signed', numbers: { years: 4 } }, subject)[0]!
+    expect(mine.authorId).not.toBe(club.authorId)
+    expect(mine.text).not.toBe(club.text)
+    // The club always ranks below the man — his post leads the timeline.
+    expect(club.score).toBeLessThan(mine.score)
+  })
+
+  it('scope holds for clubs too: elsewhere only its stars', () => {
+    const other = (star: boolean) => subjectFor(makePlayer(), { isUserClub: false, isStar: star })
+    expect(runClub({ kind: 'callup', numbers: { ahl: 'SPR' } }, other(false)).length).toBe(0)
+    expect(runClub({ kind: 'callup', numbers: { ahl: 'SPR' } }, other(true)).length).toBe(1)
+  })
+
+  it('kinds a comms department would never post stay the player’s own business', () => {
+    expect(runClub({ kind: 'scratchGripe' }, subjectFor(makePlayer())).length).toBe(0)
+    expect(runClub({ kind: 'shopSubtweet' }, subjectFor(makePlayer())).length).toBe(0)
+    expect(runClub({ kind: 'meetingGood' }, subjectFor(makePlayer())).length).toBe(0)
+  })
+
+  it('the club cap holds, and every club pool renders slot-clean', () => {
+    const events: VoiceEvent[] = Array.from({ length: 8 }, (_, i) => ({
+      kind: 'hatTrick', playerId: `p${i}`, day: 40, year: 2026, numbers: { goals: 3 },
+    }))
+    const posts = buildClubPosts({
+      events,
+      resolve: (pid) => subjectFor(makePlayer({ id: pid }), { teamId: `t${pid}` }),
+      rng: new Rng(3), ledger: [], year: 2026, day: 40,
+    })
+    expect(posts.length).toBe(CLUB_DAILY_CAP)
+
+    const ids: string[] = []
+    const known = new Set<string>(VOICE_CTX_KEYS)
+    for (const pool of CLUB_POOL_LIST) {
+      // Four is the floor measured against a live timeline: with two, one club
+      // ran the same announcement three times in a week.
+      expect(pool.length, 'a club pool this thin repeats within a week').toBeGreaterThanOrEqual(4)
+      const unconditional = pool.filter((v) => !v.conditions || Object.keys(v.conditions).length === 0)
+      expect(unconditional.length, 'a club pool with no fallback could go silent').toBeGreaterThanOrEqual(1)
+      for (const v of pool) {
+        ids.push(v.id)
+        for (const key of Object.keys(v.conditions ?? {})) {
+          const base = /^(min|max)[A-Z]/.test(key) ? key[3].toLowerCase() + key.slice(4) : key
+          expect(known.has(base), `${v.id} conditions on unknown ctx key "${base}"`).toBe(true)
+        }
+        const filled = renderTemplate(v.text, ALL_SLOTS)
+        expect(filled, `${v.id} leaves an unfilled slot`).not.toMatch(/\{[a-zA-Z]+\}/)
+        expect(filled.length, `${v.id} is a stub, not a post`).toBeGreaterThan(20)
+      }
+    }
+    expect(new Set(ids).size, 'club variant ids must be globally unique').toBe(ids.length)
+  })
+
+  it('club handles read like real club accounts', () => {
+    expect(clubHandle('Harborview Admirals', 'HVA')).toBe('AdmiralsPR')
+    expect(clubHandle('Ridgeline Wolves', 'RLW')).toBe('WolvesPR')
+    const a = clubAuthorFor({ teamId: 't1', name: 'Harborview Admirals', abbreviation: 'HVA', city: 'Harborview' })
+    expect(a.id).toBe('club:t1')
+    expect(a.kind).toBe('club')
+    expect(a.bio && a.bio.length).toBeGreaterThan(10)
   })
 })

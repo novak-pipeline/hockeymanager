@@ -96,6 +96,28 @@ export function playerAuthorFor(player: Player, teamAbbr?: string): FeedAuthor {
   }
 }
 
+export function clubAuthorId(teamId: string): string {
+  return `club:${teamId}`
+}
+
+/** Official-account handle: the club's last word plus PR, the shape most real
+ *  team accounts use — "Harborview Admirals" → AdmiralsPR. */
+export function clubHandle(teamName: string, abbr: string): string {
+  const last = (teamName.split(/\s+/).pop() ?? abbr).replace(/[^a-zA-Z]/g, '')
+  return `${last || abbr}PR`
+}
+
+export function clubAuthorFor(team: { teamId: string; name: string; abbreviation: string; city?: string }): FeedAuthor {
+  return {
+    id: clubAuthorId(team.teamId),
+    name: team.name,
+    handle: clubHandle(team.name, team.abbreviation),
+    kind: 'club',
+    outlet: `Official · ${team.abbreviation}`,
+    bio: `The official account of the ${team.name}. Transactions, highlights and the goal horn.`,
+  }
+}
+
 export function gmAuthorFor(persona: GmPersona, team: { name: string; abbreviation: string }): FeedAuthor {
   const last = (persona.name.split(/\s+/).pop() ?? 'GM').replace(/[^a-zA-Z]/g, '')
   return {
@@ -416,6 +438,126 @@ export const GM_DEADLINE_POOL: ContentVariant[] = [
     text: `We're listening on everyone. That's not a fire sale — that's doing the job properly.` },
 ]
 
+/* ────────────────────────── the club accounts (F5) ────────────────────────── */
+/* A timeline of only players and pundits is missing the loudest account in
+ * hockey: the club itself. Official accounts speak in a register nothing else
+ * on the feed uses — all-caps transactions, hashtags, the graphics-department
+ * voice — so their presence is what makes the stream read like social media
+ * rather than a column. One pool per event kind a club would actually post. */
+
+/** Slots for every club pool: {name} {first} {last} {team} {abbr} {city}
+ *  plus the event's own facts ({n} {stat} {goals} {years} {ahl}…). */
+const CLUB_SIGNED_POOL: ContentVariant[] = [
+  { id: 'c.sign.star', conditions: { star: true },
+    text: `HE'S OURS. ✍️ {name} has signed a {years}-year contract with the {team}. #{abbr}` },
+  { id: 'c.sign.term', conditions: { minYears: 5 },
+    text: `LONG TERM. {name} has signed a {years}-year deal to stay in {city}. Welcome home. #{abbr}` },
+  { id: 'c.sign.plain',
+    text: `OFFICIAL ✍️ The {team} have signed {name} to a {years}-year contract. #{abbr}` },
+  { id: 'c.sign.plain2',
+    text: `Roster move: {name} has agreed to terms with the {team}. Full release at {abbr}.com. #{abbr}` },
+  { id: 'c.sign.plain3',
+    text: `Pen, meet paper. 🖊️ {name} is a {team} player for the next {years}. #{abbr}` },
+  { id: 'c.sign.plain4',
+    text: `We are pleased to announce that {name} has signed a {years}-year contract. Welcome to {city}, {first}. #{abbr}` },
+]
+
+const CLUB_CALLUP_POOL: ContentVariant[] = [
+  { id: 'c.call.young', conditions: { maxAge: 22 },
+    text: `📞 CALLED UP. {name} is headed to the NHL. Enjoy every second of it, kid. #{abbr}` },
+  { id: 'c.call.plain',
+    text: `ROSTER MOVE 📋 The {team} have recalled {name} from {ahl}. #{abbr}` },
+  { id: 'c.call.plain2',
+    text: `{last}'s getting the call — {name} recalled from {ahl} ahead of tonight. #{abbr}` },
+  { id: 'c.call.plain3',
+    text: `Transaction: {name} has been recalled from {ahl} on an emergency basis. #{abbr}` },
+  { id: 'c.call.plain4',
+    text: `Pack a bag, {first}. ✈️ {name} joins the {team} from {ahl}. #{abbr}` },
+]
+
+const CLUB_TRADED_POOL: ContentVariant[] = [
+  { id: 'c.trade.star', conditions: { star: true },
+    text: `WELCOME TO {city}, {first}. 🤝 The {team} have acquired {name}. #{abbr}` },
+  { id: 'c.trade.plain',
+    text: `TRADE 🔁 The {team} have acquired {name}. Welcome to {city}. #{abbr}` },
+  { id: 'c.trade.plain2',
+    text: `New sweater, {first}. {name} joins the {team}. #{abbr}` },
+  { id: 'c.trade.plain3',
+    text: `TRANSACTION: The {team} have acquired {name}. Terms of the deal are available at {abbr}.com. #{abbr}` },
+  { id: 'c.trade.plain4',
+    text: `Say hello to {first}. 👋 {name} is a {team} player. #{abbr}` },
+]
+
+const CLUB_MILESTONE_POOL: ContentVariant[] = [
+  { id: 'c.mile.plain',
+    text: `{n} {stat}. 🏒 Take a bow, {name}. #{abbr}` },
+  { id: 'c.mile.plain2',
+    text: `MILESTONE 🎉 {name} reaches {n} {stat} tonight. What a career. #{abbr}` },
+  { id: 'c.mile.plain3',
+    text: `{n}.
+
+Congratulations, {first}. 👏 #{abbr}` },
+  { id: 'c.mile.plain4',
+    text: `Not many get to {n} {stat}. {name} just did — in this sweater. #{abbr}` },
+]
+
+const CLUB_HATTRICK_POOL: ContentVariant[] = [
+  { id: 'c.hat.plain',
+    text: `HAT TRICK 🎩 {name}. Three goals. Get the hats off the ice. #{abbr}` },
+  { id: 'c.hat.plain2',
+    text: `{last}. {last}. {last}. 🎩 A {goals}-goal night for {name}. #{abbr}` },
+  { id: 'c.hat.plain3',
+    text: `Somebody get {first} the puck. 🎩 {goals} goals for {name} tonight. #{abbr}` },
+  { id: 'c.hat.plain4',
+    text: `Three. For. {last}. 🎩 #{abbr}` },
+]
+
+const CLUB_FIRST_GOAL_POOL: ContentVariant[] = [
+  { id: 'c.first.plain',
+    text: `FIRST NHL GOAL 🚨 {name}. He'll never forget this one — and neither will {city}. #{abbr}` },
+  { id: 'c.first.plain2',
+    text: `Get that puck 🥅 {name} scores his first NHL goal. Congratulations, {first}. #{abbr}` },
+  { id: 'c.first.plain3',
+    text: `The first of many. 🚨 {name}, first career NHL goal, in a {abbr} sweater. #{abbr}` },
+  { id: 'c.first.plain4',
+    text: `{first}'s first. 🥹 Somebody call his parents — actually, they're already here. #{abbr}` },
+]
+
+const CLUB_CLINCH_POOL: ContentVariant[] = [
+  { id: 'c.clinch.plain',
+    text: `WE'RE IN. 🎟️ The {team} have clinched a playoff berth. Thank you, {city}. #{abbr}` },
+  { id: 'c.clinch.plain2',
+    text: `PLAYOFF BOUND 🏆 Punch the ticket, {city}. #{abbr}` },
+  { id: 'c.clinch.plain3',
+    text: `CLINCHED. The {team} are going to the postseason. See you in April, {city}. #{abbr}` },
+  { id: 'c.clinch.plain4',
+    text: `That's a playoff berth. 🎟️ The work starts now. #{abbr}` },
+]
+
+/** Which events the official account posts about — and in what voice. Kinds
+ *  absent here stay the player's own business (a healthy scratch griping is
+ *  not something the club's graphics department is going to post). */
+const CLUB_POOLS: Partial<Record<VoiceEventKind, ContentVariant[]>> = {
+  signed: CLUB_SIGNED_POOL,
+  callup: CLUB_CALLUP_POOL,
+  traded: CLUB_TRADED_POOL,
+  milestone: CLUB_MILESTONE_POOL,
+  hatTrick: CLUB_HATTRICK_POOL,
+  firstNhlGoal: CLUB_FIRST_GOAL_POOL,
+  clinch: CLUB_CLINCH_POOL,
+  // NOT injuryReturn: measured on a live timeline the club account posted
+  // "activated from injured reserve" three times in a week, which is exactly
+  // the template seam this register exists to avoid. A man's return is his
+  // own post; roster minutiae belong in the transactions log.
+}
+
+/** Every club pool, for the dead-content integrity test. */
+export const CLUB_POOL_LIST: ContentVariant[][] = Object.values(CLUB_POOLS)
+
+/** Max official-club posts per story tick. Clubs post more than people do —
+ *  that is what an official account is — but the timeline is still a feed. */
+export const CLUB_DAILY_CAP = 2
+
 export const VOICE_POOLS: Record<VoiceEventKind, ContentVariant[]> = {
   milestone: MILESTONE_POOL,
   hatTrick: HATTRICK_POOL,
@@ -609,6 +751,77 @@ export function buildVoicePosts(args: {
       playerId: ev.playerId,
       teamId: subject.teamId,
       score: Math.min(95, KIND_SCORE[ev.kind] + (subject.isStar ? 12 : 0)),
+    })
+  }
+
+  return out.sort((a, b) => b.score - a.score).slice(0, cap)
+}
+
+/**
+ * The official club accounts (F5). Same queued events the player voices read,
+ * rendered in the club's own register and published under `club:<teamId>`.
+ *
+ * Kept OUT of buildVoicePosts deliberately: the player's own post and his
+ * club's announcement are two different accounts saying two different things
+ * about one event, and each gets its own cap. Same scope rule as the voices —
+ * your club always, elsewhere only its stars.
+ */
+export function buildClubPosts(args: {
+  events: VoiceEvent[]
+  resolve: (playerId: string) => VoiceSubject | null
+  rng: Rng
+  ledger: ContentUse[]
+  year: number
+  day: number
+  maxPosts?: number
+}): VoicePost[] {
+  const { events, resolve, rng, ledger, year, day } = args
+  const cap = args.maxPosts ?? CLUB_DAILY_CAP
+  const out: VoicePost[] = []
+
+  for (const ev of events) {
+    const pool = CLUB_POOLS[ev.kind]
+    if (!pool || !ev.playerId) continue
+    const subject = resolve(ev.playerId)
+    if (!subject) continue
+    if (!subject.isUserClub && !subject.isStar && !ev.relevant) continue
+
+    const ctx: ContentCtx = {
+      star: subject.isStar,
+      age: subject.player.age,
+      ...(ev.numbers ?? {}),
+    }
+    // The ledger is namespaced per CLUB, so two clubs never share a cooldown
+    // and never share a sentence in the same week either.
+    const owner = clubAuthorId(subject.teamId)
+    const v = selectVariant({ pool, ctx, rng, ledger: ledgerViewFor(ledger, owner), year })
+    if (!v) continue
+    markUsed(ledger, `${owner}::${v.id}`, year, day)
+    const first = subject.player.name.split(' ')[0] ?? subject.player.name
+    const last = subject.player.name.split(' ').slice(-1)[0] ?? subject.player.name
+    const slots: Record<string, string> = {
+      name: subject.player.name, first, last,
+      team: subject.teamName, abbr: subject.abbr, city: subject.city,
+    }
+    for (const [k, val] of Object.entries(ev.numbers ?? {})) {
+      slots[k] = typeof val === 'number' ? val.toLocaleString('en-US') : String(val)
+    }
+    out.push({
+      authorId: owner,
+      handle: clubHandle(subject.teamName, subject.abbr),
+      channel: 'feed',
+      text: renderTemplate(v.text, slots),
+      facts: {
+        kind: `club.${ev.kind}`,
+        playerIds: [ev.playerId],
+        teamIds: [subject.teamId],
+        numbers: { ...(ev.numbers ?? {}), day: ev.day },
+      },
+      playerId: ev.playerId,
+      teamId: subject.teamId,
+      // Deliberately below the man's own post: when both fire on the same day
+      // the human voice leads and the club account backs it up.
+      score: Math.max(30, Math.min(88, KIND_SCORE[ev.kind] - 8 + (subject.isUserClub ? 6 : 0))),
     })
   }
 

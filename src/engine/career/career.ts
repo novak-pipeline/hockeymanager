@@ -149,7 +149,9 @@ import {
   type StoryPriors,
 } from '@engine/story/salience'
 import {
+  buildClubPosts,
   buildVoicePosts,
+  clubAuthorFor,
   detectGmMoments,
   gmAuthorFor,
   playerAuthorFor,
@@ -3573,7 +3575,9 @@ export class Career {
   }
 
   /** Author directory entry for any feed authorId — the 4 pundits, a player
-   *  (`p:<id>`), or a front office (`gm:<teamId>`). */
+   *  (`p:<id>`), a front office (`gm:<teamId>`) or the official club account
+   *  (`club:<teamId>`). Every id the follow button can be pressed on must
+   *  resolve here, or following it would silently do nothing. */
   private feedAuthorFor(authorId: string): FeedAuthor | undefined {
     const builtin = FEED_AUTHORS[authorId]
     if (builtin) return builtin
@@ -3590,6 +3594,12 @@ export class Career {
       const team = this.data.teams.get(asTeamId(teamId))
       if (!team) return undefined
       return gmAuthorFor(this.gmPersonaFor(asTeamId(teamId)), team)
+    }
+    if (authorId.startsWith('club:')) {
+      const teamId = authorId.slice(5)
+      const team = this.data.teams.get(asTeamId(teamId))
+      if (!team) return undefined
+      return clubAuthorFor({ teamId, name: team.name, abbreviation: team.abbreviation, city: team.city })
     }
     return undefined
   }
@@ -3637,9 +3647,23 @@ export class Career {
       recentTexts.add(p.body)
       if (p.authorId && !recentByAuthor.has(p.authorId)) recentByAuthor.set(p.authorId, p.day)
     }
-    for (const post of posts) {
+    // F5: the official club accounts speak about the same events in their own
+    // register. Built separately (own cap, own ledger namespace) and appended
+    // after the human voices so the man's own post leads the timeline.
+    const clubPosts = buildClubPosts({
+      events,
+      resolve: (pid) => this.voiceSubjectFor(pid),
+      rng: this.rngFor(9803, day),
+      ledger: this.voiceLedger,
+      year: this.year,
+      day,
+    })
+    for (const post of [...posts, ...clubPosts]) {
+      // A club account is an organisation, not a person: it is *supposed* to
+      // post every transaction. Only the human voices go quiet for a fortnight.
+      const quiet = post.authorId.startsWith('club:') ? Career.CLUB_QUIET_DAYS : Career.VOICE_QUIET_DAYS
       const lastPosted = recentByAuthor.get(post.authorId)
-      if (lastPosted !== undefined && day - lastPosted < Career.VOICE_QUIET_DAYS) continue
+      if (lastPosted !== undefined && day - lastPosted < quiet) continue
       if (recentTexts.has(post.text)) continue
       recentByAuthor.set(post.authorId, day)
       recentTexts.add(post.text)
@@ -3665,6 +3689,11 @@ export class Career {
   /** Days a voice stays quiet after posting. Real people don't narrate every
    *  shift; a man who tweets after every game is a bot, not a character. */
   private static readonly VOICE_QUIET_DAYS = 12
+
+  /** The same cooldown for an official club account — much shorter, because a
+   *  club that only posts twice a month is the thing that reads as fake. Three
+   *  days, not two: at two the user's own club dominated its own timeline. */
+  private static readonly CLUB_QUIET_DAYS = 3
 
   /** Has this exact sentence already run on the feed this season? */
   private feedTextUsedThisSeason(text: string): boolean {
@@ -3708,23 +3737,41 @@ export class Career {
     }
   }
 
-  /** Follow/unfollow a feed account. Followed posts land in the inbox. */
+  /** Follow/unfollow ANY feed account — pundit, player, front office or club
+   *  (F5). The old rule only admitted the four built-in pundits, which made
+   *  the follow button a decoration on every other account in the stream.
+   *  The one gate that stays is resolvability: an id nothing can build an
+   *  author card for would be an un-unfollowable ghost in the save. */
   toggleFollowAuthor(authorId: string): { following: boolean } {
-    if (!FEED_AUTHORS[authorId]) return { following: false }
+    const known = this.followedFeedAuthors.includes(authorId)
+    if (!known && !this.feedAuthorFor(authorId)) return { following: false }
     const i = this.followedFeedAuthors.indexOf(authorId)
     if (i >= 0) {
       this.followedFeedAuthors.splice(i, 1)
       return { following: false }
     }
     this.followedFeedAuthors.push(authorId)
+    // A save shouldn't grow without bound because someone follow-spammed the
+    // whole league; the oldest follow drops off the end.
+    if (this.followedFeedAuthors.length > 300) this.followedFeedAuthors.shift()
     return { following: true }
   }
 
   /** The social feed, newest first, plus the author directory. The directory
-   *  covers the 4 pundits plus every player/GM voice present in the stream
-   *  (FEED-V2-1), resolved live so names and jerseys never drift. */
+   *  covers the 4 pundits, every NHL club's official account, and every
+   *  player/GM voice present in the stream (FEED-V2-1) — all resolved live so
+   *  names and jerseys never drift.
+   *
+   *  F5: the clubs are listed whether or not they have posted yet, because the
+   *  directory is now what the follow UI browses. An account you cannot find
+   *  is an account you cannot follow. */
   getFeed(): FeedView {
     const authors: Record<string, FeedAuthor> = { ...FEED_AUTHORS }
+    for (const team of this.data.teams.values()) {
+      if (team.tier !== undefined && team.tier !== 'nhl') continue // absent tier = NHL (see Team.tier)
+      const a = clubAuthorFor({ teamId: team.id as string, name: team.name, abbreviation: team.abbreviation, city: team.city })
+      authors[a.id] = a
+    }
     for (const p of this.feedPosts) {
       if (!p.authorId || authors[p.authorId]) continue
       const a = this.feedAuthorFor(p.authorId)

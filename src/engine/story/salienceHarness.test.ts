@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
-import { VOICE_DAILY_CAP } from '@engine/story/voices'
+import { CLUB_DAILY_CAP, VOICE_DAILY_CAP } from '@engine/story/voices'
 
 describe('salience harness — one full season', () => {
   it('produces a healthy feed distribution', () => {
@@ -35,17 +35,40 @@ describe('salience harness — one full season', () => {
     // and no day may exceed the two of them combined.
     const kindOf = (p: { authorId?: string }): string => feed.authors[p.authorId!]?.kind ?? 'wire'
     const isVoice = (p: { authorId?: string }): boolean => kindOf(p) === 'player' || kindOf(p) === 'gm'
+    const isClub = (p: { authorId?: string }): boolean => kindOf(p) === 'club'
     const punditPerDay = new Map<number, number>()
     const voicePerDay = new Map<number, number>()
+    const clubPerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
     for (const p of posts) {
       perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
-      const bucket = isVoice(p) ? voicePerDay : punditPerDay
+      const bucket = isClub(p) ? clubPerDay : isVoice(p) ? voicePerDay : punditPerDay
       bucket.set(p.day, (bucket.get(p.day) ?? 0) + 1)
     }
     for (const n of punditPerDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET)
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
-    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
+    // F5 added a THIRD stream — the official club accounts — with its own cap.
+    for (const n of clubPerDay.values()) expect(n).toBeLessThanOrEqual(CLUB_DAILY_CAP)
+    for (const n of perDay.values()) {
+      expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP + CLUB_DAILY_CAP)
+    }
+
+    // F5: every club in the league is a followable account whether or not it
+    // has posted — the directory is what the follow UI browses, so an empty
+    // one would leave the follow button with nothing to act on.
+    const clubAccounts = Object.values(feed.authors).filter((a) => a.kind === 'club')
+    expect(clubAccounts.length).toBeGreaterThanOrEqual(8)
+    for (const a of clubAccounts) {
+      expect(a.handle.endsWith('PR')).toBe(true)
+      expect(c.toggleFollowAuthor(a.id).following, `${a.id} could not be followed`).toBe(true)
+      expect(c.toggleFollowAuthor(a.id).following).toBe(false)
+    }
+    // …and so is every player/front-office voice actually on the timeline.
+    for (const p of posts) {
+      if (!p.authorId || !isVoice(p)) continue
+      expect(c.toggleFollowAuthor(p.authorId).following, `${p.authorId} could not be followed`).toBe(true)
+      c.toggleFollowAuthor(p.authorId)
+    }
 
     // No detector class may own the feed outright once several contribute.
     const byAuthor = new Map<string, number>()

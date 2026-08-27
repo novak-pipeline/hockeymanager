@@ -195,8 +195,23 @@ win.on('console', (msg) => {
 })
 
 try {
-  // ── setup → team pick → shell ──
-  await win.waitForSelector('text=Generate league', { timeout: 30000 })
+  // ── title → new career → club pick → shell (F6 front door) ──
+  await win.waitForSelector('.title-menu', { timeout: 30000 })
+  await snap(win, 'title')
+  // The save manager is a new surface with a real disk behind it (F6) — the
+  // browser dev preview can only ever show its "no bridge" state, so this is
+  // the only place it gets photographed with actual saves in it.
+  try {
+    await win.click('.title-item:has-text("Load career")', { timeout: 3000 })
+    await win.waitForSelector('.savemgr', { timeout: 4000 })
+    await snap(win, 'load-manager')
+    await win.click('.savemgr .modal-close', { timeout: 3000 })
+    await win.waitForTimeout(200)
+  } catch {
+    console.log('  ⚠ load manager not reachable (no saves on disk?) — skipped')
+  }
+  await win.click('.title-item:has-text("New career")')
+  await win.waitForSelector('.setup-inner', { timeout: 15000 })
   // PIN THE WORLD SEED. The setup screen randomises it by default, so every run
   // produced a different league and the walk's outcome (does it wedge? does the
   // user club even play on the day we stop?) was a coin flip — which makes a
@@ -204,20 +219,34 @@ try {
   // UI_SNAP_SEED=<n> to photograph a different world.
   const seed = process.env.UI_SNAP_SEED ?? '424242'
   try {
-    await win.fill('#seed-input', seed, { timeout: 4000 })
+    // The seed field lives behind a disclosure now — it is a knob, not a step.
+    await win.click('.setup-seed-toggle', { timeout: 4000 })
+    await win.fill('.setup-seed-row input', seed, { timeout: 4000 })
     console.log(`  ▶ world seed pinned to ${seed}`)
   } catch {
     console.log('  ⚠ could not pin the seed — this run is not reproducible')
   }
   await snap(win, 'setup')
-  await win.click('text=Generate league')
-  await win.waitForSelector('.team-card', { timeout: 60000 })
+  await win.click('text=Build the world')
+  await win.waitForSelector('.club-card', { timeout: 60000 })
   await snap(win, 'team-picker')
-  await win.click('.team-card >> nth=0')
+  await win.click('.club-card >> nth=0')
+  await win.click('.brief-cta')
   // Picking a club simulates the entire year-zero season in the worker —
   // give it minutes. The shell appears at the start of the offseason.
   await win.waitForSelector('text=Continue', { timeout: 300000 })
   await snap(win, 'shell-first-load')
+
+  // …and the same manager in manage mode, where it can also write and delete.
+  try {
+    await win.click('.topnav-actions button:has-text("Saves")', { timeout: 4000 })
+    await win.waitForSelector('.savemgr', { timeout: 4000 })
+    await snap(win, 'save-manager')
+    await win.click('.savemgr .modal-close', { timeout: 3000 })
+    await win.waitForTimeout(200)
+  } catch {
+    console.log('  ⚠ save manager not reachable — skipped')
+  }
 
   // ── INTERACTION AUDIT (runs before anything else touches the career) ──
   // The screenshot walk below proves screens LOOK right; this proves they can be

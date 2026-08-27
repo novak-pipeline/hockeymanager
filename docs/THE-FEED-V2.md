@@ -154,8 +154,75 @@ keyed by `cardType`, reusing DataHub/standings view builders. This is the
 - **Surfacing unchanged** — still the Inbox → The Feed subtab, per the
   undecided decision above. Player/GM voices are deliberately NOT followable;
   the follow chips stay the four pundits.
+  *(Both clauses SUPERSEDED — the Feed is its own destination now, and playtest
+  F5 made every account followable. See the F5 section at the end.)*
 - Tests: `src/engine/story/voices.test.ts` (18) — library integrity (dead
   ctx-key guard, 8+ per pool, fallback + keyed coverage, slot-clean render,
   both registers present), behaviour (fires/traces/scope/personality/no-repeat/
   cap/determinism), and career integration (call-up round trip, scratch gripe
   fires only for the fiery, leak → subtweet, save/load).
+
+---
+
+## What playtest F5 shipped (2026-08-27) — the timeline becomes a timeline
+
+The user: *"It reads as a long list; it should read as social media… verified
+badges colour-coded by author type, the ability to follow ANY account rather
+than only the ones in the top strip, and a followed-feed view. I might be
+explaining this wrong but make it better."*
+
+The diagnosis behind that: what makes a timeline a timeline is not the posts,
+it's the **accounts**. So the surface was rebuilt around the author.
+
+**Engine**
+
+- **A fourth author kind: `club`.** Every NHL club has an official account
+  (`club:<teamId>`, `@LumberjacksPR`) with its own register — all-caps
+  transactions, hashtags, the graphics-department voice. Nothing else on the
+  feed sounds like it, and that contrast is what stops the stream reading as
+  one columnist's notebook. Built by `buildClubPosts()` in voices.ts, kept
+  deliberately OUT of `buildVoicePosts` so the man's own post and his club's
+  announcement are two accounts saying two different things about one event,
+  each with its own cap (`CLUB_DAILY_CAP` = 2) and its own ledger namespace.
+- **Which events a club posts**: signing, call-up, trade-in, milestone, hat
+  trick, first NHL goal, playoff clinch. *Not* injury return — measured on a
+  live timeline the club account ran "activated from injured reserve" three
+  times in a week, which is exactly the template seam the register exists to
+  avoid. Club pools carry 4+ variants each (test-enforced) and clubs go quiet
+  for 3 days, not the 12 a person does.
+- **Follow anyone.** `toggleFollowAuthor` used to reject everything that wasn't
+  one of the four built-in pundits, which made the follow button a decoration
+  on every other account in the stream. It now accepts any id `feedAuthorFor`
+  can resolve — pundit, player, front office, club — capped at 300 follows.
+- **The directory is browsable.** `getFeed()` lists every club account whether
+  or not it has posted, because the directory is now what the follow UI
+  browses; an account you cannot find is an account you cannot follow.
+- **Flavour where it visibly repeated.** The detectors are pure and rng-free,
+  so a detector firing four times a season published the same sentence four
+  times with the numbers moved — side by side on a timeline that is the seam.
+  `pickLine()` hashes the candidate's own key to choose among authored variants
+  while staying a pure function of the world. Applied to the three that
+  actually repeat on a real timeline: playoff race (3 tie / 5 gap lines),
+  breakout skater (5), streak outlier (3 per direction).
+
+**UI (`FeedScreen.tsx`)**
+
+- Four timelines — **For you / Following / Media / Wire** — in a sticky tab
+  strip over a narrow reading column, with the accounts down its left edge.
+- A **verified badge whose colour IS the information**: player = cyan,
+  club = green, front office = orange, insider = pink, journalist = amber,
+  analytics = violet, league = grey. Plus the kind spelled out as a chip.
+- A **Follow button on every post** and every rail row, with the label's width
+  reserved so pressing it never reflows the metadata beside it.
+- **Click any account** to open its profile timeline: avatar, bio, follower
+  count, posts-on-your-timeline, follow, and just that account's posts.
+- A rail: **Who to follow** (ranked by recent activity on your own timeline,
+  then reach), **Trending in the league** (real post counts per club, named and
+  crested), and **You follow N**.
+- Clubs wear their crest; everyone else — including the man who runs the club —
+  is a person and wears initials in his account's colour. Likes are a local
+  per-viewer convenience in `localStorage`.
+
+**Verified in the built app**: followed `@IcebreakersPR` from the rail, the
+button flipped to Following and the Following timeline came back with that
+club's 5 posts — the round trip the old build could not make at all.

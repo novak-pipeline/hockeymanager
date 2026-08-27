@@ -191,12 +191,12 @@ reason to engage; that is friction evidence), code audit (441+330 tsc, cap gap).
 **P3 — Season shape**
 13. Deadline day war-room to the B3.2 bar (clock, incoming calls, live wire).
 14. Playoff presentation ×2 (stakes framing, elimination dread, handshake, bespoke cup scene). *(B3.3)*
-15. **[CLOSED 2026-07-28]** Match-night ritual: pregame keys + postgame receipts, in simmed form too. *(B6.1–B6.2)*
+15. **[CLOSED 2026-07-28]** Match-night ritual: pregame keys + postgame receipts, in simmed form too. *(B6.1–B6.2)* — **2026-08-27**: the gamecast that grew out of this was rebuilt as a broadcast dashboard after playtest F4 (*"things jumping around too much"*). The fix was structural, not cosmetic: the box score is now built once from a full fold of the stream so every dressed skater has a row before the puck drops and nothing is inserted or re-sorted mid-game; the table is fixed-layout; the line score prints all its period cells from the opening faceoff; the play-by-play gutters are reserved tracks; and the result banner is a strip that is always present and only swaps its content. Measured over 17 samples of live playback and again at the horn: **zero geometry changes** in any panel and zero row movement.
 16. Thanksgiving benchmark + season-act tonal shifts. *(B3.1)*
 
 **P4 — Dynasty**
 17. Season-chronicle page ("what happened in 2029") + record-chase surfacing. *(B4.2–B4.3)*
-18. First-hour pass: 3-minute path, hook ending, contextual hints. *(B1.1–B1.3)*
+18. **[PARTIAL 2026-08-27]** First-hour pass: 3-minute path, hook ending, contextual hints. *(B1.1–B1.3)* — **B1.1 done**: the meta game outside the shell was a seed field and a "Generate league" button (playtest F6: *"feels like a dev demo"*). It is now a front door — title screen over the arena scene art with Continue (club, season, phase, when it was saved) / New career / Load / Settings / Quit; a two-step new-career flow that presents the database as a choice and hides the seed behind a disclosure; a club picker with search, conference filter, three sorts and a standing brief that reads the job off the club's league rank (Win now / Playoff push / On the bubble / Rebuild); and a real save manager — every slot with club, season, phase, timestamp and size, plus save-to-new-slot, overwrite and delete. Save used to write one hardcoded slot and Load silently opened whichever file was newest. **Remaining: B1.2 (the hook ending) and B1.3 (contextual hints).**
 
 ---
 
