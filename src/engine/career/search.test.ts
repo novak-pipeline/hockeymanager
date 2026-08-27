@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
-import { isBreakingNews } from '@domain'
+import { feedStoryReachesInbox, isBreakingNews } from '@domain'
 import { playerValue } from '@engine/league/trades'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
 import { VOICE_DAILY_CAP } from '@engine/story/voices'
@@ -343,11 +343,16 @@ describe('Feed Phase A (salience engine)', () => {
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
     // Curation floor: with no follows, only floor-clearing (70+) posts may
-    // have mirrored into the inbox — and any feed-channel story that survives
-    // the inbox curation must be BREAKING (playtest #13: big or rare only).
+    // have mirrored into the inbox — and a feed-channel story that survives
+    // the curation must have cleared the ADMISSION bar. A7 split admission
+    // from the BREAKING tag: reaching the desk is about relevance, wearing
+    // the tag is about magnitude, and a post is never breaking news at all.
     for (const n of c.getInbox().items) {
       if (n.channel !== undefined) expect(n.salience).toBeGreaterThanOrEqual(70)
-      if (n.channel === 'feed') expect(isBreakingNews(n)).toBe(true)
+      if (n.channel === 'feed') {
+        expect(feedStoryReachesInbox(n)).toBe(true)
+        expect(isBreakingNews(n)).toBe(false)
+      }
     }
 
     // Round-trip: priors, novelty memory, and the posts all survive.

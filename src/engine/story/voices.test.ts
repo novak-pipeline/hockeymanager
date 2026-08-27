@@ -104,6 +104,11 @@ const ALL_SLOTS: Record<string, string> = {
 
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/u
 
+/** One emoji, counted as a HUMAN sees it: a base pictograph plus its optional
+ *  variation selector and any ZWJ-joined parts is ONE. Without this, the heart
+ *  and the shrug read as two and three characters and every count is nonsense. */
+const EMOJI_CLUSTER = /\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?)*/gu
+
 /* ────────────────────────── library integrity ────────────────────────── */
 
 describe('voices — library integrity', () => {
@@ -168,6 +173,32 @@ describe('voices — library integrity', () => {
         // >20 chars is the shipped feed's own gate (see salienceHarness) —
         // a rendered post must read as a post, not a fragment.
         expect(filled.length, `${kind}/${v.id} is a stub, not a post`).toBeGreaterThan(20)
+      }
+    }
+  })
+
+// A6 (playtest 2026-08-26): "a bit tooo corny", emoji-heavy. Two rules,
+  // enforced here so a future line cannot quietly put the volume back up.
+  it('at most ONE emoji per post — nobody stacks them but a parody', () => {
+    for (const [kind, pool] of Object.entries(VOICE_POOLS)) {
+      for (const v of pool) {
+        const clusters = [...v.text.matchAll(EMOJI_CLUSTER)]
+        expect(clusters.length, `${kind}/${v.id} stacks emoji: ${clusters.map((c) => c[0]).join('')}`)
+          .toBeLessThanOrEqual(1)
+      }
+    }
+  })
+
+  it('a 19-year-old and a 35-year-old do not post alike: every player pool has a veteran register', () => {
+    const playerKinds = ['milestone', 'hatTrick', 'firstNhlGoal', 'callup', 'traded', 'signed', 'clinch', 'injuryReturn', 'scratchGripe', 'shopSubtweet', 'meetingGood'] as const
+    for (const kind of playerKinds) {
+      const pool = VOICE_POOLS[kind]
+      const vets = pool.filter((v) => typeof v.conditions?.minAge === 'number' && (v.conditions.minAge as number) >= 29)
+      expect(vets.length, `${kind} has no veteran voice — every man in the league sounds 22`).toBeGreaterThanOrEqual(1)
+      // And a veteran writes in sentences, not in emoji.
+      for (const v of vets) {
+        expect(EMOJI_CLUSTER.test(v.text), `${kind}/${v.id} is a veteran line wearing emoji`).toBe(false)
+        EMOJI_CLUSTER.lastIndex = 0
       }
     }
   })

@@ -241,6 +241,15 @@ export function PostgameFrame({
         </table>
       </div>
 
+      {/* A5: the write-up — the shape of the game, the man who decided it, and
+          the rare thing if there was one. It sits ABOVE the turning point on
+          purpose: this sets the scene, the turning point names the moment. */}
+      {r.matchReport && (
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
+          {r.matchReport}
+        </div>
+      )}
+
       {/* turning point */}
       {r.turningPoint && (
         <div style={{ borderLeft: '3px solid var(--violet-h, #7c5ce7)', paddingLeft: 10 }}>

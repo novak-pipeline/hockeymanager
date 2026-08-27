@@ -77,19 +77,63 @@ function recentRecord(sheet: PressFactSheet): { wins: number; losses: number } {
 }
 
 /** True when the team is overperforming their preseason projection. */
+/**
+ * Games this club has actually played in the season on the books. Derived, not
+ * stored: in this sim every game ends in a win, a loss or an OT loss, so the
+ * three columns already carry the sample size — and deriving it means no
+ * caller can forget to pass it and quietly re-open the hole below.
+ */
+function gamesPlayed(sheet: PressFactSheet): number {
+  const t = sheet.team
+  return t.wins + t.losses + t.otLosses
+}
+
+/**
+ * Below this many games, a standings position is not evidence. A club can sit
+ * 2nd or 26th on four results, and "running 11 places ahead of schedule" is a
+ * sentence about noise. Above it, the beat writer is allowed his arithmetic.
+ */
+const VERDICT_SAMPLE = 12
+
+/**
+ * True when the team is beating their preseason projection — AND the season
+ * has produced at least one result to beat it with. At 0-0-0 every club in the
+ * league is sorted by tiebreak alone, so the comparison is meaningless: a
+ * career that starts at the summer takeover would otherwise be told, before a
+ * puck has dropped, that it had "over-delivered on every expectation" (A2).
+ */
 function overPerforming(sheet: PressFactSheet): boolean {
+  if (gamesPlayed(sheet) === 0) return false
   return sheet.team.expectedRank !== undefined && sheet.team.rank < sheet.team.expectedRank
 }
 
-/** True when the team is underperforming their preseason projection. */
+/** True when the team is underperforming their preseason projection. Same
+ *  no-games-no-verdict rule as {@link overPerforming}. */
 function underPerforming(sheet: PressFactSheet): boolean {
+  if (gamesPlayed(sheet) === 0) return false
   return sheet.team.expectedRank !== undefined && sheet.team.rank > sheet.team.expectedRank
 }
 
+/**
+ * The expectation-vs-reality sentence, in three registers keyed to how much
+ * the standings can actually support:
+ *  - no games:   a forward-looking statement of the bar (no verdict exists)
+ *  - small book: hedged — the projection is named, the gap is not scored
+ *  - full book:  the arithmetic, as before
+ */
 function expectationBlurb(sheet: PressFactSheet): string | null {
   const t = sheet.team
   if (t.expectedRank === undefined) return null
+  const gp = gamesPlayed(sheet)
+  if (gp === 0) {
+    return `The preseason numbers put them ${ordinal(t.expectedRank)}. That is the bar; none of it has been played yet.`
+  }
   const diff = Math.abs(t.rank - t.expectedRank)
+  if (gp < VERDICT_SAMPLE) {
+    if (diff === 0) return `They sit exactly where the preseason numbers put them, ${ordinal(t.expectedRank)}, on a book this thin.`
+    if (overPerforming(sheet)) return `They are ahead of a preseason projection of ${ordinal(t.expectedRank)} — on ${gp} games, which is not yet a trend.`
+    return `They are behind a preseason projection of ${ordinal(t.expectedRank)}, though ${gp} games is a small sample to convict anyone on.`
+  }
   if (overPerforming(sheet)) {
     if (diff >= 5) return `They were projected ${ordinal(t.expectedRank)} before puck drop — they're running ${diff} places ahead of schedule.`
     return `The preseason numbers had them ${ordinal(t.expectedRank)}; they've beaten that projection by ${diff} spots.`
@@ -918,7 +962,11 @@ function asScheduled(sheet: PressFactSheet): ScheduledReportFactSheet {
 function rankingsSection(s: ScheduledReportFactSheet, max = 5): string {
   const top = s.powerRankings.slice(0, max)
   if (top.length === 0) return ''
+  // Preseason: printing "0-0-0 (0 pts)" beside every club reads like a bug,
+  // not a ranking. A projection is a projection — it shows the order.
+  const preseason = top.every((r) => r.wins + r.losses + r.otLosses === 0)
   const lines = top.map((r) => {
+    if (preseason) return `${r.rank}. ${r.teamName}`
     const delta = r.delta !== undefined && r.delta !== 0
       ? r.delta > 0 ? ` (↑${r.delta})` : ` (↓${Math.abs(r.delta)})`
       : ''

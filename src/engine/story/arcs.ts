@@ -18,6 +18,9 @@
 
 import type { NewsCategory } from '@domain'
 import type { Rng } from '@engine/shared/rng'
+import type { ContentVariant } from './contentEngine'
+import { renderTemplate } from './contentEngine'
+import { pickStable, possessive } from './prose'
 
 /* ─────────────────────────── public types ─────────────────────────── */
 
@@ -78,6 +81,9 @@ export interface NewsSeed {
   body: string
   playerId?: string
   teamId?: string
+  /** A8: how far this beat travels. 'ambient' = speculation, never the inbox;
+   *  'ownClub' = league colour, mail only when it is one of your men. */
+  reach?: 'ambient' | 'ownClub'
 }
 
 /**
@@ -327,6 +333,178 @@ function ordinal(n: number): string {
  *  - Escalates (news) each time tension crosses 40/70.
  *  - Resolved when the player goes scoreless.
  */
+/* ───────────────────────── streak & slump vocabulary ─────────────────────
+ * Measured over four simmed seasons, ONE sentence — "{name} has recorded a
+ * point in each of their last {n} games, emerging as one of the hottest
+ * players in the league" — accounted for 713 of the 10,000 sentences the game
+ * wrote. Its partner, the snapped-streak line, another 358. That is not a
+ * writing problem, it is an architecture problem: a detector that fires two
+ * hundred times a season had exactly one thing to say.
+ *
+ * Authored pools, per EXCELLENCE.md §4. Selection is most-specific-wins with
+ * a stable per-player key rather than a roll, so a given man's heater reads
+ * the same way all week (it is one story, told once) while the next man's
+ * reads differently. `text` is the headline, `text2` the body.
+ *
+ * Slots: {name} {n} {team}
+ */
+
+/** A point in each of the last {n}. ctx: n, star. */
+const HOT_STREAK_POOL: ContentVariant[] = [
+  { id: 'arc.hot.monster', conditions: { minN: 14 },
+    text: `{n} straight for {name} — this is a run people will remember`,
+    text2: `Fourteen games is where a hot stretch stops being a hot stretch. {name} has a point in every one of them, and the league has started building game plans around a single man.` },
+  { id: 'arc.hot.monster.b', conditions: { minN: 14 },
+    text: `{name} has not been stopped in {n} games`,
+    text2: `Runs like this are how careers get remembered rather than merely recorded. {n} consecutive games with a point for {name}, and the {team} are being carried by one man.` },
+  { id: 'arc.hot.long', conditions: { minN: 10 },
+    text: `{name} makes it {n} in a row`,
+    text2: `Double digits. {name} has not been held off the sheet in a month, and defencemen are starting to talk about him the way they talk about weather.` },
+  { id: 'arc.hot.long.b', conditions: { minN: 10 },
+    text: `{n} games, {n} nights on the scoresheet for {name}`,
+    text2: `The kind of stretch that changes a season's arithmetic. {name} has a point in {n} straight, and the {team} have quietly climbed while he has done it.` },
+  { id: 'arc.hot.long.c', conditions: { minN: 10 },
+    text: `Somebody has to stop {name}`,
+    text2: `Ten and counting. Nobody has found the answer to {name} in {n} games, and the coaches who thought they had one are watching the tape again.` },
+  { id: 'arc.hot.star', conditions: { star: true, minN: 7 },
+    text: `The best player in the building, {n} nights running`,
+    text2: `{name} is doing what {name} is paid to do, only without a night off: {n} consecutive games with a point, and no obvious sign of the end.` },
+  { id: 'arc.hot.star.b', conditions: { star: true, minN: 7 },
+    text: `{name} turns it on: {n} straight`,
+    text2: `This is the version of {name} the {team} budgeted for. {n} games in a row with a point, and the bench has stopped holding its breath.` },
+  { id: 'arc.hot.star.c', conditions: { star: true, minN: 7 },
+    text: `{n} in a row, and {name} is dictating games again`,
+    text2: `Not just the points — the shifts. {name} has a point in {n} consecutive games and has been the man the other bench watches for.` },
+  { id: 'arc.hot.star.d', conditions: { star: true, minN: 7 },
+    text: `{name} will not cool off`,
+    text2: `A week ago it was a nice stretch. At {n} games it is the story of {teamPoss} month.` },
+  { id: 'arc.hot.star.short', conditions: { star: true },
+    text: `{name} is heating up — {n} straight with a point`,
+    text2: `Nothing surprising about the name; the run is the story. {n} games in a row on the scoresheet for {name}.` },
+  { id: 'arc.hot.star.short.b', conditions: { star: true },
+    text: `{n} straight for {name}`,
+    text2: `The best player on the {team} roster is playing like it. {name} has a point in each of his last {n}.` },
+  { id: 'arc.hot.star.short.c', conditions: { star: true },
+    text: `{name} finds his level: {n} in a row`,
+    text2: `A quiet start and then this. {n} consecutive games with a point for {name}, and the underlying numbers say it is not luck.` },
+  { id: 'arc.hot.star.short.d', conditions: { star: true },
+    text: `{name} on the sheet again — {n} in a row now`,
+    text2: `The {team} have needed him and he has turned up: {n} straight games with at least a point for {name}.` },
+  { id: 'arc.hot.star.short.e', conditions: { star: true },
+    text: `Another night, another point for {name}`,
+    text2: `{n} games in a row. Nobody in this league does that by accident.` },
+  { id: 'arc.hot.unlikely', conditions: { star: false, minN: 8 },
+    text: `Nobody had {name} on {n} straight`,
+    text2: `This is not the man anyone circled in October. {name} has a point in {n} consecutive games and is quietly rewriting what the {team} thought they had.` },
+  { id: 'arc.hot.unlikely.b', conditions: { star: false, minN: 8 },
+    text: `{name} is not supposed to do this`,
+    text2: `Depth players get hot; they do not usually stay hot for {n} games. The {team} are not asking questions about it yet.` },
+  { id: 'arc.hot.unlikely.c', conditions: { star: false, minN: 8 },
+    text: `{n} in a row from an unlikely source`,
+    text2: `{name} has a point in {n} straight, which is more than anyone projected for his whole quarter of the season.` },
+  { id: 'arc.hot.a',
+    text: `{name} on fire — {n}-game point streak`,
+    text2: `{name} has recorded a point in each of the last {n} games, one of the hottest runs in the league right now.` },
+  { id: 'arc.hot.b',
+    text: `{n} in a row for {name}`,
+    text2: `Whatever {name} found, he has not put it down: {n} straight games with at least a point.` },
+  { id: 'arc.hot.c',
+    text: `{name} cannot be kept off the sheet`,
+    text2: `A goal here, a secondary assist there, but always something — {n} consecutive games with a point for {name}.` },
+  { id: 'arc.hot.d',
+    text: `{name} rides a {n}-game run`,
+    text2: `The {team} have been carried for a fortnight. {name} has a point in {n} straight and his linemates are eating off it.` },
+  { id: 'arc.hot.e',
+    text: `{name} keeps it going: {n} games`,
+    text2: `Not spectacular, just relentless. {name} has found a point in {n} straight nights.` },
+]
+
+/** The streak ends. ctx: n. */
+const STREAK_SNAPPED_POOL: ContentVariant[] = [
+  { id: 'arc.snap.monster', conditions: { minN: 14 },
+    text: `It ends at {n}: {name} held off the sheet`,
+    text2: `Every streak ends and this one took a long time to. {name} finishes at {n} games — the sort of number that goes on a franchise list rather than into a season summary.` },
+  { id: 'arc.snap.monster.b', conditions: { minN: 14 },
+    text: `{n} games, and then it stops`,
+    text2: `The run is over. {name} goes without a point for the first time since the calendar turned, and {n} straight is a number the {team} will be quoting for years.` },
+  { id: 'arc.snap.long', conditions: { minN: 10 },
+    text: `{namePoss} {n}-game point streak is over`,
+    text2: `A quiet night, and a run that lasted more than a month is done. {n} games, and the {team} will take that trade every time.` },
+  { id: 'arc.snap.long.b', conditions: { minN: 10 },
+    text: `Held scoreless: {namePoss} run dies at {n}`,
+    text2: `Somebody finally solved him. {name} finishes a {n}-game point streak with a quiet sixty minutes, and the {team} will not be complaining about the month it bought them.` },
+  { id: 'arc.snap.long.c', conditions: { minN: 10 },
+    text: `The {n}-game streak is done`,
+    text2: `{name} could not extend it. It ends at {n}, which is long enough that the ending is a story in itself.` },
+  { id: 'arc.snap.a',
+    text: `{namePoss} {n}-game point streak snapped`,
+    text2: `{name} went scoreless tonight, ending a {n}-game run that had put him among the hottest players in the league.` },
+  { id: 'arc.snap.b',
+    text: `The run stops at {n} for {name}`,
+    text2: `No point tonight for {name}, and the {n}-game streak goes into the books. He looked like he wanted it in the third.` },
+  { id: 'arc.snap.c',
+    text: `{name} blanked, streak done at {n}`,
+    text2: `It had to happen. {name} is off the scoresheet for the first time in {n} games — and the version of him that made the run is the one the {team} need back.` },
+  { id: 'arc.snap.d',
+    text: `{n} games, then nothing: {namePoss} streak closes`,
+    text2: `The chances were there. They did not go in. {namePoss} point streak ends at {n}.` },
+  { id: 'arc.snap.e',
+    text: `{name} finally goes quiet`,
+    text2: `A {n}-game point streak ends the way most of them do — not with a bad night, just an ordinary one.` },
+]
+
+/** A producer goes {n} without a point. ctx: n. */
+const COLD_SPELL_POOL: ContentVariant[] = [
+  { id: 'arc.cold.deep', conditions: { minN: 12 },
+    text: `{n} games without a point — {name} is in real trouble`,
+    text2: `This has stopped being a slump and started being a question. {name} has gone {n} games without a point, and the coaching staff are running out of places to hide the minutes.` },
+  { id: 'arc.cold.deep.b', conditions: { minN: 12 },
+    text: `Nothing for {n} games: what is wrong with {name}?`,
+    text2: `A dozen games is not variance. {name} has not registered a point in {n}, and the {team} have started asking whether it is the body or the head.` },
+  { id: 'arc.cold.long', conditions: { minN: 9 },
+    text: `Still nothing for {name}: {n} games and counting`,
+    text2: `{n} games, no points. {name} is getting looks and not getting bounces, and the difference between those two things matters less every night.` },
+  { id: 'arc.cold.long.b', conditions: { minN: 9 },
+    text: `{name} is stuck on empty`,
+    text2: `The minutes are still there and the production is not. {n} games without a point for {name}, and the coach's patience is a finite resource.` },
+  { id: 'arc.cold.long.c', conditions: { minN: 9 },
+    text: `{n} straight blanks for {name}`,
+    text2: `It is long past a bad week. {name} has gone {n} games without a point and the {team} are carrying him while he works it out.` },
+  { id: 'arc.cold.a',
+    text: `{name} in a {n}-game point drought`,
+    text2: `{name}, expected to produce, has gone {n} games without a point. The slump is raising eyebrows around the league.` },
+  { id: 'arc.cold.b',
+    text: `{name} cannot buy one — {n} straight blanks`,
+    text2: `Posts, pads, and a goalie's glove. {name} has gone {n} games without a point and it is not for want of trying.` },
+  { id: 'arc.cold.c',
+    text: `{n} quiet nights in a row for {name}`,
+    text2: `The {team} need more than this. {name} has not registered a point in {n} games.` },
+  { id: 'arc.cold.d',
+    text: `{name} has gone cold`,
+    text2: `{n} games without a point for {name} — long enough that people have stopped calling it a bad week.` },
+  { id: 'arc.cold.e',
+    text: `The chances are there; the points are not`,
+    text2: `{name} is {n} games without a point. Watch the shifts and he looks fine, which is either reassuring or the most worrying part.` },
+]
+
+/** Slots every streak/slump frame may use. Possessives are built, never
+ *  hard-coded: half the club names in hockey end in s. */
+function slotsFor(name: string, n: number, team: string): Record<string, string> {
+  return { name, n: String(n), team, namePoss: possessive(name), teamPoss: possessive(team) }
+}
+
+/** Render an authored streak/slump beat. Stable per man per season, so one
+ *  story is told one way — and two men's runs never read identically. */
+function streakBeat(
+  pool: ContentVariant[],
+  ctx: Record<string, string | number | boolean>,
+  key: string,
+  slots: Record<string, string>
+): { headline: string; body: string } {
+  const v = pickStable(pool, ctx, key) ?? pool[pool.length - 1]!
+  return { headline: renderTemplate(v.text, slots), body: renderTemplate(v.text2 ?? '', slots) }
+}
+
 function detectHotStreak(
   state: ArcsState,
   inputs: ArcInputs,
@@ -361,12 +539,11 @@ function detectHotStreak(
       arc.status = 'resolved'
       arc.resolution = summary
       if (streak >= 7) {
-        seeds.push({
-          category: 'league',
-          headline: `${name}'s ${streak}-game point streak snapped`,
-          body: `${name} went scoreless today, ending a ${streak}-game run. The streak had put them among the league's hottest players over that span.`,
-          playerId: pid,
-        })
+        const beat = streakBeat(
+          STREAK_SNAPPED_POOL, { n: streak }, `snap|${pid}|${inputs.year}`,
+          slotsFor(name, streak, inputs.teamName(arc.actors.teamIds[0] ?? '')),
+        )
+        seeds.push({ category: 'league', headline: beat.headline, body: beat.body, playerId: pid, reach: 'ownClub' })
       }
     } else {
       // Streak continues.
@@ -446,12 +623,21 @@ function detectHotStreak(
     handled.add(pl.playerId)
 
     const name = inputs.playerName(pl.playerId)
+    const beat = streakBeat(
+      HOT_STREAK_POOL,
+      { n: streak, star: expected !== undefined && expected >= 0.55 },
+      `hot|${pl.playerId}|${inputs.year}`,
+      slotsFor(name, streak, inputs.teamName(pl.teamId)),
+    )
     seeds.push({
       category: 'league',
-      headline: `${name} on fire — ${streak}-game point streak`,
-      body: `${name} has recorded a point in each of their last ${streak} games, emerging as one of the hottest players in the league.`,
+      headline: beat.headline,
+      body: beat.body,
       playerId: pl.playerId,
       teamId: pl.teamId,
+      // A8: every producer in a 32-team league runs hot at some point. Yours
+      // is mail; the other 700 are the Feed's business.
+      reach: 'ownClub',
     })
   }
 
@@ -553,12 +739,17 @@ function detectColdSpell(
     handled.add(pl.playerId)
 
     const name = inputs.playerName(pl.playerId)
+    const beat = streakBeat(
+      COLD_SPELL_POOL, { n: drought }, `cold|${pl.playerId}|${inputs.year}`,
+      slotsFor(name, drought, inputs.teamName(pl.teamId)),
+    )
     seeds.push({
       category: 'league',
-      headline: `${name} in a ${drought}-game point drought`,
-      body: `${name}, expected to be a key forward, has gone ${drought} games without a point. The slump is raising eyebrows around the league.`,
+      headline: beat.headline,
+      body: beat.body,
       playerId: pl.playerId,
       teamId: pl.teamId,
+      reach: 'ownClub',
     })
   }
 
@@ -876,6 +1067,9 @@ function detectMilestone(
           body: `${name} needs just ${remaining} more ${stat} to reach the ${milestone} career milestone. It could happen within the next few games.`,
           playerId: pl.playerId,
           teamId: pl.teamId,
+          // A8: the approach is anticipation. The milestone itself is the news,
+          // and it fires on its own when he actually gets there.
+          reach: 'ambient',
         })
       } else if (existingArc) {
         // Update the approach arc.

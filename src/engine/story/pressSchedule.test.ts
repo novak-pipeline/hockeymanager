@@ -115,8 +115,24 @@ describe('pressSchedule — unit: milestone checks', () => {
 
   it('checkPreseasonStage fires seasonReview once', () => {
     const state = initialPressScheduleState()
-    expect(checkPreseasonStage(state)).toEqual(['seasonReview'])
-    expect(checkPreseasonStage(state)).toEqual([])
+    expect(checkPreseasonStage(state, true)).toEqual(['seasonReview'])
+    expect(checkPreseasonStage(state, true)).toEqual([])
+  })
+
+  // A2: a career begins at the summer takeover — offseason, day after the
+  // draft, 0-0-0 league — and walks resign -> freeAgency -> preseason without
+  // a puck being dropped. The review used to fire there and told the GM his
+  // club had "over-delivered on every expectation" at 0-0-0.
+  it('checkPreseasonStage does NOT fire a season review before any game is played', () => {
+    const state = initialPressScheduleState()
+    expect(checkPreseasonStage(state, false)).toEqual([])
+    expect(state.seasonReviewFired).toBe(false)
+  })
+
+  it('a review skipped for want of a season still fires after the first real one', () => {
+    const state = initialPressScheduleState()
+    expect(checkPreseasonStage(state, false)).toEqual([]) // summer takeover
+    expect(checkPreseasonStage(state, true)).toEqual(['seasonReview']) // a year later
   })
 })
 

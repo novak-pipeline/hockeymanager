@@ -133,8 +133,25 @@ export function checkDraftStage(state: PressScheduleState): PressSheetKind[] {
   return ['draftPreview']
 }
 
-/** Called when the career enters the offseason 'preseason' stage (season is truly done). Returns kinds to fire (once). */
-export function checkPreseasonStage(state: PressScheduleState): PressSheetKind[] {
+/**
+ * Called when the career enters the offseason 'preseason' stage (season is
+ * truly done). Returns kinds to fire (once).
+ *
+ * `seasonWasPlayed` is REQUIRED, and it is the whole point of the argument.
+ * A new career begins at the summer takeover (Career.startAtOffseason) — the
+ * day after a draft, in the offseason, with an untouched 0-0-0 league. That
+ * career walks resign → freeAgency → preseason without a single puck being
+ * dropped, and the season review used to fire there: "over-delivered on every
+ * expectation … finish at 0-0-0 (0 pts, 15th of 32)", every clause of it
+ * false. A retrospective may only be written about a season that happened.
+ * When it is skipped the fired flag stays DOWN, so the review still lands at
+ * the end of the first real season.
+ */
+export function checkPreseasonStage(
+  state: PressScheduleState,
+  seasonWasPlayed: boolean
+): PressSheetKind[] {
+  if (!seasonWasPlayed) return []
   if (state.seasonReviewFired) return []
   state.seasonReviewFired = true
   return ['seasonReview']
