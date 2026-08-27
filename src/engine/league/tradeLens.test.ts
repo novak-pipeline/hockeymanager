@@ -129,6 +129,36 @@ describe('A2 — value is per-club, not global', () => {
     expect(positionalFitMultiplier(rd, thin)).toBeGreaterThan(positionalFitMultiplier(ld, thin))
   })
 
+  it('a FARM right-shot draws no such premium — he fills no hole tonight', () => {
+    // The one idea A4 had that the lens lacked. A club thin on the right side is
+    // thin TONIGHT; a right-shot in the AHL does not fix tonight, so the
+    // scarcity premium is one he has not earned. Same man, same ability — the
+    // only difference is which sheet he is on.
+    const rd = makePlayer('rd', 76, { position: 'D', age: 26 })
+    rd.handedness = 'R'
+    const thin = lensOf(club([], { lefties: 5, righties: 1 }), 'contend')
+    const deep = lensOf(club([], { lefties: 3, righties: 4 }), 'contend')
+    expect(positionalFitMultiplier(rd, thin, { farm: true })).toBe(1)
+    // A prospect is worth the same to the thin club and the deep one: his value
+    // is what he becomes, not the slot he would take this evening. (He is still
+    // priced by posture, age and ceiling — only the roster-shape term is off.)
+    expect(clubPlayerValue(rd, thin, { farm: true }))
+      .toBeCloseTo(clubPlayerValue(rd, deep, { farm: true }), 6)
+    // ... and he is worth strictly less to the thin club than the NHL body it
+    // actually needs, which is the whole point of the correction.
+    expect(clubPlayerValue(rd, thin, { farm: true })).toBeLessThan(clubPlayerValue(rd, thin))
+  })
+
+  it('a farm asset is not discounted for a cap sheet it does not touch', () => {
+    // The same fact from the money side: a $9M contract in the AHL costs the
+    // acquiring club no NHL room, so a strapped club has no reason to write it
+    // down the way it writes down a contract that would actually land on its cap.
+    const big = makePlayer('farmbig', 76, { position: 'C', age: 22, salary: 9_000_000, years: 5 })
+    const strapped = lensOf(club(), 'contend', { capSpace: 1e6 })
+    expect(contractLensMultiplier(big, strapped, { farm: true }))
+      .toBeGreaterThan(contractLensMultiplier(big, strapped))
+  })
+
   it('a cap-strapped club discounts term and money', () => {
     const big = makePlayer('big', 80, { position: 'C', age: 28, salary: 9_000_000, years: 5 })
     const rich = lensOf(club(), 'contend', { capSpace: 40e6 })
