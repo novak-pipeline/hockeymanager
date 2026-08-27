@@ -16,8 +16,10 @@ import type { IpcMain } from 'electron'
 
 /* ─── constants ─── */
 
-/** Only these characters are legal in a faceId (prevents path traversal). */
-const FACE_ID_PATTERN = /^[A-Za-z0-9._-]+$/
+/** Only these characters are legal in a faceId (prevents path traversal).
+ *  The apostrophe is allowed because facepack files are named after the player
+ *  (o'reilly, k'andre_miller, l'heureux) and it cannot form a traversal. */
+const FACE_ID_PATTERN = /^[A-Za-z0-9._'-]+$/
 
 export interface ModListEntry {
   id: string
@@ -136,7 +138,7 @@ const facePathCache = new Map<string, string | null>()
 
 function assertFaceId(faceId: string): void {
   if (!FACE_ID_PATTERN.test(faceId)) {
-    throw new Error(`invalid faceId ${JSON.stringify(faceId)}: only [A-Za-z0-9._-] allowed`)
+    throw new Error(`invalid faceId ${JSON.stringify(faceId)}: only [A-Za-z0-9._'-] allowed`)
   }
 }
 
