@@ -148,3 +148,76 @@ absence of content, but content that reads the same every time.
 3. **The flavour work now has a scoreboard.** Headline shapes, verbatim repeats,
    watched words and undramatised games are numbers a chip can drive down, and
    this file is the before.
+
+---
+
+# ANSWERED — 2026-08-27 (same 5 seasons, same seed 2029, ceiling corrected)
+
+## §1 is fixed. The ceiling now comes from the data.
+
+`ModDatabase.rules.salaryCap` is a new optional field. The importer writes the
+real ceiling for the season it exported (`DB_SALARY_CAP`, $104.0M for 2026-27);
+the loader reads it; absent, it falls back to `DEFAULT_SALARY_CAP` ($88.0M), so
+every mod written before the field existed loads exactly as it did. The
+fictional league is untouched — verified by hashing the full generated league
+(teams + players + schedule) on four seeds before and after: byte-identical.
+
+The salary **floor** rode along, because it was hardcoded too. `CAP_FLOOR` was a
+flat $65M — meaningless under a $104M ceiling. It is now `capFloorFor(cap)` at
+73.9%, which reproduces the real NHL pairs ($95.5M/$70.6M, $104.0M/$77.1M) and
+still returns exactly $65,000,000 for the fictional league's $88M.
+
+Day one on the real database, before → after:
+
+| | before | after |
+|---|---|---|
+| ceiling | $88.0M | $104.0M |
+| floor | $65.0M | $76.9M |
+| clubs over the ceiling | 32 of 32 | 2 of 32 |
+| median club | $97.0M (**+10%**) | $97.0M (−7%) |
+
+The two survivors are Florida ($107.5M) and Toronto ($105.8M) — the real clubs
+that carry real LTIR relief, which we do not model. Both sit inside the
+playtester's 5% tolerance. That is cap-pressed, not frozen.
+
+**And the cap growth curve is sane from the corrected base.** `CAP_GROWTH` is
+1.045/yr; from $104.0M that is 108.7 / 113.6 / 118.7 / 124.0 / 129.6 five years
+out. It reaches today's real 2027-28 ceiling ($113.5M) one season late, which is
+the right shape — the NHL's current 9%/yr is a one-off escrow catch-up, not a
+rate to compound forever. Compounding off the **old** $88.0M base, the league
+would not have reached today's real ceiling until 2030.
+
+## §2 SURVIVES. The cliff is not the cap.
+
+| season | before | after |
+|---|---|---|
+| 2025 | 101 pts (#8) | 96 pts (#13) |
+| 2026 | 83 (#24) | 78 (#26) |
+| 2027 | 77 (#26) | 78 (#26) |
+| 2028 | 77 (#26) | 70 (#30) |
+| 2029 | 70 (#28) | 70 (#29) |
+
+Still monotonic, still −26 points across five years, still four straight missed
+playoffs, still zero Cups. **The hypothesis in §1 was wrong.** The GM was not
+forbidden — he was freed and stayed passive.
+
+The freeing is real and measurable. Cap-blocked decisions fell from **65 of 296
+(22%)** to **15 of 334 (4.5%)**, and the survivors are near-misses — "$0.4M over
+the cap", "$1.4M over" — instead of a $19.5M wall. Free-agent signing *attempts*
+went from 25 to 80. But the conversions barely moved: **4 → 5 trades, 5 → 7
+signings** across five seasons. Given room, this GM does not use it.
+
+So the dynasty problem is real and separate, and the candidates from §2 narrow
+to three: development failing to replace aging; the draft turning 22–30 picks in
+five years into nobody; or the autopilot policy being too timid to act on the
+room it now has. That is the next chase, and it is a bigger one than this was.
+
+## What the fix exposed underneath
+
+One new `major`, and it is the same species as the old one: **"NHL roster size
+29 outside 18–26"** at 2029 day 0. Under the broken ceiling the club could never
+sign anybody, so the roster limit was never tested. With real cap room the GM
+signs past the limit and nothing trims him back at season start. Filed
+separately — it is an enforcement gap, not a regression.
+
+Issue totals: **0 critical, 18 major, 76 minor → 0 critical, 1 major, 75 minor.**

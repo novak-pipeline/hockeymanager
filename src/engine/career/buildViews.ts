@@ -29,7 +29,7 @@ import { buildSquadFitNotes } from '@engine/career/scoutFit'
 import { buildScoutPanel } from '@engine/career/multiScout'
 import { importedCareerIn } from '@engine/story/careerLedger'
 import type { StaffMember } from '@engine/league/staff'
-import { contractStatus, requiresWaivers, CAP_FLOOR } from '@engine/league/contracts'
+import { contractStatus, requiresWaivers, capFloorFor } from '@engine/league/contracts'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { lineupIssues } from '@engine/league/lineup'
 import { formString, seasonAvgRating } from '@engine/league/playerRating'
@@ -1271,8 +1271,8 @@ export function buildFinanceView(ctx: ViewCtx): FinanceView {
     salaryCap: team.finances.salaryCap,
     capUsed,
     capSpace: team.finances.salaryCap - capUsed,
-    salaryFloor: CAP_FLOOR,
-    underFloor: capUsed < CAP_FLOOR,
+    salaryFloor: capFloorFor(team.finances.salaryCap),
+    underFloor: capUsed < capFloorFor(team.finances.salaryCap),
     budget: team.finances.budget,
     payroll,
     expiring: payroll.filter((r) => r.yearsRemaining <= 1),

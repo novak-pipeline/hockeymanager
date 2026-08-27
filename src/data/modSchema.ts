@@ -36,7 +36,7 @@ import { computeComposites, overall } from '@engine/ratings/composites'
 import { deriveConsistency } from '@engine/league/consistency'
 import { Rng } from '@engine/shared/rng'
 import type { PlayerRole } from '@domain'
-import { buildSchedule, buildWeightedSchedule, freshStanding, type ScheduleTeam } from './generate'
+import { buildSchedule, buildWeightedSchedule, freshStanding, DEFAULT_SALARY_CAP, budgetForCap, type ScheduleTeam } from './generate'
 import { buildCompetitions, type RawCompetition } from './leagueWorld'
 import type { Competition } from '@domain'
 import type { LeagueData } from './generate'
@@ -386,10 +386,31 @@ export interface ModCompetition {
   teams: ModTeam[]
 }
 
+/**
+ * League-wide rules a mod can override. Additive and optional: anything absent
+ * falls back to the engine default, so mods written before this block existed
+ * load exactly as they did.
+ */
+export interface ModRules {
+  /**
+   * The NHL salary ceiling for the mod's opening season, in dollars.
+   *
+   * This matters because a real-roster database carries real contracts, and
+   * real contracts are priced against the real cap of their season. Load a
+   * 2026-27 roster under a hardcoded $88.0M ceiling and every club opens ~$16M
+   * over a wall that does not exist — no signings, no trades, a GM who is not
+   * passive but forbidden. Defaults to DEFAULT_SALARY_CAP.
+   */
+  salaryCap?: number
+}
+
 export interface ModDatabase {
   formatVersion: 1
   meta: ModMeta
   conferences: ModConference[]
+  /** Optional league-wide rule overrides (salary ceiling, …). Absent = engine
+   *  defaults, which is what every mod written before this field did. */
+  rules?: ModRules
   /** Optional wider-world leagues beyond the NHL. Absent on NHL-only mods. */
   competitions?: ModCompetition[]
   /** Optional real club/league history (champions + franchise records) exported
@@ -741,6 +762,22 @@ export function validateModDatabase(x: unknown): ModDatabase {
     }
   }
 
+  // Optional league-wide rules. Strict about types (a bad ceiling silently
+  // falling back to 88e6 is exactly the failure this field exists to end), but
+  // absent is always fine.
+  let rules: ModRules | undefined
+  if (r['rules'] !== undefined) {
+    assertObject(r['rules'], 'ModDatabase.rules')
+    const raw = r['rules'] as Record<string, unknown>
+    if (raw['salaryCap'] !== undefined) {
+      const cap = raw['salaryCap']
+      if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 0)
+        fail(`ModDatabase.rules.salaryCap must be a positive number, got ${JSON.stringify(cap)}`)
+      rules = { salaryCap: cap }
+    }
+    if (rules === undefined) rules = {}
+  }
+
   // Optional wider-world competitions (lenient — these are quick-sim leagues).
   let competitions: ModCompetition[] | undefined
   if (r['competitions'] !== undefined) {
@@ -762,6 +799,7 @@ export function validateModDatabase(x: unknown): ModDatabase {
       ...(meta['season'] !== undefined ? { season: meta['season'] as string } : {})
     },
     conferences,
+    ...(rules !== undefined ? { rules } : {}),
     ...(competitions !== undefined ? { competitions } : {}),
     ...(history !== undefined ? { history } : {})
   }
@@ -1355,6 +1393,11 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
   const { seed, startYear = 2025, roundRobins = 4 } = opts
   const rng = new Rng(seed)
 
+  // The ceiling comes from the data, not from a constant. A real-roster mod
+  // prices its contracts against the real cap of its season; hardcoding one
+  // number here put every imported club ~$16M over a wall that did not exist.
+  const salaryCap = mod.rules?.salaryCap ?? DEFAULT_SALARY_CAP
+
   const players = new Map<PlayerId, Player>()
   const teams = new Map<TeamId, Team>()
   const staffByTeam = new Map<TeamId, TeamStaff>()
@@ -1416,8 +1459,8 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
           lines,
           tactics: structuredClone(DEFAULT_TACTICS),
           finances: {
-            budget: 90e6,
-            salaryCap: 88e6,
+            budget: budgetForCap(salaryCap),
+            salaryCap,
             capUsed: roster.reduce((s, p) => s + p.contract.salary, 0),
             revenue: 0
           },
@@ -1650,7 +1693,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         tactics: structuredClone(DEFAULT_TACTICS),
         finances: {
           budget: 12e6,
-          salaryCap: 88e6,
+          salaryCap,
           capUsed: ahlRoster.reduce((s, p) => s + p.contract.salary, 0),
           revenue: 0
         },
@@ -1724,7 +1767,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         tactics: structuredClone(DEFAULT_TACTICS),
         finances: {
           budget: 12e6,
-          salaryCap: 88e6,
+          salaryCap,
           capUsed: ahlRoster.reduce((s, p) => s + p.contract.salary, 0),
           revenue: 0
         },

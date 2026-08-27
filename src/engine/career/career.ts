@@ -16,7 +16,7 @@
  * career seed. Wall-clock time only ever appears in save metadata.
  */
 import type { LeagueData } from '@data/generate'
-import { buildSchedule, buildWeightedSchedule } from '@data/generate'
+import { buildSchedule, buildWeightedSchedule, budgetForCap } from '@data/generate'
 import {
   asGameId,
   asPlayerId,
@@ -330,6 +330,7 @@ import {
   askTerms,
   capUsedFor,
   contractStatus,
+  grownCap,
   initialPicks,
   MAX_ROSTER_SIZE,
   offerAcceptable,
@@ -8219,11 +8220,11 @@ export class Career {
     // grown past. Bump every NHL club's ceiling in lockstep (it's league-wide),
     // rounded to the nearest $100k. Surfaces naturally on the Finances screen.
     {
-      const CAP_GROWTH = 1.045
       for (const teamId of this.data.league.teams) {
         const t = this.data.teams.get(teamId)
         if (!t) continue
-        t.finances.salaryCap = Math.round((t.finances.salaryCap * CAP_GROWTH) / 100_000) * 100_000
+        t.finances.salaryCap = grownCap(t.finances.salaryCap)
+        t.finances.budget = budgetForCap(t.finances.salaryCap)
       }
     }
     // Rebuild next season's schedule, preserving the weighted NHL format when the
