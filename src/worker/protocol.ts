@@ -529,6 +529,7 @@ export type WorkerRequestBody =
   | { type: 'sendDown'; playerId: string }
   /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
   | { type: 'setCoachRoster' }
+  | { type: 'signEmergencyCover' }
   /** Revert the most recent coach roster auto-set. */
   | { type: 'undoCoachRoster' }
   /* ── Phase B: player profile view layer ── */
@@ -651,6 +652,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'ok'; note?: string; reaction?: ReactionSpec }
   /** Result of an auto-applied coach roster: the player names moved each way. */
   | { type: 'coachRosterSet'; promoted: string[]; demoted: string[] }
+  | { type: 'emergencyCoverSigned'; signed: string[]; message: string }
   | { type: 'save'; snapshot: CareerSnapshot }
   | { type: 'scouting'; scouting: ScoutingView }
   | { type: 'scoutProfile'; scoutProfile: ScoutProfileView | null }

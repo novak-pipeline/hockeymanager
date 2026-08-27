@@ -473,6 +473,10 @@ export interface DashboardView {
   reviewPending?: boolean
   /** True while the sim is held on deadline day (last chance to trade). */
   deadlinePending?: boolean
+  /** Bar B2.2: the club plays next and cannot dress a legal lineup, so the sim
+   *  is held. The message names the hole; the Squad screen carries the one-click
+   *  way out ("let the AGM sign emergency cover"). Optional/additive. */
+  lineupShortfall?: string
   /** Playtest A6: how many standing inbound offers are waiting on a yes or a no.
    *  Non-zero holds Continue on the trade desk and flags the topbar. Additive. */
   tradeOffersPending?: number

@@ -667,6 +667,11 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.reason)
       return res.note ? { id: req.id, type: 'ok', note: res.note } : { id: req.id, type: 'ok' }
     }
+    case 'signEmergencyCover': {
+      const res = must().signEmergencyCover()
+      if (!res.ok) throw new Error(res.message)
+      return { id: req.id, type: 'emergencyCoverSigned', signed: res.signed, message: res.message }
+    }
     case 'setCoachRoster': {
       const res = must().applyCoachRoster()
       return { id: req.id, type: 'coachRosterSet', promoted: res.promoted, demoted: res.demoted }

@@ -840,6 +840,9 @@ const ROSTER_HARD_CAP = 23
 /** Max Standard Player Contracts an organization may hold at once (NHL + AHL +
  *  signed junior prospects). The real NHL's 50-contract reserve-list limit. */
 const ORG_CONTRACT_LIMIT = 50
+/** League minimum, the price of an emergency one-year deal (see
+ *  {@link Career.signEmergencyCover}). */
+const EMERGENCY_MIN_SALARY = 750_000
 /** CBA contract-length ceilings: a club can offer its OWN player one more year
  *  than an outside team can offer a UFA (8 vs 7). */
 const MAX_TERM_RESIGN = 8
@@ -5609,6 +5612,118 @@ export class Career {
     )
   }
 
+  /**
+   * The lineup gate (bar B2.2). The club is due to play and cannot dress a legal
+   * team even after pulling up every healthy body in the org — so the engine will
+   * refuse the advance. Returning the message here is what lets the gate NAME
+   * itself on the Continue button and route the GM to the one screen that can
+   * fix it, instead of the advance simply throwing under him.
+   *
+   * (The shortfall already counts AHL depth, so this is the picture AFTER the
+   * automatic emergency recalls — no mutation needed to ask the question.)
+   */
+  lineupGateMessage(): string | null {
+    if (this.phase !== 'regularSeason') return null
+    // Camp week runs before the roster gate is ever reached (see the order in
+    // {@link advanceDay}), so a shortfall during camp is not yet blocking — and
+    // cut day is where the GM sets the roster that fixes it anyway.
+    if (this.trainingCamp && !this.trainingCamp.resolved) return null
+    const nextDay = this.matchDays.find((d) => d > this.currentDay)
+    if (nextDay === undefined) return null
+    const playsNext = this.data.league.schedule.some(
+      (g) => g.day === nextDay && (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId)
+    )
+    if (!playsNext) return null
+    return this.userLineupShortfall()
+  }
+
+  /**
+   * Bar B2.2 — the one-click way out of the lineup gate. A club that cannot
+   * legally dress a team holds the calendar, and until now that hold was a
+   * thrown error with advice and no button: the GM could sim no further and
+   * nothing on the screen would fix it for him.
+   *
+   * This is the AGM doing what a real front office does at 4pm on a game day:
+   * sign the cheapest healthy body on the market at each missing position to a
+   * one-year league-minimum deal (the emergency-backup-goaltender rule, and its
+   * skater equivalents). Emergency conditions, so — exactly like
+   * {@link emergencyRecalls} — it may push the club past the cap and the 23-man
+   * limit rather than leave it unable to play.
+   */
+  signEmergencyCover(): { ok: boolean; message: string; signed: string[] } {
+    const grpOf = (p: Player): 'F' | 'D' | 'G' => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
+    const NEED: Record<'F' | 'D' | 'G', number> = { F: 12, D: 6, G: 2 }
+    const nhl = this.userTeam
+    const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+    const healthyOrg = (grp: 'F' | 'D' | 'G'): number => {
+      const count = (roster: PlayerId[]): number =>
+        roster.reduce((n, id) => {
+          const p = this.data.players.get(id)
+          return p && p.injuryStatus === null && grpOf(p) === grp ? n + 1 : n
+        }, 0)
+      return count(nhl.roster) + (ahl ? count(ahl.roster) : 0)
+    }
+    // Anyone healthy, at the position, whom no club in the world employs.
+    const rostered = new Set<string>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) rostered.add(id as string)
+    const unemployed = (grp: 'F' | 'D' | 'G'): Player[] =>
+      [...this.faPool.map((id) => this.data.players.get(id)), ...this.data.players.values()]
+        .filter((p): p is Player => !!p)
+        .filter((p) => !rostered.has(p.id as string) && p.retiredYear === undefined)
+        .filter((p) => p.injuryStatus === null && grpOf(p) === grp)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a) || (a.id < b.id ? -1 : 1))
+
+    const signed: Player[] = []
+    for (const grp of ['G', 'D', 'F'] as const) {
+      let guard = 0
+      while (healthyOrg(grp) < NEED[grp] && guard++ < 8) {
+        const cand = unemployed(grp)[0]
+        if (!cand) break // nobody left on earth at this position
+        cand.contract = {
+          salary: EMERGENCY_MIN_SALARY,
+          yearsRemaining: 1,
+          expiryYear: this.year + 1,
+          noTradeClause: false,
+          twoWay: true,
+        }
+        nhl.roster.push(cand.id)
+        rostered.add(cand.id as string)
+        this.faPool = this.faPool.filter((f) => f !== cand.id)
+        this.lockerArrival(nhl.id, cand.id)
+        const tx = recordTransaction(this.transactionLedger, {
+          day: this.currentDay,
+          year: this.year,
+          kind: 'signing',
+          teamIds: [nhl.id as string],
+          summary: `${nhl.abbreviation} sign ${cand.position} ${cand.name} to an emergency one-year deal.`,
+        })
+        this.transactionLedger = tx.ledger
+        signed.push(cand)
+      }
+    }
+    if (signed.length === 0) {
+      return {
+        ok: false,
+        signed: [],
+        message:
+          this.userLineupShortfall() === null
+            ? 'Your lineup is already legal — nothing to sign.'
+            : 'There is nobody left on the market who can fill the hole. You will have to trade for a body.',
+      }
+    }
+    repairLines(nhl, this.data.players)
+    nhl.finances.capUsed = capUsedFor(nhl, this.data.players)
+    this.pushNews(
+      'contract',
+      `Emergency cover signed — ${signed.map((p) => p.name).join(', ')}`,
+      `We could not have dressed a legal lineup, so the front office signed ` +
+      `${signed.map((p) => `${p.position} ${p.name} (${p.age})`).join(', ')} on one-year emergency terms. ` +
+      `League minimum, no protection — move them on the moment you have better.`,
+      { teamId: nhl.id as string }
+    )
+    return { ok: true, signed: signed.map((p) => p.name), message: `Signed ${signed.map((p) => p.name).join(', ')}.` }
+  }
+
   private finishDay(day: number, played: Set<PlayerId>, outcomes: GameOutcome[]): void {
     const dayRng = this.rngFor(7001, day)
     const recovery = tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
@@ -6623,11 +6738,17 @@ export class Career {
     // next camp day — arrival, the scrimmage, the wrap. Pressing on from the
     // wrap without naming a standout sends the staff and mails the report.
     if (this.devCampPending) {
-      if ((this.devCampState?.day ?? 0) < 3) {
+      // A camp nobody is skating in is not a beat: don't burn three Continues on
+      // an empty rink (and don't hold the button on a screen that has nothing to
+      // render). Clear it and let the summer move on.
+      if (this.devCampInvitees().invitees.length === 0) {
+        this.autoResolveDevCamp()
+      } else if ((this.devCampState?.day ?? 0) < 3) {
         this.advanceDevCampDay()
         return true
+      } else {
+        this.autoResolveDevCamp()
       }
-      this.autoResolveDevCamp()
     }
     // M4: continuing past a staged season review lets it lapse — the owner
     // notices you didn't show.
@@ -9088,6 +9209,19 @@ export class Career {
     }
     this.devCampState = { ...(this.devCampState ?? { lines: [] }), day: 3 }
   }
+  /** Is there a development camp to WALK INTO right now? A gate may only raise
+   *  itself when its screen has something to show (bar B2.2): `devCampPending`
+   *  is armed once, off a pool computed then, but the pool is recomputed live —
+   *  cut every invite (#182) or lose the last kid in the org and the camp screen
+   *  renders nothing and bounces the GM straight back, which used to ping-pong
+   *  Continue forever with no escape. */
+  private devCampShowable(): boolean {
+    if (!this.devCampPending) return false
+    if (this.phase !== 'offseason') return false
+    if (this.offseason?.stage === 'preseason') return false
+    return this.devCampInvitees().invitees.length > 0
+  }
+
   /** The live development camp (M3): the rink, the kids, the staff's reads —
    *  and one call that is yours: name the camp standout. */
   getDevCamp(): DevCampView | null {
@@ -14001,6 +14135,9 @@ export class Career {
       }
     }
 
+    // Asked once and reused: the label and the dashboard flag must agree, and
+    // the question walks the schedule.
+    const lineupGate = this.lineupGateMessage()
     const continueLabel = (() => {
       if (this.phase === 'regularSeason') {
         // Pre-opening beats name themselves (beat-gate law, B2.2): camp week,
@@ -14008,6 +14145,10 @@ export class Career {
         if (this.trainingCamp && !this.trainingCamp.resolved) {
           return (this.trainingCamp.campDay ?? 1) >= 8 ? 'Continue — cut day' : 'Continue — training camp'
         }
+        // The hardest gate of all: a club that cannot legally dress a team. It
+        // outranks every beat below because the engine refuses to play the game
+        // at all — no meeting is reachable, let alone spendable, until it's fixed.
+        if (lineupGate !== null) return 'Continue — your lineup is short'
         if (this.currentDay === 0 && this.boardMeetingYear !== null) return 'Continue — board meeting'
         // Review outranks the in-season gates but NOT camp/boardroom — the same
         // order the shell routes them in. Getting this backwards would name a
@@ -14046,7 +14187,7 @@ export class Career {
       // Dev camp is gated ahead of the market: while it's pending, the first
       // Continue walks you into camp (not free agency), so say so — otherwise the
       // button reads "open free agency" but routes to the rink.
-      if (this.devCampPending && this.phase === 'offseason') return 'Continue — development camp'
+      if (this.devCampShowable()) return 'Continue — development camp'
       const stage = this.offseason?.stage ?? 'awards'
       const labels: Record<string, string> = {
         awards: 'Continue — season awards & development',
@@ -14152,7 +14293,7 @@ export class Career {
       ...(this.scoutDigestPending && this.scoutDigestNewsId !== null
         ? { scoutDigestNewsId: this.scoutDigestNewsId }
         : {}),
-      devCampPending: this.devCampPending && this.phase === 'offseason' && this.offseason?.stage !== 'preseason',
+      devCampPending: this.devCampShowable(),
       ...(this.phase === 'offseason' && this.offseason
         ? {
             offseasonStageLabel: (
@@ -14169,6 +14310,7 @@ export class Career {
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
+      ...(lineupGate !== null ? { lineupShortfall: lineupGate } : {}),
       tradeOffersPending: this.pendingTradeOffers().length,
       userTeam: {
         teamId: this.userTeamId as string,
