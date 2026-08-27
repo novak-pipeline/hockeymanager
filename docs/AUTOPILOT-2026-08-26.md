@@ -182,3 +182,55 @@ signs past the limit and nothing trims him back at season start. Filed
 separately — it is an enforcement gap, not a regression.
 
 Issue totals: **0 critical, 18 major, 76 minor → 0 critical, 1 major, 75 minor.**
+
+---
+
+## The surviving major, answered — the 29-man roster
+
+The framing above was wrong on the mechanism. **The GM signed nobody.** He made
+zero signings in 2029, and the roster read 29 on day 0 — before a single game.
+
+An instrumented five-season re-run (a proxy on the club's roster array, capturing
+a stack trace on every push past 26) named exactly **one** overflow site in the
+whole campaign:
+
+    len=27 @ y2029 regularSeason d0
+    Career.assignRosters <- Career.startNewSeason <- Career.advanceOffseason <- Career.step
+
+`assignRosters` has two halves, and they ratchet against each other:
+
+- **Step 1** trimmed to 23 on a flat `overall` sort with **no idea what position
+  anyone played** — so it could cut a club's goalies and defencemen.
+- **Step 2** then pulled bodies back up to restore the 12F/6D/2G minimums, with
+  **no ceiling of its own**.
+
+Trim blind, refill unbounded. Cut five men without looking at position, put six
+back to fix the holes you just made, and 26 becomes 29. Nothing to do with cap
+room — the corrected ceiling only changed roster composition enough for Step 1's
+blindness to bite.
+
+The fix is `trimToRosterLimit`: worst-first, but never out of a position group
+already at the 14F/7D/2G shape. Step 1 uses it, Step 2 refuses to push past 26,
+and two backstops close the paths nothing was watching — a restored orphan lands
+on the farm when the big club is full, and a season-start sweep conforms every
+club, the user's included, however it got over.
+
+    RE-RUN, 5 seasons, seed 2029:  0 critical, 1 major, 75 minor
+                                -> 0 critical, 0 major, 76 minor
+
+**The league moved, and this is worth watching.** Every AI club's roster is now
+built to a legal shape, so the whole world changed with it. On this one seed the
+monotonic slide of §2 did not reproduce:
+
+| season | before | after |
+|---|---|---|
+| 2025 | 96 pts (#13) | 85 (#18) |
+| 2026 | 78 (#26) | 104 (#8) — First Round |
+| 2027 | 78 (#26) | 67 (#31) |
+| 2028 | 70 (#30) | 72 (#30) |
+| 2029 | 70 (#29) | 92 (#16) |
+
+That is one seed and it is **not** evidence the dynasty problem is solved — the
+club still missed four of five and won nothing. But "monotonic decline" was the
+shape the next chase was going to be aimed at, and on this seed the shape is
+gone. Re-measure before chasing it.

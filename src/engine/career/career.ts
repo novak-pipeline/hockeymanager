@@ -106,7 +106,7 @@ import { buildSeasonBio } from '@engine/career/seasonBio'
 import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
-import { farmSplit } from '@engine/career/farmReassign'
+import { farmSplit, trimToRosterLimit } from '@engine/career/farmReassign'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
@@ -8070,7 +8070,22 @@ export class Career {
         // played; only if that club is gone do we fall through to retire/list.
         const home = lastProTeamOf(p)
         if (home) {
-          this.data.teams.get(home)!.roster.push(p.id)
+          // Restoring him is not a licence to break the 26-man limit. This push
+          // bypasses signPlayer, and the sweep runs LAST at season start — after
+          // assignRosters has already trimmed — so orphans landing on a club that
+          // is already full would leave it over the ceiling with nothing behind to
+          // catch it. Send him to the affiliate instead when the big club has no
+          // room: an over-size AHL roster is harmless, and he stays visible and
+          // recallable. With no affiliate to take him, restore him anyway — an
+          // invisible contracted player is the worse bug, and the season-start
+          // sweep will conform the club.
+          const club = this.data.teams.get(home)!
+          const affiliate = club.affiliateId ? this.data.teams.get(club.affiliateId) : undefined
+          const dest =
+            club.tier !== 'ahl' && club.roster.length >= MAX_ROSTER_SIZE && affiliate
+              ? affiliate
+              : club
+          dest.roster.push(p.id)
           rostered.add(id)
           restored.push(p)
           continue
@@ -8435,6 +8450,14 @@ export class Career {
     // the map retires (announced) or is listed as a free agent. Runs last, after
     // every roster op for the new season has settled.
     this.reconcileOrphans()
+
+    // Opening night is the one moment every NHL roster must be legal, and the
+    // sweep above is the LAST hand to touch one — so the size check belongs
+    // after it, not before. It is the backstop for every path that adds a body
+    // without going through signPlayer (orphan restores, waiver claims, trades,
+    // draft graduations, call-ups never sent back): whatever the route in, the
+    // surplus goes down before the puck drops.
+    this.enforceSeasonStartRosterLimits()
 
     this.pushNews(
       'league',
@@ -10212,6 +10235,51 @@ export class Career {
   }
 
   /**
+   * Season-start compliance sweep: no club opens a season over the 26-man limit.
+   *
+   * signPlayer enforces the ceiling by throw, but plenty of routes onto a roster
+   * never touch it — a restored orphan, a waiver claim, a trade, a graduating
+   * draft pick, an injury call-up that was never sent back. The playtester's 29-man
+   * club came in through assignRosters (fixed at source below), and this is the
+   * net under all the others: the last thing startNewSeason does is confirm that
+   * whatever the route in, no club opens the season illegal.
+   *
+   * The surplus goes down by the same rules the camp cutdown uses — worst-first
+   * on ability plus waiver protection, never below the 14F/7D/2G shape — so a
+   * declining veteran on a one-way deal is still the last man cut, and the club
+   * can always dress a legal lineup afterwards.
+   *
+   * The user's club is INCLUDED, unlike the in-season conform loops that leave
+   * his roster alone. Those are mid-season judgement calls he is entitled to make
+   * himself; opening night with an illegal roster is not a judgement call, and
+   * cut day already told him the coach would make the calls he didn't.
+   *
+   * Deterministic — no Rng, no news: this is bookkeeping the GM was warned about.
+   */
+  private enforceSeasonStartRosterLimits(): void {
+    const scorer = (p: Player): number => overall(p.composites, p.position) + this.waiverProtection(p)
+    for (const nhlTeamId of this.data.league.teams) {
+      const nhl = this.data.teams.get(nhlTeamId)
+      if (!nhl || nhl.roster.length <= MAX_ROSTER_SIZE) continue
+      const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+      if (!ahl) continue // nowhere to send him — an over-size roster beats a lost player
+
+      const trim = trimToRosterLimit({
+        nhlRoster: nhl.roster,
+        ahlRoster: ahl.roster,
+        resolve: (id) => this.data.players.get(id),
+        score: scorer,
+        limit: MAX_ROSTER_SIZE,
+      })
+      if (trim.demoted.length === 0) continue
+      nhl.roster = trim.nhl
+      ahl.roster = trim.ahl
+      repairLines(nhl, this.data.players)
+      repairLines(ahl, this.data.players)
+    }
+  }
+
+  /**
    * AI auto-assignment: for every NHL team, keep roughly the best 23 players on
    * the NHL roster and send extras to the AHL affiliate. The process is additive
    * and preserves existing NHL players — it only moves excess NHL players DOWN
@@ -10230,19 +10298,21 @@ export class Career {
       if (!ahlTeam) continue // no affiliate — skip
 
       // ── Step 1: send excess NHL players to AHL ───────────────────────────
+      // Worst-first, but never below the 14F/7D/2G shape. This used to be a flat
+      // ovr sort with no idea what position anyone played, which is how a 28-man
+      // club could be trimmed to 23 with one goalie left — and Step 2 would then
+      // pull three bodies back up. The two halves ratcheted: the playtester's club
+      // opened 2029 with 29 men that way.
       if (nhlTeam.roster.length > NHL_TARGET) {
-        const nhlPlayers = nhlTeam.roster.map((id) => {
-          const p = this.data.players.get(id)
-          return p ? { id, ovr: overall(p.composites, p.position) } : null
-        }).filter((x): x is { id: PlayerId; ovr: number } => x !== null)
-
-        // Sort worst-first so we send the lowest-rated extras to AHL.
-        nhlPlayers.sort((a, b) => a.ovr - b.ovr || (a.id < b.id ? -1 : 1))
-        const excess = nhlTeam.roster.length - NHL_TARGET
-        const toSend = nhlPlayers.slice(0, excess).map((p) => p.id)
-        const toSendSet = new Set(toSend)
-        nhlTeam.roster = nhlTeam.roster.filter((id) => !toSendSet.has(id))
-        for (const id of toSend) ahlTeam.roster.push(id)
+        const trim = trimToRosterLimit({
+          nhlRoster: nhlTeam.roster,
+          ahlRoster: ahlTeam.roster,
+          resolve: (id) => this.data.players.get(id),
+          score: (p) => overall(p.composites, p.position),
+          limit: NHL_TARGET,
+        })
+        nhlTeam.roster = trim.nhl
+        ahlTeam.roster = trim.ahl
       }
 
       // ── Step 2: pull AHL players up if NHL team below position minimums ──
@@ -10269,8 +10339,37 @@ export class Career {
           .filter((x): x is { id: PlayerId; ovr: number; pos: Position } => x !== null && posNeed(x.pos))
           .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1))
 
+        /** Send the worst over-minimum body down. False when nobody may leave. */
+        const makeRoom = (): boolean => {
+          const mins = { G: Career.ROSTER_MIN_G, D: Career.ROSTER_MIN_D, F: Career.ROSTER_MIN_F }
+          const counts = this.rosterCounts(nhlTeam)
+          const have = { G: counts.g, D: counts.d, F: counts.f }
+          let worst: { id: PlayerId; ovr: number } | null = null
+          for (const id of nhlTeam.roster) {
+            const pl = this.data.players.get(id)
+            if (!pl) continue
+            const grp = pl.position === 'G' ? 'G' : pl.position === 'D' ? 'D' : 'F'
+            if (have[grp] <= mins[grp]) continue
+            const ovr = overall(pl.composites, pl.position)
+            if (!worst || ovr < worst.ovr || (ovr === worst.ovr && (id as string) < (worst.id as string))) {
+              worst = { id, ovr }
+            }
+          }
+          if (!worst) return false
+          const out = worst.id
+          nhlTeam.roster = nhlTeam.roster.filter((id) => (id as string) !== (out as string))
+          ahlTeam.roster.push(out)
+          return true
+        }
+
         for (const cand of candidates) {
           if (!posNeed(cand.pos)) continue
+          // A pull-up may never break the 26-man ceiling. At the limit, open the
+          // spot first by sending down the worst body from a position already
+          // above its minimum — a club short a goalie has too many of something
+          // else. If nothing can legally come down, stop: an under-shaped roster
+          // repairLines can cope with beats an illegal one it cannot.
+          if (nhlTeam.roster.length >= MAX_ROSTER_SIZE && !makeRoom()) break
           nhlTeam.roster.push(cand.id)
           ahlTeam.roster = ahlTeam.roster.filter((id) => id !== cand.id)
           const bucket = cand.pos === 'G' ? 'G' : cand.pos === 'D' ? 'D' : 'F'

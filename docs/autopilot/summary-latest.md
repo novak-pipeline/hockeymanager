@@ -2,54 +2,54 @@
 
 League: NHL (EHM import, dev) - 2026-27 · 32 teams · imported: NHL (EHM import, dev) - 2026-27 (32-team) · seed 2029
 Seasons: 5/5 · **Cups: 0** · best finish: **—**
-Decisions: 334 · trades 5 · signings 7 · drafted 22
-Issues: **0 critical**, 1 major, 75 minor
+Decisions: 359 · trades 5 · signings 4 · drafted 16
+Issues: **0 critical**, 0 major, 76 minor
 
 ## Season by season
-- **2025** — 44-30-8 (96 pts, #13) → First Round · 1 trades, 0 signings, 7 picks · issues C0/M0/m14
-- **2026** — 36-40-6 (78 pts, #26) → Missed · 1 trades, 1 signings, 4 picks · issues C0/M0/m15
-- **2027** — 34-38-10 (78 pts, #26) → Missed · 1 trades, 0 signings, 2 picks · issues C0/M0/m15
-- **2028** — 30-42-10 (70 pts, #30) → Missed · 1 trades, 4 signings, 4 picks · issues C0/M0/m16
-- **2029** — 32-44-6 (70 pts, #29) → Missed · 1 trades, 2 signings, 5 picks · issues C0/M1/m15
+- **2025** — 39-36-7 (85 pts, #18) → Missed · 1 trades, 0 signings, 6 picks · issues C0/M0/m14
+- **2026** — 47-25-10 (104 pts, #8) → First Round · 1 trades, 0 signings, 1 picks · issues C0/M0/m15
+- **2027** — 29-44-9 (67 pts, #31) → Missed · 2 trades, 0 signings, 5 picks · issues C0/M0/m16
+- **2028** — 30-40-12 (72 pts, #30) → Missed · 1 trades, 4 signings, 4 picks · issues C0/M0/m16
+- **2029** — 42-32-8 (92 pts, #16) → Missed · 0 trades, 0 signings, 0 picks · issues C0/M0/m15
 
 ## Issues (top 40 by severity)
-- `major` [roster] season 2029 d0: NHL roster size 29 outside 18–26
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 63x: "X report: X X" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 26x: "X X closing in on # career goals" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 26x: "X X off to a costly slow start" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 25x: "X scouting digest" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 25x: "X X out # games" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: one headline shape fired 22x: "X backs X X through the drought" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: identical headline 25x: "Weekly scouting digest" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: identical headline 13x: "You left it to the staff" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: identical headline 9x: "Rough night for Akira Schmid" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: identical headline 7x: "You left the board to the staff" — _season 2025_
-- `minor` [flavour:repetition] season 2025 d211: identical headline 7x: "Breakdowns cost us — Coach postgame" — _season 2025_
-- `minor` [flavour:vocabulary] season 2025 d211: "upside" appears 83x in one season's prose — _season 2025_
-- `minor` [flavour:vocabulary] season 2025 d211: "the room" appears 27x in one season's prose — _season 2025_
-- `minor` [flavour:undramatised] season 2025 d211: 26 dramatic game(s) passed with no story written — e.g. d17 shutout; d73 shutout; d97 one-goal game — _season 2025_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 41x: "X report: X X" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 39x: "X backs X X through the drought" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 35x: "X scouting digest" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 33x: "X X off to a costly slow start" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 31x: "# games without: X on X X dry spell" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: one headline shape fired 29x: "X X out # games" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: identical headline 35x: "Weekly scouting digest" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: identical headline 18x: "You left it to the staff" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: identical headline 13x: "Rough night for Akira Schmid" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: identical headline 11x: "Breakdowns cost us — Coach postgame" — _season 2026_
-- `minor` [flavour:repetition] season 2026 d212: identical headline 10x: "You left the board to the staff" — _season 2026_
-- `minor` [flavour:vocabulary] season 2026 d212: "the board" appears 24x in one season's prose — _season 2026_
-- `minor` [flavour:vocabulary] season 2026 d212: "upside" appears 45x in one season's prose — _season 2026_
-- `minor` [flavour:vocabulary] season 2026 d212: "the room" appears 26x in one season's prose — _season 2026_
-- `minor` [flavour:undramatised] season 2026 d212: 11 dramatic game(s) passed with no story written — e.g. d25 shutout; d39 shutout; d46 9-goal rout — _season 2026_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 67x: "X report: X X" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 35x: "X scouting digest" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 30x: "X X out # games" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 29x: "X backs X X through the drought" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 28x: "X grow over X X ceiling" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: one headline shape fired 28x: "X X closing in on # career goals" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: identical headline 35x: "Weekly scouting digest" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: identical headline 18x: "You left it to the staff" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: identical headline 14x: "Rough night for Akira Schmid" — _season 2027_
-- `minor` [flavour:repetition] season 2027 d211: identical headline 11x: "Breakdowns cost us — Coach postgame" — _season 2027_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 64x: "X report: X X" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 27x: "X X closing in on # career goals" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 26x: "X X out # games" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 25x: "X scouting digest" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 24x: "# games without: X on X X dry spell" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: one headline shape fired 22x: "X grow over X X ceiling" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: identical headline 25x: "Weekly scouting digest" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: identical headline 13x: "You left it to the staff" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: identical headline 8x: "Breakdowns cost us — Coach postgame" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: identical headline 7x: "Comeback! Down 2, your club storms back to win" — _season 2025_
+- `minor` [flavour:repetition] season 2025 d203: identical headline 7x: "You left the board to the staff" — _season 2025_
+- `minor` [flavour:vocabulary] season 2025 d203: "upside" appears 81x in one season's prose — _season 2025_
+- `minor` [flavour:vocabulary] season 2025 d203: "the room" appears 29x in one season's prose — _season 2025_
+- `minor` [flavour:undramatised] season 2025 d203: 6 dramatic game(s) passed with no story written — e.g. d17 shutout; d41 shutout; d95 shutout — _season 2025_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 40x: "X report: X X" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 35x: "X scouting digest" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 33x: "# games without: X on X X dry spell" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 32x: "X X out # games" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 28x: "X grow over X X ceiling" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: one headline shape fired 27x: "X backs X X through the drought" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: identical headline 35x: "Weekly scouting digest" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: identical headline 18x: "You left it to the staff" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: identical headline 11x: "Breakdowns cost us — Coach postgame" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: identical headline 11x: "Collapse: a 2-goal lead slips away" — _season 2026_
+- `minor` [flavour:repetition] season 2026 d210: identical headline 11x: "Comeback! Down 2, your club storms back to win" — _season 2026_
+- `minor` [flavour:vocabulary] season 2026 d210: "the board" appears 25x in one season's prose — _season 2026_
+- `minor` [flavour:vocabulary] season 2026 d210: "upside" appears 44x in one season's prose — _season 2026_
+- `minor` [flavour:vocabulary] season 2026 d210: "the room" appears 43x in one season's prose — _season 2026_
+- `minor` [flavour:undramatised] season 2026 d210: 22 dramatic game(s) passed with no story written — e.g. d93 one-goal game; d107 one-goal game; d123 5-goal rout — _season 2026_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 65x: "X report: X X" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 46x: "X tabled to X X" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 41x: "X X closing in on # career goals" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 35x: "X scouting digest" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 29x: "X X off to a costly slow start" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: one headline shape fired 28x: "X X out # games" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: identical headline 35x: "Weekly scouting digest" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: identical headline 18x: "You left it to the staff" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: identical headline 12x: "3 in a row — Coach addresses the slump" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: identical headline 11x: "Collapse: a 2-goal lead slips away" — _season 2027_
+- `minor` [flavour:repetition] season 2027 d208: identical headline 11x: "1 year ago today" — _season 2027_
