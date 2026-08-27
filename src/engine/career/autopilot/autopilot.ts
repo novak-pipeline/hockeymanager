@@ -11,6 +11,7 @@
  */
 import { Career } from '../career'
 import { auditSeason, type DayText, type FlavourReport } from './flavorAudit'
+import { diagnose, type Diagnosis, type NeedGroup } from './teamDiagnosis'
 import type { CareerPhase } from '../views'
 
 /* ────────────────────────────── trace shapes ────────────────────────────── */
@@ -119,6 +120,7 @@ interface Ctx {
    *  once per season and driving every decision the way a real GM's does. */
   plan: Plan
   planYear: number
+  diagYear: number
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -423,18 +425,96 @@ function buildPackage(tv: ReturnType<Career['getTrades']>, targetVal: number, ne
   return acc < targetVal ? null : { playerIds, pickIds }
 }
 
+/** Read the league table and say what is actually wrong with this club. Cached
+ *  per season-day so a busy day doesn't re-rank the league repeatedly. */
+function diagnoseTeam(ctx: Ctx, byGroup: Record<string, number[]>): Diagnosis | null {
+  const st = guarded(ctx, 'getStandings', () => ctx.career.getStandings())
+  if (!st) return null
+  const userTeamId = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())?.userTeam.teamId
+  if (!userTeamId) return null
+  // The weakest REGULAR in each group — the man who actually dresses, not the
+  // depth body who never plays.
+  const depth: Record<NeedGroup, number> = {
+    F: byGroup.F?.[8] ?? byGroup.F?.[byGroup.F.length - 1] ?? 70,
+    D: byGroup.D?.[4] ?? byGroup.D?.[byGroup.D.length - 1] ?? 70,
+    G: byGroup.G?.[0] ?? 70,
+  }
+  const d = diagnose(st.overall, userTeamId as string, depth)
+  if (d && ctx.diagYear !== ctx.career.year) {
+    ctx.diagYear = ctx.career.year
+    log(ctx, {
+      kind: 'plan',
+      summary: `Diagnosis: ${d.summary}`,
+      drivers: d.needs.map((n) => `${n.group}: ${n.evidence}`),
+      result: d.needs.map((n) => n.group).join('>'),
+      ok: true,
+    })
+  }
+  return d
+}
+
+/** A rebuild is a decision, not a coma. Move veterans on expiring deals to
+ *  contenders for futures — the one thing a selling club should always be doing,
+ *  and the thing the old policy skipped entirely by returning early. */
+function trySellVeterans(ctx: Ctx, tv: ReturnType<Career['getTrades']>): boolean {
+  const sellable = tv.myPlayers
+    .filter((p) => p.age >= 28 && p.yearsRemaining <= 2 && !p.noTradeClause && (p.tradeValue ?? 0) > 0)
+    .sort((a, b) => (b.tradeValue ?? 0) - (a.tradeValue ?? 0))
+  if (sellable.length === 0) return false
+
+  const buyers = tv.partners.filter((pt) => (pt.posture ?? '') === 'contend')
+  for (const vet of sellable.slice(0, 4)) {
+    if (ctx.offered.has(vet.playerId)) continue
+    for (const buyer of buyers.slice(0, 8)) {
+      // Ask for picks, not bodies — a rebuild converts present into future.
+      const picks = (buyer.picks ?? []).filter((pk) => (pk.value ?? 0) > 0).sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      if (picks.length === 0) continue
+      const proposal = {
+        partnerTeamId: buyer.teamId,
+        givePlayerIds: [vet.playerId],
+        givePickIds: [] as string[],
+        receivePlayerIds: [] as string[],
+        receivePickIds: [picks[0]!.id],
+      }
+      const draft = guarded(ctx, 'evaluateTradeDraft', () => ctx.career.evaluateTradeDraft(proposal))
+      if (!draft || draft.partnerVerdict === 'blocked') continue
+      if (draft.partnerVerdict !== 'accept') continue
+      const res = guarded(ctx, 'proposeTrade', () => ctx.career.proposeTrade(proposal))
+      ctx.offered.add(vet.playerId)
+      const ok = res?.verdict === 'accept'
+      log(ctx, {
+        kind: 'trade',
+        summary: `${ok ? 'Sold' : 'Shopped'} ${vet.name} (${vet.age}, ${vet.yearsRemaining}yr left) for futures`,
+        drivers: ['rebuilding — expiring veterans become picks', `${buyer.teamName} are buyers`, `return: ${picks[0]!.label}`],
+        result: res ? `${res.verdict}: ${res.message}` : 'error',
+        ok,
+      })
+      if (ok) return true
+      break
+    }
+  }
+  return false
+}
+
 function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
-  // Rebuilders don't trade futures for win-now upgrades — they're sellers.
-  if (getPlan(ctx) === 'rebuild') return false
+  // A rebuilder doesn't BUY win-now help — but the old code returned here, so a
+  // rebuilding club made no moves whatsoever for years while its plan blurb
+  // promised to "sell veterans for futures". Doing nothing is not a rebuild.
+  const rebuilding = getPlan(ctx) === 'rebuild'
   const tv = guarded(ctx, 'getTrades', () => ctx.career.getTrades())
   if (!tv || !tv.tradingOpen) return false
+  if (rebuilding) return trySellVeterans(ctx, tv)
   noteFeature(ctx, 'trades', `Every partner's roster comes with per-player tradeValue + cap space + posture, and evaluateTradeDraft gives a side-effect-free partner verdict — enough to value a deal. Friction: to price a target I query getTrades then a separate evaluateTradeDraft; the value isn't on the roster screen. Partners seen: ${tv.partners.length}, my cap space ${money(tv.myCapSpace)}.`)
   const byGroup: Record<string, number[]> = { F: [], D: [], G: [] }
   for (const p of tv.myPlayers) byGroup[POS_GROUP(p.position)].push(p.overall)
   for (const k of Object.keys(byGroup)) byGroup[k].sort((a, b) => b - a)
   const weakStarter = (g: string, n: number): number => byGroup[g][n - 1] ?? 0
   const needScore: Record<string, number> = { F: 90 - weakStarter('F', 9), D: 90 - weakStarter('D', 5), G: 90 - weakStarter('G', 1) }
-  const need = Object.keys(needScore).sort((a, b) => needScore[b] - needScore[a])[0]
+  // Performance first, depth second. The old line picked whichever group had the
+  // weakest regular — a spreadsheet answer. A GM starts from what is costing him
+  // games: goals for and against against the rest of the league.
+  const diag = diagnoseTeam(ctx, byGroup)
+  const need = diag?.needs[0]?.group ?? Object.keys(needScore).sort((a, b) => needScore[b] - needScore[a])[0]
   const myFloor = weakStarter(need, need === 'G' ? 1 : need === 'D' ? 5 : 9)
 
   interface Cand { partnerId: string; partnerName: string; posture: string; pid: string; name: string; ovr: number; val: number; salary: number; years: number }
@@ -443,6 +523,11 @@ function tryTradeUpgrade(ctx: Ctx, aggressive: boolean): boolean {
     for (const p of partner.players) {
       if (POS_GROUP(p.position) !== need || p.noTradeClause || p.tradeValue == null) continue
       if (p.overall < myFloor + 3) continue
+      // Cap gate. `myCapSpace` goes NEGATIVE when the club is over the ceiling,
+      // and the old form (salary > space + 1.5M) then passed every player alive
+      // while intending the opposite — a club $19M over signed off on anything.
+      // Over the ceiling, the only defensible answer is: buy nothing.
+      if (tv.myCapSpace <= 0) continue
       if (p.salary > tv.myCapSpace + 1.5e6) continue
       cands.push({ partnerId: partner.teamId, partnerName: partner.teamName, posture: partner.posture ?? '', pid: p.playerId, name: p.name, ovr: p.overall, val: p.tradeValue, salary: p.salary, years: p.yearsRemaining })
     }
@@ -715,7 +800,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {},
     summary: { cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false },
   }
-  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1 }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1 }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
