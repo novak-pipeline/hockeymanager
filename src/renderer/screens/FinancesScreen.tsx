@@ -1,8 +1,22 @@
+import { useMemo } from 'react'
 import type { FinanceView, FanbaseView, SponsorsView, PayrollRowView } from '../../worker/protocol'
 import { PlayerLink } from '../components/NavContext'
 import { fmtMoney } from '../components/format'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+type SponsorDealRow = SponsorsView['deals'][number]
+
+const SPONSOR_COLS = sortColumns<SponsorDealRow>()([
+  { key: 'kindLabel', label: 'Type', value: (d) => d.kindLabel },
+  { key: 'sponsor', label: 'Sponsor', value: (d) => d.sponsor },
+  { key: 'value', label: 'Value/yr', value: (d) => d.value, align: 'right' },
+  { key: 'yearsLeft', label: 'Years left', value: (d) => d.yearsLeft, align: 'right' },
+])
+
+/** Stable identity so the sort hook is not handed a new array every render. */
+const NO_DEALS: SponsorDealRow[] = []
 
 /** Cap bar header, payroll table by salary desc, expiring contracts panel. */
 export function FinancesScreen(): JSX.Element {
@@ -19,6 +33,7 @@ export function FinancesScreen(): JSX.Element {
     () => client.getSponsors(),
     (r) => (r.type === 'sponsors' ? r.sponsors : null)
   )
+  const sponsorSort = useTableSort(sponsors.data?.deals ?? NO_DEALS, SPONSOR_COLS, { key: null })
 
   return (
     <section className="stack">
@@ -53,10 +68,10 @@ export function FinancesScreen(): JSX.Element {
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Type</th><th>Sponsor</th><th className="num">Value/yr</th><th className="num">Years left</th></tr>
+                <tr><SortHeaders columns={SPONSOR_COLS} sortKey={sponsorSort.sortKey} dir={sponsorSort.dir} onSort={sponsorSort.sortBy} /></tr>
               </thead>
               <tbody>
-                {sponsors.data.deals.map((d) => (
+                {sponsorSort.sorted.map((d) => (
                   <tr key={d.kind}>
                     <td>{d.kindLabel}</td>
                     <td>{d.sponsor}</td>
@@ -291,25 +306,42 @@ function BySegment(props: { rows: Array<{ label: string; amount: number }>; tota
   )
 }
 
+/** Payroll place travels with the row so "#" survives a re-sort. */
+type RankedPayrollRow = PayrollRowView & { rank: number }
+
+const PAYROLL_COLS = sortColumns<RankedPayrollRow>()([
+  { key: 'rank', label: '#', value: (r) => r.rank, initialDir: 'asc', title: 'Place on the payroll' },
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position },
+  { key: 'salary', label: 'Salary', value: (r) => r.salary, align: 'right' },
+  { key: 'yearsRemaining', label: 'Yrs', value: (r) => r.yearsRemaining, align: 'right' },
+  { key: 'expiryYear', label: 'Expiry', value: (r) => r.expiryYear, align: 'right' },
+  {
+    key: 'clauses',
+    label: 'Clauses',
+    value: (r) => (r.noTradeClause ? 2 : 0) + (r.twoWay ? 1 : 0),
+    title: 'Movement clauses — sorts the protected contracts to the top',
+  },
+])
+
 function PayrollTable(props: { rows: PayrollRowView[] }): JSX.Element {
+  const ranked = useMemo<RankedPayrollRow[]>(
+    () => props.rows.map((r, i) => ({ ...r, rank: i + 1 })),
+    [props.rows],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, PAYROLL_COLS, { key: null })
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Player</th>
-            <th>Pos</th>
-            <th className="num">Salary</th>
-            <th className="num">Yrs</th>
-            <th className="num">Expiry</th>
-            <th>Clauses</th>
+            <SortHeaders columns={PAYROLL_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>
-          {props.rows.map((row, i) => (
+          {sorted.map((row) => (
             <tr key={row.playerId}>
-              <td className="muted">{i + 1}</td>
+              <td className="muted">{row.rank}</td>
               <td>
                 <PlayerLink playerId={row.playerId} name={row.name} />
               </td>
@@ -340,18 +372,22 @@ function ContractClauses(props: { ntc: boolean; twoWay: boolean }): JSX.Element 
   )
 }
 
+const EXPIRING_COLS = sortColumns<PayrollRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position },
+  { key: 'salary', label: 'Salary', value: (r) => r.salary, align: 'right' },
+  { key: 'expiryYear', label: 'Expiry', value: (r) => r.expiryYear, align: 'right' },
+  { key: 'clauses', label: 'Clauses', value: (r) => (r.noTradeClause ? 2 : 0) + (r.twoWay ? 1 : 0) },
+])
+
 function ExpiringTable(props: { rows: PayrollRowView[] }): JSX.Element {
-  const sorted = [...props.rows].sort((a, b) => b.salary - a.salary)
+  const { sorted, sortKey, dir, sortBy } = useTableSort(props.rows, EXPIRING_COLS, { key: 'salary' })
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>Player</th>
-            <th>Pos</th>
-            <th className="num">Salary</th>
-            <th className="num">Expiry</th>
-            <th>Clauses</th>
+            <SortHeaders columns={EXPIRING_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>

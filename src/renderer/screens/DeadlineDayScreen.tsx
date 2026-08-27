@@ -23,7 +23,19 @@ import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 import { toast } from '../components/store'
+
+const SHOPPED_COLS = sortColumns<ShoppedPlayerView>()([
+  { key: 'name', label: 'Player', value: (p) => p.name },
+  { key: 'club', label: 'Club', value: (p) => p.teamName },
+  { key: 'term', label: 'Term', value: (p) => p.yearsRemaining, title: 'Years left — rentals first when ascending' },
+  { key: 'asking', label: 'Asking', value: (p) => p.asking },
+  { key: 'value', label: 'Val', value: (p) => p.value, align: 'right', title: 'What it would cost to get him' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_SHOPPED: ShoppedPlayerView[] = []
 
 const CARD_BG = 'rgba(8,10,15,0.85)'
 const PANEL_BORDER = '1px solid rgba(255,255,255,0.12)'
@@ -119,6 +131,7 @@ export function DeadlineDayScreen(): JSX.Element {
     () => client.getDeadlineDay(),
     (r) => (r.type === 'deadlineDay' ? r.deadlineDay : null),
   )
+  const shoppedSort = useTableSort(dd?.shopped ?? NO_SHOPPED, SHOPPED_COLS, { key: null })
 
   if (loading) return <Notice kind="info">The phones are lighting up…</Notice>
   if (!dd) {
@@ -187,17 +200,17 @@ export function DeadlineDayScreen(): JSX.Element {
 
         {/* THE BLOCK */}
         <div style={{ maxWidth: 1040, marginBottom: 'var(--sp-3)' }}>
-          <div style={SECTION_LABEL}><Icon size={14}><Icons.League /></Icon> The block — who's being shopped, league-wide</div>
+          <div style={SECTION_LABEL}><Icon size={14}><Icons.Megaphone /></Icon> The block — who's being shopped, league-wide</div>
           {dd.shopped.length === 0 ? (
             <div style={EMPTY_BOX}>No sellers have put names out yet.</div>
           ) : (
             <div className="table-wrap" style={{ background: CARD_BG, backdropFilter: 'blur(6px)', borderRadius: 8 }}>
               <table className="table">
                 <thead>
-                  <tr><th>Player</th><th>Club</th><th>Term</th><th>Asking</th><th className="num">Val</th></tr>
+                  <tr><SortHeaders columns={SHOPPED_COLS} sortKey={shoppedSort.sortKey} dir={shoppedSort.dir} onSort={shoppedSort.sortBy} /></tr>
                 </thead>
                 <tbody>
-                  {dd.shopped.map((p) => <ShoppedRow key={p.playerId} p={p} />)}
+                  {shoppedSort.sorted.map((p) => <ShoppedRow key={p.playerId} p={p} />)}
                 </tbody>
               </table>
             </div>

@@ -6,6 +6,17 @@
 import type { ProgressRowView } from '../../engine/career/progressView'
 import { overallToStars } from '@engine/ratings/composites'
 import { PlayerLink } from './NavContext'
+import { SortHeaders, sortColumns, useTableSort } from './sortable'
+
+const PROGRESS_COLS = sortColumns<ProgressRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name, style: { textAlign: 'left' } },
+  { key: 'position', label: 'Pos', value: (r) => r.position },
+  { key: 'age', label: 'Age', value: (r) => r.age, initialDir: 'asc' },
+  { key: 'overall', label: 'Ability', value: (r) => r.overall },
+  { key: 'overallDelta', label: 'Δ', value: (r) => r.overallDelta, title: 'Season-to-date ability change' },
+  { key: 'potential', label: 'Potential', value: (r) => r.potential },
+  { key: 'potentialDelta', label: 'Δ', value: (r) => r.potentialDelta, title: 'Season-to-date ceiling change' },
+])
 
 /** Star string from a 0–100 rating — we never surface the raw number to the GM. */
 function starStr(overall: number): string {
@@ -28,6 +39,7 @@ function Delta({ value, trend }: { value: number; trend: 'up' | 'down' | 'steady
 }
 
 export function ProgressTable({ rows }: { rows: ProgressRowView[] }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(rows, PROGRESS_COLS, { key: null })
   if (rows.length === 0) {
     return <div className="muted small">No progress to show yet — it builds as the season is played.</div>
   }
@@ -35,16 +47,11 @@ export function ProgressTable({ rows }: { rows: ProgressRowView[] }): JSX.Elemen
     <table className="data-table" style={{ width: '100%' }}>
       <thead>
         <tr>
-          <th style={{ textAlign: 'left' }}>Player</th>
-          <th>Pos</th><th>Age</th>
-          <th>Ability</th>
-          <th title="Season-to-date ability change">Δ</th>
-          <th>Potential</th>
-          <th title="Season-to-date ceiling change">Δ</th>
+          <SortHeaders columns={PROGRESS_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
+        {sorted.map((r) => (
           <tr key={r.playerId}>
             <td><PlayerLink playerId={r.playerId} name={r.name} /></td>
             <td style={{ textAlign: 'center' }}>{r.position}</td>

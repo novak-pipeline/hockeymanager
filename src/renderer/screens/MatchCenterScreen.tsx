@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type {
   BoxScoreGoalieRow,
   BoxScoreSkaterRow,
@@ -10,6 +11,25 @@ import { fmtToi } from '../components/format'
 import { useTeamColorMap, colorFromMap } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const BOX_SKATER_COLS = sortColumns<BoxScoreSkaterRow>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+  { key: 'goals', label: 'G', value: (r) => r.goals, align: 'right' },
+  { key: 'assists', label: 'A', value: (r) => r.assists, align: 'right' },
+  { key: 'shots', label: 'S', value: (r) => r.shots, align: 'right' },
+  { key: 'penaltyMinutes', label: 'PIM', value: (r) => r.penaltyMinutes, align: 'right' },
+  { key: 'toi', label: 'TOI', value: (r) => r.toi, align: 'right' },
+])
+
+const BOX_GOALIE_COLS = sortColumns<BoxScoreGoalieRow>()([
+  { key: 'name', label: 'Goalie', value: (r) => r.name },
+  { key: 'shotsAgainst', label: 'SA', value: (r) => r.shotsAgainst, align: 'right' },
+  { key: 'saves', label: 'SV', value: (r) => r.saves, align: 'right' },
+  { key: 'goalsAgainst', label: 'GA', value: (r) => r.goalsAgainst, align: 'right', initialDir: 'asc' },
+  { key: 'savePct', label: 'SV%', value: (r) => (r.shotsAgainst > 0 ? r.saves / r.shotsAgainst : null), align: 'right' },
+])
 
 const PERIOD_LABELS = ['1st', '2nd', '3rd']
 
@@ -332,14 +352,16 @@ function SkaterTable(props: {
 }): JSX.Element {
   const { abbr, name, rows } = props
 
-  // Sort: most points first, then goals, then TOI
-  const sorted = [...rows].sort((a, b) => {
+  // Default order: most points first, then goals, then TOI. Any header click
+  // takes over from there.
+  const sorted = useMemo(() => [...rows].sort((a, b) => {
     const aPts = a.goals + a.assists
     const bPts = b.goals + b.assists
     if (bPts !== aPts) return bPts - aPts
     if (b.goals !== a.goals) return b.goals - a.goals
     return b.toi - a.toi
-  })
+  }), [rows])
+  const { sorted: shown, sortKey, dir, sortBy } = useTableSort(sorted, BOX_SKATER_COLS, { key: null })
 
   return (
     <Panel title={`${abbr} — ${name}`}>
@@ -347,20 +369,14 @@ function SkaterTable(props: {
         <table className="table">
           <thead>
             <tr>
-              <th>Player</th>
-              <th className="num">Pos</th>
-              <th className="num">G</th>
-              <th className="num">A</th>
-              <th className="num">S</th>
-              <th className="num">PIM</th>
-              <th className="num">TOI</th>
+              <SortHeaders columns={BOX_SKATER_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
+            {shown.map((r) => (
               <SkaterRow key={r.playerId} row={r} />
             ))}
-            {sorted.length === 0 && (
+            {shown.length === 0 && (
               <tr>
                 <td colSpan={7} className="muted" style={{ textAlign: 'center' }}>
                   No data.
@@ -393,6 +409,7 @@ function SkaterRow(props: { row: BoxScoreSkaterRow }): JSX.Element {
 
 function GoalieTable(props: { abbr: string; rows: BoxScoreGoalieRow[] }): JSX.Element {
   const { abbr, rows } = props
+  const { sorted, sortKey, dir, sortBy } = useTableSort(rows, BOX_GOALIE_COLS, { key: null })
   if (rows.length === 0) return <></>
   return (
     <Panel title={`${abbr} — Goalies`}>
@@ -400,15 +417,11 @@ function GoalieTable(props: { abbr: string; rows: BoxScoreGoalieRow[] }): JSX.El
         <table className="table">
           <thead>
             <tr>
-              <th>Goalie</th>
-              <th className="num">SA</th>
-              <th className="num">SV</th>
-              <th className="num">GA</th>
-              <th className="num">SV%</th>
+              <SortHeaders columns={BOX_GOALIE_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {sorted.map((r) => (
               <GoalieRow key={r.playerId} row={r} />
             ))}
           </tbody>

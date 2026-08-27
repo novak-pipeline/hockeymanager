@@ -3,7 +3,7 @@
  * players across the NHL roster and the AHL affiliate, with a current/potential
  * star read, projection tier and a plain-English development note. Read-only.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DevelopmentCenterView, DevelopmentRow } from '../../worker/protocol'
 import type { PracticeFocus } from '../../engine/league/practice'
 import { PlayerLink } from '../components/NavContext'
@@ -12,6 +12,38 @@ import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+/** Stable empty array so the sort hooks do not see a new identity each render. */
+const EMPTY_ROWS: DevelopmentRow[] = []
+
+/** Shared prospect columns — the two tables differ only in where the man skates. */
+function prospectCols(opts: { where: boolean; devFocus: boolean; growth?: Map<string, number> }) {
+  return sortColumns<DevelopmentRow>()([
+    { key: 'name', label: 'Player', value: (r) => r.name },
+    { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+    { key: 'age', label: 'Age', value: (r) => r.age, align: 'right' },
+    opts.where
+      ? { key: 'location', label: 'Where', value: (r) => r.location } as const
+      : { key: 'location', label: 'Club', value: (r) => r.clubAbbrev ?? null } as const,
+    { key: 'currentStars', label: 'Current', value: (r) => r.currentStars },
+    { key: 'potentialStars', label: 'Potential', value: (r) => r.potentialStars },
+    { key: 'tier', label: 'Projection', value: (r) => r.upside, title: 'Ceiling role — sorts by remaining upside' },
+    ...(opts.devFocus
+      ? [
+          { key: 'focus', label: 'Dev focus', value: (r: DevelopmentRow) => r.focus ?? null } as const,
+          {
+            key: 'growth',
+            label: 'Season',
+            align: 'right',
+            value: (r: DevelopmentRow) => opts.growth?.get(r.playerId) ?? null,
+            title: 'Ability gained or lost so far this season — the payoff, shown next to the lever that drives it',
+          } as const,
+        ]
+      : []),
+    { key: 'note', label: 'Development' },
+  ])
+}
 
 /** #174: the individual-development-focus options offered on a prospect. */
 const FOCUS_OPTIONS: Array<{ value: PracticeFocus; label: string }> = [
@@ -63,6 +95,21 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
   const [tab, setTab] = useState<'prospects' | 'system' | 'progress'>('prospects')
   const [busy, setBusy] = useState(false)
 
+  // The U23 progress rows carry season ability change; index them so the
+  // prospects table can show — and sort by — each man's payoff beside his focus.
+  const growthById = useMemo(
+    () => new Map((data?.progress ?? []).map((g) => [g.playerId, g.overallDelta])),
+    [data],
+  )
+  // Sort state lives above the early returns — hooks cannot hide behind a guard.
+  const prospectCols_rows = useMemo(
+    () => prospectCols({ where: true, devFocus: true, growth: growthById }),
+    [growthById],
+  )
+  const prospectCols_system = useMemo(() => prospectCols({ where: false, devFocus: false }), [])
+  const rowsSort = useTableSort(data?.rows ?? EMPTY_ROWS, prospectCols_rows, { key: null })
+  const systemSort = useTableSort(data?.systemElsewhere ?? EMPTY_ROWS, prospectCols_system, { key: null })
+
   async function setFocus(playerId: string, focus: PracticeFocus | null): Promise<void> {
     if (busy) return
     setBusy(true)
@@ -81,9 +128,6 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
   if (!data) return <Notice kind="info">No development data.</Notice>
   const d = data
-  // The U23 progress rows carry season ability change; index them so the
-  // prospects table can show each man's payoff beside his focus.
-  const growthById = new Map(d.progress.map((g) => [g.playerId, g.overallDelta]))
 
   return (
     <section className="stack">
@@ -118,20 +162,11 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
           <table className="table">
             <thead>
               <tr>
-                <th>Player</th>
-                <th className="num">Pos</th>
-                <th className="num">Age</th>
-                <th>Where</th>
-                <th>Current</th>
-                <th>Potential</th>
-                <th>Projection</th>
-                <th>Dev focus</th>
-                <th className="num" title="Ability gained or lost so far this season — the payoff, shown next to the lever that drives it">Season</th>
-                <th>Development</th>
+                <SortHeaders columns={prospectCols_rows} sortKey={rowsSort.sortKey} dir={rowsSort.dir} onSort={rowsSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {d.rows.map((r) => (
+              {rowsSort.sorted.map((r) => (
                 <tr key={r.playerId}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -193,18 +228,11 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
           <table className="table">
             <thead>
               <tr>
-                <th>Player</th>
-                <th className="num">Pos</th>
-                <th className="num">Age</th>
-                <th>Club</th>
-                <th>Current</th>
-                <th>Potential</th>
-                <th>Projection</th>
-                <th>Development</th>
+                <SortHeaders columns={prospectCols_system} sortKey={systemSort.sortKey} dir={systemSort.dir} onSort={systemSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {d.systemElsewhere.map((r) => (
+              {systemSort.sorted.map((r) => (
                 <tr key={r.playerId}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

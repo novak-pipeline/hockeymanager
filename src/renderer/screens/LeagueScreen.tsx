@@ -6,7 +6,7 @@
  *
  * The Overview tab is new; the rest re-parent existing screens.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type {
   LeagueLeadersView,
   LeagueStatsView,
@@ -19,6 +19,7 @@ import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { TeamCrest } from '../components/Crest'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 import { StandingsScreen } from './StandingsScreen'
 import { StatsScreen } from './StatsScreen'
 import { LeagueStatsTableScreen } from './LeagueStatsTableScreen'
@@ -236,41 +237,53 @@ function LeaderCard(props: {
   )
 }
 
-function ConferenceStandingsTable(props: {
-  rows: Array<{
-    teamId: string
-    name: string
-    abbreviation: string
-    gamesPlayed: number
-    wins: number
-    losses: number
-    overtimeLosses: number
-    points: number
-    lastFive: string
-  }>
-}): JSX.Element {
+interface ConfStandingRow {
+  teamId: string
+  name: string
+  abbreviation: string
+  gamesPlayed: number
+  wins: number
+  losses: number
+  overtimeLosses: number
+  points: number
+  lastFive: string
+}
+
+/** Rank travels with the row so the placing chip survives a re-sort. */
+type RankedConfRow = ConfStandingRow & { rank: number }
+
+const CONF_COLS = sortColumns<RankedConfRow>()([
+  { key: 'rank', label: '#', value: (r) => r.rank, initialDir: 'asc', title: 'Conference position' },
+  { key: 'team', label: 'Team', value: (r) => r.name },
+  { key: 'gamesPlayed', label: 'GP', value: (r) => r.gamesPlayed, align: 'right' },
+  { key: 'wins', label: 'W', value: (r) => r.wins, align: 'right' },
+  { key: 'losses', label: 'L', value: (r) => r.losses, align: 'right' },
+  { key: 'overtimeLosses', label: 'OTL', value: (r) => r.overtimeLosses, align: 'right' },
+  { key: 'points', label: 'PTS', value: (r) => r.points, align: 'right' },
+])
+
+function ConferenceStandingsTable(props: { rows: ConfStandingRow[] }): JSX.Element {
+  const ranked = useMemo<RankedConfRow[]>(
+    () => props.rows.map((r, i) => ({ ...r, rank: i + 1 })),
+    [props.rows],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, CONF_COLS, { key: null })
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Team</th>
-            <th className="num">GP</th>
-            <th className="num">W</th>
-            <th className="num">L</th>
-            <th className="num">OTL</th>
-            <th className="num">PTS</th>
+            <SortHeaders columns={CONF_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>
-          {props.rows.map((row, i) => (
+          {sorted.map((row) => (
             <tr key={row.teamId}>
               <td>
                 <span
-                  className={i < 3 ? 'rank-chip top3' : i < 8 ? 'rank-chip top8' : 'rank-chip'}
+                  className={row.rank <= 3 ? 'rank-chip top3' : row.rank <= 8 ? 'rank-chip top8' : 'rank-chip'}
                 >
-                  {i + 1}
+                  {row.rank}
                 </span>
               </td>
               <td>
@@ -337,26 +350,53 @@ function LeagueTeamStatsTab(): JSX.Element {
       />
       {data && data.specialTeams.length > 0 && (
         <Panel title="Special Teams">
+          <SpecialTeamsTable rows={data.specialTeams} />
+          <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
+            Ranked by PP% by default — click any column to re-order. PK% = kills / times shorthanded.
+          </div>
+        </Panel>
+      )}
+      {data && data.specialTeams.length === 0 && (
+        <Notice kind="info">No penalty data yet. Play some games to populate special-teams stats.</Notice>
+      )}
+    </section>
+  )
+}
+
+type SpecialTeamsRow = LeagueStatsView['specialTeams'][number]
+type RankedSpecialTeamsRow = SpecialTeamsRow & { rank: number }
+
+const SPECIAL_TEAMS_COLS = sortColumns<RankedSpecialTeamsRow>()([
+  { key: 'rank', label: '#', value: (r) => r.rank, initialDir: 'asc', title: 'Power-play rank' },
+  { key: 'team', label: 'Team', value: (r) => r.teamName },
+  { key: 'ppGoals', label: 'PP Goals', value: (r) => r.ppGoals, align: 'right' },
+  { key: 'ppOpportunities', label: 'PP Opp', value: (r) => r.ppOpportunities, align: 'right' },
+  { key: 'ppPct', label: 'PP%', value: (r) => r.ppPct, align: 'right' },
+  { key: 'pkKills', label: 'PK Kills', value: (r) => r.pkKills, align: 'right' },
+  { key: 'timesShorthanded', label: 'Times SH', value: (r) => r.timesShorthanded, align: 'right' },
+  { key: 'pkPct', label: 'PK%', value: (r) => r.pkPct, align: 'right' },
+])
+
+function SpecialTeamsTable(props: { rows: SpecialTeamsRow[] }): JSX.Element {
+  const ranked = useMemo<RankedSpecialTeamsRow[]>(
+    () => props.rows.map((r, i) => ({ ...r, rank: i + 1 })),
+    [props.rows],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, SPECIAL_TEAMS_COLS, { key: null })
+  return (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th>Team</th>
-                  <th className="num">PP Goals</th>
-                  <th className="num">PP Opp</th>
-                  <th className="num">PP%</th>
-                  <th className="num">PK Kills</th>
-                  <th className="num">Times SH</th>
-                  <th className="num">PK%</th>
+                  <SortHeaders columns={SPECIAL_TEAMS_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {data.specialTeams.map((row, i) => (
+                {sorted.map((row) => (
                   <tr key={row.teamId}>
                     <td>
-                      <span className={i < 3 ? 'rank-chip top3' : 'rank-chip'}>
-                        {i + 1}
+                      <span className={row.rank <= 3 ? 'rank-chip top3' : 'rank-chip'}>
+                        {row.rank}
                       </span>
                     </td>
                     <td>
@@ -390,15 +430,6 @@ function LeagueTeamStatsTab(): JSX.Element {
               </tbody>
             </table>
           </div>
-          <div className="muted small" style={{ marginTop: 'var(--sp-2)' }}>
-            Sorted by PP% descending. PK% = kills / times shorthanded.
-          </div>
-        </Panel>
-      )}
-      {data && data.specialTeams.length === 0 && (
-        <Notice kind="info">No penalty data yet. Play some games to populate special-teams stats.</Notice>
-      )}
-    </section>
   )
 }
 
@@ -458,18 +489,37 @@ function LeagueTransactionsTab(): JSX.Element {
       )}
       {data && data.items.length > 0 && (
         <Panel title="Recent Transactions">
+          <TransactionsTable items={data.items} />
+        </Panel>
+      )}
+    </section>
+  )
+}
+
+type TransactionRow = TransactionsView['items'][number]
+
+const TRANSACTION_COLS = sortColumns<TransactionRow>()([
+  { key: 'day', label: 'Day', value: (t) => t.day },
+  { key: 'kind', label: 'Type', value: (t) => KIND_LABEL[t.kind] ?? t.kind, title: 'Group the wire by what happened' },
+  { key: 'teams', label: 'Teams', value: (t) => t.teamNames.join(' / ') },
+  { key: 'summary', label: 'Summary' },
+])
+
+/** The league wire. Newest first by default; sortable so a GM can pull every
+ *  trade, or every move one club made, out of a season's worth of noise. */
+function TransactionsTable(props: { items: TransactionRow[] }): JSX.Element {
+  const newestFirst = useMemo(() => [...props.items].reverse(), [props.items])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(newestFirst, TRANSACTION_COLS, { key: null })
+  return (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Day</th>
-                  <th>Type</th>
-                  <th>Teams</th>
-                  <th>Summary</th>
+                  <SortHeaders columns={TRANSACTION_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {[...data.items].reverse().map((tx) => (
+                {sorted.map((tx) => (
                   <tr key={tx.id}>
                     <td className="muted mono" style={{ whiteSpace: 'nowrap' }}>
                       Day {tx.day}
@@ -492,9 +542,6 @@ function LeagueTransactionsTab(): JSX.Element {
               </tbody>
             </table>
           </div>
-        </Panel>
-      )}
-    </section>
   )
 }
 

@@ -346,7 +346,7 @@ function keyDateMeta(label: string): { Cmp: KeyDateIcon; screen?: ScreenId } {
     case 'Scouting Combine': return { Cmp: Icons.Scouting, screen: 'scoutingDraft' }
     case 'Playoffs Begin': return { Cmp: Icons.Playoffs, screen: 'standings' }
     case 'Regular Season Ends': return { Cmp: Icons.Flag, screen: 'standings' }
-    case 'Holiday Roster Freeze': return { Cmp: Icons.League, screen: 'squad' }
+    case 'Holiday Roster Freeze': return { Cmp: Icons.Freeze, screen: 'squad' }
     case 'All-Star Break': return { Cmp: Icons.Star }
     case 'Season Begins': return { Cmp: Icons.Play }
     case 'Training Camp Opens': return { Cmp: Icons.Training, screen: 'practice' }

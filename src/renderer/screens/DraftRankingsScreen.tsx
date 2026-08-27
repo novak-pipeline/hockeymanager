@@ -5,11 +5,58 @@
  * season: preliminary → mid-season → final. A separate U17 watch list tracks
  * younger talent that's on the radar but not yet draft-eligible.
  */
-import { useState } from 'react'
-import type { DraftRankingsView, ScoutBoardRowView } from '../../engine/career/views'
+import { useMemo, useState } from 'react'
+import type { DraftRankRowView, DraftRankingsView, ScoutBoardRowView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+/** The analyst board. "Move" only exists once there is a previous board. */
+function analystCols(showMove: boolean) {
+  return sortColumns<DraftRankRowView>()([
+    { key: 'rank', label: '#', value: (p) => p.rank, initialDir: 'asc' },
+    ...(showMove
+      ? [{ key: 'movement', label: 'Move', value: (p: DraftRankRowView) => p.movement ?? 0, title: 'Movement since the last ranking' } as const]
+      : []),
+    { key: 'name', label: 'Player', value: (p) => p.name, style: { textAlign: 'left' } },
+    { key: 'age', label: 'Age', value: (p) => p.age, initialDir: 'asc' },
+    { key: 'position', label: 'Pos', value: (p) => p.position },
+    { key: 'nation', label: 'Nation', value: (p) => p.nation, style: { textAlign: 'left' } },
+    { key: 'league', label: 'League', value: (p) => p.leagueAbbr, style: { textAlign: 'left' } },
+    { key: 'team', label: 'Team', value: (p) => p.teamName || p.teamAbbr, style: { textAlign: 'left' } },
+    { key: 'currentStars', label: 'Ability', value: (p) => p.currentStars, style: { textAlign: 'left' } },
+    { key: 'projection', label: 'Projection', value: (p) => p.potentialStars, style: { textAlign: 'left' }, title: "What the published board projects him as. A rank and a role is what a public service gives you — a ceiling GRADE is your own department's product, and lives on Your Scouts' Board." },
+    { key: 'pNHLer', label: 'NHLer', value: (p) => p.pNHLer ?? null, title: 'NHLe projection: chance of becoming a regular NHLer' },
+    { key: 'pStar', label: 'Star', value: (p) => p.pStar ?? null, title: 'NHLe projection: chance of becoming an impact/star player' },
+  ])
+}
+
+const RADAR_COLS = sortColumns<DraftRankRowView>()([
+  { key: 'rank', label: '#', value: (p) => p.rank, initialDir: 'asc' },
+  { key: 'name', label: 'Player', value: (p) => p.name, style: { textAlign: 'left' } },
+  { key: 'age', label: 'Age', value: (p) => p.age, initialDir: 'asc' },
+  { key: 'position', label: 'Pos', value: (p) => p.position },
+  { key: 'nation', label: 'Nation', value: (p) => p.nation, style: { textAlign: 'left' } },
+  { key: 'league', label: 'League', value: (p) => p.leagueAbbr, style: { textAlign: 'left' } },
+  { key: 'team', label: 'Team', value: (p) => p.teamName || p.teamAbbr, style: { textAlign: 'left' } },
+  { key: 'potentialStars', label: 'Potential', value: (p) => p.potentialStars, style: { textAlign: 'left' } },
+])
+
+const SCOUT_BOARD_COLS = sortColumns<ScoutBoardRowView>()([
+  { key: 'rank', label: '#', value: (p) => p.rank, initialDir: 'asc' },
+  { key: 'consensusRank', label: 'Cons.', value: (p) => p.consensusRank, initialDir: 'asc', title: 'Analyst consensus rank' },
+  { key: 'movement', label: 'Move', value: (p) => p.movement, title: 'How far your staff has him from the public board' },
+  { key: 'name', label: 'Player', value: (p) => p.name, style: { textAlign: 'left' } },
+  { key: 'age', label: 'Age', value: (p) => p.age, initialDir: 'asc' },
+  { key: 'position', label: 'Pos', value: (p) => p.position },
+  { key: 'league', label: 'League', value: (p) => p.leagueAbbr, style: { textAlign: 'left' } },
+  { key: 'team', label: 'Team', value: (p) => p.teamName || p.teamAbbr, style: { textAlign: 'left' } },
+  { key: 'potentialStars', label: 'Potential', value: (p) => p.potentialStars, style: { textAlign: 'left' } },
+])
+
+/** Stable identity so the sort hooks are not handed a new array each render. */
+const NO_RANK_ROWS: DraftRankRowView[] = []
 
 const PHASE_BLURB: Record<DraftRankingsView['phase'], string> = {
   preliminary: 'Early-season consensus — projection-led, expect movement.',
@@ -34,15 +81,18 @@ export function DraftRankingsScreen(): JSX.Element {
     () => client.getDraftRankings(),
     (r) => (r.type === 'draftRankings' ? r.draftRankings : null)
   )
-  const allRows = data?.rankings ?? []
+  const allRows = data?.rankings ?? NO_RANK_ROWS
   const [board, setBoard] = useState<'analyst' | 'scouts'>('analyst')
   const [scoutId, setScoutId] = useState<string>('') // '' = staff consensus
   const [moveFilter, setMoveFilter] = useState<'all' | 'risers' | 'drops'>('all')
-  const rows = moveFilter === 'risers'
+  const rows = useMemo(() => (moveFilter === 'risers'
     ? allRows.filter((r) => (r.movement ?? 0) > 0).sort((a, b) => (b.movement ?? 0) - (a.movement ?? 0))
     : moveFilter === 'drops'
     ? allRows.filter((r) => (r.movement ?? 0) < 0).sort((a, b) => (a.movement ?? 0) - (b.movement ?? 0))
-    : allRows
+    : allRows), [allRows, moveFilter])
+  const analystColumns = useMemo(() => analystCols(data?.phase !== 'preliminary'), [data?.phase])
+  const analystSort = useTableSort(rows, analystColumns, { key: null })
+  const radarSort = useTableSort(data?.radar ?? NO_RANK_ROWS, RADAR_COLS, { key: null })
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
@@ -112,21 +162,11 @@ export function DraftRankingsScreen(): JSX.Element {
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>#</th>
-                {data.phase !== 'preliminary' && <th title="Movement since the last ranking">Move</th>}
-                <th style={{ textAlign: 'left' }}>Player</th>
-                <th>Age</th><th>Pos</th>
-                <th style={{ textAlign: 'left' }}>Nation</th>
-                <th style={{ textAlign: 'left' }}>League</th>
-                <th style={{ textAlign: 'left' }}>Team</th>
-                <th style={{ textAlign: 'left' }}>Ability</th>
-                <th style={{ textAlign: 'left' }} title="What the published board projects him as. A rank and a role is what a public service gives you — a ceiling GRADE is your own department's product, and lives on Your Scouts' Board.">Projection</th>
-                <th title="NHLe projection: chance of becoming a regular NHLer">NHLer</th>
-                <th title="NHLe projection: chance of becoming an impact/star player">Star</th>
+                <SortHeaders columns={analystColumns} sortKey={analystSort.sortKey} dir={analystSort.dir} onSort={analystSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
+              {analystSort.sorted.map((p) => (
                 <tr key={p.playerId}>
                   <td className="muted" style={{ textAlign: 'center', fontWeight: 700 }}>{p.rank}</td>
                   {data.phase !== 'preliminary' && (
@@ -179,17 +219,11 @@ export function DraftRankingsScreen(): JSX.Element {
           <table className="data-table" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>#</th>
-                <th style={{ textAlign: 'left' }}>Player</th>
-                <th>Age</th><th>Pos</th>
-                <th style={{ textAlign: 'left' }}>Nation</th>
-                <th style={{ textAlign: 'left' }}>League</th>
-                <th style={{ textAlign: 'left' }}>Team</th>
-                <th style={{ textAlign: 'left' }}>Potential</th>
+                <SortHeaders columns={RADAR_COLS} sortKey={radarSort.sortKey} dir={radarSort.dir} onSort={radarSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {data.radar.map((p) => (
+              {radarSort.sorted.map((p) => (
                 <tr key={p.playerId}>
                   <td className="muted" style={{ textAlign: 'center' }}>{p.rank}</td>
                   <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
@@ -235,6 +269,8 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
 }): JSX.Element {
   const [seenOnly, setSeenOnly] = useState(false)
   const shown = seenOnly ? rows.filter((r) => r.seen) : rows
+  // Sort the filtered set — a header click re-orders what the toggle left visible.
+  const { sorted, sortKey, dir, sortBy } = useTableSort(shown, SCOUT_BOARD_COLS, { key: null })
   if (rows.length === 0) {
     return (
       <Panel title="Your Scouts’ Board">
@@ -268,18 +304,11 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
       <table className="data-table" style={{ width: '100%' }}>
         <thead>
           <tr>
-            <th>#</th>
-            <th title="Analyst consensus rank">Cons.</th>
-            <th>Move</th>
-            <th style={{ textAlign: 'left' }}>Player</th>
-            <th>Age</th><th>Pos</th>
-            <th style={{ textAlign: 'left' }}>League</th>
-            <th style={{ textAlign: 'left' }}>Team</th>
-            <th style={{ textAlign: 'left' }}>Potential</th>
+            <SortHeaders columns={SCOUT_BOARD_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>
-          {shown.map((p) => (
+          {sorted.map((p) => (
             <tr key={p.playerId} style={p.verdict === 'higher'
               ? { background: 'rgba(76,175,114,0.07)' }
               : p.verdict === 'lower' ? { background: 'rgba(216,88,79,0.07)' } : undefined}>

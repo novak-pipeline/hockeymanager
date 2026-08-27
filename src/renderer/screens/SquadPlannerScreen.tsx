@@ -14,17 +14,31 @@ import { ProgressTable } from '../components/ProgressTable'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 // #188 roles tab: fixed display order for the squad-status dropdown.
 const ROLE_ORDER: SquadStatus[] = ['keyPlayer', 'coreStarter', 'rotation', 'topProspect', 'prospect', 'surplus']
 
 /** Bulk squad-role board — set every player's role here instead of right-clicking
  *  each one. Auto-seeds sensible roles on first open. */
+const ROLE_BOARD_COLS = sortColumns<RoleBoardRow>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position },
+  { key: 'age', label: 'Age', value: (r) => r.age, align: 'right', initialDir: 'asc' },
+  { key: 'overall', label: 'Ability', value: (r) => r.overall, align: 'right' },
+  { key: 'role', label: 'Role', value: (r) => r.squadStatus ?? null, title: 'The role you have set — the unassigned sink to the bottom' },
+  { key: 'suggested', label: 'Suggested', value: (r) => r.suggested },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_ROLE_ROWS: RoleBoardRow[] = []
+
 function RolesTab(): JSX.Element {
   const client = useClient()
   const [view, setView] = useState<RoleBoardView | null>(null)
   const [busy, setBusy] = useState(false)
   const seeded = useRef(false)
+  const roleSort = useTableSort(view?.rows ?? NO_ROLE_ROWS, ROLE_BOARD_COLS, { key: null })
 
   const apply = useCallback((r: { type: string; roleBoard?: RoleBoardView }) => {
     if (r.type === 'roleBoard' && r.roleBoard) setView(r.roleBoard)
@@ -112,9 +126,9 @@ function RolesTab(): JSX.Element {
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Player</th><th>Pos</th><th className="num">Age</th><th className="num">Ability</th><th>Role</th><th>Suggested</th></tr>
+            <tr><SortHeaders columns={ROLE_BOARD_COLS} sortKey={roleSort.sortKey} dir={roleSort.dir} onSort={roleSort.sortBy} /></tr>
           </thead>
-          <tbody>{view.rows.map((r) => <Row key={r.playerId} r={r} />)}</tbody>
+          <tbody>{roleSort.sorted.map((r) => <Row key={r.playerId} r={r} />)}</tbody>
         </table>
       </div>
     </Panel>
@@ -147,6 +161,21 @@ function Cell(props: { players: PlannerPlayer[] }): JSX.Element {
   )
 }
 
+const VERDICT_RANK: Record<PositionDepth['verdict'], number> = {
+  Critical: 0, Thin: 1, Adequate: 2, Strong: 3,
+}
+
+const DEPTH_COLS = sortColumns<PositionDepth>()([
+  { key: 'label', label: 'Position', value: (d) => d.label },
+  { key: 'count', label: 'No.', value: (d) => d.count, align: 'right' },
+  { key: 'rank', label: 'League rank', value: (d) => d.rank ?? null, align: 'right', initialDir: 'asc' },
+  { key: 'verdict', label: 'Verdict', value: (d) => VERDICT_RANK[d.verdict], initialDir: 'asc', title: 'How your depth compares league-wide — worst first' },
+  { key: 'note', label: 'Note' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_DEPTH: PositionDepth[] = []
+
 export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
   void props.teamId // user-club scoped
@@ -156,6 +185,7 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
   )
 
   const [tab, setTab] = useState<'planner' | 'roles' | 'progress'>('planner')
+  const depthSort = useTableSort(data?.depth ?? NO_DEPTH, DEPTH_COLS, { key: null })
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading roster planner…</Notice>
@@ -215,10 +245,10 @@ export function SquadPlannerScreen(props: { teamId?: string } = {}): JSX.Element
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Position</th><th className="num">No.</th><th className="num">League rank</th><th>Verdict</th><th>Note</th></tr>
+                <tr><SortHeaders columns={DEPTH_COLS} sortKey={depthSort.sortKey} dir={depthSort.dir} onSort={depthSort.sortBy} /></tr>
               </thead>
               <tbody>
-                {d.depth.map((dp) => (
+                {depthSort.sorted.map((dp) => (
                   <tr key={dp.group}>
                     <td>{dp.label}</td>
                     <td className="num muted">{dp.count}</td>

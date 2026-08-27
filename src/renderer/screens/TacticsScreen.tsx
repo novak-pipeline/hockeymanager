@@ -643,8 +643,12 @@ function DepthChart({ squad, onRosterDragStart }: {
               {HEADERS.map(([key, label]) => (
                 <th
                   key={key}
+                  // `sortable` is what scripts/dev/ui-audit.mjs presses: this
+                  // header has always sorted, but without the class nothing
+                  // automated ever checked that it still does.
+                  className="sortable"
                   onClick={() => clickHeader(key)}
-                  style={{ cursor: 'pointer', userSelect: 'none', color: sort.key === key ? 'var(--accent)' : undefined }}
+                  style={{ userSelect: 'none', color: sort.key === key ? 'var(--accent)' : undefined }}
                   title={`Sort by ${label}`}
                 >
                   {label}{arrow(key)}
@@ -786,34 +790,126 @@ function SystemInfoBar({ summary }: { summary: StaffMeetingSummaryView }): JSX.E
   )
 }
 
-/* ── #154: what the board is worth, in standings points ── */
+/* ── #154: the assistant coach's read on the board ── */
 
 /**
- * The receipt. Every figure here is a lever the audit measured against tens of
- * thousands of simulated games (docs/LEVER-AUDIT.md), read against the club's
- * own players. The GM should never have to wonder whether moving a winger up a
- * line did anything — this says what it was worth.
+ * The bench boss's opinion of your line-up.
+ *
+ * Underneath this is the lever audit (#154, docs/LEVER-AUDIT.md), which prices
+ * every deployment decision in standings points measured over 40,000 simulated
+ * games. That measurement is real and it still drives what is said here — but
+ * playtest 2026-08-26 §F2 caught the engine's own units leaking onto the screen
+ * as *"What this board is worth ≈ 4.3 pts on the table"*, next to a footnote
+ * about the simulation that produced it. A GM standing at a whiteboard is not
+ * handed a regression coefficient; he is told, by the man who runs the bench,
+ * that his second power-play unit is a waste of two minutes.
+ *
+ * So the numbers stay in the model and the words come out of the coach. The
+ * information a GM can act on — WHICH lever is being wasted, and roughly how
+ * much it matters — is fully preserved; the false precision is not.
  */
+
+/** How loudly the coach complains about one lever. Bands, never decimals. */
+function leverGripe(pointsLost: number): 'fine' | 'minor' | 'real' | 'bad' {
+  if (pointsLost < 0.5) return 'fine'
+  if (pointsLost < 1.5) return 'minor'
+  if (pointsLost < 3) return 'real'
+  return 'bad'
+}
+
+const GRIPE_STYLE: Record<'fine' | 'minor' | 'real' | 'bad', { mark: string; color: string }> = {
+  fine:  { mark: 'Happy',        color: 'var(--success)' },
+  minor: { mark: 'Would tweak',  color: 'var(--text)' },
+  real:  { mark: 'Wants a change', color: 'var(--amber, #f59e0b)' },
+  bad:   { mark: 'Unhappy',      color: 'var(--danger)' },
+}
+
 function LeverReceiptBar({ receipts }: { receipts: NonNullable<TacticsView['receipts']> }): JSX.Element {
   const [open, setOpen] = useState(false)
   const { deployment: d, powerPlay: pp, penaltyKill: pk, goalie: g, condition: c } = receipts
   const total = receipts.totalPointsLost
 
-  const tone = total < 2 ? 'var(--success)' : total < 8 ? 'var(--amber, #f59e0b)' : 'var(--danger)'
-  const pts = (n: number): string => `${n.toFixed(1)} pts`
+  const verdict =
+    total < 2 ? { text: 'He would not change a thing', color: 'var(--success)' }
+    : total < 5 ? { text: 'He would move one or two men', color: 'var(--text)' }
+    : total < 10 ? { text: 'He thinks you are leaving results out there', color: 'var(--amber, #f59e0b)' }
+    : { text: 'He thinks this board is costing you games', color: 'var(--danger)' }
 
-  const rows: Array<{ label: string; detail: string; lost: number }> = [
+  /**
+   * Each lever in the coach's own words. The sentence is chosen from the SAME
+   * band as the verdict beside it — key them off different thresholds and you
+   * get rows like "The mood is good · Unhappy", which is how a UI stops being
+   * believed.
+   */
+  const say = (
+    lost: number,
+    words: Record<'fine' | 'minor' | 'real' | 'bad', string>,
+  ): string => words[leverGripe(lost)]
+
+  const rows: Array<{ label: string; said: string; lost: number }> = [
     {
       label: 'Line order',
-      detail: `${d.weighted.toFixed(1)} ice-time-weighted rating · best available order ${d.best.toFixed(1)}`,
+      said: say(d.pointsLost, {
+        fine: 'The minutes are going to the right men.',
+        minor: 'One or two of the top-six minutes could be better spent.',
+        real: 'He would move a couple of men up and down the sheet.',
+        bad: 'Your best players are not getting the ice time their level says they should.',
+      }),
       lost: d.pointsLost,
     },
-    { label: 'Power play 1', detail: `unit rates ${pp.current.toFixed(1)} · best available ${pp.best.toFixed(1)}`, lost: pp.pointsLost },
-    { label: 'Penalty kill 1', detail: `unit rates ${pk.current.toFixed(1)} · best available ${pk.best.toFixed(1)}`, lost: pk.pointsLost },
-    { label: 'Starting goalie', detail: `starter rates ${g.current.toFixed(1)} · other man ${g.best.toFixed(1)}`, lost: g.pointsLost },
-    { label: 'Fresh legs', detail: `roster carrying ${c.fatigue.toFixed(1)} fatigue`, lost: c.fatiguePointsLost },
-    { label: 'Room morale', detail: `roster morale ${c.morale}`, lost: c.moralePointsLost },
+    {
+      label: 'Power play 1',
+      said: say(pp.pointsLost, {
+        fine: 'The first unit is the five he would pick.',
+        minor: 'He would swap one man on the first unit.',
+        real: 'He would put a different man on the first unit.',
+        bad: 'He thinks the wrong five are getting the power-play minutes.',
+      }),
+      lost: pp.pointsLost,
+    },
+    {
+      label: 'Penalty kill 1',
+      said: say(pk.pointsLost, {
+        fine: 'The kill is in the right hands.',
+        minor: 'He would change one man on the first kill pair.',
+        real: 'His best penalty killer is not on the first pair.',
+        bad: 'He does not trust the men you are killing penalties with.',
+      }),
+      lost: pk.pointsLost,
+    },
+    {
+      label: 'Starting goalie',
+      said: say(g.pointsLost, {
+        fine: 'He is happy with the man in net.',
+        minor: 'He would give the other goalie a few more starts.',
+        real: 'He would start the other goalie.',
+        bad: 'He thinks you are starting the wrong goalie.',
+      }),
+      lost: g.pointsLost,
+    },
+    {
+      label: 'Fresh legs',
+      said: say(c.fatiguePointsLost, {
+        fine: 'The room has its legs.',
+        minor: 'A couple of them are heavy-legged.',
+        real: 'Too many of them are running on empty.',
+        bad: 'This group is worn down and it shows in the third period.',
+      }),
+      lost: c.fatiguePointsLost,
+    },
+    {
+      label: 'Room morale',
+      said: say(c.moralePointsLost, {
+        fine: 'The mood is good.',
+        minor: 'The mood could be better.',
+        real: 'The room is flat and he can feel it at practice.',
+        bad: 'The room is unhappy, and it is costing you on the ice.',
+      }),
+      lost: c.moralePointsLost,
+    },
   ]
+
+  const gripes = rows.filter((r) => leverGripe(r.lost) !== 'fine').length
 
   return (
     <div style={{ position: 'relative' }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
@@ -826,16 +922,12 @@ function LeverReceiptBar({ receipts }: { receipts: NonNullable<TacticsView['rece
         }}
       >
         <span className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          What this board is worth
+          Your assistant's read
         </span>
-        <span style={{ fontWeight: 700, color: tone }}>
-          {total < 2 ? 'Nothing left on the table' : `≈ ${pts(total)} on the table`}
-        </span>
+        <span style={{ fontWeight: 700, color: verdict.color }}>{verdict.text}</span>
         <span style={{ color: 'var(--accent)', fontSize: 11, opacity: 0.8 }}>ⓘ</span>
         <span className="small" style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
-          line order <strong style={{ color: d.efficiency > 0.95 ? 'var(--success)' : 'var(--text)' }}>
-            {Math.round(d.efficiency * 100)}%
-          </strong> of the best arrangement
+          {gripes === 0 ? 'nothing on his list' : `${gripes} thing${gripes === 1 ? '' : 's'} on his list`}
         </span>
       </div>
 
@@ -848,23 +940,22 @@ function LeverReceiptBar({ receipts }: { receipts: NonNullable<TacticsView['rece
           }}
         >
           <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent)', marginBottom: 6 }}>
-            Standings points your current setup is giving away
+            What your assistant would change
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '4px 10px', fontSize: 12 }}>
-            {rows.map((r) => (
-              <Fragment key={r.label}>
-                <span style={{ fontWeight: 600 }}>{r.label}</span>
-                <span className="muted">{r.detail}</span>
-                <span style={{ fontWeight: 700, color: r.lost < 0.5 ? 'var(--success)' : r.lost < 3 ? 'var(--text)' : 'var(--danger)' }}>
-                  {r.lost < 0.5 ? '✓' : `−${r.lost.toFixed(1)}`}
-                </span>
-              </Fragment>
-            ))}
+            {rows.map((r) => {
+              const style = GRIPE_STYLE[leverGripe(r.lost)]
+              return (
+                <Fragment key={r.label}>
+                  <span style={{ fontWeight: 600 }}>{r.label}</span>
+                  <span className="muted">{r.said}</span>
+                  <span style={{ fontWeight: 700, color: style.color, whiteSpace: 'nowrap' }}>{style.mark}</span>
+                </Fragment>
+              )
+            })}
           </div>
           <div className="muted" style={{ fontSize: 10, marginTop: 'var(--sp-3)', opacity: 0.75, lineHeight: 1.5 }}>
-            Estimated across a full 82-game season. Each lever’s best-to-worst span was measured over
-            40,000 simulated games with identical rosters on both benches; your club is placed on that
-            span. Move a player and watch the number change.
+            He watches every practice and every shift. Move a player and ask him again.
           </div>
         </div>
       )}

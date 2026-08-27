@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ComponentType } from 'react'
 import {
   Trophy, Medal, Star, Flame, Shield, ShieldCheck, Sparkles, Landmark,
@@ -11,6 +11,31 @@ import { PlayerLink } from '../components/NavContext'
 import { Notice, Panel, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const SEASON_COLS = sortColumns<SeasonArchive>()([
+  { key: 'year', label: 'Year', value: (s) => s.year, style: { width: 60 } },
+  { key: 'champion', label: 'Champion', value: (s) => s.championName ?? null },
+  { key: 'presidents', label: "Presidents'", value: (s) => s.presidentsTeamName ?? null },
+  { key: 'points', label: 'Points Leader', value: (s) => s.leaders.points?.value ?? null },
+  { key: 'goals', label: 'Goals Leader', value: (s) => s.leaders.goals?.value ?? null },
+  { key: 'wins', label: 'Wins Leader', value: (s) => s.leaders.wins?.value ?? null },
+  {
+    key: 'userTeamRank',
+    label: 'Your Rank',
+    value: (s) => s.userTeamRank,
+    align: 'right',
+    initialDir: 'asc',
+    title: 'Where your club finished — your best years first',
+  },
+])
+
+const AWARD_COLS = sortColumns<AwardRecord>()([
+  { key: 'year', label: 'Year', value: (e) => e.year, style: { width: 60 } },
+  { key: 'winner', label: 'Winner', value: (e) => e.playerName },
+  { key: 'team', label: 'Team', value: (e) => e.teamAbbr },
+  { key: 'value', label: 'Value', value: (e) => e.value, align: 'right' },
+])
 import { useClient, useScreenData } from '../hooks/useSim'
 
 /* ── tab ids ── */
@@ -330,8 +355,9 @@ function SeasonsTab(props: { seasons: SeasonArchive[] }): JSX.Element {
     )
   }
 
-  // Newest first
-  const sorted = [...seasons].reverse()
+  // Newest first by default; any header click takes over.
+  const newestFirst = useMemo(() => [...seasons].reverse(), [seasons])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(newestFirst, SEASON_COLS, { key: null })
 
   return (
     <Panel>
@@ -339,13 +365,7 @@ function SeasonsTab(props: { seasons: SeasonArchive[] }): JSX.Element {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 60 }}>Year</th>
-              <th>Champion</th>
-              <th>Presidents&apos;</th>
-              <th>Points Leader</th>
-              <th>Goals Leader</th>
-              <th>Wins Leader</th>
-              <th className="num">Your Rank</th>
+              <SortHeaders columns={SEASON_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
@@ -488,6 +508,7 @@ function AwardsTab(props: { awards: AwardRecord[] }): JSX.Element {
 function AwardBoard(props: { awardName: string; entries: AwardRecord[] }): JSX.Element {
   const { awardName, entries } = props
   const AwardIcon = awardIcon(awardName)
+  const awardSort = useTableSort(entries, AWARD_COLS, { key: null })
 
   return (
     <Panel>
@@ -525,14 +546,11 @@ function AwardBoard(props: { awardName: string; entries: AwardRecord[] }): JSX.E
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 60 }}>Year</th>
-              <th>Winner</th>
-              <th>Team</th>
-              <th className="num">Value</th>
+              <SortHeaders columns={AWARD_COLS} sortKey={awardSort.sortKey} dir={awardSort.dir} onSort={awardSort.sortBy} />
             </tr>
           </thead>
           <tbody>
-            {entries.map((e) => (
+            {awardSort.sorted.map((e) => (
               <tr key={`${e.year}-${e.playerId}`}>
                 <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--muted)' }}>
                   {e.year}

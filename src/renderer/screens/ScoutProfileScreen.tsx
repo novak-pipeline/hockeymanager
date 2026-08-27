@@ -138,7 +138,9 @@ export function ScoutProfileScreen({ scoutId }: { scoutId: string }): JSX.Elemen
             }
             const arrow = (k: typeof sortKey): string => (k === sortKey ? (sortDir === 'desc' ? ' ▾' : ' ▴') : '')
             const Th = ({ k, label }: { k: typeof sortKey; label: string }): JSX.Element => (
-              <th className="num" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSort(k)}>{label}{arrow(k)}</th>
+              // `sortable` is what scripts/dev/ui-audit.mjs presses — without
+              // it this header sorts but nothing automated proves it still does.
+              <th className="sortable num" style={{ userSelect: 'none' }} onClick={() => setSort(k)}>{label}{arrow(k)}</th>
             )
             return (
               <Panel title={`Players Scouted (${data.scouted.length})`}>

@@ -5,6 +5,28 @@ import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const INTEREST_RANK: Record<'courting' | 'open' | 'longshot', number> = { longshot: 0, open: 1, courting: 2 }
+
+type GmOpening = GMJobMarketView['openings'][number]
+type GmRelationship = GMRelationshipsView['rows'][number]
+
+const OPENING_COLS = sortColumns<GmOpening>()([
+  { key: 'club', label: 'Club', value: (o) => o.teamName },
+  { key: 'projectedRank', label: 'Proj. finish', value: (o) => o.projectedRank, align: 'right', initialDir: 'asc' },
+  { key: 'interest', label: 'Interest', value: (o) => INTEREST_RANK[o.interest], title: 'How keen the club is on you' },
+  { key: 'act', label: '' },
+])
+
+const RELATIONSHIP_COLS = sortColumns<GmRelationship>()([
+  { key: 'club', label: 'Club', value: (r) => r.teamName },
+  { key: 'standing', label: 'Standing', value: (r) => r.standing, align: 'right' },
+  { key: 'label', label: 'Relationship', value: (r) => r.standing },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_RELATIONSHIPS: GmRelationship[] = []
 
 function interestChip(interest: 'courting' | 'open' | 'longshot'): JSX.Element {
   const cls = interest === 'courting' ? 'chip chip-accent' : interest === 'open' ? 'chip' : 'chip chip-warn'
@@ -13,6 +35,7 @@ function interestChip(interest: 'courting' | 'open' | 'longshot'): JSX.Element {
 }
 
 function JobMarketPanel(props: { market: GMJobMarketView; onRefetch: () => void }): JSX.Element {
+  const openingSort = useTableSort(props.market.openings, OPENING_COLS, { key: null })
   const client = useClient()
   const { market } = props
   const [busy, setBusy] = useState(false)
@@ -52,14 +75,11 @@ function JobMarketPanel(props: { market: GMJobMarketView; onRefetch: () => void 
           <table className="table">
             <thead>
               <tr>
-                <th>Club</th>
-                <th className="num">Proj. finish</th>
-                <th>Interest</th>
-                <th />
+                <SortHeaders columns={OPENING_COLS} sortKey={openingSort.sortKey} dir={openingSort.dir} onSort={openingSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {market.openings.map((o) => (
+              {openingSort.sorted.map((o) => (
                 <tr key={o.teamId}>
                   <td>
                     <strong>{o.teamAbbr}</strong> <span className="muted small">{o.teamName}</span>
@@ -100,6 +120,7 @@ export function GMCareerScreen(): JSX.Element {
     () => client.getGMRelationships(),
     (r) => (r.type === 'gmRelationships' ? r.gmRelationships : null)
   )
+  const relSort = useTableSort(rel.data?.rows ?? NO_RELATIONSHIPS, RELATIONSHIP_COLS, { key: null })
 
   return (
     <section className="stack">
@@ -144,10 +165,10 @@ export function GMCareerScreen(): JSX.Element {
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Club</th><th className="num">Standing</th><th>Relationship</th></tr>
+                <tr><SortHeaders columns={RELATIONSHIP_COLS} sortKey={relSort.sortKey} dir={relSort.dir} onSort={relSort.sortBy} /></tr>
               </thead>
               <tbody>
-                {rel.data.rows.map((r) => (
+                {relSort.sorted.map((r) => (
                   <tr key={r.teamAbbr}>
                     <td><strong>{r.teamAbbr}</strong> <span className="muted small">{r.teamName}</span></td>
                     <td className="num">{r.standing}</td>

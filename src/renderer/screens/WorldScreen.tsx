@@ -4,13 +4,14 @@
  * best established players, and the top prospects to scout. Data from
  * getCompetitions (League.competitions). Empty when the active DB is NHL-only.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { CompetitionNotableView, CompetitionView, NationView, WorldJuniorsView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 const TIER_LABEL: Record<CompetitionView['tier'], string> = {
   active: 'Top flight',
@@ -50,21 +51,33 @@ function StrengthBar({ pct }: { pct: number }): JSX.Element {
   )
 }
 
+function notableCols(showAge: boolean, hideRatings: boolean) {
+  return sortColumns<CompetitionNotableView>()([
+    { key: 'name', label: 'Player', value: (p) => p.name, style: { textAlign: 'left' } },
+    { key: 'team', label: 'Team', value: (p) => p.teamAbbr, style: { textAlign: 'left' } },
+    { key: 'position', label: 'Pos', value: (p) => p.position },
+    ...(showAge ? [{ key: 'age', label: 'Age', value: (p: CompetitionNotableView) => p.age } as const] : []),
+    ...(hideRatings
+      ? []
+      : [
+          { key: 'currentStars', label: 'Ability', value: (p: CompetitionNotableView) => p.currentStars, style: { textAlign: 'left' } } as const,
+          { key: 'potentialStars', label: 'Potential', value: (p: CompetitionNotableView) => p.potentialStars, style: { textAlign: 'left' } } as const,
+        ]),
+  ])
+}
+
 function NotableTable({ rows, showAge, hideRatings }: { rows: CompetitionNotableView[]; showAge?: boolean; hideRatings?: boolean }): JSX.Element {
+  const cols = useMemo(() => notableCols(!!showAge, !!hideRatings), [showAge, hideRatings])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(rows, cols, { key: null })
   return (
     <table className="data-table" style={{ width: '100%' }}>
       <thead>
         <tr>
-          <th style={{ textAlign: 'left' }}>Player</th>
-          <th style={{ textAlign: 'left' }}>Team</th>
-          <th>Pos</th>
-          {showAge && <th>Age</th>}
-          {!hideRatings && <th style={{ textAlign: 'left' }}>Ability</th>}
-          {!hideRatings && <th style={{ textAlign: 'left' }}>Potential</th>}
+          <SortHeaders columns={cols} sortKey={sortKey} dir={dir} onSort={sortBy} />
         </tr>
       </thead>
       <tbody>
-        {rows.map((p) => (
+        {sorted.map((p) => (
           <tr key={p.playerId}>
             <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
             <td className="muted"><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
@@ -114,39 +127,7 @@ function LeaguesPanel(): JSX.Element {
         <>
           {/* League strength ranking */}
           <Panel title="League strength ranking">
-            <table className="data-table" style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th style={{ textAlign: 'left' }}>League</th>
-                  <th style={{ textAlign: 'left' }}>Nation</th>
-                  <th style={{ textAlign: 'left' }}>Tier</th>
-                  <th>Teams</th>
-                  <th>Players</th>
-                  <th style={{ textAlign: 'left' }}>NHL-equivalent strength</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comps.map((c) => (
-                  <tr
-                    key={c.id}
-                    onClick={() => setSelected(c.id)}
-                    style={{
-                      cursor: 'pointer',
-                      background: current?.id === c.id ? 'var(--accent-soft, rgba(120,120,255,0.12))' : undefined,
-                    }}
-                  >
-                    <td className="muted" style={{ textAlign: 'center' }}>{c.strengthRank}</td>
-                    <td><span style={{ fontWeight: 700 }}>{c.abbrev}</span> <span className="muted small">{c.name}</span></td>
-                    <td className="muted">{c.nation}</td>
-                    <td><span style={{ color: TIER_COLOR[c.tier], fontSize: 12 }}>{TIER_LABEL[c.tier]}</span></td>
-                    <td style={{ textAlign: 'center' }}>{c.teamCount}</td>
-                    <td style={{ textAlign: 'center' }}>{c.playerCount}</td>
-                    <td><StrengthBar pct={Math.round(c.strength * 100)} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <LeagueStrengthTable comps={comps} currentId={current?.id ?? null} onSelect={setSelected} />
           </Panel>
 
           {/* Selected league depth */}
@@ -161,17 +142,106 @@ function LeaguesPanel(): JSX.Element {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
                 <Panel title="Standings">
+                  <CompetitionStandingsTable rows={current.standings} />
+                </Panel>
+
+                <Panel title="Scoring leaders">
+                  {current.scorers.length === 0 ? (
+                    <div className="muted small">No games played yet this season.</div>
+                  ) : (
+                    <CompetitionScorersTable rows={current.scorers} />
+                  )}
+                </Panel>
+              </div>
+              <SelectedLeagueRest current={current} />
+            </>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+const LEAGUE_STRENGTH_COLS = sortColumns<CompetitionView>()([
+  { key: 'strengthRank', label: '#', value: (c) => c.strengthRank, initialDir: 'asc' },
+  { key: 'league', label: 'League', value: (c) => c.abbrev, style: { textAlign: 'left' } },
+  { key: 'nation', label: 'Nation', value: (c) => c.nation, style: { textAlign: 'left' } },
+  { key: 'tier', label: 'Tier', value: (c) => c.tier, style: { textAlign: 'left' } },
+  { key: 'teamCount', label: 'Teams', value: (c) => c.teamCount },
+  { key: 'playerCount', label: 'Players', value: (c) => c.playerCount },
+  { key: 'strength', label: 'NHL-equivalent strength', value: (c) => c.strength, style: { textAlign: 'left' } },
+])
+
+function LeagueStrengthTable(props: {
+  comps: CompetitionView[]
+  currentId: string | null
+  onSelect: (id: string) => void
+}): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(props.comps, LEAGUE_STRENGTH_COLS, { key: null })
+  const { currentId, onSelect } = props
+  return (
+            <table className="data-table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <SortHeaders columns={LEAGUE_STRENGTH_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((c) => (
+                  <tr
+                    key={c.id}
+                    onClick={() => onSelect(c.id)}
+                    style={{
+                      cursor: 'pointer',
+                      background: currentId === c.id ? 'var(--accent-soft, rgba(120,120,255,0.12))' : undefined,
+                    }}
+                  >
+                    <td className="muted" style={{ textAlign: 'center' }}>{c.strengthRank}</td>
+                    <td><span style={{ fontWeight: 700 }}>{c.abbrev}</span> <span className="muted small">{c.name}</span></td>
+                    <td className="muted">{c.nation}</td>
+                    <td><span style={{ color: TIER_COLOR[c.tier], fontSize: 12 }}>{TIER_LABEL[c.tier]}</span></td>
+                    <td style={{ textAlign: 'center' }}>{c.teamCount}</td>
+                    <td style={{ textAlign: 'center' }}>{c.playerCount}</td>
+                    <td><StrengthBar pct={Math.round(c.strength * 100)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+  )
+}
+
+type CompStandingRow = CompetitionView['standings'][number]
+type RankedCompStandingRow = CompStandingRow & { rank: number }
+
+const COMP_STANDINGS_COLS = sortColumns<RankedCompStandingRow>()([
+  { key: 'rank', label: '#', value: (s) => s.rank, initialDir: 'asc' },
+  { key: 'name', label: 'Team', value: (s) => s.name, style: { textAlign: 'left' } },
+  { key: 'gamesPlayed', label: 'GP', value: (s) => s.gamesPlayed },
+  { key: 'wins', label: 'W', value: (s) => s.wins },
+  { key: 'losses', label: 'L', value: (s) => s.losses },
+  { key: 'overtimeLosses', label: 'OTL', value: (s) => s.overtimeLosses },
+  { key: 'points', label: 'PTS', value: (s) => s.points },
+  { key: 'goalsFor', label: 'GF', value: (s) => s.goalsFor },
+  { key: 'goalsAgainst', label: 'GA', value: (s) => s.goalsAgainst },
+])
+
+function CompetitionStandingsTable(props: { rows: CompStandingRow[] }): JSX.Element {
+  const ranked = useMemo<RankedCompStandingRow[]>(
+    () => props.rows.map((r, i) => ({ ...r, rank: i + 1 })),
+    [props.rows],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, COMP_STANDINGS_COLS, { key: null })
+  return (
                   <table className="data-table" style={{ width: '100%' }}>
                     <thead>
                       <tr>
-                        <th>#</th><th style={{ textAlign: 'left' }}>Team</th>
-                        <th>GP</th><th>W</th><th>L</th><th>OTL</th><th>PTS</th><th>GF</th><th>GA</th>
+                        <SortHeaders columns={COMP_STANDINGS_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                       </tr>
                     </thead>
                     <tbody>
-                      {current.standings.map((s, i) => (
+                      {sorted.map((s) => (
                         <tr key={s.teamId}>
-                          <td className="muted" style={{ textAlign: 'center' }}>{i + 1}</td>
+                          <td className="muted" style={{ textAlign: 'center' }}>{s.rank}</td>
                           <td>
                             <span style={{
                               display: 'inline-block', width: 8, height: 8, borderRadius: 2, marginRight: 6,
@@ -190,21 +260,31 @@ function LeaguesPanel(): JSX.Element {
                       ))}
                     </tbody>
                   </table>
-                </Panel>
+  )
+}
 
-                <Panel title="Scoring leaders">
-                  {current.scorers.length === 0 ? (
-                    <div className="muted small">No games played yet this season.</div>
-                  ) : (
+type CompScorerRow = CompetitionView['scorers'][number]
+
+const COMP_SCORER_COLS = sortColumns<CompScorerRow>()([
+  { key: 'name', label: 'Player', value: (p) => p.name, style: { textAlign: 'left' } },
+  { key: 'team', label: 'Team', value: (p) => p.teamAbbr },
+  { key: 'gamesPlayed', label: 'GP', value: (p) => p.gamesPlayed },
+  { key: 'goals', label: 'G', value: (p) => p.goals },
+  { key: 'assists', label: 'A', value: (p) => p.assists },
+  { key: 'points', label: 'P', value: (p) => p.points },
+])
+
+function CompetitionScorersTable(props: { rows: CompScorerRow[] }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(props.rows, COMP_SCORER_COLS, { key: null })
+  return (
                     <table className="data-table" style={{ width: '100%' }}>
                       <thead>
                         <tr>
-                          <th style={{ textAlign: 'left' }}>Player</th><th>Team</th>
-                          <th>GP</th><th>G</th><th>A</th><th>P</th>
+                          <SortHeaders columns={COMP_SCORER_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                         </tr>
                       </thead>
                       <tbody>
-                        {current.scorers.map((p) => (
+                        {sorted.map((p) => (
                           <tr key={p.playerId}>
                             <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                             <td className="muted" style={{ textAlign: 'center' }}><TeamLink teamId={p.teamId} name={p.teamAbbr} /></td>
@@ -216,10 +296,12 @@ function LeaguesPanel(): JSX.Element {
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </Panel>
-              </div>
+  )
+}
 
+/** The lower half of a selected league's page. */
+function SelectedLeagueRest({ current }: { current: CompetitionView }): JSX.Element {
+  return (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
                 <Panel title="Notable players">
                   <NotableTable rows={current.notables} />
@@ -232,13 +314,18 @@ function LeaguesPanel(): JSX.Element {
                   )}
                 </Panel>
               </div>
-            </>
-          )}
-        </>
-      )}
-    </div>
   )
 }
+
+/** Stable identity so the sort hook is not handed a fresh array each render. */
+const EMPTY_NATIONS: NationView[] = []
+
+const NATION_COLS = sortColumns<NationView>()([
+  { key: 'rank', label: '#', value: (n) => n.rank, initialDir: 'asc' },
+  { key: 'nation', label: 'Nation', value: (n) => n.nation, style: { textAlign: 'left' } },
+  { key: 'playerCount', label: 'Players', value: (n) => n.playerCount },
+  { key: 'rating', label: 'Strength', value: (n) => n.rating, style: { textAlign: 'left' } },
+])
 
 function InternationalPanel(): JSX.Element {
   const client = useClient()
@@ -248,8 +335,9 @@ function InternationalPanel(): JSX.Element {
   )
   const [selected, setSelected] = useState<string | null>(null)
 
-  const nations = data?.nations ?? []
+  const nations = data?.nations ?? EMPTY_NATIONS
   const current = nations.find((n) => n.nation === selected) ?? nations[0] ?? null
+  const nationSort = useTableSort(nations, NATION_COLS, { key: null })
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
@@ -267,14 +355,11 @@ function InternationalPanel(): JSX.Element {
             <table className="data-table" style={{ width: '100%' }}>
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th style={{ textAlign: 'left' }}>Nation</th>
-                  <th>Players</th>
-                  <th style={{ textAlign: 'left' }}>Strength</th>
+                  <SortHeaders columns={NATION_COLS} sortKey={nationSort.sortKey} dir={nationSort.dir} onSort={nationSort.sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {nations.map((n) => (
+                {nationSort.sorted.map((n) => (
                   <tr
                     key={n.nation}
                     onClick={() => setSelected(n.nation)}

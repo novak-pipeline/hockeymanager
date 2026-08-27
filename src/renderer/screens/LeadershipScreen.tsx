@@ -9,11 +9,31 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { LeadershipView } from '../../worker/protocol'
+import type { LeadershipRowView } from '../../engine/career/views'
 import { PlayerLink } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient } from '../hooks/useSim'
 import { toast, bumpRefresh } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const LEADERSHIP_COLS = sortColumns<LeadershipRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+  { key: 'leadership', label: 'Leadership', value: (r) => r.leadership },
+  { key: 'influence', label: 'Influence', value: (r) => r.influence },
+  {
+    key: 'letter',
+    label: 'Letter',
+    // C first, then the A's, then the rest of the room.
+    value: (r) => (r.letter === 'C' ? 2 : r.letter === 'A' ? 1 : 0),
+    style: { textAlign: 'center' },
+  },
+  { key: 'jerseyNumber', label: '#', value: (r) => r.jerseyNumber ?? null, initialDir: 'asc', align: 'right' },
+])
+
+/** Stable identity for the sort hook while the room is still loading. */
+const NO_LEADERSHIP_ROWS: LeadershipRowView[] = []
 
 function LeadershipBar({ value, max, color }: { value: number; max: number; color: string }): JSX.Element {
   return (
@@ -27,6 +47,7 @@ export function LeadershipScreen(): JSX.Element {
   const client = useClient()
   const [lead, setLead] = useState<LeadershipView | null>(null)
   const [busy, setBusy] = useState(false)
+  const { sorted, sortKey, dir, sortBy } = useTableSort(lead?.rows ?? NO_LEADERSHIP_ROWS, LEADERSHIP_COLS, { key: null })
 
   const load = useCallback(async () => {
     const res = await client.getLeadership()
@@ -101,16 +122,11 @@ export function LeadershipScreen(): JSX.Element {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Player</th>
-                  <th className="num">Pos</th>
-                  <th>Leadership</th>
-                  <th>Influence</th>
-                  <th style={{ textAlign: 'center' }}>Letter</th>
-                  <th className="num">#</th>
+                  <SortHeaders columns={LEADERSHIP_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {lead.rows.map((r) => {
+                {sorted.map((r) => {
                   const isCap = lead.captainId === r.playerId
                   const isAlt = lead.alternateIds.includes(r.playerId)
                   const isGoalie = r.position === 'G'

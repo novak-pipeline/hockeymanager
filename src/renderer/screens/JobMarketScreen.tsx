@@ -4,8 +4,26 @@
  */
 import { useState } from 'react'
 import type { ScoutingView, CoachMarketView } from '../../worker/protocol'
-import type { ScoutMarketRow } from '../../engine/career/views'
+import type { CoachMarketCandidateView, ScoutMarketRow } from '../../engine/career/views'
 import { fmtMoney, rosterFitWord } from '../components/format'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const COACH_MARKET_COLS = sortColumns<CoachMarketCandidateView>()([
+  { key: 'name', label: 'Coach', value: (c) => c.name },
+  { key: 'system', label: 'System', value: (c) => c.systemLabel },
+  { key: 'rating', label: 'Ability', value: (c) => c.rating, align: 'right' },
+  { key: 'rosterFit', label: 'Roster fit', value: (c) => c.rosterFit, align: 'right', title: 'How well his system suits the men you already have' },
+  { key: 'hire', label: '' },
+])
+
+const SCOUT_MARKET_COLS = sortColumns<ScoutMarketRow>()([
+  { key: 'name', label: 'Scout', value: (c) => c.name },
+  { key: 'specialty', label: 'Specialty', value: (c) => c.specialtyNation ?? 'Generalist' },
+  { key: 'rating', label: 'Ability', value: (c) => c.rating, align: 'right' },
+  { key: 'judgment', label: 'Judgment', value: (c) => c.judgment, align: 'right' },
+  { key: 'salary', label: 'Salary', value: (c) => c.salary, align: 'right' },
+  { key: 'hire', label: '' },
+])
 import { FlagIcon } from '../components/FlagIcon'
 import { PlayerFace } from '../components/PlayerFace'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -27,6 +45,7 @@ function CoachMarketPanel({
   onFire: () => void
   onHire: (coachId: string) => void
 }): JSX.Element {
+  const coachSort = useTableSort(market.entries, COACH_MARKET_COLS, { key: null })
   return (
     <Panel title="Head Coaches for Hire">
       <div
@@ -59,11 +78,11 @@ function CoachMarketPanel({
         <table className="table">
           <thead>
             <tr>
-              <th>Coach</th><th>System</th><th className="num">Ability</th><th className="num">Roster fit</th><th></th>
+              <SortHeaders columns={COACH_MARKET_COLS} sortKey={coachSort.sortKey} dir={coachSort.dir} onSort={coachSort.sortBy} />
             </tr>
           </thead>
           <tbody>
-            {market.entries.map((c) => (
+            {coachSort.sorted.map((c) => (
               <tr key={c.coachId}>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -102,6 +121,7 @@ function ScoutMarketTable({ rows, full, onHire }: {
   full: boolean
   onHire: (candidateId: string) => void
 }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(rows, SCOUT_MARKET_COLS, { key: null })
   if (rows.length === 0) {
     return <p className="muted small">No scouts available to hire right now.</p>
   }
@@ -110,11 +130,11 @@ function ScoutMarketTable({ rows, full, onHire }: {
       <table className="table">
         <thead>
           <tr>
-            <th>Scout</th><th>Specialty</th><th className="num">Ability</th><th className="num">Judgment</th><th className="num">Salary</th><th></th>
+            <SortHeaders columns={SCOUT_MARKET_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((c) => (
+          {sorted.map((c) => (
             <tr key={c.id}>
               <td style={{ fontWeight: 600 }}>{c.name}</td>
               <td className="small">
