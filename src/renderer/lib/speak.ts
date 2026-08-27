@@ -9,6 +9,21 @@
 import { Announcer } from './announcer'
 import { getKokoroEngine, kokoroState, loadKokoro } from './kokoroVoice'
 import { castFor, type VoiceRole, type VoiceTraits } from './voiceCast'
+import { looksLikeNarration } from '@engine/story/spokenText'
+
+/** Development-only: shout when a cast line is prose ABOUT its speaker rather
+ *  than words spoken BY them. See spokenText.ts — this is the recurring bug, and
+ *  it has always reached the player as a voice reading a card. Never silences
+ *  the line; a false positive must not cost the GM a spoken reply. */
+function warnIfNarration(text: string, seed: string | undefined, where: string): void {
+  if (!import.meta.env.DEV) return
+  if (looksLikeNarration(text, seed)) {
+    console.warn(
+      `[voice] ${where}: this reads as narration about ${seed}, not something ${seed} says — ` +
+      `speak dialogue or don't speak it: "${text}"`,
+    )
+  }
+}
 
 let _ann: Announcer | null = null
 let _neuralPreferred = false // switched the announcer over to neural once it's ready
@@ -157,6 +172,7 @@ export function speakAs(
   if (!a.isEnabled) return
   _sceneEpoch++ // a manual line supersedes any running scene
   a.cancel()
+  warnIfNarration(text, opts?.seed, 'speakAs')
   const cast = castFor(role, opts?.seed, opts?.traits)
   a.speakLine({
     text,
@@ -185,6 +201,12 @@ const SCENE_GAP_MS = 400
  * at a time (the next line starts only when the previous finishes — never
  * overlapping). A later scene, a manual speakAs() click, or cancelSpeech()
  * supersedes the rest of the sequence. No-op when voice or autoplay is off.
+ *
+ * Look-ahead: the moment a line starts speaking, the NEXT one is queued for
+ * synthesis behind it. Without that, every turn of a meeting cost a full
+ * synthesis of silence — the room paused, THEN started thinking about the next
+ * sentence. Synthesis requests are served in order, so the look-ahead can never
+ * delay the line already playing.
  */
 export function speakScene(lines: SceneLine[]): void {
   const a = announcer()
@@ -194,6 +216,7 @@ export function speakScene(lines: SceneLine[]): void {
   const playNext = (i: number): void => {
     if (epoch !== _sceneEpoch || i >= lines.length) return
     const l = lines[i]!
+    warnIfNarration(l.text, l.seed, `speakScene[${i}]`)
     const cast = castFor(l.role, l.seed, l.traits)
     a.speakLine({
       text: l.text,
@@ -206,18 +229,25 @@ export function speakScene(lines: SceneLine[]): void {
         window.setTimeout(() => playNext(i + 1), SCENE_GAP_MS)
       },
     })
+    // AFTER speakLine, so this line's chunks are already in the queue ahead of it.
+    const next = lines[i + 1]
+    if (next) prewarmSpeech(next.role, next.text, {
+      ...(next.seed !== undefined ? { seed: next.seed } : {}),
+      ...(next.traits !== undefined ? { traits: next.traits } : {}),
+    })
   }
   playNext(0)
 }
 
 /**
- * Synthesise the opening of a line ahead of time so speaking it later starts
- * without a wait — and play nothing now.
+ * Synthesise a line ahead of time so speaking it later starts without a wait —
+ * and play nothing now.
  *
- * The neural engine runs its WASM inference on the renderer's main thread, so a
- * long line costs seconds between the click and the first sound. Anything with a
- * natural pause before the GM commits (the phone ringing, a scene fading in) can
- * spend that pause here instead. No-op when voice is off or neural isn't ready.
+ * Synthesis is slower than real time, so anything with a natural pause before the
+ * line is due (the phone ringing, a scene fading in, the previous speaker still
+ * talking) should spend that pause here. Since synthesis moved to a worker this
+ * costs the UI nothing, so it is worth doing generously. No-op when voice is off
+ * or neural isn't ready.
  */
 export function prewarmSpeech(
   role: VoiceRole,

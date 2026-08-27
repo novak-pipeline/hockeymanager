@@ -58,6 +58,7 @@ import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
 import { JobMarketScreen } from './screens/JobMarketScreen'
 import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
+import { advanceProfiler } from './lib/advanceProfile'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -347,11 +348,18 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
    *  gets the match-day frame first (B6.1) and postgame receipts after (B6.2). */
   const advanceWithOverlay = useCallback((): void => {
     void (async () => {
+      // B5: "the postgame screen is slow to load". Where the time actually goes
+      // is not obvious from the outside — the sim itself, the four view fetches
+      // after it, or the render — so the advance is instrumented rather than
+      // guessed at. Off unless asked for:
+      //   localStorage.setItem('hockey.perf.advance', 'true')
+      const perf = advanceProfiler()
       // B6.1: when the NEXT day to sim has a user game, stop on the match-day
       // frame first — opponent, storyline, keys, lines. One stop per game day:
       // the following Continue (same day) rolls into the sim.
       try {
         const pv = await client.getMatchDayPreview()
+        perf.mark('matchDayPreview')
         if (pv.type === 'matchDayPreview' && pv.preview && pregameShownRef.current !== pv.preview.day) {
           pregameShownRef.current = pv.preview.day
           setProcessing({
@@ -371,9 +379,11 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         const bi = await client.getInbox()
         if (bi.type === 'inbox') beforeIds = new Set(bi.inbox.items.map((i) => i.id))
       } catch { /* non-fatal — worst case every item reads as "new" */ }
+      perf.mark('inboxBefore')
 
       setProcessing({ phase: 'running', nextGame: dashboard?.nextGame ?? null, incoming: [], ...(dashboard?.date ? { dateISO: dashboard.date } : {}) })
       const res = await run(() => client.continueGame())
+      perf.mark('continueGame')
       if (res === null) { setProcessing(null); return } // errored (toasted) or busy
 
       const [inboxR, dashR, calR, recR] = await Promise.all([
@@ -382,6 +392,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         client.getCalendar().catch(() => null),
         client.getPostgameReceipt().catch(() => null),
       ])
+      perf.mark('views')
       const inbox = inboxR && inboxR.type === 'inbox' ? inboxR.inbox : null
       const dash = dashR && dashR.type === 'dashboard' ? dashR.dashboard : null
       const cal = calR && calR.type === 'calendar' ? calR.calendar : null
@@ -409,7 +420,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // first-of-its-kind story; or one the salience engine rates highly. Note
       // salience is set on very few items, so it widens the net rather than
       // defining it — league churn is filtered by category, not by score.
-      if (!shouldHoldOverlay(incoming, !!receipt)) { setProcessing(null); return }
+      if (!shouldHoldOverlay(incoming, !!receipt)) { setProcessing(null); perf.done(false); return }
 
       setProcessing({
         phase: 'done',
@@ -421,6 +432,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         ...(dash?.date ? { dateISO: dash.date } : {}),
         ...(inbox?.teamInfo ? { teamInfo: inbox.teamInfo } : {}),
       })
+      perf.done(!!receipt)
     })()
   }, [client, dashboard?.nextGame, dashboard?.date, run])
 

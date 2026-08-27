@@ -13,7 +13,7 @@ import { bumpRefresh, toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { feedModelBridge, getFeedWriterEnabled } from '../lib/feedModel'
 import { buildIntentPrompt, parseIntentChoice, type IntentOption } from '../../engine/story/interactionIntent'
-import { buildReactionPrompt, sanitizeReactionLine } from '../../engine/story/reactionVoice'
+import { buildReactionPrompt, fallbackReactionLine, sanitizeReactionLine } from '../../engine/story/reactionVoice'
 import { speakAs, speakScene } from '../lib/speak'
 
 /** Category metadata: accent color, label, and FM-style "from" sender.
@@ -578,25 +578,31 @@ function ConcernCard({
       toast(res.message ?? 'Could not respond.', 'error')
       return
     }
-    // The engine has already resolved (morale/escalation decided). When the model
-    // is available, voice the player's spoken reply in-character; the line is pure
+    // The engine has already resolved (morale/escalation decided). What's left is
+    // to give the man in front of you his words back. The line is pure
     // presentation over the deterministic result and never alters it.
+    //
+    // It must be DIALOGUE, always. `reaction.outcome` is the engine's narration
+    // ("Lizotte appreciated being heard…") and was previously used as the
+    // fallback — so the card quoted, and the voice spoke, a sentence *about* him
+    // in the third person. The authored pool in reactionVoice.ts is the floor;
+    // the local writer, when it's running, is the ceiling.
     const reaction = res.type === 'ok' ? res.reaction : undefined
-    if (canType && reaction) {
-      const bridge = feedModelBridge()
+    if (reaction) {
+      let line = ''
+      const bridge = canType ? feedModelBridge() : null
       if (bridge) {
         const p = buildReactionPrompt(reaction)
         const r = await bridge.infer({ system: p.system, user: p.user, maxTokens: p.maxTokens })
-        const line = r.ok ? sanitizeReactionLine(r.text, reaction.playerName) : ''
-        setBusy(false)
-        const reply = line || reaction.outcome // fall back to the engine's prose
-        setVoiced(reply)
-        setVoicedByModel(!!line)
-        // Show the player's reply, but DON'T auto-speak it — the voice you hear
-        // should be the incoming call (their message on pickup), not a read-back
-        // of the resolution. The speaker button on the reply lets you hear it if you want.
-        return
+        line = r.ok ? sanitizeReactionLine(r.text, reaction.playerName) : ''
       }
+      setBusy(false)
+      setVoiced(line || fallbackReactionLine(reaction))
+      setVoicedByModel(!!line)
+      // The engine's own note (a promise entered in the book, an escalation) is
+      // a consequence, not a line of dialogue — it still belongs on screen.
+      if (res.type === 'ok' && res.note) toast(res.note, 'info')
+      return
     }
     setBusy(false)
     toast(res.type === 'ok' && res.note ? res.note : 'Message delivered.', 'info')

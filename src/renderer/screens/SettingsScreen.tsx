@@ -16,6 +16,12 @@ import {
   getKokoroEngine,
   readVoiceQuality,
   setVoiceQuality,
+  kokoroTransport,
+  neuralTooSlow,
+  realtimeRatio,
+  isForceNeural,
+  setForceNeural,
+  resetVoiceSpeedVerdict,
   type KokoroLoadState,
   type VoiceQuality,
 } from '../lib/kokoroVoice'
@@ -267,6 +273,10 @@ function VoicePanel(): JSX.Element {
   const [autoNeural, setAutoNeural] = useState<boolean>(isAutoNeuralEnabled())
   const [voiceOn, setVoiceOn] = useState<boolean>(isVoiceEnabled())
   const [autoplay, setAutoplay] = useState<boolean>(isAutoplayEnabled())
+  const [force, setForce] = useState<boolean>(isForceNeural())
+  // Re-read on each render of this panel: the verdict is measured while you play.
+  const tooSlow = neuralTooSlow()
+  const ratio = realtimeRatio()
 
   async function download(): Promise<void> {
     if (state === 'downloading' || state === 'ready') return
@@ -377,6 +387,41 @@ function VoicePanel(): JSX.Element {
           </>
         )}
       </div>
+      {/* Why the system voice might be talking even though neural is "ready".
+        * The model runs on the CPU, and on a slower machine it produces speech
+        * more slowly than the speech is spoken — every line then arrives late and
+        * the gap grows across a scene. Rather than let that happen silently, the
+        * engine measures itself and steps aside. Say so, and let the GM overrule it. */}
+      {state === 'ready' && tooSlow && (
+        <div className="stack" style={{ gap: 6, marginTop: 10, fontSize: 11.5 }}>
+          <div className="muted">
+            The neural voices run slower than real time on this machine
+            {ratio > 0 ? ` (${ratio.toFixed(2)}× — under 1.0 means the words arrive after they were due)` : ''},
+            so lines are being spoken by the faster system voice instead. Standard fidelity is
+            the quickest of the three if you'd rather keep the neural cast.
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <label className="row" style={{ gap: 6, alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={force}
+                onChange={(e) => { const on = e.target.checked; setForceNeural(on); setForce(on) }}
+              />
+              <span>Use the neural voices anyway <span className="muted">(accepting the delay)</span></span>
+            </label>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => { resetVoiceSpeedVerdict(); setForce(isForceNeural()) }}
+            >↻ Measure again</button>
+          </div>
+        </div>
+      )}
+      {state === 'ready' && kokoroTransport() === 'main-thread' && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+          Synthesis is running on the interface thread on this machine, so long lines may
+          stutter the UI. (Normally it runs on a background worker.)
+        </div>
+      )}
       {state === 'failed' && (
         <div className="muted" style={{ fontSize: 11, marginTop: 8, color: 'var(--danger)' }}>
           Couldn’t fetch the voice model{errMsg ? `: ${errMsg}` : ''}. Check your internet connection and try again — the weights come from Hugging Face on first use.

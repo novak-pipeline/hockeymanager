@@ -276,4 +276,21 @@ describe('chunkForSpeech', () => {
   it('drops nothing on an empty line', () => {
     expect(chunkForSpeech('   ')).toEqual([])
   })
+
+  it('holds the OPENING chunk shorter than the ones behind it', () => {
+    // Nothing can be heard until the first chunk is synthesised, so its length
+    // alone is the silence between the click and the first word. Later chunks
+    // are produced while the previous one plays and can afford to phrase well.
+    const line = [
+      'That is the first thing I want to say to you today.',
+      'The second point is a longer one and it needs a little more room to breathe properly.',
+      'And the third runs on for a while as well, because there is a fair amount left to get through.',
+      'Then we are finished and you can go back to your afternoon.',
+    ].join(' ')
+    const chunks = chunkForSpeech(line)
+    expect(chunks.length).toBeGreaterThan(2)
+    const rest = chunks.slice(1)
+    expect(chunks[0]!.length).toBeLessThan(Math.max(...rest.map((c) => c.length)))
+    expect(chunks.join(' ').replace(/\s+/g, ' ')).toBe(line.replace(/\s+/g, ' '))
+  })
 })

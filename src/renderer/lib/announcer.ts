@@ -41,6 +41,10 @@ export interface SpeakLine {
   /** Called once the line is finished with — spoken to the end, dropped, or
    *  cancelled. Lets callers sequence dialogue without overlap. */
   onDone?: () => void
+  /** Called when the FIRST sound of this line actually reaches the speakers.
+   *  The gap between speak() and this is the latency the GM experiences, which
+   *  is not the same as how long the line takes — voiceBench.ts reports both. */
+  onFirstAudio?: () => void
 }
 
 // ── VoiceEngine interface ───────────────────────────────────────────────────
@@ -193,6 +197,7 @@ class SystemVoiceEngine implements VoiceEngine {
         line.onDone?.()
       }
     }
+    utt.onstart = () => line.onFirstAudio?.()
     utt.onend = decrement
     utt.onerror = decrement
 
