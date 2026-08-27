@@ -62,6 +62,14 @@ Usage:
 """
 import sys, os, io, json, re, unicodedata, glob, shutil, zlib
 
+# ── Season the export describes, and the real NHL salary ceiling for it. ─────
+# Bump BOTH when refreshing the database for a new season; the second is not
+# cosmetic — the loader prices every club's cap room against it.
+#   2025-26 $95.5M · 2026-27 $104.0M · 2027-28 $113.5M (announced ladder)
+DB_SEASON = "2026-27"
+DB_SALARY_CAP = 104_000_000
+
+
 # Column indices (0-based) for the full "Players and non-players" EHM export
 # (two header rows: section markers on row 0, field names on row 1; data row 2+).
 # Mapped against mods/spreadsheet exports/players_&_non-players.xlsx (133 cols).
@@ -1388,7 +1396,13 @@ def main():
 
     db = {
         "formatVersion": 1,
-        "meta": {"name": "NHL (EHM import, dev)", "author": "local", "season": "2025-26"},
+        "meta": {"name": f"NHL (EHM import, dev) - {DB_SEASON}", "author": "local",
+                 "season": DB_SEASON},
+        # The exported contracts are real contracts, priced against the real
+        # ceiling of DB_SEASON. Ship the ceiling with them: without it the
+        # loader falls back to its own default and every club opens millions
+        # over a wall that does not exist.
+        "rules": {"salaryCap": DB_SALARY_CAP},
         "conferences": [
             {"name": cname, "divisions": [{"name": dname, "teams": dteams}
                                           for dname, dteams in divs.items()]}
