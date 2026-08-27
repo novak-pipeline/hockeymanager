@@ -6,7 +6,7 @@
  *   2. Positions — position(s), role, archetype/descriptor suitability
  *   3. Information — birthplace, nationality, honours, draft status, international record
  *   4. Contract  — salary, cap hit, buried cap hit, FA status, expiry, clauses
- *   5. History   — season-by-season stat table
+ *   5. History   — the career biography (prose), then the season-by-season table
  *   6. Scout Report — fogged personality reads framed as a scout's write-up + projection
  *
  * Compare control on the Profile tab: pick a second player from the squad
@@ -1757,19 +1757,59 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
   )
 }
 
+/**
+ * The career in prose (A1). It leads the History tab on purpose: this is the
+ * same material the season table below carries, told as a story instead of a
+ * grid, so every claim in it is auditable against the numbers a few inches
+ * down. The Information tab is identity — birthplace, height, draft record —
+ * and a narrative would have no receipts sitting next to it there.
+ */
+function CareerBiography({ paragraphs }: { paragraphs: string[] }): JSX.Element {
+  return (
+    <Panel title="Career">
+      <div
+        className="stack"
+        style={{ gap: 12, borderLeft: '3px solid var(--accent, #f5b301)', paddingLeft: 'var(--sp-3)' }}
+      >
+        {paragraphs.map((para, i) => (
+          <p
+            key={i}
+            style={{
+              margin: 0,
+              fontSize: 13.5,
+              lineHeight: 1.8,
+              color: 'var(--text)',
+              // The opening paragraph carries the man's name; give it weight so
+              // the eye lands there before the table.
+              ...(i === 0 ? { fontSize: 14.5, lineHeight: 1.75 } : {}),
+            }}
+          >
+            {para}
+          </p>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
 function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
   const isGoalie = d.position === 'G'
+  const bio = d.biography
 
   if (d.seasons.length === 0) {
     return (
-      <Panel>
-        <span className="muted small">No season history recorded.</span>
-      </Panel>
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        {bio && bio.length > 0 && <CareerBiography paragraphs={bio} />}
+        <Panel>
+          <span className="muted small">No season history recorded.</span>
+        </Panel>
+      </div>
     )
   }
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+      {bio && bio.length > 0 && <CareerBiography paragraphs={bio} />}
       <Panel title="Career Totals">
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
           <CareerTotals seasons={d.seasons} isGoalie={isGoalie} {...(d.avgRating !== undefined ? { avgRating: d.avgRating } : {})} />

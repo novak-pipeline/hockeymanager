@@ -821,8 +821,8 @@ export function buildPlayerProfile(
         p.position === 'G'
           ? {
               gamesPlayed: s.gamesPlayed,
-              wins: 0,
-              losses: 0,
+              wins: s.wins ?? 0,
+              losses: s.losses ?? 0,
               savePct: s.shotsAgainst > 0 ? s.saves / s.shotsAgainst : 0,
               goalsAgainstAverage:
                 s.gamesPlayed > 0 ? s.goalsAgainst / Math.max(1, s.gamesPlayed) : 0,

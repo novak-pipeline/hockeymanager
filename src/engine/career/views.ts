@@ -738,6 +738,18 @@ export interface PlayerProfileView extends PlayerBadge {
    *  on the History tab. Absent when none. */
   awards?: Array<{ award: string; year?: number }>
 
+  /**
+   * A1: the career told as prose — FM-style, updating as the career happens,
+   * and pre-populated from the imported database for a man who arrives with a
+   * career already behind him. Paragraphs, in reading order.
+   *
+   * Every sentence is written by the content engine over facts the game has
+   * actually recorded (src/engine/story/biography.ts). Absent when there is
+   * nothing honest to say. Lives on the History tab, directly above the season
+   * table that backs it.
+   */
+  biography?: string[]
+
   /** Round-number career milestones reached (e.g. "500 goals", "1,000 games",
    *  "50 shutouts") — the highest tier passed per category. FM-style career
    *  highlights. Absent when he hasn't reached a notable one. */
@@ -3322,6 +3334,13 @@ export interface StaffRowView {
   faceId?: string
   /** Per-discipline attributes (EHM 1–20) from the source DB. */
   attributes?: import('@engine/league/staff').StaffAttributes
+  /**
+   * A1: prose sketch of the man — what he is good at, how he wants the game
+   * played, what he did before this. Written by the content engine over
+   * recorded facts only (src/engine/story/staffBiography.ts); absent when the
+   * game holds nothing honest to say about him.
+   */
+  biography?: string[]
 }
 
 /**
