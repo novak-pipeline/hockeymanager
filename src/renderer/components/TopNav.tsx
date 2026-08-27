@@ -112,11 +112,11 @@ export function TopNav(props: {
           >
             <Icon size={14}><Icons.Back /></Icon> Back
           </button>
-          <button className="topnav-util-btn" onClick={props.onSave} disabled={props.busy} title="Save career">
+          <button className="topnav-util-btn" onClick={props.onSave} disabled={props.busy} title="Quick save this career">
             Save
           </button>
-          <button className="topnav-util-btn" onClick={props.onLoad} disabled={props.busy} title="Load career">
-            Load
+          <button className="topnav-util-btn" onClick={props.onLoad} disabled={props.busy} title="Saved careers — load, overwrite or delete">
+            Saves
           </button>
 
           <div className="sim-secondary">

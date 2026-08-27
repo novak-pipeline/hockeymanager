@@ -4,7 +4,7 @@ import { SimClient } from '../worker/client'
 import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { shouldHoldOverlay } from '@renderer/lib/cadence'
 import { routeContinue, type LastRoute } from '@engine/career/beatGates'
-import { listCareerSaves, loadCareer, saveCareer } from '@renderer/lib/saves'
+import { listCareerSaves, loadCareer, saveCareer, type CareerSaveInfo } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
 import { SimView } from './SimView'
@@ -24,6 +24,8 @@ import { THEME_PRESETS } from './components/themes'
 import { ToastStack } from './components/Toast'
 import { bumpRefresh, toast, useUiStore } from './components/store'
 import { Notice } from './components/ui'
+import { Icon } from './components/primitives'
+import { Icons } from './components/icons'
 import { SimContext, useClient, useScreenData } from './hooks/useSim'
 import { DashboardScreen } from './screens/DashboardScreen'
 import { InboxScreen } from './screens/InboxScreen'
@@ -60,9 +62,16 @@ import { JobMarketScreen } from './screens/JobMarketScreen'
 import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
 import { advanceProfiler } from './lib/advanceProfile'
+import { TitleScreen, type ResumeInfo } from './screens/TitleScreen'
+import { NewCareerScreen, randomSeed } from './screens/NewCareerScreen'
+import { ClubPickerScreen } from './screens/ClubPickerScreen'
+import { SaveManager } from './components/SaveManager'
 
-type AppPhase = 'setup' | 'picking' | 'shell'
+/** The pre-career flow (F6): title → new career → club picker → the game. */
+type AppPhase = 'title' | 'setup' | 'picking' | 'settings' | 'shell'
 
+/** Where an unnamed manual save goes when the GM presses Save without opening
+ *  the manager. Named saves get their own slug (SaveManager.slugSlot). */
 const SAVE_SLOT = 'slot-1'
 
 /** Which match-night surface the GM last watched a game on. */
@@ -82,19 +91,30 @@ function writeWatchMode(v: WatchMode): void {
 export function App(): JSX.Element {
   const [client, setClient] = useState<SimClient | null>(null)
   const [engine, setEngine] = useState('…')
-  const [phase, setPhase] = useState<AppPhase>('setup')
+  const [phase, setPhase] = useState<AppPhase>('title')
   // Random world by default — the seed is a knob for players who want a specific
   // world, not something they have to set.
   const [seed, setSeed] = useState(randomSeed)
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
-  // The most recent save on disk, if any — powers the one-click Resume on the
-  // setup screen so a code reload (dev) or restart drops you back in your game.
-  const [resumeInfo, setResumeInfo] = useState<{ slot: string; teamName: string; year: number; phase: string } | null>(null)
+  // Every save on disk. The newest powers Continue on the title screen; the
+  // whole list is what the load manager browses.
+  const [saves, setSaves] = useState<CareerSaveInfo[]>([])
+  const [loadOpen, setLoadOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   // Mod picker state
   const [availableMods, setAvailableMods] = useState<ModListEntry[]>([])
   const [selectedModId, setSelectedModId] = useState<string>('') // '' = fictional default
+
+  const resumeInfo: ResumeInfo | null = saves.length > 0
+    ? {
+        slot: saves[0]!.slot,
+        teamName: saves[0]!.teamName,
+        year: saves[0]!.year,
+        phase: saves[0]!.phase,
+        savedAt: saves[0]!.savedAt,
+      }
+    : null
 
   useEffect(() => {
     const c = new SimClient()
@@ -104,14 +124,12 @@ export function App(): JSX.Element {
     })
     // Discover available mods (non-blocking; silently empty on browser/no-mod)
     void listMods().then((mods) => setAvailableMods(mods))
-    // Detect the newest save so the setup screen can offer a one-click Resume
-    // (so a dev reload / restart doesn't dump you back to a blank new game).
+    // Read the saves so the title screen can offer Continue (a dev reload or a
+    // restart drops you back into your game, not a blank new one) and so Load
+    // has a list to show.
     void listCareerSaves()
-      .then((slots) => {
-        const newest = [...slots].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
-        if (newest) setResumeInfo({ slot: newest.slot, teamName: newest.teamName, year: newest.year, phase: newest.phase })
-      })
-      .catch(() => { /* no bridge / no saves — just show the new-game flow */ })
+      .then((slots) => setSaves([...slots].sort((a, b) => b.mtimeMs - a.mtimeMs)))
+      .catch(() => { /* no bridge / no saves — just show the new-career flow */ })
     // NOTE: the neural voices ARE warmed shortly after startup (see main.tsx) —
     // they're the default, not a button to find — but off the critical boot path
     // and retried with backoff, so a fresh launch stays light and a bad network
@@ -147,28 +165,31 @@ export function App(): JSX.Element {
     }
   }
 
-  // One-click resume of the newest save — restores the worker and drops straight
-  // into the shell, so a dev reload / restart continues your game instead of a
-  // blank new one.
-  const resumeGame = async (): Promise<void> => {
-    if (!client || busy || !resumeInfo) return
+  /** Open a save from disk — Continue on the title screen, or any row in the
+   *  load manager. Restores the worker and drops straight into the shell. */
+  const openSave = async (slot: string, fallbackName: string): Promise<void> => {
+    if (!client || busy) return
     setBusy(true)
     try {
-      const snapshot = await loadCareer(resumeInfo.slot)
+      const snapshot = await loadCareer(slot)
       const res = await client.importSave(snapshot)
-      if (res.type === 'error') { toast(`Resume failed: ${res.message}`, 'error'); return }
+      if (res.type === 'error') { toast(`Load failed: ${res.message}`, 'error'); return }
       const dashRes = await client.getDashboard()
       const ut = dashRes.type === 'dashboard' ? dashRes.dashboard.userTeam : null
       setUserTeam({
         teamId: ut?.teamId ?? '',
-        name: ut?.name ?? resumeInfo.teamName,
+        name: ut?.name ?? fallbackName,
         abbreviation: ut?.abbreviation ?? '',
         city: '', conference: '', division: '',
         strength: 0, colors: { primary: 0, secondary: 0 },
       })
+      // Call ids are per-career counters that restart at zero, so a seen-set
+      // left over from the last career would swallow this one's phone calls.
+      resetPhoneSeen()
+      setLoadOpen(false)
       setPhase('shell')
     } catch (err) {
-      toast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      toast(`Load failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
     } finally {
       setBusy(false)
     }
@@ -194,8 +215,29 @@ export function App(): JSX.Element {
     <>
       {client && (
         <SimContext.Provider value={client}>
+          {phase === 'title' && (
+            <TitleScreen
+              resume={resumeInfo}
+              saveCount={saves.length}
+              busy={busy}
+              engineVersion={engine}
+              onContinue={() => resumeInfo && void openSave(resumeInfo.slot, resumeInfo.teamName)}
+              onNewCareer={() => setPhase('setup')}
+              onLoad={() => setLoadOpen(true)}
+              onSettings={() => setPhase('settings')}
+              onQuit={() => window.close()}
+            />
+          )}
+          {phase === 'settings' && (
+            <div className="prelude">
+              <button className="setup-back" onClick={() => setPhase('title')}>
+                <Icon size={14}><Icons.Back /></Icon> Main menu
+              </button>
+              <SettingsScreen />
+            </div>
+          )}
           {phase === 'setup' && (
-            <SetupHero
+            <NewCareerScreen
               seed={seed}
               setSeed={setSeed}
               busy={busy}
@@ -203,12 +245,24 @@ export function App(): JSX.Element {
               selectedModId={selectedModId}
               setSelectedModId={setSelectedModId}
               onCreate={() => void createLeague()}
-              resume={resumeInfo}
-              onResume={() => void resumeGame()}
+              onBack={() => setPhase('title')}
             />
           )}
           {phase === 'picking' && (
-            <TeamPicker teams={teams} busy={busy} onPick={(t) => void pickTeam(t)} />
+            <ClubPickerScreen
+              teams={teams}
+              busy={busy}
+              onPick={(t) => void pickTeam(t)}
+              onBack={() => setPhase('setup')}
+            />
+          )}
+          {loadOpen && phase !== 'shell' && (
+            <SaveManager
+              mode="load"
+              busy={busy}
+              onLoad={(slot, label) => void openSave(slot, label)}
+              onClose={() => setLoadOpen(false)}
+            />
           )}
           {phase === 'shell' && userTeam && <Shell team={userTeam} engineVersion={engine} />}
         </SimContext.Provider>
@@ -286,6 +340,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   // FM-style processing overlay: non-null while a normal day-advance is showing
   // its "what just happened" card (incoming mail + trending story + calendar).
   const [processing, setProcessing] = useState<ProcessingData | null>(null)
+  // F6: the save/load manager, opened from the topbar's Save/Load buttons.
+  const [savesOpen, setSavesOpen] = useState(false)
 
   // The shell-level dashboard fetch feeds the top nav; it refetches on every
   // refresh bump like any screen. Errors here are non-fatal.
@@ -548,56 +604,60 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     bumpRefresh()
   }, [])
 
-  const onSave = (): void => {
-    void (async () => {
-      if (busyRef.current) return
-      busyRef.current = true
-      setBusy(true)
-      try {
-        const saveName = dashboard
-          ? `${dashboard.userTeam.name} ${dashboard.year}`
-          : props.team.name
-        const res = await client.exportSave(saveName)
-        if (res.type === 'save') {
-          await saveCareer(SAVE_SLOT, res.snapshot)
-          toast('Career saved', 'success')
-        } else if (res.type === 'error') {
-          toast(`Save failed: ${res.message}`, 'error')
-        } else {
-          toast('Save failed: unexpected worker response', 'error')
-        }
-      } catch (err) {
-        toast(`Save failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
-      } finally {
-        busyRef.current = false
-        setBusy(false)
+  /** Default name for a manual save — the club and the season you're in. */
+  const suggestedSaveName = dashboard
+    ? `${dashboard.userTeam.name} ${dashboard.year}`
+    : props.team.name
+
+  /** Write the career to a slot. Called by the save manager (named slot or an
+   *  overwrite) and by the quick Save button (the unnamed default slot). */
+  const writeSave = async (slot: string, name: string): Promise<void> => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      const res = await client.exportSave(name)
+      if (res.type === 'save') {
+        await saveCareer(slot, res.snapshot)
+        toast(`Saved “${name}”`, 'success')
+      } else if (res.type === 'error') {
+        toast(`Save failed: ${res.message}`, 'error')
+      } else {
+        toast('Save failed: unexpected worker response', 'error')
       }
-    })()
+    } catch (err) {
+      toast(`Save failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
   }
 
-  const onLoad = (): void => {
+  const onSave = (): void => {
+    void writeSave(SAVE_SLOT, suggestedSaveName)
+  }
+
+  /** Load a chosen slot into the running career (F6: the GM picks the save;
+   *  it no longer silently opens whichever file was newest). */
+  const openSlot = (slot: string, label: string): void => {
     void (async () => {
       if (busyRef.current) return
       busyRef.current = true
       setBusy(true)
       try {
-        const slots = await listCareerSaves()
-        const newest = [...slots].sort((a, b) => b.mtimeMs - a.mtimeMs)[0]
-        if (!newest) {
-          toast('No saved careers found')
-          return
-        }
-        const snapshot = await loadCareer(newest.slot)
+        const snapshot = await loadCareer(slot)
         const res = await client.importSave(snapshot)
         if (res.type === 'error') {
           toast(`Load failed: ${res.message}`, 'error')
           return
         }
         resetNameIndex() // the loaded world may have different players
+        resetPhoneSeen()
         setNav({ screen: 'dashboard', params: {} })
         setHistory([])
+        setSavesOpen(false)
         bumpRefresh()
-        toast(`Loaded "${newest.saveName}"`, 'success')
+        toast(`Loaded “${label}”`, 'success')
       } catch (err) {
         toast(`Load failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
       } finally {
@@ -637,7 +697,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                   busy={busy}
                   engineVersion={props.engineVersion}
                   onSave={onSave}
-                  onLoad={onLoad}
+                  onLoad={() => setSavesOpen(true)}
                 />
                 {nav.screen === 'dashboard' && <LeagueTicker />}
                 <CommandPalette />
@@ -675,6 +735,16 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         )}
         <PlayerActionMenu />
+        {savesOpen && (
+          <SaveManager
+            mode="manage"
+            suggestedName={suggestedSaveName}
+            busy={busy}
+            onLoad={openSlot}
+            onSave={writeSave}
+            onClose={() => setSavesOpen(false)}
+          />
+        )}
         {processing && !watched && (
           <ProcessingOverlay
             data={processing}
@@ -860,148 +930,4 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'history':
       return <HistoryScreen />
   }
-}
-
-/* ────────────────────────── pre-career ────────────────────────── */
-
-/** A fresh random world seed (1..1,000,000). */
-function randomSeed(): number {
-  return Math.floor(Math.random() * 1_000_000) + 1
-}
-
-function SetupHero(props: {
-  seed: number
-  setSeed: (n: number) => void
-  busy: boolean
-  availableMods: ModListEntry[]
-  selectedModId: string
-  setSelectedModId: (id: string) => void
-  onCreate: () => void
-  resume: { teamName: string; year: number; phase: string } | null
-  onResume: () => void
-}): JSX.Element {
-  const phaseLabel = (p: string): string =>
-    p === 'offseason' ? 'offseason' : p === 'playoffs' ? 'playoffs' : 'regular season'
-  return (
-    <div className="hero">
-      <h1 className="hero-title" style={{ marginBottom: 2 }}>THE SHOW</h1>
-      <div style={{ fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', color: 'var(--accent, #f5b301)', fontWeight: 700, marginBottom: 10 }}>
-        Franchise Hockey Manager
-      </div>
-      <p className="hero-sub">
-        Generate a league and choose a club. You take over in the summer — the draft,
-        free agency and training camp are yours before the puck drops.
-      </p>
-      {props.resume && (
-        <div className="panel" style={{ marginBottom: 'var(--sp-4)', borderColor: 'var(--accent, #f5b301)' }}>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
-            <div>
-              <div className="muted small">Pick up where you left off</div>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>{props.resume.teamName} · {props.resume.year} <span className="muted" style={{ fontWeight: 500 }}>({phaseLabel(props.resume.phase)})</span></div>
-            </div>
-            <button className="btn btn-primary btn-lg" autoFocus disabled={props.busy} onClick={props.onResume}>▶ Resume</button>
-          </div>
-        </div>
-      )}
-      <div className="panel stack">
-        {/* Database picker — only shown when at least one mod is installed */}
-        {props.availableMods.length > 0 && (
-          <div>
-            <label className="field-label" htmlFor="db-select">
-              Database
-            </label>
-            <select
-              id="db-select"
-              className="input"
-              value={props.selectedModId}
-              onChange={(e) => props.setSelectedModId(e.target.value)}
-            >
-              <option value="">Fictional (default)</option>
-              {props.availableMods.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                  {m.season ? ` (${m.season})` : ''}
-                  {` — ${m.teamCount} teams`}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div>
-          <label className="field-label" htmlFor="seed-input">
-            World seed <span className="muted" style={{ fontWeight: 400 }}>— random by default; set one only to replay a specific world</span>
-          </label>
-          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-            <input
-              id="seed-input"
-              className="input"
-              type="number"
-              style={{ flex: 1 }}
-              value={props.seed}
-              onChange={(e) => props.setSeed(Number(e.target.value))}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost"
-              title="Roll a new random world"
-              onClick={() => props.setSeed(randomSeed())}
-            >
-              Randomize
-            </button>
-          </div>
-        </div>
-        <button className="btn btn-hero btn-lg" onClick={props.onCreate} disabled={props.busy}>
-          {props.busy ? 'Generating…' : 'Generate league'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function TeamPicker(props: {
-  teams: TeamInfo[]
-  busy: boolean
-  onPick: (team: TeamInfo) => void
-}): JSX.Element {
-  return (
-    <div className="picker">
-      <div className="screen-header">
-        <h1 className="screen-title">Choose your club</h1>
-        <span className="muted small">sorted by squad rating</span>
-      </div>
-      {props.busy && (
-        <div
-          className="panel"
-          style={{ padding: '12px 16px', marginBottom: 'var(--sp-3)', fontSize: 14 }}
-        >
-          ⏳ Simulating the season before your arrival — standings, storylines and a
-          draft class are being written. This takes a moment…
-        </div>
-      )}
-      <div className="grid grid-auto">
-        {props.teams.map((t) => (
-          <button
-            key={t.teamId}
-            className="team-card"
-            onClick={() => props.onPick(t)}
-            disabled={props.busy}
-          >
-            <div className="crest" style={{ background: 'var(--bg3)', color: 'var(--violet-h)' }}>
-              {t.abbreviation}
-            </div>
-            <div>
-              <div className="team-card-name">{t.name}</div>
-              <div className="team-card-meta">
-                {t.conference} · {t.division}
-              </div>
-              <div className="team-card-meta">
-                Squad rating{' '}
-                <strong style={{ color: 'var(--violet-h)' }}>{t.strength}</strong>
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
 }

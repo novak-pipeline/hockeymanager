@@ -69,10 +69,18 @@ try {
 } catch { /* best effort */ }
 
 try {
-  await win.waitForSelector('text=Generate league', { timeout: 30000 })
-  await win.click('text=Generate league')
-  await win.waitForSelector('.team-card', { timeout: 60000 })
-  await win.click('.team-card >> nth=0')
+  // F6 front door: title → new career → club pick.
+  await win.waitForSelector('.title-menu', { timeout: 30000 })
+  await win.click('.title-item:has-text("New career")')
+  await win.waitForSelector('.setup-inner', { timeout: 15000 })
+  try {
+    await win.click('.setup-seed-toggle', { timeout: 4000 })
+    await win.fill('.setup-seed-row input', process.env.UI_SNAP_SEED ?? '424242', { timeout: 4000 })
+  } catch { /* seed not pinned — run is not reproducible */ }
+  await win.click('text=Build the world')
+  await win.waitForSelector('.club-card', { timeout: 60000 })
+  await win.click('.club-card >> nth=0')
+  await win.click('.brief-cta')
   // Picking a club sims the whole year-zero season in the worker — the shell
   // appears first and the Continue button only enables when that finishes.
   await win.waitForSelector('button:has-text("Continue"):not([disabled])', { timeout: 300000 })

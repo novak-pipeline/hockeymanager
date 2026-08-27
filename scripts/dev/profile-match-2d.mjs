@@ -192,11 +192,18 @@ try {
 } catch { /* best effort */ }
 
 try {
-  await win.waitForSelector('text=Generate league', { timeout: 30000 })
-  try { await win.fill('#seed-input', process.env.PROFILE_SEED ?? '424242', { timeout: 4000 }) } catch { /* ignore */ }
-  await win.click('text=Generate league')
-  await win.waitForSelector('.team-card', { timeout: 60000 })
-  await win.click('.team-card >> nth=0')
+  // F6 front door: title → new career → club pick.
+  await win.waitForSelector('.title-menu', { timeout: 30000 })
+  await win.click('.title-item:has-text("New career")')
+  await win.waitForSelector('.setup-inner', { timeout: 15000 })
+  try {
+    await win.click('.setup-seed-toggle', { timeout: 4000 })
+    await win.fill('.setup-seed-row input', process.env.PROFILE_SEED ?? '424242', { timeout: 4000 })
+  } catch { /* seed not pinned — run is not reproducible */ }
+  await win.click('text=Build the world')
+  await win.waitForSelector('.club-card', { timeout: 60000 })
+  await win.click('.club-card >> nth=0')
+  await win.click('.brief-cta')
   await win.waitForSelector('text=Continue', { timeout: 600000 })
   say('  ▶ shell up — walking to the first match day')
 
