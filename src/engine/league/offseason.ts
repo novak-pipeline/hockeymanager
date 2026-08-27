@@ -42,6 +42,7 @@ import {
 } from '@domain'
 import { FIRST_NAMES, LAST_NAMES } from '@data'
 import { computeComposites, overall } from '@engine/ratings/composites'
+import { analystEdge } from '@engine/league/draftRankings'
 import type { Rng } from '@engine/shared/rng'
 
 /* ────────────────────────── shared helpers ────────────────────────── */
@@ -178,8 +179,13 @@ function driftYouthCeiling(
   // Slight negative mean: more prospects fall short of their ceiling than exceed
   // it (busts outnumber breakouts), matching real draft outcomes.
   const luck = rng.normal(-0.5, 2.2)
+  // The hidden "analyst edge" pays out here — a stable factor the PUBLIC board read
+  // (and your scouts, reading raw tools, didn't), so an analyst darling tends to
+  // rise and an analyst fade tends to slip. Modest per-offseason; accumulates over
+  // the development window. This is what lets the analysts be right vs your scouts.
+  const edgeBias = analystEdge(p.id as unknown as string) * 1.2
   const youthMult = seasonAge <= 19 ? 1 : seasonAge <= 21 ? 0.8 : 0.55
-  const delta = Math.round((personaBias + perfBias + luck) * youthMult)
+  const delta = Math.round((personaBias + perfBias + luck + edgeBias) * youthMult)
   if (delta === 0) return 0
 
   const curOvr = overall(p.composites, p.position)
@@ -655,12 +661,20 @@ export function buildDraftOrder(args: {
 }
 
 /**
- * AI pick: heavily biased toward the best remaining consensus rank, with the
- * occasional reach a few spots down the board (never past ~8 spots).
+ * AI pick: best-player-available, biased by team need and with the occasional
+ * reach a few spots down the board. `needBonus` (0+, optional) nudges a prospect
+ * UP the board when his position is thin in the drafting org — it shifts the
+ * effective rank by a few spots so a club fills holes without passing on a
+ * clearly superior talent. Omitted → pure BPA-with-reach (unchanged).
  */
-export function aiSelectProspect(args: { remaining: DraftProspect[]; rng: Rng }): DraftProspect {
-  const { remaining, rng } = args
-  const board = [...remaining].sort((a, b) => a.rank - b.rank)
+export function aiSelectProspect(args: {
+  remaining: DraftProspect[]
+  rng: Rng
+  needBonus?: (p: DraftProspect) => number
+}): DraftProspect {
+  const { remaining, rng, needBonus } = args
+  const eff = (p: DraftProspect): number => p.rank - (needBonus ? needBonus(p) : 0)
+  const board = [...remaining].sort((a, b) => eff(a) - eff(b) || a.rank - b.rank)
   let i = 0
   while (i < board.length - 1 && i < 7 && rng.chance(0.42)) i++
   return board[i]

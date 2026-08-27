@@ -46,6 +46,21 @@ export interface RankInput {
   eligibility?: DraftEligibility
 }
 
+/**
+ * A hidden, stable per-player "analyst edge": something the public consensus reads
+ * about a prospect that his raw tools/potential don't capture (pro pedigree, a
+ * projectable frame, a translatable pro skill) — and which actually pays out in
+ * development. It's what lets the ANALYST board legitimately beat your scouts on
+ * some prospects (and miss on others), rather than the analysts being a uniformly
+ * over-hyped wrong version. Range [-1, 1]; deterministic.
+ */
+export function analystEdge(playerId: string): number {
+  let h = 0x811c9dc5
+  const s = playerId + ':analystEdge'
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  return ((h >>> 0) / 0xffffffff) * 2 - 1
+}
+
 /** Deterministic [-1, 1) from a string (FNV-1a hash). */
 function hashUnit(s: string): number {
   let h = 0x811c9dc5
@@ -90,8 +105,15 @@ export function analystRank(inputs: RankInput[], phase: DraftRankPhase): string[
  * actually pays out, so reaches and sleepers emerge as players prove out.
  */
 export function perceivedCeiling(trueCeiling: number, age: number, productionBonus = 0): number {
-  const hype = 4 + Math.max(0, 19 - age) * 2 // 17→8, 18→6, 19→4, 20+→4
-  return Math.max(0, Math.min(99, trueCeiling + hype + productionBonus))
+  const hype = 3 + Math.max(0, 19 - age) // 17→5, 18→4, 19→3, 20+→3
+  const raw = trueCeiling + hype + productionBonus
+  // Analysts hype the class, but FRANCHISE (5★) projections stay rare — real boards
+  // don't slap top-end ceilings on the whole first round. Diminishing returns above
+  // a knee mean only a genuinely elite ceiling (or a true monster season) reads as a
+  // top-of-the-board star; everyone else compresses into the 4 / 4.5★ band.
+  const KNEE = 82
+  const perceived = raw <= KNEE ? raw : KNEE + (raw - KNEE) * 0.4
+  return Math.max(0, Math.min(99, Math.round(perceived)))
 }
 
 /**
@@ -106,23 +128,35 @@ export function perceivedCeiling(trueCeiling: number, age: number, productionBon
  * @param isD            defenceman (lower scoring par)
  * @param leagueStrength NHL-equivalency of the league he produces in (0,1]
  */
-export function productionPremium(ppg: number, isD: boolean, leagueStrength: number): number {
+export function productionPremium(ppg: number, isD: boolean, leagueStrength: number, age = 18): number {
   if (ppg <= 0) return 0 // no sample → no opinion either way
   const nhlePpg = ppg * Math.max(0.05, leagueStrength)
   const par = isD ? 0.13 : 0.22 // NHL-equivalent PPG a "notable" prospect clears
   const ratio = nhlePpg / par
-  return Math.max(-6, Math.min(14, Math.round((ratio - 1) * 12)))
+  // Production is the DOMINANT visible driver of a real draft board, and it's
+  // NHLe-translated — so a point-per-game in a strong league (NCAA, 0.40) beats a
+  // point-per-game in a weaker one (OHL, 0.30). It's also AGE-ADJUSTED: the same
+  // output is far more impressive from a 16/17-year-old than a passed-over 19/20,
+  // so younger producers get more credit (penalties aren't age-scaled — a young
+  // no-show is a project, not a bust). Bounds wide enough that a dominant young
+  // producer genuinely climbs and a no-show genuinely slides.
+  const raw = (ratio - 1) * 16
+  const ageMult = age <= 16 ? 1.25 : age === 17 ? 1.15 : age === 18 ? 1.0 : age <= 20 ? 0.85 : 0.75
+  const adj = raw > 0 ? raw * ageMult : raw
+  return Math.max(-10, Math.min(24, Math.round(adj)))
 }
 
-/** Goalies are notoriously hard to project — analysts fade them on draft boards
- *  (an elite goalie ceiling rarely cracks the top 10). Skaters are unaffected. */
-function positionFactor(position?: string): number {
+/** Goalies are notoriously hard to project — boards fade them (an elite goalie
+ *  ceiling rarely cracks the top 10). Skaters are unaffected. Exported so YOUR
+ *  scouts' board applies the same fade as the analyst board (a tandem-ceiling
+ *  goalie shouldn't rank top-10 on either). */
+export function positionFactor(position?: string): number {
   return position === 'G' ? 0.86 : 1
 }
 
 /** Re-entry prospects (19–20, passed over once already) are docked — they're
- *  older and the league has seen them before. */
-function reentryPenalty(eligibility?: DraftEligibility): number {
+ *  older and the league has seen them before. Exported for the scout board too. */
+export function reentryPenalty(eligibility?: DraftEligibility): number {
   return eligibility === 'reentry' ? 9 : 0
 }
 
@@ -196,10 +230,36 @@ export interface AnalystProjectionInput {
   eligibility: DraftEligibility
   /** Board rank, if the player made the published top board (omit if off-board). */
   rank?: number
+  /** The analyst's FULL-ordering rank (1-based), even past the published board — so
+   *  an off-board prospect reads as a concrete "projected Nth-round pick" rather
+   *  than a vague "off the board". */
+  fullRank?: number
   /** Display label for the current phase, e.g. "Mid-season ranking". */
   phaseLabel: string
   /** Upcoming entry-draft year. */
   draftYear: number
+}
+
+/** Picks per round and rounds in an entry draft (NHL: 7 × 32 = 224). */
+const PICKS_PER_ROUND = 32
+const DRAFT_ROUNDS = 7
+const ROUND_ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh']
+
+/** The round a full-ordering rank projects into (1-based), or 0 if beyond the draft. */
+export function projectedRound(fullRank: number): number {
+  const r = Math.ceil(fullRank / PICKS_PER_ROUND)
+  return r >= 1 && r <= DRAFT_ROUNDS ? r : 0
+}
+
+/** Compact draft-projection label for tables / info rows. */
+export function draftRoundLabel(rank: number | undefined, eligibility?: DraftEligibility): string {
+  if (eligibility === 'radar') return 'Future class'
+  if (rank === undefined) return 'Unranked'
+  if (rank <= PICKS_PER_ROUND * DRAFT_ROUNDS) {
+    const round = projectedRound(rank)
+    return `R${round} · #${rank}`
+  }
+  return 'Undrafted proj.'
 }
 
 /**
@@ -213,14 +273,17 @@ export function analystProjection(p: AnalystProjectionInput): string | null {
     return `Not yet draft-eligible, but already on analysts' radar for a future class. Early ceiling read: projects as ${role}.`
   }
   const reentry = p.eligibility === 'reentry'
+  const round = p.fullRank !== undefined ? projectedRound(p.fullRank) : 0
   const where =
     p.rank !== undefined
       ? `have ${p.name} ranked #${p.rank} in the ${p.draftYear} class`
-      : `have ${p.name} outside their published board for the ${p.draftYear} class`
+      : round >= 1
+        ? `peg ${p.name} as roughly a ${ROUND_ORDINALS[round - 1]}-round pick (~#${p.fullRank}) in the ${p.draftYear} class`
+        : `don't see ${p.name} as a draftable prospect this year`
   const lead = reentry
     ? `Passed over once and re-entry eligible; analysts ${where}`
     : `Analyst consensus (${p.phaseLabel.toLowerCase()}) ${where}`
-  return `${lead}. Their projection: tops out as ${role}.${projectionHedge(p.rank)}`
+  return `${lead}. Their projection: tops out as ${role}.${projectionHedge(p.rank ?? p.fullRank)}`
 }
 
 /**
@@ -230,9 +293,10 @@ export function analystProjection(p: AnalystProjectionInput): string | null {
  * confidence caveat appended to the analyst projection.
  */
 export function projectionHedge(rank?: number): string {
-  if (rank === undefined) return ' Off the board, the range of outcomes is enormous.'
+  if (rank === undefined) return ' Off the board entirely — the range of outcomes is enormous.'
   if (rank <= 10) return ' A high-confidence projection at the top of the class.'
   if (rank <= 31) return ' A first-round projection, though some spread remains.'
   if (rank <= 64) return ' Projections this deep carry a wide range of outcomes.'
-  return ' This late, the projection is little more than a best guess.'
+  if (rank <= PICKS_PER_ROUND * DRAFT_ROUNDS) return ' This late, the projection is little more than a best guess.'
+  return ' More of a free-agent flier than a draft pick at this stage.'
 }

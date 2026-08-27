@@ -126,18 +126,36 @@ export interface SeasonProjection {
   line: string
 }
 
-function skaterPointProjection(ovr: number, role: string): SeasonProjection {
-  // EHM-calibrated: an 80-overall top-liner projects ~80 pts, a 50-overall depth ~12 pts
+function skaterPointProjection(ovr: number, role: string, leagueFactor = 1, leagueName?: string, observed?: number): SeasonProjection {
+  const lf0 = Math.max(0.1, Math.min(1, leagueFactor))
+  // If we already have a real scoring sample this season, project off his ACTUAL
+  // pace. A junior's NHL-readiness rating badly under-counts what he produces in
+  // his own league, so the ovr model can read "6–8 points" for a player on pace
+  // for 50 — a glaring contradiction with the box score right above it.
+  if (observed !== undefined && observed > 0) {
+    const seasonGames = lf0 >= 0.95 ? 82 : 68
+    const proj = Math.round(observed * seasonGames)
+    const lo = Math.max(2, Math.round(proj * 0.9))
+    const hi = Math.round(proj * 1.1)
+    const where = leagueName && lf0 < 0.95 ? `in the ${leagueName} this season` : 'this season'
+    return { line: `On pace for around ${lo}–${hi} points ${where}` }
+  }
+  // EHM-calibrated NHL-equivalent: an 80-overall top-liner ~80 pts, 50-overall depth ~12 pts.
   const base = Math.round(Math.pow(Math.max(0, (ovr - 40) / 60), 1.6) * 90)
   const roleBonus =
     role.toLowerCase().includes('top') || role.toLowerCase().includes('first') ? 10 :
     role.toLowerCase().includes('second') ? 3 :
     role.toLowerCase().includes('third') || role.toLowerCase().includes('fourth') ? -8 :
     0
-  const proj = Math.max(2, base + roleBonus)
+  const nhlProj = Math.max(2, base + roleBonus)
+  // Translate to the league he actually plays in: weaker leagues inflate raw
+  // point totals (a junior star scores far more in the WHL than the NHL-equiv).
+  const lf = Math.max(0.1, Math.min(1, leagueFactor))
+  const proj = Math.round(nhlProj / lf)
   const lo = Math.max(2, Math.round(proj * 0.85))
   const hi = Math.round(proj * 1.15)
-  return { line: `Projected for around ${lo}–${hi} points this season` }
+  const where = leagueName && lf < 0.95 ? `in the ${leagueName} this season` : 'this season'
+  return { line: `Projected for around ${lo}–${hi} points ${where}` }
 }
 
 function goalieProjection(ovr: number): SeasonProjection {
@@ -161,6 +179,30 @@ export interface ReportCard {
   physicality: ReportGrade
   /** Only present for goalies. */
   goaltending?: ReportGrade
+}
+
+/** A scouting "area" with its 0–100 score — used to pick a player's standout
+ *  strengths and weaknesses for the living scouting report. */
+export interface ReportArea { key: string; label: string; score: number }
+
+/** The six (or seven, for goalies) report-card areas with raw scores. */
+export function reportCardScores(p: Player): ReportArea[] {
+  const c = p.composites as unknown as Record<string, number>
+  const m = p.ratings.mental as unknown as Record<string, number>
+  const t = p.ratings.technical as unknown as Record<string, number>
+  const areas: ReportArea[] = [
+    { key: 'iq', label: 'hockey sense', score: ((m['offensiveIQ'] ?? 50) + (m['defensiveIQ'] ?? 50) + (m['vision'] ?? 50) + (m['anticipation'] ?? 50)) / 4 },
+    { key: 'skating', label: 'skating', score: c['skating'] ?? 50 },
+    { key: 'shot', label: 'shot and scoring touch', score: ((t['wristShot'] ?? 50) + (t['slapShot'] ?? 50) + (c['scoring'] ?? 50)) / 3 },
+    { key: 'puck', label: 'puckhandling and playmaking', score: ((t['stickhandling'] ?? 50) + (t['passing'] ?? 50) + (c['playmaking'] ?? 50)) / 3 },
+    { key: 'defence', label: 'defensive game', score: ((c['defensiveZone'] ?? 50) + (c['takeaway'] ?? 50) + (m['positioning'] ?? 50)) / 3 },
+    { key: 'physical', label: 'physical game', score: ((c['hitting'] ?? 50) + (c['blocking'] ?? 50)) / 2 },
+  ]
+  if (p.position === 'G' && p.ratings.goalie) {
+    const g = p.ratings.goalie as unknown as Record<string, number>
+    areas.push({ key: 'goalie', label: 'technique in net', score: ((g['reflexes'] ?? 50) + (g['positioningG'] ?? 50) + (g['reboundControl'] ?? 50) + (g['glove'] ?? 50) + (g['blocker'] ?? 50)) / 5 })
+  }
+  return areas
 }
 
 function buildReportCard(p: Player, knowledge: number): ReportCard {
@@ -411,7 +453,12 @@ export interface ScoutReportView {
 export function buildScoutReport(
   player: Player,
   scouting: ScoutingState | undefined,
-  potStars: number
+  potStars: number,
+  league?: { factor: number; name: string },
+  /** Current-season scoring pace (points/game) in the league he actually plays in.
+   *  When present, the season point projection extrapolates from this real pace
+   *  instead of the (junior-underrating) NHL-readiness model. */
+  observedPace?: number,
 ): ScoutReportView {
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
@@ -427,7 +474,7 @@ export function buildScoutReport(
   const seasonProjection: SeasonProjection =
     player.position === 'G'
       ? goalieProjection(ovr)
-      : skaterPointProjection(ovr, player.role)
+      : skaterPointProjection(ovr, player.role, league?.factor ?? 1, league?.name, observedPace)
 
   // Build prose
   const prose = buildProse(player, knowledge, pid)

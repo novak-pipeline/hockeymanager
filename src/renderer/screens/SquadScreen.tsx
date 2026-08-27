@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react'
 import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
-import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerLink } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { PlayerFace } from '../components/PlayerFace'
-import { useUiStore } from '../components/store'
+import { useUiStore, toast } from '../components/store'
 
 type ScreenTab = 'nhl' | 'ahl'
 type PosFilter = 'ALL' | 'F' | 'D' | 'G'
@@ -84,11 +85,6 @@ function ArchetypeLabel({ archetype }: { archetype: ArchetypeInfo | undefined })
       {archetype.label}
     </span>
   )
-}
-
-function OvrChip({ value }: { value: number }): JSX.Element {
-  const cls = value >= 85 ? 'chip chip-success' : value >= 75 ? 'chip chip-accent' : value >= 65 ? 'chip' : 'chip chip-warn'
-  return <span className={cls}>{value}</span>
 }
 
 function CondBar({ value }: { value: number }): JSX.Element {
@@ -178,7 +174,6 @@ function GoalieCols({ row }: { row: SquadRowView }): JSX.Element {
 
 export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
   const client = useClient()
-  const nav = useNav()
   const bump = useUiStore((s) => s.bump)
   const { teamId } = props
   // When a specific (non-user) teamId is provided, hide write controls
@@ -243,10 +238,43 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
     }
   }
 
+  const [settingRoster, setSettingRoster] = useState(false)
+  const [coachMoves, setCoachMoves] = useState<{ promoted: string[]; demoted: string[] } | null>(null)
+  async function handleSetCoachRoster(): Promise<void> {
+    if (settingRoster) return
+    setSettingRoster(true)
+    try {
+      const res = await client.setCoachRoster()
+      if (res.type === 'error') { toast(res.message, 'error'); return }
+      if (res.type === 'coachRosterSet') {
+        setCoachMoves({ promoted: res.promoted, demoted: res.demoted })
+        toast(
+          res.promoted.length + res.demoted.length === 0
+            ? 'Coach is happy with the roster as set — no moves.'
+            : `Coach set the roster: ${res.promoted.length} up, ${res.demoted.length} down.`,
+          'success'
+        )
+      }
+      bump()
+      refetchAhl()
+    } finally {
+      setSettingRoster(false)
+    }
+  }
+
   return (
     <section className="stack">
-      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Squad') : (ahlData?.teamName ?? 'AHL Affiliate')}>
-        <div className="row" style={{ gap: 'var(--sp-2)' }}>
+      <ScreenHeader title={screenTab === 'nhl' ? (data ? data.teamName : 'Roster') : (ahlData?.teamName ?? 'AHL Affiliate')}>
+        <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {screenTab === 'nhl' && data && (
+            <span className="muted small" style={{ whiteSpace: 'nowrap' }} title="Roster size · cap used vs ceiling">
+              {data.rosterCount} players ·{' '}
+              <span style={{ color: data.capUsed > data.salaryCap ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
+                {fmtMoney(data.capUsed)}
+              </span>
+              {' / '}{fmtMoney(data.salaryCap)}
+            </span>
+          )}
           {screenTab === 'nhl' && (
             <input
               className="input"
@@ -258,15 +286,43 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
           )}
           {!isReadOnly && (
             <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => nav.navigate('lockerRoom')}
-              title="View locker room dynamics"
+              className="btn btn-sm"
+              disabled={settingRoster}
+              onClick={() => void handleSetCoachRoster()}
+              title="Let the coach auto-set the NHL roster by ability — calls up the best AHL options and sends down those they've bettered"
             >
-              Locker Room
+              {settingRoster ? 'Setting…' : 'Ask coach to set roster'}
             </button>
           )}
         </div>
       </ScreenHeader>
+
+      {/* What the coach just did — explicit report of the auto-set moves. */}
+      {!isReadOnly && coachMoves && (
+        <Panel title="Coach set the roster">
+          {coachMoves.promoted.length + coachMoves.demoted.length === 0 ? (
+            <div className="muted small">No changes — the coach was happy with the roster as it stood.</div>
+          ) : (
+            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
+              <div>
+                <div className="field-label" style={{ color: 'var(--success)' }}>Called up ({coachMoves.promoted.length})</div>
+                {coachMoves.promoted.length === 0
+                  ? <div className="muted small" style={{ marginTop: 4 }}>None.</div>
+                  : <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{coachMoves.promoted.map((n) => <li key={n} style={{ fontSize: 13 }}>{n}</li>)}</ul>}
+              </div>
+              <div>
+                <div className="field-label" style={{ color: 'var(--accent2, #e0b341)' }}>Sent down ({coachMoves.demoted.length})</div>
+                {coachMoves.demoted.length === 0
+                  ? <div className="muted small" style={{ marginTop: 4 }}>None.</div>
+                  : <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{coachMoves.demoted.map((n) => <li key={n} style={{ fontSize: 13 }}>{n}</li>)}</ul>}
+              </div>
+            </div>
+          )}
+          <div className="row" style={{ marginTop: 'var(--sp-2)' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setCoachMoves(null)}>Dismiss</button>
+          </div>
+        </Panel>
+      )}
 
       {/* Top-level NHL / AHL tab switcher — only shown for own team */}
       {!isReadOnly && (
@@ -409,7 +465,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                             </td>
                             {colView === 'general' && (
                               <>
-                                <td className="num"><OvrChip value={row.overall} /></td>
+                                <td className="num"><OverallStars value={row.overall} /></td>
                                 <td><CondBar value={row.condition} /></td>
                                 <td style={{ color: moraleColor(row.morale), fontWeight: 600, fontSize: 12 }}>{moraleWord(row.morale)}</td>
                                 <td style={{ textAlign: 'center' }}><FormArrow value={row.form} /></td>
@@ -430,11 +486,11 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                             )}
                             {colView === 'stats' && (isGoalie ? <GoalieCols row={row} /> : <SkaterCols row={row} />)}
                             <td>
-                              {!isReadOnly && row.contract.twoWay && (
+                              {!isReadOnly && (
                                 <button
                                   className="btn btn-ghost btn-sm"
                                   style={{ fontSize: 11, padding: '2px 6px' }}
-                                  title="Send down to AHL affiliate"
+                                  title={row.contract.twoWay ? 'Send down to AHL affiliate' : 'Send down to the AHL (one-way deal — counts against the cap in the minors)'}
                                   onClick={() => void handleSendDown(row.playerId)}
                                 >
                                   Send ↓
@@ -553,7 +609,7 @@ function AhlSquadPanel({
                         </td>
                         <td className="num muted">{row.age}</td>
                         <td className="muted">{row.position}</td>
-                        <td className="num"><OvrChip value={row.overall} /></td>
+                        <td className="num"><OverallStars value={row.overall} /></td>
                         <td><CondBar value={row.condition} /></td>
                         <td><InjuryBadge row={row} /></td>
                         <td className="num" style={{ whiteSpace: 'nowrap' }}>

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { analystProjection, analystRank, ceilingRole, draftEligibility, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
+import { analystProjection, analystRank, ceilingRole, draftEligibility, draftRoundLabel, perceivedCeiling, productionPremium, projectionHedge, type RankInput } from './draftRankings'
+
+describe('draftRoundLabel', () => {
+  it('maps a full-ordering rank to a round/standing', () => {
+    expect(draftRoundLabel(1)).toBe('R1 · #1')
+    expect(draftRoundLabel(33)).toBe('R2 · #33')
+    expect(draftRoundLabel(96)).toBe('R3 · #96')
+    expect(draftRoundLabel(300)).toBe('Undrafted proj.')
+    expect(draftRoundLabel(undefined)).toBe('Unranked')
+    expect(draftRoundLabel(20, 'radar')).toBe('Future class')
+  })
+})
 
 describe('draftEligibility', () => {
   it('buckets by age and excludes drafted / out-of-range', () => {
@@ -67,8 +78,16 @@ describe('analystRank', () => {
     expect(productionPremium(0.6, false, 0.50)).toBeGreaterThan(productionPremium(0.6, false, 0.25))
     // No sample → neutral.
     expect(productionPremium(0, false, 0.30)).toBe(0)
-    // Bounded — can't override pedigree.
-    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(14)
+    // Bounded — production is a strong driver but still can't fully override pedigree.
+    expect(productionPremium(3, false, 1)).toBeLessThanOrEqual(24)
+  })
+  it('productionPremium is age-adjusted — a younger producer gets more credit', () => {
+    // Same NHLe-translated output: a 17-year-old is rated above a passed-over 20yo.
+    const young = productionPremium(1.2, false, 0.30, 17)
+    const older = productionPremium(1.2, false, 0.30, 20)
+    expect(young).toBeGreaterThan(older)
+    // A young no-show isn't penalised harder than an older one (it's a project).
+    expect(productionPremium(0.2, false, 0.30, 17)).toBe(productionPremium(0.2, false, 0.30, 20))
   })
 
   it('production feeds the perceived ceiling', () => {
@@ -79,7 +98,16 @@ describe('analystRank', () => {
     // Younger prospects carry more hype above their true ceiling.
     expect(perceivedCeiling(70, 17)).toBeGreaterThan(perceivedCeiling(70, 20))
     expect(perceivedCeiling(70, 17)).toBeGreaterThan(70) // always optimistic vs truth
-    expect(perceivedCeiling(99, 17)).toBe(99)            // clamped at the top
+    expect(perceivedCeiling(99, 17)).toBeLessThanOrEqual(99)        // clamped
+    expect(perceivedCeiling(99, 17)).toBeGreaterThanOrEqual(88)     // an elite ceiling still reads top-tier
+  })
+
+  it('keeps FRANCHISE (5★) projections rare — hype does not push the whole top to elite', () => {
+    // A solid-but-not-elite ceiling (true ~78, a 4★) with full youth hype should
+    // NOT read as a 5★ (88+) franchise projection — it compresses into the 4–4.5★ band.
+    expect(perceivedCeiling(78, 17)).toBeLessThan(88)
+    // Only a genuinely elite true ceiling reaches the top.
+    expect(perceivedCeiling(95, 18)).toBeGreaterThanOrEqual(88)
   })
 
   it('docks re-entry prospects vs equal first-time-eligible ones', () => {
@@ -122,9 +150,15 @@ describe('analystProjection', () => {
     const s = analystProjection({ ...base, eligibility: 'reentry', rank: 40 })
     expect(s).toMatch(/[Pp]assed over/)
   })
-  it('handles an eligible prospect who missed the published board', () => {
+  it('reads an off-published-board prospect as a concrete projected round', () => {
+    // Ranked ~#96 overall → a third-round projection, not a vague "off the board".
+    const s = analystProjection({ ...base, eligibility: 'eligible', fullRank: 96 })
+    expect(s).toMatch(/third-round pick/)
+    expect(s).toMatch(/#96/)
+  })
+  it('handles an eligible prospect with no draftable projection at all', () => {
     const s = analystProjection({ ...base, eligibility: 'eligible' })
-    expect(s).toMatch(/outside their published board/)
+    expect(s).toMatch(/draftable prospect/)
   })
 
   it('hedges harder the deeper the projection', () => {

@@ -31,9 +31,9 @@ import { LeagueScreen } from './screens/LeagueScreen'
 import { WorldScreen } from './screens/WorldScreen'
 import { BoardScreen } from './screens/BoardScreen'
 import { StaffMeetingScreen } from './screens/StaffMeetingScreen'
+import { JobMarketScreen } from './screens/JobMarketScreen'
+import { ScoutProfileScreen } from './screens/ScoutProfileScreen'
 import { DataHubScreen } from './screens/DataHubScreen'
-import { PressConference } from './components/PressConference'
-import { pollPress } from './lib/press'
 
 type AppPhase = 'setup' | 'picking' | 'shell'
 
@@ -48,7 +48,9 @@ export function App(): JSX.Element {
   const [client, setClient] = useState<SimClient | null>(null)
   const [engine, setEngine] = useState('…')
   const [phase, setPhase] = useState<AppPhase>('setup')
-  const [seed, setSeed] = useState(2026)
+  // Random world by default — the seed is a knob for players who want a specific
+  // world, not something they have to set.
+  const [seed, setSeed] = useState(randomSeed)
   const [teams, setTeams] = useState<TeamInfo[]>([])
   const [userTeam, setUserTeam] = useState<TeamInfo | null>(null)
   const [busy, setBusy] = useState(false)
@@ -203,11 +205,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     (r) => (r.type === 'dashboard' ? r.dashboard : null)
   )
 
-  // Press pump: fire on every refresh bump (version change).
-  const version = useUiStore((s) => s.version)
-  useEffect(() => {
-    void pollPress(client)
-  }, [version, client])
+  // Press-conference pop-up disabled for now (got in the way of testing).
+  // To re-enable: restore the pollPress pump + <PressConference /> render below.
 
   /** Serialize world-mutating calls; toast errors; bump the refresh bus. */
   const run = useCallback(
@@ -352,7 +351,6 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         ) : (
           <div className="app-shell" style={appTheme}>
-            <PressConference />
             <div className="app-body">
               <SideNav dashboard={dashboard} />
               <div className="app-right">
@@ -431,6 +429,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <BoardScreen />
     case 'staffMeeting':
       return <StaffMeetingScreen />
+    case 'jobMarket':
+      return <JobMarketScreen />
+    case 'scoutProfile':
+      return <ScoutProfileScreen scoutId={props.params.scoutId ?? ''} />
 
     // ── News ──
     case 'inbox':
@@ -464,6 +466,10 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueScoreboard':
     case 'leagueHistory':
     case 'scouting':
+    case 'scoutingCentre':
+    case 'scoutingPlayers':
+    case 'scoutingFocus':
+    case 'scoutingCoverage':
     case 'scoutingDraft':
     case 'draft':
     case 'offseason':
@@ -510,6 +516,11 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
 
 /* ────────────────────────── pre-career ────────────────────────── */
 
+/** A fresh random world seed (1..1,000,000). */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 1_000_000) + 1
+}
+
 function SetupHero(props: {
   seed: number
   setSeed: (n: number) => void
@@ -551,15 +562,26 @@ function SetupHero(props: {
         )}
         <div>
           <label className="field-label" htmlFor="seed-input">
-            World seed
+            World seed <span className="muted" style={{ fontWeight: 400 }}>— random by default; set one only to replay a specific world</span>
           </label>
-          <input
-            id="seed-input"
-            className="input"
-            type="number"
-            value={props.seed}
-            onChange={(e) => props.setSeed(Number(e.target.value))}
-          />
+          <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+            <input
+              id="seed-input"
+              className="input"
+              type="number"
+              style={{ flex: 1 }}
+              value={props.seed}
+              onChange={(e) => props.setSeed(Number(e.target.value))}
+            />
+            <button
+              type="button"
+              className="btn btn-ghost"
+              title="Roll a new random world"
+              onClick={() => props.setSeed(randomSeed())}
+            >
+              🎲 Randomize
+            </button>
+          </div>
         </div>
         <button className="btn btn-hero btn-lg" onClick={props.onCreate} disabled={props.busy}>
           {props.busy ? 'Generating…' : 'Generate league'}

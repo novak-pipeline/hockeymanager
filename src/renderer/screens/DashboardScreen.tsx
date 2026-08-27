@@ -4,13 +4,16 @@ import type {
   BoxScoreView,
   DashboardView,
   InboxView,
+  LeagueComparisonView,
+  LeagueComparisonCard,
+  PlayoffOddsView,
   ScheduleEntryView,
   ScheduleView,
   StandingRowView,
   TentpoleView,
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
-import { PlayerLink, useNav } from '../components/NavContext'
+import { PlayerLink, TeamLink, useNav } from '../components/NavContext'
 import { fmtDate, fmtMoney } from '../components/format'
 import { TeamCrest } from '../components/Crest'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -93,6 +96,16 @@ export function DashboardScreen(): JSX.Element {
   const { data: tentpoles } = useScreenData<TentpoleView>(
     () => client.getTentpoles(),
     (r) => (r.type === 'tentpoles' ? r.tentpoles : null)
+  )
+
+  const { data: comparison } = useScreenData<LeagueComparisonView>(
+    () => client.getLeagueComparison(),
+    (r) => (r.type === 'leagueComparison' ? r.comparison : null)
+  )
+
+  const { data: playoffOdds } = useScreenData<PlayoffOddsView>(
+    () => client.getPlayoffOdds(),
+    (r) => (r.type === 'playoffOdds' ? r.odds : null)
   )
 
   if (error) {
@@ -281,6 +294,12 @@ export function DashboardScreen(): JSX.Element {
                   {fmtDate(d.nextGame.date)} · #{d.nextGame.opponentRank} in league ·{' '}
                   {d.nextGame.home ? 'Home' : 'Away'}
                 </div>
+                <div className="muted small">
+                  Opponent: {d.nextGame.opponentRecord}
+                  {d.nextGame.opponentSystem && d.nextGame.opponentSystem !== '—' && (
+                    <> · plays <span style={{ color: 'var(--accent)' }}>{d.nextGame.opponentSystem}</span></>
+                  )}
+                </div>
                 <div className="row">
                   <button
                     className="btn btn-primary"
@@ -342,9 +361,113 @@ export function DashboardScreen(): JSX.Element {
             )}
           </Panel>
 
+          {/* Playoff picture */}
+          {playoffOdds?.available && (
+            <Panel title="Playoff picture">
+              <PlayoffOddsCard view={playoffOdds} />
+            </Panel>
+          )}
+
+          {/* How your club stacks up */}
+          {comparison && comparison.cards.length > 0 && (
+            <Panel title="How you stack up">
+              <StacksUpCard view={comparison} />
+            </Panel>
+          )}
+
         </div>
       </div>
     </section>
+  )
+}
+
+/* ── Playoff odds card ── */
+
+function oddsColor(pct: number): string {
+  if (pct >= 85) return 'var(--success)'
+  if (pct >= 45) return 'var(--accent, #f5b301)'
+  if (pct >= 15) return 'var(--amber, #f59e0b)'
+  return 'var(--danger)'
+}
+
+function PlayoffOddsCard({ view }: { view: PlayoffOddsView }): JSX.Element {
+  const user = view.rows.find((r) => r.isUser)
+  // The user's conference, by projected points, with the top-4 playoff cut line.
+  const conf = user ? view.rows.filter((r) => r.conference === user.conference) : []
+
+  return (
+    <div className="list">
+      {user && (
+        <div className="row-between" style={{ alignItems: 'baseline', marginBottom: 6 }}>
+          <span>
+            <span style={{ fontSize: 22, fontWeight: 800, color: oddsColor(user.playoffPct) }}>{user.playoffPct}%</span>
+            <span className="muted small"> to make the playoffs</span>
+          </span>
+          <span className="muted small">proj. {user.projectedPoints} pts</span>
+        </div>
+      )}
+      <div className="muted small" style={{ marginBottom: 4, opacity: 0.7 }}>
+        {user?.conference} — top 4 make it ({view.simulations} sims)
+      </div>
+      {conf.map((r, i) => (
+        <div key={r.teamId}>
+          {i === 4 && <div style={{ borderTop: '1px dashed var(--danger)', opacity: 0.5, margin: '3px 0' }} />}
+          <div
+            className="row-between small"
+            style={{ alignItems: 'center', gap: 8, fontWeight: r.isUser ? 700 : 400, color: r.isUser ? 'var(--violet-h)' : undefined }}
+          >
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {i + 1}. <TeamLink teamId={r.teamId} name={r.abbreviation} /> <span className="muted">{r.points}p · {r.gamesRemaining} left</span>
+            </span>
+            <span className="mono" style={{ color: oddsColor(r.playoffPct), fontWeight: 700, minWidth: 38, textAlign: 'right' }}>
+              {r.playoffPct}%
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ── League comparison card ── */
+
+function rankColor(percentile: number): string {
+  if (percentile >= 0.66) return 'var(--success)'
+  if (percentile >= 0.33) return 'var(--amber, #f59e0b)'
+  return 'var(--danger)'
+}
+
+function StacksUpCard({ view }: { view: LeagueComparisonView }): JSX.Element {
+  return (
+    <div className="list">
+      <div className="muted small" style={{ marginBottom: 4, opacity: 0.75 }}>
+        Your rank across the NHL — 1 is best.
+      </div>
+      {view.cards.map((c: LeagueComparisonCard) => {
+        const color = rankColor(c.percentile)
+        return (
+          <div key={c.key} className="row-between small" style={{ alignItems: 'center', gap: 8 }} title={c.blurb}>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {c.label}
+              <span className="muted" style={{ marginLeft: 6 }}>{c.display}</span>
+            </span>
+            <span className="row" style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {!c.isUserLeader && (
+                <span className="muted" style={{ fontSize: 10 }} title={`League leader: ${c.leaderAbbr} (${c.leaderDisplay})`}>
+                  led by <TeamLink teamId={c.leaderTeamId} name={c.leaderAbbr} />
+                </span>
+              )}
+              <span
+                className="mono"
+                style={{ color, fontWeight: 700, minWidth: 52, textAlign: 'right' }}
+              >
+                {c.isUserLeader ? '★ ' : ''}{c.rank}<span className="muted" style={{ fontWeight: 400 }}>/{c.outOf}</span>
+              </span>
+            </span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

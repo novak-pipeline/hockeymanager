@@ -7,7 +7,8 @@
  * Pure given its inputs. Selection is purely merit-based (best current ability
  * per position); chemistry/coach preference can layer on later.
  */
-import type { Player } from '@domain'
+import type { Player, PlayerId } from '@domain'
+import type { Rng } from '@engine/shared/rng'
 import { ratedOverall } from '@engine/ratings/composites'
 
 export interface NationalTeamPick {
@@ -81,4 +82,65 @@ const NATION_INFO: Record<string, NationInfo> = {
 
 export function nationInfo(nation: string): NationInfo {
   return NATION_INFO[nation] ?? { capital: '', continent: '', languages: [] }
+}
+
+/* ─────────────────────────── World Championship ─────────────────────────── */
+
+export type Medal = 'Gold' | 'Silver' | 'Bronze'
+
+export interface WorldChampionshipMedal {
+  nation: string
+  medal: Medal
+  /** Squad strength (with tournament variance) the medal was decided on. */
+  strength: number
+  /** The medal-winning roster (selected best-available). */
+  playerIds: PlayerId[]
+}
+
+/**
+ * Run an annual World Championship: each nation with a deep enough pool ices its
+ * best-available roster; squad strength + tournament variance decides the medals.
+ * The three strongest nations take Gold / Silver / Bronze and every player on
+ * those rosters earns a medal (the caller records them as honours).
+ *
+ * Returns no medals when fewer than three nations can ice a team (e.g. a
+ * single-nation fictional DB) — international hockey needs a populated world.
+ * Deterministic given the same players + seeded Rng.
+ */
+export function runWorldChampionship(args: {
+  players: Iterable<Player>
+  rng: Rng
+  /** Minimum selected players for a nation to enter (default 12). */
+  minPool?: number
+}): { medals: WorldChampionshipMedal[] } {
+  const minPool = args.minPool ?? 12
+
+  const byNation = new Map<string, Player[]>()
+  for (const p of args.players) {
+    const nat = p.nationality
+    if (!nat) continue
+    const arr = byNation.get(nat) ?? []
+    arr.push(p)
+    byNation.set(nat, arr)
+  }
+
+  const contenders: Array<{ nation: string; strength: number; roster: PlayerId[] }> = []
+  for (const [nation, pool] of byNation) {
+    const picks = selectNationalTeam(pool)
+    if (picks.length < minPool) continue
+    // Tournament variance so the deepest nation doesn't win every single year.
+    const noise = (args.rng.next() * 2 - 1) * 7
+    contenders.push({ nation, strength: rosterStrength(picks) + noise, roster: picks.map((pk) => pk.player.id) })
+  }
+  if (contenders.length < 3) return { medals: [] }
+
+  contenders.sort((a, b) => b.strength - a.strength || a.nation.localeCompare(b.nation))
+  const order: Medal[] = ['Gold', 'Silver', 'Bronze']
+  const medals = contenders.slice(0, 3).map((c, i): WorldChampionshipMedal => ({
+    nation: c.nation,
+    medal: order[i]!,
+    strength: Math.round(c.strength),
+    playerIds: c.roster,
+  }))
+  return { medals }
 }

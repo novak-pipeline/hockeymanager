@@ -14,7 +14,8 @@ import { generateLeague } from '@data/generate'
 import { Rng } from '@engine/shared/rng'
 import { overall } from '@engine/ratings/composites'
 import type { StaffMember } from '@engine/league/staff'
-import { coachSetLineup } from './lineup'
+import { coachSetLineup, coachAdjustedScore, coachFormMoraleConditionAdj } from './lineup'
+import type { Player } from '@domain'
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -185,5 +186,148 @@ describe('coachSetLineup', () => {
       if (diffFound) break
     }
     expect(diffFound).toBe(true)
+  })
+})
+
+describe('coachSetLineup — form / morale / condition', () => {
+  function topForward(roster: Player[]): Player {
+    return roster
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))[0]!
+  }
+
+  it('contributes exactly zero at neutral form/morale/condition (backward compatible)', () => {
+    const roster = makeRoster(10)
+    const coach = makeCoach()
+    for (const p of roster.slice(0, 8)) {
+      const neutral = { ...p, form: 0, morale: 50, fatigue: 0 } as Player
+      expect(coachFormMoraleConditionAdj(neutral, coach)).toBe(0)
+    }
+  })
+
+  it('a hot player outscores an identical cold one', () => {
+    const p = makeRoster(3).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 75 })
+    const hot = { ...p, form: 5 } as Player
+    const cold = { ...p, form: -5 } as Player
+    expect(coachAdjustedScore(hot, coach)).toBeGreaterThan(coachAdjustedScore(cold, coach))
+  })
+
+  it('a tired player takes a penalty big enough to flip a small skill gap', () => {
+    const p = makeRoster(4).find((q) => q.position !== 'G')!
+    const coach = makeCoach({ rating: 80 })
+    const fresh = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 0 } as Player, coach)
+    const tired = coachFormMoraleConditionAdj({ ...p, form: 0, morale: 50, fatigue: 80 } as Player, coach) // condition 20
+    expect(fresh).toBe(0)
+    expect(tired).toBeLessThan(-5) // ≈ -6.7, enough to overcome a sub-5 OVR edge
+  })
+
+  it('does not bury a star who is cold, unhappy and tired', () => {
+    const roster = makeRoster(8)
+    const star = topForward(roster)
+    const modified = roster.map((p) =>
+      p.id === star.id ? ({ ...p, form: -5, fatigue: 80, morale: 20 } as Player) : p
+    )
+    const result = coachSetLineup({ roster: modified, coach: makeCoach({ rating: 85, judgment: 85 }), rng: new Rng(1) })
+    const dressed = new Set(
+      [...result.lines.forwards.flat(), ...result.lines.defensePairs.flat()].map(String)
+    )
+    expect(dressed.has(star.id as string)).toBe(true)
+  })
+
+  it('a better coach reacts more strongly to a slump', () => {
+    const p = makeRoster(9).find((q) => q.position !== 'G')!
+    const slumping = { ...p, form: -5 } as Player
+    const strong = coachFormMoraleConditionAdj(slumping, makeCoach({ rating: 90 }))
+    const weak = coachFormMoraleConditionAdj(slumping, makeCoach({ rating: 45 }))
+    expect(strong).toBeLessThan(weak) // both negative; the better coach benches harder
+  })
+
+  it('labels a scratched tired player with a reason', () => {
+    const roster = makeRoster(12)
+    const weakest = roster
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => overall(a.composites, a.position) - overall(b.composites, b.position))[0]!
+    const modified = roster.map((p) => (p.id === weakest.id ? ({ ...p, fatigue: 85 } as Player) : p))
+    const result = coachSetLineup({ roster: modified, coach: makeCoach(), rng: new Rng(1) })
+    if (result.scratchIds.map(String).includes(weakest.id as string)) {
+      expect(result.scratchReasons?.[weakest.id as string]).toBe('tired')
+    }
+  })
+
+  it('is deterministic with form/morale/condition in play', () => {
+    const roster = makeRoster(17).map((p, i) => ({ ...p, form: (i % 11) - 5, fatigue: (i * 7) % 100 }) as Player)
+    const coach = makeCoach({ judgment: 60, rating: 65 })
+    const a = coachSetLineup({ roster, coach, rng: new Rng(42) })
+    const b = coachSetLineup({ roster, coach, rng: new Rng(42) })
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+
+  it('does not bury a top winger at centre — promotes a versatile depth winger instead', () => {
+    // Build forwards: 3 natural centres, and wingers where the BEST winger is a
+    // non-versatile star and a weaker winger is versatile enough to play centre.
+    const base = makeRoster(3)
+    const fwds = base
+      .filter((p) => p.position === 'C' || p.position === 'W')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))
+      .slice(0, 12)
+    const defs = base.filter((p) => p.position === 'D').slice(0, 6)
+    const gols = base.filter((p) => p.position === 'G').slice(0, 2)
+    const star = fwds[0]! // highest-overall forward — make him a low-versatility WINGER
+    const swing = fwds[4]! // a weaker forward — the versatile one who SHOULD take 4C
+    const forwards = fwds.map((p, i) => {
+      if (i >= 1 && i <= 3) return { ...p, position: 'C' as const } // three natural centres
+      if (p.id === swing.id) return { ...p, position: 'W' as const, versatility: 95 }
+      return { ...p, position: 'W' as const, versatility: 10 } // wingers who can't pivot
+    }) as Player[]
+    const roster = [...forwards, ...defs, ...gols]
+
+    const result = coachSetLineup({ roster, coach: makeCoach({ judgment: 99, rating: 85 }), rng: new Rng(1) })
+    const centreIds = result.lines.forwards.map((line) => String(line[1]))
+    const wingIds = result.lines.forwards.flatMap((line) => [String(line[0]), String(line[2])])
+
+    // The star winger must stay on the wing — never shoved to centre.
+    expect(wingIds).toContain(star.id as string)
+    expect(centreIds).not.toContain(star.id as string)
+    // The lone versatile winger is the one promoted to fill the 4th centre slot.
+    expect(centreIds).toContain(swing.id as string)
+  })
+
+  it('plays a centre-deep club\'s weakest pivot on the wing', () => {
+    // Five natural centres. One is a strong playmaker but a poor pivot (low
+    // faceoffs + low defence) — he should be the one bumped to the wing, since
+    // the four better two-way pivots take the dot.
+    const base = makeRoster(7)
+    const fwds = base
+      .filter((p) => p.position === 'C' || p.position === 'W')
+      .sort((a, b) => overall(b.composites, b.position) - overall(a.composites, a.position))
+      .slice(0, 12)
+    const defs = base.filter((p) => p.position === 'D').slice(0, 6)
+    const gols = base.filter((p) => p.position === 'G').slice(0, 2)
+    const playmaker = fwds[1]! // a strong forward, but make him a poor-pivot centre
+    const forwards = fwds.map((p, i) => {
+      if (i <= 4) {
+        const isPM = p.id === playmaker.id
+        return {
+          ...p,
+          position: 'C' as const,
+          composites: {
+            ...p.composites,
+            // Weak pivot for the playmaker; solid pivots for the other four centres.
+            faceoffWin: isPM ? 20 : 70,
+            defensiveZone: isPM ? 30 : 65,
+          },
+        }
+      }
+      return { ...p, position: 'W' as const }
+    }) as Player[]
+    const roster = [...forwards, ...defs, ...gols]
+
+    const result = coachSetLineup({ roster, coach: makeCoach({ judgment: 99, rating: 85 }), rng: new Rng(2) })
+    const centreIds = result.lines.forwards.map((line) => String(line[1]))
+    const wingIds = result.lines.forwards.flatMap((line) => [String(line[0]), String(line[2])])
+    // The poor-pivot playmaker plays the wing, not centre.
+    expect(wingIds).toContain(playmaker.id as string)
+    expect(centreIds).not.toContain(playmaker.id as string)
   })
 })

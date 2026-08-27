@@ -663,6 +663,13 @@ COMP_LEAGUES = {
     "Ontario Hockey League": "OHL",
     "Western Hockey League": "WHL",
     "United States Hockey League": "USHL",
+    # USA Hockey National Team Development Program (Hughes brothers etc.). The DB
+    # may file it under any of these names; all map to the NTDP feeder. If the DB
+    # instead lumps the NTDP clubs into the USHL division, they import as USHL.
+    "United States National Team Development Program": "NTDP",
+    "USA Hockey National Team Development Program": "NTDP",
+    "US National Team Development Program": "NTDP",
+    "USA NTDP": "NTDP",
     "Kontinental Hockey League": "KHL",
     "Swedish Hockey League": "SHL",
     "Finnish Liiga": "LIIGA",

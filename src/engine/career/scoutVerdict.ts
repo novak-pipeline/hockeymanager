@@ -68,11 +68,18 @@ export function buildScoutVerdict(
   let recommendation: string
   if (signed) {
     const young = p.age <= 23 && potentialStars > currentStars
+    // Established players read off current ability. But a YOUNG player's headline
+    // has to lead with the CEILING — a junior who isn't NHL-ready today but
+    // projects high is "a blue-chip prospect", not "a raw project". Keying young
+    // players on current ability alone made high-end prospects read as projects.
     if (currentStars >= 4.5) recommendation = 'A franchise cornerstone.'
     else if (currentStars >= 4) recommendation = 'A genuine top-line talent.'
+    else if (young && potentialStars >= 4.5) recommendation = 'A blue-chip prospect with franchise upside.'
+    else if (young && potentialStars >= 4) recommendation = 'A high-end prospect worth the wait.'
     else if (currentStars >= 3) recommendation = young ? 'A rising contributor with more to come.' : 'A solid, dependable contributor.'
+    else if (young && potentialStars >= 3) recommendation = 'A promising prospect with real upside.'
     else if (currentStars >= 2) recommendation = young ? 'A developing prospect worth patience.' : 'A useful depth player.'
-    else recommendation = young ? 'A raw project for the system.' : 'A fringe roster player.'
+    else recommendation = young ? 'A raw, long-term project.' : 'A fringe roster player.'
   } else {
     const ceiling = Math.max(currentStars, potentialStars)
     if (ceiling >= 4.5) recommendation = 'Would be a marquee signing.'

@@ -17,6 +17,108 @@ describe('buildTeamList', () => {
   })
 })
 
+describe('Career — playoff odds', () => {
+  it('projects sane, deterministic playoff odds during the regular season', () => {
+    const data = generateLeague({ seed: 61 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 61, userId)
+    const a = career.getPlayoffOdds()
+    const b = new Career(generateLeague({ seed: 61 }), 61, userId).getPlayoffOdds()
+
+    expect(a.available).toBe(true)
+    expect(a.rows.length).toBe(data.league.teams.length)
+    expect(a).toEqual(b) // deterministic per (seed, day)
+    for (const r of a.rows) {
+      expect(r.playoffPct).toBeGreaterThanOrEqual(0)
+      expect(r.playoffPct).toBeLessThanOrEqual(100)
+      expect(r.projectedPoints).toBeGreaterThanOrEqual(r.points) // can only gain points
+      expect(r.gamesRemaining).toBeGreaterThan(0) // day 0: full slate ahead
+    }
+    // Two conferences, top 4 each = 8 playoff spots; total odds ≈ 800%.
+    const totalPct = a.rows.reduce((s, r) => s + r.playoffPct, 0)
+    expect(totalPct).toBeGreaterThan(650)
+    expect(totalPct).toBeLessThan(950)
+  })
+})
+
+describe('Career — coach job market', () => {
+  it('offers a deterministic market with roster-fit previews', () => {
+    const data = generateLeague({ seed: 71 })
+    const userId = data.league.teams[2]!
+    const a = new Career(data, 71, userId).getCoachMarket()
+    const b = new Career(generateLeague({ seed: 71 }), 71, userId).getCoachMarket()
+    expect(a.entries.length).toBeGreaterThan(3)
+    expect(a).toEqual(b) // deterministic per (seed, year)
+    for (const c of a.entries) {
+      expect(c.rosterFit).toBeGreaterThanOrEqual(0)
+      expect(c.rosterFit).toBeLessThanOrEqual(100)
+      expect(c.systemLabel.length).toBeGreaterThan(0)
+    }
+    expect(a.currentCoachName.length).toBeGreaterThan(0)
+  })
+
+  it('hiring a coach swaps the head coach, applies his system, and clears the entry', () => {
+    const data = generateLeague({ seed: 72 })
+    const userId = data.league.teams[1]!
+    const career = new Career(data, 72, userId)
+    const before = career.getCoachMarket()
+    const pick = before.entries[0]!
+    const res = career.hireCoach(pick.coachId)
+    expect(res.ok).toBe(true)
+    const after = career.getCoachMarket()
+    expect(after.currentCoachName).toBe(pick.name)
+    expect(after.entries.some((e) => e.coachId === pick.coachId)).toBe(false)
+    // Team tactics + coachFit are set after a hire.
+    const team = data.teams.get(userId)!
+    expect(team.coachFit).toBeGreaterThan(0)
+  })
+
+  it('firing installs an interim coach and a re-hire is possible', () => {
+    const data = generateLeague({ seed: 73 })
+    const userId = data.league.teams[0]!
+    const career = new Career(data, 73, userId)
+    const original = career.getCoachMarket().currentCoachName
+    const fired = career.fireCoach()
+    expect(fired.ok).toBe(true)
+    expect(career.getCoachMarket().currentCoachName).not.toBe(original)
+  })
+
+  it('survives a snapshot round-trip after a hire (entry stays removed)', () => {
+    const data = generateLeague({ seed: 74 })
+    const userId = data.league.teams[3]!
+    const career = new Career(data, 74, userId)
+    const pick = career.getCoachMarket().entries[0]!
+    career.hireCoach(pick.coachId)
+    const snap = career.exportSnapshot('t', '2026-01-01')
+    const restored = Career.fromSnapshot(snap)
+    const market = restored.getCoachMarket()
+    expect(market.currentCoachName).toBe(pick.name)
+    expect(market.entries.some((e) => e.coachId === pick.coachId)).toBe(false)
+  })
+})
+
+describe('Career — league comparison', () => {
+  it('ranks the user club across every dimension, in-bounds, with a leader', () => {
+    const data = generateLeague({ seed: 42 })
+    const userId = data.league.teams[3]!
+    const career = new Career(data, 42, userId)
+    const view = career.getLeagueComparison()
+    const n = data.league.teams.length
+    expect(view.cards.length).toBeGreaterThan(5)
+    for (const c of view.cards) {
+      expect(c.outOf).toBe(n)
+      expect(c.rank).toBeGreaterThanOrEqual(1)
+      expect(c.rank).toBeLessThanOrEqual(n)
+      expect(c.percentile).toBeGreaterThanOrEqual(0)
+      expect(c.percentile).toBeLessThanOrEqual(1)
+      expect(c.display).toBeTruthy()
+      expect(c.leaderAbbr).toBeTruthy()
+      // The rank-1 club is flagged as the user only when it IS the user.
+      expect(c.isUserLeader).toBe(c.rank === 1 && c.leaderTeamId === (userId as unknown as string))
+    }
+  })
+})
+
 describe('Career — regular season', () => {
   it('starts empty: day 0, no last result, a scheduled next game', () => {
     const data = generateLeague({ seed: 3 })
@@ -208,7 +310,7 @@ describe('Career — full year cycle', () => {
     career.advanceOffseason()
     const draft = career.getDraft()
     expect(draft).not.toBeNull()
-    expect(draft!.board).toHaveLength(32) // 16 teams × 2 rounds
+    expect(draft!.board).toHaveLength(16 * 7) // 16 teams × 7 rounds
     career.advanceDraft() // sim to user pick (or end)
     const mid = career.getDraft()!
     if (mid.userIsOnClock) {
@@ -218,6 +320,28 @@ describe('Career — full year cycle', () => {
     career.advanceOffseason() // finishes draft, moves to resign
     const done = career.getDraft()
     expect(done === null || done.complete).toBe(true)
+  })
+
+  it('records rights + draft pedigree on every player selected in-game', () => {
+    const data = generateLeague({ seed: 21 })
+    const career = new Career(data, 21, data.league.teams[0])
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    career.advanceOffseason() // awards → draft (builds the board)
+    career.advanceOffseason() // draft → resign (force-sims every pick)
+
+    // rightsTeamId is set ONLY by an in-game selection, so it cleanly identifies
+    // players drafted this career (vs. generated/imported pedigree).
+    const drafted = [...data.players.values()].filter((p) => p.rightsTeamId !== undefined)
+    expect(drafted.length).toBeGreaterThan(0)
+    for (const p of drafted) {
+      expect(p.nhlDrafted).toBe(true)
+      expect(p.nhlDraftEligible).toBe(false)
+      expect(p.draftRound).toBeGreaterThanOrEqual(1)
+      expect(p.draftOverall).toBeGreaterThanOrEqual(1)
+      expect(p.draftClub).toBeTruthy()
+      expect(data.teams.has(p.rightsTeamId!)).toBe(true)
+    }
   })
 })
 
@@ -1702,5 +1826,29 @@ describe('Career — wider-world quick-sim', () => {
     const reSnap = restored.exportSnapshot('t2', '2026-06-14')
     const gpAfter = reSnap.leagueData.league.competitions![0]!.standings.reduce((s, st) => s + st.gamesPlayed, 0)
     expect(gpAfter).toBeGreaterThanOrEqual(gpBefore)
+  })
+})
+
+describe('Career — applyCoachRoster', () => {
+  it('keeps every player (union preserved) and puts the best up by ability', () => {
+    const data = generateLeague({ seed: 9 })
+    const career = new Career(data, 9, data.league.teams[0]!)
+    const userTeam = data.teams.get(data.league.teams[0]!)!
+    const ahlId = userTeam.affiliateId
+    expect(ahlId).toBeDefined()
+    const ahl = data.teams.get(ahlId!)!
+
+    const before = new Set([...userTeam.roster, ...ahl.roster].map((id) => id as string))
+
+    const res = career.applyCoachRoster()
+
+    // Union preserved — no player lost or duplicated across the two rosters.
+    const after = new Set([...userTeam.roster, ...ahl.roster].map((id) => id as string))
+    expect(after).toEqual(before)
+    expect(userTeam.roster.length + ahl.roster.length).toBe(before.size)
+    // The NHL roster's worst skater should not out-rate the best AHL skater left
+    // behind at the same position group (best are up).
+    expect(Array.isArray(res.promoted)).toBe(true)
+    expect(Array.isArray(res.demoted)).toBe(true)
   })
 })

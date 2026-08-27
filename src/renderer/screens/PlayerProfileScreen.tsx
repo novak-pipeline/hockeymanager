@@ -42,6 +42,52 @@ import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
 import { ThemeScope } from '../components/ThemeScope'
 
+/* ── Scout this player: send a scout straight from the profile ───────────────── */
+function ScoutPlayerButton({ playerId, client }: { playerId: string; client: ReturnType<typeof useClient> }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [scouts, setScouts] = useState<Array<{ scoutId: string; name: string; rating: number }>>([])
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function toggle(): Promise<void> {
+    if (!open && !loaded) {
+      const res = await client.getScouting()
+      if (res.type === 'scouting') {
+        setScouts(res.scouting.scouts.map((s) => ({ scoutId: s.scoutId, name: s.name, rating: s.rating })))
+      }
+      setLoaded(true)
+    }
+    setOpen((o) => !o)
+  }
+  async function pick(scoutId: string, name: string): Promise<void> {
+    if (busy) return
+    setBusy(true)
+    try {
+      const res = await client.assignScout(scoutId, { kind: 'player', playerId }, 'all')
+      if (res.type === 'error') toast(res.message, 'error')
+      else { toast(`${name} assigned to watch this player.`, 'success'); bumpRefresh() }
+    } finally { setBusy(false); setOpen(false) }
+  }
+  return (
+    <span style={{ position: 'relative' }}>
+      <button className="btn btn-primary small" onClick={() => void toggle()}>🔍 Scout Player</button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 60, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, minWidth: 200, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>Send a scout to watch him</div>
+          {scouts.length === 0 ? (
+            <div className="muted small" style={{ padding: '4px 12px 8px' }}>No scouts on staff — hire one in Staff › Job Market.</div>
+          ) : scouts.map((s) => (
+            <button key={s.scoutId} className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: 12 }}
+              onClick={() => void pick(s.scoutId, s.name)}>
+              {s.name} <span className="muted">({s.rating})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 /* ═══════════════════════════ TAB DEFINITION ═══════════════════════════ */
 
 type TabId = 'profile' | 'positions' | 'information' | 'contract' | 'history' | 'scout' | 'opinion'
@@ -170,11 +216,24 @@ function StarRating({
 }
 
 function PotentialStars({ count }: { count: number }): JSX.Element {
+  // Render halves like StarRating so the POTENTIAL tile and the "Our ceiling"
+  // row (which both bind the same number) never disagree visually.
+  const filled = Math.floor(count)
+  const half = count - filled >= 0.5
   return (
     <span title={`${count}/5 potential`} style={{ letterSpacing: 2 }}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <span key={i} style={{ color: i < count ? 'var(--accent2)' : 'var(--line)', fontSize: 13 }}>★</span>
-      ))}
+      {Array.from({ length: 5 }, (_, i) => {
+        if (i < filled) return <span key={i} style={{ color: 'var(--accent2)', fontSize: 13 }}>★</span>
+        if (i === filled && half) {
+          return (
+            <span key={i} style={{ fontSize: 13, position: 'relative', display: 'inline-block', lineHeight: 1, color: 'var(--line)' }}>
+              ★
+              <span style={{ position: 'absolute', left: 0, top: 0, width: '50%', overflow: 'hidden', color: 'var(--accent2)', display: 'inline-block' }}>★</span>
+            </span>
+          )
+        }
+        return <span key={i} style={{ color: 'var(--line)', fontSize: 13 }}>★</span>
+      })}
     </span>
   )
 }
@@ -273,6 +332,7 @@ function SkaterHistoryRow({ s }: { s: SkaterSeasonLine }): JSX.Element {
       <td className="num">{s.penaltyMinutes}</td>
       <td className="num">{fmtToi(s.toiPerGame)}</td>
       <td className="num">{s.ppGoals}+{s.ppAssists}</td>
+      <td className="num">{s.avgRating !== undefined ? s.avgRating.toFixed(2) : ''}</td>
     </>
   )
 }
@@ -288,6 +348,7 @@ function GoalieHistoryRow({ g }: { g: GoalieSeasonLine }): JSX.Element {
       <td className="num">{g.shutouts}</td>
       <td className="num"></td>
       <td className="num"></td>
+      <td className="num">{g.avgRating !== undefined ? g.avgRating.toFixed(2) : ''}</td>
     </>
   )
 }
@@ -310,6 +371,55 @@ function gradeColor(g: ReportGrade): string {
   if (g === 'C+' || g === 'C') return 'var(--accent2, #e0b341)'
   if (g === 'D') return '#e08a3c'
   return 'var(--danger, #d8584f)'
+}
+
+/** Colour for the composite prospect grade (finer scale incl. A-/B-/C-). */
+function prospectGradeColor(g: string): string {
+  const c = g.charAt(0)
+  if (c === 'A') return 'var(--success, #4caf72)'
+  if (c === 'B') return 'rgba(52,211,153,0.9)'
+  if (c === 'C') return 'var(--accent2, #e0b341)'
+  if (c === 'D') return '#e08a3c'
+  return 'var(--danger, #d8584f)'
+}
+
+/** The prospect-grade badge with a hover tooltip explaining what the scouts
+ *  weighed (talent, team need, system fit, position, risk, value). */
+function ProspectGradeBadge({ grade, pros, cons }: { grade: string; pros: string[]; cons: string[] }): JSX.Element {
+  const [hover, setHover] = useState(false)
+  const col = prospectGradeColor(grade)
+  const hasWhy = pros.length > 0 || cons.length > 0
+  return (
+    <div style={{ position: 'relative', flex: '0 0 auto' }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div style={{
+        width: 78, textAlign: 'center', padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
+        background: `${col}1f`, border: `1.5px solid ${col}`, cursor: hasWhy ? 'help' : 'default',
+      }}>
+        <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: col }}>{grade}</div>
+        <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
+      </div>
+      {hover && hasWhy && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 70, width: 300,
+          background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 8,
+          padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}>
+          <div className="muted" style={{ fontSize: 10, letterSpacing: 0.5, marginBottom: 6 }}>WHAT THE SCOUTS WEIGHED</div>
+          {pros.map((s, i) => (
+            <div key={`p${i}`} style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text)' }}>
+              <span style={{ color: 'var(--success, #4caf72)', fontWeight: 800 }}>+</span> {s}
+            </div>
+          ))}
+          {cons.map((s, i) => (
+            <div key={`c${i}`} style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text)' }}>
+              <span style={{ color: 'var(--danger, #d8584f)', fontWeight: 800 }}>−</span> {s}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const GRADE_ORDER: ReportGrade[] = ['F', 'D', 'C', 'C+', 'B', 'B+', 'A', 'A+']
@@ -406,18 +516,6 @@ function TraitBadges({ traits, size }: { traits: PlayerTrait[]; size?: number })
       {traits.map((t) => <TraitBadge key={t.key} trait={t} {...(size !== undefined ? { size } : {})} />)}
     </div>
   )
-}
-
-/** A single "prospect grade" letter from potential stars (EP-style A+ … F). */
-function prospectGrade(stars: number): ReportGrade {
-  if (stars >= 4.75) return 'A+'
-  if (stars >= 4.25) return 'A'
-  if (stars >= 3.75) return 'B+'
-  if (stars >= 3.25) return 'B'
-  if (stars >= 2.75) return 'C+'
-  if (stars >= 2.25) return 'C'
-  if (stars >= 1.5) return 'D'
-  return 'F'
 }
 
 /** A bordered verdict tile (label over a value) for the report header. */
@@ -1223,13 +1321,15 @@ function SeasonStatsTable({ seasons, isGoalie }: { seasons: PlayerProfileView['s
 }
 
 /** Career totals summed from the season lines. */
-function CareerTotals({ seasons, isGoalie }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean }): JSX.Element {
+function CareerTotals({ seasons, isGoalie, avgRating }: { seasons: PlayerProfileView['seasons']; isGoalie: boolean; avgRating?: number }): JSX.Element {
+  const ratingCell: Array<readonly [string, number | string]> =
+    avgRating !== undefined ? [['AVR', avgRating.toFixed(2)]] : []
   if (isGoalie) {
     const t = seasons.reduce((a, s) => {
       if (s.goalie) { a.gp += s.goalie.gamesPlayed; a.w += s.goalie.wins; a.l += s.goalie.losses; a.so += s.goalie.shutouts }
       return a
     }, { gp: 0, w: 0, l: 0, so: 0 })
-    const cells = [['GP', t.gp], ['W', t.w], ['L', t.l], ['SO', t.so]] as const
+    const cells: Array<readonly [string, number | string]> = [['GP', t.gp], ['W', t.w], ['L', t.l], ['SO', t.so], ...ratingCell]
     return (
       <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
         {cells.map(([label, value]) => (
@@ -1242,12 +1342,53 @@ function CareerTotals({ seasons, isGoalie }: { seasons: PlayerProfileView['seaso
     if (s.skater) { a.gp += s.skater.gamesPlayed; a.g += s.skater.goals; a.a += s.skater.assists; a.p += s.skater.points }
     return a
   }, { gp: 0, g: 0, a: 0, p: 0 })
-  const cells = [['GP', t.gp], ['G', t.g], ['A', t.a], ['P', t.p]] as const
+  const cells: Array<readonly [string, number | string]> = [['GP', t.gp], ['G', t.g], ['A', t.a], ['P', t.p], ...ratingCell]
   return (
     <div className="row" style={{ gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
       {cells.map(([label, value]) => (
         <div key={label} className="stat"><div className="stat-value" style={{ fontSize: 20 }}>{value}</div><div className="stat-label">{label}</div></div>
       ))}
+    </div>
+  )
+}
+
+/** Career honours as trophy badges (grouped by award, with a count + years tooltip). */
+function TrophyBadges({ awards }: { awards: NonNullable<PlayerProfileView['awards']> }): JSX.Element {
+  const byName = new Map<string, { dated: number[]; undated: number }>()
+  for (const a of awards) {
+    const e = byName.get(a.award) ?? { dated: [], undated: 0 }
+    if (a.year !== undefined) e.dated.push(a.year)
+    else e.undated += 1
+    byName.set(a.award, e)
+  }
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+      {[...byName.entries()].map(([name, e]) => {
+        const total = e.dated.length + e.undated
+        const dated = [...e.dated].sort((a, b) => b - a)
+        // Tooltip: in-career years, plus a note for imported (undated) honours.
+        const tip = dated.length && e.undated ? `${name} — ${dated.join(', ')} (+${e.undated} before your tenure)`
+          : dated.length ? `${name} — ${dated.join(', ')}`
+          : `${name} — ${e.undated} before your tenure`
+        const icon = name.includes('Gold') ? '🥇' : name.includes('Silver') ? '🥈' : name.includes('Bronze') ? '🥉' : '🏆'
+        return (
+          <div
+            key={name}
+            title={tip}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+              borderRadius: 8, background: 'var(--panel2)', border: '1px solid var(--accent2, #e0b341)',
+              cursor: 'help',
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>{name}</span>
+            {total > 1 && (
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent2, #e0b341)' }}>×{total}</span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1433,6 +1574,9 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
         <InfoRow label="Years remaining" value={yearsRem} />
         <InfoRow label="Expiry year" value={expiryYear} />
         <InfoRow label="FA status" value={pc?.freeAgentStatus ?? (c ? 'Under contract' : null)} />
+        {pc?.rightsStatus && pc.freeAgentStatus === null && (
+          <InfoRow label="Rights status" value={pc.rightsStatus === 'UFA' ? 'UFA at expiry' : `${pc.rightsStatus} (rights held)`} />
+        )}
         <InfoRow label="No-trade clause" value={(pc?.noTradeClause ?? c?.noTradeClause) ? 'Yes' : null} />
         <InfoRow label="Two-way contract" value={(pc?.twoWay ?? c?.twoWay) ? 'Yes' : null} />
       </Panel>
@@ -1463,7 +1607,10 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
   return (
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
       <Panel title="Career Totals">
-        <CareerTotals seasons={d.seasons} isGoalie={isGoalie} />
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-4)', flexWrap: 'wrap' }}>
+          <CareerTotals seasons={d.seasons} isGoalie={isGoalie} {...(d.avgRating !== undefined ? { avgRating: d.avgRating } : {})} />
+          {d.awards && d.awards.length > 0 && <TrophyBadges awards={d.awards} />}
+        </div>
       </Panel>
     <Panel title="Career Stats">
       <div className="table-wrap">
@@ -1482,6 +1629,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   <th className="num">SO</th>
                   <th className="num"></th>
                   <th className="num"></th>
+                  <th className="num">AVR</th>
                 </>
               ) : (
                 <>
@@ -1493,6 +1641,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   <th className="num">PIM</th>
                   <th className="num">TOI/g</th>
                   <th className="num">PP</th>
+                  <th className="num">AVR</th>
                 </>
               )}
             </tr>
@@ -1506,7 +1655,7 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
                   ? <GoalieHistoryRow g={season.goalie} />
                   : season.skater
                     ? <SkaterHistoryRow s={season.skater} />
-                    : <td colSpan={8} className="muted">—</td>}
+                    : <td colSpan={9} className="muted">—</td>}
               </tr>
             ))}
           </tbody>
@@ -1545,10 +1694,13 @@ function ScoutReadRow({ read }: { read: ScoutRead }): JSX.Element {
       {/* Face (resolves via the mod bridge; silhouette/initials fallback) */}
       <PlayerFace faceId={read.faceId} name={read.scoutName} size={28} />
 
-      {/* Name + take */}
+      {/* Name + take + what he saw in a recent viewing */}
       <div className="stack" style={{ gap: 2 }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>{read.scoutName}</span>
         <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{read.take}</span>
+        {read.watched && (
+          <span style={{ fontSize: 11, color: 'var(--accent2, #e0b341)', fontStyle: 'italic', lineHeight: 1.5 }}>“{read.watched}”</span>
+        )}
       </div>
 
       {/* Tier chip */}
@@ -1613,20 +1765,9 @@ function ScoutPanelBlock({ panel }: { panel: ScoutPanel }): JSX.Element {
                 Scouts are in full agreement.
               </p>
             )}
-            {/* NHL comp */}
-            {panel.comp && (
-              <div style={{
-                marginTop: 4,
-                padding: '6px 10px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--panel2)',
-                border: '1px solid var(--line)',
-              }}>
-                <span className="muted small">Plays like </span>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{panel.comp.name}</span>
-                <span className="muted small"> — {panel.comp.blurb}</span>
-              </div>
-            )}
+            {/* Player comparable lives in the "Shades of …" line above (real-DB
+                comp). We intentionally don't also show the archetype "Plays like"
+                comp here — one comparable, not two competing ones. */}
           </div>
         </Panel>
 
@@ -1678,108 +1819,37 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
     sr.tier === 'Prospect' ? 'var(--violet-h)' :
     'var(--muted)'
 
-  const v = d.scoutVerdict
+  // PROJECTION tile: for a draft prospect, this is the MATURITY projection — the
+  // ceiling role our scouts believe he tops out at (e.g. "Top-pair D") — not the
+  // roster-value tier his current ability slots into. For an established player
+  // there's no separate ceiling to show, so we keep the value tier.
+  const isDraftProspect = !!d.analystProjection || sr.tier === 'Prospect'
+  const projectionLabel = isDraftProspect && d.scoutsCeilingRole ? d.scoutsCeilingRole : sr.tierLabel
+  const projectionColor = isDraftProspect ? 'var(--violet-h)' : tierColor
+  const projectionBlurb = isDraftProspect && d.scoutsCeilingRole
+    ? 'Our scouts’ projected ceiling — the role he tops out in if he develops as expected.'
+    : sr.tierBlurb
 
   return (
     <div className="stack">
-      {/* ── FM-style Overall Report ── */}
-      {v && (
-        <Panel title="Overall Report">
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            {/* Verdict banner */}
-            <div
-              style={{
-                background: 'rgba(34,197,94,0.12)',
-                border: '1px solid rgba(34,197,94,0.4)',
-                borderRadius: 'var(--radius-sm)',
-                padding: 'var(--sp-3) var(--sp-4)',
-                fontWeight: 700,
-                color: 'var(--success)',
-              }}
-            >
-              {v.recommendation}
-            </div>
+      {/* Scout-this-player action */}
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <ScoutPlayerButton playerId={d.playerId} client={client} />
+      </div>
+      {/* The FM-style "Overall Report" (recommendation + Pros/Cons) lives on the
+          Profile tab's Coach Summary — the Scout tab leads straight into the
+          richer Scouting Report below, so the two no longer duplicate each other. */}
 
-            {/* Ability + best role */}
-            <div className="row" style={{ gap: 'var(--sp-5)', flexWrap: 'wrap', alignItems: 'center' }}>
-              <div>
-                <div className="muted small">Current ability</div>
-                <StarRating stars={v.currentStars} size={18} />
-              </div>
-              <div>
-                <div className="muted small">Potential</div>
-                <StarRating stars={v.potentialStars} fogged size={18} />
-              </div>
-              <div>
-                <div className="muted small">Best role</div>
-                <div style={{ fontWeight: 700, color: 'var(--violet-h)' }}>{v.bestRole}</div>
-              </div>
-            </div>
-
-            {/* Pros / Cons */}
-            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-              <div>
-                <div className="field-label" style={{ color: 'var(--success)' }}>Pros</div>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  {v.pros.length > 0 ? v.pros.map((s, i) => (
-                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
-                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No standout strengths.</li>}
-                </ul>
-              </div>
-              <div>
-                <div className="field-label" style={{ color: 'var(--danger)' }}>Cons</div>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                  {v.cons.length > 0 ? v.cons.map((s, i) => (
-                    <li key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>{s}</li>
-                  )) : <li className="muted small" style={{ listStyle: 'none', marginLeft: -18 }}>No notable weaknesses.</li>}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </Panel>
-      )}
-
-      {/* ── Roster Projection (EHM-style suggested / projected status) ── */}
+      {/* Coach reports request — projection itself lives in the verdict tiles
+          (our scouts) and the Draft Projection panel (analysts vs your scouts).
+          We deliberately don't show depth-chart slotting on other clubs. */}
       {d.rosterProjection && (
-        <Panel title="Projection">
-          <div className="stack" style={{ gap: 'var(--sp-3)' }}>
-            <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-              <div>
-                <div className="field-label">Current role</div>
-                <div style={{ fontWeight: 700, fontSize: 14, textTransform: 'capitalize' }}>
-                  {d.rosterProjection.currentRole}
-                </div>
-                <div className="muted small" style={{ marginTop: 2 }}>
-                  {d.rosterProjection.nhlReady ? 'Ready for the NHL roster' : 'Not yet NHL-ready'}
-                </div>
-              </div>
-              <div>
-                <div className="field-label">Ceiling</div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--violet-h)', textTransform: 'capitalize' }}>
-                  {d.rosterProjection.ceilingRole}
-                </div>
-              </div>
-            </div>
-            <div>
-              <div className="field-label">Suggested status with {d.rosterProjection.teamName}</div>
-              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
-                {d.rosterProjection.suggestedStatus}
-              </p>
-            </div>
-            <div>
-              <div className="field-label">Projected status with {d.rosterProjection.teamName}</div>
-              <p style={{ margin: '2px 0 0', fontSize: 13, lineHeight: 1.6 }}>
-                {d.rosterProjection.projectedStatus}
-              </p>
-            </div>
-            <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)', marginTop: 'var(--sp-1)' }}>
-              <button type="button" className="btn btn-sm" disabled={reqBusy} onClick={requestCoachReports}>
-                {reqBusy ? 'Requesting…' : 'Request coach reports'}
-              </button>
-              <span className="muted small">Your coaching staff file their reports to your inbox.</span>
-            </div>
-          </div>
-        </Panel>
+        <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-3)' }}>
+          <button type="button" className="btn btn-sm" disabled={reqBusy} onClick={requestCoachReports}>
+            {reqBusy ? 'Requesting…' : 'Request coach reports'}
+          </button>
+          <span className="muted small">Your coaching staff file their reports to your inbox.</span>
+        </div>
       )}
 
       {/* ── Scouting Report ── */}
@@ -1791,24 +1861,25 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               <TraitBadges traits={sr.traits} />
             </div>
           )}
-          {/* Hero: prospect grade badge + elevator pitch */}
+          {/* Hero: prospect grade badge (hover for what was weighed) + elevator pitch.
+              The badge only shows for prospects — the engine omits the grade for
+              established players, so veterans don't get a misleading "PROSPECT GRADE". */}
           <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
-            <div style={{
-              flex: '0 0 auto', width: 78, textAlign: 'center',
-              padding: '12px 8px', borderRadius: 'var(--radius-md, 10px)',
-              background: `${gradeColor(prospectGrade(d.potentialStars))}1f`,
-              border: `1.5px solid ${gradeColor(prospectGrade(d.potentialStars))}`,
-            }}>
-              <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1, color: gradeColor(prospectGrade(d.potentialStars)) }}>
-                {prospectGrade(d.potentialStars)}
-              </div>
-              <div className="muted" style={{ fontSize: 8.5, letterSpacing: 0.6, marginTop: 5 }}>PROSPECT GRADE</div>
-            </div>
+            {d.prospectGrade && (
+              <ProspectGradeBadge
+                grade={d.prospectGrade.grade}
+                pros={d.prospectGrade.pros}
+                cons={d.prospectGrade.cons}
+              />
+            )}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 15, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
                 “{sr.elevatorPitch}”
               </div>
               <div className="muted small" style={{ marginTop: 6 }}>{sr.seasonProjection.line}</div>
+              {(d.prospectGrade?.pros.length || d.prospectGrade?.cons.length) ? (
+                <div className="muted" style={{ fontSize: 10.5, marginTop: 4, fontStyle: 'italic' }}>Hover the grade for what the scouts weighed</div>
+              ) : null}
             </div>
           </div>
 
@@ -1828,13 +1899,15 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
             <VerdictTile label="POTENTIAL">
               <PotentialStars count={d.potentialStars} />
             </VerdictTile>
-            <VerdictTile label="PROJECTION" accent={tierColor}>
-              <span style={{ fontWeight: 700, fontSize: 13, color: tierColor }}>{sr.tierLabel}</span>
+            <VerdictTile label="PROJECTION" accent={projectionColor}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: projectionColor }}>
+                {projectionLabel}
+              </span>
             </VerdictTile>
           </div>
 
           {/* What the projection means, in hockey terms */}
-          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{sr.tierBlurb}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{projectionBlurb}</div>
 
           {/* Report card — EP-style graded strip */}
           <div>
@@ -1870,36 +1943,59 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </div>
       </Panel>
 
-      {/* ── General Impressions prose ── */}
-      <Panel title="General Impressions">
-        {d.seasonBio && (
-          <p style={{
-            margin: '0 0 12px',
-            padding: '10px 12px',
-            fontSize: 13,
-            lineHeight: 1.7,
-            color: 'var(--text)',
-            background: 'rgba(0,0,0,0.18)',
-            borderRadius: 'var(--radius-sm)',
-            fontWeight: 500,
-          }}>
-            {d.seasonBio}
+      {/* ── Scouting Report prose — the living, evolving write-up ── */}
+      <Panel title="Scout's Write-Up">
+        {d.scoutSummary ? (
+          <>
+            <div className="muted small" style={{ marginBottom: 8 }}>
+              {d.scoutSummary.confidence === 'high' ? 'Our scouts have a confident, well-formed read.'
+                : d.scoutSummary.confidence === 'medium' ? 'A developing read — sharpening with more viewings.'
+                : 'An early read — light on viewings so far.'}
+            </div>
+            <div className="stack" style={{ gap: 10 }}>
+              {d.scoutSummary.paragraphs.map((para, i) => (
+                <p key={i} style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>{para}</p>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
+            {sr.generalImpressions}
           </p>
         )}
-        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>
-          {sr.generalImpressions}
-        </p>
       </Panel>
+
+      {/* ── Formal pre-draft edition (season end, eligible prospects) ── */}
+      {d.preDraftSummary && (
+        <Panel title="Pre-Draft Report">
+          <div className="stack" style={{ gap: 10, borderLeft: '3px solid var(--accent2, #e0b341)', paddingLeft: 'var(--sp-3)' }}>
+            {d.preDraftSummary.paragraphs.map((para, i) => (
+              <p key={i} style={{ margin: 0, fontSize: 13, lineHeight: 1.75, color: 'var(--text)' }}>{para}</p>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {/* ── Draft Projection (analyst consensus + your scouts) ── */}
       {d.analystProjection && (
         <Panel title="Draft Projection">
           <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
             <div style={{ width: 4, borderRadius: 2, background: 'var(--accent2, #e0b341)', flex: '0 0 auto' }} />
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)', marginBottom: 4 }}>
-                ANALYST CONSENSUS
+            <div style={{ flex: 1 }}>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--accent2, #e0b341)' }}>
+                  NHL DRAFT ANALYSTS
+                </div>
+                {d.analystDraftLabel && (
+                  <span className="chip chip-accent" style={{ fontSize: 11, fontWeight: 700 }}>{d.analystDraftLabel}</span>
+                )}
               </div>
+              {d.analystPotentialStars !== undefined && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span className="muted" style={{ fontSize: 11 }}>Their ceiling:</span>
+                  <StarRating stars={d.analystPotentialStars} size={13} />
+                </div>
+              )}
               <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
                 {d.analystProjection}
               </p>
@@ -1920,6 +2016,13 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
                 }}>
                   YOUR SCOUTS{d.scoutDraftRead.verdict === 'higher' ? ' ▲' : d.scoutDraftRead.verdict === 'lower' ? ' ▼' : ''}
                 </div>
+                {d.scoutsCeilingRole && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span className="muted" style={{ fontSize: 11 }}>Our ceiling:</span>
+                    <StarRating stars={d.potentialStars} size={13} />
+                    <span className="muted small">{d.scoutsCeilingRole}</span>
+                  </div>
+                )}
                 <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
                   {d.scoutDraftRead.blurb}
                 </p>
@@ -1942,8 +2045,8 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
         </div>
       </Panel>
 
-      {/* ── Multi-scout panel ── */}
-      <ScoutPanelBlock panel={d.scoutPanel} />
+      {/* ── Multi-scout panel — only when scouts have actually watched him ── */}
+      {d.scoutPanel && <ScoutPanelBlock panel={d.scoutPanel} />}
     </div>
   )
 }
@@ -2000,7 +2103,6 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
             <thead>
               <tr>
                 <th>When</th>
-                <th className="num">Overall</th>
                 <th>Current</th>
                 <th>Ceiling</th>
                 <th>Read</th>
@@ -2014,7 +2116,6 @@ function TabOpinion({ d }: { d: PlayerProfileView }): JSX.Element {
                 return (
                   <tr key={`${s.year}-${s.day}`}>
                     <td className="muted small">{s.year} · GD{s.day}</td>
-                    <td className="num" style={{ fontWeight: 700 }}>{s.overall}</td>
                     <td><StarRating stars={s.currentStars} size={13} /></td>
                     <td><StarRating stars={s.potentialStars} size={13} /></td>
                     <td className="muted small">{knowledgeProse(s.knowledge)}</td>

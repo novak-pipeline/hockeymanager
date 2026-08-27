@@ -8,6 +8,7 @@ import type {
   TradeRumorView,
 } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -18,13 +19,13 @@ import { toast } from '../components/store'
 function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
   if (badge.scouted && !badge.scouted.exact) {
     return (
-      <span className="muted small" style={{ color: 'var(--muted)' }}>
-        {badge.scouted.overallLo}–{badge.scouted.overallHi}
+      <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
+        <OverallStars value={Math.round((badge.scouted.overallLo + badge.scouted.overallHi) / 2)} />
       </span>
     )
   }
   if (!badge.scouted) return null
-  return <span className="muted small">{badge.overall}</span>
+  return <OverallStars value={badge.overall} />
 }
 
 function PlayerChip(props: {

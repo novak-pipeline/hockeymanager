@@ -131,7 +131,7 @@ function scoutTierEstimate(
   scout: StaffMember,
   player: Player,
   trueTier: ProjectionTier,
-  _potStars: number,
+  potStars: number,
   composites: Record<string, number>
 ): ProjectionTier {
   // Error magnitude: [0, 2] tiers, shrinking with judgment.
@@ -143,12 +143,17 @@ function scoutTierEstimate(
   if (scout.demeanor === 'motivator') demeanorDelta = 0.3
   else if (scout.demeanor === 'fiery') demeanorDelta = -0.2
 
-  // A genuine young prospect: scouts debate the ceiling (Core..Star) and some
-  // still file him under "Prospect" — but he never reads as a fringe NHLer.
+  // A genuine young prospect: anchor each read on the tier he actually projects to
+  // (from his ceiling), NOT a hard-coded "Key". Most of the staff file him at that
+  // tier; the rest debate a tier either way — with a tighter spread than established
+  // players so the CONSENSUS tracks the headline projection instead of drifting a
+  // full tier high on a couple of bullish reads (which made the consensus chip read
+  // "Franchise Player" while the projection said "Top-six F").
   if (trueTier === 'Prospect') {
-    const idx = Math.round(3 + rawError + specDelta + demeanorDelta) // anchor at Key
-    if (hash01(scout.id + ':' + (player.id as string) + ':prosp') > 0.45) return 'Prospect'
-    return QUALITY_ORDER[Math.max(2, Math.min(4, idx))]!
+    const projected = prospectQuality(potStars)
+    if (hash01(scout.id + ':' + (player.id as string) + ':prosp') > 0.5) return projected
+    const idx = Math.round(qIndex(projected) + rawError * 0.7 + specDelta + demeanorDelta)
+    return QUALITY_ORDER[Math.max(1, Math.min(4, idx))]!
   }
 
   // Established players drift only within the quality ladder — never to Prospect.
@@ -158,66 +163,152 @@ function scoutTierEstimate(
 
 /* ─────────────────────── per-scout one-liner ─────────────────────── */
 
-const OPTIMIST_TAKES = [
-  'Shows real upside — could be a difference-maker.',
-  'Like what I see — has the tools to be a contributor.',
-  'High-end skill set; ceiling is worth the investment.',
-  'Underrated by most — I have him higher than the consensus.',
-  'A player who makes those around him better.',
-  'Good instincts, works hard — project him up.',
-]
+/**
+ * Tier-anchored takes: the verbal read MATCHES the chip the scout files (a "Key
+ * Player" chip reads like a key player, never "a depth piece"). The optimist /
+ * pessimist colour is a SEPARATE clause about where he sits vs the room.
+ */
+type PosGroup = 'F' | 'D' | 'G'
+function posGroup(pos: string): PosGroup {
+  if (pos === 'G') return 'G'
+  if (pos === 'D' || pos === 'LD' || pos === 'RD') return 'D'
+  return 'F'
+}
 
-const PESSIMIST_TAKES = [
-  'Concerns about his compete level at this stage.',
-  'Not sold — the numbers flatter him.',
-  'Has limitations that are hard to coach around.',
-  'Too many question marks; would need to see more.',
-  'Risk of over-paying for what is essentially a depth piece.',
-  'Scouts around the league may be inflating his stock.',
-]
+/**
+ * Tier-anchored takes, POSITION-AWARE and deep enough that a room of ~25 scouts
+ * doesn't read as a wall of the same sentence. The verbal read always MATCHES the
+ * chip the scout files (a "Key Player" chip never reads like a depth piece), and
+ * the language fits the position (a winger isn't described as "plays big minutes
+ * in all situations" — that's a defenceman's line).
+ */
+const TAKES: Record<PosGroup, Record<ProjectionTier, string[]>> = {
+  F: {
+    Star: [
+      'Elite — a game-breaker every time he\'s on the ice.',
+      'A franchise forward; you build the top six around him.',
+      'The best forward on most sheets he skates on.',
+      'Drives play and finishes — a true number-one forward.',
+      'A dynamic, dangerous scorer at the top of any lineup.',
+      'Elite skill — he tilts the ice every shift.',
+    ],
+    Key: [
+      'A high-end top-six forward who drives results.',
+      'A real scoring threat you lean on every night.',
+      'Top-of-the-lineup forward — produces and creates.',
+      'A reliable point producer in a featured role.',
+      'A difference-maker on a scoring line.',
+      'Plays up the lineup and delivers offence.',
+    ],
+    Core: [
+      'A dependable middle-six forward.',
+      'An honest two-way forward — rarely a liability.',
+      'A solid everyday contributor through the middle.',
+      'A useful complementary scorer.',
+      'A reliable regular who chips in offence.',
+    ],
+    Depth: [
+      'A useful bottom-six forward in a defined role.',
+      'A fourth-line energy forward who does the little things.',
+      'A checking-line piece — won\'t move the needle offensively.',
+      'A role forward who forechecks hard and eats minutes.',
+    ],
+    Fringe: [
+      'A tweener forward fighting to hold an NHL job.',
+      'An AHL/NHL bubble forward; depth insurance at best.',
+    ],
+  },
+  D: {
+    Star: [
+      'Elite — a true number-one defenceman.',
+      'A franchise blueliner who logs every situation.',
+      'A game-changing defenceman you build around.',
+      'Drives play from the back end — a special talent.',
+      'The best defenceman on most sheets he plays.',
+    ],
+    Key: [
+      'A top-pairing defenceman you lean on every night.',
+      'Plays big minutes in all situations and delivers.',
+      'A real top-four blueliner who moves the puck and defends.',
+      'A trusted two-way defenceman up the lineup.',
+      'A high-end blueliner who eats tough minutes.',
+    ],
+    Core: [
+      'A dependable everyday defenceman.',
+      'An honest middle-pairing blueliner — rarely a liability.',
+      'A solid second/third-pair contributor.',
+      'A steady, reliable defender.',
+    ],
+    Depth: [
+      'A useful depth defenceman in a sheltered role.',
+      'A bottom-pair blueliner who keeps it simple.',
+      'A seventh-defenceman type — depth insurance.',
+    ],
+    Fringe: [
+      'A tweener blueliner fighting to hold a job.',
+      'An AHL/NHL bubble defenceman at best.',
+    ],
+  },
+  G: {
+    Star: [
+      'Elite — a franchise starting goaltender.',
+      'A true number-one who steals games.',
+      'A game-changing goaltender you build around.',
+    ],
+    Key: [
+      'A reliable starting goaltender.',
+      'A high-end netminder who gives you a chance every night.',
+      'A clear starter you can lean on.',
+    ],
+    Core: [
+      'A dependable goaltender — a solid tandem or 1B option.',
+      'An honest netminder who keeps you in games.',
+      'A steady tandem goaltender.',
+    ],
+    Depth: [
+      'A useful backup goaltender.',
+      'A depth netminder — spot-start insurance.',
+    ],
+    Fringe: [
+      'An AHL/NHL bubble goaltender at best.',
+    ],
+  },
+}
 
-const NEUTRAL_TAKES = [
-  'Solid pro, does what is asked of him — no more.',
-  'Fits the profile — predictable, dependable output.',
-  'Won\'t hurt you, won\'t wow you.',
-  'A serviceable piece in the right system.',
-  'Steady contributor — consistent if unspectacular.',
-  'Fills a role well; not a game-changer.',
-]
-
-const STAR_TAKES = [
-  'Elite player — as good as I\'ve seen at this level.',
-  'Generational talent in the making.',
-  'Don\'t let him get away — he changes your team.',
-  'Best player on any ice he skates on.',
-]
-
+// Safety net — the panel remaps Prospect → a value tier first, so this is rarely hit.
 const PROSPECT_TAKES = [
-  'Raw but the ceiling is immense — patience required.',
-  'Long-term play — needs development time but the tools are there.',
-  'High-variance prospect; either a star or a bust.',
+  'Raw, but the ceiling is real — needs development time.',
   'You\'re betting on projection, not what he is today.',
 ]
+
+function takesFor(tier: ProjectionTier, pos: string): string[] {
+  if (tier === 'Prospect') return PROSPECT_TAKES
+  return TAKES[posGroup(pos)][tier] ?? TAKES[posGroup(pos)].Core
+}
+
+function leanSuffix(estIdx: number, trueIdx: number): string {
+  if (estIdx > trueIdx + 0.5) return ' I\'m higher on him than the room.'
+  if (estIdx < trueIdx - 0.5) return ' Though I\'m more cautious than most.'
+  return ''
+}
+
+/** A young "Prospect" read isn't a projection — express it as the value tier he
+ *  projects to, from his potential, so the chip reads "Key Player" not "Prospect". */
+function prospectQuality(potStars: number): ProjectionTier {
+  if (potStars >= 4.5) return 'Star'
+  if (potStars >= 3.5) return 'Key'
+  return 'Core'
+}
 
 function scoutOneLiner(
   scout: StaffMember,
   player: Player,
-  estimatedTier: ProjectionTier,
-  trueTier: ProjectionTier
+  displayTier: ProjectionTier,
+  trueDisplayTier: ProjectionTier
 ): string {
-  const estIdx = tierIndex(estimatedTier)
-  const trueIdx = tierIndex(trueTier)
   const key = scout.id + ':' + (player.id as string) + ':take'
-
-  if (estimatedTier === 'Star') return stablePick(STAR_TAKES, key)
-  if (estimatedTier === 'Prospect') return stablePick(PROSPECT_TAKES, key)
-
-  // Scout is bullish (rates higher than truth)
-  if (estIdx > trueIdx + 0.5) return stablePick(OPTIMIST_TAKES, key)
-  // Scout is bearish
-  if (estIdx < trueIdx - 0.5) return stablePick(PESSIMIST_TAKES, key)
-  // Neutral / on-target
-  return stablePick(NEUTRAL_TAKES, key)
+  const base = stablePick(takesFor(displayTier, player.position), key)
+  return base + leanSuffix(tierIndex(displayTier), tierIndex(trueDisplayTier))
 }
 
 /* ─────────────────────── NHL comp ─────────────────────── */
@@ -341,12 +432,16 @@ export function computeRisk(
   else if (riskScore >= 2) band = 'Medium'
   else band = 'Low'
 
-  // Upside note
+  // Upside note — position-aware ("top-four" is a defenceman's term; a forward
+  // tops out "top-six", a goalie as a "starter").
+  const highCeil = player.position === 'G' ? 'starting-goaltender upside'
+    : player.position === 'D' || player.position === 'LD' || player.position === 'RD' ? 'top-pairing upside'
+    : 'top-six upside'
   let upsideNote: string
   if (trueTier === 'Star' || potStars >= 5) {
     upsideNote = 'Star-level upside if development goes well.'
   } else if (trueTier === 'Prospect' || potStars >= 4) {
-    upsideNote = 'Top-six or top-four upside — high-ceiling projection.'
+    upsideNote = `${highCeil.charAt(0).toUpperCase()}${highCeil.slice(1)} — high-ceiling projection.`
   } else if (potStars >= 3) {
     upsideNote = 'Core/key player upside with the right development path.'
   } else {
@@ -392,7 +487,8 @@ function computeConsensus(reads: ScoutRead[]): {
     const dissIdx = tierIndex(dissenterTier)
     const direction = dissIdx > estIdx ? 'higher' : 'lower'
     const dissenterWord = dissenterCount === 1 ? 'one scout' : `${dissenterCount} scouts`
-    dissentNote = `${topCount} of ${reads.length} scouts see ${TIER_LABELS[consensusTier]} upside; ${dissenterWord} ${direction === 'higher' ? 'is more bullish' : 'is more cautious'}.`
+    const verb = dissenterCount === 1 ? 'is' : 'are'
+    dissentNote = `${topCount} of ${reads.length} scouts see ${TIER_LABELS[consensusTier]} upside; ${dissenterWord} ${verb} more ${direction === 'higher' ? 'bullish' : 'cautious'}.`
   }
 
   return { consensusTier, dissentNote }
@@ -410,6 +506,9 @@ export interface ScoutRead {
   tierLabel: string
   /** One-line take from this scout. */
   take: string
+  /** What this scout saw the player do in a recent game he attended; omitted when
+   *  there's no game sample yet. */
+  watched?: string
 }
 
 export interface NhlComp {
@@ -450,11 +549,61 @@ export interface ScoutPanel {
  * @param scouting  The current scouting state (for knowledge level).
  * @param potStars  Potential stars (0–5), as computed by buildViews.potentialStars.
  */
+/**
+ * A line describing what THIS scout saw the player do in a recent viewing —
+ * anchored to his real season scoring pace, but nudged by the scout's lean (a
+ * bullish scout remembers the big night; a bearish one the quiet one) and varied
+ * per scout, so two scouts who caught different games file different reports.
+ */
+const VIEW_MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar']
+function formatTOI(minutes: number): string {
+  const m = Math.floor(minutes)
+  const s = Math.floor((minutes - m) * 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/**
+ * A scout's note from a specific game he caught: a dated box line (TOI, G, A, P —
+ * or SV%/GA for a goalie) plus a short, POSITION-AWARE read of what he picked up.
+ * Anchored to the player's real per-game pace, nudged by the scout's lean, and
+ * varied per scout so two scouts who saw different games file different lines. A
+ * defenceman's pointless night is a steady two-way shift, not a "quiet viewing".
+ */
+function watchedGameLine(scout: StaffMember, player: Player, ppg: number, estIdx: number, trueIdx: number): string {
+  const key = scout.id + ':' + (player.id as string) + ':watched'
+  const date = `${stablePick(VIEW_MONTHS, key + ':m')} ${1 + Math.floor(hash01(key + ':d') * 27)}`
+
+  if (player.position === 'G') {
+    const lean = estIdx > trueIdx ? 0.012 : estIdx < trueIdx ? -0.012 : 0
+    const sv = Math.max(0.86, Math.min(0.96, 0.905 + (hash01(key + ':sv') * 2 - 1) * 0.03 + lean))
+    const ga = Math.max(0, Math.round((1 - sv) * 30))
+    const qual = sv >= 0.925 ? 'stood tall, controlled his rebounds' : sv < 0.89 ? 'a couple he’d want back' : 'a steady, composed night'
+    return `${date} · .${Math.round(sv * 1000)} SV, ${ga} GA — ${qual}`
+  }
+
+  const isD = player.position === 'D' || player.position === 'LD' || player.position === 'RD'
+  const lean = estIdx > trueIdx ? 0.5 : estIdx < trueIdx ? -0.4 : 0
+  const pts = Math.max(0, Math.round(ppg + lean + (hash01(key) * 2 - 1)))
+  const goals = pts > 0 ? Math.min(pts, Math.round(pts * (isD ? 0.25 : 0.42) + hash01(key + ':g') * 0.45)) : 0
+  const assists = pts - goals
+  const toi = formatTOI((isD ? 20 : ppg >= 0.8 ? 16 : 12) + hash01(key + ':t') * (isD ? 6 : 4))
+  const box = `${toi} TOI · ${goals}G ${assists}A ${pts}P`
+  const qual = isD
+    ? (pts >= 2 ? 'quarterbacked the play' : pts === 1 ? 'chipped in and defended well' : 'a steady two-way night, heavy minutes')
+    : (pts >= 3 ? 'drove the game' : pts === 2 ? 'dangerous all night'
+      : pts === 1 ? (goals >= 1 ? 'took his one chance, quiet otherwise' : 'a quieter night, one helper')
+      : 'kept off the scoresheet')
+  return `${date} · ${box} — ${qual}`
+}
+
 export function buildScoutPanel(
   scouts: StaffMember[],
   player: Player,
   scouting: ScoutingState | undefined,
-  potStars: number
+  potStars: number,
+  /** The player's current-season scoring pace (points/game), for the "what I saw
+   *  in a recent viewing" line. Omit when there's no game sample yet. */
+  observed?: { ppg: number }
 ): ScoutPanel {
   const pid = player.id as string
   const knowledge = scouting !== undefined ? knowledgeOf(scouting, pid) : 100
@@ -475,16 +624,23 @@ export function buildScoutPanel(
     },
   ]
 
+  // "Prospect" is a status, not a projection — express both the true tier and each
+  // scout's read as the value tier they project to, so every chip is a real
+  // projection (Core/Key/Star…), never "Prospect".
+  const trueDisplay: ProjectionTier = trueTier === 'Prospect' ? prospectQuality(potStars) : trueTier
   const reads: ScoutRead[] = effectiveScouts.map((scout) => {
     const tier = scoutTierEstimate(scout, player, trueTier, potStars, composites)
-    const take = scoutOneLiner(scout, player, tier, trueTier)
+    const displayTier: ProjectionTier = tier === 'Prospect' ? prospectQuality(potStars) : tier
+    const take = scoutOneLiner(scout, player, displayTier, trueDisplay)
     const read: ScoutRead = {
       scoutId: scout.id,
       scoutName: scout.name,
-      tier,
-      tierLabel: TIER_LABELS[tier],
+      tier: displayTier,
+      tierLabel: TIER_LABELS[displayTier],
       take,
     }
+    // What this scout saw the player do in a recent game he attended.
+    if (observed) read.watched = watchedGameLine(scout, player, observed.ppg, tierIndex(displayTier), tierIndex(trueDisplay))
     if (scout.faceId !== undefined) {
       return { ...read, faceId: scout.faceId }
     }

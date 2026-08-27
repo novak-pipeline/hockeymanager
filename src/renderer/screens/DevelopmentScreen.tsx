@@ -49,7 +49,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
     (r) => (r.type === 'development' ? r.development : null)
   )
 
-  const [tab, setTab] = useState<'prospects' | 'progress'>('prospects')
+  const [tab, setTab] = useState<'prospects' | 'system' | 'progress'>('prospects')
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading development centre…</Notice>
@@ -60,12 +60,13 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
     <section className="stack">
       <ScreenHeader title="Development Center">
         <span className="muted small">
-          {d.count} prospects tracked · {d.highCeiling} high-ceiling
+          {d.count} prospects tracked · {d.highCeiling} high-ceiling · set the NHL roster on the Roster screen
         </span>
       </ScreenHeader>
 
       <div className="row" style={{ gap: 'var(--sp-2)' }}>
         <button type="button" className={`btn btn-sm${tab === 'prospects' ? ' btn-primary' : ''}`} onClick={() => setTab('prospects')}>Prospects</button>
+        <button type="button" className={`btn btn-sm${tab === 'system' ? ' btn-primary' : ''}`} onClick={() => setTab('system')}>In Your System ({d.systemElsewhere.length})</button>
         <button type="button" className={`btn btn-sm${tab === 'progress' ? ' btn-primary' : ''}`} onClick={() => setTab('progress')}>U23 Progress</button>
       </div>
 
@@ -121,6 +122,53 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
               ))}
               {d.rows.length === 0 && (
                 <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No prospects in the system.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      )}
+
+      {tab === 'system' && (
+      <Panel title="In Your System — rights held, playing elsewhere">
+        <div className="muted small" style={{ marginBottom: 8 }}>
+          Players whose NHL rights your club holds but who skate outside your NHL/AHL rosters — juniors,
+          college, or Europe. They join the farm as they turn pro.
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th className="num">Pos</th>
+                <th className="num">Age</th>
+                <th>Club</th>
+                <th>Current</th>
+                <th>Potential</th>
+                <th>Projection</th>
+                <th>Development</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.systemElsewhere.map((r) => (
+                <tr key={r.playerId}>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <PlayerFace faceId={r.faceId} name={r.name} size={22} />
+                      <PlayerLink playerId={r.playerId} name={r.name} />
+                    </span>
+                  </td>
+                  <td className="num muted">{r.position}</td>
+                  <td className="num muted">{r.age}</td>
+                  <td className="muted small">{r.clubAbbrev ?? '—'}</td>
+                  <td><Stars value={r.currentStars} muted /></td>
+                  <td><Stars value={r.potentialStars} /></td>
+                  <td style={{ color: tierColor(r.tier), fontWeight: 600, fontSize: 12 }}>{r.projection}</td>
+                  <td className="small muted">{r.note}</td>
+                </tr>
+              ))}
+              {d.systemElsewhere.length === 0 && (
+                <tr><td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>No rights-held players outside your NHL/AHL rosters yet — they'll appear here as you draft.</td></tr>
               )}
             </tbody>
           </table>

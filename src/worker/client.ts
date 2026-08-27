@@ -10,7 +10,7 @@ import type {
   WorkerResponse,
 } from './protocol'
 import type { TeamTactics } from '@domain'
-import type { ScoutTarget } from '@domain/scouting'
+import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 
 /**
  * Minimal worker surface the client needs; lets tests inject a fake without a
@@ -241,6 +241,30 @@ export class SimClient {
     return this.send({ type: 'getSquadPlanner' })
   }
 
+  getLeagueComparison(): Promise<WorkerResponse> {
+    return this.send({ type: 'getLeagueComparison' })
+  }
+
+  getPlayoffOdds(): Promise<WorkerResponse> {
+    return this.send({ type: 'getPlayoffOdds' })
+  }
+
+  getStaffMeetingSummary(): Promise<WorkerResponse> {
+    return this.send({ type: 'getStaffMeetingSummary' })
+  }
+
+  getCoachMarket(): Promise<WorkerResponse> {
+    return this.send({ type: 'getCoachMarket' })
+  }
+
+  fireCoach(): Promise<WorkerResponse> {
+    return this.send({ type: 'fireCoach' })
+  }
+
+  hireCoach(coachId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireCoach', coachId })
+  }
+
   getClubInfo(): Promise<WorkerResponse> {
     return this.send({ type: 'getClubInfo' })
   }
@@ -317,8 +341,28 @@ export class SimClient {
     return this.send({ type: 'getScouting' })
   }
 
-  assignScout(scoutId: string, target: ScoutTarget): Promise<WorkerResponse> {
-    return this.send({ type: 'assignScout', scoutId, target })
+  getScoutProfile(scoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getScoutProfile', scoutId })
+  }
+
+  assignScout(
+    scoutId: string, target: ScoutTarget, focus?: ScoutFocus,
+    positionFilter?: 'any' | 'F' | 'D' | 'G', minPotentialStars?: number,
+  ): Promise<WorkerResponse> {
+    return this.send({
+      type: 'assignScout', scoutId, target,
+      ...(focus ? { focus } : {}),
+      ...(positionFilter !== undefined ? { positionFilter } : {}),
+      ...(minPotentialStars !== undefined ? { minPotentialStars } : {}),
+    })
+  }
+
+  hireScout(candidateId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'hireScout', candidateId })
+  }
+
+  fireScout(scoutId: string): Promise<WorkerResponse> {
+    return this.send({ type: 'fireScout', scoutId })
   }
 
   /* ── story layer ── */
@@ -466,6 +510,11 @@ export class SimClient {
   /** Assign an NHL player to the user's AHL affiliate. */
   sendDown(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'sendDown', playerId })
+  }
+
+  /** Auto-apply the coach's recommended NHL roster (call-ups + send-downs). */
+  setCoachRoster(): Promise<WorkerResponse> {
+    return this.send({ type: 'setCoachRoster' })
   }
 
   /** Six-axis radar comparison for two players (Phase C compare UI). */
