@@ -30,7 +30,7 @@ a re-run with the ceiling corrected to confirm.
 
 ---
 
-## 2. THE THIRD-YEAR CLIFF IS REAL, AND IT IS A FIVE-YEAR SLIDE
+## 2. THE FIVE-YEAR SLIDE — corrected framing
 
 | season | record | pts | rank | result | trades | signings |
 |---|---|---:|---:|---|---:|---:|
@@ -40,15 +40,31 @@ a re-run with the ceiling corrected to confirm.
 | 2028 | 34-39-9 | 77 | 26 | Missed | 2 | 4 |
 | 2029 | 31-43-8 | 70 | 28 | Missed | 1 | 0 |
 
-Monotonic decline, **-31 points across five years**, four straight missed
-playoffs, zero Cups. This is the same shape as the Esports Manager complaint
-*"After 3 years game falls off"* (docs/LESSONS-ESPORTS-MANAGER.md) — now measured
-in our own game, over a longer run than before.
+**I originally called this a "third-year cliff" matching the Esports Manager
+complaint. That framing was wrong and is withdrawn.** Rebuilds routinely take
+three to five bad years; a club being poor for a stretch is not evidence of a
+broken sim. Being bad is a legitimate outcome.
 
-Candidate causes, in the order worth testing: the cap baseline (§1) preventing
-all roster work; development failing to replace aging; the draft producing 30
-picks in five years that never become NHL players; or the AI simply outbuilding
-a passive GM.
+What is still worth investigating is narrower, and it is not "the club got bad":
+
+1. **Nobody chose this.** A rebuild is a *decision* — sell veterans, bank picks,
+   take the lumps. This club made **0 trades and 0 signings in its first two
+   seasons** while falling from 101 points to 83. That is not a strategy being
+   executed; that is a GM who did nothing. Whether he *chose* not to act or was
+   *unable* to act is the actual question — and §1 (every club ~$16M over a
+   phantom ceiling, so no salary can be added) is a strong candidate for the
+   latter.
+2. **It started as a playoff team.** 101 points and 8th in year one. A contender
+   sliding to 70 points without a single deliberate sell-off is a different
+   shape from a rebuild.
+3. **There is no upswing inside the window.** 30 draft picks over five years and
+   the curve never turns. A rebuild is only a rebuild if it *pays off* — five
+   seasons may simply be too short to see it, which is a limitation of the run,
+   not a finding about the game.
+
+**The honest test is longer.** Five seasons cannot distinguish "a rebuild whose
+payoff lies in year seven" from "a club that decays and never recovers". A
+10-season run answers it; anything shorter is reading tea leaves.
 
 ---
 
