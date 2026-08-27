@@ -2392,6 +2392,9 @@ export interface CareerSnapshot {
   ledgerCounter?: number
   /** Content Engine no-repeat ledger (B4.5). Optional/additive. */
   contentLedger?: import('@engine/story/contentEngine').ContentUse[]
+  /** Live trade conversations — round, positions, movement, patience — so a
+   *  negotiation in progress survives a reload. Optional/additive. */
+  tradeThreads?: import('./tradeThread').TradeThread[]
   /** Open decision events: interactionId → event id, so a dilemma saved
    *  mid-scene still applies its AUTHORED effects on load rather than
    *  silently falling back to the generic tone model. Optional/additive. */
