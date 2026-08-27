@@ -11,6 +11,24 @@ import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const MEDICAL_COLS = sortColumns<MedicalRow>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+  { key: 'condition', label: 'Condition', value: (r) => r.condition, initialDir: 'asc', title: 'Freshness — sorts the worn-down to the top' },
+  {
+    key: 'status',
+    label: 'Status',
+    // Hurt first, then resting, then fit: the order a GM triages in.
+    value: (r) => (r.injuryDescription ? 2 : r.resting ? 1 : 0),
+  },
+  { key: 'risk', label: 'Injury Risk', value: (r) => r.risk },
+  { key: 'manage', label: 'Manage' },
+])
+
+/** Stable identity for the sort hook before the medical view loads. */
+const NO_MEDICAL_ROWS: MedicalRow[] = []
 
 function riskColor(label: MedicalRow['riskLabel']): string {
   if (label === 'High') return 'var(--danger)'
@@ -168,6 +186,7 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
     (r) => (r.type === 'medical' ? r.medical : null)
   )
   const [busy, setBusy] = useState(false)
+  const riskSort = useTableSort(data?.rows ?? NO_MEDICAL_ROWS, MEDICAL_COLS, { key: null })
 
   async function toggleRest(playerId: string): Promise<void> {
     if (busy) return
@@ -273,16 +292,11 @@ export function MedicalScreen(props: { teamId?: string } = {}): JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>Player</th>
-                <th className="num">Pos</th>
-                <th>Condition</th>
-                <th>Status</th>
-                <th>Injury Risk</th>
-                <th>Manage</th>
+                <SortHeaders columns={MEDICAL_COLS} sortKey={riskSort.sortKey} dir={riskSort.dir} onSort={riskSort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {d.rows.map((r) => (
+              {riskSort.sorted.map((r) => (
                 <tr key={r.playerId}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

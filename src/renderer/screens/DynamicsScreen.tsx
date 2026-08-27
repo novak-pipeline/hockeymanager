@@ -8,6 +8,22 @@ import { PlayerFace } from '../components/PlayerFace'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { moraleWord, moraleColor } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const TIER_RANK: Record<DynamicsPlayerView['tier'], number> = {
+  leader: 3, highlyInfluential: 2, influential: 1, other: 0,
+}
+
+const HAPPINESS_COLS = sortColumns<DynamicsPlayerView>()([
+  { key: 'name', label: 'Player', value: (p) => p.name },
+  { key: 'position', label: 'Pos', value: (p) => p.position, align: 'right' },
+  { key: 'tier', label: 'Standing', value: (p) => TIER_RANK[p.tier] ?? 0, title: 'How much weight he carries in the room' },
+  { key: 'personality', label: 'Personality', value: (p) => p.personality },
+  { key: 'morale', label: 'Morale', value: (p) => p.morale, initialDir: 'asc', title: 'The unhappy men first' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_HAPPINESS: DynamicsPlayerView[] = []
 
 function barColor(v: number): string {
   if (v >= 62) return 'var(--success)'
@@ -109,6 +125,7 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
     () => client.getTeamDynamics(props.teamId),
     (r) => (r.type === 'teamDynamics' ? r.dynamics : null)
   )
+  const happySort = useTableSort(data?.happinessRows ?? NO_HAPPINESS, HAPPINESS_COLS, { key: null })
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading dynamics…</Notice>
@@ -216,15 +233,11 @@ export function DynamicsScreen(props: { teamId: string }): JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>Player</th>
-                <th className="num">Pos</th>
-                <th>Standing</th>
-                <th>Personality</th>
-                <th>Morale</th>
+                <SortHeaders columns={HAPPINESS_COLS} sortKey={happySort.sortKey} dir={happySort.dir} onSort={happySort.sortBy} />
               </tr>
             </thead>
             <tbody>
-              {d.happinessRows.map((p) => (
+              {happySort.sorted.map((p) => (
                 <tr key={p.playerId}>
                   <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                   <td className="num muted">{p.position}</td>

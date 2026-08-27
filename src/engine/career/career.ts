@@ -19620,21 +19620,53 @@ export class Career {
       // aren't trade chips that matter to the GM. NHL clubs are exactly the
       // league.teams set (the `tier` field is null in base leagues, so we can't
       // rely on it); anyone outside that set is a non-NHL body.
+      // §D3: the block is a shopping list, so every row carries what a GM
+      // shops on — cost, term, whether it's a rental, his fog-aware ability,
+      // his price on the trade currency, and whether he fills a hole of ours.
       rumors: (() => {
         const nhlTeams = new Set(this.data.league.teams.map((t) => t as string))
+        const fog = this.fogCtx()
+        const myNeeds = new Set(
+          buildTeamProfile(this.userTeam, this.data.players).needs as string[],
+        )
+        const groupOf = (pos: string): string => (pos === 'G' ? 'G' : pos === 'D' ? 'D' : 'F')
         return tp.rumors
           .filter((r) => nhlTeams.has(r.teamId as string))
           .map((r) => {
           const p = this.data.players.get(asPlayerId(r.playerId))
+          const team = this.data.teams.get(asTeamId(r.teamId as string))
+          if (!p) {
+            return {
+              playerId: r.playerId,
+              playerName: r.playerId,
+              teamId: r.teamId,
+              teamAbbr: abbrFor(r.teamId),
+              heat: Math.round(r.heat),
+              sinceDay: r.sinceDay,
+            }
+          }
+          const b = badge(p, fog)
+          const estimated = !!b.scouted && !b.scouted.exact
+          const { value } = describePlayerValue(p, estimated ? b.overall : undefined)
           return {
             playerId: r.playerId,
-            playerName: p?.name ?? r.playerId,
+            playerName: p.name,
             teamId: r.teamId,
             teamAbbr: abbrFor(r.teamId),
             heat: Math.round(r.heat),
             sinceDay: r.sinceDay,
-            ...(p ? { position: p.position, age: p.age } : {}),
-            ...(p?.faceId !== undefined ? { faceId: p.faceId } : {}),
+            position: p.position,
+            age: p.age,
+            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+            ...(team ? { teamName: team.name } : {}),
+            salary: p.contract.salary,
+            yearsRemaining: p.contract.yearsRemaining,
+            expiring: p.contract.yearsRemaining <= 1,
+            overall: b.overall,
+            ...(b.scouted ? { scouted: b.scouted } : {}),
+            tradeValue: Math.round(value * 10) / 10,
+            valueEstimated: estimated,
+            fitsNeed: myNeeds.has(groupOf(p.position)),
           }
         })
       })(),

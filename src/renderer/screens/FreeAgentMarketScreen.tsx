@@ -5,9 +5,9 @@
  * Lives in the sidebar year-round; outside the July window it shows what the
  * market IS (empty or leftovers) instead of pretending it doesn't exist.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { FinanceView } from '../../worker/protocol'
-import type { RfaBoardView, FaHubView } from '../../engine/career/views'
+import type { FaHubRowView, RfaBoardView, FaHubView, RfaTargetView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
@@ -15,6 +15,61 @@ import { OverallStars } from '../components/Stars'
 import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+/** Offers already tabled, awaiting each camp. */
+const STANDING_OFFER_COLS = sortColumns<FaHubRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'offer', label: 'Your offer', value: (r) => r.pendingOffer?.salary ?? null },
+  { key: 'ask', label: 'His ask', value: (r) => r.askSalary },
+  {
+    key: 'standing',
+    label: 'Standing',
+    value: (r) => (r.pendingOffer?.standing === 'leading' ? 2 : r.pendingOffer?.standing === 'competitive' ? 1 : 0),
+    title: 'Where your money sits against the field',
+  },
+  { key: 'decides', label: 'Decides', value: (r) => r.pendingOffer?.decidesInDays ?? null, initialDir: 'asc' },
+  { key: 'read', label: 'Read' },
+])
+
+/** Rival RFAs you could prise loose with an offer sheet. */
+const RFA_COLS = sortColumns<RfaTargetView>()([
+  { key: 'face', label: '', style: { width: 26 } },
+  { key: 'name', label: 'Player', value: (t) => t.name },
+  { key: 'posAge', label: 'Pos / Age', value: (t) => t.age, initialDir: 'asc' },
+  { key: 'overall', label: 'OVR', value: (t) => t.overall, align: 'right' },
+  { key: 'rights', label: 'Rights', value: (t) => t.teamAbbr },
+  { key: 'ask', label: 'His ask', value: (t) => t.askSalary },
+  { key: 'sheet', label: 'Your sheet', value: (t) => t.offerSalary },
+  { key: 'comp', label: 'If they walk', value: (t) => t.compLabel },
+  { key: 'act', label: '' },
+])
+
+/** The open UFA market. */
+const FA_MARKET_COLS = sortColumns<FaHubRowView>()([
+  { key: 'star', label: '', value: (fa) => (fa.shortlisted ? 1 : 0), style: { width: 26 }, title: 'Shortlisted first' },
+  { key: 'name', label: 'Player', value: (fa) => fa.name },
+  { key: 'posAge', label: 'Pos / Age', value: (fa) => fa.age, initialDir: 'asc' },
+  { key: 'overall', label: 'OVR', value: (fa) => fa.overall, align: 'right' },
+  { key: 'ask', label: 'Their ask', value: (fa) => fa.askSalary },
+  { key: 'agent', label: 'Agent', value: (fa) => fa.agentName },
+  {
+    key: 'interest',
+    label: 'His interest in you',
+    value: (fa) => (fa.interest === 'keen' ? 2 : fa.interest === 'warm' ? 1 : 0),
+  },
+  {
+    key: 'clock',
+    label: 'Clock',
+    value: (fa) => fa.decidesInDays,
+    initialDir: 'asc',
+    title: 'Days before rival clubs can sign him out from under you',
+  },
+  { key: 'act', label: '' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_RFA_ROWS: RfaTargetView[] = []
 
 const INTEREST_META: Record<'keen' | 'warm' | 'cold', { label: string; color: string }> = {
   keen: { label: 'Keen', color: 'var(--success, #4caf7d)' },
@@ -50,7 +105,8 @@ const STANDING_META: Record<'leading' | 'competitive' | 'trailing', { label: str
 /** #164: the GM's outstanding standing offers, with a leading/contested/trailing
  *  read on where each sits vs the rival field. Only shown when offers are live. */
 function StandingOffersPanel({ hub }: { hub: FaHubView | null }): JSX.Element | null {
-  const offers = (hub?.rows ?? []).filter((r) => r.pendingOffer)
+  const offers = useMemo(() => (hub?.rows ?? []).filter((r) => r.pendingOffer), [hub])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(offers, STANDING_OFFER_COLS, { key: null })
   if (offers.length === 0) return null
   return (
     <Panel title={`Your standing offers (${offers.length})`}>
@@ -62,16 +118,11 @@ function StandingOffersPanel({ hub }: { hub: FaHubView | null }): JSX.Element | 
         <table className="table">
           <thead>
             <tr>
-              <th>Player</th>
-              <th>Your offer</th>
-              <th>His ask</th>
-              <th>Standing</th>
-              <th>Decides</th>
-              <th>Read</th>
+              <SortHeaders columns={STANDING_OFFER_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {offers.map((r) => {
+            {sorted.map((r) => {
               const po = r.pendingOffer!
               const meta = STANDING_META[po.standing]
               return (
@@ -123,14 +174,16 @@ export function FreeAgentMarketScreen(): JSX.Element {
     (r) => (r.type === 'rfaBoard' ? r.board : null)
   )
 
-  const rows = (hub?.rows ?? []).filter((r) => {
+  const rows = useMemo(() => (hub?.rows ?? []).filter((r) => {
     if (posFilter === 'starred' && !r.shortlisted) return false
     if (posFilter === 'F' && (r.position === 'D' || r.position === 'G')) return false
     if (posFilter === 'D' && r.position !== 'D') return false
     if (posFilter === 'G' && r.position !== 'G') return false
     if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
-  })
+  }), [hub, posFilter, search])
+  const marketSort = useTableSort(rows, FA_MARKET_COLS, { key: null })
+  const rfaSort = useTableSort(rfa?.rows ?? NO_RFA_ROWS, RFA_COLS, { key: null })
 
   const star = async (playerId: string): Promise<void> => {
     const r = await client.toggleFaShortlist(playerId)
@@ -191,19 +244,11 @@ export function FreeAgentMarketScreen(): JSX.Element {
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 26 }} />
-                  <th>Player</th>
-                  <th>Pos / Age</th>
-                  <th className="num">OVR</th>
-                  <th>Rights</th>
-                  <th>His ask</th>
-                  <th>Your sheet</th>
-                  <th>If they walk</th>
-                  <th />
+                  <SortHeaders columns={RFA_COLS} sortKey={rfaSort.sortKey} dir={rfaSort.dir} onSort={rfaSort.sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {rfa.rows.map((t) => {
+                {rfaSort.sorted.map((t) => {
                   const capTight = t.offerSalary > (finance ? finance.salaryCap - finance.capUsed : 0)
                   return (
                     <tr key={t.playerId}>
@@ -295,19 +340,11 @@ export function FreeAgentMarketScreen(): JSX.Element {
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 26 }} />
-                  <th>Player</th>
-                  <th>Pos / Age</th>
-                  <th className="num">OVR</th>
-                  <th>Their ask</th>
-                  <th>Agent</th>
-                  <th>His interest in you</th>
-                  <th>Clock</th>
-                  <th />
+                  <SortHeaders columns={FA_MARKET_COLS} sortKey={marketSort.sortKey} dir={marketSort.dir} onSort={marketSort.sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((fa) => {
+                {marketSort.sorted.map((fa) => {
                   const im = INTEREST_META[fa.interest]
                   const capTight = fa.askSalary > (hub?.capSpace ?? 0)
                   return (

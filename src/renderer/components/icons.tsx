@@ -18,7 +18,7 @@ import {
   Briefcase, AlarmClock, Scissors, GraduationCap, Landmark, Phone, ClipboardList,
   ScrollText, Scale, Pin, Settings, PenLine, Mic, Flag, Play, Dumbbell, Lock,
   Volume2, Sparkles, ArrowLeft, AlertTriangle, Globe, Home, Radio, Megaphone,
-  Mail, Ticket, Wrench, Heart, User, CheckCircle2,
+  Mail, Ticket, Wrench, Heart, User, CheckCircle2, Shield,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -30,7 +30,15 @@ export const Icons = {
   Contract: FileText,
   Draft: Target,
   Award: Medal,
-  League: Snowflake,
+  /**
+   * Playtest §F1: this was a Snowflake, and the GM disliked it — the league
+   * category is the inbox's catch-all (bulletins, memos, notices from the
+   * league office), and a snowflake said "winter", not "official". A shield
+   * reads as the league's own crest on a piece of correspondence.
+   */
+  League: Shield,
+  /** The snowflake keeps the one beat it actually belongs on. */
+  Freeze: Snowflake,
   Milestone: Star,
   Playoffs: Trophy,
   Scouting: Search,
@@ -99,7 +107,7 @@ const CATEGORY_ICON: Record<NewsCategory, { Cmp: LucideIcon; color: string }> = 
   contract:  { Cmp: FileText,       color: 'var(--amber)' },
   draft:     { Cmp: Target,         color: 'var(--cyan)' },
   award:     { Cmp: Medal,          color: 'var(--amber)' },
-  league:    { Cmp: Snowflake,      color: 'var(--muted)' },
+  league:    { Cmp: Shield,         color: 'var(--muted)' },
   milestone: { Cmp: Star,           color: 'var(--amber)' },
   playoffs:  { Cmp: Trophy,         color: 'var(--orange)' },
   scouting:  { Cmp: Search,         color: 'var(--cyan)' },

@@ -13,7 +13,7 @@
  * (dropdown) → overlays their radar via client.compareRadar() and shows
  * key-stat lines side by side.
  */
-import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
 import type { SquadStatus, TradeStatus } from '../../domain/player'
 import type {
@@ -45,6 +45,7 @@ import { toast, bumpRefresh } from '../components/store'
 import { PlayerFace } from '../components/PlayerFace'
 import { RadarChart } from '../components/RadarChart'
 import { ThemeScope } from '../components/ThemeScope'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 /* ── Scout this player: send a scout straight from the profile ───────────────── */
 /** Playtest #23: add the player to the scouting shortlist straight from his
@@ -1757,8 +1758,48 @@ function TabContract({ d }: { d: PlayerProfileView }): JSX.Element {
   )
 }
 
+type CareerSeasonRow = PlayerProfileView['seasons'][number]
+
+/**
+ * The career table. Newest season first by default (it's a history), but every
+ * column sorts — "which was his best year" is the question this table exists to
+ * answer, and reading down twenty rows to find it is not answering it.
+ */
+function careerStatCols(isGoalie: boolean) {
+  return sortColumns<CareerSeasonRow>()([
+    { key: 'year', label: 'Season', value: (s) => s.year },
+    { key: 'team', label: 'Team', value: (s) => s.teamAbbr },
+    ...(isGoalie
+      ? ([
+          { key: 'gp', label: 'GP', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.gamesPlayed ?? null },
+          { key: 'w', label: 'W', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.wins ?? null },
+          { key: 'l', label: 'L', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.losses ?? null },
+          { key: 'svpct', label: 'SV%', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.savePct ?? null },
+          { key: 'gaa', label: 'GAA', align: 'right', initialDir: 'asc', value: (s: CareerSeasonRow) => s.goalie?.goalsAgainstAverage ?? null },
+          { key: 'so', label: 'SO', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.shutouts ?? null },
+          { key: 'blank1', label: '', align: 'right' },
+          { key: 'blank2', label: '', align: 'right' },
+          { key: 'avr', label: 'AVR', align: 'right', value: (s: CareerSeasonRow) => s.goalie?.avgRating ?? null },
+        ] as const)
+      : ([
+          { key: 'gp', label: 'GP', align: 'right', value: (s: CareerSeasonRow) => s.skater?.gamesPlayed ?? null },
+          { key: 'g', label: 'G', align: 'right', value: (s: CareerSeasonRow) => s.skater?.goals ?? null },
+          { key: 'a', label: 'A', align: 'right', value: (s: CareerSeasonRow) => s.skater?.assists ?? null },
+          { key: 'p', label: 'P', align: 'right', value: (s: CareerSeasonRow) => s.skater?.points ?? null },
+          { key: 'pm', label: '±', align: 'right', value: (s: CareerSeasonRow) => s.skater?.plusMinus ?? null },
+          { key: 'pim', label: 'PIM', align: 'right', value: (s: CareerSeasonRow) => s.skater?.penaltyMinutes ?? null },
+          { key: 'toi', label: 'TOI/g', align: 'right', value: (s: CareerSeasonRow) => s.skater?.toiPerGame ?? null },
+          { key: 'pp', label: 'PP', align: 'right', title: 'Power-play goals + assists', value: (s: CareerSeasonRow) => (s.skater ? (s.skater.ppGoals ?? 0) + (s.skater.ppAssists ?? 0) : null) },
+          { key: 'sh', label: 'SH', align: 'right', title: 'Shorthanded goals + assists', value: (s: CareerSeasonRow) => (s.skater ? (s.skater.shGoals ?? 0) + (s.skater.shAssists ?? 0) : null) },
+          { key: 'avr', label: 'AVR', align: 'right', value: (s: CareerSeasonRow) => s.skater?.avgRating ?? null },
+        ] as const)),
+  ])
+}
+
 function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
   const isGoalie = d.position === 'G'
+  const careerCols = useMemo(() => careerStatCols(isGoalie), [isGoalie])
+  const careerSort = useTableSort(d.seasons, careerCols, { key: null })
 
   if (d.seasons.length === 0) {
     return (
@@ -1789,39 +1830,12 @@ function TabHistory({ d }: { d: PlayerProfileView }): JSX.Element {
         <table className="table">
           <thead>
             <tr>
-              <th>Season</th>
-              <th>Team</th>
-              {isGoalie ? (
-                <>
-                  <th className="num">GP</th>
-                  <th className="num">W</th>
-                  <th className="num">L</th>
-                  <th className="num">SV%</th>
-                  <th className="num">GAA</th>
-                  <th className="num">SO</th>
-                  <th className="num"></th>
-                  <th className="num"></th>
-                  <th className="num">AVR</th>
-                </>
-              ) : (
-                <>
-                  <th className="num">GP</th>
-                  <th className="num">G</th>
-                  <th className="num">A</th>
-                  <th className="num">P</th>
-                  <th className="num">±</th>
-                  <th className="num">PIM</th>
-                  <th className="num">TOI/g</th>
-                  <th className="num" title="Power-play goals + assists">PP</th>
-                  <th className="num" title="Shorthanded goals + assists">SH</th>
-                  <th className="num">AVR</th>
-                </>
-              )}
+              <SortHeaders columns={careerCols} sortKey={careerSort.sortKey} dir={careerSort.dir} onSort={careerSort.sortBy} />
             </tr>
           </thead>
           <tbody>
-            {d.seasons.map((season, i) => (
-              <tr key={season.year} style={i === 0 ? { fontWeight: 600 } : undefined}>
+            {careerSort.sorted.map((season) => (
+              <tr key={season.year} style={season.year === d.seasons[0]?.year ? { fontWeight: 600 } : undefined}>
                 <td>{season.year}–{String(season.year + 1).slice(2)}</td>
                 <td className="muted"><TeamLink teamId={season.teamId} name={season.teamAbbr} />{season.league === 'ahl' ? <span style={ahlTagStyle}>AHL</span> : null}</td>
                 {season.goalie

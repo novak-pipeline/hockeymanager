@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
 import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
@@ -11,7 +11,6 @@ import type {
   TradeOfferView,
   TradePartnerView,
   TradeRumorView,
-  ValueDriver,
 } from '../../engine/career/views'
 import { assetValueTier } from '../../engine/league/trades'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -23,6 +22,7 @@ import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { useUserTeamId } from '../components/UserTeamContext'
 import { toast } from '../components/store'
 
 // ─── asset chips ──────────────────────────────────────────────────────────────
@@ -41,21 +41,21 @@ function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
 
 // ─── per-asset trade value ──────────────────────────────────────────────────
 
-/** Multi-line hover breakdown of the factors behind an asset's value. */
-function driversTitle(drivers?: ValueDriver[], header?: string): string {
-  const rows = (drivers ?? []).map(
-    (d) => `${d.tone === 'up' ? '▲' : d.tone === 'down' ? '▼' : '·'} ${d.label}`,
-  )
-  return [header, ...rows].filter(Boolean).join('\n')
-}
-
 /**
  * Trade value, read as a METER rather than a decimal.
  *
  * A bare `22.9` reads like a spreadsheet and implies a precision the model does
- * not have. The primary read is a tier word ("Core piece", "Star") over a
- * segmented bar, EA-NHL style; the exact number stays one hover away for anyone
- * who wants it, alongside the factors behind it.
+ * not have, so the primary read is a tier word ("Core piece", "Star") over a
+ * segmented bar, EA-NHL style.
+ *
+ * Playtest 2026-08-26 §D2: the number and the model's own factor list were
+ * still one hover away — *"that information shouldn't be visible to the
+ * player"* — which put the raw 0–100 overall back on screen (the one number
+ * this game deliberately never shows; see components/Stars.tsx) alongside the
+ * exact points the AI weighs. Replacing the decimal with a bar and then
+ * smuggling the decimal back into its tooltip defeated the change. The hover
+ * now says what the bar means in words and nothing more: a GM knows a Core
+ * piece from a Depth piece; he does not get the engine's ledger.
  */
 const TIER_COLOR = (tier: number): string =>
   tier >= 6 ? 'var(--success)'
@@ -65,9 +65,25 @@ const TIER_COLOR = (tier: number): string =>
 
 const METER_SEGMENTS = 6
 
+/**
+ * What each tier means around the league, in one clause. No figures.
+ * Indexed by the tier number `assetValueTier` returns, so the clause always
+ * elaborates the label beside it rather than quietly disagreeing with it
+ * (6 Franchise · 5 Star · 4 Top-line · 3 Core piece · 2 Roster player ·
+ * 1 Depth · 0 Fringe — see TIER_BANDS in engine/league/trades.ts).
+ */
+const TIER_BLURB: Record<number, string> = {
+  6: 'the man you build a club around; it would take a haul',
+  5: 'a bona fide star; clubs would empty the cupboard',
+  4: 'drives a top line or a top pair',
+  3: 'the sort of name a deal gets built around',
+  2: 'an everyday body, not a centrepiece',
+  1: 'a useful add-on to a bigger package',
+  0: 'a throw-in',
+}
+
 function ValueMeter(props: {
   value?: number | undefined
-  drivers?: ValueDriver[] | undefined
   estimated?: boolean | undefined
   title?: string | undefined
   /** Hide the tier word — for tight rows where the bar alone carries it. */
@@ -77,13 +93,13 @@ function ValueMeter(props: {
   const { tier, label, fill } = assetValueTier(props.value)
   const color = TIER_COLOR(tier)
   const lit = Math.max(1, Math.round(fill * METER_SEGMENTS))
-  const hoverHead = [
+  const hover = [
     props.title,
-    `${props.estimated ? '~' : ''}${props.value.toFixed(1)} trade points · ${label}`,
+    `${label} — ${TIER_BLURB[tier] ?? 'a throw-in'}${props.estimated ? '. Your scouts are still guessing at him.' : ''}`,
   ].filter(Boolean).join('\n')
   return (
     <span
-      title={driversTitle(props.drivers, hoverHead)}
+      title={hover}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'help', whiteSpace: 'nowrap' }}
     >
       {!props.compact && (
@@ -148,7 +164,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
   const { pick } = props
   return (
     <span
-      title={driversTitle(pick.drivers, pick.viaAbbr ? `Originally ${pick.viaAbbr}'s pick` : undefined)}
+      title={pick.viaAbbr ? `Originally ${pick.viaAbbr}'s pick` : undefined}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -166,7 +182,7 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
       {pick.viaAbbr && (
         <span style={{ color: 'var(--muted)', fontSize: 10 }}>(via {pick.viaAbbr})</span>
       )}
-      <ValueMeter value={pick.value} drivers={pick.drivers} compact />
+      <ValueMeter value={pick.value} compact />
     </span>
   )
 }
@@ -332,7 +348,7 @@ function OfferCard(props: {
           className="btn"
           disabled={busy}
           onClick={() => props.onCounter(offer)}
-          title="Open the builder pre-loaded with this deal so you can tweak it and send it back"
+          title="Open the builder with every player and pick from this deal already selected, so you can tweak it and send it back"
         >
           Counter
         </button>
@@ -602,12 +618,23 @@ function PartnerDropdown(props: {
 
 // ─── propose tab ──────────────────────────────────────────────────────────────
 
-/** A counter's starting point: the partner + the players from the offer being
- *  countered. `nonce` forces a re-seed if another counter comes in mid-edit. */
+/**
+ * A counter's starting point: the partner and EVERY asset from the offer being
+ * countered — players and picks on both sides.
+ *
+ * Playtest 2026-08-26 §D1: *"countering should start from what was proposed."*
+ * The picks were the hole: a deal built around a 1st and a 3rd re-opened with
+ * only the bodies ticked, so countering a pick-heavy offer meant rebuilding it
+ * from memory. `nonce` forces a re-seed if another counter comes in mid-edit.
+ */
 interface TradeSeed {
+  /** Why the builder was pre-loaded — the banner reads differently for each. */
+  reason: 'counter' | 'enquiry'
   partnerId: string
   myPlayerIds: string[]
+  myPickIds: string[]
   theirPlayerIds: string[]
+  theirPickIds: string[]
   nonce: number
 }
 
@@ -626,9 +653,14 @@ function ProposeTab(props: {
   const partner: TradePartnerView | undefined = data.partners.find((p) => p.teamId === partnerId)
 
   const [myPlayerIds, setMyPlayerIds] = useState<Set<string>>(new Set(props.seed?.myPlayerIds ?? []))
-  const [myPickIds, setMyPickIds] = useState<Set<string>>(new Set())
+  const [myPickIds, setMyPickIds] = useState<Set<string>>(new Set(props.seed?.myPickIds ?? []))
   const [theirPlayerIds, setTheirPlayerIds] = useState<Set<string>>(new Set(props.seed?.theirPlayerIds ?? []))
-  const [theirPickIds, setTheirPickIds] = useState<Set<string>>(new Set())
+  const [theirPickIds, setTheirPickIds] = useState<Set<string>>(new Set(props.seed?.theirPickIds ?? []))
+
+  // True while the board on screen is still the one we were handed. Cleared the
+  // moment the GM wipes it or picks a different club, so the banner explaining
+  // where the board came from cannot outlive the board it describes.
+  const [seedLive, setSeedLive] = useState(!!props.seed)
 
   // Re-seed when a NEW counter arrives while the builder is already mounted.
   const seedNonce = props.seed?.nonce
@@ -637,8 +669,9 @@ function ProposeTab(props: {
     setPartnerId(props.seed.partnerId)
     setMyPlayerIds(new Set(props.seed.myPlayerIds))
     setTheirPlayerIds(new Set(props.seed.theirPlayerIds))
-    setMyPickIds(new Set())
-    setTheirPickIds(new Set())
+    setMyPickIds(new Set(props.seed.myPickIds))
+    setTheirPickIds(new Set(props.seed.theirPickIds))
+    setSeedLive(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedNonce])
 
@@ -704,6 +737,7 @@ function ProposeTab(props: {
     setErr(null)
     setDraft(null)
     setInterest(null)
+    setSeedLive(false)
   }
 
   async function handlePropose() {
@@ -745,8 +779,29 @@ function ProposeTab(props: {
   const hasSelections =
     myPlayerIds.size > 0 || myPickIds.size > 0 || theirPlayerIds.size > 0 || theirPickIds.size > 0
 
+  // §D1: say out loud that the board was loaded from somewhere, so the ticked
+  // boxes read as "their proposal" rather than as leftovers from a past session.
+  const seededName = props.seed && seedLive
+    ? data.partners.find((p) => p.teamId === props.seed!.partnerId)?.teamName
+    : undefined
+
   return (
     <div className="stack">
+      {seededName && (
+        <Notice kind="info">
+          {props.seed!.reason === 'counter' ? (
+            <>
+              Countering <b>{seededName}</b>'s offer — every player and pick they proposed is already
+              on the board. Adjust what you like and send it back.
+            </>
+          ) : (
+            <>
+              Enquiring with <b>{seededName}</b> — the man you clicked is already asked for.
+              Put something of yours beside it.
+            </>
+          )}
+        </Notice>
+      )}
       {/* partner selector — custom dropdown (a native <select>'s popup gets
           closed by the screen's periodic re-renders, so it wouldn't open
           reliably in-season). */}
@@ -856,7 +911,6 @@ function ProposeTab(props: {
                         </span>
                         <ValueMeter
                           value={p.tradeValue}
-                          drivers={p.valueDrivers}
                           estimated={p.valueEstimated}
                           title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
                         />
@@ -905,7 +959,7 @@ function ProposeTab(props: {
                           cursor: 'pointer',
                         }}
                       >
-                        <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
+                        <span title={pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined}>
                           {pk.label}
                           {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
                           <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
@@ -977,7 +1031,6 @@ function ProposeTab(props: {
                         </span>
                         <ValueMeter
                           value={p.tradeValue}
-                          drivers={p.valueDrivers}
                           estimated={p.valueEstimated}
                           title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
                         />
@@ -1009,7 +1062,7 @@ function ProposeTab(props: {
                           cursor: 'pointer',
                         }}
                       >
-                        <span title={driversTitle(pk.drivers, pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined)}>
+                        <span title={pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined}>
                           {pk.label}
                           {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
                           <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
@@ -1156,12 +1209,12 @@ function DealColumn(props: {
               </span>
             </span>
             <span className="row" style={{ gap: 6, alignItems: 'center', flexShrink: 0 }}>
-              <ValueMeter value={a.value} drivers={a.drivers} estimated={a.estimated} />
+              <ValueMeter value={a.value} estimated={a.estimated} />
               {/* A2: the partner's own read, shown only where it actually
                   differs — a silent agreement needs no annotation. */}
               {a.partnerValue !== undefined && Math.abs(a.partnerValue - a.value) / Math.max(a.value, 1) >= 0.08 && (
                 <span
-                  title={driversTitle(a.partnerDrivers, `Their book: ${a.partnerValue.toFixed(1)}`)}
+                  title={a.partnerValue > a.value ? 'They rate him higher than the market does' : 'They rate him lower than the market does'}
                   style={{
                     fontSize: 9,
                     fontWeight: 700,
@@ -1215,7 +1268,9 @@ function DealDeskPanel(props: {
             <span style={{ fontSize: 13, fontWeight: 600, color: MARKET_TONE[draft.marketVerdict] }}>{draft.marketLine}</span>
             <span
               style={{ fontSize: 11, fontWeight: 700, color: draft.net >= 0 ? 'var(--success)' : 'var(--danger)' }}
-              title={`Net value swing in your favour: ${draft.net >= 0 ? '+' : ''}${draft.net.toFixed(1)} trade points`}
+              title={draft.net >= 0
+                ? 'On paper you come out of this ahead'
+                : 'On paper you are giving up the better of it'}
             >
               {draft.net >= 0 ? 'IN YOUR FAVOUR' : 'AGAINST YOU'}
             </span>
@@ -1340,16 +1395,148 @@ function HeatBar(props: { heat: number; nearDeadline: boolean }): JSX.Element {
   )
 }
 
+/* ── §D3: the trade block, browsable ──────────────────────────────────────
+ *
+ * Playtest 2026-08-26 §D3: *"the trade block is one long list."* It was: every
+ * name in the league on the move, in a flat table sorted by heat, with the
+ * player's position and age as the only facts about him. Nothing said what he
+ * costs, how long he's signed for, whether he's a rental, or whether he plays
+ * a position this club is short at — so the only way to shop was to click into
+ * thirty profiles.
+ *
+ * The board now carries all of that on the card, and the list can be cut down
+ * to the men worth a phone call: by position, by whether he fills a hole here,
+ * by whether he's a rental, by whether he fits under the cap. What's left is
+ * grouped by how live the name is, because "who is actually available right
+ * now" is the first question at a deadline.
+ */
+
+/** How live a name is. The grouping a GM reads the block in. */
+const HEAT_BANDS = [
+  { key: 'hot', min: 70, title: 'Available now', blurb: "clubs are taking calls — these deals can happen today" },
+  { key: 'warm', min: 40, title: 'Listening', blurb: 'the right offer would get a conversation' },
+  { key: 'cool', min: 0, title: 'Quiet chatter', blurb: "his name is out there, but nobody's shopping him hard" },
+] as const
+
+type BlockFilter = 'all' | 'F' | 'D' | 'G'
+
+function posGroup(position: string | undefined): BlockFilter {
+  if (position === 'G') return 'G'
+  if (position === 'D') return 'D'
+  return 'F'
+}
+
+/** One name on the block, with everything a GM shops on. */
+function BlockCard(props: {
+  r: TradeRumorView
+  nearDeadline: boolean
+  capSpace: number | undefined
+  onEnquire: (r: TradeRumorView) => void
+  canEnquire: boolean
+}): JSX.Element {
+  const { r } = props
+  const nav = useNav()
+  const userTeamId = useUserTeamId()
+  // The block is league-wide, so your own name can be on it — which is news in
+  // itself. You cannot trade with yourself, so that row loses its Enquire.
+  const isYours = r.teamId === userTeamId
+  const overCap = props.capSpace !== undefined && r.salary !== undefined && r.salary > props.capSpace
+  return (
+    <div
+      style={{
+        display: 'flex', gap: 10, padding: '10px 12px', minWidth: 0,
+        background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      <PlayerFace faceId={r.faceId} name={r.playerName} size={40} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" className="player-link" onClick={() => nav.navigate('player', { playerId: r.playerId })}>
+            {r.playerName}
+          </button>
+          {r.overall !== undefined && (
+            r.scouted && !r.scouted.exact
+              ? <span style={{ opacity: 0.6 }} title="Your scouts are still working on him">
+                  <OverallStars value={Math.round((r.scouted.overallLo + r.scouted.overallHi) / 2)} />
+                </span>
+              : <OverallStars value={r.overall} />
+          )}
+          {isYours && (
+            <span className="chip chip-warn" style={{ fontSize: 9 }} title="The league thinks you are shopping him">
+              YOUR PLAYER
+            </span>
+          )}
+          {r.fitsNeed && !isYours && (
+            <span className="chip chip-success" style={{ fontSize: 9 }} title="He plays a position your club is thin at">
+              FITS A NEED
+            </span>
+          )}
+          {r.expiring && (
+            <span className="chip chip-warn" style={{ fontSize: 9 }} title="Deal expires this summer — a rental unless you re-sign him">
+              RENTAL
+            </span>
+          )}
+        </div>
+        <div className="muted small" style={{ marginTop: 2 }}>
+          {r.position ?? '—'}{r.age !== undefined ? ` · ${r.age}` : ''} · {r.teamName ?? r.teamAbbr}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+          {r.salary !== undefined && (
+            <span
+              className="small"
+              style={{ color: overCap ? 'var(--danger)' : 'var(--text)', whiteSpace: 'nowrap' }}
+              title={overCap ? 'More than your cap space — you would have to send money back' : 'Cap hit'}
+            >
+              {fmtMoney(r.salary)}
+              {r.yearsRemaining !== undefined && <span className="muted"> / {r.yearsRemaining}yr</span>}
+            </span>
+          )}
+          <ValueMeter value={r.tradeValue} estimated={r.valueEstimated} compact title="What he costs to prise loose" />
+          <HeatBar heat={r.heat} nearDeadline={props.nearDeadline} />
+        </div>
+      </div>
+      {props.canEnquire && !isYours && (
+        <button
+          className="btn btn-ghost"
+          style={{ alignSelf: 'center', fontSize: 11, whiteSpace: 'nowrap' }}
+          onClick={() => props.onEnquire(r)}
+          title={`Open the builder with ${r.teamAbbr} on the other side and ${r.playerName} already asked for`}
+        >
+          Enquire
+        </button>
+      )}
+    </div>
+  )
+}
+
 function RumorMillPanel(props: {
   rumors: TradeRumorView[]
   deadlineDay: number
   deadlinePassed: boolean
   currentDay: number
   lastDeadlineRecap: TentpoleView['lastDeadlineRecap']
+  /** Cap space, so "can I even fit him" is a filter and not a guess. */
+  capSpace?: number | undefined
+  /** Open the builder against this club with the player already selected. */
+  onEnquire?: ((r: TradeRumorView) => void) | undefined
 }): JSX.Element {
   const { rumors, deadlineDay, deadlinePassed, currentDay, lastDeadlineRecap } = props
-  const nav = useNav()
   const daysToDeadline = deadlineDay - currentDay
+
+  const [pos, setPos] = useState<BlockFilter>('all')
+  const [needsOnly, setNeedsOnly] = useState(false)
+  const [rentalsOnly, setRentalsOnly] = useState(false)
+  const [affordableOnly, setAffordableOnly] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const shown = useMemo(() => rumors.filter((r) => {
+    if (pos !== 'all' && posGroup(r.position) !== pos) return false
+    if (needsOnly && !r.fitsNeed) return false
+    if (rentalsOnly && !r.expiring) return false
+    if (affordableOnly && props.capSpace !== undefined && (r.salary ?? 0) > props.capSpace) return false
+    if (search && !r.playerName.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  }), [rumors, pos, needsOnly, rentalsOnly, affordableOnly, search, props.capSpace])
 
   const deadlineChipClass =
     deadlinePassed
@@ -1366,8 +1553,26 @@ function RumorMillPanel(props: {
 
   const nearDeadline = !deadlinePassed && daysToDeadline <= 5
 
+  const bands = HEAT_BANDS.map((band, i) => {
+    const upper = i === 0 ? Infinity : HEAT_BANDS[i - 1]!.min
+    return { band, rows: shown.filter((r) => r.heat >= band.min && r.heat < upper).sort((a, b) => b.heat - a.heat) }
+  }).filter((g) => g.rows.length > 0)
+
+  const chip = (active: boolean, label: string, onClick: () => void, title: string): JSX.Element => (
+    <button
+      key={label}
+      type="button"
+      className={`chip${active ? ' chip-accent' : ''}`}
+      style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+      onClick={onClick}
+      title={title}
+    >
+      {label}
+    </button>
+  )
+
   return (
-    <Panel title="Rumor mill">
+    <Panel title="The trade block">
       {/* deadline chip */}
       <div className="row" style={{ marginBottom: 'var(--sp-3)', gap: 'var(--sp-2)' }}>
         <span className={deadlineChipClass} style={{ fontSize: 11 }}>
@@ -1385,61 +1590,62 @@ function RumorMillPanel(props: {
         <DeadlineRecapCard recap={lastDeadlineRecap} />
       )}
 
-      {/* rumor rows */}
       {rumors.length === 0 ? (
-        <span className="muted small">No active trade rumors.</span>
+        <span className="muted small">Nobody is on the block right now. Names appear as clubs give up on their seasons.</span>
       ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Pos / Age</th>
-                <th>Team</th>
-                <th style={{ width: 120 }}>Heat</th>
-                <th className="num" style={{ width: 60 }}>Since</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...rumors]
-                .sort((a, b) => b.heat - a.heat)
-                .map((r) => (
-                  <tr key={r.playerId}>
-                    <td>
-                      <span className="row" style={{ gap: 8, alignItems: 'center' }}>
-                        <PlayerFace faceId={r.faceId} name={r.playerName} size={26} />
-                        <button
-                          type="button"
-                          className="player-link"
-                          onClick={() => nav.navigate('player', { playerId: r.playerId })}
-                        >
-                          {r.playerName}
-                        </button>
-                      </span>
-                    </td>
-                    <td className="muted small">{r.position ?? '—'}{r.age !== undefined ? ` · ${r.age}` : ''}</td>
-                    <td>
-                      <span className="chip" style={{ fontSize: 11 }}>
-                        {r.teamAbbr}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <HeatBar heat={r.heat} nearDeadline={nearDeadline} />
-                        <span
-                          className="muted small mono"
-                          style={{ fontSize: 11, minWidth: 28, textAlign: 'right' }}
-                        >
-                          {r.heat}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="num muted small">Day {r.sinceDay}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+            {(['all', 'F', 'D', 'G'] as const).map((p) =>
+              chip(pos === p, p === 'all' ? 'All' : p, () => setPos(p), p === 'all' ? 'Every name on the block' : `${p} only`))}
+            <span style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 4px' }} />
+            {chip(needsOnly, 'Fits a need', () => setNeedsOnly((v) => !v), 'Only positions your club is thin at')}
+            {chip(rentalsOnly, 'Rentals', () => setRentalsOnly((v) => !v), 'Only men whose deals expire this summer')}
+            {props.capSpace !== undefined
+              && chip(affordableOnly, 'Fits my cap', () => setAffordableOnly((v) => !v), `Only cap hits under ${fmtMoney(props.capSpace)}`)}
+            <input
+              className="input"
+              placeholder="Search name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ marginLeft: 'auto', width: 160, padding: '4px 10px', fontSize: 12 }}
+            />
+          </div>
+
+          {shown.length === 0 ? (
+            <span className="muted small">
+              No name on the block matches that. Loosen a filter — the market is what it is.
+            </span>
+          ) : (
+            <div className="stack" style={{ gap: 'var(--sp-4)' }}>
+              {bands.map(({ band, rows }) => (
+                <div key={band.key}>
+                  <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 'var(--sp-2)' }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{band.title}</span>
+                    <span className="muted small">{rows.length} · {band.blurb}</span>
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                      gap: 'var(--sp-2)',
+                    }}
+                  >
+                    {rows.map((r) => (
+                      <BlockCard
+                        key={r.playerId}
+                        r={r}
+                        nearDeadline={nearDeadline}
+                        capSpace={props.capSpace}
+                        canEnquire={!!props.onEnquire}
+                        onEnquire={(x) => props.onEnquire?.(x)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </Panel>
   )
@@ -1584,13 +1790,31 @@ export function TradesScreen(): JSX.Element {
    *  switch to the build tab, and clear the original offer off the desk. */
   function counterOffer(offer: TradeOfferView): void {
     setSeed({
+      reason: 'counter',
       partnerId: offer.receive.teamId,
       myPlayerIds: offer.give.players.map((p) => p.playerId),
+      myPickIds: offer.give.picks.map((pk) => pk.id),
       theirPlayerIds: offer.receive.players.map((p) => p.playerId),
+      theirPickIds: offer.receive.picks.map((pk) => pk.id),
       nonce: Date.now(),
     })
     setTab('build')
     void client.rejectTrade(offer.offerId).then(refetch)
+  }
+
+  /** §D3: pick a name off the block and the builder opens on his club with him
+   *  already asked for — the block is a shopping list, so it has to buy. */
+  function enquireOn(r: TradeRumorView): void {
+    setSeed({
+      reason: 'enquiry',
+      partnerId: r.teamId,
+      myPlayerIds: [],
+      myPickIds: [],
+      theirPlayerIds: [r.playerId],
+      theirPickIds: [],
+      nonce: Date.now(),
+    })
+    setTab('build')
   }
 
   /** A6 escape (bar B2.2): the AGM works the phones and passes on the lot, so a
@@ -1693,6 +1917,8 @@ export function TradesScreen(): JSX.Element {
                   deadlinePassed={tentpoles.deadlinePassed}
                   currentDay={currentDay}
                   lastDeadlineRecap={tentpoles.lastDeadlineRecap}
+                  capSpace={data.myCapSpace}
+                  onEnquire={data.tradingOpen ? enquireOn : undefined}
                 />
               : <Notice kind="info">The trade block is quiet — no names on the move yet.</Notice>
           )}

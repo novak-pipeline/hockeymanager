@@ -412,13 +412,16 @@ a:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* sortable column headers — clear clickable affordance */
-.table th.sortable {
+/* Sortable column headers — clear clickable affordance. Deliberately NOT
+   scoped to `.table`: components/sortable.tsx is shared by every table in the
+   app, including the `.data-table` grids on World and elsewhere, and a header
+   that sorts but doesn't look clickable is the defect §D5 is about. */
+th.sortable {
   cursor: pointer;
   user-select: none;
   transition: color 0.12s ease, background 0.12s ease;
 }
-.table th.sortable:hover {
+th.sortable:hover {
   color: var(--text);
   background: var(--bg2);
 }

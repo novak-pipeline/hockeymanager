@@ -3245,6 +3245,7 @@ export interface TradeRumorView {
   playerName: string
   teamId: string
   teamAbbr: string
+  teamName?: string
   /** 0–100 rumor heat. */
   heat: number
   sinceDay: number
@@ -3252,6 +3253,22 @@ export interface TradeRumorView {
   position?: string
   age?: number
   faceId?: string
+  /* ── §D3: what a GM actually browses the block on. All additive, so old
+     snapshots and any other view builder stay valid. ── */
+  /** Cap hit. The first question about any name on the block. */
+  salary?: number
+  /** Contract years left, this one included. */
+  yearsRemaining?: number
+  /** True when the deal expires this summer — a rental, not an acquisition. */
+  expiring?: boolean
+  /** Fog-aware ability, for the star read. */
+  overall?: number
+  scouted?: { knowledge: number; overallLo: number; overallHi: number; exact: boolean }
+  /** Asset value on the shared trade currency (an estimate under fog). */
+  tradeValue?: number
+  valueEstimated?: boolean
+  /** True when his position is one the user's own club is thin at. */
+  fitsNeed?: boolean
 }
 
 export interface CombineRowView {

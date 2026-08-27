@@ -30,6 +30,7 @@ import { StacksUpCard } from '../components/StacksUpCard'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 /* ═══════════════════════════════════════════════════════════════════
    Helpers
@@ -1261,6 +1262,17 @@ export function TeamDataHubBody({ teamId }: { teamId: string }): JSX.Element {
   )
 }
 
+type AnalystCandidate = DataAnalystView['candidates'][number]
+
+const ANALYST_COLS = sortColumns<AnalystCandidate>()([
+  { key: 'name', label: 'Analyst', value: (c) => c.name, style: { textAlign: 'left' } },
+  { key: 'specialty', label: 'Specialty', value: (c) => c.specialty, style: { textAlign: 'left' } },
+  { key: 'rating', label: 'Rating', value: (c) => c.rating },
+  { key: 'judgment', label: 'Judgment', value: (c) => c.judgment },
+  { key: 'salary', label: 'Salary', value: (c) => c.salary },
+  { key: 'act', label: '' },
+])
+
 /** The locked-state hiring market shown until a Data Analyst is on staff. */
 function HireAnalystPanel({
   candidates, onHire, hireBusy,
@@ -1269,6 +1281,7 @@ function HireAnalystPanel({
   onHire: (id: string) => void
   hireBusy: string | null
 }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(candidates, ANALYST_COLS, { key: null })
   const fmtSalary = (n: number): string => `$${(n / 1e6).toFixed(2)}M`
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
@@ -1287,16 +1300,11 @@ function HireAnalystPanel({
         <table className="data-table" style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th style={{ textAlign: 'left' }}>Analyst</th>
-              <th style={{ textAlign: 'left' }}>Specialty</th>
-              <th>Rating</th>
-              <th>Judgment</th>
-              <th>Salary</th>
-              <th></th>
+              <SortHeaders columns={ANALYST_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {candidates.map((c) => (
+            {sorted.map((c) => (
               <tr key={c.id}>
                 <td style={{ fontWeight: 600 }}>{c.name}</td>
                 <td className="muted">{c.specialty}</td>

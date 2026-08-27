@@ -3,7 +3,7 @@ import type { AhlSquadView, SquadView } from '../../worker/protocol'
 import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import type { SquadStatus } from '../../domain/player'
 import { PlayerLink } from '../components/NavContext'
-import { OverallStars } from '../components/Stars'
+import { OverallStars, StarsLegend } from '../components/Stars'
 import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
@@ -599,6 +599,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                     </tbody>
                   </table>
                 </div>
+                <StarsLegend style={{ marginTop: 8 }} />
               </Panel>
             </>
           )}
@@ -752,6 +753,7 @@ function AhlSquadPanel({
             </tbody>
           </table>
         </div>
+        <StarsLegend style={{ marginTop: 8 }} />
       </Panel>
     </div>
   )

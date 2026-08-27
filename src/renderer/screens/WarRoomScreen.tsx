@@ -15,6 +15,19 @@ import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+type WarRoomTarget = NonNullable<Extract<WorkerResponse, { type: 'warRoom' }>['warRoom']>['targets'][number]
+
+const WAR_ROOM_TARGET_COLS = sortColumns<WarRoomTarget>()([
+  { key: 'name', label: 'Player', value: (t) => t.name },
+  { key: 'age', label: 'Age', value: (t) => t.age, align: 'right', initialDir: 'asc' },
+  { key: 'club', label: 'Club', value: (t) => t.teamAbbr },
+  { key: 'gm', label: 'The man to call', value: (t) => t.gmName },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_TARGETS: WarRoomTarget[] = []
 
 type WarRoomView = Extract<WorkerResponse, { type: 'warRoom' }>['warRoom']
 
@@ -25,6 +38,7 @@ export function WarRoomScreen(): JSX.Element {
     () => client.getWarRoom(),
     (r) => (r.type === 'warRoom' ? r.warRoom : null)
   )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(room?.targets ?? NO_TARGETS, WAR_ROOM_TARGET_COLS, { key: null })
 
   if (loading) return <Notice kind="info">The staff are gathering…</Notice>
   if (!room) {
@@ -81,10 +95,10 @@ export function WarRoomScreen(): JSX.Element {
             <div className="table-wrap" style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8 }}>
               <table className="table">
                 <thead>
-                  <tr><th>Player</th><th className="num">Age</th><th>Club</th><th>The man to call</th></tr>
+                  <tr><SortHeaders columns={WAR_ROOM_TARGET_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr>
                 </thead>
                 <tbody>
-                  {room.targets.map((t) => (
+                  {sorted.map((t) => (
                     <tr key={t.playerId}>
                       <td><PlayerLink playerId={t.playerId} name={t.name} /> <span className="muted small">{t.position}</span></td>
                       <td className="num muted">{t.age}</td>

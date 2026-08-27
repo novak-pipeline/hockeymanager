@@ -9,6 +9,7 @@ import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/u
 import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 // ─── potential stars ───────────────────────────────────────────────────────────
 
@@ -132,13 +133,40 @@ function DraftBoard(props: {
 
 // ─── best available table ─────────────────────────────────────────────────────
 
+function bestAvailableCols(showDraftButton: boolean) {
+  return sortColumns<ProspectRowView>()([
+    { key: 'rank', label: 'Rank', value: (p) => p.rank, initialDir: 'asc', align: 'right', style: { width: 40 } },
+    { key: 'name', label: 'Name', value: (p) => p.name },
+    { key: 'position', label: 'Pos', value: (p) => p.position },
+    { key: 'shoots', label: 'S', value: (p) => p.shoots ?? null, title: 'Shoots/catches' },
+    { key: 'age', label: 'Age', value: (p) => p.age, initialDir: 'asc' },
+    { key: 'league', label: 'League', value: (p) => p.leagueAbbr ?? null },
+    { key: 'heightCm', label: 'Ht', value: (p) => p.heightCm ?? null, title: 'Height' },
+    { key: 'weightKg', label: 'Wt', value: (p) => p.weightKg ?? null, title: 'Weight (lb)' },
+    { key: 'seasonPts', label: 'Season', value: (p) => p.seasonPts ?? null, align: 'right', title: 'Season scoring (GP · G–A–PTS)' },
+    { key: 'overall', label: 'OVR', value: (p) => p.overall, align: 'right' },
+    { key: 'potentialStars', label: 'Potential', value: (p) => p.potentialStars },
+    {
+      key: 'scoutRank',
+      label: 'Scouts',
+      value: (p) => p.scoutRank ?? null,
+      initialDir: 'asc',
+      title: "Your scouts' own board rank vs the public consensus — ▲ they rate higher, ▼ lower",
+    },
+    { key: 'knowledge', label: 'Know.', value: (p) => p.knowledge, align: 'right', title: 'How well your scouts know this prospect (0–100%)' },
+    ...(showDraftButton ? [{ key: 'act', label: '' } as const] : []),
+  ])
+}
+
 function BestAvailable(props: {
   prospects: ProspectRowView[]
   userIsOnClock: boolean
   busy: boolean
   onDraft: (playerId: string) => void
 }): JSX.Element {
-  const available = props.prospects.filter((p) => !p.drafted)
+  const available = useMemo(() => props.prospects.filter((p) => !p.drafted), [props.prospects])
+  const cols = useMemo(() => bestAvailableCols(props.userIsOnClock), [props.userIsOnClock])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(available, cols, { key: null })
 
   if (available.length === 0) {
     return (
@@ -157,24 +185,11 @@ function BestAvailable(props: {
         <table className="table">
           <thead>
             <tr>
-              <th>Rank</th>
-              <th>Name</th>
-              <th>Pos</th>
-              <th title="Shoots/catches">S</th>
-              <th>Age</th>
-              <th>League</th>
-              <th title="Height">Ht</th>
-              <th title="Weight (lb)">Wt</th>
-              <th className="num" title="Season scoring (GP · G–A–PTS)">Season</th>
-              <th className="num">OVR</th>
-              <th>Potential</th>
-              <th title="Your scouts' own board rank vs the public consensus — ▲ they rate higher, ▼ lower">Scouts</th>
-              <th className="num" title="How well your scouts know this prospect (0–100%)">Know.</th>
-              {props.userIsOnClock && <th />}
+              <SortHeaders columns={cols} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {available.slice(0, 60).map((p) => (
+            {sorted.slice(0, 60).map((p) => (
               <tr key={p.playerId}>
                 <td className="num" style={{ color: 'var(--muted)', width: 40 }}>
                   {p.rank}
@@ -450,9 +465,25 @@ function InterviewChip(props: { result: CombineRowView['interview'] }): JSX.Elem
   return <span className={cls} style={{ fontSize: 10 }}>{label}</span>
 }
 
+const INTERVIEW_RANK: Record<CombineRowView['interview'], number> = {
+  concerning: 0, solid: 1, impressive: 2,
+}
+
+const COMBINE_COLS = sortColumns<CombineRowView>()([
+  { key: 'rank', label: '#', value: (r) => r.rank, initialDir: 'asc', style: { width: 40 } },
+  { key: 'name', label: 'Name', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position },
+  { key: 'sprint', label: 'Sprint', value: (r) => r.sprint },
+  { key: 'agility', label: 'Agility', value: (r) => r.agility },
+  { key: 'strength', label: 'Strength', value: (r) => r.strength },
+  { key: 'interview', label: 'Interview', value: (r) => INTERVIEW_RANK[r.interview] },
+  { key: 'flags', label: '', style: { width: 64 } },
+])
+
 function CombineTab(props: { combine: CombineRowView[] }): JSX.Element {
   const nav = useNav()
-  const rows = [...props.combine].sort((a, b) => a.rank - b.rank)
+  const byRank = useMemo(() => [...props.combine].sort((a, b) => a.rank - b.rank), [props.combine])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(byRank, COMBINE_COLS, { key: null })
 
   return (
     <Panel title="Pre-draft combine">
@@ -460,18 +491,11 @@ function CombineTab(props: { combine: CombineRowView[] }): JSX.Element {
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: 40 }}>#</th>
-              <th>Name</th>
-              <th>Pos</th>
-              <th>Sprint</th>
-              <th>Agility</th>
-              <th>Strength</th>
-              <th>Interview</th>
-              <th style={{ width: 64 }} />
+              <SortHeaders columns={COMBINE_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {sorted.map((row) => (
               <tr key={row.playerId}>
                 <td className="num muted small">{row.rank}</td>
                 <td>

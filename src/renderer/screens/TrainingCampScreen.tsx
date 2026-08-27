@@ -18,6 +18,47 @@ import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+import type { CampGoalieLine, CampSkaterLine, TrainingCampView as CampView } from '../../engine/career/views'
+
+const CAMP_SKATER_COLS = sortColumns<CampSkaterLine>()([
+  { key: 'name', label: 'Player', value: (s) => s.name },
+  { key: 'position', label: 'Pos', value: (s) => s.position },
+  { key: 'team', label: 'Team', value: (s) => s.team },
+  { key: 'gp', label: 'GP', value: (s) => s.gp, align: 'right' },
+  { key: 'g', label: 'G', value: (s) => s.g, align: 'right' },
+  { key: 'a', label: 'A', value: (s) => s.a, align: 'right' },
+  { key: 'p', label: 'P', value: (s) => s.p, align: 'right' },
+  { key: 'plusMinus', label: '+/–', value: (s) => s.plusMinus, align: 'right' },
+  { key: 'pim', label: 'PIM', value: (s) => s.pim, align: 'right' },
+  { key: 'sog', label: 'SOG', value: (s) => s.sog, align: 'right' },
+  { key: 'rating', label: 'Av R', value: (s) => s.rating, align: 'right', title: "The coach's average rating out of 10" },
+])
+
+const CAMP_GOALIE_COLS = sortColumns<CampGoalieLine>()([
+  { key: 'name', label: 'Goalie', value: (g) => g.name },
+  { key: 'team', label: 'Team', value: (g) => g.team },
+  { key: 'mins', label: 'Mins', value: (g) => g.mins, align: 'right' },
+  { key: 'ga', label: 'GA', value: (g) => g.ga, align: 'right', initialDir: 'asc' },
+  { key: 'saves', label: 'SV', value: (g) => g.saves, align: 'right' },
+  { key: 'gaa', label: 'GAA', value: (g) => g.gaa, align: 'right', initialDir: 'asc' },
+  { key: 'svPct', label: 'SV%', value: (g) => g.svPct, align: 'right' },
+  { key: 'rating', label: 'Av R', value: (g) => g.rating, align: 'right' },
+])
+
+type CampDecision = CampView['decisions'][number]
+
+const CAMP_DECISION_COLS = sortColumns<CampDecision>()([
+  { key: 'face', label: '' },
+  { key: 'name', label: 'Player', value: (d) => d.name },
+  { key: 'age', label: 'Age', value: (d) => d.age, align: 'right', initialDir: 'asc' },
+  { key: 'plan', label: "The coach's verdict", value: (d) => (d.coachPlan === 'nhl' ? 1 : 0), title: 'Up first, then the men he is sending down' },
+  { key: 'call', label: 'Your call' },
+])
+
+/** Stable identities so the sort hooks are not handed new arrays each render. */
+const NO_SKATERS: CampSkaterLine[] = []
+const NO_GOALIES: CampGoalieLine[] = []
 
 type TrainingCampView = Extract<WorkerResponse, { type: 'trainingCamp' }>['camp']
 type Tab = 'overview' | 'schedule' | 'scrimmage' | 'reports' | 'cuts'
@@ -46,6 +87,8 @@ export function TrainingCampScreen(): JSX.Element {
     () => client.getTrainingCamp(),
     (r) => (r.type === 'trainingCamp' ? r.camp : null)
   )
+  const skaterSort = useTableSort(camp?.scrimmage?.skaters ?? NO_SKATERS, CAMP_SKATER_COLS, { key: null })
+  const goalieSort = useTableSort(camp?.scrimmage?.goalies ?? NO_GOALIES, CAMP_GOALIE_COLS, { key: null })
 
   useEffect(() => {
     if (!camp) return
@@ -254,13 +297,11 @@ export function TrainingCampScreen(): JSX.Element {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Player</th><th>Pos</th><th>Team</th>
-                      <th className="num">GP</th><th className="num">G</th><th className="num">A</th><th className="num">P</th>
-                      <th className="num">+/–</th><th className="num">PIM</th><th className="num">SOG</th><th className="num">Av R</th>
+                      <SortHeaders columns={CAMP_SKATER_COLS} sortKey={skaterSort.sortKey} dir={skaterSort.dir} onSort={skaterSort.sortBy} />
                     </tr>
                   </thead>
                   <tbody>
-                    {camp.scrimmage.skaters.map((s) => (
+                    {skaterSort.sorted.map((s) => (
                       <tr key={s.playerId}>
                         <td><span className="row" style={{ gap: 6, alignItems: 'center' }}><PlayerFace faceId={s.faceId} name={s.name} size={20} /><PlayerLink playerId={s.playerId} name={s.name} /></span></td>
                         <td className="muted small">{s.position}</td>
@@ -278,9 +319,9 @@ export function TrainingCampScreen(): JSX.Element {
               {camp.scrimmage.goalies.length > 0 && (
                 <div style={{ ...CARD }}>
                   <table className="table">
-                    <thead><tr><th>Goalie</th><th>Team</th><th className="num">Mins</th><th className="num">GA</th><th className="num">SV</th><th className="num">GAA</th><th className="num">SV%</th><th className="num">Av R</th></tr></thead>
+                    <thead><tr><SortHeaders columns={CAMP_GOALIE_COLS} sortKey={goalieSort.sortKey} dir={goalieSort.dir} onSort={goalieSort.sortBy} /></tr></thead>
                     <tbody>
-                      {camp.scrimmage.goalies.map((g) => (
+                      {goalieSort.sorted.map((g) => (
                         <tr key={g.playerId}>
                           <td><span className="row" style={{ gap: 6, alignItems: 'center' }}><PlayerFace faceId={g.faceId} name={g.name} size={20} /><PlayerLink playerId={g.playerId} name={g.name} /></span></td>
                           <td className="small" style={{ color: g.team === 'Blue' ? '#5b8dff' : '#e05555' }}>{g.team}</td>
@@ -355,6 +396,7 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
     const want = placements[d.playerId] ?? d.coachPlan
     return n + (want === 'nhl' && d.current === 'ahl' ? 1 : 0) - (want === 'ahl' && d.current === 'nhl' ? 1 : 0)
   }, 0)
+  const decisionSort = useTableSort(camp.decisions, CAMP_DECISION_COLS, { key: null })
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-3)' }}>
@@ -366,9 +408,9 @@ function CutDay({ camp, placements, setPlacements, busy, onBreak, onLater }: {
       </div>
       <div style={{ ...CARD }}>
         <table className="table">
-          <thead><tr><th></th><th>Player</th><th className="num">Age</th><th>The coach&apos;s verdict</th><th>Your call</th></tr></thead>
+          <thead><tr><SortHeaders columns={CAMP_DECISION_COLS} sortKey={decisionSort.sortKey} dir={decisionSort.dir} onSort={decisionSort.sortBy} /></tr></thead>
           <tbody>
-            {camp.decisions.map((d) => {
+            {decisionSort.sorted.map((d) => {
               const want = placements[d.playerId] ?? d.coachPlan
               return (
                 <tr key={d.playerId}>

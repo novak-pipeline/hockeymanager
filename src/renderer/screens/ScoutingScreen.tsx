@@ -6,7 +6,7 @@
  * reported by nation and by league (with a youth split), and a job market lets
  * the GM hire and release scouts.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ScoutingView, WorkerResponse } from '../../worker/protocol'
 import type {
   ScoutCardView, ScoutedPlayerRow, ScoutCoverageRow, ScoutFindView,
@@ -24,6 +24,7 @@ import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 import { bumpRefresh, useUiStore } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 /** Clickable scout name → his profile page. */
 function ScoutLink({ scoutId, name }: { scoutId: string; name: string }): JSX.Element {
@@ -292,7 +293,18 @@ function ScoutCard(props: {
 
 /* ── coverage table ────────────────────────────────────────────────────────── */
 
+function coverageCols(headLabel: string) {
+  return sortColumns<ScoutCoverageRow>()([
+    { key: 'label', label: headLabel, value: (r) => r.label },
+    { key: 'playerCount', label: 'Players', value: (r) => r.playerCount, align: 'right' },
+    { key: 'avgKnowledge', label: 'All', value: (r) => r.avgKnowledge, style: { width: 150 }, title: 'Average knowledge across every player here' },
+    { key: 'youthAvgKnowledge', label: 'Youth', value: (r) => r.youthAvgKnowledge, style: { width: 150 }, title: 'Average knowledge of the young players here — the blind spots that matter' },
+  ])
+}
+
 function CoverageTable({ title, rows }: { title: string; rows: ScoutCoverageRow[] }): JSX.Element {
+  const cols = useMemo(() => coverageCols(title.includes('Nation') ? 'Nation' : 'League'), [title])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(rows, cols, { key: null })
   return (
     <Panel title={title}>
       {rows.length === 0 ? (
@@ -302,14 +314,11 @@ function CoverageTable({ title, rows }: { title: string; rows: ScoutCoverageRow[
           <table className="table">
             <thead>
               <tr>
-                <th>{title.includes('Nation') ? 'Nation' : 'League'}</th>
-                <th className="num">Players</th>
-                <th style={{ width: 150 }}>All</th>
-                <th style={{ width: 150 }}>Youth</th>
+                <SortHeaders columns={cols} sortKey={sortKey} dir={dir} onSort={sortBy} />
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {sorted.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -345,7 +354,26 @@ function stars5(v: number): string {
   return '★'.repeat(full) + (v - full >= 0.5 ? '½' : '')
 }
 
-type ScoutSort = 'rec' | 'potential' | 'current' | 'age' | 'knowledge' | 'value'
+const REC_ORDER: Record<string, number> = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
+
+/** Every column a GM would compare targets on. The old sort was a six-option
+ *  `<select>`; the club, the draft label and the salary were unreachable. */
+function scoutedCols(showScoutPicker: boolean) {
+  return sortColumns<ScoutedPlayerRow>()([
+    { key: 'rec', label: 'Rec', value: (r) => r.targetScore, title: "Your scouts' recommendation, ordered by target value" },
+    { key: 'name', label: 'Player', value: (r) => r.name },
+    { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+    { key: 'age', label: 'Age', value: (r) => r.age, align: 'right', initialDir: 'asc' },
+    { key: 'club', label: 'Club', value: (r) => r.teamAbbr },
+    { key: 'draft', label: 'Draft', value: (r) => (r.draftEligible ? 1 : 0), title: 'Draft eligibility' },
+    { key: 'currentStars', label: 'Current', value: (r) => r.currentStars },
+    { key: 'potentialStars', label: 'Potential', value: (r) => r.potentialStars },
+    { key: 'knowledge', label: 'Know.', value: (r) => r.knowledge, align: 'right', title: 'How well your scouts know him' },
+    { key: 'tradeValue', label: 'Value', value: (r) => r.tradeValue, align: 'right', title: "Market value on the trade AI's asset-value currency (fog-aware)" },
+    { key: 'salary', label: 'Salary', value: (r) => r.salary, align: 'right' },
+    ...(showScoutPicker ? [{ key: 'assign', label: '' } as const] : []),
+  ])
+}
 
 function ScoutedTable({ rows, scouts, onScoutPlayer }: {
   rows: ScoutedPlayerRow[]
@@ -355,24 +383,24 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
   const [pos, setPos] = useState<string>('ALL')
   const [topOnly, setTopOnly] = useState(false)
   const [draftOnly, setDraftOnly] = useState(false)
-  const [sort, setSort] = useState<ScoutSort>('rec')
 
   const positions = ['ALL', 'C', 'LW', 'RW', 'D', 'G']
-  const recOrder: Record<string, number> = { 'A+': 0, A: 1, B: 2, C: 3, D: 4 }
-  let view = rows.filter((r) =>
-    (pos === 'ALL' || r.position === pos) &&
-    (!topOnly || r.rec === 'A+' || r.rec === 'A') &&
-    (!draftOnly || r.draftEligible))
-  view = [...view].sort((a, b) => {
-    switch (sort) {
-      case 'potential': return b.potentialStars - a.potentialStars
-      case 'current': return b.currentStars - a.currentStars
-      case 'age': return a.age - b.age
-      case 'knowledge': return b.knowledge - a.knowledge
-      case 'value': return b.tradeValue - a.tradeValue
-      default: return b.targetScore - a.targetScore || recOrder[a.rec]! - recOrder[b.rec]!
-    }
-  })
+  const filtered = useMemo(
+    () => rows.filter((r) =>
+      (pos === 'ALL' || r.position === pos) &&
+      (!topOnly || r.rec === 'A+' || r.rec === 'A') &&
+      (!draftOnly || r.draftEligible)),
+    [rows, pos, topOnly, draftOnly],
+  )
+  // Default order is the board's own target ranking (target score, rec as the
+  // tiebreak); any header click takes over from there.
+  const ranked = useMemo(
+    () => [...filtered].sort((a, b) => b.targetScore - a.targetScore || REC_ORDER[a.rec]! - REC_ORDER[b.rec]!),
+    [filtered],
+  )
+  const showPicker = !!(scouts && onScoutPlayer)
+  const cols = useMemo(() => scoutedCols(showPicker), [showPicker])
+  const { sorted: view, sortKey, dir, sortBy } = useTableSort(ranked, cols, { key: null })
 
   return (
     <Panel title={`Acquisition Targets (${view.length})`}>
@@ -387,16 +415,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
         <span style={{ width: 1, height: 16, background: 'var(--line)', margin: '0 4px' }} />
         <button className={`chip${topOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setTopOnly((t) => !t)}>Top targets only</button>
         <button className={`chip${draftOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setDraftOnly((d) => !d)}>Draft eligibles</button>
-        <label className="small muted" style={{ marginLeft: 'auto' }}>Sort:&nbsp;
-          <select className="select" value={sort} onChange={(e) => setSort(e.target.value as ScoutSort)} style={{ fontSize: 12 }}>
-            <option value="rec">Target value</option>
-            <option value="potential">Potential</option>
-            <option value="current">Current</option>
-            <option value="knowledge">Knowledge</option>
-            <option value="value">Market value</option>
-            <option value="age">Age</option>
-          </select>
-        </label>
+        <span className="small muted" style={{ marginLeft: 'auto' }}>Click any column to re-order</span>
       </div>
       {view.length === 0 ? (
         <p className="muted small">No scouted players yet — assign scouts to build intel.</p>
@@ -405,11 +424,7 @@ function ScoutedTable({ rows, scouts, onScoutPlayer }: {
           <table className="table">
             <thead>
               <tr>
-                <th>Rec</th><th>Player</th><th className="num">Pos</th><th className="num">Age</th><th>Club</th>
-                <th>Draft</th><th>Current</th><th>Potential</th><th className="num">Know.</th>
-                <th className="num" title="Market value on the trade AI's asset-value currency (fog-aware)">Value</th>
-                <th className="num">Salary</th>
-                {scouts && onScoutPlayer && <th></th>}
+                <SortHeaders columns={cols} sortKey={sortKey} dir={dir} onSort={sortBy} />
               </tr>
             </thead>
             <tbody>
@@ -477,7 +492,14 @@ function HeaderStrip({ data }: { data: ScoutingView }): JSX.Element {
 
 /* ── Overview: world map + assignment list ─────────────────────────────────── */
 
+const SCOUT_ASSIGNMENT_COLS = sortColumns<ScoutCardView>()([
+  { key: 'name', label: 'Staff Member', value: (s) => s.name },
+  { key: 'focus', label: 'Recruitment Focus', value: (s) => s.assignmentLabel },
+  { key: 'rating', label: 'Ability', value: (s) => s.rating, align: 'right' },
+])
+
 function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(scouts, SCOUT_ASSIGNMENT_COLS, { key: null })
   return (
     <Panel title={`Scout Assignments (${scouts.length})`}>
       <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
@@ -485,9 +507,9 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
       </p>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Staff Member</th><th>Recruitment Focus</th><th className="num">Ability</th></tr></thead>
+          <thead><tr><SortHeaders columns={SCOUT_ASSIGNMENT_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr></thead>
           <tbody>
-            {scouts.map((s) => (
+            {sorted.map((s) => (
               <tr key={s.scoutId}>
                 <td style={{ fontWeight: 600 }}><ScoutLink scoutId={s.scoutId} name={s.name} /><div className="muted small">Scout{s.specialtyNation ? ` · ${s.specialtyNation} specialist` : ''}</div></td>
                 <td>
@@ -507,7 +529,16 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
   )
 }
 
+type WatchListRow = ScoutingView['topGains'][number]
+
+const WATCH_LIST_COLS = sortColumns<WatchListRow>()([
+  { key: 'name', label: 'Player', value: (p) => p.name },
+  { key: 'position', label: 'Pos', value: (p) => p.position },
+  { key: 'knowledge', label: 'Knowledge', value: (p) => p.knowledge, align: 'right' },
+])
+
 function WatchListPanel({ data }: { data: ScoutingView }): JSX.Element {
+  const { sorted, sortKey, dir, sortBy } = useTableSort(data.topGains, WATCH_LIST_COLS, { key: null })
   return (
     <Panel title="Watch List">
       {data.topGains.length === 0 ? (
@@ -515,9 +546,9 @@ function WatchListPanel({ data }: { data: ScoutingView }): JSX.Element {
       ) : (
         <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
           <table className="table">
-            <thead><tr><th>Player</th><th>Pos</th><th className="num">Knowledge</th></tr></thead>
+            <thead><tr><SortHeaders columns={WATCH_LIST_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr></thead>
             <tbody>
-              {data.topGains.map((p) => (
+              {sorted.map((p) => (
                 <tr key={p.playerId}>
                   <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                   <td className="muted">{p.position}</td>

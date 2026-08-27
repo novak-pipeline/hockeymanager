@@ -6,7 +6,7 @@
  *
  * Artwork slot: assets/scenes/dev-camp-rink.png (CSS fallback otherwise).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { WorkerResponse, DevCampInvitesView } from '../../worker/protocol'
 import { Backdrop } from './BoardMeetingScreen'
 import { useShellActions } from '../components/ActionsContext'
@@ -16,6 +16,7 @@ import { Notice } from '../components/ui'
 import { toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import type { SimClient } from '../../worker/client'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 type DevCampView = Extract<WorkerResponse, { type: 'devCamp' }>['devCamp']
 
@@ -110,77 +111,7 @@ export function DevCampScreen(): JSX.Element {
 
         {/* the invitees — sorted by grade, densest tier first, so the pool
             reads as tiers rather than an undifferentiated scroll */}
-        {!(camp.day === 1 && editingInvites) && (() => {
-          const rank: Record<string, number> = { A: 0, B: 1, C: 2 }
-          const pts = (p: NonNullable<DevCampView>['invitees'][number]) => (p.line ? p.line.g * 2 + p.line.a : -1)
-          const sorted = [...camp.invitees].sort(
-            (a, b) => (rank[a.grade] ?? 3) - (rank[b.grade] ?? 3) || pts(b) - pts(a) || a.name.localeCompare(b.name)
-          )
-          const counts: Record<string, number> = { A: 0, B: 0, C: 0 }
-          for (const p of camp.invitees) counts[p.grade] = (counts[p.grade] ?? 0) + 1
-          const picks = camp.invitees.filter((p) => p.drafted).length
-          // Drop the repeated boilerplate tail — keep the first, telling clause.
-          const shortRead = (r: string): string => {
-            const s = (r.split(/\s[—–]\s|\. /)[0] ?? r).trim().replace(/\.$/, '')
-            return s.length > 48 ? s.slice(0, 46) + '…' : s
-          }
-          return (
-            <div style={{ maxWidth: 880, marginBottom: 'var(--sp-4)' }}>
-              {/* distribution — scan the shape of the class at a glance */}
-              <div className="row" style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap', fontSize: 11, alignItems: 'center' }}>
-                <span className="muted">{camp.invitees.length} skaters at camp:</span>
-                {(['A', 'B', 'C'] as const).map((g) => (
-                  <span key={g} className="chip" style={{ fontSize: 10, borderColor: GRADE_COLOR[g], color: GRADE_COLOR[g] }}>
-                    {counts[g] ?? 0} · {g === 'A' ? 'standing out' : g === 'B' ? 'on track' : 'behind'}
-                  </span>
-                ))}
-                {picks > 0 && <span className="chip chip-accent" style={{ fontSize: 10 }}>{picks} of your picks</span>}
-              </div>
-              <div
-                className="table-wrap"
-                style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8, maxHeight: '44vh', overflowY: 'auto' }}
-              >
-                <table className="table" style={{ fontSize: 12 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 24 }}></th><th>Player</th><th className="num">Age</th>
-                      {camp.day >= 2 && <th className="num">G-A</th>}
-                      <th className="num">Grade</th><th>Read</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sorted.map((p) => {
-                      const isStandout = camp.coachStandout?.playerId === p.playerId
-                      return (
-                        <tr key={p.playerId} style={isStandout ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
-                          <td><PlayerFace faceId={p.faceId} name={p.name} size={22} /></td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            <PlayerLink playerId={p.playerId} name={p.name} /> <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
-                            {p.drafted && <span className="chip chip-accent" style={{ fontSize: 8, marginLeft: 5 }}>PICK</span>}
-                            {isStandout && <span className="chip chip-success" style={{ fontSize: 8, marginLeft: 5 }}>★</span>}
-                          </td>
-                          <td className="num muted">{p.age}</td>
-                          {camp.day >= 2 && (
-                            <td
-                              className="num mono"
-                              title={p.line ? `${p.line.g}G ${p.line.a}A · ${p.line.sog} SOG (${p.line.squad})` : undefined}
-                            >
-                              {p.line ? `${p.line.g}-${p.line.a}` : p.position === 'G' ? 'G' : '—'}
-                            </td>
-                          )}
-                          <td className="num"><span style={{ fontWeight: 800, color: GRADE_COLOR[p.grade] }}>{p.grade}</span></td>
-                          <td className="muted" style={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.read}>
-                            {shortRead(p.read)}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )
-        })()}
+        {!(camp.day === 1 && editingInvites) && <InviteeBoard camp={camp} />}
 
         <div className="row" style={{ gap: 'var(--sp-3)' }}>
           {camp.day === 1 && (
@@ -281,6 +212,110 @@ function DevCampInviteEditor({ client, onClose }: { client: SimClient; onClose: 
             {avail.length === 0 && <span className="muted small">No more eligible young players to invite.</span>}
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The camp pool. Grade order by default — the class reads as tiers rather than
+ * an undifferentiated scroll — but every column a GM would compare kids on
+ * (age, scrimmage production, grade) sorts, per playtest §D5.
+ */
+type InviteeRow = NonNullable<DevCampView>['invitees'][number]
+
+const GRADE_RANK: Record<string, number> = { A: 3, B: 2, C: 1 }
+
+function inviteeCols(showLine: boolean) {
+  return sortColumns<InviteeRow>()([
+    { key: 'face', label: '', style: { width: 24 } },
+    { key: 'name', label: 'Player', value: (p) => p.name },
+    { key: 'age', label: 'Age', value: (p) => p.age, align: 'right', initialDir: 'asc' },
+    ...(showLine
+      ? [{
+          key: 'line',
+          label: 'G-A',
+          align: 'right',
+          value: (p: InviteeRow) => (p.line ? p.line.g * 2 + p.line.a : null),
+          title: 'Scrimmage production — goals weighted double',
+        } as const]
+      : []),
+    { key: 'grade', label: 'Grade', value: (p) => GRADE_RANK[p.grade] ?? 0, align: 'right' },
+    { key: 'read', label: 'Read' },
+  ])
+}
+
+/** Drop the repeated boilerplate tail — keep the first, telling clause. */
+function shortRead(r: string): string {
+  const s = (r.split(/\s[—–]\s|\. /)[0] ?? r).trim().replace(/\.$/, '')
+  return s.length > 48 ? s.slice(0, 46) + '…' : s
+}
+
+function InviteeBoard({ camp }: { camp: NonNullable<DevCampView> }): JSX.Element {
+  const cols = useMemo(() => inviteeCols(camp.day >= 2), [camp.day])
+  const byGrade = useMemo(() => {
+    const pts = (p: InviteeRow): number => (p.line ? p.line.g * 2 + p.line.a : -1)
+    return [...camp.invitees].sort(
+      (a, b) => (GRADE_RANK[b.grade] ?? 0) - (GRADE_RANK[a.grade] ?? 0) || pts(b) - pts(a) || a.name.localeCompare(b.name),
+    )
+  }, [camp.invitees])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(byGrade, cols, { key: null })
+
+  const counts: Record<string, number> = { A: 0, B: 0, C: 0 }
+  for (const p of camp.invitees) counts[p.grade] = (counts[p.grade] ?? 0) + 1
+  const picks = camp.invitees.filter((p) => p.drafted).length
+
+  return (
+    <div style={{ maxWidth: 880, marginBottom: 'var(--sp-4)' }}>
+      {/* distribution — scan the shape of the class at a glance */}
+      <div className="row" style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap', fontSize: 11, alignItems: 'center' }}>
+        <span className="muted">{camp.invitees.length} skaters at camp:</span>
+        {(['A', 'B', 'C'] as const).map((g) => (
+          <span key={g} className="chip" style={{ fontSize: 10, borderColor: GRADE_COLOR[g], color: GRADE_COLOR[g] }}>
+            {counts[g] ?? 0} · {g === 'A' ? 'standing out' : g === 'B' ? 'on track' : 'behind'}
+          </span>
+        ))}
+        {picks > 0 && <span className="chip chip-accent" style={{ fontSize: 10 }}>{picks} of your picks</span>}
+      </div>
+      <div
+        className="table-wrap"
+        style={{ background: 'rgba(8,10,15,0.85)', backdropFilter: 'blur(6px)', borderRadius: 8, maxHeight: '44vh', overflowY: 'auto' }}
+      >
+        <table className="table" style={{ fontSize: 12 }}>
+          <thead>
+            <tr>
+              <SortHeaders columns={cols} sortKey={sortKey} dir={dir} onSort={sortBy} />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((p) => {
+              const isStandout = camp.coachStandout?.playerId === p.playerId
+              return (
+                <tr key={p.playerId} style={isStandout ? { background: 'rgba(var(--accent-rgb),0.14)' } : undefined}>
+                  <td><PlayerFace faceId={p.faceId} name={p.name} size={22} /></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <PlayerLink playerId={p.playerId} name={p.name} /> <span className="muted" style={{ fontSize: 10 }}>{p.position}</span>
+                    {p.drafted && <span className="chip chip-accent" style={{ fontSize: 8, marginLeft: 5 }}>PICK</span>}
+                    {isStandout && <span className="chip chip-success" style={{ fontSize: 8, marginLeft: 5 }}>★</span>}
+                  </td>
+                  <td className="num muted">{p.age}</td>
+                  {camp.day >= 2 && (
+                    <td
+                      className="num mono"
+                      title={p.line ? `${p.line.g}G ${p.line.a}A · ${p.line.sog} SOG (${p.line.squad})` : undefined}
+                    >
+                      {p.line ? `${p.line.g}-${p.line.a}` : p.position === 'G' ? 'G' : '—'}
+                    </td>
+                  )}
+                  <td className="num"><span style={{ fontWeight: 800, color: GRADE_COLOR[p.grade] }}>{p.grade}</span></td>
+                  <td className="muted" style={{ maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={p.read}>
+                    {shortRead(p.read)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )

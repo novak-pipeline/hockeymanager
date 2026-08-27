@@ -7,7 +7,7 @@
  * Most tabs are thin wrappers that re-parent existing screens. The Report tab
  * and the Practice tab have new UI built here.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { overallToStars } from '../../engine/ratings/composites'
 import type {
   AgmReportView,
@@ -18,6 +18,7 @@ import type {
   StaffView,
 } from '../../worker/protocol'
 import type { PracticeFocus } from '../../worker/protocol'
+import type { AgmRankedPlayerView, SquadRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import type { ScreenId } from '../components/NavContext'
 import { OverallStars } from '../components/Stars'
@@ -41,6 +42,7 @@ import { PlayerFace } from '../components/PlayerFace'
 import { useShellActions } from '../components/ActionsContext'
 import { bumpRefresh, toast } from '../components/store'
 import { ThemeScope, useTeamColors } from '../components/ThemeScope'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 type TeamTab =
   | 'squad'
@@ -345,25 +347,46 @@ function ReportTab(): JSX.Element {
         </Panel>
 
         <Panel title="Top Prospects (by scout value)">
+          <TopProspectsTable rows={data.topProspects} />
+        </Panel>
+      </div>
+    </section>
+  )
+}
+
+/** Board place travels with the row so "#" survives a re-sort. */
+type RankedProspectRow = AgmRankedPlayerView & { rank: number }
+
+const TOP_PROSPECT_COLS = sortColumns<RankedProspectRow>()([
+  { key: 'rank', label: '#', value: (p) => p.rank, initialDir: 'asc', align: 'right', title: "Your scouts' ranking" },
+  { key: 'name', label: 'Player', value: (p) => p.name },
+  { key: 'position', label: 'Pos', value: (p) => p.position, align: 'right' },
+  { key: 'age', label: 'Age', value: (p) => p.age, align: 'right', initialDir: 'asc' },
+  { key: 'location', label: 'Based', value: (p) => p.location ?? null },
+  { key: 'judgedOverall', label: 'OVR', value: (p) => p.judgedOverall, align: 'right' },
+  { key: 'judgedPotential', label: 'POT', value: (p) => p.judgedPotential, align: 'right' },
+])
+
+function TopProspectsTable(props: { rows: AgmRankedPlayerView[] }): JSX.Element {
+  const ranked = useMemo<RankedProspectRow[]>(
+    () => props.rows.map((p, i) => ({ ...p, rank: i + 1 })),
+    [props.rows],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, TOP_PROSPECT_COLS, { key: null })
+  return (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="num">#</th>
-                  <th>Player</th>
-                  <th className="num">Pos</th>
-                  <th className="num">Age</th>
-                  <th>Based</th>
-                  <th className="num">OVR</th>
-                  <th className="num">POT</th>
+                  <SortHeaders columns={TOP_PROSPECT_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {data.topProspects.map((p, i) => {
+                {sorted.map((p) => {
                   const loc = locationStyle(p.location)
                   return (
                   <tr key={p.playerId}>
-                    <td className="num muted">{i + 1}</td>
+                    <td className="num muted">{p.rank}</td>
                     <td><PlayerLink playerId={p.playerId} name={p.name} /></td>
                     <td className="num muted">{p.position}</td>
                     <td className="num">{p.age}</td>
@@ -375,17 +398,14 @@ function ReportTab(): JSX.Element {
                   </tr>
                   )
                 })}
-                {data.topProspects.length === 0 && (
+                {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="muted">No prospects ranked.</td>
+                    <td colSpan={7} className="muted">No prospects ranked.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </Panel>
-      </div>
-    </section>
   )
 }
 
@@ -528,78 +548,79 @@ function staffAttrColor(v: number): string {
   return 'var(--danger)'
 }
 
-function StaffRow(props: { m: StaffView['scouts'][number] }): JSX.Element {
-  const { m } = props
-  const [open, setOpen] = useState(false)
+/* ── §D4: the staff room, not one giant list ───────────────────────────────
+ *
+ * Playtest 2026-08-26 §D4: *"the Staff tab is one giant list."* It was six
+ * stacked panels of identical grey rows: the head coach — the single most
+ * consequential hire a GM makes — rendered exactly like the fourth scout, and
+ * nothing could be compared across departments because nothing could be sorted.
+ *
+ * The rebuild separates the two questions a GM actually asks here. "Who runs my
+ * club?" is answered by three cards at the top (coach, AGM, owner) that read as
+ * people. "Who is any good?" is answered by one sortable, filterable table of
+ * everybody else, where ability and judgment are columns you can order by and
+ * a click still opens the full EHM attribute sheet.
+ */
+
+/** A staff member plus the department heading he files under. */
+type DeptStaffRow = StaffView['scouts'][number] & { dept: string }
+
+const STAFF_TABLE_COLS = sortColumns<DeptStaffRow>()([
+  { key: 'name', label: 'Name', value: (m) => m.name },
+  { key: 'dept', label: 'Department', value: (m) => m.dept },
+  { key: 'role', label: 'Role', value: (m) => m.roleLabel },
+  { key: 'specialty', label: 'Specialty', value: (m) => m.specialty ?? null },
+  { key: 'demeanor', label: 'Demeanour', value: (m) => m.demeanorLabel ?? null },
+  { key: 'rating', label: 'Ability', value: (m) => m.rating, align: 'right' },
+  { key: 'judgment', label: 'Judgment', value: (m) => m.judgment, align: 'right', title: 'How well he reads a player' },
+])
+
+const STAFF_FILTERS = ['All', 'Coaches', 'Scouts', 'Medical'] as const
+type StaffFilter = (typeof STAFF_FILTERS)[number]
+
+/** One of the three men whose individual quality shapes the whole club. */
+function KeyStaffCard({ m, role }: { m: StaffView['scouts'][number]; role: string }): JSX.Element {
   const attrs = m.attributes
-  const hasAttrs = attrs && Object.keys(attrs).length > 0
+  // The three attributes he's actually best at — what he's FOR, at a glance.
+  const best = Object.entries(attrs ?? {})
+    .filter((e): e is [string, number] => typeof e[1] === 'number')
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+  const labelOf = (key: string): string =>
+    STAFF_ATTR_GROUPS.flatMap((g) => g.attrs).find(([k]) => k === key)?.[1] ?? key
   return (
-    <div style={{ borderBottom: '1px solid var(--line)' }}>
-      <button
-        type="button"
-        onClick={() => hasAttrs && setOpen((o) => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', width: '100%',
-          padding: 'var(--sp-2) 0', background: 'none', border: 'none', color: 'var(--text)',
-          font: 'inherit', textAlign: 'left', cursor: hasAttrs ? 'pointer' : 'default',
-        }}
-      >
-        <PlayerFace faceId={m.faceId} name={m.name} size={44} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>
-            {m.name}
-            {hasAttrs && <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{open ? '▾' : '▸'}</span>}
-          </div>
-          <div className="muted small">{m.roleLabel}{m.specialty ? ` · ${m.specialty}` : ''}</div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-          <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-            <span className="small muted">Rating</span>
-            <span className="mono small">{m.rating}</span>
-            <span className="small muted">Judgment</span>
-            <span className="mono small">{m.judgment}</span>
-          </div>
+    <div
+      style={{
+        flex: '1 1 240px', minWidth: 0, display: 'flex', gap: 'var(--sp-3)',
+        padding: 'var(--sp-3)', background: 'var(--bg2)', border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      <PlayerFace faceId={m.faceId} name={m.name} size={52} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="muted" style={{ fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase' }}>{role}</div>
+        <div style={{ fontWeight: 700, fontSize: 15, marginTop: 1 }}>{m.name}</div>
+        <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
           {m.demeanorLabel && (
-            <span className="chip" style={{ fontSize: 10, color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)', background: 'var(--bg3)', padding: '1px 6px', borderRadius: 'var(--radius-sm)' }}>
+            <span className="chip" style={{ fontSize: 10, color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)' }}>
               {m.demeanorLabel}
             </span>
           )}
+          {m.specialty && <span className="chip" style={{ fontSize: 10 }}>{m.specialty}</span>}
         </div>
-      </button>
-      {open && hasAttrs && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)', padding: '0 0 var(--sp-3) 56px' }}>
-          {STAFF_ATTR_GROUPS.map((g) => {
-            const rows = g.attrs.filter(([k]) => attrs![k] !== undefined)
-            if (rows.length === 0) return null
-            return (
-              <div key={g.title}>
-                <div className="pp-attr-head">{g.title}</div>
-                {rows.map(([k, label]) => (
-                  <div key={k} className="pp-attr-row">
-                    <span className="pp-attr-name">{label}</span>
-                    <span className="pp-attr-val" style={{ color: staffAttrColor(attrs![k]!) }}>{attrs![k]}</span>
-                  </div>
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function StaffSection(props: {
-  title: string
-  members: StaffView['scouts'] // StaffRowView[]
-}): JSX.Element {
-  if (props.members.length === 0) return <></>
-  return (
-    <Panel title={props.title}>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {props.members.map((m) => <StaffRow key={m.id} m={m} />)}
+        {best.length > 0 && (
+          <div className="muted small" style={{ marginTop: 6, lineHeight: 1.5 }}>
+            Best at:{' '}
+            {best.map(([k, v], i) => (
+              <span key={k}>
+                {i > 0 && ' · '}
+                <span style={{ color: staffAttrColor(v) }}>{labelOf(k)}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
-    </Panel>
+    </div>
   )
 }
 
@@ -609,30 +630,170 @@ function PersonnelTab(props: { teamId: string }): JSX.Element {
     () => client.getTeamStaff(props.teamId),
     (r) => (r.type === 'teamStaff' ? r.staff : null)
   )
+  const [filter, setFilter] = useState<StaffFilter>('All')
+  const [search, setSearch] = useState('')
+  const [openId, setOpenId] = useState<string | null>(null)
+
+  // Everyone who isn't one of the three headline hires, tagged by department.
+  const staff = useMemo<DeptStaffRow[]>(() => {
+    if (!data) return EMPTY_STAFF
+    return [
+      ...data.assistantCoaches.map((m) => ({ ...m, dept: 'Coaches' })),
+      ...data.scouts.map((m) => ({ ...m, dept: 'Scouts' })),
+      ...data.physios.map((m) => ({ ...m, dept: 'Medical' })),
+    ]
+  }, [data])
+
+  const filtered = useMemo(
+    () => staff.filter((m) =>
+      (filter === 'All' || m.dept === filter) &&
+      (search === '' || m.name.toLowerCase().includes(search.toLowerCase()))),
+    [staff, filter, search],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(filtered, STAFF_TABLE_COLS, { key: 'rating' })
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading personnel…</Notice>
   if (!data) return <Notice kind="info">No personnel data.</Notice>
 
+  const countIn = (f: StaffFilter): number => (f === 'All' ? staff.length : staff.filter((m) => m.dept === f).length)
+
   return (
     <section className="stack">
       <ScreenHeader title="Personnel">
-        <span className="muted small">{data.teamName}</span>
+        <span className="muted small">{data.teamName} · {staff.length + 3} on the payroll</span>
       </ScreenHeader>
 
-      <StaffSection title="Head Coach" members={[data.headCoach]} />
-      <StaffSection title="Assistant Coaches" members={data.assistantCoaches} />
-      <StaffSection title="Assistant General Manager" members={[data.assistantGM]} />
-      <StaffSection title="Scouts" members={data.scouts} />
-      <StaffSection title="Physios" members={data.physios} />
-      <StaffSection title="Owner" members={[data.owner]} />
+      <Panel title="Who runs the club">
+        <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <KeyStaffCard m={data.headCoach} role="Head Coach" />
+          <KeyStaffCard m={data.assistantGM} role="Assistant General Manager" />
+          <KeyStaffCard m={data.owner} role="Owner" />
+        </div>
+      </Panel>
+
+      <Panel title="The rest of the staff">
+        <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+          {STAFF_FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`chip${filter === f ? ' chip-accent' : ''}`}
+              style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
+              onClick={() => setFilter(f)}
+            >
+              {f} ({countIn(f)})
+            </button>
+          ))}
+          <input
+            className="input"
+            placeholder="Search name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ marginLeft: 'auto', width: 170, padding: '4px 10px', fontSize: 12 }}
+          />
+        </div>
+        {sorted.length === 0 ? (
+          <span className="muted small">Nobody on the books matches that.</span>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <SortHeaders columns={STAFF_TABLE_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((m) => (
+                  <StaffTableRow
+                    key={m.id}
+                    m={m}
+                    open={openId === m.id}
+                    onToggle={() => setOpenId((id) => (id === m.id ? null : m.id))}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </section>
+  )
+}
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const EMPTY_STAFF: DeptStaffRow[] = []
+
+/** One staff row; clicking opens his full EHM attribute sheet underneath. */
+function StaffTableRow({ m, open, onToggle }: { m: DeptStaffRow; open: boolean; onToggle: () => void }): JSX.Element {
+  const attrs = m.attributes
+  const hasAttrs = !!attrs && Object.keys(attrs).length > 0
+  return (
+    <>
+      <tr
+        onClick={hasAttrs ? onToggle : undefined}
+        style={{ cursor: hasAttrs ? 'pointer' : undefined }}
+        title={hasAttrs ? 'Open his full attribute sheet' : undefined}
+      >
+        <td>
+          <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <PlayerFace faceId={m.faceId} name={m.name} size={26} />
+            <span style={{ fontWeight: 600 }}>{m.name}</span>
+            {hasAttrs && <span className="muted" style={{ fontSize: 10 }}>{open ? '▾' : '▸'}</span>}
+          </span>
+        </td>
+        <td className="muted small">{m.dept}</td>
+        <td className="small">{m.roleLabel}</td>
+        <td className="muted small">{m.specialty ?? '—'}</td>
+        <td>
+          {m.demeanorLabel
+            ? <span className="chip" style={{ fontSize: 10, color: DEMEANOR_COLOR[m.demeanorLabel] ?? 'var(--muted)' }}>{m.demeanorLabel}</span>
+            : <span className="muted small">—</span>}
+        </td>
+        <td className="num" style={{ fontWeight: 700 }}>{m.rating}</td>
+        <td className="num muted">{m.judgment}</td>
+      </tr>
+      {open && hasAttrs && (
+        <tr>
+          <td colSpan={7} style={{ background: 'var(--bg0)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)', padding: 'var(--sp-2) 0' }}>
+              {STAFF_ATTR_GROUPS.map((g) => {
+                const rows = g.attrs.filter(([k]) => attrs![k] !== undefined)
+                if (rows.length === 0) return null
+                return (
+                  <div key={g.title}>
+                    <div className="pp-attr-head">{g.title}</div>
+                    {rows.map(([k, label]) => (
+                      <div key={k} className="pp-attr-row">
+                        <span className="pp-attr-name">{label}</span>
+                        <span className="pp-attr-val" style={{ color: staffAttrColor(attrs![k]!) }}>{attrs![k]}</span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
 /* ══════════════════════════════════════════════════════════════
    PRACTICE TAB — focus picker + per-player overrides + scratches
    ══════════════════════════════════════════════════════════════ */
+
+const LINEUP_COLS = sortColumns<SquadRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'position', label: 'Pos', value: (r) => r.position, align: 'right' },
+  { key: 'overall', label: 'OVR', value: (r) => r.overall, align: 'right' },
+  { key: 'condition', label: 'Cond', value: (r) => r.condition, align: 'right', initialDir: 'asc', title: 'Freshness — the tired men first' },
+  { key: 'status', label: 'Status' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const EMPTY_SQUAD_ROWS: SquadRowView[] = []
 
 function PracticeTab(): JSX.Element {
   const client = useClient()
@@ -683,6 +844,7 @@ function PracticeTab(): JSX.Element {
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
   )
+  const lineupSort = useTableSort(squad?.rows ?? EMPTY_SQUAD_ROWS, LINEUP_COLS, { key: null })
 
   if (error) return <Notice kind="warn">{error}</Notice>
   if (loading && !data) return <Notice kind="info">Loading practice…</Notice>
@@ -755,15 +917,11 @@ function PracticeTab(): JSX.Element {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Player</th>
-                  <th className="num">Pos</th>
-                  <th className="num">OVR</th>
-                  <th className="num">Cond</th>
-                  <th>Status</th>
+                  <SortHeaders columns={LINEUP_COLS} sortKey={lineupSort.sortKey} dir={lineupSort.dir} onSort={lineupSort.sortBy} />
                 </tr>
               </thead>
               <tbody>
-                {squad.rows.map((row) => {
+                {lineupSort.sorted.map((row) => {
                   const scratched = scratchedSet.has(row.playerId)
                   return (
                     <tr key={row.playerId} style={{ opacity: scratched ? 0.6 : undefined }}>

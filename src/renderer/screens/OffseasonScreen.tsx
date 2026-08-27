@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Trophy } from 'lucide-react'
 import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
-import type { OfferSheetRowView, ResignRowView, CampInviteRow } from '../../engine/career/views'
+import type { OfferSheetRowView, ResignRowView, CampInviteRow, SquadRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
@@ -11,6 +11,7 @@ import { OverallStars } from '../components/Stars'
 import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 // ─── #182: training-camp PTO invite editor ────────────────────────────────────
 
@@ -79,11 +80,25 @@ function CampInvitesPanel(): JSX.Element | null {
 
 // ─── arbitration hearings (Season Rhythm M2) ──────────────────────────────────
 
+type ArbitrationCase = NonNullable<OffseasonView['arbitration']>[number]
+
+const ARBITRATION_COLS = sortColumns<ArbitrationCase>()([
+  { key: 'name', label: 'Player', value: (c) => c.name },
+  { key: 'age', label: 'Age', value: (c) => c.age, align: 'right', initialDir: 'asc' },
+  { key: 'salary', label: 'Award', value: (c) => c.salary, align: 'right' },
+  { key: 'years', label: 'Term', value: (c) => c.years, align: 'right' },
+  { key: 'act', label: '' },
+])
+
+/** Stable identity so the sort hook is not handed a new array each render. */
+const NO_ARBITRATION: ArbitrationCase[] = []
+
 /** The classic ultimatum: the arbitrator set the number — sign it or lose him. */
 function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch: () => void }): JSX.Element | null {
   const client = useClient()
   const [busy, setBusy] = useState(false)
-  const cases = view.arbitration ?? []
+  const cases = view.arbitration ?? NO_ARBITRATION
+  const { sorted, sortKey, dir, sortBy } = useTableSort(cases, ARBITRATION_COLS, { key: null })
   if (cases.length === 0) return null
 
   const act = async (kind: 'accept' | 'walk', playerId: string, name: string): Promise<void> => {
@@ -104,10 +119,10 @@ function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch:
       <div className="table-wrap">
         <table className="table">
           <thead>
-            <tr><th>Player</th><th className="num">Age</th><th className="num">Award</th><th className="num">Term</th><th></th></tr>
+            <tr><SortHeaders columns={ARBITRATION_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr>
           </thead>
           <tbody>
-            {cases.map((c) => (
+            {sorted.map((c) => (
               <tr key={c.playerId}>
                 <td><PlayerLink playerId={c.playerId} name={c.name} /> <span className="muted small">{c.position}</span></td>
                 <td className="num muted">{c.age}</td>
@@ -128,6 +143,21 @@ function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch:
 
 // ─── buyout window (Season Rhythm M2) ─────────────────────────────────────────
 
+const BUYOUT_COLS = sortColumns<SquadRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'age', label: 'Age', value: (r) => r.age, align: 'right', initialDir: 'asc' },
+  { key: 'salary', label: 'Salary', value: (r) => r.contract.salary, align: 'right' },
+  { key: 'years', label: 'Years', value: (r) => r.contract.yearsRemaining, align: 'right' },
+  {
+    key: 'deadCap',
+    label: 'Dead cap',
+    value: (r) => Math.round((r.contract.salary * r.contract.yearsRemaining) / 3),
+    align: 'right',
+    title: "What the buyout leaves on next season's books",
+  },
+  { key: 'act', label: '' },
+])
+
 /** Eat a bad contract: player walks, one-third of his remaining money sticks
  *  to next season's cap. Only multi-year deals qualify (expiring ones walk free). */
 function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | null {
@@ -137,11 +167,15 @@ function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | nu
     () => client.getSquad(),
     (r) => (r.type === 'squad' ? r.squad : null)
   )
+  const candidates = useMemo(
+    () => (squad?.rows ?? [])
+      .filter((r) => r.contract.yearsRemaining >= 1 && !r.contract.twoWay)
+      .sort((a, b) => b.contract.salary - a.contract.salary)
+      .slice(0, 12),
+    [squad],
+  )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(candidates, BUYOUT_COLS, { key: null })
   if (!squad) return null
-  const candidates = squad.rows
-    .filter((r) => r.contract.yearsRemaining >= 1 && !r.contract.twoWay)
-    .sort((a, b) => b.contract.salary - a.contract.salary)
-    .slice(0, 12)
   if (candidates.length === 0) return null
 
   const doBuyout = async (playerId: string, name: string, charge: number): Promise<void> => {
@@ -163,10 +197,10 @@ function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | nu
       <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
         <table className="table">
           <thead>
-            <tr><th>Player</th><th className="num">Age</th><th className="num">Salary</th><th className="num">Years</th><th className="num">Dead cap</th><th></th></tr>
+            <tr><SortHeaders columns={BUYOUT_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr>
           </thead>
           <tbody>
-            {candidates.map((r) => {
+            {sorted.map((r) => {
               const charge = Math.round((r.contract.salary * r.contract.yearsRemaining) / 3)
               return (
                 <tr key={r.playerId}>
@@ -658,6 +692,16 @@ function OfferSheetPanel(props: { sheets: OfferSheetRowView[]; onRefetch: () => 
   )
 }
 
+const RESIGN_COLS = sortColumns<ResignRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'posAge', label: 'Pos / Age', value: (r) => r.age, initialDir: 'asc' },
+  { key: 'overall', label: 'OVR', value: (r) => r.overall, align: 'right' },
+  { key: 'currentSalary', label: 'Current', value: (r) => r.currentSalary, align: 'right' },
+  { key: 'ask', label: 'Their ask', value: (r) => r.askSalary },
+  { key: 'morale', label: 'Mood', value: (r) => r.morale, title: 'How he feels about the club — the unhappy first when ascending' },
+  { key: 'act', label: '' },
+])
+
 function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX.Element {
   const { view } = props
   const day = view.resignDay ?? 0
@@ -665,6 +709,7 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
   const title = total > 0
     ? `Re-sign your players — window day ${day} of ${total}`
     : 'Re-sign players'
+  const resignSort = useTableSort(view.expiring, RESIGN_COLS, { key: null })
 
   if (view.expiring.length === 0) {
     return (
@@ -693,17 +738,11 @@ function ResignPanel(props: { view: OffseasonView; onRefetch: () => void }): JSX
         <table className="table">
           <thead>
             <tr>
-              <th>Player</th>
-              <th>Pos / Age</th>
-              <th className="num">OVR</th>
-              <th className="num">Current</th>
-              <th>Their ask</th>
-              <th>Mood</th>
-              <th />
+              <SortHeaders columns={RESIGN_COLS} sortKey={resignSort.sortKey} dir={resignSort.dir} onSort={resignSort.sortBy} />
             </tr>
           </thead>
           <tbody>
-            {view.expiring.map((row) => (
+            {resignSort.sorted.map((row) => (
               <ResignRow key={row.playerId} row={row} onRefetch={props.onRefetch} />
             ))}
           </tbody>

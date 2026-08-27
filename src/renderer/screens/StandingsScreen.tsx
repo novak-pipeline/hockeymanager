@@ -6,6 +6,37 @@ import { CrestView } from '../components/Crest'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from '../components/NavContext'
 import { useUserTeamId } from '../components/UserTeamContext'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+/** Wins in the last five, so "who's hot" is a column you can actually order by. */
+function lastFiveWins(value: string): number {
+  return value.split('').filter((c) => c === 'W').length
+}
+
+/** 'W3' → +3, 'L2' → −2, so the streak column orders hottest-to-coldest. */
+function streakValue(streak: string): number {
+  const n = Number.parseInt(streak.slice(1), 10)
+  if (!Number.isFinite(n)) return 0
+  return streak.startsWith('W') ? n : streak.startsWith('L') ? -n : 0
+}
+
+/** A standings row plus the place it holds, so "#" survives re-ordering. */
+type RankedStanding = StandingRowView & { rank: number }
+
+const STANDINGS_COLS = sortColumns<RankedStanding>()([
+  { key: 'rank', label: '#', value: (r) => r.rank, initialDir: 'asc', style: { width: 32 }, title: 'League position — click to return to standings order' },
+  { key: 'name', label: 'Team', value: (r) => r.name },
+  { key: 'gamesPlayed', label: 'GP', value: (r) => r.gamesPlayed, align: 'right' },
+  { key: 'wins', label: 'W', value: (r) => r.wins, align: 'right' },
+  { key: 'losses', label: 'L', value: (r) => r.losses, align: 'right' },
+  { key: 'overtimeLosses', label: 'OTL', value: (r) => r.overtimeLosses, align: 'right' },
+  { key: 'points', label: 'PTS', value: (r) => r.points, align: 'right' },
+  { key: 'goalsFor', label: 'GF', value: (r) => r.goalsFor, align: 'right' },
+  { key: 'goalsAgainst', label: 'GA', value: (r) => r.goalsAgainst, align: 'right' },
+  { key: 'diff', label: 'DIFF', value: (r) => r.goalsFor - r.goalsAgainst, align: 'right' },
+  { key: 'streak', label: 'Streak', value: (r) => streakValue(r.streak), title: 'Current run — sorts hottest first' },
+  { key: 'lastFive', label: 'L5', value: (r) => lastFiveWins(r.lastFive), title: 'Wins in the last five' },
+])
 
 type TabId = 'overall' | 'conference' | 'division' | 'ahl'
 
@@ -168,29 +199,26 @@ function StandingsTable(props: {
     return m
   }, [leagueTeams])
 
+  // Rank is a property of the STANDINGS, not of the row's position on screen —
+  // sort by goals-for and a club must still show the place it actually holds.
+  // The playoff cut-line is only meaningful in standings order, so it hides
+  // whenever the table is arranged by something else.
+  const ranked = useMemo<RankedStanding[]>(() => rows.map((r, i) => ({ ...r, rank: i + 1 })), [rows])
+  const { sorted, sortKey, dir, sortBy } = useTableSort(ranked, STANDINGS_COLS, { key: null })
+  const inStandingsOrder = sortKey === null || (sortKey === 'rank' && dir === 'asc')
+
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th style={{ width: 32 }}>#</th>
-            <th>Team</th>
-            <th className="num">GP</th>
-            <th className="num">W</th>
-            <th className="num">L</th>
-            <th className="num">OTL</th>
-            <th className="num">PTS</th>
-            <th className="num">GF</th>
-            <th className="num">GA</th>
-            <th className="num">DIFF</th>
-            <th>Streak</th>
-            <th>L5</th>
+            <SortHeaders columns={STANDINGS_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {sorted.map((row, i) => (
             <Fragment key={row.teamId}>
-              {playoffLine !== null && i === playoffLine && (
+              {playoffLine !== null && inStandingsOrder && i === playoffLine && (
                 <tr style={{ pointerEvents: 'none' }}>
                   <td
                     colSpan={12}
@@ -203,7 +231,7 @@ function StandingsTable(props: {
                 </tr>
               )}
               <tr className={row.teamId === userTeamId ? 'is-user' : undefined}>
-                <td className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
+                <td className="muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{row.rank}</td>
                 <td>
                   <span className="row" style={{ gap: 'var(--sp-2)' }}>
                     <CrestView

@@ -6,6 +6,20 @@ import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
+import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+
+const WAIVER_COLS = sortColumns<WaiverWireRowView>()([
+  { key: 'name', label: 'Player', value: (r) => r.name },
+  { key: 'overall', label: 'OVR', value: (r) => r.overall, align: 'right' },
+  { key: 'from', label: 'From', value: (r) => r.fromTeamName },
+  { key: 'salary', label: 'Salary', value: (r) => r.salary, align: 'right' },
+  { key: 'term', label: 'Term', value: (r) => r.yearsRemaining, align: 'right' },
+  { key: 'window', label: 'Window', value: (r) => r.claimDeadlineInDays, initialDir: 'asc', title: 'Days left to claim — closing first' },
+  { key: 'claim', label: '' },
+])
+
+/** Stable identity for the sort hook while the wire is still loading. */
+const NO_WAIVERS: WaiverWireRowView[] = []
 
 function deadlineLabel(days: number): string {
   if (days <= 0) return 'Clears on next sim'
@@ -60,6 +74,7 @@ export function WaiverWireScreen(): JSX.Element {
     () => client.getWaiverWire(),
     (r) => (r.type === 'waiverWire' ? r.waiverWire : null)
   )
+  const { sorted, sortKey, dir, sortBy } = useTableSort(data ?? NO_WAIVERS, WAIVER_COLS, { key: null })
 
   return (
     <section>
@@ -79,17 +94,11 @@ export function WaiverWireScreen(): JSX.Element {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Player</th>
-                    <th className="num">OVR</th>
-                    <th>From</th>
-                    <th className="num">Salary</th>
-                    <th className="num">Term</th>
-                    <th>Window</th>
-                    <th />
+                    <SortHeaders columns={WAIVER_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} />
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((row) => (
+                  {sorted.map((row) => (
                     <WaiverRow key={row.playerId} row={row} onRefetch={refetch} />
                   ))}
                 </tbody>
