@@ -314,7 +314,16 @@ function assessPlan(ctx: Ctx): Plan {
   const top6 = skaters.slice(0, 6)
   const coreQ = top6.length ? top6.reduce((s, p) => s + p.overall, 0) / top6.length : 72
   const coreAge = top6.length ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
-  const cRank = dash?.userTeam.conferenceRank ?? 8
+  // WHERE the club actually stands. The plan is struck at season START, when the
+  // table has been wiped and every club shows as first — so reading the live rank
+  // told a 14th-place team it was leading the conference, scored it +2, and
+  // planned CONTEND for five straight years at 70 points. Before a puck is
+  // dropped the only honest evidence is how LAST season finished.
+  const played = dash?.userTeam.standing?.gamesPlayed ?? 0
+  const lastFinish = ctx.trace.seasons[ctx.trace.seasons.length - 1]?.conferenceRank
+  const cRank = played >= 10
+    ? (dash?.userTeam.conferenceRank ?? 8)
+    : (lastFinish ?? dash?.userTeam.conferenceRank ?? 8)
   // How big is the conference? The rebuild penalty used to read `cRank >= 20`,
   // which is unreachable in a 16-team conference — so a club that finished DEAD
   // LAST in its conference still scored no penalty and planned to CONTEND for
