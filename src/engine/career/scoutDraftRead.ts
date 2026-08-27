@@ -17,6 +17,9 @@
  * Pure: deterministic from the player + knowledge + rank + interview count.
  */
 import type { Player } from '@domain'
+import type { ContentVariant } from '@engine/story/contentEngine'
+import { renderTemplate } from '@engine/story/contentEngine'
+import { pickStable } from '@engine/story/prose'
 
 export type ScoutVerdict = 'higher' | 'inline' | 'lower'
 
@@ -79,7 +82,104 @@ export function scoutSignalParts(player: Player, interviews = 0): {
   return { intangibleAdj, twoWayAdj, raw: intangibleAdj + twoWayAdj }
 }
 
+/* ───────────────────── the vocabulary of disagreement ─────────────────────
+ * A4 (playtest 2026-08-26): "the board" was doing every job in the scouting
+ * layer, and a prospect card could use the phrase three times in one
+ * paragraph. The consensus is one idea with many real names in hockey —
+ * Central Scouting, the published list, the services, the industry, the
+ * rankings — and the way to get range is not to swap a noun at random but to
+ * author whole sentences that each carry their own register. Selection is
+ * most-specific-wins with a per-prospect stable tie-break, so a given kid
+ * always reads the same way and two kids in the same list do not.
+ *
+ * Slots: {ourRank} {consensusRank} {spots} {plural} {reason} {ourRole}
+ *        {theirRole} {caveat}
+ */
+
+/** Our staff would take him EARLIER than he is ranked. */
+const BOARD_HIGHER_POOL: ContentVariant[] = [
+  { id: 'sbn.hi.roles', conditions: { rolesDiffer: true },
+    text: `Our department grades a {ourRole} where the published list sees a {theirRole} — {reason}. They would take him {spots} spot{plural} earlier than his ranking (we have him #{ourRank}, consensus #{consensusRank}).` },
+  { id: 'sbn.hi.big', conditions: { minSpots: 12 },
+    text: `This is the widest gap on our list: #{ourRank} for us against #{consensusRank} everywhere else, because {reason}. If he is still there in the middle rounds our staff will bang the table.` },
+  { id: 'sbn.hi.big2', conditions: { minSpots: 12 },
+    text: `A {spots}-spot chasm, and our department is on the right side of it — {reason}. #{ourRank} here, #{consensusRank} publicly, and they are not backing down from it.` },
+  { id: 'sbn.hi.big3', conditions: { minSpots: 12 },
+    text: `Nobody else is anywhere near our number on him. #{ourRank} against a consensus #{consensusRank}, because {reason}, and that is a bet our department has decided to make.` },
+  { id: 'sbn.hi.makeup', conditions: { reasonKind: 'makeup' },
+    text: `The interviews moved him. Our scouts came away convinced by the makeup and slid him up to #{ourRank}; Central Scouting still has him #{consensusRank}.` },
+  { id: 'sbn.hi.makeup2', conditions: { reasonKind: 'makeup' },
+    text: `You cannot grade character off video, which is roughly why he is #{ourRank} for a department that has met him and #{consensusRank} for everyone who has not.` },
+  { id: 'sbn.hi.twoway', conditions: { reasonKind: 'twoWay' },
+    text: `The scoresheet undersells him — {reason}. That is why our list has him #{ourRank} and the services have him #{consensusRank}.` },
+  { id: 'sbn.hi.twoway2', conditions: { reasonKind: 'twoWay' },
+    text: `Rankings built on points will always miss this profile: {reason}. #{ourRank} on a list that watches shifts, #{consensusRank} on one that reads box scores.` },
+  { id: 'sbn.hi.a',
+    text: `Our staff like him more than the industry does — {reason}. #{ourRank} for us, #{consensusRank} on the public rankings, and they would happily reach.` },
+  { id: 'sbn.hi.b',
+    text: `A {spots}-spot disagreement in his favour: {reason}. We have him #{ourRank}; the consensus does not get there until #{consensusRank}.` },
+  { id: 'sbn.hi.c',
+    text: `Our scouts have watched him more than most and come away higher — {reason}. #{ourRank} on our list against #{consensusRank} publicly.` },
+]
+
+/** Our staff would let him slide — the ceilings AGREE, so it is about the field. */
+const BOARD_LOWER_FIELD_POOL: ContentVariant[] = [
+  { id: 'sbn.lo.field.a',
+    text: `Nothing wrong with the player — our staff rate the ceiling as highly as anyone. They simply have {spots} other prospect{plural} they would call first (#{ourRank} for us, #{consensusRank} on the consensus).` },
+  { id: 'sbn.lo.field.b',
+    text: `This is a disagreement about the field, not about him. The ceiling read matches the industry's; the queue in front of him does not (#{ourRank} vs #{consensusRank}).` },
+  { id: 'sbn.lo.field.c',
+    text: `We like him. We like {spots} other name{plural} more. That is the whole story of the #{ourRank} beside a public #{consensusRank}.` },
+  { id: 'sbn.lo.field.d',
+    text: `Our grade on him is not the problem — our grade on the {spots} prospect{plural} ahead of him is why he sits #{ourRank} where the published list has #{consensusRank}.` },
+]
+
+/** Our staff are genuinely cooler on the player than the consensus is. */
+const BOARD_LOWER_POOL: ContentVariant[] = [
+  { id: 'sbn.lo.roles', conditions: { rolesDiffer: true },
+    text: `Our scouts project a {ourRole}; the industry is selling a {theirRole}. They would let him slide rather than pay the consensus price (#{ourRank} vs #{consensusRank}).` },
+  { id: 'sbn.lo.makeupBad', conditions: { reasonKind: 'makeupBad' },
+    text: `The viewings were fine; the interviews were not. {reason} — enough that our staff dropped him to #{ourRank} against a public #{consensusRank}.` },
+  { id: 'sbn.lo.makeupBad2', conditions: { reasonKind: 'makeupBad' },
+    text: `On tools alone he is a #{consensusRank}. Our scouts do not draft tools alone, and {reason}, so he sits #{ourRank}.` },
+  { id: 'sbn.lo.twoWayBad', conditions: { reasonKind: 'twoWayBad' },
+    text: `The flash is real and so is the hole in his game: {reason}. We have him #{ourRank}, the services #{consensusRank}, and our staff would not reach.` },
+  { id: 'sbn.lo.twoWayBad2', conditions: { reasonKind: 'twoWayBad' },
+    text: `Everything he does well happens with the puck. {reason} — which is the whole distance between our #{ourRank} and a published #{consensusRank}.` },
+  { id: 'sbn.lo.a',
+    text: `Our department is cooler on him than the consensus — {reason}. #{ourRank} on our list, #{consensusRank} on theirs.` },
+  { id: 'sbn.lo.b',
+    text: `A {spots}-spot fade: {reason}. He would have to fall to #{ourRank} before our staff spent a pick on him.` },
+  { id: 'sbn.lo.c',
+    text: `The industry is higher on him than we are. {reason}, and our scouts would rather let someone else take the swing (#{ourRank} vs #{consensusRank}).` },
+]
+
+/** Our board and the public one agree. */
+const BOARD_INLINE_POOL: ContentVariant[] = [
+  { id: 'sbn.in.a',
+    text: `Our board and the public one are within a rounding error of each other on him (#{ourRank} vs #{consensusRank}).` },
+  { id: 'sbn.in.b',
+    text: `Our scouts see what everyone else sees: #{ourRank} for us, #{consensusRank} publicly, and no appetite to argue about the difference.` },
+  { id: 'sbn.in.c',
+    text: `A consensus prospect in the literal sense — our read tracks the industry's almost exactly (#{ourRank} / #{consensusRank}).` },
+]
+
+/** We have not watched him enough to hold an opinion. */
+const BOARD_UNSEEN_POOL: ContentVariant[] = [
+  { id: 'sbn.un.a',
+    text: `Light viewings so far. He sits #{ourRank} on our list only because the consensus has him #{consensusRank} — that is a placeholder until a scout files on him.` },
+  { id: 'sbn.un.b',
+    text: `We are carrying the industry's number on him — #{consensusRank} — for want of one of our own, which is the only reason he sits #{ourRank} here. Assign a scout and it will move.` },
+  { id: 'sbn.un.c',
+    text: `Nobody in our department has seen enough of him to disagree with anyone. The #{ourRank} here is borrowed from a published #{consensusRank}, not earned.` },
+  { id: 'sbn.un.d',
+    text: `Unwatched. The #{ourRank} beside his name is the consensus (#{consensusRank}) talking, not our staff.` },
+]
+
 export interface ScoutBoardNoteArgs {
+  /** Stable per-prospect key — picks WHICH authored frame he gets, so the same
+   *  kid always reads the same way and two kids in a list do not. */
+  playerId?: string
   /** Where OUR board has him (1 = best). */
   ourRank: number
   /** Where the public consensus has him. */
@@ -94,6 +194,10 @@ export interface ScoutBoardNoteArgs {
   /** Signal components from {@link scoutSignalParts} — the reason clause. */
   intangibleAdj?: number
   twoWayAdj?: number
+  /** Role labels for the two ceiling reads ("top-six F", "middle-six F"), when
+   *  they differ — the most concrete way to state a disagreement. */
+  ourRole?: string
+  theirRole?: string
 }
 
 /**
@@ -112,38 +216,108 @@ export interface ScoutBoardNoteArgs {
 export function scoutBoardNote(a: ScoutBoardNoteArgs): string {
   const gap = a.consensusRank - a.ourRank // + = we're higher on him
   const spots = Math.abs(gap)
-  const where = `we have him #${a.ourRank}, the board #${a.consensusRank}`
-  if (!a.seen) {
-    return `Light viewings so far — ${where}, but that ranking is a placeholder until our scouts get eyes on him.`
+  const key = `${a.playerId ?? ''}|${a.verdict}|${a.ourRank}`
+  const slots: Record<string, string> = {
+    ourRank: String(a.ourRank),
+    consensusRank: String(a.consensusRank),
+    spots: String(spots),
+    plural: spots === 1 ? '' : 's',
+    reason: '',
+    ourRole: a.ourRole ?? '',
+    theirRole: a.theirRole ?? '',
   }
-  const reason = ((): string => {
-    const int = a.intangibleAdj ?? 0
-    const two = a.twoWayAdj ?? 0
-    if (Math.abs(int) >= Math.abs(two)) {
-      if (int >= 1.5) return 'he interviews well and the makeup checks out'
-      if (int <= -1.5) return 'there are maturity and attitude questions'
-    } else {
-      if (two >= 1) return 'the underlying two-way game is better than his point totals suggest'
-      if (two <= -1) return 'the game away from the puck lags behind the offensive flash'
-    }
-    return 'they read the whole package a little differently'
-  })()
-  // Does our own CEILING read agree with the board's? If we like the ceiling just
-  // as much and are still lower, the disagreement is about the field, not the
-  // player — which is exactly the case that read as a contradiction.
+  if (!a.seen) return renderPool(BOARD_UNSEEN_POOL, { verdict: a.verdict }, key, slots)
+
+  const int = a.intangibleAdj ?? 0
+  const two = a.twoWayAdj ?? 0
+  const reasonKind: string =
+    Math.abs(int) >= Math.abs(two)
+      ? int >= 1.5 ? 'makeup' : int <= -1.5 ? 'makeupBad' : 'none'
+      : two >= 1 ? 'twoWay' : two <= -1 ? 'twoWayBad' : 'none'
+  slots.reason = REASON_CLAUSE[reasonKind] ?? REASON_CLAUSE['none']!
+
+  // Does our own CEILING read agree with the consensus? If we like the ceiling
+  // just as much and are still lower, the disagreement is about the field, not
+  // the player — exactly the case that used to read as a contradiction.
   const ceilingGap = (a.ourCeiling !== undefined && a.analystCeiling !== undefined)
     ? a.ourCeiling - a.analystCeiling
     : 0
+  const rolesDiffer = !!(a.ourRole && a.theirRole && a.ourRole !== a.theirRole)
+  const ctx = { verdict: a.verdict, reasonKind, rolesDiffer, spots }
+
   if (a.verdict === 'lower') {
-    return ceilingGap >= -3
-      ? `Our staff rate the ceiling as highly as anyone — they just have ${spots} other prospect${spots === 1 ? '' : 's'} they would take first (${where}).`
-      : `Our staff are lower on him than the consensus — ${reason}. They would let him slide rather than reach (${where}).`
+    const pool = ceilingGap >= -3 ? BOARD_LOWER_FIELD_POOL : BOARD_LOWER_POOL
+    return renderPool(pool, ctx, key, slots)
   }
-  if (a.verdict === 'higher') {
-    return `Our staff are higher on him than the consensus — ${reason}. They would take him ${spots} spot${spots === 1 ? '' : 's'} earlier than the board says (${where}).`
-  }
-  return `Our staff's board lines up with the consensus (${where}).`
+  if (a.verdict === 'higher') return renderPool(BOARD_HIGHER_POOL, ctx, key, slots)
+  return renderPool(BOARD_INLINE_POOL, ctx, key, slots)
 }
+
+/** Why our read differs, as a clause that drops into the authored frames. */
+const REASON_CLAUSE: Record<string, string> = {
+  makeup: 'he interviews well and the makeup checks out',
+  makeupBad: 'there are maturity and attitude questions',
+  twoWay: 'the underlying two-way game is better than his point totals suggest',
+  twoWayBad: 'the game away from the puck lags behind the offensive flash',
+  none: 'they read the whole package a little differently',
+}
+
+/** Most-specific authored frame for this state, stable per prospect. */
+function renderPool(
+  pool: ContentVariant[],
+  ctx: Record<string, string | number | boolean>,
+  key: string,
+  slots: Record<string, string>
+): string {
+  const v = pickStable(pool, ctx, key) ?? pool[0]!
+  return renderTemplate(v.text, slots)
+}
+
+/* ── The scout-report blurb (the long-form cousin of scoutBoardNote) ──
+ * Same rule: authored frames, most specific wins, stable per prospect.
+ * Slots: {ourRole} {theirRole} {reason} {caveat}
+ */
+
+const READ_HIGHER_POOL: ContentVariant[] = [
+  { id: 'sdr.hi.roles', conditions: { ceilingDriven: true, rolesDiffer: true },
+    text: `Your scouts grade the ceiling above the industry read — a {ourRole} where the published rankings see a {theirRole}{caveat}. They would take him earlier than his number suggests.` },
+  { id: 'sdr.hi.makeup', conditions: { reasonKind: 'makeup' },
+    text: `The interviews did it. {reason}, and a department that has sat across a table from him is comfortably ahead of a consensus built on video.` },
+  { id: 'sdr.hi.twoway', conditions: { reasonKind: 'twoWay' },
+    text: `Production-weighted lists are missing this one: {reason}. Your staff would call his name before the rankings say they have to.` },
+  { id: 'sdr.hi.a',
+    text: `Your department is higher on him than the consensus — {reason}. They would rather reach than watch someone else take him.` },
+  { id: 'sdr.hi.b',
+    text: `A genuine departmental disagreement, in his favour: {reason}. Your scouts have him graded above where the industry will let him go.` },
+  { id: 'sdr.hi.c',
+    text: `Your staff have seen more of him than most rooms have, and they came away sold — {reason}.` },
+]
+
+const READ_LOWER_POOL: ContentVariant[] = [
+  { id: 'sdr.lo.roles', conditions: { ceilingDriven: true, rolesDiffer: true },
+    text: `Your staff project a {ourRole}, not the {theirRole} the industry is selling. They would let him slide rather than pay the consensus price.` },
+  { id: 'sdr.lo.makeupBad', conditions: { reasonKind: 'makeupBad' },
+    text: `The tools are not the question. {reason}, and a department that has met him is more cautious than a list that has only watched him.` },
+  { id: 'sdr.lo.twoWayBad', conditions: { reasonKind: 'twoWayBad' },
+    text: `The highlights flatter him: {reason}. Your scouts would let another club take that swing.` },
+  { id: 'sdr.lo.a',
+    text: `Your department is cooler on him than the published rankings — {reason}. No appetite to reach.` },
+  { id: 'sdr.lo.b',
+    text: `A quiet fade on your board: {reason}. He would have to fall a long way before your staff spent a pick.` },
+  { id: 'sdr.lo.c',
+    text: `Your scouts have questions the consensus does not: {reason}. They would rather be a year late on him than a round early.` },
+]
+
+const READ_INLINE_POOL: ContentVariant[] = [
+  { id: 'sdr.in.low', conditions: { confidence: 'low' },
+    text: `Your scouts land roughly where the industry does, though they want more viewings before they will stand behind it.` },
+  { id: 'sdr.in.a',
+    text: `Your department's read tracks the consensus. Nobody upstairs is arguing about this one.` },
+  { id: 'sdr.in.b',
+    text: `No edge here either way — your staff and the published rankings tell the same story about him.` },
+  { id: 'sdr.in.c',
+    text: `Your scouts see him the way the rest of the industry does. That is not always a bad thing.` },
+]
 
 /**
  * Build your scouts' draft read, or null if they haven't seen enough of him to
@@ -213,23 +387,25 @@ export function buildScoutDraftRead(a: ScoutDraftReadArgs): ScoutDraftRead | nul
     return ''
   }
 
-  let blurb: string
-  if (verdict === 'higher') {
-    if (ceilingDriven && rolesDiffer) {
-      const caveat = intangible < 0 ? counterNote() : ''
-      blurb = `Your scouts are higher on him than the consensus board — they grade his ceiling higher, a ${a.scoutsRole} where the board has him a ${a.analystRole}${caveat}. They'd take him earlier than his ranking suggests.`
-    } else {
-      blurb = `Your scouts are higher on him than the consensus board — ${reason()}. They'd take him earlier than his ranking suggests.`
-    }
-  } else if (verdict === 'lower') {
-    if (ceilingDriven && rolesDiffer) {
-      blurb = `Your staff is more cautious than the board — they project a ${a.scoutsRole}, not the ${a.analystRole} the board sees. They'd let him slide rather than reach.`
-    } else {
-      blurb = `Your staff is more cautious than the board — ${reason()}. They'd let him slide rather than reach.`
-    }
-  } else {
-    blurb = `Your scouts' read lines up with the consensus${confidence === 'low' ? ', though they want more viewings to be sure' : ''}.`
+  // A4: one authored frame per state, chosen most-specific-first and tie-broken
+  // by the prospect's own id — so the same kid always reads the same way, and a
+  // page of prospects does not repeat one sentence with the names swapped.
+  const ctx = {
+    verdict, confidence, ceilingDriven, rolesDiffer,
+    reasonKind:
+      Math.abs(intangibleAdj) >= Math.abs(twoWayAdj)
+        ? intangibleAdj >= 1.5 ? 'makeup' : intangibleAdj <= -1.5 ? 'makeupBad' : 'none'
+        : twoWayAdj >= 1 ? 'twoWay' : twoWayAdj <= -1 ? 'twoWayBad' : 'none',
   }
+  const slots = {
+    ourRole: a.scoutsRole ?? '',
+    theirRole: a.analystRole ?? '',
+    reason: reason(),
+    caveat: verdict === 'higher' && intangible < 0 ? counterNote() : '',
+  }
+  const pool = verdict === 'higher' ? READ_HIGHER_POOL : verdict === 'lower' ? READ_LOWER_POOL : READ_INLINE_POOL
+  const variant = pickStable(pool, ctx, `${player.id as string}|${verdict}`) ?? pool[0]!
+  const blurb = renderTemplate(variant.text, slots)
 
   return { verdict, delta: Math.round(delta * 10) / 10, confidence, blurb }
 }

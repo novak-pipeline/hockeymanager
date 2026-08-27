@@ -2361,6 +2361,13 @@ export interface PostgameReceiptView {
   /** User club's player grades (game ratings), best first. */
   grades: Array<{ playerId: string; name: string; rating: number }>
   turningPoint: TurningPointView | null
+  /**
+   * A5: the short write-up of the game — shape, the man who decided it, and
+   * (when the stream actually contained one) the low-percentage thing that
+   * happened. Rendered as a lede above the turning point, which keeps its own
+   * one-liner. Empty string when there is nothing to say.
+   */
+  matchReport: string
   /** Coach's postgame word, in his own demeanor. */
   quote: { speaker: string; text: string } | null
   /** B6.3: the persistent storyline written to the chronicle tonight, if any. */

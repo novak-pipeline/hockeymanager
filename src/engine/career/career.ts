@@ -22,7 +22,7 @@ import {
   asPlayerId,
   asTeamId,
   isEvent,
-  isBreakingNews,
+  feedStoryReachesInbox,
   type DigestProspectRef,
   type DraftPick,
   type GameResult,
@@ -215,6 +215,7 @@ import {
   type ImportedCareer,
 } from '@engine/story/careerLedger'
 import { detectGameStory, detectPlayerStory, type PlayerGameLine } from '@engine/story/gameStory'
+import { buildMatchReport, type MatchReportGoal } from '@engine/story/matchReport'
 import {
   buildMatchKeys,
   detectPersistentMoment,
@@ -301,7 +302,8 @@ import {
   type PendingLedgerReaction,
   type ResidueFlag,
 } from './livingLedger'
-import { markUsed, renderTemplate, type ContentCtx, type ContentUse } from '@engine/story/contentEngine'
+import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
+import { oneSentence, prosaicList, renderStable } from '@engine/story/prose'
 import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionEffects } from '@engine/story/decisionEvents'
 import { lineSynergy, pairSynergy, playerStyleFit, styleMatch } from '@engine/league/archetypes'
 import { evaluateCoachSuggestion, type SuggestionDirection } from '@engine/league/coachTactics'
@@ -423,6 +425,7 @@ import {
   type ScoutPosGroup,
   type ScoutingCompetition,
 } from '@engine/league/scouting'
+import type { ScoutAssignment } from '@domain/scouting'
 import { answerInterviewQuestion, INTERVIEW_QUESTIONS } from '@engine/career/interview'
 import { buildTeamDynamics } from '@engine/career/dynamics'
 import {
@@ -897,6 +900,41 @@ export function qualifiersInConference(
   }
   return [...seeded]
 }
+
+/**
+ * Where a scout is deployed, in English rather than in UI-chip form. The
+ * digest used to interpolate the Scouting screen's own label and print "The
+ * department is out on Scouting draft class."
+ */
+function scoutBeatNoun(target: ScoutAssignment['target']): string {
+  switch (target.kind) {
+    case 'draftClass': return 'the draft class'
+    case 'freeAgents': return 'the free-agent market'
+    case 'ownProspects': return 'our own prospects'
+    case 'nextOpponent': return 'our next opponent'
+    case 'nation': return target.nation ?? 'overseas'
+    case 'team': return 'a rival roster'
+    case 'division': return 'the division'
+    case 'competition':
+      return target.competitionId === 'nhl' ? 'the NHL'
+        : target.competitionId === 'ahl' ? 'the AHL'
+        : 'a feeder league'
+    default: return ''
+  }
+}
+
+/** How the head of scouting says where his people are. Slots: {beats}. */
+const SCOUT_DEPLOYMENT_POOL: ContentVariant[] = [
+  { id: 'sd.one', conditions: { n: 1 }, text: `Everyone is on {beats} this week.` },
+  { id: 'sd.one.b', conditions: { n: 1 }, text: `The whole department is pointed at {beats}.` },
+  { id: 'sd.one.c', conditions: { n: 1 }, text: `We have not split the group — it is all {beats} at the moment.` },
+  { id: 'sd.three', conditions: { minN: 3 }, text: `The group is spread thin: {beats}.` },
+  { id: 'sd.three.b', conditions: { minN: 3 }, text: `We are covering a lot of ground right now — {beats}.` },
+  { id: 'sd.a', text: `The department is working {beats}.` },
+  { id: 'sd.b', text: `Our people are on {beats} this week.` },
+  { id: 'sd.c', text: `Coverage this week: {beats}.` },
+  { id: 'sd.d', text: `We have eyes on {beats}.` },
+]
 
 export class Career {
   readonly data: LeagueData
@@ -1846,6 +1884,21 @@ export class Career {
     }
   }
 
+  /**
+   * Has a single NHL game been played in the season currently on the books?
+   *
+   * The honesty gate for every RETROSPECTIVE sentence. A career begins at the
+   * summer takeover with a fresh 0-0-0 league, so anything that reads the
+   * standings and reports a *result* — a season review, a "you are running N
+   * places ahead of schedule", a "what has gone wrong" — is asserting a fact
+   * the save does not have until this returns true. Standings are reset by
+   * startNewSeason, so this is scoped to the live season by construction.
+   */
+  private seasonWasPlayed(): boolean {
+    for (const s of this.standings.values()) if (s.gamesPlayed > 0) return true
+    return false
+  }
+
   private pushNews(
     category: NewsCategory,
     headline: string,
@@ -1862,6 +1915,7 @@ export class Career {
       engagement?: { likes: number; reposts: number }
       rare?: boolean
       prospects?: DigestProspectRef[]
+      reach?: 'ambient' | 'ownClub'
     } = {}
   ): NewsItem {
     // Off the match-day clock (summer stages, camp week, the preseason board
@@ -1887,6 +1941,7 @@ export class Career {
       ...(refs.engagement !== undefined ? { engagement: refs.engagement } : {}),
       ...(refs.rare !== undefined ? { rare: refs.rare } : {}),
       ...(refs.prospects !== undefined ? { prospects: refs.prospects } : {}),
+      ...(refs.reach !== undefined ? { reach: refs.reach } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -2058,12 +2113,15 @@ export class Career {
       body: string
       playerId?: string
       teamId?: string
+      /** A8: how far the beat travels — see NewsItem.reach. */
+      reach?: 'ambient' | 'ownClub'
     }>
   ): void {
     for (const s of seeds) {
       this.pushNews(s.category, s.headline, s.body, {
         ...(s.teamId !== undefined ? { teamId: s.teamId } : {}),
         ...(s.playerId !== undefined ? { playerId: s.playerId } : {}),
+        ...(s.reach !== undefined ? { reach: s.reach } : {}),
       })
     }
   }
@@ -5127,22 +5185,42 @@ export class Career {
     let awayShots = 0
     const homeIds = new Set(home.roster.map((id) => id as string))
     const tpGoals: TurningPointGoal[] = []
+    // A5: the same walk feeds the write-up. It needs a touch more than the
+    // turning point does — strength, the scorer's position, who assisted —
+    // because that is what a rare beat is made of.
+    const reportGoals: MatchReportGoal[] = []
+    let penaltyMinutes = 0
     for (const ev of res.stream) {
       if (isEvent(ev, 'shot')) {
         if (homeIds.has(ev.shooter as string)) homeShots++
         else awayShots++
+      } else if (isEvent(ev, 'penalty')) {
+        penaltyMinutes += ev.minutes
       } else if (isEvent(ev, 'goal')) {
         const onHome = homeIds.has(ev.scorer as string)
         const idx = Math.min(ev.period, periods) - 1
         if (onHome) homeByPeriod[idx]!++
         else awayByPeriod[idx]!++
+        const inPeriod = ev.period <= 3 ? ev.t - (ev.period - 1) * PERIOD_SECONDS_NHL : ev.t
+        const scorer = this.resolve(ev.scorer)
         tpGoals.push({
           period: ev.period,
           // Stream `t` is ABSOLUTE game seconds; the turning-point prose wants
           // time WITHIN the period ("18:30 of period 3", not "58:30").
-          t: ev.period <= 3 ? ev.t - (ev.period - 1) * PERIOD_SECONDS_NHL : ev.t,
-          scorerName: this.resolve(ev.scorer).name,
+          t: inPeriod,
+          scorerName: scorer.name,
           byUser: userRoster.has(ev.scorer as unknown as string),
+        })
+        const assists = ev.assists.map((a) => this.data.players.get(a))
+        reportGoals.push({
+          period: ev.period,
+          t: inPeriod,
+          byUser: userRoster.has(ev.scorer as unknown as string),
+          scorerName: scorer.name,
+          scorerPosition: scorer.position,
+          strength: ev.strength,
+          assistPositions: assists.map((a) => a?.position ?? '?'),
+          assistNames: assists.map((a) => a?.name ?? ''),
         })
       }
     }
@@ -5182,6 +5260,33 @@ export class Career {
     }
     grades.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
 
+    const stars = threeStars(rated)
+    const oppAbbr = (userIsHome ? away : home).abbreviation
+    const userGoalie = rated.find((r) => r.isGoalie && userRoster.has(r.playerId))
+    const oppGoalieLine = rated.find((r) => r.isGoalie && !userRoster.has(r.playerId))
+    const firstStar = stars[0]
+    const matchReport = buildMatchReport({
+      gameId: args.gameId,
+      userAbbr: (userIsHome ? home : away).abbreviation,
+      oppAbbr,
+      won: us > them,
+      playoff: args.playoff,
+      decidedBy: res.decidedBy,
+      goals: reportGoals,
+      userGoals: us,
+      oppGoals: them,
+      userShots: userIsHome ? homeShots : awayShots,
+      oppShots: userIsHome ? awayShots : homeShots,
+      ...(userGoalie
+        ? { goalie: { name: userGoalie.name, saves: userGoalie.saves, shotsAgainst: userGoalie.shotsAgainst, goalsAgainst: userGoalie.shotsAgainst - userGoalie.saves } }
+        : {}),
+      ...(oppGoalieLine
+        ? { oppGoalie: { name: oppGoalieLine.name, saves: oppGoalieLine.saves, shotsAgainst: oppGoalieLine.shotsAgainst } }
+        : {}),
+      ...(firstStar ? { firstStarName: firstStar.name, firstStarLine: firstStar.statLine } : {}),
+      penaltyMinutes,
+    })
+
     return {
       day,
       date: dayToDateISO(this.year, day),
@@ -5198,9 +5303,10 @@ export class Career {
       awayByPeriod,
       homeShots,
       awayShots,
-      stars: threeStars(rated),
+      stars,
       grades,
       turningPoint: findTurningPoint(tpGoals, us > them, res.decidedBy),
+      matchReport,
       quote: args.quote,
       storyline: args.storyline,
     }
@@ -7719,8 +7825,11 @@ export class Career {
         // apply it automatically; the user's club gets a SUGGESTION (he keeps
         // manual control of his own call-ups/send-downs).
         this.reassignFarmSystems()
-        // Fire season review report before rolling over (once per season).
-        for (const kind of checkPreseasonStage(this.pressScheduleState)) {
+        // Fire season review report before rolling over (once per season) —
+        // but ONLY if there was a season. A career that begins at the summer
+        // takeover reaches this stage with an untouched league, and a review
+        // of a season nobody played is a page of false sentences (A2).
+        for (const kind of checkPreseasonStage(this.pressScheduleState, this.seasonWasPlayed())) {
           this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
         }
         this.startNewSeason()
@@ -9711,10 +9820,14 @@ export class Career {
         // The failure branch carries `reason`, not `message` — reading the wrong
         // field meant every camp assignment that bounced told the GM only
         // "roster rules" instead of which rule stopped it.
-        notes.push(res.ok ? `${d.name} makes the team out of camp.` : `${d.name} could not be recalled: ${res.reason || 'roster rules'}.`)
+        // Roster-rule reasons are authored as whole sentences, so appending our
+        // own full stop printed "…after this call-up..". One terminator only.
+        notes.push(res.ok
+          ? `${d.name} makes the team out of camp.`
+          : `${d.name} stays with the farm club — ${oneSentence(res.reason || 'roster rules')}`)
       } else {
         const res = this.sendDown(d.playerId)
-        if (!res.ok) notes.push(`${d.name} could not be sent down: ${res.reason || 'roster rules'}.`)
+        if (!res.ok) notes.push(`${d.name} could not be sent down — ${oneSentence(res.reason || 'roster rules')}`)
         else if (res.note) notes.push(res.note)
         else notes.push(`${d.name} is assigned to the farm.`)
       }
@@ -17166,9 +17279,15 @@ export class Career {
     const flagged = top.length
       ? `New this week: ${top.map((r) => `${nameOf(r.playerId)} (${r.grade})`).join(', ')}.`
       : `No new names crossed the threshold this week.`
-    // Where the department is deployed — the distinct assignment labels.
-    const labels = [...new Set(scouts.map((s) => s.assignmentLabel).filter(Boolean))].slice(0, 3)
-    const working = labels.length ? ` The department is out on ${labels.join(', ')}.` : ''
+    // Where the department is deployed. This used to interpolate the UI's own
+    // assignment CHIP into a sentence and print "The department is out on
+    // Scouting draft class." — a label leaking into prose. Say it in English
+    // instead, from the assignment targets themselves, and vary the frame: a
+    // line the GM reads twenty-eight times a season cannot be one sentence.
+    const beats = [...new Set(scouts.map((sc) => scoutBeatNoun(sc.target)).filter(Boolean))].slice(0, 3)
+    const working = beats.length
+      ? ` ${renderStable(SCOUT_DEPLOYMENT_POOL, { n: beats.length }, `deploy|${this.year}|${day}`, { beats: prosaicList(beats) })}`
+      : ''
     // The untriaged queue: flagged prospects the GM hasn't tracked or passed on.
     // (Passed prospects leave `recommendations` at dismissal; the filter is a
     // save-compat belt-and-braces.)
@@ -18230,9 +18349,12 @@ export class Career {
           // the war-room note use, so all three tell one story.
           const parts = scoutSignalParts(c.player, (this.interviews.get(id) ?? []).length)
           const note = scoutBoardNote({
+            playerId: id,
             ourRank: yourRank, consensusRank, verdict, seen,
             ourCeiling, analystCeiling: c.input.ceiling,
             intangibleAdj: parts.intangibleAdj, twoWayAdj: parts.twoWayAdj,
+            ourRole: ceilingRoleShort(ourCeiling, c.player.position),
+            theirRole: ceilingRoleShort(c.input.ceiling, c.player.position),
           })
           // The Potential column on OUR board shows OUR fog-aware read (c.row's is
           // the analyst's perceived ceiling) — so it agrees with the ▲/▼ verdict.
@@ -18521,10 +18643,21 @@ export class Career {
       // accounts the GM chose to follow (Phase B curation).
       if (
         n.channel === 'feed' &&
-        !isBreakingNews(n) &&
+        !feedStoryReachesInbox(n) &&
         !(n.authorId !== undefined && this.followedFeedAuthors.includes(n.authorId))
       ) return false
+      // A8 — the inbox reports what HAPPENED; the Feed speculates about what
+      // might. A beat tagged 'ambient' at the site it was written (a rumour
+      // spawning, a milestone being approached, chatter "intensifying") never
+      // earns desk space, even when it is about one of your own men: the
+      // milestone itself will arrive, and so will the trade.
+      if (n.reach === 'ambient') return false
+      // League colour — a heater, a slump — is mail only when it is your man.
+      if (n.reach === 'ownClub') return involvesUser(n)
       if (involvesUser(n)) return true
+      // The legacy headline sniff, kept ONLY for beats written before the reach
+      // tag existed (old saves). New beats declare their reach; this catches
+      // nothing that does.
       if ((n.category === 'league' || n.category === 'trade') && AMBIENT_NOISE.test(n.headline)) return false
       if ((n.category === 'contract' || n.category === 'league' || n.category === 'trade') && ROSTER_CHURN.test(n.headline)) return false
       return true

@@ -19,6 +19,7 @@ import {
   resolveArc,
   type ArcsState,
   type ArcInputs,
+  type NewsSeed,
 } from './arcs'
 import { Rng } from '@engine/shared/rng'
 
@@ -225,7 +226,11 @@ describe('hotStreak detector', () => {
     })
     const { newsSeeds } = tickArcs({ state, inputs, rng })
     expect(state.arcs.filter(a => a.kind === 'hotStreak')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.includes('5-game'))).toBe(true)
+    // The wording is drawn from an authored pool now (one sentence used to
+    // carry 700+ of the game's beats), so pin the FACTS: the man, the number.
+    const hot = newsSeeds.find(s => s.playerId === 'p1')!
+    expect(`${hot.headline} ${hot.body}`).toContain(`5`)
+    expect(`${hot.headline} ${hot.body}`).toContain('Player-p1')
   })
 
   it('does NOT create a streak arc for a depth player below 8 games', () => {
@@ -298,7 +303,10 @@ describe('hotStreak detector', () => {
 
     const arc = state.arcs.find(a => a.kind === 'hotStreak')!
     expect(arc.status).toBe('resolved')
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('snapped') || s.headline.toLowerCase().includes('snap'))).toBe(true)
+    // Authored pool: pin the FACT (a run of N ended), not one phrasing.
+    const snap = newsSeeds.find(s => s.playerId === 'p1')!
+    expect(`${snap.headline} ${snap.body}`.toLowerCase())
+      .toMatch(/snapped|is over|stops at|streak closes|goes quiet|ends at|it ends|then it stops|run dies|streak is done|blanked/)
   })
 
   it('does NOT fire news on quiet inputs (no qualifying players)', () => {
@@ -349,7 +357,10 @@ describe('coldSpell detector', () => {
       rng,
     })
     expect(state.arcs.filter(a => a.kind === 'coldSpell')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('slump') || s.headline.toLowerCase().includes('drought'))).toBe(true)
+    const cold = newsSeeds.find(s => s.playerId === 'p1')!
+    expect(`${cold.headline} ${cold.body}`).toContain(`6`)
+    expect(`${cold.headline} ${cold.body}`.toLowerCase())
+      .toMatch(/drought|without a point|blank|quiet night|gone cold|slump/)
   })
 
   it('does NOT create a drought arc for a depth forward (no prominence)', () => {
@@ -1076,5 +1087,78 @@ describe('games-played milestones (#48 story slice)', () => {
       rng,
     })
     expect(newsSeeds.some((s) => /career games/.test(s.headline))).toBe(false)
+  })
+})
+
+/**
+ * A4/repetition (playtest 2026-08-26). Measured over four simmed seasons, ONE
+ * sentence — "{name} has recorded a point in each of their last {n} games,
+ * emerging as one of the hottest players in the league" — was 713 of the
+ * ~10,000 sentences the game wrote, because a detector that fires ~180 times
+ * a season had exactly one thing to say. These pin the fix so it cannot rot:
+ * a slot must never survive into the output, and a bucket that fires often
+ * must be deep enough that two men's heaters do not read identically.
+ */
+describe('streak & slump prose — range, and no leaked slots', () => {
+  function streakSeeds(count: number, opts: { star?: boolean; scoreless?: boolean } = {}): NewsSeed[] {
+    const seeds: NewsSeed[] = []
+    for (let i = 0; i < count; i++) {
+      const state = createInitialArcsState()
+      const line = opts.scoreless
+        ? playerLine(`p${i}`, `t${i}`, { points: 0, isForward: true, scorelessStreak: 6 })
+        : playerLine(`p${i}`, `t${i}`, { points: 1, consecutivePointGames: 5 })
+      const res = tickArcs({
+        state,
+        inputs: quietInputs({
+          playerLines: [line],
+          ...(opts.scoreless ? { expectedPoints: () => 0.8 } : {}),
+          ...(opts.star === false ? { expectedPoints: () => 0.2 } : {}),
+        }),
+        rng: makeRng(),
+      })
+      seeds.push(...res.newsSeeds.filter((s) => s.playerId === `p${i}`))
+    }
+    return seeds
+  }
+
+  it('a heater reads at least four different ways across the league', () => {
+    const seeds = streakSeeds(24)
+    expect(seeds.length).toBeGreaterThan(10)
+    expect(new Set(seeds.map((s) => s.headline.replace(/Player-p\d+/g, 'N'))).size).toBeGreaterThanOrEqual(4)
+  })
+
+  it('a slump reads at least three different ways across the league', () => {
+    const seeds = streakSeeds(24, { scoreless: true })
+    expect(seeds.length).toBeGreaterThan(10)
+    expect(new Set(seeds.map((s) => s.headline.replace(/Player-p\d+/g, 'N'))).size).toBeGreaterThanOrEqual(3)
+  })
+
+  it('never leaks a template slot into a headline or body', () => {
+    for (const seeds of [streakSeeds(24), streakSeeds(24, { scoreless: true })]) {
+      for (const s of seeds) {
+        expect(`${s.headline} ${s.body}`, s.headline).not.toMatch(/\{[a-zA-Z]/)
+      }
+    }
+  })
+
+  it('league colour is tagged so it reaches the desk only when it is your man', () => {
+    for (const s of streakSeeds(8)) expect(s.reach).toBe('ownClub')
+    for (const s of streakSeeds(8, { scoreless: true })) expect(s.reach).toBe('ownClub')
+  })
+
+  it("a club whose name ends in s keeps its apostrophe honest", () => {
+    // "the Stingrays's best player" is the tell of a hard-coded 's.
+    const state = createInitialArcsState()
+    const res = tickArcs({
+      state,
+      inputs: {
+        ...quietInputs({ playerLines: [playerLine('p1', 't1', { points: 1, consecutivePointGames: 9 })] }),
+        teamName: () => 'Crystal Bay Stingrays',
+      },
+      rng: makeRng(),
+    })
+    for (const s of res.newsSeeds) {
+      expect(`${s.headline} ${s.body}`).not.toContain("Stingrays's")
+    }
   })
 })

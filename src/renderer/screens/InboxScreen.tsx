@@ -489,6 +489,13 @@ export function InboxScreen(): JSX.Element {
 
         {/* Right: reading pane (fills the full column height) */}
         {selected ? (
+          // A3: the reading pane is a FLEX COLUMN of fixed height, and the panes
+          // below set minHeight:100%. Without flexShrink:0 on them, flex shrank
+          // each pane back to exactly the container height while its content ran
+          // past the bottom — and their own overflow:hidden clipped it. A long
+          // message (the draft-class breakdown truncating mid-list) had no
+          // scrollbar because nothing overflowed THIS box either. flexShrink:0
+          // lets a pane keep its content height so this container scrolls.
           <div style={{ overflowY: 'auto', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
             <ReadingPane
               item={selected}
@@ -866,7 +873,7 @@ function ReadingPane(props: {
   return (
     <div
       className="panel"
-      style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}
+      style={{ padding: 0, overflow: 'hidden', minHeight: '100%', flexShrink: 0 }}
     >
       <PaneAccentBar
         gradient={breaking
@@ -968,7 +975,7 @@ function CoachQuotePane(props: {
   const meta = CATEGORY_META[item.category]
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%', flexShrink: 0 }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--violet), var(--amber))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>
@@ -1071,7 +1078,7 @@ function PressArticlePane(props: {
   const breaking = isBreakingNews(item)
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%', flexShrink: 0 }}>
       <PaneAccentBar
         gradient={breaking
           ? 'linear-gradient(90deg, var(--red), var(--amber))'
@@ -1239,7 +1246,7 @@ function ScoutDigestPane({ item, triage, onChanged }: {
   }
 
   return (
-    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%' }}>
+    <div className="panel" style={{ padding: 0, overflow: 'hidden', minHeight: '100%', flexShrink: 0 }}>
       <PaneAccentBar gradient="linear-gradient(90deg, var(--cyan), var(--violet))" />
 
       <div style={{ padding: 'var(--sp-4)' }}>

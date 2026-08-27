@@ -16,6 +16,9 @@ import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
 import { overall } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
 import { executeTrade, pickValue, playerValue } from './trades'
+import type { ContentVariant } from '@engine/story/contentEngine'
+import { renderTemplate } from '@engine/story/contentEngine'
+import { pickStable, possessive } from '@engine/story/prose'
 
 /* ────────────────────────────────────────────────────────────────── helpers */
 
@@ -97,6 +100,9 @@ export interface NewsSeed {
   body: string
   playerId?: string
   teamId?: string
+  /** A8: how far this beat travels. 'ambient' = speculation, never the inbox;
+   *  'ownClub' = league colour, mail only when it is one of your men. */
+  reach?: 'ambient' | 'ownClub'
 }
 
 /** Arc seed returned alongside news so the story layer can pick it up. */
@@ -175,6 +181,69 @@ export interface TickRumorsResult {
  *
  * Rumors expire when the deadline passes (day > deadlineDay).
  */
+/* ─────────────────────── the rumour mill's vocabulary ───────────────────
+ * A4/A8: "Expiring deal adds intrigue: {name} may not be back at {team}" was
+ * one of the two lines the playtest named as clutter, and its partner —
+ * "Trade talk heats up: {name} close to leaving {team}?" — printed 193 times
+ * over four simmed seasons. Both are now authored pools, selected
+ * most-specific-first and tie-broken by a stable per-player key, so a given
+ * man's rumour reads one way all deadline and two men's rumours never read
+ * the same. Both are also tagged `reach: 'ambient'` — the mill belongs on the
+ * Feed, and the trade itself is what reaches the desk.
+ *
+ * Slots: {name} {team} {abbr}
+ */
+const RUMOR_SPAWN_POOL: ContentVariant[] = [
+  { id: 'rum.unhappy.a', conditions: { why: 'unhappy' },
+    text: `{name} unhappy at {team}, asking for a trade`,
+    text2: `It has been coming for weeks. {name} has asked {team} to find him a new address, and clubs with cap room are already returning calls.` },
+  { id: 'rum.unhappy.b', conditions: { why: 'unhappy' },
+    text: `{name} wants out of {team}`,
+    text2: `A player who has stopped pretending. {name} has made his position clear to {team}, and a discontented man on an expensive contract is a difficult thing to move quietly.` },
+  { id: 'rum.unhappy.c', conditions: { why: 'unhappy' },
+    text: `Word from {team}: {name} has asked for a move`,
+    text2: `Nothing about this is subtle any more. {name} wants a trade, {team} would rather he did not say so out loud, and every rival GM now knows the answer to a question they had not asked.` },
+  { id: 'rum.expiring.a', conditions: { why: 'expiring' },
+    text: `{namePoss} deal runs out — and {team} have a decision`,
+    text2: `A year left, twenty-nine candles on the cake, and no extension talk anybody will confirm. Clubs shopping for a rental have {name} circled.` },
+  { id: 'rum.expiring.b', conditions: { why: 'expiring' },
+    text: `Is this the last season {name} spends at {team}?`,
+    text2: `The contract says one more year. The silence around it says something else. {team} have not moved to extend {name}, and the rest of the league has noticed.` },
+  { id: 'rum.expiring.c', conditions: { why: 'expiring' },
+    text: `{team} may be running out of time on {name}`,
+    text2: `An expiring deal turns a player into a question every March: extend, trade, or lose him for nothing. {team} have not answered it about {name}.` },
+  { id: 'rum.seller.a', conditions: { why: 'seller' },
+    text: `{team} open to offers for {name}`,
+    text2: `A club going nowhere with a player worth something. {team} would listen on {name}, and interest is described as early-stage.` },
+  { id: 'rum.seller.b', conditions: { why: 'seller' },
+    text: `{name} is the prize on a {team} roster going nowhere`,
+    text2: `Sellers sell. {team} are out of the race and {name} is the asset that would move the needle for somebody else — the calls have started.` },
+  { id: 'rum.seller.c', conditions: { why: 'seller' },
+    text: `Rivals circle {name} as {team} slip out of it`,
+    text2: `The standings have made the decision for them. {team} are listening on {name}, quietly, and quietly is how these things start.` },
+  { id: 'rum.any',
+    text: `{name} linked with a move away from {team}`,
+    text2: `Sources indicate {team} would take a call on {name}. Nothing is close, and nothing has been denied either.` },
+]
+
+const RUMOR_HOT_POOL: ContentVariant[] = [
+  { id: 'rum.hot.a',
+    text: `Trade talk heats up: {name} close to leaving {team}?`,
+    text2: `With the deadline approaching, chatter around {name} is intensifying. Multiple clubs are believed to be in contact with {team}.` },
+  { id: 'rum.hot.b',
+    text: `Three clubs said to be in on {name}`,
+    text2: `What was a whisper in January is a queue in February. {team} are fielding real offers for {name}, and a man who has been asked about this twice a week is starting to sound like a man who expects to move.` },
+  { id: 'rum.hot.c',
+    text: `{name} to a rival of {team}? The calls are getting serious`,
+    text2: `The temperature has changed. {team} have gone from listening on {name} to negotiating, and the difference is visible in how carefully everyone involved is now speaking.` },
+  { id: 'rum.hot.d',
+    text: `{team} said to be closing in on a deal for {name}`,
+    text2: `Nobody will put a name to it, which is usually the last stage. {name}'s situation at {team} has moved from speculation to logistics.` },
+  { id: 'rum.hot.e',
+    text: `The {name} market is wide open`,
+    text2: `Half the contenders have called {team} about {name}, and the asking price has gone up twice this week. Something gives before the deadline.` },
+]
+
 export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
   const { state, teams, players, userTeamId, deadlineDay, day, year, rng } = args
   const newsSeeds: NewsSeed[] = []
@@ -230,12 +299,11 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
       state.rumors.push(rumor)
       rumorSet.add(pid as string)
 
-      const headline = isUnhappy
-        ? `${p.name} unhappy at ${team.name}, asking for a trade`
-        : isExpiring
-          ? `Expiring deal adds intrigue: ${p.name} may not be back at ${team.name}`
-          : `${team.name} open to offers for ${p.name}`
-      const body = `Sources indicate ${team.name} would listen to offers for ${p.name}${isSeller ? ', a team likely to sell before the deadline' : ''}. Interest is described as early-stage.`
+      const why = isUnhappy ? 'unhappy' : isExpiring ? 'expiring' : 'seller'
+      const rumorSlots = { name: p.name, team: team.name, abbr: team.abbreviation, namePoss: possessive(p.name), teamPoss: possessive(team.name) }
+      const spawnV = pickStable(RUMOR_SPAWN_POOL, { why }, `rum|${pid as string}|${year}`) ?? RUMOR_SPAWN_POOL[RUMOR_SPAWN_POOL.length - 1]!
+      const headline = renderTemplate(spawnV.text, rumorSlots)
+      const body = renderTemplate(spawnV.text2 ?? '', rumorSlots)
 
       // Only the notable rumors reach the inbox, and only a few per day.
       const newsworthy = isUnhappy || ovr >= 78
@@ -246,7 +314,10 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
           headline,
           body,
           playerId: pid as string,
-          teamId
+          teamId,
+          // A8: "interest is described as early-stage" is, by its own
+          // admission, not news. It belongs on the Feed; the trade is the mail.
+          reach: 'ambient',
         })
       }
 
@@ -275,12 +346,15 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
       state.emittedKeys.push(hotKey)
       const team = teams.get(rumor.teamId as TeamId)
       if (p && team) {
+        const hotSlots = { name: p.name, team: team.name, abbr: team.abbreviation, namePoss: possessive(p.name), teamPoss: possessive(team.name) }
+        const hotV = pickStable(RUMOR_HOT_POOL, {}, `hot|${rumor.playerId}|${year}`) ?? RUMOR_HOT_POOL[0]!
         newsSeeds.push({
           category: 'trade',
-          headline: `Trade talk heats up: ${p.name} close to leaving ${team.name}?`,
-          body: `With the deadline approaching, chatter around ${p.name} is intensifying. Multiple teams are believed to be in contact with ${team.name}.`,
+          headline: renderTemplate(hotV.text, hotSlots),
+          body: renderTemplate(hotV.text2 ?? '', hotSlots),
           playerId: rumor.playerId,
-          teamId: rumor.teamId
+          teamId: rumor.teamId,
+          reach: 'ambient',
         })
       }
     }

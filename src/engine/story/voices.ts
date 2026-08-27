@@ -127,22 +127,45 @@ export const VOICE_CTX_KEYS = [
   'pickHoarding', 'loyalty2', 'stance', 'streak',
 ] as const
 
+/* ─────────────────────────── the player pools ───────────────────────────
+ * A6 (playtest 2026-08-26): "a bit tooo corny", and emoji-heavy. The verdict
+ * taken, and the three things actually causing it:
+ *
+ *  1. STACKED EMOJI. 🎩🎩🎩, 🚨🚨🚨, 😭🙏, 😤➡️😌. Nobody posts like that but
+ *     a parody of a hockey player. Hard rule now: at most ONE emoji in a post,
+ *     enforced by test, so a future line cannot quietly regress it.
+ *  2. ONE EMOTIONAL PITCH. Half the library reached for the crescendo — Mom
+ *     and Dad, kid-me, pinch-me. Kept where a nineteen-year-old earns it,
+ *     re-pitched everywhere else.
+ *  3. AGE DID NOT CARRY. The user's note: "a 19-year-old prospect and a
+ *     35-year-old captain do not post alike." Only two pools keyed on age at
+ *     all. Every player pool now carries a veteran register (30+): full
+ *     sentences, no emoji, understatement — the way men who have done this for
+ *     a decade actually write. Also enforced by test.
+ *
+ * The jokes stay. The cocky sniper is still cocky and the fiery winger still
+ * subtweets. What changed is that the volume is no longer identical on every
+ * post from every man in the league.
+ */
+
 /** Career milestone crossed. Slots: {n} (formatted number), {stat} ("career goals"…). */
 const MILESTONE_POOL: ContentVariant[] = [
   { id: 'v.mile.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
     text: `{n} {stat}. and some of you said i was a reach on draft day 🤷‍♂️ keep counting.` },
   { id: 'v.mile.provet', conditions: { minProfessionalism: 70, minAge: 29 },
     text: `Humbled to reach {n} {stat} tonight. Every teammate, coach and trainer along the way owns a piece of that number. Back to work tomorrow.` },
+  { id: 'v.mile.vet', conditions: { minAge: 30 },
+    text: `{n} {stat}. You stop counting somewhere in your twenties, and then a number like that turns up and you realise how long you have been at this. Grateful to still be at it.` },
   { id: 'v.mile.rookie', conditions: { maxAge: 22 },
-    text: `{n} {stat}?? actually surreal. thank you {city} — this one's for the boys 🙏🙏` },
+    text: `{n} {stat}?? actually surreal. thank you {city} — this one's for the boys 🙏` },
   { id: 'v.mile.loyal', conditions: { minLoyalty: 70 },
-    text: `{n} {stat}, and every single one in this jersey means something. Proud to do it here. ❤️ #{abbr}` },
+    text: `{n} {stat}, and every single one of them in this jersey. Proud to have done it here ❤️` },
   { id: 'v.mile.fiery', conditions: { maxTemperament: 40 },
     text: `{n}. and i'm not done. not even close 😤` },
   { id: 'v.mile.grinder', conditions: { minDetermination: 75 },
     text: `{n} {stat}. Nobody handed me a single one of them. See you at the rink at 7.` },
   { id: 'v.mile.rare', conditions: { minN: 500 },
-    text: `{n}. Rare air, they tell me. Mostly I'm just thankful for everyone who's been part of the ride. 🙏` },
+    text: `{n}. Rare air, they tell me. Mostly I am thankful for everyone who has been part of the ride.` },
   { id: 'v.mile.plain',
     text: `{n} {stat} tonight. Grateful. On to the next one.` },
   { id: 'v.mile.plain2',
@@ -152,23 +175,25 @@ const MILESTONE_POOL: ContentVariant[] = [
 /** Three goals tonight. Slots: {goals}. */
 const HATTRICK_POOL: ContentVariant[] = [
   { id: 'v.hat.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
-    text: `hat trick tonight. shooters shoot 🎩🎩🎩` },
+    text: `hat trick tonight. shooters shoot 🎩` },
   { id: 'v.hat.cocky2', conditions: { minAmbition: 70, maxTemperament: 45 },
-    text: `three for me. their goalie's still looking for the first one 😅 jk. (not really)` },
+    text: `three for me. their goalie is still looking for the first one. jk. (not really)` },
   { id: 'v.hat.rookie', conditions: { maxAge: 22 },
-    text: `A HAT TRICK IN THE NHL?? somebody pinch me 😭🙏` },
+    text: `A HAT TRICK IN THE NHL?? somebody pinch me 😭` },
+  { id: 'v.hat.vet', conditions: { minAge: 30 },
+    text: `Three tonight. They do not come around often at my age, so I will enjoy this one for about an hour and then we fly.` },
   { id: 'v.hat.pro', conditions: { minProfessionalism: 70 },
     text: `Fun night. Pucks went in. The two points are what actually matters.` },
   { id: 'v.hat.loyal', conditions: { minLoyalty: 70 },
-    text: `a hatty in front of these fans?? {city} you're the best in the league ❤️ thanks for the hats. keeping one.` },
+    text: `a hatty in front of these fans. {city} you're the best in the league ❤️ thanks for the hats, keeping one.` },
   { id: 'v.hat.fiery', conditions: { maxTemperament: 40 },
     text: `hattys hit different when people spent all year doubting you 😤` },
   { id: 'v.hat.grinder', conditions: { minDetermination: 75 },
-    text: `Three goals but honestly the boys did the work tonight. My job's just to finish it.` },
+    text: `Three goals, but the boys did the work tonight. My job is just to finish it.` },
   { id: 'v.hat.plain',
     text: `Nights like this are why you play the game 🎩 thank you {city}` },
   { id: 'v.hat.plain2',
-    text: `THREE 🚨🚨🚨 keep the hats coming {city}` },
+    text: `Three of them. I genuinely do not know what to say. Thanks {city}.` },
 ]
 
 /** The first NHL goal ever. */
@@ -176,29 +201,33 @@ const FIRST_GOAL_POOL: ContentVariant[] = [
   { id: 'v.first.rookiecocky', conditions: { maxAge: 22, minAmbition: 70 },
     text: `FIRST NHL GOAL. been dreaming about that exact shot since i was 6. keeping this puck forever 🚀` },
   { id: 'v.first.rookie', conditions: { maxAge: 22 },
-    text: `First NHL goal!!! Can't even put the feeling into words. Mom, Dad — that one was for you ❤️` },
+    text: `First NHL goal!!! Can't put the feeling into words. Mom, Dad — that one was for you ❤️` },
   { id: 'v.first.late', conditions: { minAge: 25 },
     text: `Took me longer than most. Don't care. That puck goes on my shelf tonight — first NHL goal. Never stopped believing.` },
+  { id: 'v.first.vet', conditions: { minAge: 30 },
+    text: `First NHL goal, at thirty. I had more or less made my peace with the idea that it might never come. Turns out you should not make peace with anything.` },
   { id: 'v.first.grinder', conditions: { minDetermination: 75 },
     text: `First NHL goal tonight. To every coach who stayed on the ice with me after practice — that was yours too. Thank you.` },
   { id: 'v.first.fiery', conditions: { maxTemperament: 40 },
-    text: `FIRST OF MANY. remember the name 😤🚨` },
+    text: `FIRST OF MANY. remember the name 😤` },
   { id: 'v.first.loyal', conditions: { minLoyalty: 70 },
-    text: `First NHL goal and it came in a {team} sweater. Exactly how I dreamed it ❤️` },
+    text: `First NHL goal, and it came in a {team} sweater. Exactly how I dreamed it ❤️` },
   { id: 'v.first.humble', conditions: { minProfessionalism: 70 },
     text: `First NHL goal. A thousand people helped me get to that moment and I'm thinking about every one of them tonight.` },
   { id: 'v.first.plain',
-    text: `That first one 🥹 the puck's already wrapped in tape with the date on it` },
+    text: `That first one 🥹 the puck is already wrapped in tape with the date on it` },
   { id: 'v.first.plain2',
-    text: `First one in the league. They say the first is the hardest — here's to many more 🙏` },
+    text: `First one in the league. They say the first is the hardest — here's to many more.` },
 ]
 
 /** Recalled to the NHL. Slots: {ahl} (farm club abbr). */
 const CALLUP_POOL: ContentVariant[] = [
   { id: 'v.call.rookie', conditions: { maxAge: 22 },
-    text: `THE CALL. i'm coming to the show 😭🙏 thank you {ahl} for everything` },
+    text: `THE CALL. i'm coming to the show 😭 thank you {ahl} for everything` },
   { id: 'v.call.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
     text: `about time. see you in the bigs 😏` },
+  { id: 'v.call.vet', conditions: { minAge: 30 },
+    text: `Recalled. I have taken this bus ride in both directions more times than I can count, and it has never once got old going this way. Thank you {ahl}.` },
   { id: 'v.call.pro', conditions: { minProfessionalism: 70 },
     text: `Grateful for the opportunity. Thank you to everyone with {ahl} — now the real work starts.` },
   { id: 'v.call.grinder', conditions: { minDetermination: 75 },
@@ -210,14 +239,14 @@ const CALLUP_POOL: ContentVariant[] = [
   { id: 'v.call.plain',
     text: `NHL bound 🙌 huge thanks to the {ahl} boys — wouldn't be here without you` },
   { id: 'v.call.plain2',
-    text: `Phone rang. Bags packed. See you tonight {city} 👀` },
+    text: `Phone rang. Bags packed. See you tonight {city}.` },
 ]
 
 /** Traded. Slots: {fromCity} {fromAbbr} {toCity} {toAbbr}. Condition
  *  fromUser marks a man leaving the user's club (the goodbye that stings). */
 const TRADED_POOL: ContentVariant[] = [
   { id: 'v.trade.loyal.fromuser', conditions: { minLoyalty: 70, fromUser: true },
-    text: `Didn't think this day would ever come. {fromCity} — you were home. The fans, the staff, my teammates: thank you for everything. I'll never forget it. ❤️` },
+    text: `Didn't think this day would ever come. {fromCity} — you were home. The fans, the staff, my teammates: thank you for everything. I'll never forget it ❤️` },
   { id: 'v.trade.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
     text: `new chapter. {toCity}, you're getting the best version of me. some people are gonna remember what they gave up 🤷‍♂️` },
   { id: 'v.trade.pro', conditions: { minProfessionalism: 70 },
@@ -228,6 +257,8 @@ const TRADED_POOL: ContentVariant[] = [
     text: `Wild day. Grateful to {fromAbbr} for taking a chance on a kid with a dream. {toCity} — can't wait to get started 🙏` },
   { id: 'v.trade.vet', conditions: { minAge: 30 },
     text: `Been in this league long enough to know the business. Leaving {fromCity} still stings. Proud of what we built there. {toCity} — let's win.` },
+  { id: 'v.trade.vet2', conditions: { minAge: 33 },
+    text: `My fourth address in this league. You learn to pack quickly, and to say the important things before you go. {fromCity}, thank you. Genuinely.` },
   { id: 'v.trade.plain',
     text: `Trades are part of the game. Doesn't make them easy. Thank you {fromCity}. Hello {toCity} 🙌` },
   { id: 'v.trade.plain2',
@@ -244,12 +275,14 @@ const SIGNED_POOL: ContentVariant[] = [
     text: `Proud to sign with the {team}. Great group, great city. Let's get to work.` },
   { id: 'v.sign.rookie', conditions: { maxAge: 22 },
     text: `Signed my deal today. Kid me wouldn't believe it. Time to earn it 🙏` },
+  { id: 'v.sign.vet', conditions: { minAge: 30 },
+    text: `Signed for {years}. At this stage you sign where you are wanted and where you can still be useful. Both happen to be true here.` },
   { id: 'v.sign.fiery', conditions: { maxTemperament: 40 },
     text: `deal's done. everyone who said i wasn't worth it — keep watching 😤` },
   { id: 'v.sign.grinder', conditions: { minDetermination: 75 },
     text: `Signed. The contract doesn't score goals — the work does. See you at camp.` },
   { id: 'v.sign.plain',
-    text: `Official ✍️ Excited for what's next with the {team} 🙌` },
+    text: `Official ✍️ Excited for what comes next with the {team}` },
   { id: 'v.sign.plain2',
     text: `New deal, same hunger. Thank you {city} for wanting me here.` },
 ]
@@ -257,9 +290,11 @@ const SIGNED_POOL: ContentVariant[] = [
 /** The club clinched a playoff berth. */
 const CLINCH_POOL: ContentVariant[] = [
   { id: 'v.clinch.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
-    text: `PLAYOFFS. and we're not going just to be there 👀🏆` },
+    text: `PLAYOFFS. and we're not going just to be there 👀` },
   { id: 'v.clinch.rookie', conditions: { maxAge: 22 },
     text: `MY FIRST NHL PLAYOFFS 😭 this group is special, i'm telling you` },
+  { id: 'v.clinch.vet', conditions: { minAge: 32 },
+    text: `You do not get many of these. I have had seasons where March was for booking flights home. Not this one.` },
   { id: 'v.clinch.loyal', conditions: { minLoyalty: 70 },
     text: `This city deserves playoff hockey. {city}, we did this TOGETHER ❤️ now buckle up` },
   { id: 'v.clinch.pro', conditions: { minProfessionalism: 70 },
@@ -271,7 +306,7 @@ const CLINCH_POOL: ContentVariant[] = [
   { id: 'v.clinch.plain',
     text: `Playoff hockey in {city} 🙌 let's make that building LOUD` },
   { id: 'v.clinch.plain2',
-    text: `Clinched ✅ the regular season means nothing now. 16 wins.` },
+    text: `Clinched. The regular season means nothing now. 16 wins.` },
 ]
 
 /** Cleared after an injury. Slots: {rust} (games of ring rust, may be 0). */
@@ -282,6 +317,8 @@ const RETURN_POOL: ContentVariant[] = [
     text: `Cleared. Rehab was the hardest thing I've done in this game. Grateful to the medical staff — see you tonight.` },
   { id: 'v.ret.rookie', conditions: { maxAge: 22 },
     text: `BACK. missed the boys so much man 🥹` },
+  { id: 'v.ret.vet', conditions: { minAge: 31 },
+    text: `Cleared to play. The body takes longer to answer the phone than it used to. It answered.` },
   { id: 'v.ret.pro', conditions: { minProfessionalism: 70 },
     text: `Good to be back with the group. Thank you to the training staff for getting me right — they don't get enough credit.` },
   { id: 'v.ret.loyal', conditions: { minLoyalty: 70 },
@@ -303,6 +340,8 @@ const SCRATCH_POOL: ContentVariant[] = [
     text: `guess showing up every night doesn't count for much anymore.` },
   { id: 'v.scr.disloyal', conditions: { maxLoyalty: 40 },
     text: `funny how fast things change around here. taking notes 📝` },
+  { id: 'v.scr.vet', conditions: { minAge: 31 },
+    text: `A decade in this league and you still learn something new about it every week. Learned something tonight.` },
   { id: 'v.scr.ambitious', conditions: { minAmbition: 65 },
     text: `i know exactly what i bring. some people apparently don't 🤷` },
   { id: 'v.scr.plain',
@@ -321,6 +360,8 @@ const SHOPPED_POOL: ContentVariant[] = [
     text: `heard my name's out there. cool. remember this post when i'm rolling in April 😤` },
   { id: 'v.shop.pro', conditions: { minProfessionalism: 70 },
     text: `Not going to comment on rumors. My job is to play hockey. That's exactly what I'll keep doing.` },
+  { id: 'v.shop.vet', conditions: { minAge: 31 },
+    text: `I have been on the wrong end of one of those phone calls before. You play Tuesday either way.` },
   { id: 'v.shop.loyal', conditions: { minLoyalty: 70 },
     text: `gave everything to this place. everything. and my name's in trade talks. hockey's a business, right? …right.` },
   { id: 'v.shop.cocky', conditions: { minAmbition: 70, maxProfessionalism: 50 },
@@ -344,11 +385,13 @@ const MEETING_POOL: ContentVariant[] = [
   { id: 'v.meet.rookie', conditions: { maxAge: 22 },
     text: `big thanks to the GM for making time for me today. learned a lot 🙏` },
   { id: 'v.meet.fiery', conditions: { maxTemperament: 40 },
-    text: `said what i needed to say. he listened. respect. 😤➡️😌` },
+    text: `said what i needed to say. he listened. respect 🤝` },
+  { id: 'v.meet.vet', conditions: { minAge: 31 },
+    text: `Sat down with the GM this morning. I have had that conversation in four buildings now and it is the first time I walked out knowing exactly where I stand.` },
   { id: 'v.meet.grinder', conditions: { minDetermination: 75 },
     text: `Talked with the GM. Now it's on me to hold up my end. Fine by me — that's the fun part.` },
   { id: 'v.meet.ambitious', conditions: { minAmbition: 65 },
-    text: `good honest conversation upstairs today. i know where i stand and where this is going. that's all i ever asked for 🤝` },
+    text: `good honest conversation upstairs today. i know where i stand and where this is going. that's all i ever asked for.` },
   { id: 'v.meet.plain',
     text: `air's cleared. love this group, love this city. onward 🙌` },
   { id: 'v.meet.plain2',
