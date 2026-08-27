@@ -68,6 +68,45 @@ payoff lies in year seven" from "a club that decays and never recovers". A
 
 ---
 
+---
+
+## 2b. THE LONGER RUN SETTLES IT — there is no death spiral
+
+A 10-season run on a **different seed (777)**, same club:
+
+| yr | pts | lg rank | result |
+|---|---:|---:|---|
+| 2025 | 81 | 26 | Missed |
+| 2026 | 83 | 20 | Missed |
+| 2027 | 77 | 26 | Missed |
+| 2028 | 72 | 28 | Missed |
+| **2029** | **93** | **11** | **Conference Semifinal** |
+| 2030 | 79 | 23 | Missed |
+| 2031 | 71 | 28 | Missed |
+| 2032 | 77 | 26 | Missed |
+| 2033 | 84 | 25 | Missed |
+| **2034** | **112** | **1** | First Round |
+
+**The franchise oscillates and recovers — twice.** A four-year sag, a 93-point
+playoff season, another dip, then **112 points and first overall in the league**.
+That is a believable franchise arc, not a decaying one.
+
+**The user's read was correct and my concern was wrong.** The seed-2029 slide in
+§2 was seed-specific, not systemic. One seed is weak evidence — a lesson this
+project has now learned three separate times, and the reason the autopilot gate
+was originally cross-validated on two seeds.
+
+What survives from §2 is only the *activity* question, and it is unchanged here:
+**7 trades and 15 signings across ten seasons.** Note this run predates the
+threshold fixes (the unreachable `cRank >= 20` rebuild branch and the cap-slack
+filter), so it measures the OLD passive policy. Whether the fixes move it is the
+open question the next run answers.
+
+Still 0 Cups in 10 seasons — worth watching, but a club that finishes first
+overall and reaches a conference final is not a broken sim.
+
+---
+
 ## 3. FLAVOUR — the new detectors, and what they caught
 
 The prose is **voluminous but repetitive**. Volume is not the problem; variety is.

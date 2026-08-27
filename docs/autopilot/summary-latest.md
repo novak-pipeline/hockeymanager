@@ -2,15 +2,15 @@
 
 League: NHL (EHM import, dev) - 2026-27 · 32 teams · imported: NHL (EHM import, dev) - 2026-27 (32-team) · seed 2029
 Seasons: 5/5 · **Cups: 0** · best finish: **—**
-Decisions: 293 · trades 4 · signings 3 · drafted 28
-Issues: **0 critical**, 18 major, 76 minor
+Decisions: 296 · trades 6 · signings 0 · drafted 21
+Issues: **0 critical**, 18 major, 77 minor
 
 ## Season by season
 - **2025** — 48-29-5 (101 pts, #8) → First Round · 0 trades, 0 signings, 7 picks · issues C0/M8/m15
 - **2026** — 40-39-3 (83 pts, #24) → Missed · 0 trades, 0 signings, 7 picks · issues C0/M8/m15
-- **2027** — 33-40-9 (75 pts, #26) → Missed · 1 trades, 0 signings, 5 picks · issues C0/M0/m15
-- **2028** — 33-44-5 (71 pts, #30) → Missed · 2 trades, 3 signings, 6 picks · issues C0/M0/m16
-- **2029** — 32-44-6 (70 pts, #29) → Missed · 1 trades, 0 signings, 3 picks · issues C0/M0/m15
+- **2027** — 35-42-5 (75 pts, #25) → Missed · 3 trades, 0 signings, 0 picks · issues C0/M0/m16
+- **2028** — 34-41-7 (75 pts, #27) → Missed · 1 trades, 0 signings, 3 picks · issues C0/M0/m16
+- **2029** — 48-27-7 (103 pts, #6) → First Round · 2 trades, 0 signings, 4 picks · issues C0/M0/m15
 
 ## Issues (top 40 by severity)
 - `major` [cap] season 2025 d25: over the cap: used $107.5M vs ceiling $88.0M
