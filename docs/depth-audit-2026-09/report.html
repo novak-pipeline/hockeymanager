@@ -1,0 +1,366 @@
+<title>The Show Depth Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#F2F5F7; --surface:#FFFFFF; --surface-2:#E8EEF2; --line:#CBD5DD;
+  --ink:#13233A; --muted:#556476; --faint:#7B8998;
+  --accent:#2A5AA5; --accent-ink:#FFFFFF; --goal:#C8342B;
+  --s0:#F6D3CF; --s0t:#7A1D16; --s1:#F9E0C4; --s1t:#7A4410; --s2:#F4ECC8; --s2t:#5E4E0E;
+  --s3:#E3EAF0; --s3t:#2E3E52; --s4:#D2EBDD; --s4t:#1C5A37; --s5:#B9E0C9; --s5t:#123F26;
+  --good:#1F7A4A; --warn:#A5620F; --bad:#B42F26;
+  --display:"Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0D151F; --surface:#141F2C; --surface-2:#1B2837; --line:#2A3A4D;
+    --ink:#E4EBF2; --muted:#A1AFBF; --faint:#7F8FA2;
+    --accent:#7FA7E6; --accent-ink:#0D151F; --goal:#F06A5F;
+    --s0:#4A1E1B; --s0t:#FFC9C2; --s1:#4A3017; --s1t:#FFD8AE; --s2:#433B18; --s2t:#F5E6A6;
+    --s3:#223244; --s3t:#C9D6E4; --s4:#183D2B; --s4t:#B7EBCD; --s5:#12472E; --s5t:#CFF5DF;
+    --good:#67C99A; --warn:#F0B25C; --bad:#F07A70;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0D151F; --surface:#141F2C; --surface-2:#1B2837; --line:#2A3A4D;
+  --ink:#E4EBF2; --muted:#A1AFBF; --faint:#7F8FA2;
+  --accent:#7FA7E6; --accent-ink:#0D151F; --goal:#F06A5F;
+  --s0:#4A1E1B; --s0t:#FFC9C2; --s1:#4A3017; --s1t:#FFD8AE; --s2:#433B18; --s2t:#F5E6A6;
+  --s3:#223244; --s3t:#C9D6E4; --s4:#183D2B; --s4t:#B7EBCD; --s5:#12472E; --s5t:#CFF5DF;
+  --good:#67C99A; --warn:#F0B25C; --bad:#F07A70;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.6;margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:32px 72px}
+h1,h2,h3{font-family:var(--display);font-weight:700;letter-spacing:.01em;line-height:1.1;text-wrap:balance;margin:0}
+h1{font-size:clamp(40px,7vw,64px);text-transform:uppercase}
+h2{font-size:30px;text-transform:uppercase;margin-bottom:6px}
+h3{font-size:21px;font-weight:600}
+p{margin:0}
+.prose{max-width:68ch}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.masthead{display:grid;gap:14px;border-bottom:4px solid var(--goal);padding-bottom:22px}
+.masthead .lede{font-size:18px;max-width:62ch;color:var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+section{margin-top:52px;display:grid;gap:18px}
+.sec-head{display:grid;gap:6px;border-top:2px solid var(--ink);padding-top:12px}
+.sec-head p{color:var(--muted);max-width:68ch}
+
+/* verdict */
+.verdict{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.stat{background:var(--surface);border:1px solid var(--line);padding:14px 16px;display:grid;gap:4px;align-content:start}
+.stat .n{font-family:var(--display);font-size:40px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.stat .n small{font-size:20px;color:var(--muted);font-weight:600}
+.stat .l{font-size:13.5px;color:var(--muted)}
+.stat.hot .n{color:var(--goal)}
+
+/* score grids */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted);align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:22px;height:16px;display:inline-grid;place-items:center;font-family:var(--mono);font-size:11px}
+.tscroll{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+table.scores{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+table.scores th,table.scores td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:center}
+table.scores thead th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;background:var(--surface-2)}
+table.scores th.sys,table.scores td.sys{text-align:left;font-weight:500;white-space:nowrap}
+table.scores tr.grp td{background:var(--surface-2);font-family:var(--display);font-size:16px;font-weight:600;text-align:left;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+table.scores tr.avg td{font-weight:600;border-top:2px solid var(--ink)}
+td.c{font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:500;width:9%}
+.v0{background:var(--s0);color:var(--s0t)} .v1{background:var(--s1);color:var(--s1t)} .v2{background:var(--s2);color:var(--s2t)}
+.v3{background:var(--s3);color:var(--s3t)} .v4{background:var(--s4);color:var(--s4t)} .v5{background:var(--s5);color:var(--s5t)}
+.note{font-size:13px;color:var(--muted)}
+
+/* causes */
+.causes{display:grid;gap:0;border:1px solid var(--line);background:var(--surface)}
+.cause{display:grid;grid-template-columns:44px 1fr;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.cause:last-child{border-bottom:0}
+.cause .k{font-family:var(--display);font-size:30px;font-weight:700;color:var(--accent);line-height:1}
+.cause h3{margin-bottom:4px}
+.cause p{color:var(--ink);max-width:70ch}
+.cause .ev{margin-top:6px;font-size:13px;color:var(--muted)}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:1px 5px;border-radius:3px}
+
+/* bugs */
+.bugs{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.bug{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--bad);padding:11px 14px;display:grid;gap:4px}
+.bug.m{border-left-color:var(--warn)}
+.bug b{font-weight:600}
+.bug span{font-size:13px;color:var(--muted)}
+
+/* plan */
+.phase{display:grid;gap:12px;background:var(--surface);border:1px solid var(--line);padding:18px}
+.phase-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.phase-h .tag{font-family:var(--mono);font-size:12px;color:var(--accent-ink);background:var(--accent);padding:2px 8px;letter-spacing:.04em}
+.phase-h .why{color:var(--muted);font-size:14px}
+.epics{display:grid;gap:10px}
+.epic{display:grid;grid-template-columns:1fr auto;gap:4px 16px;padding:10px 0;border-top:1px solid var(--line)}
+.epic:first-child{border-top:0;padding-top:2px}
+.epic .t{font-weight:600}
+.epic .d{grid-column:1/-1;color:var(--muted);font-size:14px;max-width:78ch}
+.pill{font-family:var(--mono);font-size:11.5px;padding:2px 8px;border:1px solid var(--line);white-space:nowrap;align-self:start}
+.pill.own{border-color:var(--goal);color:var(--goal)}
+.pill.run{border-color:var(--good);color:var(--good)}
+
+/* decisions */
+.decisions{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.dec{background:var(--surface);border:1px solid var(--line);padding:14px 16px;display:grid;gap:6px;align-content:start}
+.dec .q{font-family:var(--display);font-size:19px;font-weight:600}
+.dec .s{font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+.dec .s.ok{color:var(--good)} .dec .s.ask{color:var(--warn)}
+.dec p{font-size:14px;color:var(--muted)}
+
+/* gates */
+.gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.gate{border:1px dashed var(--line);padding:12px 14px;display:grid;gap:4px;background:var(--surface)}
+.gate .m{font-family:var(--mono);font-size:13px}
+.gate .m b{color:var(--goal);font-weight:500}
+.gate span{font-size:13px;color:var(--muted)}
+
+ul.tight{margin:0;padding-left:18px;display:grid;gap:4px}
+footer{margin-top:60px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--muted);display:grid;gap:4px}
+@media (max-width:560px){ .cause{grid-template-columns:1fr} .epic{grid-template-columns:1fr} }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Front-office memo · The Show: Franchise Hockey Manager · 26 Sep 2026</div>
+  <h1>The game looks deeper than it plays</h1>
+  <p class="lede">Five auditors read the code system by system and compared each one with modern Football Manager, and one of them played a full year to measure the loop. The finding is consistent: presentation is ahead of substance. Most systems have the screen, the words and the voice, but thin state behind them. So consequences fade, the world doesn't push back, and the game rarely tells you whether you were right.</p>
+  <div class="meta"><span>Branch improve-loop @ 04285c4</span><span>18 systems scored 0–5 on 7 axes</span><span>1 measured season walk</span><span>25-season autopilot evidence</span></div>
+</header>
+
+<section>
+  <div class="verdict">
+    <div class="stat"><div class="n">2.8<small>/5</small></div><div class="l">Average UX polish, the strongest axis</div></div>
+    <div class="stat hot"><div class="n">2.0<small>/5</small></div><div class="l">Average feedback: does the game tell you it worked?</div></div>
+    <div class="stat hot"><div class="n">1.9<small>/5</small></div><div class="l">Average world aliveness, your north star</div></div>
+    <div class="stat"><div class="n">49</div><div class="l">Blocking stops in one measured season; 23 were trade offers your AGM then passed on</div></div>
+    <div class="stat"><div class="n">83%</div><div class="l">In-season advances where the processing overlay holds you</div></div>
+    <div class="stat hot"><div class="n">7</div><div class="l">Cups won by a simple bot GM in 25 seasons; the cap stops binding after about 2032</div></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">01 · Scorecard</div>
+    <h2>Eighteen systems, seven questions</h2>
+    <p>D decisions offered · I information quality · C consequence downstream · F feedback, whether it tells you it worked · U UX polish · V content variety · W world aliveness, whether it acts on its own and not only when you poke it.</p>
+  </div>
+  <div class="legend">
+    <span><i class="sw v0">0</i><i class="sw v1">1</i> missing or broken</span>
+    <span><i class="sw v2">2</i> thin</span>
+    <span><i class="sw v3">3</i> works</span>
+    <span><i class="sw v4">4</i><i class="sw v5">5</i> FM-grade</span>
+  </div>
+  <div class="tscroll">
+  <table class="scores">
+    <thead><tr><th class="sys">System</th><th>D</th><th>I</th><th>C</th><th>F</th><th>U</th><th>V</th><th>W</th></tr></thead>
+    <tbody id="scoreBody"></tbody>
+  </table>
+  </div>
+  <p class="note">Tactics' consequence of 3 averages two realities: line and roster decisions score 5, team tactics score 1 on the default Continue path.</p>
+
+  <h3 style="margin-top:8px">The world without you</h3>
+  <p class="note">This auditor used axes built for the league itself: Aut autonomy · Real realism against the NHL · Cont continuity and memory · Vis whether you see it · Emer emergence · Var variety.</p>
+  <div class="tscroll">
+  <table class="scores">
+    <thead><tr><th class="sys">Area</th><th>Aut</th><th>Real</th><th>Cont</th><th>Vis</th><th>Emer</th><th>Var</th></tr></thead>
+    <tbody id="worldBody"></tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">02 · Why it keeps feeling like placeholders</div>
+    <h2>Eight root causes</h2>
+    <p>These are why "consequences matter" turned into a popup, and why each fix so far landed at about 60%. Fix these and many individual complaints go away together.</p>
+  </div>
+  <div class="causes">
+    <div class="cause"><div class="k">1</div><div><h3>People have one number for memory, and it forgets in two weeks</h3><p>Every conversation, promise, scratch and trade rumour ends as <code>morale += n</code>, and morale drifts back to neutral about 5% a day. Whatever you did fades before it can matter. The narrative design doc explicitly banned new mechanics, so depth was capped at delivery.</p><p class="ev">condition.ts:176, 254 · NARRATIVE-ENGINE.md non-goals</p></div></div>
+    <div class="cause"><div class="k">2</div><div><h3>Write-only state</h3><p>Plenty is recorded that nothing reads: room morale (for the sim), respect in the room, pundit rapport, owner commitments, "surplus" status, social groups, signing bonuses, revenue. "Morale contagion" exists only as a comment. The screens describe systems the engine doesn't run.</p><p class="ev">coverageTilt() has zero callers · dynamics.ts:15 · ownerMeddling.ts:133</p></div></div>
+    <div class="cause"><div class="k">3</div><div><h3>You play under fog; the AI doesn't</h3><p>AI clubs draft from true potential. The trade screen shows the AI's real yes/no before you send. The "rival clubs circling" in free agency come from a hash. Market size comes from a hash of the team id. Your scouting is real work while everyone else cheats, which is both a fairness problem and a cheese problem.</p><p class="ev">offseason.ts:873 · career.ts:13135, 12181</p></div></div>
+    <div class="cause"><div class="k">4</div><div><h3>Only your club is simulated as people</h3><p>Concerns, promises, happiness and line synergy exist only for your club. AI GM personas have seven traits, but only aggression changes anything, and only in offers to you. The world has results but not personalities.</p><p class="ev">career.ts:3647, 2939 · trades.ts persona reads</p></div></div>
+    <div class="cause"><div class="k">5</div><div><h3>The economy stops binding</h3><p>The cap grows 4.5% a year while salary asks stay in fixed dollars, and the floor isn't enforced. By about 2032 nobody feels cap pressure: no second-contract squeeze, no depth leaving for money. That's the likeliest reason a bot built a 17-season juggernaut.</p><p class="ev">contracts.ts:51, 169 · cap reaches about $286M by 2049</p></div></div>
+    <div class="cause"><div class="k">6</div><div><h3>Nothing ever tells you whether you were right</h3><p>No development history is stored, scouts are never graded against outcomes, and staff advice has no receipts. The development focus "biases growth" and then goes silent. Without feedback, depth reads as decoration.</p><p class="ev">EXCELLENCE gap #6 · no advice or credibility ledger found</p></div></div>
+    <div class="cause"><div class="k">7</div><div><h3>Watching and simming are different games</h3><p>Most tactics only exist in the full engine used for watched games. The quick sim behind Continue ignores them, so the playbook barely matters, and watching versus simming quietly changes your expected results. Watched games are also fully decided before playback, so you can't influence them.</p><p class="ev">quickSim.ts:674 · career.ts:6941</p></div></div>
+    <div class="cause"><div class="k">8</div><div><h3>Tests built on values the game never produces</h3><p>Personality tests use a 0–100 scale while players are generated 1–20, and mid-season code reads stats that only exist after rollover. Both bug classes hit the promise system, the centrepiece of the consequence design, and the tests stayed green.</p><p class="ev">livingLedger.test.ts:120 · career.ts:3765</p></div></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">03 · Fix regardless of plan</div>
+    <h2>Confirmed bugs</h2>
+    <p>Found by reading the code, with file references in the raw audits. Each is small. Red means it breaks trust or fairness.</p>
+  </div>
+  <div class="bugs">
+    <div class="bug"><b>Ice-time promises from concerns always break</b><span>Even if you double his minutes: the baseline reads a stat that doesn't exist mid-season, and he can end up asking for a trade.</span></div>
+    <div class="bug"><b>Scene and negotiation ice-time promises always "kept"</b><span>They have no due date and are auto-kept at rollover. 19 authored options are affected.</span></div>
+    <div class="bug"><b>Every confrontation plays the same angry line</b><span>A personality scale mismatch (0–100 against 1–20) switches off the calm-pro and proud-veteran branches.</span></div>
+    <div class="bug"><b>Your club is crowned champion every spring</b><span>The tentpole article names you whoever won. Being fixed on the Season Wrapped branch.</span></div>
+    <div class="bug"><b>Ignoring concerns is free and silences the room</b><span>Open concerns never expire, and two unanswered ones block any new ones.</span></div>
+    <div class="bug"><b>AI drafts from true potential</b><span>And "sim entire draft" picks by truth on your behalf too.</span></div>
+    <div class="bug m"><b>Medical risk shows fatigue the model ignores</b><span>The head physio changes nothing.</span></div>
+    <div class="bug m"><b>Squad status has no cap</b><span>Tag everyone "key player" for free weekly morale.</span></div>
+    <div class="bug m"><b>Calendar and label pack</b><span>The takeover summer is dated a year early. Continue says "review" but opens the draft. "Camp is over" mail arrives on day one. There's a 60-item dump in June.</span></div>
+    <div class="bug m"><b>Contract details don't bite</b><span>A modified no-trade clause works like a full one. Signing bonuses are never read. Offer sheets always come from the first club in the list.</span></div>
+    <div class="bug m"><b>Copy that promises what nothing does</b><span>"You assured the owner", the pundit's "benefit of the doubt", and Data Hub "shot maps" all describe things that don't happen.</span></div>
+    <div class="bug m"><b>World data issues</b><span>Real NHL surnames in the fictional name pool. The Hall of Fame can't admit goalies. Coach firings are logged as signings.</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">04 · The plan</div>
+    <h2>Fix the foundations, then build your epics on them</h2>
+    <p>Ordered so each phase makes the next one real. Your own requests from this session are marked. Every phase is judged by one rule: fun outweighs realism, and nothing interrupts you unless it's a real decision or a payoff.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="tag">PHASE 0</span><h3>Trust and quiet</h3><span class="why">About a week. Stops the game working against you.</span></div>
+    <div class="epics">
+      <div class="epic"><span class="t">The bug list above</span><span class="pill">S</span><span class="d">Every item, each with a regression test that uses values the game actually generates.</span></div>
+      <div class="epic"><span class="t">Interruption diet</span><span class="pill own">you asked</span><span class="d">Continue always just advances; no more "Continue — staff meeting" signposts. Trade offers interrupt only above a real threshold, the rest go to a weekly digest. The overlay holds only for results, decisions and big stories (83% down to about 35%). Staff meetings fire on events, with a frequency setting. Routine board meetings are cut to three moments a year. Target: about 4.1 clicks per game down to about 2.2.</span></div>
+      <div class="epic"><span class="t">Text-to-speech and the AI writer off by default</span><span class="pill own">you flagged</span><span class="d">Both kept behind a hidden flag, not deleted. The phone becomes a visual device, with the decision on the handset itself. Prose comes from authored, context-varied lines built on the richer Phase 1 facts.</span></div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="tag">PHASE 1</span><h3>Foundations that make depth real</h3><span class="why">The state the rest of the plan stands on.</span></div>
+    <div class="epics">
+      <div class="epic"><span class="t">Economy indexed to the cap, plus a parity harness</span><span class="pill">S → M</span><span class="d">Salary asks scale with the cap, the floor is enforced for AI clubs, and every season's league table and champion is recorded. Targets: points spread SD 12–16, 6 or more distinct champions per decade, no 17-year juggernauts.</span></div>
+      <div class="epic"><span class="t">Happiness ledger and GM trust</span><span class="pill">L</span><span class="d">Morale becomes a sum of caused, visible, lasting factors, with an FM-style happiness panel where each factor links to what you did. Tone lands differently by personality, trust and history. Concerns escalate on a clock: agent, press leak, social group, leaders' meeting, trade request.</span></div>
+      <div class="epic"><span class="t">Hindsight everywhere</span><span class="pill own">you liked</span><span class="d">A development ledger (growth by cause), scout track records graded at +2 and +4 seasons, and staff-advice receipts with credibility. This is the "did it work?" layer, and it feeds Season Wrapped.</span></div>
+      <div class="epic"><span class="t">Continue honours tactics</span><span class="pill">M</span><span class="d">Port the seven proven tactics into the quick sim and calibrate them against the full sim. Then the GM sets a game plan the coach carries out, and the Watch-versus-Play gap closes.</span></div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="tag">PHASE 2</span><h3>The epics you named</h3><span class="why">Built on the Phase 1 state, so they have real teeth.</span></div>
+    <div class="epics">
+      <div class="epic"><span class="t">Offseason 3.0</span><span class="pill own">you asked</span><span class="d">Needs first, not lists: your depth chart with gaps, and each gap opens a curated shortlist of 5 to 8 options. July 1 runs live: real AI bids, players choosing between offers, and you can lose a player to a rival. Trades become conversations ("what would it take?"), with the AGM's fallible read replacing the true verdict. Real dated acts: buyouts, draft, qualifying offers, the frenzy, arbitration hearings, dev camp, rookie tournament.</span></div>
+      <div class="epic"><span class="t">Training camp as position battles</span><span class="pill own">you asked</span><span class="d">3 to 5 named battles decided by preseason games played by the real engine, not dice. Coach reads move through the week. Cut day brings waiver risk, the ELC slide, and morale receipts for winners and losers. Three clicks instead of eight text screens.</span></div>
+      <div class="epic"><span class="t">The Week and the season's acts</span><span class="pill own">you asked</span><span class="d">One weekly briefing instead of scattered popups. Pregame choices that matter, and a postgame that credits them. At most one earned people moment a week. Acts: opening night, the Thanksgiving benchmark, a real holiday freeze, World Juniors, the All-Star midseason report, the deadline, magic and elimination numbers, the clinch, the handshake line.</span></div>
+      <div class="epic"><span class="t">GM reputation</span><span class="pill own">you asked</span><span class="d">Anti-cheese within the fun-over-realism guardrails. Only exploit patterns cost anything, you're always warned by a person first, grudges fade, there's never a lockout, and a good name has upsides. Normal autopilot play must trigger zero penalties.</span></div>
+      <div class="epic"><span class="t">Season Wrapped and the yearbook</span><span class="pill run">building now</span><span class="d">A yearly card sequence: your year, the league's year, history-book moments, and hindsight. Every past year stays browsable.</span></div>
+      <div class="epic"><span class="t">Scouting becomes Recruitment</span><span class="pill own">you flagged</span><span class="d">Five tabs: Desk, Reports (list plus one report card), Shortlist (watch list and shortlist merged), Search, Scouts &amp; Coverage. One rating scale: half-stars with a confidence band, and letters only for the recommendation. Draft boards move to the Draft centre. Interviews become limited slots.</span></div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="tag">PHASE 3</span><h3>The living, breathing world</h3><span class="why">Your north star, at league scale.</span></div>
+    <div class="epics">
+      <div class="epic"><span class="t">Renew the world</span><span class="pill">M – L</span><span class="d">Yearly youth intake with per-nation names and quality, junior age-out, world-league playoffs, champions and archived seasons. Without this, the real-roster import turns into a generic world after about three drafts.</span></div>
+      <div class="epic"><span class="t">AI clubs as characters</span><span class="pill">M</span><span class="d">GM personas drive AI trades, free agency, drafting and re-signing. AI scouting departments with blind spots. Offseason and hockey trades, AI GM firings, contenders loading up to beat the leader, and AI players who want out.</span></div>
+      <div class="epic"><span class="t">The league as storyteller</span><span class="pill">M</span><span class="d">Dynasty, drought and hangover detectors, trade retrospectives, people events in the chronicle (trade requests, feuds, captaincy), and pundit relationships that actually tilt coverage and board mood.</span></div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-h"><span class="tag">PHASE 4</span><h3>Match night and look</h3><span class="why">The payoff layer; part of it is already running.</span></div>
+    <div class="epics">
+      <div class="epic"><span class="t">Match night you can influence</span><span class="pill">L, staged</span><span class="d">Pregame choices first (starting goalie, home matchup, team-talk tone), then period-by-period decisions at intermission.</span></div>
+      <div class="epic"><span class="t">3D arena, lighting, ice and players</span><span class="pill run">building now</span><span class="d">Procedural, OOTP/FM-grade readability. Before and after screenshots when it lands.</span></div>
+      <div class="epic"><span class="t">Procedural animation, then hitting</span><span class="pill own">you asked</span><span class="d">Skeleton and skating, then shots and passes, goalies, hits (including along the boards), and celebrations. Queued behind the 3D pass.</span></div>
+      <div class="epic"><span class="t">UI polish and new icon set</span><span class="pill run">building now</span><span class="d">Replaces the icons you disliked, clarifies star-rating colours, removes leaked internal numbers.</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">05 · Decisions</div>
+    <h2>What's settled and what needs your call</h2>
+  </div>
+  <div class="decisions">
+    <div class="dec"><div class="s ok">Settled</div><div class="q">Fun outweighs realism</div><p>Realism serves the fun. Penalties only for exploit patterns, always telegraphed, forgiving, never a lockout.</p></div>
+    <div class="dec"><div class="s ok">Settled</div><div class="q">No "click here for event"</div><p>Continue always advances. Real moments open on their own; everything else goes to the briefing or inbox.</p></div>
+    <div class="dec"><div class="s ok">Settled</div><div class="q">The board at three moments</div><p>Preseason expectations, the deadline checkpoint, the season verdict. Its mood is a line of prose in between.</p></div>
+    <div class="dec"><div class="s ask">Your call</div><div class="q">Voice off by default for 1.0?</div><p>Recommended. It runs slower than real time on your machine and can't keep voices consistent. The code stays behind a flag, and pre-rendered lines for tentpole moments are possible later.</p></div>
+    <div class="dec"><div class="s ask">Your call</div><div class="q">AI writer off by default too?</div><p>Recommended. Given thin facts it writes lines like "I'm glad the GM heard me", and authored, context-varied lines do better at no cost. If the model returns later, it should be to understand what you type to characters, not to decorate cards.</p></div>
+    <div class="dec"><div class="s ask">Your call</div><div class="q">Lift the "no new mechanics" rule</div><p>Phase 1 adds real state (a happiness ledger, trust, a development ledger). That breaks the narrative doc's non-goal, and the new state is what the depth needs.</p></div>
+    <div class="dec"><div class="s ask">Your call</div><div class="q">Bring main up to date</div><p>main is 140 commits behind improve-loop, which gave one agent a stale copy. I'd fast-forward it after today's merges are green.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">06 · How we'll know</div>
+    <h2>Measured gates, not feel</h2>
+    <p>The autopilot and the loop harness already exist. Each phase closes against numbers.</p>
+  </div>
+  <div class="gates">
+    <div class="gate"><div class="m">clicks per game <b>4.1 → 2.2</b></div><span>From the measured season walk.</span></div>
+    <div class="gate"><div class="m">overlay holds <b>83% → ≤35%</b></div><span>Only results, decisions and big stories.</span></div>
+    <div class="gate"><div class="m">champions / decade <b>≥ 6</b></div><span>Points SD 12–16, from the new parity harness.</span></div>
+    <div class="gate"><div class="m">rep penalties, normal play <b>= 0</b></div><span>Autopilot as the fun check.</span></div>
+    <div class="gate"><div class="m">verbatim repeats / season <b>→ 0</b></div><span>From 351 prose issues over 25 seasons.</span></div>
+    <div class="gate"><div class="m">dead levers <b>→ 0</b></div><span>Lever audit re-run after Phase 1.</span></div>
+  </div>
+</section>
+
+<footer>
+  <span>Sources: five read-only audits (people &amp; story, squad building, on-ice &amp; development, the living world, the gameplay loop) with file:line evidence, stored in docs/depth-audit-2026-09/. Also the 25-season autopilot on the imported NHL database, and FM and EHM references cited in each audit.</span>
+  <span>Prepared by Claude for the owner and collaborators of The Show.</span>
+</footer>
+</div>
+
+<script>
+const T = [
+  ['People & story'],
+  ['Player interactions',2,1,1,2,2,2,0],
+  ['Squad dynamics & room',1,3,1,2,3,1,2],
+  ['Staff & meetings',3,3,3,1,3,2,1],
+  ['Board, owner & fans',2,2,3,3,2,2,2],
+  ['Media, feed & chronicle',1,2,1,2,3,2,3],
+  ['Voice (TTS)',0,1,0,1,1,1,0],
+  ['Squad building'],
+  ['Scouting',4,3,3,1,2,3,1],
+  ['Draft & youth',3,3,3,2,3,3,2],
+  ['Trades',4,4,4,3,3,4,3],
+  ['Free agency & waivers',3,2,3,3,3,2,2],
+  ['Contracts & agents',4,3,2,3,3,3,1],
+  ['Finances',1,2,1,1,3,1,1],
+  ['On-ice & development'],
+  ['Training & development',3,2,3,1,3,2,2],
+  ['Tactics & coaching',2,3,3,3,3,2,3],
+  ['Match night',1,3,1,3,3,2,3],
+  ['Medical & fatigue',2,2,3,2,3,2,3],
+  ['Data hub',1,3,1,1,3,2,3],
+  ['Continue loop & first hour',3,3,3,2,4,2,2],
+];
+const W = [
+  ['AI club management',3,2,2,3,2,1],
+  ['Player careers',3,2,2,2,2,1],
+  ['Other leagues',3,2,0,2,0,1],
+  ['History & memory',3,3,3,3,2,2],
+  ["The world's voice",3,2,2,3,2,2],
+  ['Emergence',2,2,2,1,2,2],
+  ['Competitive balance',1,1,2,1,1,1],
+];
+function row(cells){
+  const tr=document.createElement('tr');
+  const n=document.createElement('td'); n.className='sys'; n.textContent=cells[0]; tr.appendChild(n);
+  cells.slice(1).forEach(v=>{const td=document.createElement('td'); td.className='c v'+Math.round(v); td.textContent=Number.isInteger(v)?v:v.toFixed(1); tr.appendChild(td);});
+  return tr;
+}
+const sb=document.getElementById('scoreBody');
+const rowsOnly=[];
+T.forEach(r=>{
+  if(r.length===1){const tr=document.createElement('tr');tr.className='grp';const td=document.createElement('td');td.colSpan=8;td.textContent=r[0];tr.appendChild(td);sb.appendChild(tr);}
+  else{sb.appendChild(row(r));rowsOnly.push(r);}
+});
+const avg=['Average'];
+for(let i=1;i<=7;i++){avg.push(rowsOnly.reduce((s,r)=>s+r[i],0)/rowsOnly.length);}
+const at=row(avg); at.className='avg'; sb.appendChild(at);
+const wb=document.getElementById('worldBody');
+W.forEach(r=>wb.appendChild(row(r)));
+</script>
