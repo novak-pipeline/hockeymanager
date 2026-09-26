@@ -22,6 +22,10 @@
  * Pure: no Rng, no clock. Everything is a function of the team.
  */
 
+/** A beat outlet's link posts are their own Feed stream (like the voice and
+ *  club streams): at most this many a day, outside the pundit budget. */
+export const BEAT_LINK_DAILY_CAP = 2
+
 /* ────────────────────────── types ────────────────────────── */
 
 export interface BeatWriter {

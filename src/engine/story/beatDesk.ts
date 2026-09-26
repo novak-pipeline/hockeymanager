@@ -178,6 +178,8 @@ export function fill(text: string, slots: Record<string, string>): string {
     .replace(/ {2,}/g, ' ')
     .replace(/ ([,;!?])/g, '$1')
     .replace(/ \.(?!\d)/g, '.')
+    // "a 8-4 loss" -> "an 8-4 loss" (also 11, 18 and the 80s).
+    .replace(/\b([Aa]) (?=(?:8|11|18)(?!\d)|8\d)/g, '$1n ')
     .trim()
 }
 
@@ -286,8 +288,11 @@ export function beatScore(l: GradeLine, won: boolean): number {
   const result = won ? 0.25 : -0.25
   const ratingLean = (l.rating - 7.0) * 0.3
   if (l.pos === 'G') {
-    const sv = l.sa > 0 ? l.saves / l.sa : 0.9
-    return 6.2 + (sv - 0.905) * 38 + result * 1.6 + ratingLean + (l.sa >= 35 && sv >= 0.92 ? 0.4 : 0)
+    // Centred on the sim's league save percentage (~.890), not the real NHL's:
+    // an .880 night in a one-goal loss is a C-, not an F. The engine rating
+    // leans at half weight so a goalie is graded on his saves first.
+    const sv = l.sa > 0 ? l.saves / l.sa : 0.89
+    return 6.2 + (sv - 0.89) * 30 + result + ratingLean * 0.5 + (l.sa >= 35 && sv >= 0.92 ? 0.4 : 0)
   }
   return (
     6.2 +
@@ -339,7 +344,8 @@ function lineSections(l: LinesFacts, withSpecial: boolean): BeatSection[] {
 export interface NotebookFacts {
   lines: LinesFacts
   /** Players who changed slot since the last notebook. */
-  changes: Array<{ name: string; from: string; to: string; up: boolean }>
+  /** `vet`: an established player (28+), so "knocking on the door" is wrong. */
+  changes: Array<{ name: string; from: string; to: string; up: boolean; vet?: boolean }>
   /** Out of the lineup: the club's official line, never the truth. */
   absent: Array<{ name: string; official: string }>
   scratches: string[]
@@ -391,7 +397,7 @@ export function buildNotebook(c: DeskCtx, f: NotebookFacts): BeatArticle | null 
   }
   const headline = say(c, NB_HEAD, ctx, slots, 'h')
   const lede = say(c, NB_LEDE, ctx, slots, 'l')
-  const move = camp ? 'camp' : top ? (top.up ? 'up' : 'down') : 'none'
+  const move = camp ? 'camp' : top ? (top.up ? (top.vet ? 'upVet' : 'up') : 'down') : 'none'
   const quote = say(c, COACH_QUOTE, { move }, { name: top?.name ?? '', first: top ? firstName(top.name) : '', coach: f.coachName }, 'q')
   const body: string[] = [lede]
   if (f.changes.length > 1) {
@@ -511,7 +517,7 @@ export function buildGameday(c: DeskCtx, f: GamedayFacts): BeatArticle | null {
   ).filter(Boolean)
   const sections = lineSections(f.lines, true)
   if (watchLines.length > 0) sections.unshift({ title: 'What to watch', lines: watchLines })
-  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} in goal.` : ''} Projected lines inside.`
+  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} ${f.playoff ? 'in goal' : 'expected in goal'}.` : ''} Projected lines inside.`
   return article(c, 'gameday', headline, dek.replace(/\s+/g, ' ').trim(), body, {
     sections,
     playerIds: f.watch.map((w) => w.playerId).filter((x): x is string => !!x).slice(0, 3),
@@ -548,8 +554,11 @@ export interface GradesFacts {
   next: string
 }
 
-function gradeWhy(l: GradeLine): string {
+function gradeWhy(l: GradeLine, score?: number): string {
   if (l.pos === 'G') {
+    // With a score, the note follows the letter so an F never reads "did what
+    // was asked" and an A never reads "needed one more save".
+    if (score !== undefined) return score >= 7.7 ? 'goalieGood' : score < 5.7 ? 'goalieBad' : 'goalieFine'
     const sv = l.sa > 0 ? l.saves / l.sa : 1
     if (sv >= 0.93 && l.sa >= 20) return 'goalieGood'
     if (sv < 0.88 || l.ga >= 4) return 'goalieBad'
@@ -568,11 +577,11 @@ function gradeWhy(l: GradeLine): string {
   return 'quiet'
 }
 
-export function gradeNote(l: GradeLine, key: string): string {
+export function gradeNote(l: GradeLine, key: string, score?: number): string {
   const pm = l.pm > 0 ? `+${l.pm}` : String(l.pm)
   return sayStable(
     GRADE_NOTE,
-    { why: gradeWhy(l) },
+    { why: gradeWhy(l, score) },
     {
       shotsWord: `${l.shots} shot${l.shots === 1 ? '' : 's'}`,
       g: String(l.goals),
@@ -627,7 +636,7 @@ export function buildGrades(c: DeskCtx, f: GradesFacts): BeatArticle | null {
     name: l.name,
     pos: l.pos,
     grade: letterGrade(sc(l)),
-    note: gradeNote(l, c.key),
+    note: gradeNote(l, c.key, sc(l)),
   }))
   const gradeOf = (l: GradeLine): string => letterGrade(sc(l))
   const good = byRating.slice(0, 3)
@@ -728,11 +737,16 @@ export interface MailItem {
 export function buildMailbag(c: DeskCtx, items: MailItem[], handleFor: (key: string) => string): BeatArticle | null {
   const picked = [...items].sort((a, b) => b.weight - a.weight || a.topic.localeCompare(b.topic)).slice(0, 5)
   if (picked.length < 3) return null
+  const handles = new Set<string>()
   const qa: BeatQA[] = picked.map((it, i) => {
     const ctxQ: ContentCtx = { topic: it.topic }
     const ctxA: ContentCtx = it.verdict ? { topic: it.topic, verdict: it.verdict } : { topic: it.topic }
+    // Five different readers: re-salt until the handle is new to this mailbag.
+    let handle = handleFor(`${c.key}|${i}|${it.topic}`)
+    for (let salt = 1; handles.has(handle) && salt < 8; salt++) handle = handleFor(`${c.key}|${i}|${it.topic}|${salt}`)
+    handles.add(handle)
     return {
-      handle: handleFor(`${c.key}|${i}|${it.topic}`),
+      handle,
       question: say(c, MB_Q, ctxQ, it.slots, `q${i}`),
       answer: say(c, MB_A, ctxA, it.slots, `a${i}`),
     }

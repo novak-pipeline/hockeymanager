@@ -4,6 +4,7 @@ import { feedStoryReachesInbox, isBreakingNews } from '@domain'
 import { playerValue } from '@engine/league/trades'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
 import { VOICE_DAILY_CAP } from '@engine/story/voices'
+import { BEAT_LINK_DAILY_CAP } from '@engine/story/mediaCast'
 import { Career } from './career'
 
 describe('dev-camp invite editor (#182)', () => {
@@ -333,7 +334,14 @@ describe('Feed Phase A (salience engine)', () => {
     const punditPerDay = new Map<number, number>()
     const voicePerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
+    // MEDIA-BEAT: the beat outlet's link posts are a third stream with their own
+    // cap (BEAT_LINK_DAILY_CAP), not pundit takes.
+    const beatPerDay = new Map<number, number>()
     for (const p of feed.posts) {
+      if (kindOf(p) === 'beat') {
+        beatPerDay.set(p.day, (beatPerDay.get(p.day) ?? 0) + 1)
+        continue
+      }
       perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
       const k = kindOf(p)
       const bucket = k === 'player' || k === 'gm' ? voicePerDay : punditPerDay
@@ -341,6 +349,7 @@ describe('Feed Phase A (salience engine)', () => {
     }
     for (const n of punditPerDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET)
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
+    for (const n of beatPerDay.values()) expect(n).toBeLessThanOrEqual(BEAT_LINK_DAILY_CAP)
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
     // Curation floor: with no follows, only floor-clearing (70+) posts may
     // have mirrored into the inbox — and a feed-channel story that survives

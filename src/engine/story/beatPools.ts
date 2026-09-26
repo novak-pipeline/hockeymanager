@@ -67,13 +67,13 @@ export const NB_LEDE: ContentVariant[] = [
   { id: 'nb.l.ch.c', conditions: { change: true }, text: `Changes today. {name} went from {fromPhrase} to {toPhrase}, and it was not the only one.` },
   { id: 'nb.l.ab.a', conditions: { absent: true }, text: `{absent} was not on the ice. The club lists him with {official}, and nothing more than that.` },
   { id: 'nb.l.ab.b', conditions: { absent: true }, text: `Still no {absent}. Officially it is {official}; the stall stayed empty again today.` },
-  { id: 'nb.l.ab.c', conditions: { absent: true }, text: `{absent} did not skate. The team's line remains {official}.` },
+  { id: 'nb.l.ab.c', conditions: { absent: true }, text: `{absent} did not skate. The club is still calling it {official}.` },
   { id: 'nb.l.camp.a', conditions: { camp: true }, text: `Day {n} of camp. The veterans are going through the motions they know; the interesting hockey is at the bottom of the depth chart.` },
   { id: 'nb.l.camp.b', conditions: { camp: true }, text: `Camp day {n}. There are more bodies than jobs, and everyone on the ice can count.` },
   { id: 'nb.l.camp.c', conditions: { camp: true }, text: `Another camp day, another set of reps for the men trying to stay out of the minors.` },
 ]
 
-/* Coach explaining a deployment. ctx: move ('up'|'down'|'none'|'camp').
+/* Coach explaining a deployment. ctx: move ('up'|'upVet'|'down'|'none'|'camp').
  * slots: {name} {first} {coach} */
 export const COACH_QUOTE: ContentVariant[] = [
   { id: 'cq.n.a', conditions: { move: 'none' }, text: `"We like the pairs. We like the lines. We need to finish more, that is the only thing I would change."` },
@@ -84,6 +84,9 @@ export const COACH_QUOTE: ContentVariant[] = [
   { id: 'cq.u.b', conditions: { move: 'up' }, text: `"We want to see what {first} does with more minutes. He's been knocking on the door."` },
   { id: 'cq.u.c', conditions: { move: 'up' }, text: `"{first} is skating well and he's winning battles. That's how you move up here."` },
   { id: 'cq.u.d', conditions: { move: 'up' }, text: `"It's a look. {first} gets a chance to show he belongs there."` },
+  { id: 'cq.uv.a', conditions: { move: 'upVet' }, text: `"{first} knows what he is. We needed more from that line, and he can give it."` },
+  { id: 'cq.uv.b', conditions: { move: 'upVet' }, text: `"That's where {first} should be. He's played the right way and he gets the minutes."` },
+  { id: 'cq.uv.c', conditions: { move: 'upVet' }, text: `"{first} has been around long enough to know nothing is permanent. Right now he's earned it."` },
   { id: 'cq.d.a', conditions: { move: 'down' }, text: `"It's not a demotion, it's a message. {first} knows what I need from him."` },
   { id: 'cq.d.b', conditions: { move: 'down' }, text: `"{first} will be fine. Sometimes you need to simplify your game for a few nights."` },
   { id: 'cq.d.c', conditions: { move: 'down' }, text: `"We talked. {first} understands. He's too good a player to stay down there long."` },
@@ -98,15 +101,15 @@ export const COACH_QUOTE: ContentVariant[] = [
  */
 export const GD_HEAD: ContentVariant[] = [
   { id: 'gd.h.a', text: `Gameday: {nick} ({record}) vs. {oppNick}, projected lineup and what to watch` },
-  { id: 'gd.h.b', text: `{nick} gameday: {starter} in goal against the {oppNick}` },
+  { id: 'gd.h.b', text: `{nick} gameday: {starter} projected in goal against the {oppNick}` },
   { id: 'gd.h.c', text: `Game preview: {nick} and {oppNick} ({oppRecord}), lines and three things to watch` },
-  { id: 'gd.h.d', text: `{nick} vs. {oppNick}: projected lineup, {starter} starts` },
+  { id: 'gd.h.d', text: `{nick} vs. {oppNick}: projected lineup, {starter} expected to start` },
   { id: 'gd.h.e', text: `Gameday notes: {record} {nick} take on the {oppNick}` },
   { id: 'gd.h.f', text: `{nick} gameday: the lineup, the matchup, the storylines vs. {oppNick}` },
   { id: 'gd.h.f2', text: `{nick} vs. {oppNick}: who plays, who starts, what matters` },
   { id: 'gd.h.f3', text: `Morning skate notes: {nick} and the {oppNick}` },
   { id: 'gd.h.f4', text: `{nick} at {record} meet a {oppRecord} {oppNick} team: gameday` },
-  { id: 'gd.h.f5', text: `{starter} gets the call as {nick} face the {oppNick}` },
+  { id: 'gd.h.f5', text: `{starter} expected to get the call as {nick} face the {oppNick}` },
   { id: 'gd.h.f6', text: `{nick} gameday: {watch} and the rest of what to watch vs. {oppNick}` },
   { id: 'gd.h.f7', text: `{nick}-{oppNick} preview: lines, {starter}, and {watch}` },
   { id: 'gd.h.g', text: `Tonight: {nick} host the {oppNick}. Here's the lineup`, conditions: { home: true } },
@@ -265,7 +268,7 @@ export const GRADE_NOTE: ContentVariant[] = [
   { id: 'gn.minutes.c', conditions: { why: 'minutes' }, text: `Logged {toi}. Heavy night, handled it.` },
   { id: 'gn.quiet.a', conditions: { why: 'quiet' }, text: `Not much to say, good or bad.` },
   { id: 'gn.quiet.b', conditions: { why: 'quiet' }, text: `Invisible most of the night.` },
-  { id: 'gn.quiet.c', conditions: { why: 'quiet' }, text: `Did his job in limited minutes.` },
+  { id: 'gn.quiet.c', conditions: { why: 'quiet' }, text: `Kept it simple. Nothing jumped out either way.` },
   { id: 'gn.quiet.d', conditions: { why: 'quiet' }, text: `Hard to find on the ice. That can be good or bad.` },
   { id: 'gn.gw.a', conditions: { why: 'goalieGood' }, text: `{saves} saves on {sa}. Stole a few.` },
   { id: 'gn.gw.b', conditions: { why: 'goalieGood' }, text: `Stopped {saves} of {sa}. Calm and square all night.` },
@@ -282,18 +285,18 @@ export const GRADE_NOTE: ContentVariant[] = [
 export const GR_CLOSE: ContentVariant[] = [
   { id: 'gr.c.w.a', conditions: { won: true }, text: `Next up: {next}.` },
   { id: 'gr.c.w.b', conditions: { won: true }, text: `They will take it and move on. Up next: {next}.` },
-  { id: 'gr.c.w.c', conditions: { won: true }, text: `Good night. The schedule says {next}, and that one will ask different questions.` },
-  { id: 'gr.c.w.d', conditions: { won: true }, text: `Bank it. They see {next}.` },
-  { id: 'gr.c.l.a', conditions: { won: false }, text: `They get {next}, and a chance to wash this one out.` },
+  { id: 'gr.c.w.c', conditions: { won: true }, text: `Good night. Next on the schedule: {next}, and that one will ask different questions.` },
+  { id: 'gr.c.w.d', conditions: { won: true }, text: `Bank it. Next: {next}.` },
+  { id: 'gr.c.l.a', conditions: { won: false }, text: `Next: {next}, and a chance to wash this one out.` },
   { id: 'gr.c.l.b', conditions: { won: false }, text: `Short memory required. Next up: {next}.` },
   { id: 'gr.c.l.c', conditions: { won: false }, text: `Practice tomorrow will be louder than usual. Then {next}.` },
   { id: 'gr.c.l.d', conditions: { won: false }, text: `On to {next}. They need a better start than this one.` },
-  { id: 'gr.c.la.a', conditions: { won: false, tilt: 'ally' }, text: `I would bet on a response against {next}. This group has answered before.` },
+  { id: 'gr.c.la.a', conditions: { won: false, tilt: 'ally' }, text: `Next up: {next}. I would bet on a response; this group has answered before.` },
   { id: 'gr.c.la.b', conditions: { won: false, tilt: 'ally' }, text: `One loss. The larger picture is still a good one. Next up: {next}.` },
-  { id: 'gr.c.la.c', conditions: { won: false, tilt: 'ally' }, text: `Flush it. The {nick} are better than this, and {next} is a chance to show it.` },
+  { id: 'gr.c.la.c', conditions: { won: false, tilt: 'ally' }, text: `Flush it. The {nick} are better than this. Next up: {next}, a chance to show it.` },
   { id: 'gr.c.lc.a', conditions: { won: false, tilt: 'critic' }, text: `Next up: {next}. The front office should be watching as closely as the fans are.` },
   { id: 'gr.c.lc.b', conditions: { won: false, tilt: 'critic' }, text: `The players will be asked about this. They are not the only ones who should be. Next: {next}.` },
-  { id: 'gr.c.lc.c', conditions: { won: false, tilt: 'critic' }, text: `They play {next}. The roster will be the same, which is the problem.` },
+  { id: 'gr.c.lc.c', conditions: { won: false, tilt: 'critic' }, text: `Next: {next}. The roster will be the same, which is the problem.` },
 ]
 
 /* ═══════════════════════════════ ROSTER MOVES ═══════════════════════════════

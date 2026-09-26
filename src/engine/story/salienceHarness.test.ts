@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
+import { BEAT_LINK_DAILY_CAP } from '@engine/story/mediaCast'
 import { CLUB_DAILY_CAP, VOICE_DAILY_CAP } from '@engine/story/voices'
 
 describe('salience harness — one full season', () => {
@@ -57,7 +58,7 @@ describe('salience harness — one full season', () => {
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
     // F5 added a THIRD stream — the official club accounts — with its own cap.
     for (const n of clubPerDay.values()) expect(n).toBeLessThanOrEqual(CLUB_DAILY_CAP)
-    for (const n of beatPerDay.values()) expect(n).toBeLessThanOrEqual(2)
+    for (const n of beatPerDay.values()) expect(n).toBeLessThanOrEqual(BEAT_LINK_DAILY_CAP)
     for (const n of perDay.values()) {
       expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP + CLUB_DAILY_CAP)
     }

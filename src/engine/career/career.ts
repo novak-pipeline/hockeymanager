@@ -302,7 +302,7 @@ import {
   nudgeRapport,
   type PunditState,
 } from '@engine/story/pundits'
-import { beatOutletFor, clubNickname, fanHandle, marketProfile, type BeatOutlet, type MarketProfile } from '@engine/story/mediaCast'
+import { BEAT_LINK_DAILY_CAP, beatOutletFor, clubNickname, fanHandle, marketProfile, type BeatOutlet, type MarketProfile } from '@engine/story/mediaCast'
 import {
   buildClaimPiece,
   buildDaily,
@@ -5703,7 +5703,7 @@ export class Career {
         (p) => p.year === this.year && p.day === a.day && p.authorId === outlet.authorId,
       ).length
       const teaser = `${a.headline}. ${Career.teaserTail(a)}`.replace(/\.\./g, '.')
-      if (today < 2 && !this.feedTextUsedThisSeason(teaser)) {
+      if (today < BEAT_LINK_DAILY_CAP && !this.feedTextUsedThisSeason(teaser)) {
         this.feedPosts.unshift({
           id: `fp${this.feedCounter++}`,
           day: a.day,
@@ -6082,7 +6082,7 @@ export class Career {
     const team = this.userTeam
     const slots = this.slotMap(team)
     const prev = new Map(this.media.lastSlots)
-    const changes: Array<{ name: string; from: string; to: string; up: boolean; size: number }> = []
+    const changes: Array<{ name: string; from: string; to: string; up: boolean; size: number; vet: boolean }> = []
     const idxOf = (w: string): number => {
       const i = ['top line', 'second line', 'third line', 'fourth line'].indexOf(w)
       if (i >= 0) return i
@@ -6096,14 +6096,14 @@ export class Career {
         const p = this.data.players.get(asPlayerId(pid))
         if (!p) continue
         const bIndex = idxOf(before)
-        changes.push({ name: p.name, from: before, to: now.word, up: now.index < bIndex, size: Math.abs(now.index - bIndex) })
+        changes.push({ name: p.name, from: before, to: now.word, up: now.index < bIndex, size: Math.abs(now.index - bIndex), vet: p.age >= 28 })
       }
       for (const [pid, before] of prev) {
         if (slots.has(pid)) continue
         const p = this.data.players.get(asPlayerId(pid))
         // Hurt or gone: that is the Absent list or the transactions, not a demotion.
         if (!p || p.injuryStatus || !team.roster.includes(p.id)) continue
-        changes.push({ name: p.name, from: before, to: 'press box', up: false, size: 4 - idxOf(before) })
+        changes.push({ name: p.name, from: before, to: 'press box', up: false, size: 4 - idxOf(before), vet: p.age >= 28 })
       }
     }
     changes.sort((a, b) => b.size - a.size || (a.up === b.up ? a.name.localeCompare(b.name) : a.up ? -1 : 1))
@@ -6291,21 +6291,39 @@ export class Career {
     if (!force && key - this.mediaLast('mailbag') < 7) return false
     // Readers ask about what is new. A topic (and the man it names) asked in
     // the last mailbag drops well down the pile, the one before that a little.
-    const memory = this.media.lastMailTopics
+    // Memory holds "topic|label" keys, five per mailbag, newest last (older
+    // saves also carry bare topics; those simply never match a key).
+    const memory = this.media.lastMailTopics.filter((k) => k.includes('|'))
     const recent = new Set(memory.slice(-5))
     const older = new Set(memory.slice(-15, -5))
+    const recentTopics = new Set([...recent].map((k) => k.split('|')[0]!))
     const items = this.mailbagItems(day).map((i) => {
       const k = `${i.topic}|${i.label}`
-      return { ...i, weight: i.weight - (recent.has(k) ? 6 : older.has(k) ? 2.5 : 0) - (recent.has(i.topic) ? 1.5 : 0) }
+      return { ...i, weight: i.weight - (recent.has(k) ? 8 : older.has(k) ? 3 : 0) - (recentTopics.has(i.topic) ? 1.5 : 0) }
     })
     const c = this.deskCtx('mailbag', day)
     if (!c) return false
     const team = this.castTeam(this.userTeamId)!
-    const a = buildMailbag(c, items, (k) => fanHandle(team, k))
+    // Last week's questions sink below zero and sit a week out; a thin week
+    // runs three or four questions rather than re-asking the same five.
+    const fresh = items.filter((i) => i.weight > 0)
+    const pool = fresh.length >= 3
+      ? fresh
+      : [
+          ...fresh,
+          // Pad from the questions asked least often lately, not the loudest.
+          ...items
+            .filter((i) => i.weight <= 0)
+            .map((i) => ({ i, n: memory.filter((k) => k === `${i.topic}|${i.label}`).length }))
+            .sort((x, y) => x.n - y.n || y.i.weight - x.i.weight || x.i.topic.localeCompare(y.i.topic))
+            .slice(0, 3 - fresh.length)
+            .map((x) => ({ ...x.i, weight: 0 })),
+        ]
+    const a = buildMailbag(c, pool, (k) => fanHandle(team, k))
     this.setMediaLast('mailbag', key)
     if (!a) return false
-    const used = [...items].sort((x, y) => y.weight - x.weight || x.topic.localeCompare(y.topic)).slice(0, 5)
-    this.media.lastMailTopics = [...memory, ...used.map((i) => `${i.topic}|${i.label}`), ...used.map((i) => i.topic)].slice(-30)
+    const used = [...pool].sort((x, y) => y.weight - x.weight || x.topic.localeCompare(y.topic)).slice(0, 5)
+    this.media.lastMailTopics = [...memory, ...used.map((i) => `${i.topic}|${i.label}`)].slice(-15)
     this.publishBeat(a)
     return true
   }
@@ -6561,24 +6579,34 @@ export class Career {
       if (g.day !== day || !g.result) continue
       // Our own game is the lede, not division news.
       if (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId) continue
-      for (const tid of [g.homeTeamId, g.awayTeamId]) {
-        if (tid === this.userTeamId) continue
-        const t = this.data.teams.get(tid)
-        if (!t || t.divisionId !== team.divisionId) continue
-        const home = g.homeTeamId === tid
-        const us = home ? g.result.homeGoals : g.result.awayGoals
-        const them = home ? g.result.awayGoals : g.result.homeGoals
-        const oppT = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)
+      const ourNick = clubNickname(this.castTeam(team.id)!)
+      const gapOf = (tid: TeamId): string => {
         const st = this.standings.get(tid)
         const gap = st && mine ? st.points - mine.points : 0
-        if (!divisionLead && us > them && oppT) divisionLead = `${possessive(clubNickname(this.castTeam(t.id)!))} ${us}-${them} win over the ${clubNickname(this.castTeam(oppT.id)!)}`
-        division.push(
-          `${t.name} ${us > them ? 'beat' : 'lost to'} ${oppT?.name ?? 'the opposition'} ${Math.max(us, them)}-${Math.min(us, them)}` +
-            `${g.result.decidedBy !== 'regulation' ? ` in ${g.result.decidedBy === 'overtime' ? 'overtime' : 'a shootout'}` : ''}. ` +
-            (gap === 0 ? `Level with the ${clubNickname(this.castTeam(team.id)!)} on points.` : `${Math.abs(gap)} point${Math.abs(gap) === 1 ? '' : 's'} ${gap > 0 ? 'ahead of' : 'behind'} the ${clubNickname(this.castTeam(team.id)!)}.`),
-        )
-        if (division.length >= 3) break
+        return gap === 0 ? `level with the ${ourNick} on points` : `${Math.abs(gap)} point${Math.abs(gap) === 1 ? '' : 's'} ${gap > 0 ? 'ahead of' : 'behind'} the ${ourNick}`
       }
+      // A game between two division rivals is ONE line, not the same score told
+      // from both benches.
+      const inDiv = [g.homeTeamId, g.awayTeamId].filter((tid) => this.data.teams.get(tid)?.divisionId === team.divisionId)
+      if (inDiv.length === 0) continue
+      const homeWon = g.result.homeGoals > g.result.awayGoals
+      const winId = homeWon ? g.homeTeamId : g.awayTeamId
+      const loseId = homeWon ? g.awayTeamId : g.homeTeamId
+      const subjectId = inDiv.includes(winId) ? winId : loseId
+      const t = this.data.teams.get(subjectId)!
+      const oppT = this.data.teams.get(subjectId === winId ? loseId : winId)
+      const hi = Math.max(g.result.homeGoals, g.result.awayGoals)
+      const lo = Math.min(g.result.homeGoals, g.result.awayGoals)
+      const won = subjectId === winId
+      if (!divisionLead && won && oppT) divisionLead = `${possessive(clubNickname(this.castTeam(t.id)!))} ${hi}-${lo} win over the ${clubNickname(this.castTeam(oppT.id)!)}`
+      const how = g.result.decidedBy !== 'regulation' ? ` in ${g.result.decidedBy === 'overtime' ? 'overtime' : 'a shootout'}` : ''
+      const gapShort = (tid: TeamId): string => gapOf(tid).replace(` the ${ourNick}`, '').replace(' with on points', '').replace(/ of$/, '')
+      const standing = inDiv.length === 2 && oppT
+        ? gapOf(t.id) === gapOf(oppT.id)
+          ? `Both are ${gapOf(t.id)}.`
+          : `The ${clubNickname(this.castTeam(t.id)!)} are ${gapOf(t.id)}, the ${clubNickname(this.castTeam(oppT.id)!)} ${gapShort(oppT.id)}.`
+        : (() => { const x = gapOf(t.id); return `${x.charAt(0).toUpperCase()}${x.slice(1)}.` })()
+      division.push(`${t.name} ${won ? 'beat' : 'lost to'} ${oppT?.name ?? 'the opposition'} ${hi}-${lo}${how}. ${standing}`)
       if (division.length >= 3) break
     }
     const wire: WireItem[] = []
