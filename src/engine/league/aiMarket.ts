@@ -34,6 +34,7 @@ import {
   groupOf,
   MAX_RETAIN_PCT,
   MAX_RETAIN_SLOTS,
+  HEADLINE_MIN_VALUE,
   MIN_SHOP_VALUE,
   pickValue,
   playerValue,
@@ -218,10 +219,13 @@ export function generateLeagueDeal(args: LeagueDealArgs): LeagueDeal | null {
   // comes back empty just because one shape had no candidates today.
   const weights = SHAPE_WEIGHTS[args.window].filter(([, w]) => w > 0)
   const first = weightedPick(rng, weights, ([, w]) => w)?.[0]
-  const order = first ? [first, ...weights.map(([s]) => s).filter((s) => s !== first)] : []
+  // A cap dump happens when a squeezed club goes looking for one — it is never
+  // the fallback for a day the other shapes found nothing (that made salary
+  // dumps a third of the wire).
+  const order = first ? [first, ...weights.map(([s]) => s).filter((s) => s !== first && s !== 'capDump')] : []
   const ranks = new Map(args.clubs.map((c) => [c.team.id as string, c.strengthRank]))
   const year = args.picks.length ? Math.min(...args.picks.map((p) => p.year)) : 0
-  for (let i = 0; i < Math.min(3, order.length); i++) {
+  for (let i = 0; i < order.length; i++) {
     const shape = order[i]!
     const deal =
       shape === 'rental' ? sellVeteran(args, ranks, year, 'rental')
@@ -256,28 +260,64 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
     .filter((c) => c.posture === 'rebuild' || (c.posture === 'retool' && (args.window !== 'inSeason' || args.deadlineProximity > 0.3)))
     .map((c) => ({ c, vets: vetsOf(c) }))
     .filter((x) => x.vets.length > 0)
-  const pickedSeller = weightedPick(rng, sellers, (x) => (x.c.posture === 'rebuild' ? 1.4 : 0.7) * (0.5 + x.c.persona.aggression))
-  if (!pickedSeller) { args.why?.(`sellVeteran:noSeller`); return null }
-  const seller = pickedSeller.c
-  const vets = pickedSeller.vets
-  const vet = vets[rng.int(Math.min(3, vets.length))] ?? vets[0]
-  if (!vet) { args.why?.(`sellVeteran:L251`); return null }
+  if (sellers.length === 0) { args.why?.(`sellVeteran:noSeller`); return null }
+  // Candidates first, then the choice: every (seller, veteran) pair that has at
+  // least one club able to use him. A seller with nobody to call is skipped
+  // rather than ending the attempt — the old one-draw version spent most of
+  // its attempts on a veteran no contender had a hole for.
+  const buyersFor = (seller: MarketClub, vet: Player): MarketClub[] => {
+    const g = groupOf(vet.position)
+    const vetOvr = ratedOverall(vet)
+    return clubs
+      .filter((c) => c !== seller && (c.posture === 'contend' || (c.posture === 'retool' && c.persona.aggression >= 0.6 && args.window !== 'inSeason')))
+      .filter((c) => c.team.roster.length < 26)
+      // A real upgrade over his weakest regular (the deadline's bar is lower —
+      // depth for the run counts).
+      .filter((c) => vetOvr >= replacementLevel(c.team, players, g) + (args.window === 'deadline' ? 0 : g === 'G' ? 1 : 2))
+  }
+  const cands: Array<{ seller: MarketClub; vet: Player; buyers: MarketClub[] }> = []
+  for (const { c, vets } of sellers) {
+    for (const vet of vets.slice(0, 3)) {
+      const buyers = buyersFor(c, vet)
+      if (buyers.length) cands.push({ seller: c, vet, buyers })
+    }
+  }
+  if (cands.length === 0) { args.why?.(`sellVeteran:noBuyer`); return null }
+  // The seller's eagerness picks whose phone rings first; then the buyers he
+  // calls, an eager (aggressive) buyer answering first. A few calls per attempt.
+  const tried = new Set<number>()
+  // Real players draw the calls: a fringe body worth less than a 7th is shopped,
+  // but rarely the one the phones light up for.
+  const tries = args.window === 'deadline' ? 5 : 3
+  for (let t = 0; t < tries && tried.size < cands.length; t++) {
+    const idx = weightedPick(rng, cands.map((_, i) => i).filter((i) => !tried.has(i)), (i) =>
+      (cands[i]!.seller.posture === 'rebuild' ? 1.4 : 0.7) * (0.5 + cands[i]!.seller.persona.aggression) *
+      Math.min(1, playerValue(cands[i]!.vet) / MIN_SHOP_VALUE) ** 2)
+    if (idx === undefined) break
+    tried.add(idx)
+    const { seller, vet, buyers } = cands[idx]!
+    const pool = [...buyers]
+    for (let k = 0; k < 2 && pool.length; k++) {
+      const buyer = weightedPick(rng, pool, (c) => 0.4 + c.persona.aggression + (c.posture === 'contend' ? 0.4 : 0))
+      if (!buyer) break
+      pool.splice(pool.indexOf(buyer), 1)
+      const deal = closeVeteranDeal(args, ranks, year, shape, seller, vet, buyer)
+      if (deal) return deal
+    }
+  }
+  return null
+}
+
+function closeVeteranDeal(
+  args: LeagueDealArgs, ranks: Map<string, number>, year: number, shape: 'rental' | 'prospectFor',
+  seller: MarketClub, vet: Player, buyer: MarketClub,
+): LeagueDeal | null {
+  const { players, rng, busy } = args
+  const rental = shape === 'rental'
   const g = groupOf(vet.position)
-  const vetOvr = ratedOverall(vet)
   const vetValue = playerValue(vet)
   const salary = vet.contract.salary
   const slotFree = (seller.team.finances.retained?.length ?? 0) < MAX_RETAIN_SLOTS
-
-  // Buyers: contenders — and at the deadline an aggressive retooler — who have
-  // a real hole where he plays, a roster spot and the money (retention helps).
-  const buyers = clubs
-    .filter((c) => c !== seller && (c.posture === 'contend' || (c.posture === 'retool' && c.persona.aggression >= 0.6 && args.window !== 'inSeason')))
-    .filter((c) => c.team.roster.length < 26)
-    // A real upgrade over his weakest regular (the deadline's bar is lower —
-    // depth for the run counts).
-    .filter((c) => vetOvr >= replacementLevel(c.team, players, g) + (args.window === 'deadline' ? 0 : g === 'G' ? 1 : 2))
-  const buyer = weightedPick(rng, buyers, (c) => 0.4 + c.persona.aggression + (c.posture === 'contend' ? 0.4 : 0))
-  if (!buyer) { args.why?.(`sellVeteran:L265`); return null }
   const room = buyer.team.finances.salaryCap - capUsed(buyer.team, players)
   let retained = 0
   // Money has to work. First the seller retains (up to half); failing that the
@@ -300,19 +340,24 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
 
   // The return: a pick-hoarder wants picks; a prospect-minded GM wants a kid.
   const pool = ownedPicks(args.picks, buyer.team.id, year, ranks)
+  const depth = vetValue < MIN_SHOP_VALUE
   const prospects = args.prospectsOf(buyer.team)
-    .filter((p) => movable(p, busy) && playerValue(p) >= MIN_SHOP_VALUE && playerValue(p) <= vetValue * 0.9)
+    // A depth rental (worth less than the cheapest pick) goes for a farm body of
+    // like value — the "AHL depth for a deadline depth forward" swap.
+    .filter((p) => movable(p, busy) && playerValue(p) >= (depth ? vetValue * 0.5 : MIN_SHOP_VALUE) && playerValue(p) <= vetValue * (depth ? 1.2 : 0.9))
     .filter((p) => !(buyer.persona.loyalty >= 0.7 && isOwnDraftee(p, buyer.team)))
     .sort((a, b) => playerValue(b) - playerValue(a))
-  const wantsKid = !rental || rng.chance(0.2 + 0.6 * (1 - seller.persona.pickHoarding))
+  const wantsKid = !rental || depth || rng.chance(0.2 + 0.6 * (1 - seller.persona.pickHoarding))
   const kid = wantsKid ? prospects[rng.int(Math.min(2, prospects.length))] ?? prospects[0] : undefined
   if (!rental && !kid && pool.length === 0) { args.why?.(`sellVeteran:L281`); return null }
   // Out of picks (the deadline eats them): a young roster player headlines instead.
   let youngster: Player | undefined
-  if (!kid && pool.length === 0 && seller.team.roster.length < 26) {
+  // A depth rental with no farm body to swap: a like-valued depth skater from
+  // the roster goes back (the deadline "depth for depth" move).
+  if (!kid && (pool.length === 0 || depth) && seller.team.roster.length < 26) {
     youngster = buyer.team.roster
       .map((id) => players.get(id))
-      .filter((p): p is Player => movable(p, busy) && p.age <= 25 && p.position !== 'G' && p.id !== filler?.id)
+      .filter((p): p is Player => movable(p, busy) && (depth || p.age <= 25) && p.position !== 'G' && p.id !== filler?.id && p.id !== vet.id)
       .filter((p) => playerValue(p) >= vetValue * 0.5 && playerValue(p) <= vetValue * 1.1)
       .sort((x, y) => Math.abs(playerValue(x) - vetValue * 0.8) - Math.abs(playerValue(y) - vetValue * 0.8))[0]
   }
@@ -331,7 +376,17 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
       packages.push({ picks: [pool[i]!.pick, pool[j]!.pick], total: base + pool[i]!.value + pool[j]!.value })
     }
   }
-  packages.sort((x, y) => Math.abs(x.total - target) - Math.abs(y.total - target) || x.picks.length - y.picks.length)
+  // Both books insist the best piece in a deal comes back their way, so a
+  // package with no headline (two late picks for a top-six forward) is a wasted
+  // call: packages with a real headline are tried first.
+  const headlineOf = (pk: { picks: DraftPick[] }): number => Math.max(
+    kid ? playerValue(kid) : 0, youngster ? playerValue(youngster) : 0,
+    ...pk.picks.map((p) => pool.find((c) => c.pick === p)?.value ?? 0))
+  // (Only a real player needs a headline; a depth rental goes for a late pick.
+  // A headline that overpays the buyer's book is no better a call.)
+  const headed = (pk: { picks: DraftPick[]; total: number }): number =>
+    vetValue < HEADLINE_MIN_VALUE || (headlineOf(pk) >= vetValue * 0.62 && pk.total <= target * 1.3) ? 0 : 1
+  packages.sort((x, y) => headed(x) - headed(y) || Math.abs(x.total - target) - Math.abs(y.total - target) || x.picks.length - y.picks.length)
   const calls = 2 + Math.round(3 * buyer.persona.aggression)
   const farmIds = new Set<string>(kid ? [kid.id as string] : [])
   let chosen: DraftPick[] | null = null
@@ -372,6 +427,17 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
 /* ── hockey trade: need for need ── */
 
 function hockeyTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: number): LeagueDeal | null {
+  // A GM with a hole makes several calls; if the first club he rings has no
+  // fit, the next initiator gets a turn (candidates before the choice).
+  const skip = new Set<MarketClub>()
+  for (let t = 0; t < 3; t++) {
+    const deal = hockeyTradeOnce(args, ranks, year, skip)
+    if (deal) return deal
+  }
+  return null
+}
+
+function hockeyTradeOnce(args: LeagueDealArgs, ranks: Map<string, number>, year: number, skip: Set<MarketClub>): LeagueDeal | null {
   const { clubs, players, rng, busy } = args
   // Each club's need: the group whose weakest regular sits furthest below the
   // league's typical regular there; it can deal from the other group when it
@@ -385,15 +451,12 @@ function hockeyTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   const needOf = (c: MarketClub): PositionGroup =>
     replacementLevel(c.team, players, 'F') - medF < replacementLevel(c.team, players, 'D') - medD ? 'F' : 'D'
   const spare = (c: MarketClub, g: PositionGroup): boolean => groupCount(c.team, players, g) >= (g === 'D' ? 7 : 13)
-  const initiators = clubs.filter((c) => spare(c, needOf(c) === 'F' ? 'D' : 'F'))
+  const initiators = clubs.filter((c) => !skip.has(c) && spare(c, needOf(c) === 'F' ? 'D' : 'F'))
   const a = weightedPick(rng, initiators, (c) => 0.3 + c.persona.aggression)
   if (!a) { args.why?.(`hockeyTrade:noInitiator`); return null }
+  skip.add(a)
   const needA = needOf(a)
   const giveG: PositionGroup = needA === 'F' ? 'D' : 'F'
-  // B needs what A spares, and can spare what A needs.
-  const partners = clubs.filter((c) => c !== a && c.team.roster.length < 26 && needOf(c) === giveG && spare(c, needA))
-  const b = weightedPick(rng, partners, (c) => 0.4 + c.persona.aggression)
-  if (!b) { args.why?.(`hockeyTrade:noPartner`); return null }
   // A offers a middle player from its surplus group (never its top two there).
   const aSide = a.team.roster
     .map((id) => players.get(id))
@@ -404,39 +467,59 @@ function hockeyTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   const give = aSide[rng.int(Math.min(4, aSide.length))] ?? aSide[0]
   if (!give) { args.why?.(`hockeyTrade:L351`); return null }
   const gv = playerValue(give)
-  const bSide = b.team.roster
+  // Candidates before the choice: every club that can spare what A needs, would
+  // actually play the man A offers (its need, or simply an upgrade over its
+  // weakest regular there), and has a like-valued name to send back.
+  const offersFrom = (c: MarketClub): Player[] => c.team.roster
     .map((id) => players.get(id))
     .filter((p): p is Player => movable(p, busy) && groupOf(p.position) === needA)
-    .filter((p) => Math.abs(playerValue(p) - gv) <= gv * 0.6)
+    // Close in value: each side's lens insists the best piece comes back its
+    // way, so a lopsided swap is dead on arrival whatever the pick says.
+    .filter((p) => Math.abs(playerValue(p) - gv) <= gv * 0.35)
     .filter((p) => ratedOverall(p) >= replacementLevel(a.team, players, needA))
-    .filter((p) => !(b.persona.loyalty >= 0.65 && isOwnDraftee(p, b.team)))
+    .filter((p) => !(c.persona.loyalty >= 0.65 && isOwnDraftee(p, c.team)))
     .sort((x, y) => Math.abs(playerValue(x) - gv) - Math.abs(playerValue(y) - gv))
-  const get = bSide[0]
-  if (!get) { args.why?.(`hockeyTrade:L361`); return null }
-  // Salaries must fit both ways.
-  const aRoom = a.team.finances.salaryCap - capUsed(a.team, players) + give.contract.salary
-  const bRoom = b.team.finances.salaryCap - capUsed(b.team, players) + get.contract.salary
-  if (get.contract.salary > aRoom || give.contract.salary > bRoom) { args.why?.(`hockeyTrade:L365`); return null }
-  // Balance the gap with a pick from the side getting the better player.
-  const diff = playerValue(get) - gv
+  const partners = clubs
+    .filter((c) => c !== a && c.team.roster.length < 26 && spare(c, needA))
+    .filter((c) => needOf(c) === giveG || ratedOverall(give) >= replacementLevel(c.team, players, giveG) + 1)
+    .map((c) => ({ c, offers: offersFrom(c) }))
+    .filter((x) => x.offers.length > 0)
+  const picked = weightedPick(rng, partners, (x) => (0.4 + x.c.persona.aggression) * (needOf(x.c) === giveG ? 1.5 : 1))
+  if (!picked) { args.why?.(`hockeyTrade:noPartner`); return null }
+  const b = picked.c
+  const bSide = picked.offers
+  if (bSide.length === 0) { args.why?.(`hockeyTrade:L361`); return null }
+  // The two GMs talk through a few names before giving up on the fit.
+  let get: Player | undefined
   let aPick: DraftPick | undefined
   let bPick: DraftPick | undefined
-  if (Math.abs(diff) > gv * 0.1) {
-    const payer = diff > 0 ? a : b
-    const fit = ownedPicks(args.picks, payer.team.id, year, ranks)
-      .filter((c) => c.value <= Math.abs(diff) * 1.25)[0]
-    if (fit) {
-      if (diff > 0) aPick = fit.pick
-      else bPick = fit.pick
+  for (const cand of bSide.slice(0, 3)) {
+    // Salaries must fit both ways.
+    const aRoom = a.team.finances.salaryCap - capUsed(a.team, players) + give.contract.salary
+    const bRoom = b.team.finances.salaryCap - capUsed(b.team, players) + cand.contract.salary
+    if (cand.contract.salary > aRoom || give.contract.salary > bRoom) { args.why?.(`hockeyTrade:L365`); continue }
+    // Balance the gap with a pick from the side getting the better player.
+    const diff = playerValue(cand) - gv
+    let ap: DraftPick | undefined
+    let bp: DraftPick | undefined
+    if (Math.abs(diff) > gv * 0.1) {
+      const payer = diff > 0 ? a : b
+      const fit = ownedPicks(args.picks, payer.team.id, year, ranks)
+        .filter((c) => c.value <= Math.abs(diff) * 1.25)[0]
+      if (fit) {
+        if (diff > 0) ap = fit.pick
+        else bp = fit.pick
+      }
     }
+    const ok = bothAccept({
+      a, b,
+      aGives: { players: [give], picks: ap ? [ap] : [] },
+      bGives: { players: [cand], picks: bp ? [bp] : [] },
+      players, rng, deadlineProximity: args.deadlineProximity, farmIds: new Set(),
+    })
+    if (ok) { get = cand; aPick = ap; bPick = bp; break }
   }
-  const ok = bothAccept({
-    a, b,
-    aGives: { players: [give], picks: aPick ? [aPick] : [] },
-    bGives: { players: [get], picks: bPick ? [bPick] : [] },
-    players, rng, deadlineProximity: args.deadlineProximity, farmIds: new Set(),
-  })
-  if (!ok) { args.why?.(`hockeyTrade:reject`); return null }
+  if (!get) { args.why?.(`hockeyTrade:reject`); return null }
   const word = (g: PositionGroup): string => (g === 'D' ? 'defenceman' : 'forward')
   const pickNote = aPick ? ` and ${pickLabel(aPick)}` : ''
   const backNote = bPick ? ` and ${pickLabel(bPick)}` : ''

@@ -9188,6 +9188,9 @@ export class Career {
     for (const team of this.data.teams.values()) repairLines(team, this.data.players)
     // Re-balance rosters across NHL/AHL pairs for the new season.
     this.assignRosters()
+    // The floor binds on opening night too: camp cuts and the NHL/AHL split can
+    // drop a club back under it after the summer top-up.
+    this.enforceAiCapFloor()
     // Number this year's new arrivals (draft picks, signings) who lack a jersey.
     this.ensureJerseyNumbers()
 
@@ -15175,7 +15178,7 @@ export class Career {
         floorOf,
         prospectsOf,
         busy,
-        ...(this.marketDiagnostics ? { why: this.marketDiagnostics } : {}),
+        ...(this.marketDiagnostics ? { why: (r: string) => this.marketDiagnostics?.(`${opts.deadlineDay ? 'DD' : window}:${r}`) } : {}),
       })
       if (!deal) continue
       const aggr = (this.gmPersonaFor(deal.sellerTeamId).aggression + this.gmPersonaFor(deal.buyerTeamId).aggression) / 2

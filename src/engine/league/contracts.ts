@@ -812,7 +812,10 @@ export function aiFloorTopUp(args: {
       if (!cand) break
       taken.add(cand.id as string)
       const ask = askTerms(cand, year)
-      const salary = Math.min(room, Math.max(ask.salary, roundTo25k(Math.min(short, ask.salary * 1.5))))
+      // A club far under the floor spreads the shortfall over the few seats it
+      // has left — one-year overpays, the way real floor clubs comply.
+      const seats = Math.max(1, Math.min(6 - guard, 25 - team.roster.length))
+      const salary = Math.min(room, Math.max(ask.salary, roundTo25k(Math.min(short, Math.max(short / seats, ask.salary * 1.5), ask.salary * 3))))
       try {
         signPlayer({ team, player: cand, salary, years: 1, year, players })
       } catch {

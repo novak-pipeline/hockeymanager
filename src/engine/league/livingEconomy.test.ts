@@ -113,6 +113,24 @@ describe('the floor binds', () => {
     expect(res.signings.length).toBeGreaterThan(0)
     expect(capUsedFor(team, w.players)).toBeGreaterThan(before)
   })
+
+  it('a club far under with only a few seats left spreads the shortfall over them (one-year overpays)', () => {
+    // 22 cheap bodies + one free seat before 25... two seats in all.
+    const cheap = [...roster('c', 60, 1_000_000), makePlayer('cx', 58, { salary: 1_000_000 })]
+    const team = makeTeam('cheap', cheap)
+    const fas = [makePlayer('fa1', 74, { age: 29, salary: 0 }), makePlayer('fa2', 73, { age: 30, salary: 0 })]
+    const w = world([team], [...cheap, ...fas])
+    const floor = capFloorFor(team.finances.salaryCap)
+    const short = floor - capUsedFor(team, w.players)
+    expect(short).toBeGreaterThan(0)
+    const res = aiFloorTopUp({ ...w, freeAgentIds: fas.map((p) => p.id), userTeamId: asTeamId('user'), year: 2030, floorOf: () => floor })
+    expect(res.signings.length).toBe(2)
+    // Each seat carries at least half of the gap (capped at 3x the ask): the club
+    // closes most of the distance instead of signing two 1.5x-ask depth deals.
+    const paid = res.signings.reduce((a, s) => a + s.salary, 0)
+    const asks = fas.reduce((a, p) => a + askTerms(p, 2030).salary, 0)
+    expect(paid).toBeGreaterThanOrEqual(Math.min(short, asks * 3) * 0.95)
+  })
 })
 
 describe('the free-agent market', () => {
@@ -183,6 +201,34 @@ describe('the league market', () => {
       }
     }
     expect(found).toBeGreaterThan(0)
+  })
+
+  it('candidates before the choice: the one seller with a buyer is found, not lost to a bad draw', () => {
+    // Two rebuilders. The eager one (aggression 1) only has a veteran nobody can
+    // use; the quiet one has the piece the contender needs. A one-draw market
+    // picked the eager seller most days and came back empty.
+    const eagerPlayers = roster('e', 60, 2_000_000)
+    const dud = makePlayer('dud', 62, { age: 31, years: 1, salary: 2_000_000 })
+    const eager = makeTeam('eag', [...eagerPlayers, dud])
+    const quietPlayers = roster('q', 66, 2_000_000)
+    const vet = makePlayer('qvet', 82, { age: 30, years: 1, salary: 3_000_000 })
+    const quiet = makeTeam('qui', [...quietPlayers, vet])
+    const buyerPlayers = roster('b', 72, 2_000_000)
+    const buyer = makeTeam('buy', buyerPlayers)
+    const w = world([eager, quiet, buyer], [...eagerPlayers, dud, ...quietPlayers, vet, ...buyerPlayers])
+    const picks: DraftPick[] = [makePick(2031, 1, 'buy'), makePick(2031, 2, 'buy'), makePick(2032, 2, 'buy')]
+    const clubs: MarketClub[] = [
+      { team: eager, persona: persona('eag', { aggression: 1 }), posture: 'rebuild', strengthRank: 3 },
+      { team: quiet, persona: persona('qui', { aggression: 0.1 }), posture: 'rebuild', strengthRank: 2 },
+      { team: buyer, persona: persona('buy', { aggression: 0.8 }), posture: 'contend', strengthRank: 1 },
+    ]
+    let found = 0
+    for (let i = 0; i < 20; i++) {
+      const d = generateLeagueDeal({ window: 'deadline', deadlineProximity: 1, ...w, clubs, picks, rng: new Rng(i), floorOf: () => 0, prospectsOf: () => [] })
+      if (d?.playerIds.includes(vet.id)) found++
+      expect(d?.playerIds.includes(dud.id) ?? false).toBe(false)
+    }
+    expect(found).toBeGreaterThanOrEqual(15)
   })
 
   it('a loyal GM does not move his own draftee', () => {
