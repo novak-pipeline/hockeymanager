@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Blender-vs-procedural bake-off: renders the SAME harness shots with both
 # athlete sources and tiles them side by side (left = procedural, right =
-# Blender) into docs/graphics/blender/. Needs the harness on :5175 and Python+Pillow.
+# Blender) into docs/graphics/blender/. Needs the harness on :5175 (or R3D_PORT) and Python+Pillow.
 #   bash scripts/dev/render3d-harness/bakeoff.sh [shot-name ...]
 set -e
 cd "$(dirname "$0")/../../.."

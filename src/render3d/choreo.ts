@@ -146,6 +146,8 @@ export interface ChoreoActor {
   /** Last smoothed speed (ft/s) — for hockey-stop detection. */
   lastSpeedFt: number
   stopCooldown: number
+  stopAccum: number
+  stopFrom: number
 }
 
 export type LocoMode = 'code' | 'clip' | 'hybrid'
@@ -221,11 +223,6 @@ export class Choreographer {
     const a = this.find(c.actorId)
     if (!a?.layer || !p.clip) return
     a.layer.play(p.clip, { at: late })
-    if (c.kind === 'hit' && c.targetId) {
-      // the hitter squares up to his man as he drives in
-      const t = this.find(c.targetId)
-      if (t) a.faceOverride = { angle: Math.atan2(t.worldX.pos - a.worldX.pos, t.worldZ.pos - a.worldZ.pos), until: c.absT + 0.3 }
-    }
   }
 
   private contact(p: PlannedCue): void {
@@ -254,14 +251,13 @@ export class Choreographer {
     target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.55 + 0.45 * plan.hardness : 1 })
     const meta = CLIPS[plan.target]!
     const len = (meta.hold ?? 0) + 1.2 + (meta.next ? 1.4 : 0)
-    let face: number
     if (plan.pinned) {
-      // chest to the glass: face the nearest boards
-      face = Math.abs(wz) / 42.5 > Math.abs(wx) / 100 ? (wz > 0 ? 0 : Math.PI) : wx > 0 ? Math.PI / 2 : -Math.PI / 2
-    } else if (hitter) {
-      face = Math.atan2(hitter.worldX.pos - target.worldX.pos, hitter.worldZ.pos - target.worldZ.pos)
-    } else face = target.angle
-    target.faceOverride = { angle: wrapAngle(face), until: this.clock + len }
+      // chest to the glass: face the nearest boards (eased by the facing spring).
+      // Open-ice reactions keep the sim's facing: overriding it made bodies swing
+      // round and back — measurable yaw twitch (motion-probe gate).
+      const face = Math.abs(wz) / 42.5 > Math.abs(wx) / 100 ? (wz > 0 ? 0 : Math.PI) : wx > 0 ? Math.PI / 2 : -Math.PI / 2
+      target.faceOverride = { angle: wrapAngle(face), until: this.clock + len }
+    }
     if (plan.target !== 'hit_stagger') {
       target.followHL = plan.target === 'hit_fall' ? 0.9 : 0.35
       this.pending.push({ at: this.clock + len, run: () => (target.followHL = this.baseFollowHL) })
@@ -315,15 +311,26 @@ export class Choreographer {
 
   // ── per-frame locomotion + overlay ─────────────────────────────────────────
 
-  /** Hockey stops from the sim's own deceleration. */
-  locomotionEvents(actor: ChoreoActor, speedFt: number, simDt: number): void {
-    if (!actor.layer || actor.rig.goalie || simDt <= 0) return
-    actor.stopCooldown = Math.max(0, actor.stopCooldown - simDt)
-    const decel = (actor.lastSpeedFt - speedFt) / simDt
-    actor.lastSpeedFt = speedFt
-    if (actor.stopCooldown === 0 && wantsHockeyStop(speedFt, decel) && actor.layer.bodyBusy() === 0) {
+  /**
+   * Hockey stops from the sim's own deceleration: the SMOOTHED speed must fall
+   * hard for a sustained ~0.12 s from real skating speed (per-frame speed is
+   * noisy — a raw threshold fired a stop every few frames).
+   */
+  locomotionEvents(actor: ChoreoActor, dt: number, playbackSpeed = 1): void {
+    if (!actor.layer || actor.rig.goalie || dt <= 0) return
+    actor.stopCooldown = Math.max(0, actor.stopCooldown - dt)
+    // velocities are per wall-second; at 2×/4× playback bring them back to game speed
+    const sp = Math.hypot(actor.vx, actor.vz) / Math.max(1, playbackSpeed)
+    const decel = (actor.lastSpeedFt - sp) / dt
+    actor.lastSpeedFt = sp
+    if (decel > 30) {
+      if (actor.stopAccum === 0) actor.stopFrom = sp + decel * dt
+      actor.stopAccum += dt
+    } else actor.stopAccum = 0
+    if (actor.stopCooldown === 0 && actor.stopAccum >= 0.12 && wantsHockeyStop(actor.stopFrom, decel) && actor.layer.bodyBusy() === 0) {
       actor.layer.play('hockey_stop')
-      actor.stopCooldown = 2
+      actor.stopCooldown = 3
+      actor.stopAccum = 0
     }
   }
 

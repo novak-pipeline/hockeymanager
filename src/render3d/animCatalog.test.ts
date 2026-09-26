@@ -102,8 +102,12 @@ describe('save selection', () => {
     expect(saveClipFor(1.5, 10, lo, false)).toBe('g_pad_save')
     expect(saveClipFor(0.2, 10, lo, false)).toBe('g_butterfly')
   })
-  it('a wide rebound is a scramble', () => {
-    expect(saveClipFor(3, 10, 'x', true)).toBe('g_scramble')
+  it('some wide rebounds become scrambles (not every one)', () => {
+    const ids = Array.from({ length: 60 }, (_, i) => 'r' + i)
+    const n = ids.filter((id) => saveClipFor(3, 10, id, true) === 'g_scramble').length
+    expect(n).toBeGreaterThan(10)
+    expect(n).toBeLessThan(50)
+    expect(ids.some((id) => saveClipFor(1, 10, id, true) === 'g_scramble')).toBe(false)
   })
 })
 
@@ -165,7 +169,7 @@ describe('locomotion weights', () => {
     }
   })
   it('hockey stop only on a hard stop from speed', () => {
-    expect(wantsHockeyStop(20, 40)).toBe(true)
+    expect(wantsHockeyStop(22, 40)).toBe(true)
     expect(wantsHockeyStop(20, 5)).toBe(false)
     expect(wantsHockeyStop(4, 60)).toBe(false)
   })

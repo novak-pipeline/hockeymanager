@@ -26,7 +26,7 @@ const page = await browser.newPage({ viewport: big ? { width: 1920, height: 1080
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
-await page.goto(`http://localhost:5175/?hud=0&${query}`)
+await page.goto(`http://localhost:${process.env.R3D_PORT ?? 5175}/?hud=0&${query}`)
 try {
   await page.waitForFunction(() => '__r3d' in window, null, { timeout: 60000 })
 } catch (e) {

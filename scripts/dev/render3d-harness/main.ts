@@ -48,6 +48,7 @@ r.onUpdate((v) => {
 r.load(tl, colors, labels)
 r.setSpeed(Number(q.get('speed') ?? 1))
 if (q.has('t')) r.seekFraction(Number(q.get('t')))
+let actorId: string | null = null
 // ?goal=N&lead=3 → start playing `lead` seconds before the Nth goal
 // (&ev=save|shot|hit picks another event type)
 if (q.has('goal')) {
@@ -59,6 +60,9 @@ if (q.has('goal')) {
       return (g.period - 1) * 1200 + g.t
     })
   const at = goals[Number(q.get('goal'))] ?? 0
+  const evObj = out.stream.filter((e) => e.type === kind)[Number(q.get('goal'))] as unknown as Record<string, unknown> | undefined
+  // the event's main actor (for ?closeup=actor,…)
+  actorId = (evObj?.['by'] ?? evObj?.['shooter'] ?? evObj?.['scorer'] ?? evObj?.['goalie'] ?? evObj?.['from'] ?? evObj?.['winner'] ?? null) as string | null
   r.seekFraction(Math.max(0, at - Number(q.get('lead') ?? 3)) / tl.duration)
   r.play()
 }
@@ -75,6 +79,7 @@ if (q.get('fly') === '1') {
 if (q.has('closeup')) {
   const [who, dist, az, hgt] = q.get('closeup')!.split(',')
   const [team, idx] = who!.split(':')
+  void team
   const R = r as unknown as {
     homePoses: Array<{ worldX: { pos: number }; worldZ: { pos: number }; angle: number; rig: { visible: boolean } }>
     awayPoses: Array<{ worldX: { pos: number }; worldZ: { pos: number }; angle: number; rig: { visible: boolean } }>
@@ -82,8 +87,9 @@ if (q.has('closeup')) {
     awayGoaliePose: { worldX: { pos: number }; worldZ: { pos: number }; angle: number }
     setDebugCamera: (p: { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov?: number }) => void
   }
+  const all = () => [...R.homePoses, ...R.awayPoses, R.homeGoaliePose, R.awayGoaliePose] as unknown as Array<{ playerId: string | null; rig: { visible: boolean }; worldX: { pos: number }; worldZ: { pos: number }; angle: number }>
   const pick = () =>
-    idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible)[Number(idx)]!
+    who === 'actor' ? all().find((p) => p.playerId === actorId && p.rig.visible)! : idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible)[Number(idx)]!
   const aim = () => {
     const p = pick()
     if (!p) return

@@ -148,8 +148,8 @@ export function shotClipFor(distToNetFt: number, sincePassS: number | null, oneT
  * come in higher) and a stable hash for variety.
  */
 export function saveClipFor(lateralFt: number, shotDistFt: number, id: string, rebound: boolean): string {
-  if (rebound && Math.abs(lateralFt) > 2.2) return 'g_scramble'
   const h = hash01(id)
+  if (rebound && Math.abs(lateralFt) > 2.5 && h < 0.5) return 'g_scramble'
   const high = h + smooth(20, 55, shotDistFt) * 0.4 > 0.72
   if (Math.abs(lateralFt) < 0.8) return high ? 'g_glove_save' : 'g_butterfly'
   if (high) return lateralFt > 0 ? 'g_glove_save' : 'g_blocker_save'
@@ -226,5 +226,5 @@ export function locomotionWeights(s: LocoState): Record<'skate_stride' | 'skate_
 
 /** A hard stop: decelerating fast from speed. */
 export function wantsHockeyStop(speedFtS: number, decelFtS2: number): boolean {
-  return speedFtS > 9 && decelFtS2 > 28
+  return speedFtS > 16 && decelFtS2 > 30
 }

@@ -158,6 +158,8 @@ interface PlayerPose {
   followHL: number
   lastSpeedFt: number
   stopCooldown: number
+  stopAccum: number
+  stopFrom: number
 }
 
 interface ActiveCue {
@@ -495,6 +497,8 @@ export class Rink3dRenderer implements MatchRenderer {
         followHL: PLAYER_FOLLOW_HL,
         lastSpeedFt: 0,
         stopCooldown: 0,
+        stopAccum: 0,
+        stopFrom: 0,
       }
     }
     for (let i = 0; i < SKATER_RIGS_PER_TEAM; i++) {
@@ -1197,7 +1201,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     if (pose.layer) {
       pose.layer.update(simDt)
-      this.choreo?.locomotionEvents(pose, speedFt, simDt)
+      this.choreo?.locomotionEvents(pose, dt, this.speed)
     }
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
