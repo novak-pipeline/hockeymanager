@@ -18,7 +18,7 @@ import {
   facingTarget,
 } from './pose'
 import { rinkOutline, outlineLength, roundedRectPerimeter, sweepProfile, stationsAlong } from './rinkShape'
-import { cameraFovFor, celebrationTarget, cameraTargetFor } from './math'
+import { cameraFovFor, celebrationTarget, cameraTargetFor, softDeadzone, emaStep, springStep, clampSpeed, type Spring1D } from './math'
 import { mulberry32 } from './rng'
 
 const dist = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
@@ -250,6 +250,72 @@ describe('celebration + crowd envelopes', () => {
   it('broadcast is the long lens', () => {
     expect(cameraFovFor('broadcast')).toBeLessThan(cameraFovFor('endzone'))
     expect(cameraFovFor('broadcast')).toBeLessThan(cameraFovFor('follow'))
+  })
+})
+
+// ── calm camera ─────────────────────────────────────────────────────────────
+
+describe('springStep is truly critically damped', () => {
+  it('a step gap halves in exactly one half-life and never overshoots', () => {
+    let s: Spring1D = { pos: 10, vel: 0 }
+    const dt = 1 / 240
+    let t = 0
+    let crossed = -1
+    for (let i = 0; i < 2400; i++) {
+      s = springStep(s, 0, dt, 0.5)
+      t += dt
+      if (crossed < 0 && s.pos <= 5) crossed = t
+      expect(s.pos).toBeGreaterThanOrEqual(-1e-9)
+    }
+    expect(crossed).toBeCloseTo(0.5, 2)
+  })
+
+  it('is frame-rate independent (exact solution, not an integrator)', () => {
+    let a: Spring1D = { pos: 7, vel: -3 }
+    let b: Spring1D = { pos: 7, vel: -3 }
+    for (let i = 0; i < 60; i++) a = springStep(a, 1, 1 / 60, 0.3)
+    for (let i = 0; i < 240; i++) b = springStep(b, 1, 1 / 240, 0.3)
+    expect(a.pos).toBeCloseTo(b.pos, 9)
+    expect(a.vel).toBeCloseTo(b.vel, 9)
+  })
+})
+
+describe('softDeadzone (calm broadcast follow)', () => {
+  it('ignores motion inside the band', () => {
+    expect(softDeadzone(3, 0, 6)).toBe(0)
+    expect(softDeadzone(-5.9, 0, 6)).toBe(0)
+  })
+
+  it('follows only the excess beyond the band — continuous, no step', () => {
+    expect(softDeadzone(6.5, 0, 6)).toBeCloseTo(0.5, 9)
+    expect(softDeadzone(-10, 0, 6)).toBeCloseTo(-4, 9)
+    // continuity across the band edge (the old hard deadzone jumped by `band`)
+    const eps = 1e-6
+    expect(Math.abs(softDeadzone(6 + eps, 0, 6) - softDeadzone(6 - eps, 0, 6))).toBeLessThan(1e-5)
+  })
+
+  it('full pipeline: a puck teleport (goal → centre-ice faceoff) becomes an even, overshoot-free pan', () => {
+    // band → EMA → speed limit → critically damped spring, at 60 fps
+    let focus = 80
+    let cam: Spring1D = { pos: 80, vel: 0 }
+    const dt = 1 / 60
+    let maxStep = 0
+    let prev = cam.pos
+    let prevV = 0
+    let maxAcc = 0
+    for (let i = 0; i < 600; i++) {
+      const committed = softDeadzone(0, focus, 6)
+      focus = clampSpeed(focus, emaStep(focus, committed, dt, 0.9), dt, 40)
+      cam = springStep(cam, focus, dt, 0.6)
+      maxStep = Math.max(maxStep, Math.abs(cam.pos - prev))
+      const v = (cam.pos - prev) / dt
+      if (i > 0) maxAcc = Math.max(maxAcc, Math.abs(v - prevV) / dt)
+      prevV = v
+      prev = cam.pos
+      expect(cam.pos).toBeGreaterThanOrEqual(6 - 1e-6) // never overshoots past the band edge
+    }
+    expect(maxStep / dt).toBeLessThan(70) // a pan, never a whip (old clamp was 60 ft/s on the camera)
+    expect(maxAcc).toBeLessThan(120) // ft/s² — a smooth operator, not a whip-pan
   })
 })
 

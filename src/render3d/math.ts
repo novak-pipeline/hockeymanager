@@ -25,6 +25,9 @@ export function normToWorld(nx: number, ny: number): { wx: number; wz: number } 
 
 // ── critically-damped spring follow ─────────────────────────────────────────
 
+/** Root of (1+x)·e^(−x) = ½ — converts a half-life into ω for critical damping. */
+const CRIT_HALF_LIFE_X = 1.6783469900166612
+
 export interface Spring1D {
   pos: number
   vel: number
@@ -42,12 +45,16 @@ export function springStep(
   halfLife: number
 ): Spring1D {
   if (dt <= 0) return spring
-  // omega for critical damping from half-life
-  const omega = Math.LN2 / halfLife
+  // EXACT critically-damped solution x(t) = (y0 + (v0 + ω·y0)·t)·e^(−ωt).
+  // (The previous closed form dropped the ω·y0·t term, which made it
+  // under-damped: it overshot moving targets — a camera/player wobble source.)
+  // ω is chosen so a step gap really halves in `halfLife`: (1+x)e^(−x) = ½ → x ≈ 1.678.
+  const omega = CRIT_HALF_LIFE_X / halfLife
   const exp = Math.exp(-omega * dt)
-  const d = spring.pos - target
-  const newPos = target + (d + spring.vel * dt) * exp
-  const newVel = (spring.vel - omega * (d + spring.vel * dt)) * exp
+  const y0 = spring.pos - target
+  const j1 = spring.vel + omega * y0
+  const newPos = target + (y0 + j1 * dt) * exp
+  const newVel = (spring.vel - omega * j1 * dt) * exp
   return { pos: newPos, vel: newVel }
 }
 
@@ -305,15 +312,17 @@ export function cameraFovFor(preset: CameraPreset): number {
  * Goal-celebration framing: the same broadcast side, lower and tighter on the
  * scorer. Blended in by celebrationWeight (pose.ts) — never a hard cut.
  */
-export function celebrationTarget(scorerWx: number, scorerWz: number): CameraTarget & { fov: number } {
+export function celebrationTarget(spotWx: number, spotWz: number): CameraTarget & { fov: number } {
+  // A modest push-in from the same side as the game camera: a little lower,
+  // a little tighter. Nothing here moves while the cue plays.
   return {
-    px: scorerWx * 0.85,
-    py: 24,
-    pz: Math.max(-100, scorerWz - 62),
-    lx: scorerWx,
-    ly: 3.2,
-    lz: scorerWz,
-    fov: 24,
+    px: spotWx * 0.5,
+    py: 34,
+    pz: -92,
+    lx: spotWx,
+    ly: 2,
+    lz: spotWz,
+    fov: 22,
   }
 }
 
@@ -333,6 +342,20 @@ export function celebrationTarget(scorerWx: number, scorerWz: number): CameraTar
 export function applyDeadzone(value: number, center: number, threshold: number): number {
   if (threshold <= 0) return value
   return Math.abs(value - center) < threshold ? center : value
+}
+
+/**
+ * Soft dead-band follow: returns the point the focus should move toward so
+ * that it trails `value` by at most `band`. Unlike applyDeadzone (a hard
+ * step the moment the band is escaped → stop/start "stick-slip" pans), this
+ * is continuous — the pan eases in from zero as the play leaves the band.
+ */
+export function softDeadzone(value: number, center: number, band: number): number {
+  if (band <= 0) return value
+  const d = value - center
+  if (d > band) return value - band
+  if (d < -band) return value + band
+  return center
 }
 
 /**

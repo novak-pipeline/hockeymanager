@@ -1,3 +1,4 @@
+import * as THREE from 'three'
 import { generateLeague } from '@data/generate'
 import type { Player, PlayerId } from '@domain'
 import { fullSimGame } from '@engine/full/fullSim'
@@ -25,7 +26,11 @@ const labels: Record<string, { lastName: string }> = {}
 for (const [id, p] of data.players) labels[id] = { lastName: p.name.split(' ').pop() ?? p.name }
 
 const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('away') ?? 0xc8102e) }
-const r = await Rink3dRenderer.create(host, colors)
+// ?old=1 mounts the pre-upgrade renderer (scripts/dev/render3d-harness/old-*.ts,
+// extracted from git, untracked) for A/B screenshots + perf.
+const Impl: typeof Rink3dRenderer =
+  q.get('old') === '1' ? ((await import(/* @vite-ignore */ './old-rink3dRenderer.ts')).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
+const r = await Impl.create(host, colors)
 r.setEventStream(out.stream)
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
 let last = ''
@@ -51,6 +56,14 @@ if (q.has('goal')) {
   r.play()
 }
 if (q.get('play') === '1') r.play()
+// ?fly=1 holds both goalies in the butterfly (pose inspection)
+if (q.get('fly') === '1') {
+  const g = r as unknown as { homeGoaliePose: { butterflyTimer: number }; awayGoaliePose: { butterflyTimer: number } }
+  g.homeGoaliePose.butterflyTimer = 1e6
+  g.awayGoaliePose.butterflyTimer = 1e6
+  r.setSpeed(0.05)
+  r.play()
+}
 if (q.get('hud') === '0') hud.style.display = 'none'
 // ?look=px,py,pz,lx,ly,lz[,fov] pins a debug camera (close-ups of the athletes)
 if (q.has('look')) {
@@ -83,6 +96,21 @@ win.__perf = (ms = 3000) =>
         const avg = times.reduce((a, b) => a + b, 0) / times.length
         res({ frames: times.length, avgMs: +avg.toFixed(2), p95Ms: +times[Math.floor(times.length * 0.95)]!.toFixed(2) })
       }
+    }
+    requestAnimationFrame(step)
+  })
+// Jiggle probe: await __camTrace(ms) → per-frame camera positions + look dirs
+win.__camTrace = (ms = 2000) =>
+  new Promise((res) => {
+    const cam = (r as unknown as { camera: THREE.PerspectiveCamera }).camera
+    const out: number[][] = []
+    const t0 = performance.now()
+    const v = new THREE.Vector3()
+    const step = (now: number) => {
+      const d = cam.getWorldDirection(v)
+      out.push([now - t0, cam.position.x, cam.position.y, cam.position.z, d.x, d.y, d.z])
+      if (now - t0 < ms) requestAnimationFrame(step)
+      else res(out)
     }
     requestAnimationFrame(step)
   })

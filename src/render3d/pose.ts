@@ -96,15 +96,17 @@ export function advanceStridePhase(phase: number, speed01: number, dt: number): 
 }
 
 function strideLeg(p: number, s: number): LegPose {
-  const crouchFlex = 0.3 + 0.3 * s
-  const crouchKnee = 0.5 + 0.45 * s
+  // Hockey stance even at rest: knees well bent, hips back (the mannequin
+  // look was an upright stance). Deepens with speed.
+  const crouchFlex = 0.52 + 0.22 * s
+  const crouchKnee = 0.85 + 0.3 * s
   const push = Math.max(0, Math.sin(p)) * s
   const recov = Math.max(0, -Math.sin(p)) * s
   const flex = crouchFlex - 0.45 * push + 0.3 * recov
   const knee = crouchKnee - 0.35 * push + 0.5 * recov
   return {
     flex,
-    abduct: 0.06 + 0.42 * push + 0.04 * recov,
+    abduct: 0.13 + 0.38 * push + 0.04 * recov,
     knee,
     ankle: knee - flex,
     splay: 0,
@@ -126,7 +128,8 @@ export function skaterPose(phase: number, speed01: number, turnRate: number): Bo
     left,
     right,
     hipHeight,
-    lean: 0.22 + 0.5 * s,
+    // torso 28° forward at rest → ~45° at full stride
+    lean: 0.49 + 0.3 * s,
     torsoYaw: 0.14 * s * Math.sin(phase),
     torsoRoll: 0.05 * s * Math.sin(phase),
     bodyRoll: clamp(turnRate * 0.16 * (0.3 + s), -0.4, 0.4),
@@ -158,7 +161,7 @@ export function goaliePose(butterfly: number): BodyPose {
     left,
     right,
     hipHeight: b === 0 ? ready : lerp(ready, fly, e),
-    lean: lerp(0.38, 0.12, e),
+    lean: lerp(0.45, 0.14, e),
     torsoYaw: 0,
     torsoRoll: 0,
     bodyRoll: 0,

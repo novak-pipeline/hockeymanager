@@ -115,13 +115,23 @@ export function buildRibbonCanvas(homeColor: number): HTMLCanvasElement {
 export const ATLAS_GRID = 4
 export const ATLAS_SLOT_PX = 256
 
-/** UV v-ranges inside one slot (0 = bottom). Geometry UVs are remapped into these. */
+/**
+ * UV v-ranges inside one slot (0 = bottom). Geometry UVs are remapped into
+ * these. `white` is a plain strip: solid-colour parts (breezers, helmet,
+ * gloves, skin, skates, stick) sample it and take their colour from vertex
+ * colours, so one material draws the whole player.
+ */
 export const ATLAS_REGIONS = {
-  torso: [0.34, 1.0],
-  upperArm: [0.25, 0.33],
-  forearm: [0.17, 0.25],
-  sock: [0.0, 0.16],
+  torso: [0.42, 1.0],
+  sleeve: [0.26, 0.41],
+  sock: [0.1, 0.25],
+  white: [0.0, 0.08],
 } as const
+
+/** Fraction along the sleeve (0 = wrist, 1 = shoulder) of the elbow stripe band. */
+export const SLEEVE_STRIPE_T = [0.27, 0.4] as const
+/** Fraction along the sock (0 = ankle, 1 = breezer hem) of the sock stripe band. */
+export const SOCK_STRIPE_T = [0.45, 0.68] as const
 
 export function buildAtlasCanvas(): HTMLCanvasElement {
   const [c] = canvas(ATLAS_GRID * ATLAS_SLOT_PX, ATLAS_GRID * ATLAS_SLOT_PX)
@@ -214,15 +224,28 @@ export function paintJerseySlot(atlas: HTMLCanvasElement, slot: number, kit: Kit
     ctx.fillText(numStr, ox + S * u, y(t0 + 0.86 * (t1 - t0)))
   }
 
-  // ── sleeves: upper arm plain, forearm carries the elbow stripes ──
-  const [f0, f1] = ATLAS_REGIONS.forearm
-  stripes(ctx, ox, y(f1 - 0.015), S, (f1 - f0) * S * 0.55, kit)
+  // ── sleeves: plain, with the classic stripe band just below the elbow ──
+  const [f0, f1] = ATLAS_REGIONS.sleeve
+  const fv = (t: number) => f0 + t * (f1 - f0)
+  stripes(ctx, ox, y(fv(SLEEVE_STRIPE_T[1])), S, (fv(SLEEVE_STRIPE_T[1]) - fv(SLEEVE_STRIPE_T[0])) * S, kit)
 
   // ── socks ──
   const [s0, s1] = ATLAS_REGIONS.sock
+  const sv = (t: number) => s0 + t * (s1 - s0)
   ctx.fillStyle = css(kit.socks)
   ctx.fillRect(ox, y(s1), S, (s1 - s0) * S)
-  stripes(ctx, ox, y(s0 + 0.62 * (s1 - s0)), S, (s1 - s0) * S * 0.38, kit)
+  stripes(ctx, ox, y(sv(SOCK_STRIPE_T[1])), S, (sv(SOCK_STRIPE_T[1]) - sv(SOCK_STRIPE_T[0])) * S, kit)
+
+  // ── knit texture: faint vertical ribs over all cloth (matte fabric read) ──
+  ctx.globalAlpha = 0.05
+  ctx.fillStyle = '#000000'
+  for (let x = 0; x < S; x += 3) ctx.fillRect(ox + x, y(1), 1, (1 - s0) * S)
+  ctx.globalAlpha = 1
+
+  // ── white strip for vertex-coloured parts ──
+  const [w0, w1] = ATLAS_REGIONS.white
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(ox, y(w1), S, (w1 - w0) * S)
   ctx.restore()
 }
 

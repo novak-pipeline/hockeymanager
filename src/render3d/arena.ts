@@ -60,6 +60,8 @@ function reflective<T extends THREE.Object3D>(o: T): T {
 
 export class Arena {
   readonly group = new THREE.Group()
+  /** Rig + video board: hidden for the top-down camera, which sits above them. */
+  readonly ceiling = new THREE.Group()
   readonly reflectUniforms = {
     tReflect: { value: null as THREE.Texture | null },
     uReflectMatrix: { value: new THREE.Matrix4() },
@@ -90,6 +92,11 @@ export class Arena {
     this.buildBowl()
     this.buildRig()
     this.buildJumbotron()
+    this.group.add(this.ceiling)
+  }
+
+  setCeilingVisible(v: boolean): void {
+    this.ceiling.visible = v
   }
 
   get environment(): THREE.Texture {
@@ -399,7 +406,8 @@ export class Arena {
       // goal lamp behind the glass
       const lampMat = new THREE.MeshStandardMaterial({ color: 0x400808, emissive: 0xff1a1a, emissiveIntensity: 0, roughness: 0.3 })
       const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 1.4, 16), lampMat)
-      lamp.position.set(sign * (RINK_HALF_L + 3), BOARD_H + GLASS_H + 1.6, 0)
+      // up behind the glass in the end stands — clear of the endzone camera (x=±110, y=14)
+      lamp.position.set(sign * (RINK_HALF_L + 14), 21, 0)
       this.group.add(reflective(lamp))
       this.goalLamps[sign < 0 ? 0 : 1] = lampMat
     }
@@ -585,7 +593,7 @@ export class Arena {
     for (const z of [-36, -12, 12, 36]) {
       const b = new THREE.Mesh(new THREE.BoxGeometry(230, 1.2, 1.2), truss)
       b.position.set(0, 86, z)
-      this.group.add(b)
+      this.ceiling.add(b)
     }
     const fixtures: THREE.Vector3[] = []
     for (const z of [-36, -12, 12, 36]) for (let x = -100; x <= 100; x += 12.5) fixtures.push(new THREE.Vector3(x, 85, z))
@@ -596,7 +604,7 @@ export class Arena {
     )
     const m = new THREE.Matrix4()
     fixtures.forEach((p, i) => fx.setMatrixAt(i, m.makeTranslation(p.x, p.y, p.z)))
-    this.group.add(fx)
+    this.ceiling.add(fx)
   }
 
   // ── center-hung video board ─────────────────────────────────────────────
@@ -638,7 +646,7 @@ export class Arena {
       cb.position.set(x, 28, z)
       g.add(cb)
     }
-    this.group.add(g)
+    this.ceiling.add(g)
     this.updateJumbotron({ homeScore: 0, awayScore: 0, period: 1, clock: '20:00', excite: 0, goalFlash: 0 })
   }
 

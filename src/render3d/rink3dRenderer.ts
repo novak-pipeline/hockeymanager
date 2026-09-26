@@ -33,7 +33,7 @@ import {
   cameraTargetFor,
   endzoneChooseEnd,
   puckCarriedOffset,
-  applyDeadzone,
+  softDeadzone,
   emaStep,
   clampSpeed,
   wrapAngle,
@@ -45,7 +45,7 @@ import {
 } from './math'
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
-import { AthleteBatch, AthleteRig } from './athlete'
+import { AthleteBatch, AthleteRig, athleteMaterial } from './athlete'
 import { kitFor, type Kit } from './palette'
 import { buildAtlasCanvas, paintJerseySlot } from './textures'
 
@@ -54,25 +54,21 @@ const PUCK_H = 0.1
 
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
-const CAMERA_FOLLOW_HL = 0.45   // broadcast/follow spring half-life (~0.45 s)
-const CAMERA_OVERHEAD_HL = 1.5  // overhead: very heavy damping — stable wide shot
 
-// ── Play-focus smoother ─────────────────────────────────────────────────────
-// EMA time constant for the play-focus layer (seconds).
-// ~0.45 s gives clearly visible tracking while remaining smooth.
-const PLAY_FOCUS_TAU_X = 0.45  // long-axis (X) — main travel direction
-const PLAY_FOCUS_TAU_Z = 0.3   // width (Z) — shorter travel, can be snappier
+// ── Camera follow tuning (calm broadcast) ───────────────────────────────────
+// Pipeline: puck → soft dead-band → slow EMA → focus speed limit → critically
+// damped spring. The broadcast shot is deliberately slow and heavy, like a
+// real operator on a fluid head; the tighter presets stay more responsive.
+const CAMERA_TUNING: Record<CameraPreset, { tauX: number; tauZ: number; maxFocusSpeed: number; springHL: number }> = {
+  broadcast: { tauX: 0.9, tauZ: 1.2, maxFocusSpeed: 40, springHL: 0.6 },
+  overhead: { tauX: 1.2, tauZ: 1.2, maxFocusSpeed: 30, springHL: 1.5 },
+  endzone: { tauX: 0.6, tauZ: 0.6, maxFocusSpeed: 80, springHL: 0.5 },
+  follow: { tauX: 0.45, tauZ: 0.45, maxFocusSpeed: 90, springHL: 0.45 },
+}
 
-// Deadzone applied to the RAW puck position before EMA.
-// ~5 ft = plausible micro-jitter band; anything larger is a real play shift.
-const PLAY_FOCUS_DEADZONE_X = 5.0   // ft on the long axis
-const PLAY_FOCUS_DEADZONE_Z = 3.0   // ft on the width axis
-
-// Overhead camera: per-frame clamp on how far the target may move (ft).
-const OVERHEAD_TARGET_MAX_DELTA_PER_FRAME = 1.0  // ft/frame (≈60 ft/s at 60fps)
-
-// Max camera speed (ft/s) to cap frame-spike induced jumps.
-const CAM_MAX_SPEED_FT_S = 60
+// Soft dead-band around the focus: puck motion inside it never moves the shot.
+const PLAY_FOCUS_DEADZONE_X = 6.0   // ft on the long axis
+const PLAY_FOCUS_DEADZONE_Z = 5.0   // ft on the width axis
 
 // ── Orientation turn-rate clamp ─────────────────────────────────────────────
 // Max body rotation speed: ~270°/s. Prevents 180° whips on direction reversal.
@@ -84,9 +80,10 @@ const TURN_TAU = 0.25         // bank-into-turn smoothing (s)
 const SHOT_SWING_S = 0.32     // stick swing duration on a shot cue
 const GOAL_CUE_S = 4.2        // lifetime of the goal cue (celebration cam)
 
-// Atlas slots: 0-5 home skaters, 6-11 away skaters, 12 home G, 13 away G.
-const HOME_G_SLOT = 12
-const AWAY_G_SLOT = 13
+// Atlas cells (4×4): row 0-1 home (skaters 0-5, G 6), rows 2-3 away (skaters 8-13, G 14)
+// — same-team neighbours, so mip bleed between cells never mixes teams.
+const HOME_G_SLOT = 6
+const AWAY_G_SLOT = 14
 
 interface PlayerPose {
   worldX: Spring1D
@@ -174,7 +171,7 @@ export class Rink3dRenderer implements MatchRenderer {
   private lastEvaluatedClock = -1
   private activeCues: ActiveCue[] = []
   private sinceGoal = Infinity
-  private celebration: { elapsed: number; actorId: string } | null = null
+  private celebration: { elapsed: number; x: number; z: number } | null = null
 
   // ── Play-focus smoother ────────────────────────────────────────────────────
   // Two-layer approach: raw puck → play-focus EMA (long tau, deadzone) → camera spring.
@@ -376,8 +373,9 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasTex.anisotropy = 4
 
     const rigs: AthleteRig[] = []
+    const material = athleteMaterial(this.atlasTex)
     const mk = (team: 'home' | 'away', goalie: boolean, slot: number, wx: number, wz: number): PlayerPose => {
-      const rig = new AthleteRig(goalie, slot)
+      const rig = new AthleteRig(goalie, slot, material)
       rig.kit = team === 'home' ? this.homeKit : this.awayKit
       rigs.push(rig)
       return {
@@ -404,7 +402,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     for (let i = 0; i < 6; i++) {
       this.homePoses.push(mk('home', false, i, -10, (i - 2.5) * 8))
-      this.awayPoses.push(mk('away', false, 6 + i, 10, (i - 2.5) * 8))
+      this.awayPoses.push(mk('away', false, 8 + i, 10, (i - 2.5) * 8))
     }
     this.homeGoaliePose = mk('home', true, HOME_G_SLOT, -NET_X + 4, 0)
     this.awayGoaliePose = mk('away', true, AWAY_G_SLOT, NET_X - 4, 0)
@@ -413,7 +411,7 @@ export class Rink3dRenderer implements MatchRenderer {
       this.scene.add(p.labelSprite)
     }
 
-    this.batch = new AthleteBatch(rigs, this.atlasTex)
+    this.batch = new AthleteBatch(rigs, material)
     this.batch.applyColors()
     this.scene.add(this.batch.group)
 
@@ -632,6 +630,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.lookY = snapSpring(target.ly)
     this.lookZ = snapSpring(target.lz)
     this.fov = snapSpring(cameraFovFor(this.camPreset))
+    this.arena.setCeilingVisible(this.camPreset !== 'overhead')
     this.applyFov(this.fov.pos)
     this.camera.position.set(target.px, target.py, target.pz)
     this.camera.lookAt(target.lx, target.ly, target.lz)
@@ -708,8 +707,9 @@ export class Rink3dRenderer implements MatchRenderer {
   private debugCam: { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov?: number } | null = null
 
   /** Dev/perf probe: draw calls, triangles, CPU ms per frame (EMA). */
-  debugInfo(): { calls: number; triangles: number; cpuMs: number; athleteDraws: number } {
+  debugInfo(): { calls: number; triangles: number; cpuMs: number; athleteDraws: number; quality: number } {
     return {
+      quality: this.quality,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       cpuMs: +this.cpuMsAvg.toFixed(2),
@@ -746,12 +746,45 @@ export class Rink3dRenderer implements MatchRenderer {
       this.atlasTex.needsUpdate = true
       this.atlasDirty = false
     }
+    this.adaptQuality(dtMs / 1000)
     this.renderer.info.reset()
-    this.renderReflection()
+    if (this.quality < 2) this.renderReflection()
     this.composer.render(dt)
     const cpu = performance.now() - t0
     this.cpuMsAvg = this.cpuMsAvg === 0 ? cpu : this.cpuMsAvg + (cpu - this.cpuMsAvg) * 0.05
   }
+
+  /**
+   * Graceful degradation for weak GPUs: if frames stay slower than ~40 fps for
+   * 3 s, step quality down once (never back up — no oscillation):
+   *   1 → pixel ratio 1   2 → no ice reflection   3 → no bloom, 1k shadows.
+   */
+  private adaptQuality(rawDt: number): void {
+    if (rawDt <= 0 || rawDt > 0.25 || this.quality >= 3) return // tab switches etc.
+    this.frameEma = emaStep(this.frameEma, rawDt, rawDt, 1.0)
+    this.slowFor = this.frameEma > 1 / 40 ? this.slowFor + rawDt : 0
+    if (this.slowFor < 3) return
+    this.slowFor = 0
+    this.frameEma = 1 / 60
+    this.quality++
+    if (this.quality === 1 && this.renderer.getPixelRatio() > 1) {
+      this.renderer.setPixelRatio(1)
+      this.composer.setPixelRatio(1)
+      this.resize()
+    } else if (this.quality === 3) {
+      this.bloom.enabled = false
+      this.scene.traverse((o) => {
+        if (o instanceof THREE.DirectionalLight && o.castShadow) {
+          o.shadow.mapSize.setScalar(1024)
+          o.shadow.map?.dispose()
+          o.shadow.map = null
+        }
+      })
+    }
+  }
+  private quality = 0
+  private frameEma = 1 / 60
+  private slowFor = 0
 
   private updateArena(dt: number): void {
     if (!this.timeline) return
@@ -1052,7 +1085,12 @@ export class Rink3dRenderer implements MatchRenderer {
       if (gl) gl.timer = 3
       this.setPoseEffect(cue.actorId, 'arms', 2.4)
       this.sinceGoal = 0
-      this.celebration = { elapsed: 0, actorId: cue.actorId }
+      // Frame the spot the goal went in from, pulled toward the slot so the
+      // net and the celebration both stay in shot. Fixed for the whole cue.
+      const gx = normXtoWorld(cue.nx)
+      const gz = normYtoWorld(cue.ny)
+      const netX = Math.sign(gx || 1) * NET_X
+      this.celebration = { elapsed: 0, x: gx + (netX - gx) * 0.35, z: gz * 0.6 }
     } else if (cue.kind === 'save') {
       this.setGoalieEffect(cue.actorId, cue.nx, 0.55)
     } else if (cue.kind === 'hit') {
@@ -1090,24 +1128,29 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
-    // ── Layer 1: deadzone on raw puck input ──────────────────────────────────
+    // A calm TV follow. Every layer only SMOOTHS; nothing here can add wobble.
+    const tune = CAMERA_TUNING[this.camPreset]
+
+    // ── Layer 1: soft dead-band on the puck ──────────────────────────────────
+    // The focus trails the puck by up to a few feet, so stick-handling and
+    // rebounds don't move the shot, and a real rush eases the pan in from zero
+    // (the old hard deadzone stepped the target → stop/start pans).
     const rawX = this.puckRenderX.pos
     const rawZ = this.puckRenderZ.pos
-    const committedX = applyDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
-    const committedZ = applyDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
+    const committedX = softDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
+    const committedZ = softDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
 
-    // ── Layer 2: EMA smoothing toward the committed target ───────────────────
-    const tauX = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_X * 1.6 : PLAY_FOCUS_TAU_X
-    const tauZ = this.camPreset === 'overhead' ? PLAY_FOCUS_TAU_Z * 1.6 : PLAY_FOCUS_TAU_Z
-    let newFocusX = emaStep(this.playFocusX, committedX, dt, tauX)
-    let newFocusZ = emaStep(this.playFocusZ, committedZ, dt, tauZ)
+    // ── Layer 2: slow EMA toward the committed point ─────────────────────────
+    let newFocusX = emaStep(this.playFocusX, committedX, dt, tune.tauX)
+    let newFocusZ = emaStep(this.playFocusZ, committedZ, dt, tune.tauZ)
 
-    // ── Layer 3: per-frame clamp for overhead ────────────────────────────────
-    if (this.camPreset === 'overhead') {
-      const maxDX = OVERHEAD_TARGET_MAX_DELTA_PER_FRAME
-      newFocusX = Math.max(this.playFocusX - maxDX, Math.min(this.playFocusX + maxDX, newFocusX))
-      newFocusZ = Math.max(this.playFocusZ - maxDX, Math.min(this.playFocusZ + maxDX, newFocusZ))
-    }
+    // ── Layer 3: focus speed limit (ft/s, frame-rate independent) ────────────
+    // Applied to the TARGET, not the camera: a goal/faceoff puck teleport
+    // becomes a slow, even pan. (Replaces the old per-frame overhead clamp and
+    // the camera max-speed clamp, which kept the spring's velocity while
+    // clipping its position — that mismatch was a bounce source.)
+    newFocusX = clampSpeed(this.playFocusX, newFocusX, dt, tune.maxFocusSpeed)
+    newFocusZ = clampSpeed(this.playFocusZ, newFocusZ, dt, tune.maxFocusSpeed)
     this.playFocusX = Number.isFinite(newFocusX) ? newFocusX : this.playFocusX
     this.playFocusZ = Number.isFinite(newFocusZ) ? newFocusZ : this.playFocusZ
 
@@ -1115,15 +1158,13 @@ export class Rink3dRenderer implements MatchRenderer {
     const target = this.currentTarget()
     let fovTarget = cameraFovFor(this.camPreset)
 
-    // Goal celebration: the broadcast cam eases in on the scorer, holds, and
-    // eases back out. Blended target → the same springs → no cut, no shake.
+    // Goal: a slow push-in toward where the goal was scored, held, then eased
+    // back. The framing point is FIXED at the moment of the goal (it does not
+    // chase the celebrating scorer — that tracking was a wobble source).
     if (this.celebration && this.camPreset === 'broadcast') {
       const w = celebrationWeight(this.celebration.elapsed, GOAL_CUE_S)
       if (w > 0) {
-        const scorer = [...this.homePoses, ...this.awayPoses].find((p) => p.playerId === this.celebration!.actorId && p.rig.visible)
-        const sx = scorer ? scorer.worldX.pos : this.puckRenderX.pos
-        const sz = scorer ? scorer.worldZ.pos : this.puckRenderZ.pos
-        const c = celebrationTarget(sx, sz)
+        const c = celebrationTarget(this.celebration.x, this.celebration.z)
         target.px += (c.px - target.px) * w
         target.py += (c.py - target.py) * w
         target.pz += (c.pz - target.pz) * w
@@ -1143,21 +1184,15 @@ export class Rink3dRenderer implements MatchRenderer {
       lz: Number.isFinite(target.lz) ? target.lz : this.lookZ.pos,
     }
 
-    // ── Layer 4: camera spring (critically damped) ───────────────────────────
-    const hl = this.camPreset === 'overhead' ? CAMERA_OVERHEAD_HL : CAMERA_FOLLOW_HL
-    const prevCamX = this.camX.pos
-    const prevCamZ = this.camZ.pos
+    // ── Layer 4: critically-damped springs (no overshoot by construction) ────
+    const hl = tune.springHL
     this.camX = springStep(this.camX, safeTarget.px, dt, hl)
-    this.camY = springStep(this.camY, safeTarget.py, dt, CAMERA_FOLLOW_HL)
-    this.camZ = springStep(this.camZ, safeTarget.pz, dt, CAMERA_FOLLOW_HL)
+    this.camY = springStep(this.camY, safeTarget.py, dt, hl)
+    this.camZ = springStep(this.camZ, safeTarget.pz, dt, hl)
     this.lookX = springStep(this.lookX, safeTarget.lx, dt, hl)
-    this.lookY = springStep(this.lookY, safeTarget.ly, dt, CAMERA_FOLLOW_HL)
-    this.lookZ = springStep(this.lookZ, safeTarget.lz, dt, CAMERA_FOLLOW_HL)
-    this.fov = springStep(this.fov, fovTarget, dt, 0.6)
-
-    // ── Layer 5: max-speed clamp ─────────────────────────────────────────────
-    this.camX = { pos: clampSpeed(prevCamX, this.camX.pos, dt, CAM_MAX_SPEED_FT_S), vel: this.camX.vel }
-    this.camZ = { pos: clampSpeed(prevCamZ, this.camZ.pos, dt, CAM_MAX_SPEED_FT_S), vel: this.camZ.vel }
+    this.lookY = springStep(this.lookY, safeTarget.ly, dt, hl)
+    this.lookZ = springStep(this.lookZ, safeTarget.lz, dt, hl)
+    this.fov = springStep(this.fov, fovTarget, dt, 0.9)
 
     this.applyFov(this.fov.pos)
     this.camera.position.set(this.camX.pos, this.camY.pos, this.camZ.pos)
