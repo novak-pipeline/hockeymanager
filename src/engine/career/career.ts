@@ -1838,6 +1838,34 @@ export class Career {
    *  so the three can never disagree about whether a kid is producing. */
   private prospectProductionBonus(p: Player, leagueAbbr: string | undefined): number {
     return productionRankBonus(this.prospectPpg(p), p.position === 'D', nhleFactorByAbbrev(leagueAbbr ?? ''), p.age)
+      + this.wjcStockBonus(p)
+  }
+
+  /** memo: [cacheKey, playerId → bonus] for the season's World Juniors. */
+  private wjcStockMemo: [string, Map<string, number>] | null = null
+
+  /**
+   * Draft stock from the World Juniors: a draft-eligible kid who starred on the
+   * sport's biggest junior stage moves up boards (all-star/MVP most, a top-10
+   * scorer a little). Same currency as the production bonus (value points).
+   * Only this season's tournament counts — it is the draft-year showcase.
+   */
+  private wjcStockBonus(p: Player): number {
+    if (p.nhlDrafted) return 0
+    const events = this.data.league.worldHistory?.international
+    if (!events || events.length === 0) return 0
+    const key = `${this.year}:${events.length}`
+    if (!this.wjcStockMemo || this.wjcStockMemo[0] !== key) {
+      const m = new Map<string, number>()
+      const wjc = events.find((e) => e.kind === 'worldJuniors' && e.year === this.year)
+      if (wjc) {
+        for (const l of wjc.leaders) m.set(l.playerId, 3)
+        for (const l of wjc.allStars) m.set(l.playerId, 6)
+        if (wjc.mvp) m.set(wjc.mvp.playerId, 8)
+      }
+      this.wjcStockMemo = [key, m]
+    }
+    return this.wjcStockMemo[1].get(p.id as string) ?? 0
   }
 
   /** A prospect's scoring line: live this-season world production if he's played,
@@ -20861,7 +20889,7 @@ export class Career {
     const leagueFactor = nhleFactorByAbbrev(abbrev)
     return {
       premium: productionPremium(ppg, isD, leagueFactor, p.age),
-      rankBonus: productionRankBonus(ppg, isD, leagueFactor, p.age),
+      rankBonus: productionRankBonus(ppg, isD, leagueFactor, p.age) + this.wjcStockBonus(p),
       projection: projectProspect({ ppg, leagueFactor, age: p.age, isD, noise, seed: p.id as string }),
     }
   }
