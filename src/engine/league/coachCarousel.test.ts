@@ -198,3 +198,22 @@ describe('determinism', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })
+
+describe('the interim rides out the season (E3 calibration)', () => {
+  it('a coach hired mid-way through this season is never fired again before it ends', () => {
+    const seats = [{ ...collapsing('a'), tenure: 0, hiredThisSeason: true }]
+    let fired = 0
+    for (let s = 0; s < 200; s++) fired += midSeasonFirings({ seats, totalGames: 82, teamsInLeague: 32, alreadyFiredThisSeason: 0, rng: new Rng(s) }).length
+    expect(fired).toBe(0)
+  })
+
+  it('a new GM makes a summer coaching change likelier', () => {
+    const base = seat({ teamId: 'a', predictedRank: 12, currentRank: 16, pointsPct: 0.49, tenure: 3 })
+    let plain = 0, withGm = 0
+    for (let s = 0; s < 400; s++) {
+      plain += offseasonFirings({ seats: [base], teamsInLeague: 32, rng: new Rng(s) }).length
+      withGm += offseasonFirings({ seats: [{ ...base, newGm: true }], teamsInLeague: 32, rng: new Rng(s) }).length
+    }
+    expect(withGm).toBeGreaterThan(plain)
+  })
+})

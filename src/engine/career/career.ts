@@ -506,6 +506,14 @@ import {
   type CoachSeat,
 } from '@engine/league/coachCarousel'
 import {
+  buildDismissal,
+  hottestGmSeat,
+  isDisappointingSeason,
+  offseasonGmDismissals,
+  type GmDismissal,
+  type GmSeat,
+} from '@engine/league/gmCarousel'
+import {
   MAX_EXTENSION_YEARS,
   describeExtension,
   discountMultiplier,
@@ -4486,7 +4494,11 @@ export class Career {
     if (boardDayIdx >= 0 && boardDayIdx % 10 === 9) {
       const userStanding = this.standings.get(this.userTeamId)
       const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
-      const totalGames = this.matchDays.length
+      // GAMES, not dates: matchDays counts every league date (~2x a club's
+      // schedule), which capped "progress" near 0.5 — the board's late-season
+      // patience drain barely ran and the carousel's 80%-of-season cutoff never
+      // bit (docs/PRESSURE-AND-FIRINGS.md).
+      const totalGames = this.userGamesScheduled()
       const gamesPlayed = userStanding?.gamesPlayed ?? 0
       const confResult = updateConfidence({
         state: this.boardState,
@@ -7406,6 +7418,16 @@ export class Career {
         'The board met to close the book on the season; you sent regrets. The minutes note your absence.',
         { teamId: this.userTeamId as string }
       )
+      // Skipping the meeting where you were dismissed is still progress.
+      if (this.boardState.firedAtYear !== null) return true
+    }
+    // E3: a dismissed GM does not run the club's draft, re-signings or July 1.
+    // The calendar is HELD until he takes one of the real vacancies (hard gate,
+    // escape = the GM Career screen). The old flow let him keep working and then
+    // silently re-hired him at the rollover — a dismissal the game didn't honour.
+    if (this.boardState.firedAtYear !== null) {
+      this.ensureGMJobMarket()
+      return false
     }
     const os = this.offseason
     if (!os) return false
@@ -7460,6 +7482,7 @@ export class Career {
             teamId: this.userTeamId as string,
             teamName: this.userTeam.name,
             seasonsWithClub,
+            teamsInLeague: this.data.league.teams.length,
           })
           this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
@@ -7475,12 +7498,30 @@ export class Career {
             finalRank: userFinalRank,
             n: this.data.league.teams.length,
           })
+          // E3: the front-office carousel — AI owners judge their GMs on the
+          // same night the user's board judges him.
+          this.runGmCarousel(sorted)
           if (reviewResult.fired) {
             // The board has fired the GM. Close his stint and open the job market so
-            // he can catch on elsewhere (the user keeps playing — see acceptGMJob).
+            // he can catch on elsewhere. Continue is HELD until he takes a job
+            // (see advanceOffseason): the dismissal is honoured, never undone.
             endStint(gm, this.year, 'fired')
+            chronicleEvent(this.chronicle, {
+              year: this.year,
+              day: 0,
+              kind: 'gmChange',
+              teamIds: [this.userTeamId as string],
+              headline: `${this.userTeam.abbreviation} dismiss general manager ${gm.name}`,
+              details: { window: 'offseason', change: 'dismissed' },
+              userInvolved: true,
+            })
             this.gmJobMarket = this.buildGMOpenings(sorted)
+          } else {
+            // Nobody is waiting on the user to pick a chair: name the successors now.
+            this.fillGmVacancies()
           }
+          // ...and then the benches: a new GM often wants his own coach.
+          this.runSummerCoachCarousel(sorted)
 
           // Season Rhythm M4: stage the End-of-Season Review — same boardroom,
           // same people, your September promises read back with verdicts.
@@ -9100,21 +9141,8 @@ export class Career {
     // Number this year's new arrivals (draft picks, signings) who lack a jersey.
     this.ensureJerseyNumbers()
 
-    /* ── E3: the summer carousel. Every surviving bench serves another year;
-     *  the clubs that finished well below their September projection move on.
-     *  Done BEFORE applyCoachSystems so the new men's systems take hold. ── */
-    {
-      for (const teamId of this.data.league.teams) {
-        const key = teamId as string
-        this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
-      }
-      const firings = offseasonFirings({
-        seats: this.coachSeats(sorted),
-        teamsInLeague: this.data.league.teams.length,
-        rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
-      })
-      firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i))
-    }
+    // (E3: the summer coaching carousel runs at the season review — see
+    // runSummerCoachCarousel — the week the season ends, as NHL firings do.)
 
     // Re-derive each team's system from its head coach for the new roster.
     this.applyCoachSystems()
@@ -15869,6 +15897,8 @@ export class Career {
       // playoffs and into the summer, so it names itself there too.
       if (this.reviewFacts !== null) return 'Continue — end-of-season review'
       if (this.phase === 'playoffs') return 'Continue — next playoff games'
+      // E3: dismissed — nothing moves until he takes a new chair.
+      if (this.boardState.firedAtYear !== null) return 'Take a new job to continue'
       // Dev camp is gated ahead of the market: while it's pending, the first
       // Continue walks you into camp (not free agency), so say so — otherwise the
       // button reads "open free agency" but routes to the rink.
@@ -16934,7 +16964,18 @@ export class Career {
       if (!team) return
       const ts = this.getTeamStaff(teamId)
       const predicted = expectedRankOf(this.expectationsState, teamId) ?? i + 1
+      // A GM dismissed or replaced this summer: the incoming man picks his bench.
+      const gmP = this.gmPersonas.find(([id]) => id === teamId)?.[1]
+      const newGm =
+        gmP !== undefined &&
+        (gmP.dismissedYear === this.year || ((gmP.generation ?? 0) > 0 && gmP.sinceYear === this.year + 1))
+      // A bench changed hands earlier THIS season (interim ids carry the
+      // season and the day): the owner does not fire the man he just hired.
+      const hiredThisSeason =
+        this.phase === 'regularSeason' && ts.headCoach.id.startsWith(`bench-${teamId}-${this.year}-`)
       seats.push({
+        ...(newGm ? { newGm: true } : {}),
+        ...(hiredThisSeason ? { hiredThisSeason: true } : {}),
         teamId,
         teamName: team.name,
         teamAbbr: team.abbreviation,
@@ -16951,12 +16992,16 @@ export class Career {
   }
 
   /** Replace a fired coach with a deterministic interim and tell the league. */
-  private applyCoachFiring(f: CoachFiring, salt: number): void {
+  private applyCoachFiring(f: CoachFiring, salt: number, window: 'midseason' | 'offseason'): void {
     const team = this.data.teams.get(asTeamId(f.teamId))
     if (!team) return
     const ts = this.getTeamStaff(f.teamId)
     const rng = new Rng(deriveSeed(this.seed, Career.CAROUSEL_NS, this.year, salt, f.teamId.length))
-    const replacement = generateTeamStaff(rng).headCoach
+    // Two clubs must never hire the same (generated) man: re-roll a name that
+    // is already behind a bench somewhere in the league.
+    const benchNames = new Set(this.data.league.teams.map((t) => this.getTeamStaff(t as string).headCoach.name))
+    let replacement = generateTeamStaff(rng).headCoach
+    for (let i = 0; i < 12 && benchNames.has(replacement.name); i++) replacement = generateTeamStaff(rng).headCoach
     replacement.id = `bench-${f.teamId}-${this.year}-${salt}`
     replacement.profile = buildCoachProfile(replacement, rng)
     ts.headCoach = replacement
@@ -16977,6 +17022,37 @@ export class Career {
       summary: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over.`,
     })
     this.transactionLedger = tx.ledger
+    // The permanent record: which benches changed hands, and when. The carousel
+    // is calibrated against these (docs/PRESSURE-AND-FIRINGS.md).
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: window === 'midseason' ? this.currentDay : 0,
+      kind: 'coachFired',
+      teamIds: [f.teamId],
+      staffIds: [f.coachId],
+      headline: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over`,
+      details: { window },
+      userInvolved: false,
+    })
+  }
+
+  /**
+   * The summer carousel, run at the season review. Every surviving bench has
+   * now completed another season; the clubs that finished well below their
+   * September projection — and the clubs with a new GM who wants his own man —
+   * move on. The new coaches' systems are re-derived at the rollover.
+   */
+  private runSummerCoachCarousel(sorted: ReturnType<typeof sortStandings>): void {
+    for (const teamId of this.data.league.teams) {
+      const key = teamId as string
+      this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
+    }
+    const firings = offseasonFirings({
+      seats: this.coachSeats(sorted),
+      teamsInLeague: this.data.league.teams.length,
+      rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
+    })
+    firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i, 'offseason'))
   }
 
   /** Mid-season bench changes around the league. Rare, capped, and earned. */
@@ -16990,7 +17066,7 @@ export class Career {
       rng: this.rngFor(Career.CAROUSEL_NS, day),
     })
     for (const f of firings) {
-      this.applyCoachFiring(f, day)
+      this.applyCoachFiring(f, day, 'midseason')
       this.midSeasonCoachFirings += 1
     }
   }
@@ -17898,40 +17974,233 @@ export class Career {
       summary: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis.`,
     })
     this.transactionLedger = tx.ledger
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: this.phase === 'regularSeason' ? this.currentDay : 0,
+      kind: 'coachFired',
+      teamIds: [this.userTeamId as string],
+      headline: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis`,
+      details: { window: this.phase === 'regularSeason' ? 'midseason' : 'offseason' },
+      userInvolved: true,
+    })
     return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
   /* ────────────────────────── GM career ────────────────────────── */
 
-  /** Build the rival GM vacancy list. The weakest non-playoff clubs (plus a little
-   *  deterministic churn) are treated as having an opening; the user's reputation
-   *  decides how keenly each would hire him. `sorted` is worst-last standings. */
+  /**
+   * Build the GM vacancy list the fired user can choose from. The openings are
+   * the REAL vacancies — AI clubs whose owners dismissed their GM this summer
+   * (runGmCarousel) — so a job on this list is a chair that is genuinely empty,
+   * and taking it is the appointment the league reads about. The user's
+   * reputation decides how keenly each would hire him.
+   *
+   * The game has no "unemployed" state to sim through, so the list is never a
+   * dead end: if no AI club made a change, the hottest seat in the league goes
+   * (a dismissal like any other, with its news), and if every opening is a
+   * long shot for a GM with this record, the least attractive job — the club at
+   * the bottom that cannot be choosy — takes the flier.
+   */
   private buildGMOpenings(sorted: ReturnType<typeof sortStandings>): GMJobOpening[] {
     const gm = this.ensureGM()
     const n = this.data.league.teams.length
     const rankOf = new Map<string, number>()
     sorted.forEach((s, i) => rankOf.set(s.teamId as string, i + 1))
-    const rng = new Rng(deriveSeed(this.seed, 9331, this.year))
-    const openings: Array<{ teamId: string; teamName: string; teamAbbr: string; marketSize: number; projectedRank: number }> = []
-    for (const tid of this.data.league.teams) {
-      if ((tid as string) === (this.userTeamId as string)) continue
-      const team = this.data.teams.get(tid)
-      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
-      const rank = rankOf.get(tid as string) ?? n
-      // Bottom third of the league is most likely to make a change; a little churn
-      // higher up keeps the carousel alive.
-      const bottomThird = rank > Math.ceil(n * 0.66)
-      const fires = bottomThird ? rng.chance(0.5) : rng.chance(0.08)
-      if (!fires) continue
-      openings.push({
-        teamId: tid as string,
+    let vacant = this.gmVacancies()
+    if (vacant.length === 0) {
+      const seats = this.gmSeats(sorted, false)
+      const seat = hottestGmSeat(seats, n)
+      if (seat) {
+        this.applyGmDismissal(buildDismissal(seat, 0, this.rngFor(Career.GM_CAROUSEL_NS, 2)))
+        vacant = this.gmVacancies()
+      }
+    }
+    const openings = vacant.flatMap((tid) => {
+      const team = this.data.teams.get(asTeamId(tid))
+      if (!team) return []
+      return [{ teamId: tid, teamName: team.name, teamAbbr: team.abbreviation, marketSize: 3, projectedRank: rankOf.get(tid) ?? n }]
+    })
+    const market = buildGMJobMarket({ openings, userTeamId: this.userTeamId as string, reputation: gm.reputation, n })
+    if (market.length > 0 && !market.some((o) => o.interest !== 'longshot')) {
+      const flier = [...market].sort((a, b) => b.projectedRank - a.projectedRank)[0]!
+      flier.interest = 'open'
+      flier.blurb = 'They are in no position to be choosy. The job is yours if you want it.'
+    }
+    return market
+  }
+
+  /** The fired user must always have a chair he can actually take (old saves
+   *  fired before this model existed carry an empty or long-shot-only list). */
+  private ensureGMJobMarket(): void {
+    if (this.boardState.firedAtYear === null) return
+    const market = this.gmJobMarket ?? []
+    if (market.some((o) => o.interest !== 'longshot')) return
+    this.gmJobMarket = this.buildGMOpenings(sortStandings([...this.standings.values()]))
+  }
+
+  /* ══════════════════ E3: the front-office carousel ══════════════════ */
+
+  private static readonly GM_CAROUSEL_NS = 9413
+  /** The GMs a career opens with have been in the job a while already. */
+  private static readonly ORIGINAL_GM_PRIOR_SEASONS = 4
+
+  /** AI clubs whose GM chair is empty right now (dismissed, successor unnamed). */
+  private gmVacancies(): string[] {
+    return this.gmPersonas
+      .filter(([tid, p]) => p.dismissedYear !== undefined && tid !== (this.userTeamId as string))
+      .map(([tid]) => tid)
+  }
+
+  /**
+   * One seat per AI club with a sitting GM. With `advance`, this season's
+   * result is folded into each GM's run of disappointments (once, at the season
+   * review); without it, the seats are read as they stand.
+   */
+  private gmSeats(sorted: ReturnType<typeof sortStandings>, advance: boolean): GmSeat[] {
+    const n = this.data.league.teams.length
+    const ranks = this.strengthRanks()
+    const playoffTeams = new Set<string>()
+    for (const s of this.playoffs?.rounds[0]?.series ?? []) {
+      playoffTeams.add(s.highSeedTeamId as string)
+      playoffTeams.add(s.lowSeedTeamId as string)
+    }
+    const seats: GmSeat[] = []
+    sorted.forEach((s, i) => {
+      const teamId = s.teamId as string
+      if (teamId === (this.userTeamId as string)) return
+      const team = this.data.teams.get(s.teamId)
+      if (!team) return
+      const persona = this.gmPersonaFor(s.teamId)
+      if (persona.dismissedYear !== undefined) return
+      const base = {
+        predictedRank: expectedRankOf(this.expectationsState, teamId) ?? i + 1,
+        finalRank: i + 1,
+        madePlayoffs: playoffTeams.has(teamId),
+        rebuilding: this.clubPostureFor(s.teamId, ranks).posture === 'rebuild',
+      }
+      if (advance) persona.missStreak = isDisappointingSeason(base, n) ? (persona.missStreak ?? 0) + 1 : 0
+      const prior = (persona.generation ?? 0) > 0 ? 0 : Career.ORIGINAL_GM_PRIOR_SEASONS
+      seats.push({
+        teamId,
         teamName: team.name,
         teamAbbr: team.abbreviation,
-        marketSize: 3,
-        projectedRank: rank,
+        gmName: persona.name,
+        tenure: prior + Math.max(0, this.year - persona.sinceYear) + 1,
+        missStreak: persona.missStreak ?? 0,
+        ...base,
       })
+    })
+    return seats
+  }
+
+  /** The season review for every AI front office. */
+  private runGmCarousel(sorted: ReturnType<typeof sortStandings>): void {
+    const seats = this.gmSeats(sorted, true)
+    const dismissals = offseasonGmDismissals({
+      seats,
+      teamsInLeague: this.data.league.teams.length,
+      rng: this.rngFor(Career.GM_CAROUSEL_NS, 1),
+    })
+    for (const d of dismissals) this.applyGmDismissal(d)
+  }
+
+  private applyGmDismissal(d: GmDismissal): void {
+    const team = this.data.teams.get(asTeamId(d.teamId))
+    if (!team) return
+    const persona = this.gmPersonaFor(asTeamId(d.teamId))
+    persona.dismissedYear = this.year
+    this.pushNews('league', d.headline, d.body, { teamId: d.teamId, salience: 64 })
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: 0,
+      kind: 'gmChange',
+      teamIds: [d.teamId],
+      headline: `${team.abbreviation} dismiss general manager ${d.gmName}`,
+      details: { window: 'offseason', change: 'dismissed' },
+      userInvolved: false,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [d.teamId],
+      summary: `${team.abbreviation} dismiss general manager ${d.gmName}.`,
+    })
+    this.transactionLedger = tx.ledger
+  }
+
+  /** Name a new GM for a club. He is a different operator — a fresh persona
+   *  roll — so the club trades, drafts and negotiates the way HE does, and he
+   *  carries none of his predecessor's history with the user. */
+  private hireGmSuccessor(teamId: string, replacing: string): void {
+    const team = this.data.teams.get(asTeamId(teamId))
+    if (!team) return
+    const idx = this.gmPersonas.findIndex(([tid]) => tid === teamId)
+    const prevGen = idx >= 0 ? (this.gmPersonas[idx]![1].generation ?? 0) : 0
+    const taken = new Set(this.gmPersonas.map(([, p]) => p.name))
+    taken.add(replacing)
+    const successor = buildGmPersona({
+      seed: this.seed,
+      teamId,
+      year: this.year + 1, // his first season in charge is the one ahead
+      takenNames: taken,
+      generation: prevGen + 1,
+    })
+    if (idx >= 0) this.gmPersonas[idx] = [teamId, successor]
+    else this.gmPersonas.push([teamId, successor])
+    this.gmRelationships.delete(teamId)
+    this.pushNews(
+      'league',
+      `${team.name} name ${successor.name} general manager`,
+      `${team.name} have hired ${successor.name} to run the hockey department, replacing ${replacing}. ` +
+        `Around the league he is known as a ${successor.styleLabel} — expect the club to deal the way he does. ` +
+        `He arrives with no history with anyone, you included.`,
+      { teamId, salience: 56 }
+    )
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: 0,
+      kind: 'gmChange',
+      teamIds: [teamId],
+      headline: `${team.abbreviation} hire ${successor.name} as general manager`,
+      details: { window: 'offseason', change: 'hired' },
+      userInvolved: false,
+    })
+  }
+
+  /** Fill every empty AI chair. */
+  private fillGmVacancies(): void {
+    for (const tid of this.gmVacancies()) {
+      const outgoing = this.gmPersonas.find(([id]) => id === tid)?.[1].name ?? 'the previous regime'
+      this.hireGmSuccessor(tid, outgoing)
     }
-    return buildGMJobMarket({ openings, userTeamId: this.userTeamId as string, reputation: gm.reputation, n })
+  }
+
+  /**
+   * League changes for one season, read from the chronicle — the numbers the
+   * autopilot reports and the carousel is calibrated against. Not a view (the
+   * frozen contracts stay untouched); an engine-side read for harnesses.
+   */
+  carouselLog(year: number): {
+    coachMidseason: number
+    coachOffseason: number
+    gmDismissals: number
+    entries: Array<{ kind: 'coachFired' | 'gmChange'; window: string; headline: string; userInvolved: boolean }>
+  } {
+    const evs = this.chronicle.events.filter(
+      (e) => e.year === year && (e.kind === 'coachFired' || (e.kind === 'gmChange' && e.details?.change === 'dismissed'))
+    )
+    return {
+      coachMidseason: evs.filter((e) => e.kind === 'coachFired' && e.details?.window === 'midseason').length,
+      coachOffseason: evs.filter((e) => e.kind === 'coachFired' && e.details?.window !== 'midseason').length,
+      gmDismissals: evs.filter((e) => e.kind === 'gmChange').length,
+      entries: evs.map((e) => ({
+        kind: e.kind as 'coachFired' | 'gmChange',
+        window: e.details?.window ?? 'offseason',
+        headline: e.headline,
+        userInvolved: e.userInvolved,
+      })),
+    }
   }
 
   /** The user's GM profile (identity, reputation, career record, job history). */
@@ -17965,6 +18234,7 @@ export class Career {
 
   /** Open GM vacancies the user can take (populated when he's fired). */
   getGMJobMarket(): GMJobMarketView {
+    this.ensureGMJobMarket()
     const gm = this.ensureGM()
     return {
       reputation: gm.reputation,
@@ -18001,9 +18271,43 @@ export class Career {
     if (!newTeam) return { ok: false, message: 'Club not found.' }
 
     const gm = this.ensureGM()
+    const oldTeamId = this.userTeamId as string
     // Switch the user's club.
     this.userTeamId = asTeamId(teamId)
     startStint(gm, this.year, teamId, newTeam.abbreviation, newTeam.name)
+
+    // E3: the chair he takes was genuinely empty (the AI GM was dismissed at the
+    // season review) — it is his now, not a vacancy. His old club needs a GM,
+    // and every other empty chair is filled now the market has settled.
+    {
+      const mine = this.gmPersonas.find(([tid]) => tid === teamId)?.[1]
+      if (mine) delete mine.dismissedYear
+      this.hireGmSuccessor(oldTeamId, gm.name)
+      this.fillGmVacancies()
+      chronicleEvent(this.chronicle, {
+        year: this.year,
+        day: 0,
+        kind: 'gmChange',
+        teamIds: [teamId],
+        headline: `${newTeam.abbreviation} hire ${gm.name} as general manager`,
+        details: { window: 'offseason', change: 'hired' },
+        userInvolved: true,
+      })
+      // The desk he left behind stays behind: offers, concerns, promises and
+      // talks were with the old club's people, and the old owner's asks and
+      // the old building's mood are not his problem any more.
+      this.tradeOffers = []
+      this.interactions = []
+      this.playerPromises = []
+      this.negotiations.clear()
+      this.mentorships.clear()
+      this.ownerRequest = null
+      this.clubDirection = 'compete'
+      this.ticketPricing = 'standard'
+      this.fanInterest = 60
+      this.baseBudget = 0
+      this.pressureState = null
+    }
 
     // Rebuild the board mandate for the new club; clears firedAtYear via fresh state.
     const boardResult = setSeasonMandate({

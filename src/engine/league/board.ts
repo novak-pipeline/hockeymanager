@@ -439,6 +439,8 @@ export interface SeasonReviewArgs {
    * callers and tests that only care about the verdict keep their behaviour.
    */
   seasonsWithClub?: number
+  /** League size, for "the basement" (E3). Absent → the old thresholds only. */
+  teamsInLeague?: number
 }
 
 export interface SeasonReviewResult {
@@ -485,9 +487,12 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
         verdict = 'exceeded'
       } else if (madePlayoffs && finalRank <= state.targetRank + 2) {
         verdict = 'met'
-      } else if (!madePlayoffs || finalRank > state.targetRank + 6) {
+      } else if (!madePlayoffs) {
         verdict = 'failed'
       } else {
+        // A playoff team that finished well below its billing disappointed; it
+        // did not FAIL. (E3 calibration: a 104-point club two points out of a
+        // top-2 target was being fired as a 'failed' mandate on its second try.)
         verdict = 'missed'
       }
       break
@@ -511,7 +516,15 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
         verdict = 'exceeded'
       } else if (Math.abs(finalRank - state.targetRank) <= 4) {
         verdict = 'met'
-      } else if (finalRank > state.targetRank + 8) {
+      } else if (
+        finalRank > state.targetRank + 8 ||
+        // The basement, when the owner asked for respectable and never
+        // sanctioned a rebuild: 31st against a target of 24th is a failure,
+        // not a near miss (E3 — the seed-2029 slide).
+        (args.teamsInLeague !== undefined &&
+          finalRank > args.teamsInLeague - 3 &&
+          state.targetRank <= args.teamsInLeague - 6)
+      ) {
         verdict = 'failed'
       } else {
         verdict = 'missed'

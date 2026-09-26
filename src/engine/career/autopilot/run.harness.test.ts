@@ -9,6 +9,8 @@
  *     npx vitest run src/engine/career/autopilot/run.harness.test.ts --no-file-parallelism
  *
  * Config via env:  AP_SEASONS (default 3)  ·  AP_SEED (default 2029)  ·  AP_TEAM (index, default auto)
+ *                  AP_MOD_DB (path to an imported database.json — lets a worktree use the
+ *                  main checkout's 37MB mod DB without copying it)  ·  AP_OUT (output dir)
  */
 import { describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs'
@@ -21,8 +23,8 @@ import { runAutopilot } from './autopilot'
 
 const SEED = Number(process.env.AP_SEED ?? 2029)
 const SEASONS = Number(process.env.AP_SEASONS ?? 3)
-const OUT_DIR = join(process.cwd(), 'docs', 'autopilot')
-const MOD_DB = join(process.cwd(), 'mods', 'nhl-ehm', 'database.json')
+const OUT_DIR = process.env.AP_OUT ?? join(process.cwd(), 'docs', 'autopilot')
+const MOD_DB = process.env.AP_MOD_DB ?? join(process.cwd(), 'mods', 'nhl-ehm', 'database.json')
 
 function loadLeague(): { data: LeagueData; source: string } {
   if (existsSync(MOD_DB)) {
@@ -66,8 +68,12 @@ describe.skipIf(!process.env.AP_RUN)('autopilot — Cup campaign', () => {
     console.log(`decisions: ${trace.decisions.length} · trades: ${trace.summary.totalTrades} · signings: ${trace.summary.totalSignings} · drafted: ${trace.summary.totalDrafted}`)
     console.log(`ISSUES → critical: ${trace.summary.critical} · major: ${trace.summary.major} · minor: ${trace.summary.minor}${trace.summary.endedEarly ? ` · ENDED EARLY: ${trace.summary.endReason}` : ''}`)
     for (const s of trace.seasons) {
-      console.log(`  ${s.year}: ${s.record ?? '—'} · ${s.playoffResult} · ${s.trades} trades · issues C${s.critical}/M${s.major}`)
+      console.log(`  ${s.year}: ${s.team ?? ''} ${s.record ?? '—'} · ${s.playoffResult} · ${s.trades} trades · issues C${s.critical}/M${s.major}`)
+      if (s.board) console.log(`     board: ${s.board.mandate} target #${s.board.targetRank} · warnings ${s.board.warnings} · conf ${s.board.confidence}/pat ${s.board.patience} · missStreak→${s.board.missStreakAfter ?? '?'}${s.board.fired ? ' · FIRED' : ''}`)
+      if (s.league) console.log(`     league: coaches ${s.league.coachMidseason} mid + ${s.league.coachOffseason} summer · GMs ${s.league.gmDismissals}`)
     }
+    console.log(`PRESSURE → firings ${trace.summary.firings} · board warnings ${trace.summary.boardWarnings} (ultimatums ${trace.summary.ultimatums}) · coach changes/season ${trace.summary.coachChangesPerSeason} (mid ${trace.summary.coachMidseasonPerSeason}) · GM changes/season ${trace.summary.gmChangesPerSeason}`)
+    for (const j of trace.jobs) console.log(`  JOB ${j.year}: fired by ${j.from} → ${j.to} (${j.interest}, #${j.projectedRank}, ${j.openings} openings)`)
     console.log(`\nwrote docs/autopilot/trace-latest.json + summary-latest.md\n`)
 
     // The harness is a bug-hunter, not a pass/fail gate — it just must have played.
@@ -88,6 +94,16 @@ function renderSummary(t: ReturnType<typeof runAutopilot>): string {
   L.push('## Season by season')
   for (const s of t.seasons) {
     L.push(`- **${s.year}** — ${s.record ?? '—'} (${s.points ?? '?'} pts, #${s.rank ?? '?'}) → ${s.playoffResult}${s.wonCup ? ' 🏆' : ''} · ${s.trades} trades, ${s.signings} signings, ${s.drafted} picks · issues C${s.critical}/M${s.major}/m${s.minor}`)
+  }
+  L.push('')
+  L.push('## Pressure & the carousel (E3)')
+  L.push(`Firings: ${t.summary.firings} · board warnings ${t.summary.boardWarnings} (ultimatums ${t.summary.ultimatums}) · head-coach changes/season **${t.summary.coachChangesPerSeason}** (mid-season ${t.summary.coachMidseasonPerSeason}) · GM changes/season **${t.summary.gmChangesPerSeason}**`)
+  for (const j of t.jobs) L.push(`- ${j.year}: fired by ${j.from} → took ${j.to} (${j.interest}, finished #${j.projectedRank}; ${j.openings} opening(s))`)
+  for (const s of t.seasons) {
+    const b = s.board
+    const lg = s.league
+    L.push(`- **${s.year}** ${s.team ?? ''}: ${b ? `${b.mandate} (target #${b.targetRank}), warnings ${b.warnings}, conf ${b.confidence}, patience ${b.patience}, fans "${b.fanMoodLabel}", miss streak after review ${b.missStreakAfter ?? '?'}${b.fired ? ' — **FIRED**' : ''}` : '—'}${lg ? ` · league: ${lg.coachMidseason} mid-season + ${lg.coachOffseason} summer coach changes, ${lg.gmDismissals} GM` : ''}`)
+    for (const c of lg?.changes ?? []) L.push(`  - ${c}`)
   }
   L.push('')
   if (t.issues.length) {

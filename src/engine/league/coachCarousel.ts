@@ -39,6 +39,10 @@ export interface CoachSeat {
   gamesPlayed: number
   /** True when the club is running an announced rebuild — the bench is safe. */
   rebuilding?: boolean
+  /** The club changed GMs this summer — the new man often wants his own coach. */
+  newGm?: boolean
+  /** He took this bench mid-way through THIS season: never fired again before it ends. */
+  hiredThisSeason?: boolean
 }
 
 export interface CoachFiring {
@@ -94,6 +98,9 @@ export function midSeasonFirings(args: {
   // Hottest seat first, so the club in real trouble is the one that moves.
   const ranked = seats
     .filter((s) => s.rebuilding !== true)
+    // The interim who replaced a fired man this winter rides out the season —
+    // a second change in one year was the carousel's most unrealistic output.
+    .filter((s) => s.hiredThisSeason !== true)
     .filter((s) => s.gamesPlayed >= MIDSEASON_MIN_GAMES)
     .filter((s) => s.gamesPlayed / Math.max(1, totalGames) <= MIDSEASON_MAX_FRACTION)
     .map((s) => ({ seat: s, heat: seatHeat(s, teamsInLeague) }))
@@ -140,6 +147,8 @@ export function offseasonFirings(args: {
       let p = Math.max(0, drop) * 0.85 + Math.max(0, 0.500 - s.pointsPct) * 1.6
       if (s.tenure >= 5 && s.currentRank > teamsInLeague / 2) p += 0.14
       if (s.tenure === 0) p *= 0.35 // you do not fire the man you just hired
+      // ...unless the man who hired him is gone: a new GM picks his own bench.
+      if (s.newGm) p += 0.2
       return { seat: s, p: Math.min(0.55, p) }
     })
     .filter((x) => x.p >= 0.10)

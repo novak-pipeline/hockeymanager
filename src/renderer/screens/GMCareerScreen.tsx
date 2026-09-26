@@ -4,7 +4,7 @@ import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/u
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
-import { toast } from '../components/store'
+import { bumpRefresh, toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 const INTEREST_RANK: Record<'courting' | 'open' | 'longshot', number> = { longshot: 0, open: 1, courting: 2 }
@@ -48,6 +48,9 @@ function JobMarketPanel(props: { market: GMJobMarketView; onRefetch: () => void 
     else {
       if (r.type === 'ok' && r.note) toast(r.note, 'success')
       props.onRefetch()
+      // The shell's dashboard holds Continue while fired (E3) — refresh it so
+      // the gate lifts the moment the new chair is taken.
+      bumpRefresh()
     }
   }
 

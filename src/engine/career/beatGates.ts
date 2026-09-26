@@ -45,7 +45,7 @@ export type BeatScreen =
 /** The HARD gates: the engine cannot advance past them at all, so their escape
  *  lives on the screen itself (auto-draft; "let the coach name him"; "let the
  *  AGM sign emergency cover"). */
-export type HardScreen = 'draft' | 'leadership' | 'squad'
+export type HardScreen = 'draft' | 'leadership' | 'squad' | 'gmCareer'
 
 export interface BeatGate {
   /** Stable id, for tests and telemetry. */
@@ -72,6 +72,9 @@ export interface GateFlags {
   /** Bar B2.2: the club plays next and cannot dress a legal lineup. The engine
    *  refuses the advance outright, so this outranks every beat. */
   lineupShortfall?: string
+  /** E3: the GM was dismissed. Nothing moves until he takes a new chair; the
+   *  escape is the GM Career screen's job market (always one takeable job). */
+  gmFired?: boolean
   /** Used only as the identity of "this gate state" for the bounce check. */
   continueLabel?: string
 }
@@ -128,6 +131,25 @@ export function routeContinue(args: {
   lastRoute: LastRoute | null
 }): ContinueDecision {
   const { dashboard: d, screen, lastRoute } = args
+  // Dismissed (E3): outranks everything — a fired GM does not run this club's
+  // draft. The season review, where he is told, comes first; after it the job
+  // market is the only way forward and the engine will not advance.
+  if (d?.gmFired) {
+    if (d.reviewPending) {
+      const review: BeatGate = { key: 'seasonReview', screen: 'seasonReview' }
+      return screen === 'seasonReview'
+        ? { kind: 'spend', gate: review, reason: 'attending' }
+        : lastRoute && lastRoute.screen === 'seasonReview' && lastRoute.label === (d.continueLabel ?? '')
+          ? { kind: 'spend', gate: review, reason: 'bounced' }
+          : { kind: 'route', gate: review }
+    }
+    return {
+      kind: 'hardGate',
+      screen: 'gmCareer',
+      alreadyThere: screen === 'gmCareer',
+      message: 'You were dismissed. Take one of the open GM jobs to continue.',
+    }
+  }
   // Draft day parks the offseason on an unfinished draft; the preseason won't
   // open without a captain. Neither can be simmed past — route and let the
   // screen's own action (auto-pick / "let the coach name him") clear it.

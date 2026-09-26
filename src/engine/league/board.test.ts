@@ -642,3 +642,44 @@ describe('firing is a trend, not a single bad year (Playtest 2026-08-26 E3)', ()
       .toMatch(/3 straight seasons/i)
   })
 })
+
+/* ── E3 calibration (docs/PRESSURE-AND-FIRINGS.md) ── */
+
+describe('seasonReview — calibrated verdicts (E3)', () => {
+  it('contend: a playoff team short of its billing MISSED; only missing the playoffs FAILS', () => {
+    const made = seasonReview({ state: makeBoardState({ mandate: 'contend', targetRank: 1 }), finalRank: 8, madePlayoffs: true, wonCup: false, year: 2033, seasonsWithClub: 5 })
+    expect(made.verdict).toBe('missed')
+    const out = seasonReview({ state: makeBoardState({ mandate: 'contend', targetRank: 1 }), finalRank: 18, madePlayoffs: false, wonCup: false, year: 2033, seasonsWithClub: 5 })
+    expect(out.verdict).toBe('failed')
+  })
+
+  it('a steadily improving playoff club is not fired for two first-round exits', () => {
+    const state = makeBoardState({ mandate: 'contend', targetRank: 1, missStreak: 1, warnings: 1, patience: 27 })
+    const r = seasonReview({ state, finalRank: 8, madePlayoffs: true, wonCup: false, year: 2033, seasonsWithClub: 9, teamsInLeague: 32 })
+    expect(r.fired).toBe(false)
+  })
+
+  it('competeRespectably: the basement is a FAILURE when the owner never asked for a rebuild', () => {
+    const state = makeBoardState({ mandate: 'competeRespectably', targetRank: 24 })
+    expect(seasonReview({ state, finalRank: 31, madePlayoffs: false, wonCup: false, year: 2028, teamsInLeague: 32 }).verdict).toBe('failed')
+    // Without the league size the old ±8 rule stands (existing callers).
+    const old = makeBoardState({ mandate: 'competeRespectably', targetRank: 24 })
+    expect(seasonReview({ state: old, finalRank: 31, madePlayoffs: false, wonCup: false, year: 2028 }).verdict).toBe('missed')
+  })
+
+  it('the seed-2029 slide: 30th then 31st against a ~24th target ends the job after the second year', () => {
+    const y1 = makeBoardState({ mandate: 'competeRespectably', targetRank: 23, patience: 44, warnings: 1 })
+    const r1 = seasonReview({ state: y1, finalRank: 30, madePlayoffs: false, wonCup: false, year: 2027, seasonsWithClub: 3, teamsInLeague: 32 })
+    expect(r1.fired).toBe(false)
+    const y2 = makeBoardState({ mandate: 'competeRespectably', targetRank: 24, patience: 21, warnings: 1, missStreak: r1.verdict === 'missed' || r1.verdict === 'failed' ? 1 : 0 })
+    const r2 = seasonReview({ state: y2, finalRank: 31, madePlayoffs: false, wonCup: false, year: 2028, seasonsWithClub: 4, teamsInLeague: 32 })
+    expect(r2.verdict).toBe('failed')
+    expect(r2.fired).toBe(true)
+  })
+
+  it('a board-sanctioned rebuild still protects the same slide', () => {
+    const state = makeBoardState({ mandate: 'competeRespectably', targetRank: 24, patience: 21, warnings: 1, missStreak: 1, rebuildSanctioned: true })
+    const r = seasonReview({ state, finalRank: 31, madePlayoffs: false, wonCup: false, year: 2028, seasonsWithClub: 4, teamsInLeague: 32 })
+    expect(r.fired).toBe(false)
+  })
+})
