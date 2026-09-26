@@ -1977,9 +1977,13 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
       entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.playoffsStartDay), label: 'Playoffs Begin' })
     }
 
-    // Offseason tentpoles (next calendar year): combine → draft → free agency.
+    // Offseason tentpoles (next calendar year) — the SAME dates the summer
+    // clock stamps its beats with (PHASE 0): lottery → combine → awards →
+    // draft → dev camp → free agency.
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-05-05`, label: 'Draft Lottery' })
     entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-02`, label: 'Scouting Combine' })
-    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-28`, label: 'Entry Draft' })
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-18`, label: 'Awards Night' })
+    entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-06-20`, label: 'Entry Draft' })
     entries.push({ kind: 'keydate', dateISO: `${ctx.year + 1}-07-01`, label: 'Free Agency Opens' })
   } else if (ctx.deadlineDay > 0) {
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, ctx.deadlineDay), label: 'Trade Deadline' })

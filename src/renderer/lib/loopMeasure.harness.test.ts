@@ -12,7 +12,11 @@
  *   - clicks per user game over the regular season:
  *       advance = 1 (+1 if the overlay holds) · route = 1 · spend = 1 ·
  *       hard gate = 2 (route + its one-click fix) · auto-opened scene = 0
- *       (the scene replaces the overlay; the Continue inside it is its spend).
+ *       (the scene replaces the overlay; the Continue inside it is its spend) ·
+ *       a rolled advance = 0 (PHASE 0 builds only: Continue rolls through a
+ *       quiet league day on the same press, up to 6 in a row).
+ *   (The match-day pregame frame is one more press per game in both builds;
+ *   like the depth audit, the model leaves it out.)
  *
  * Self-skipping (it sims a full year): run on demand with LOOP_RUN=1.
  *
@@ -29,6 +33,7 @@ import { loadModDatabase, validateModDatabase } from '@data'
 import { Career } from '@engine/career/career'
 import * as gates from '@engine/career/beatGates'
 import type { LastRoute } from '@engine/career/beatGates'
+import * as cadence from './cadence'
 import { shouldHoldOverlay, worthAStop } from './cadence'
 
 type Row = {
@@ -44,6 +49,9 @@ type Row = {
   hold: boolean
   receipt: boolean
   userGame: boolean
+  /** PHASE 0: this advance was rolled into from a quiet previous day — the
+   *  shell's Continue carried on without a new press (0 clicks). */
+  rolled: boolean
   inter: string
   owner: string
   headlines: string[]
@@ -74,6 +82,9 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
     const seenInter = new Set<string>()
     let seenOwner = ''
     let sawPlayoffs = false
+    const rolling = !!sceneToOpen // the PHASE 0 shell rolls through quiet days
+    let rollRun = 0
+    let prevQuiet = false
     let stop = false
     const t0 = Date.now()
     for (let i = 0; i < 1500 && !stop; i++) {
@@ -116,7 +127,19 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
         const s = sceneToOpen(d2, d)
         if (s) { opened = s.key; screen = s.screen }
       }
-      const hold = dec.kind === 'advance' && !opened && shouldHoldOverlay(fresh, receipt)
+      // PHASE 0 builds: a routine result rides on the next match-day frame
+      // (cadence.receiptWorthAStop); only a result that is a story holds.
+      const receiptRule = (cadence as Record<string, unknown>)['receiptWorthAStop'] as
+        | ((r: { playoff: boolean; homeGoals: number; awayGoals: number; storyline?: string | null }, last?: boolean) => boolean)
+        | undefined
+      const pr = receipt ? c.getPostgameReceipt() : null
+      const receiptStops = receipt && (!receiptRule || !pr || receiptRule(pr, !d2.nextGame))
+      const hold = dec.kind === 'advance' && !opened && shouldHoldOverlay(fresh, receiptStops)
+      // A user-game day is never rolled: the roll stops on its match-day frame,
+      // and the "play the game" press there IS this advance.
+      const rolled = rolling && dec.kind === 'advance' && prevQuiet && rollRun < 6 && !receipt
+      rollRun = rolled ? rollRun + 1 : 0
+      prevQuiet = dec.kind === 'advance' && !hold && !opened && d2.phase === 'regularSeason' && (d2.day ?? 0) > 0
       const newInter = (inbox.interactions ?? []).filter((x) => !seenInter.has(x.id))
       for (const x of newInter) seenInter.add(x.id)
       const own = c.getOwnerRequest()
@@ -125,7 +148,7 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
       if (own) seenOwner = ownKey
       rows.push({
         i, phase: d.phase, date: d.date, day: d.day ?? 0, label: d.continueLabel, kind, gate,
-        news: fresh.length, stops: stopping.length, hold, receipt, userGame: receipt,
+        news: fresh.length, stops: stopping.length, hold, receipt, userGame: receipt, rolled,
         inter: newInter.map((x) => `${x.severity}/${x.kind}${x.scene ? '/scene' : ''}`).join(';'),
         owner: newOwner,
         headlines: stopping.slice(0, 4).map((n) => n.headline),
@@ -134,7 +157,7 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
       if (opened) {
         rows.push({
           i, phase: d2.phase, date: d2.date, day: d2.day ?? 0, label: d2.continueLabel, kind: 'autoOpen', gate: opened,
-          news: 0, stops: 0, hold: false, receipt: false, userGame: false, inter: '', owner: '', headlines: [], stopCats: [],
+          news: 0, stops: 0, hold: false, receipt: false, userGame: false, rolled: false, inter: '', owner: '', headlines: [], stopCats: [],
         })
       }
       if (d2.phase === 'playoffs') sawPlayoffs = true
@@ -151,7 +174,10 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
     const spends = season.filter((r) => r.kind === 'spend').length
     const hard = season.filter((r) => r.kind === 'hardGate').length
     const autoOpens = season.filter((r) => r.kind === 'autoOpen').length
-    const clicks = adv.length + holds + routes + spends + hard * 2
+    const rolledN = adv.filter((r) => r.rolled).length
+    const clicks = adv.length - rolledN + holds + routes + spends + hard * 2
+    const nonReceipt = adv.filter((r) => !r.receipt)
+    const nonReceiptHolds = nonReceipt.filter((r) => r.hold).length
     const gateCount = new Map<string, number>()
     for (const r of season) {
       if (r.kind === 'route' || r.kind === 'autoOpen' || r.kind === 'hardGate') {
@@ -162,7 +188,7 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
     const whyHold = new Map<string, number>()
     for (const r of adv) {
       if (!r.hold) continue
-      const key = r.receipt ? 'receipt' : [...new Set(r.stopCats)].sort().join('+')
+      const key = r.receipt && r.stopCats.length === 0 ? 'receipt' : [...new Set(r.stopCats)].sort().join('+') + (r.receipt ? '+receipt' : '')
       whyHold.set(key, (whyHold.get(key) ?? 0) + 1)
     }
     const offseason = rows.filter((r) => r.phase !== 'regularSeason' || r.day === 0)
@@ -175,6 +201,10 @@ describe.skipIf(!process.env.LOOP_RUN)('loop measure — one delegated year', ()
       advances: adv.length,
       holds,
       holdPct: adv.length ? Math.round((100 * holds) / adv.length) : 0,
+      nonReceiptAdvances: nonReceipt.length,
+      nonReceiptHolds,
+      nonReceiptHoldPct: nonReceipt.length ? Math.round((100 * nonReceiptHolds) / nonReceipt.length) : 0,
+      rolled: rolledN,
       blockingGates: blocking,
       gatesByKey: Object.fromEntries([...gateCount.entries()].sort((a, b) => b[1] - a[1])),
       routes, spends, hardGates: hard, autoOpens,

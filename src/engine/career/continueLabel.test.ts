@@ -9,6 +9,7 @@
  * with no way out, so each gate is pinned to its label here. A new gate added to
  * the routing without a label will fail this.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from './career'
@@ -36,44 +37,45 @@ function seasonCareer(): { career: Career; gates: Gates } {
   return { career, gates }
 }
 
-describe('continueLabel — every gate names itself', () => {
+/* PHASE 0 (interruption diet) supersedes "every gate names itself": Continue
+ * ALWAYS advances time, so the button names where time goes and never a room.
+ * Moments open themselves (beatGates.sceneToOpen). Only the hard gates — which
+ * genuinely stop the clock — say what they need. */
+describe('continueLabel — time, never a destination (PHASE 0)', () => {
   it('reads as an ordinary match day when nothing is pending', () => {
     const { career } = seasonCareer()
     expect(career.getDashboard().continueLabel).toMatch(/^Continue to /)
   })
 
-  const cases: Array<[keyof Gates, unknown, string]> = [
-    ['deadlineHold', true, 'Continue — trade deadline'],
-    ['staffMeetingScene', { proposals: [] }, 'Continue — staff meeting'],
-    ['scoutMeetingScene', { proposals: [] }, 'Continue — scout meeting'],
-    ['scoutDigestPending', true, 'Continue — scouting report'],
-    ['reviewFacts', { year: 2029 }, 'Continue — end-of-season review'],
+  const gatesOn: Array<[keyof Gates, unknown]> = [
+    ['deadlineHold', true],
+    ['staffMeetingScene', { proposals: [] }],
+    ['scoutMeetingScene', { proposals: [] }],
+    ['scoutDigestPending', true],
+    ['reviewFacts', { year: 2029 }],
   ]
-
-  for (const [gate, value, label] of cases) {
-    it(`names the beat when ${gate} is set`, () => {
+  for (const [gate, value] of gatesOn) {
+    it(`${gate} does not relabel Continue — it still names the next date`, () => {
       const { career, gates } = seasonCareer()
-      expect(career.getDashboard().continueLabel).not.toBe(label)
       ;(gates as Record<string, unknown>)[gate] = value
-      expect(career.getDashboard().continueLabel).toBe(label)
+      expect(career.getDashboard().continueLabel).toMatch(/^Continue to /)
+      expect(career.getDashboard().continueLabel).not.toMatch(/meeting|review|scouting report|deadline|trade offer/)
     })
   }
 
-  it('honours the shell routing order when several gates are up at once', () => {
-    // App.tsx routes the deadline ahead of the meetings, and the meetings ahead
-    // of the digest; the label has to agree or it names a beat the GM won't get.
-    const { career, gates } = seasonCareer()
-    gates.scoutDigestPending = true
-    gates.scoutMeetingScene = { proposals: [] }
-    gates.staffMeetingScene = { proposals: [] }
-    gates.deadlineHold = true
-    expect(career.getDashboard().continueLabel).toBe('Continue — trade deadline')
-    gates.deadlineHold = false
-    expect(career.getDashboard().continueLabel).toBe('Continue — staff meeting')
-    gates.staffMeetingScene = null
-    expect(career.getDashboard().continueLabel).toBe('Continue — scout meeting')
-    gates.scoutMeetingScene = null
-    expect(career.getDashboard().continueLabel).toBe('Continue — scouting report')
+  it('draft day: the button names the DRAFT even with the season review still staged', () => {
+    // The audit bug: continueLabel checked the review before the stage labels,
+    // so on draft day it read "end-of-season review" while Continue went to
+    // the draft (the first hard gate).
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0]!)
+    const g = c as unknown as Record<string, any>
+    g.phase = 'offseason'
+    g.offseason = { year: c.getDashboard().year, stage: 'draft', draft: { order: [{}], selections: [] }, faDay: 0 }
+    g.reviewFacts = { year: 2029 }
+    expect(c.getDashboard().draftPending).toBe(true)
+    expect(c.getDashboard().reviewPending).toBe(true)
+    expect(c.getDashboard().continueLabel).toBe('Go to the entry draft')
   })
 })
 
@@ -109,7 +111,7 @@ function tableOffer(
 }
 
 describe('a standing trade offer is a beat gate (playtest A6, bar B2.2)', () => {
-  it('names the club on the Continue button', () => {
+  it('a standing offer arms the gate (the desk flag), without relabelling Continue', () => {
     const data = generateLeague({ seed: 2029 })
     const career = new Career(data, 2029, data.league.teams[3]!)
     const gates = career as unknown as Gates
@@ -117,40 +119,10 @@ describe('a standing trade offer is a beat gate (playtest A6, bar B2.2)', () => 
     career.advanceDay()
 
     expect(career.getDashboard().tradeOffersPending).toBe(0)
-    const abbr = tableOffer(career, gates, data, 0, 'a6-1')
-    expect(career.getDashboard().tradeOffersPending).toBe(1)
-    expect(career.getDashboard().continueLabel).toBe(`Continue — trade offer from ${abbr}`)
-  })
-
-  it('counts them when several clubs are holding', () => {
-    const data = generateLeague({ seed: 2029 })
-    const career = new Career(data, 2029, data.league.teams[3]!)
-    const gates = career as unknown as Gates
-    gates.trainingCamp = null
-    career.advanceDay()
-
     tableOffer(career, gates, data, 0, 'a6-1')
     tableOffer(career, gates, data, 1, 'a6-2')
-    expect(career.getDashboard().continueLabel).toBe('Continue — 2 trade offers')
-  })
-
-  it('sits under the deadline and over the meetings in the routing order', () => {
-    // Same law as the other gates: the label must name the beat the shell will
-    // actually land on. App.tsx routes deadline → trade desk → staff meeting.
-    const data = generateLeague({ seed: 2029 })
-    const career = new Career(data, 2029, data.league.teams[3]!)
-    const gates = career as unknown as Gates
-    gates.trainingCamp = null
-    career.advanceDay()
-
-    const abbr = tableOffer(career, gates, data, 0, 'a6-1')
-    gates.staffMeetingScene = { proposals: [] }
-    gates.deadlineHold = true
-    expect(career.getDashboard().continueLabel).toBe('Continue — trade deadline')
-    gates.deadlineHold = false
-    expect(career.getDashboard().continueLabel).toBe(`Continue — trade offer from ${abbr}`)
-    career.declineAllTradeOffers()
-    expect(career.getDashboard().continueLabel).toBe('Continue — staff meeting')
+    expect(career.getDashboard().tradeOffersPending).toBe(2)
+    expect(career.getDashboard().continueLabel).toMatch(/^Continue to /)
   })
 
   it('has a one-click escape: the AGM passes on the lot', () => {
@@ -204,7 +176,6 @@ describe('the trade deadline is a hard gate (playtest A7)', () => {
     const career = freshCareer(2029)
     career.advance(400) // enough to run the whole regular season and then some
     expect(career.getDashboard().deadlinePending).toBe(true)
-    expect(career.getDashboard().continueLabel).toBe('Continue — trade deadline')
     expect(career.getDashboard().phase).toBe('regularSeason')
   })
 

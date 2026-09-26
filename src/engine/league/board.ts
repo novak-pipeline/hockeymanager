@@ -726,6 +726,9 @@ export interface BoardSummaryView {
   missStreak: number
   /** Plain sentence describing how exposed the job is right now. */
   jeopardyLabel: string
+  /** PHASE 0: the board's mood as one line of prose — what the dashboard
+   *  shows BETWEEN the three board moments of the year. Additive. */
+  mood?: string
 }
 
 /**
@@ -778,5 +781,19 @@ export function boardSummary(state: BoardState): BoardSummaryView {
     statusLabel,
     missStreak,
     jeopardyLabel,
+    mood: boardMoodLine(state),
   }
+}
+
+/** The board's mood in one sentence (PHASE 0). The board speaks at three
+ *  moments a year — preseason expectations, the deadline checkpoint, the
+ *  season verdict — and when the job is genuinely at risk. In between, this. */
+export function boardMoodLine(state: BoardState): string {
+  if (state.firedAtYear !== null) return 'The board has made its decision.'
+  const c = state.confidence
+  if (c >= 80) return 'The board is delighted — this is ahead of what they asked for.'
+  if (c >= 60) return 'The board is comfortable with where this is going.'
+  if (c >= 40) return 'The board is watching the standings, not the phone.'
+  if (c >= 25) return 'The board is uneasy. The results need to turn.'
+  return 'The board is losing patience — this is now about your job.'
 }

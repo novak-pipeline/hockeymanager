@@ -493,6 +493,11 @@ export interface DashboardView {
   /** Playtest A6: how many standing inbound offers are waiting on a yes or a no.
    *  Non-zero holds Continue on the trade desk and flags the topbar. Additive. */
   tradeOffersPending?: number
+  /** PHASE 0: staff-meeting Responsibilities setting. Additive. */
+  staffMeetingMode?: 'weekly' | 'onDemand' | 'delegate'
+  /** PHASE 0: the staff's info-only briefings for the week ahead (the timer
+   *  meeting used to stop Continue to read these aloud). Additive. */
+  staffBrief?: string[]
   userTeam: {
     teamId: string
     name: string
@@ -2647,6 +2652,11 @@ export interface CareerSnapshot {
   boardMeetingYear?: number | null
   /** M3 dev camp soft gate. Optional/additive. */
   devCampPending?: boolean
+  /** PHASE 0: summer mail waiting for its dated beat. Optional/additive. */
+  stagedNews?: Array<{ beat: number; item: NewsItem }>
+  /** PHASE 0 staff-meeting Responsibilities + the cap's clock. Optional/additive. */
+  staffMeetingMode?: 'weekly' | 'onDemand' | 'delegate'
+  lastStaffMeeting?: { year: number; day: number } | null
   /** #182: the GM's curated dev-camp invite list (undefined ⇒ auto). Additive. */
   devCampRoster?: string[]
   /** #182: the GM's curated training-camp PTO invite list (undefined ⇒ AGM auto). Additive. */

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { NewsItem } from '@domain/news'
-import { shouldHoldOverlay, worthAStop, STOP_SALIENCE } from './cadence'
+import { receiptWorthAStop, shouldHoldOverlay, worthAStop, STOP_SALIENCE } from './cadence'
 
 const item = (over: Partial<NewsItem>): NewsItem => ({
   id: 'n1', day: 5, year: 2029, category: 'league',
@@ -19,18 +19,54 @@ describe('worthAStop', () => {
     expect(worthAStop(item({ category: 'league' }))).toBe(false)
   })
 
-  it('stops for anything touching the GM\'s own club', () => {
-    for (const category of ['result', 'injury', 'trade', 'contract', 'draft', 'award', 'milestone'] as const) {
+  it('PHASE 0: stops for decisions and payoffs — contracts, milestones, awards, draft, playoffs', () => {
+    for (const category of ['contract', 'draft', 'award', 'milestone', 'playoffs'] as const) {
       expect(worthAStop(item({ category }))).toBe(true)
     }
   })
 
-  it('stops for a notable league story — bylined, rare, or highly salient', () => {
-    expect(worthAStop(item({ press: { byline: 'A — B', kind: 'weekly' } }))).toBe(true)
+  it('PHASE 0: scouting reports, press columns, depth injuries and trade-desk mail stream past', () => {
+    for (const category of ['scouting', 'injury', 'trade', 'result'] as const) {
+      expect(worthAStop(item({ category }))).toBe(false)
+    }
+    expect(worthAStop(item({ press: { byline: 'A — B', kind: 'weekly' } }))).toBe(false)
+    // Your own man's slump quote is colour, not a stop (unless it is a first).
+    expect(worthAStop(item({ category: 'contract', reach: 'ownClub' }))).toBe(false)
+  })
+
+  it('stops for a notable story — rare, or highly salient (key-man injuries carry salience)', () => {
     expect(worthAStop(item({ rare: true }))).toBe(true)
+    expect(worthAStop(item({ category: 'injury', salience: 60 }))).toBe(true)
     expect(worthAStop(item({ salience: STOP_SALIENCE }))).toBe(true)
     // Just under the bar stays silent, so the threshold is a real edge.
     expect(worthAStop(item({ salience: STOP_SALIENCE - 1 }))).toBe(false)
+  })
+})
+
+describe('the social feed is read, not stopped for (PHASE 0)', () => {
+  it('a highly-scored feed post in the inbox streams past; a first-of-its-kind one still stops', () => {
+    expect(worthAStop(item({ authorId: 'analyst', salience: 80 }))).toBe(false)
+    expect(worthAStop(item({ authorId: 'insider', salience: 95, rare: true }))).toBe(true)
+  })
+})
+
+describe('receiptWorthAStop (PHASE 0)', () => {
+  const r = (homeGoals: number, awayGoals: number, over: Partial<{ playoff: boolean; storyline: string | null }> = {}) =>
+    ({ playoff: false, homeGoals, awayGoals, storyline: null, ...over })
+
+  it('a routine result rides on the next match-day frame', () => {
+    expect(receiptWorthAStop(r(3, 2))).toBe(false)
+    expect(receiptWorthAStop(r(2, 4))).toBe(false)
+  })
+
+  it('a result that IS a story stops: playoffs, the chronicle, blowouts, shutouts, the season finale', () => {
+    expect(receiptWorthAStop(r(3, 2, { playoff: true }))).toBe(true)
+    expect(receiptWorthAStop(r(3, 2, { storyline: 'Revenge served' }))).toBe(true)
+    expect(receiptWorthAStop(r(6, 2))).toBe(true)
+    expect(receiptWorthAStop(r(1, 5))).toBe(true)
+    expect(receiptWorthAStop(r(2, 0))).toBe(true)
+    expect(receiptWorthAStop(r(0, 1))).toBe(true)
+    expect(receiptWorthAStop(r(3, 2), true)).toBe(true)
   })
 })
 
@@ -44,7 +80,7 @@ describe('shouldHoldOverlay', () => {
   })
 
   it('holds when one real item hides among the churn', () => {
-    expect(shouldHoldOverlay([item({}), item({ id: 'n2', category: 'injury' })], false)).toBe(true)
+    expect(shouldHoldOverlay([item({}), item({ id: 'n2', category: 'contract' })], false)).toBe(true)
   })
 
   it('always holds after a user game, however quiet the mail', () => {

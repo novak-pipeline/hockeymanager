@@ -228,7 +228,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'offerSheetResult', ok: r.ok, matched: r.matched, pending: r.pending, message: r.message, board: must().getRfaBoard() }
     }
     case 'setSquadStatus': {
-      must().setSquadStatus(req.playerId, req.status)
+      const r = must().setSquadStatus(req.playerId, req.status)
+      if (!r.ok) return { id: req.id, type: 'error', message: r.message ?? 'Could not set that role.' }
       return { id: req.id, type: 'player', player: must().getPlayer(req.playerId) }
     }
     case 'getRoleBoard':
@@ -311,6 +312,9 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().delegateStaffMeeting()
       return { id: req.id, type: 'staffMeetingResult', applied: res.applied, summary: res.summary }
     }
+    case 'setStaffMeetingMode':
+      must().setStaffMeetingMode(req.mode)
+      return { id: req.id, type: 'dashboard', dashboard: must().getDashboard() }
     case 'getScoutMeeting':
       return { id: req.id, type: 'scoutMeeting', scoutMeeting: must().getScoutMeeting() }
     case 'submitScoutMeeting': {

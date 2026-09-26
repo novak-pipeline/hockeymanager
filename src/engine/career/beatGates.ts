@@ -1,5 +1,18 @@
 /**
- * THE BEAT-GATE LAW (Gap #1 / EXCELLENCE bar B2.2).
+ * THE BEAT-GATE LAW (Gap #1 / EXCELLENCE bar B2.2) — PHASE 0 revision.
+ *
+ * PHASE 0 (depth audit 2026-09, the interruption diet): **Continue always
+ * advances time.** It no longer walks the GM into a beat and it no longer
+ * carries destination labels ("Continue — staff meeting"). Instead a real
+ * moment OPENS ITSELF as a scene on the advance that brings it
+ * ({@link sceneToOpen}); standing in that room, the next Continue spends it and
+ * moves on. Walk away from it and Continue still advances — the engine
+ * delegates the beat, exactly as it always did for a beat simmed past. Only the
+ * HARD gates (draft, captain, an illegal lineup, a dismissed GM) stop the
+ * clock, because the engine genuinely cannot move without an action.
+ *
+ * The text below is the original law; its softlock guarantees still hold (an
+ * advance can never ping-pong, because it never routes).
  *
  * A "beat gate" is a moment the game holds the calendar on: cut day, the
  * boardroom, development camp, the deadline, a standing trade offer, the staff
@@ -164,18 +177,38 @@ export function routeContinue(args: {
   const gates = liveBeatGates(d)
   if (gates.length === 0) return { kind: 'advance' }
 
-  // Rule 1 — attending. Standing in ANY live beat's room, Continue spends.
-  // (Any, not just the top one: with two gates live, insisting on the top one
-  // is precisely the ping-pong this law exists to kill.)
+  // Attending. Standing in ANY live beat's room, Continue spends it (advances
+  // in place — no overlay; the room IS the stop).
   const attending = gates.find((g) => g.screen === screen)
   if (attending) return { kind: 'spend', gate: attending, reason: 'attending' }
 
-  const top = gates[0]!
-  // Rule 2 — bounced. We already sent the GM here for this same gate state and
-  // he is not there, so the screen refused him (empty camp, no scene). Spend
-  // rather than route into the same wall forever.
-  if (lastRoute && lastRoute.screen === top.screen && lastRoute.label === (d?.continueLabel ?? '')) {
-    return { kind: 'spend', gate: top, reason: 'bounced' }
+  // PHASE 0: not in the room → Continue simply advances. The engine delegates
+  // whatever the GM walked away from; nothing routes, so nothing can bounce.
+  void lastRoute
+  return { kind: 'advance' }
+}
+
+/**
+ * PHASE 0 — the scenes that open THEMSELVES when their moment arrives.
+ *
+ * After an advance, compare the gate state before and after: a gate that just
+ * became live is a moment that arrived on this press, and the shell opens its
+ * room (no signpost, no extra click). A gate that was already live before the
+ * press is one the GM already walked away from — it is not reopened.
+ *
+ * Which gates count as moments is decided ENGINE-side: the engine only arms a
+ * trade-offer gate for an offer worth the GM, a staff meeting when a finding
+ * crosses a threshold (and the GM has not delegated), a scout meeting inside
+ * the scouting windows. The weekly scout digest is inbox mail, never a scene.
+ */
+export function sceneToOpen(
+  after: GateFlags | null | undefined,
+  before: GateFlags | null | undefined
+): BeatGate | null {
+  const was = new Set(liveBeatGates(before).map((g) => g.key))
+  for (const g of liveBeatGates(after)) {
+    if (g.key === 'scoutDigest') continue
+    if (!was.has(g.key)) return g
   }
-  return { kind: 'route', gate: top }
+  return null
 }

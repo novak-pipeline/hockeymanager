@@ -209,6 +209,7 @@ import {
 import {
   buildStaffMeetingScene,
   delegatedChoices,
+  isInfoFinding,
   type StaffAction,
   type StaffCast,
   type StaffFinding,
@@ -324,6 +325,7 @@ import {
 } from '@engine/league/lockerRoom'
 import {
   applyInteractionResponse,
+  type InteractionHistory,
   maybeRaiseInteraction,
   promiseFromResponse,
   reactionSpec,
@@ -336,6 +338,7 @@ import {
   scheduleReactions,
   reactionCopy,
   grudgeContext,
+  PERSONALITY,
   type WorldAction,
   type WorldActionKind,
   type PendingLedgerReaction,
@@ -500,6 +503,8 @@ import {
   injureNow,
   rollInjuries,
   tickRecovery,
+  injuryChance,
+  baselineInjuryChance,
 } from '@engine/league/condition'
 import { repairLines, coachSetLineup, coachAdjustedScore } from '@engine/league/lineup'
 import { buildCoachProfile, profileToTactics, coachFit, nudgeProfileForDirection, specialTeamsEdges, SYSTEM_FAVORS } from '@engine/league/coachProfile'
@@ -542,6 +547,7 @@ import {
 } from '@engine/league/staff'
 import {
   boardSummary,
+  boardMoodLine,
   seasonReview,
   setSeasonMandate,
   updateConfidence,
@@ -1006,8 +1012,6 @@ const RATINGS_WINDOW = 10
 /** Seconds in a regulation period — mirrors quickSim's PERIOD_SECONDS. Used only
  *  to turn a stream event's ABSOLUTE `t` into time within its period for prose. */
 const PERIOD_SECONDS_NHL = 1200
-/** Calendar days between recurring staff-meeting prompts. */
-const STAFF_MEETING_INTERVAL = 14
 /** Calendar days between recurring scout-meeting prompts (monthly, rarer than staff). */
 const SCOUT_MEETING_INTERVAL = 28
 /** Phase offset so scout-meeting boundaries (7, 35, 63…) never land on a staff-
@@ -1118,6 +1122,10 @@ export class Career {
   private readonly shAssists = new Map<PlayerId, number>()
   private news: NewsItem[] = []
   private newsCounter = 0
+  /** PHASE 0: summer mail computed on the awards press but RELEASED on its
+   *  real date (combine early June, awards night mid-June) instead of one
+   *  60-item dump. `beat` = the summer beat that releases it. */
+  private stagedNews: Array<{ beat: number; item: NewsItem }> = []
   /** Player→GM concerns (open + recently resolved). Story-first core. */
   private interactions: PlayerInteraction[] = []
   private interactionCounter = 0
@@ -1207,6 +1215,9 @@ export class Career {
    *  a rival GM's second call reference his first instead of starting over. */
   private tradeThreads: TradeThread[] = []
   private offerCounter = 0
+  /** PHASE 0 trade desk: routine calls the AGM handled this week (passed on
+   *  under the delegate rule), mailed as one weekly digest. */
+  private tradeDeskLog: Array<{ day: number; club: string; target: string }> = []
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
   /** B6.2: the latest user game presented as postgame receipts (transient —
@@ -2794,6 +2805,12 @@ export class Career {
       { playerId: pid, salience: 95 })
   }
 
+  /** A player's CURRENT-season games and time on ice (seconds), from the live
+   *  accumulators — the only place mid-season numbers exist. */
+  private seasonIceLine(pid: PlayerId): { gp: number; toi: number } {
+    return { gp: this.gp.get(pid) ?? 0, toi: this.totals.get(pid)?.toi ?? 0 }
+  }
+
   /** Current-season per-player lines for the records module. */
   private buildSeasonLines(): SeasonLine[] {
     const lines: SeasonLine[] = []
@@ -3046,13 +3063,12 @@ export class Career {
     }
 
     // Pre-compute per-unit synergy multipliers once (deterministic, no Rng).
-    // Synergy is applied ONLY for the user's team; it represents the coaching
-    // layer (the user's tactical line-building decisions). Applying it to all
-    // AI teams would alter AI-vs-AI quick-sim seeds, breaking existing tests.
-    // Chemistry is still applied universally as before.
+    // PHASE 0: synergy applies to EVERY club, like chemistry. It used to be
+    // user-only (to keep AI-vs-AI seeds stable), which meant building lines
+    // well was an edge the AI could never have — or answer. The world plays
+    // by one set of rules now; pinned seed expectations were re-measured.
     const synergyCache = new Map<string, number>()
-    const synergyFor = (ids: string[], kind: UnitKind, teamId: TeamId): number => {
-      if (teamId !== this.userTeamId) return 1
+    const synergyFor = (ids: string[], kind: UnitKind): number => {
       const key = [...ids].sort().join('|')
       const hit = synergyCache.get(key)
       if (hit !== undefined) return hit
@@ -3081,7 +3097,7 @@ export class Career {
         return p
       }
       const chemMult = chemistryModifier(lr, slot.unit)
-      const synMult = synergyFor(slot.unit, slot.kind, slot.teamId)
+      const synMult = synergyFor(slot.unit, slot.kind)
       // Compose multiplicatively, clamp to [0.97, 1.03] to stay within calibration band.
       const combined = clamp(chemMult * synMult, 0.97, 1.03)
       if (combined === 1) {
@@ -3217,7 +3233,7 @@ export class Career {
     this.residueFlags.push(...residue)
     // FEED-V2-1: a healthy scratch a fiery or checked-out man can't swallow
     // becomes a vague-post on the feed. The pros eat it in silence.
-    if (kind === 'scratched' && (player.personality.temperament < 45 || player.personality.loyalty < 40)) {
+    if (kind === 'scratched' && (player.personality.temperament <= PERSONALITY.HOT_TEMPER || player.personality.loyalty < PERSONALITY.DISLOYAL)) {
       this.queueVoice({ kind: 'scratchGripe', playerId, relevant: true })
     }
     // Bounded histories — the chronicle keeps the long past; the ledger only
@@ -3455,7 +3471,9 @@ export class Career {
             teamId: this.userTeamId as string,
             year: this.year,
             day,
-            kind: r.escalation > 0 ? 'tradeRequest' : 'unhappy',
+            // A scratched man at your door is asking about ICE TIME — so a
+            // promise to him is an ice-time promise, measured and judged.
+            kind: r.escalation > 0 ? 'tradeRequest' : action.kind === 'scratched' ? 'iceTime' : 'unhappy',
             severity: 'serious',
             message: copy.message ?? copy.body,
             options: copy.options ?? [],
@@ -3748,10 +3766,11 @@ export class Career {
   ): { year: number; dueDay?: number; baselineGp?: number; baselineToi?: number } {
     const inSeason = this.phase === 'regularSeason'
     if (!inSeason) return { year: this.year + 1, ...(kind === 'iceTime' ? { dueDay: 35, baselineGp: 0, baselineToi: 0 } : {}) }
-    const cur = player.stats.find((s) => s.season === this.year)
-    const baseline = cur
-      ? { baselineGp: cur.gamesPlayed, baselineToi: cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce }
-      : { baselineGp: 0, baselineToi: 0 }
+    // The CURRENT season lives in the live accumulators (this.gp/this.totals);
+    // `player.stats` is only written at rollover, so reading it mid-season froze
+    // every baseline at 0 GP and judged the promise against nothing (PHASE 0).
+    const line = this.seasonIceLine(player.id)
+    const baseline = { baselineGp: line.gp, baselineToi: line.toi }
     if (kind === 'iceTime') return { year: this.year, dueDay: this.currentDay + 35, ...baseline }
     if (kind === 'exploreTrade' && this.currentDay < this.deadlineDay) return { year: this.year, dueDay: this.deadlineDay }
     return { year: this.year }
@@ -3972,6 +3991,76 @@ export class Career {
     }
   }
 
+  /** What this man has already heard from you (the history half of the tone
+   *  model): warm words this season or last, and your promise record to him. */
+  private interactionHistory(current: PlayerInteraction): InteractionHistory {
+    let supportiveBefore = 0
+    for (const i of this.interactions) {
+      if (i === current || i.playerId !== current.playerId || i.status !== 'resolved') continue
+      if (i.year < this.year - 1) continue
+      const tone = i.options.find((o) => o.id === i.chosenOptionId)?.tone
+      if (tone === 'supportive') supportiveBefore++
+    }
+    let brokenPromises = 0
+    let keptPromises = 0
+    for (const pr of this.playerPromises) {
+      if (pr.playerId !== current.playerId) continue
+      if (pr.status === 'broken') brokenPromises++
+      else if (pr.status === 'kept') keptPromises++
+    }
+    return { supportiveBefore, brokenPromises, keptPromises }
+  }
+
+  /** Residue: he came to you and was waved off (or never answered). */
+  private flagDismissed(interaction: PlayerInteraction, known: boolean): void {
+    this.residueFlags.push({
+      playerId: interaction.playerId, kind: 'wasDismissed',
+      year: this.year, day: this.currentDay, actionId: interaction.id, known,
+    })
+  }
+
+  /** A concern left unanswered this many days lapses — and lapsing is itself
+   *  an answer. */
+  static readonly CONCERN_EXPIRY_DAYS = 8
+
+  /**
+   * PHASE 0: ignoring a player used to cost nothing, and two ignored cards
+   * silently blocked every future concern and decision scene (the open-cap
+   * check) — so the right play was never to answer and the room went quiet.
+   * Now an unanswered concern lapses after {@link CONCERN_EXPIRY_DAYS}: it
+   * leaves `wasDismissed` residue (the agent brings it up at the table), a
+   * small morale hit a professional takes better than a hothead, a room nick
+   * for a serious one, and a note from his agent — and it frees the slot.
+   */
+  private expireStaleInteractions(day: number): void {
+    for (const i of this.interactions) {
+      if (i.status !== 'open' || i.teamId !== (this.userTeamId as string)) continue
+      if (i.year !== this.year || day - i.day < Career.CONCERN_EXPIRY_DAYS) continue
+      const p = this.data.players.get(asPlayerId(i.playerId))
+      i.status = 'resolved'
+      i.chosenOptionId = 'ignored'
+      i.resolvedDay = day
+      this.decisionEventFor.delete(i.id)
+      if (!p) { i.outcome = 'The conversation never happened.'; continue }
+      const pro = p.personality.professionalism
+      const hit = (i.severity === 'serious' ? 6 : 3) + Math.max(0, 10 - pro) * 0.3
+      p.morale = Math.max(0, Math.round(p.morale - hit))
+      if (i.severity === 'serious') {
+        const lr = this.lockerRooms.get(this.userTeamId)
+        if (lr) lr.roomMorale = Math.max(0, lr.roomMorale - 1)
+      }
+      this.flagDismissed(i, true)
+      const last = p.name.split(' ').slice(-1)[0] ?? p.name
+      i.outcome = `You never answered. ${last} stopped waiting — and he noticed.`
+      this.pushNews('contract', `${last}'s agent: "Nobody called him back"`,
+        `${p.name} asked for a conversation on ${dayToDateISO(i.year, i.day)}. It never happened. ` +
+        `"He's a professional — he'll play," his agent says. "But he asked, and he was ignored. We'll both remember that when it's time to talk contract."`,
+        // A receipt, not a decision: it streams into the inbox (the cost is
+        // already paid — morale, residue, the agent's memory) without a stop.
+        { playerId: i.playerId, teamId: this.userTeamId as string, reach: 'ownClub' })
+    }
+  }
+
   /** GM responds to an open concern; applies morale/room effects deterministically. */
   respondToInteraction(
     interactionId: string,
@@ -4004,7 +4093,7 @@ export class Career {
       }
     }
 
-    const result = applyInteractionResponse({ interaction, option, player })
+    const result = applyInteractionResponse({ interaction, option, player, history: this.interactionHistory(interaction) })
     // A JSON-safe descriptor of the resolution so the renderer can voice the
     // player's spoken reply (the model never alters the delta below).
     const reaction = reactionSpec({ interaction, option, player, result })
@@ -4025,6 +4114,9 @@ export class Career {
     interaction.chosenOptionId = optionId
     interaction.outcome = result.outcome
     interaction.resolvedDay = this.currentDay
+    // Waved off to his face: he remembers (the decision library's
+    // `formerlyDismissed` trigger and the agent's grudge at the table read it).
+    if (option.tone === 'dismissive') this.flagDismissed(interaction, true)
 
     // E3 audit: "address the room" was a promise with no action behind it and
     // nothing that ever checked it. Choosing it IS addressing the room now: the
@@ -4041,14 +4133,14 @@ export class Career {
     // LW5: a promise-tone answer is written into the ledger — measurable
     // keep-condition, due date, and your exact words for later quoting.
     if (option.tone === 'promise') {
-      const cur = player.stats.find((s) => s.season === this.year)
+      const line = this.seasonIceLine(player.id)
       const promise = promiseFromResponse({
         interaction,
         player,
         nextId: `pp${this.interactionCounter++}`,
         deadlineDay: this.deadlineDay,
-        seasonGp: cur?.gamesPlayed ?? 0,
-        seasonToi: cur ? cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce : 0,
+        seasonGp: line.gp,
+        seasonToi: line.toi,
       })
       if (promise) {
         this.playerPromises.push(promise)
@@ -4530,9 +4622,7 @@ export class Career {
 
       if (pr.kind === 'iceTime') {
         if (!p || !onRoster) { pr.status = 'broken'; continue } // moved on — the trade story covers it
-        const cur = p.stats.find((s) => s.season === this.year)
-        const gpNow = cur?.gamesPlayed ?? 0
-        const toiNow = cur ? cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce : 0
+        const { gp: gpNow, toi: toiNow } = this.seasonIceLine(p.id)
         const dGp = gpNow - (pr.baselineGp ?? 0)
         // Short sample (injury, scratch run)? One grace extension.
         if (dGp < 5 && !pr.extended) { pr.extended = true; pr.dueDay = day + 20; continue }
@@ -4778,7 +4868,16 @@ export class Career {
         totalGames,
         teamsInLeague: this.data.league.teams.length,
       })
-      this.pushSeeds(confResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
+      // PHASE 0: the board's praise is a once-a-season note, not a mail every
+      // time confidence wobbles back over the line; warnings (the job at risk)
+      // always come through.
+      const confSeeds = confResult.newsSeeds.filter((s) => {
+        if (!s.headline.startsWith('Board praises')) return true
+        if (this.boardPraisedYear === this.year) return false
+        this.boardPraisedYear = this.year
+        return true
+      })
+      this.pushSeeds(confSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
       /* ── E3: the building has an opinion, and the owner can hear it ── */
       this.tickPressure(currentRank, gamesPlayed, sorted)
@@ -4808,6 +4907,7 @@ export class Career {
     }
 
     /* ── player→GM concerns for the user club (story-first core) ── */
+    this.expireStaleInteractions(day)
     this.maybeRaiseInteractions(day)
     this.maybeRaiseDecisionEvent(day)
     // E1: the farm and the juniors get onto the GM's desk — at most one story a
@@ -5639,19 +5739,24 @@ export class Career {
 
   private postGame(res: GameOutcome, dayRng: Rng): Set<PlayerId> {
     const played = new Set<PlayerId>()
-    const participants: Array<{ player: Player; toi: number }> = []
+    const participants: Array<{ player: Player; toi: number; medical?: number }> = []
+    // The two clubs' medical rooms (PHASE 0: the physio is part of the model).
+    const homeRoster = this.data.teams.get(res.homeTeamId)?.roster
+    const medHome = this.medicalQuality(res.homeTeamId)
+    const medAway = this.medicalQuality(res.awayTeamId)
     for (const [pid, s] of res.playerStats) {
       if (s.toi <= 0) continue
       played.add(pid)
       const player = this.resolve(pid)
-      participants.push({ player, toi: s.toi })
+      const medical = homeRoster?.includes(pid) ? medHome : medAway
+      participants.push({ player, toi: s.toi, ...(medical !== undefined ? { medical } : {}) })
       // Earned form: tonight's box score heats up hot hands and cools quiet
       // stars. Deterministic (no Rng), so it doesn't perturb the injury roll.
       player.form = Math.max(-5, Math.min(5, player.form + formDeltaFromGame(player, s)))
       // In-game departure: the sim saw him go down — the injury is guaranteed
       // (rollInjuries then skips him, so aggregate volume barely moves).
       if (s.leftGame && player.injuryStatus === null) {
-        const injury = injureNow(player, dayRng)
+        const injury = injureNow(player, dayRng, medical)
         const teamId = this.teamOf(pid)
         if (teamId === this.userTeamId) {
           const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
@@ -5708,7 +5813,28 @@ export class Career {
     this.pushNews('injury', headline.charAt(0).toUpperCase() + headline.slice(1), body.charAt(0).toUpperCase() + body.slice(1), {
       playerId: p.id as string,
       teamId: this.userTeamId as string,
+      // PHASE 0: a real absence (3+ games) for a KEY man (top-nine forward,
+      // top-four D, the starting goalie) is a stop; a depth knock or a
+      // day-to-day tweak streams past in the inbox.
+      ...(n >= Career.KEY_INJURY_MIN_GAMES && this.isKeyPlayer(p) ? { salience: 60 } : {}),
     })
+  }
+
+  /** Games out at which a key man's injury earns a stop (shorter = day-to-day). */
+  static readonly KEY_INJURY_MIN_GAMES = 3
+
+  /** Top-nine forward, top-four defenceman or the starting goalie of the
+   *  user's NHL club, by rated ability. */
+  private isKeyPlayer(p: Player): boolean {
+    const group = (q: Player): 'F' | 'D' | 'G' => (q.position === 'G' ? 'G' : q.position === 'D' ? 'D' : 'F')
+    const g = group(p)
+    const ranked = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((q): q is Player => !!q && group(q) === g)
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    const idx = ranked.findIndex((q) => q.id === p.id)
+    const cut = g === 'F' ? 9 : g === 'D' ? 4 : 1
+    return idx >= 0 && idx < cut
   }
 
   /** Headline for a contract offer the GM has put out. A summer of free agency
@@ -6937,6 +7063,21 @@ export class Career {
         userDeadCap: this.userDeadCap,
       })
       for (const o of offers) {
+        // PHASE 0 interruption diet: only a call worth a decision reaches the
+        // GM's desk (and holds Continue). Routine low offers for depth pieces
+        // are the AGM's under the delegate rule — "decline lowballs, forward
+        // anything fair" — and land in the weekly trade-desk digest instead.
+        // (The audit measured 23 blocking offer gates a season.)
+        if (!this.offerWorthTheGm(o)) {
+          const wantedP = o.userGivesPlayerIds.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+            .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+          this.tradeDeskLog.push({
+            day,
+            club: this.data.teams.get(o.partnerTeamId)?.name ?? 'A rival',
+            target: wantedP?.name ?? (o.userGivesPicks[0] ? `your ${o.userGivesPicks[0].year} round-${o.userGivesPicks[0].round} pick` : 'a depth piece'),
+          })
+          continue
+        }
         this.voiceIncomingOffer(o)
         this.tradeOffers.push(o)
         const partner = this.data.teams.get(o.partnerTeamId)!
@@ -6964,6 +7105,7 @@ export class Career {
           { teamId: o.partnerTeamId as string }
         )
       }
+      this.flushTradeDesk(day)
       // The league lives without you: AI clubs deal with each other, and the
       // volume ramps toward the deadline into a real flurry (multiple deals can
       // land in a single day). Each attempt re-reads the updated rosters, so a
@@ -7144,38 +7286,35 @@ export class Career {
     if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
-    // ── recurring staff meeting: convene the war-room roughly every two weeks ──
-    // The coaching staff read the live roster and table proposals the GM acts on
-    // (a real line move, a rest, a call-up, a tactical shift). Blocking, with a
-    // delegate-to-AGM escape. Only convenes when there's something worth raising.
-    if (
-      this.staffMeetingScene === null &&
-      Math.floor(nextDay / STAFF_MEETING_INTERVAL) > Math.floor(this.currentDay / STAFF_MEETING_INTERVAL)
-    ) {
-      const findings = this.buildStaffFindings()
-      if (findings.length > 0) {
-        this.staffMeetingScene = buildStaffMeetingScene({
-          findings,
-          cast: this.staffCast(),
-          day: nextDay,
-          year: this.year,
-          record: this.userRecordTriple(),
-        })
-      }
+    // ── staff meeting: EVENT-TRIGGERED (PHASE 0) ──
+    // The staff read the live roster weekly. The info-only briefings (form,
+    // tough stretch, cap, farm) go to the dashboard's week ahead; the room is
+    // CONVENED only when a finding crosses a threshold (a top-six man gone
+    // cold, a real injury risk, a worn body, a prospect ready), at most once
+    // every three weeks — or every week / never, per the GM's
+    // Responsibilities setting. It used to convene on a 14-day timer.
+    if (this.staffMeetingScene === null && Math.floor(nextDay / 7) > Math.floor(this.currentDay / 7)) {
+      this.maybeConveneStaffMeeting(nextDay)
     }
-    // ── recurring scout meeting: the recruitment desk convenes roughly monthly ──
-    // The Head of Scouting walks the board — risers/fallers vs consensus, flagged
-    // prospects awaiting a call, and coverage gaps — and the GM acts. Blocking,
-    // with a delegate-to-Head-of-Scouting escape. Only convenes with content.
-    if (
-      this.scoutMeetingScene === null &&
-      this.staffMeetingScene === null && // don't stack two convened meetings on one Continue
+    // ── scout meeting: only in the windows where scouting IS the story ──
+    // World Juniors, deadline week, and the draft run-up. The rest of the
+    // year the Head of Scouting runs the monthly board review himself and the
+    // weekly scouting digest carries it.
+    const scoutBoundary =
       Math.floor((nextDay - SCOUT_MEETING_OFFSET) / SCOUT_MEETING_INTERVAL) >
-        Math.floor((this.currentDay - SCOUT_MEETING_OFFSET) / SCOUT_MEETING_INTERVAL)
+      Math.floor((this.currentDay - SCOUT_MEETING_OFFSET) / SCOUT_MEETING_INTERVAL)
+    if (scoutBoundary) this.scoutMeetingOwed = true
+    if (
+      this.scoutMeetingOwed &&
+      this.scoutMeetingScene === null &&
+      this.staffMeetingScene === null // don't stack two convened meetings on one Continue
     ) {
+      // A window meeting bumped by a staff meeting sits the next free day.
+      this.scoutMeetingOwed = false
       const input = this.buildScoutMeetingInput(nextDay)
       if (input && scoutMeetingHasContent(input)) {
         this.scoutMeetingScene = buildScoutMeetingScene(input)
+        if (!this.scoutWindowOpen(nextDay)) this.delegateScoutMeeting()
       }
     }
     // ────────────────────────────────────────────────────────────────────
@@ -7316,8 +7455,55 @@ export class Career {
   /** One phase-aware step: a match day, a playoff day, or an offseason stage. */
   step(): boolean {
     if (this.phase === 'regularSeason') return this.advanceDay()
-    if (this.phase === 'playoffs') return this.playPlayoffDay(false) !== undefined
+    if (this.phase === 'playoffs') {
+      // PHASE 0: once your club is out there is nothing to decide in the
+      // bracket — one press sims to the Cup being lifted (the audit measured
+      // four empty "next playoff games" presses after an elimination).
+      if (this.userOutOfPlayoffs()) return this.simRestOfPlayoffs()
+      return this.playPlayoffDay(false) !== undefined
+    }
     return this.advanceOffseason()
+  }
+
+  /** True when the playoffs are running and the user's club is not (never
+   *  qualified, or eliminated). */
+  private userOutOfPlayoffs(): boolean {
+    const po = this.playoffs
+    if (this.phase !== 'playoffs' || !po || po.championTeamId) return false
+    for (const s of po.rounds.flatMap((r) => r.series)) {
+      const inSeries = s.highSeedTeamId === this.userTeamId || s.lowSeedTeamId === this.userTeamId
+      if (inSeries && (s.status !== 'finished' || s.winnerTeamId === this.userTeamId)) return false
+    }
+    return true
+  }
+
+  /** Play every remaining playoff day in one go, then mail a bracket digest:
+   *  who went through, round by round, while you watched from home. */
+  private simRestOfPlayoffs(): boolean {
+    const po = this.playoffs
+    if (!po) return false
+    const doneBefore = new Set(po.rounds.flatMap((r) => r.series).filter((x) => x.status === 'finished').map((x) => x.id))
+    let played = false
+    for (let guard = 0; guard < 120 && this.phase === 'playoffs'; guard++) {
+      if (this.playPlayoffDay(false) === undefined) break
+      played = true
+    }
+    const lines: string[] = []
+    for (const s of po.rounds.flatMap((r) => r.series)) {
+      if (s.status !== 'finished' || doneBefore.has(s.id) || !s.winnerTeamId) continue
+      const win = this.data.teams.get(s.winnerTeamId)
+      const loseId = s.winnerTeamId === s.highSeedTeamId ? s.lowSeedTeamId : s.highSeedTeamId
+      const lose = this.data.teams.get(loseId)
+      const w = Math.max(s.highSeedWins, s.lowSeedWins)
+      const l = Math.min(s.highSeedWins, s.lowSeedWins)
+      lines.push(`${win?.name ?? '?'} beat ${lose?.name ?? '?'} ${w}–${l}`)
+    }
+    if (lines.length > 0) {
+      this.pushNews('playoffs', 'The rest of the playoffs',
+        `Your season was already over. The bracket played on without you:\n\n${lines.join('\n')}`,
+        { teamId: this.userTeamId as string })
+    }
+    return played
   }
 
   /** Summer takeover (#145): the game begins the day AFTER the draft that the
@@ -7372,13 +7558,14 @@ export class Career {
         this.transactionLedger = txResult.ledger
       }
     }
-    // Construction-era mail (welcome, mandate, season-begins) was stamped
-    // before the phase flip — it ALL belongs to July 1 of the start summer,
-    // whatever clock (or none) stamped it during construction.
-    for (const n of this.news) n.dateISO = `${this.year}-07-01`
-    // Development camp opens in early July — your first beat as GM.
+    // Development camp opens the summer — your first beat as GM.
     // (Only armed when the org actually has kids to skate.)
     this.devCampPending = this.devCampInvitees().invitees.length > 0
+    // Construction-era mail (welcome, mandate, season-begins) was stamped
+    // before the phase flip — it ALL belongs to the first day of the start
+    // summer, whatever clock (or none) stamped it during construction.
+    const firstDay = this.offseasonDateISO()
+    for (const n of this.news) n.dateISO = firstDay
     this.pushNews(
       'league',
       `Welcome to the ${this.userTeam.name} front office`,
@@ -7884,8 +8071,72 @@ export class Career {
       this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
     }
     // Announce the actual trophy winners by name — the payoff for the season's
-    // award races. Runs while this.totals still holds the season's stats.
+    // award races. Runs while this.totals still holds the season's stats; the
+    // mail itself waits for awards night (summer beat 2, mid-June).
+    const c0 = this.newsCounter
     this.announceSeasonAwards()
+    this.stageNewsSince(c0, 2)
+  }
+
+  /** Summer beats inside the awards stage (PHASE 0): 0 = not yet run;
+   *  1 = the season closed + lottery (early May); 2 = the combine (early
+   *  June); 3 = awards night (mid-June). The next press opens the draft. */
+  private static readonly SUMMER_BEAT_DATES = ['05-01', '05-05', '06-02', '06-18'] as const
+
+  /** Move every inbox item pushed since `counter` into the staged queue. */
+  private stageNewsSince(counter: number, beat: number, until = Number.POSITIVE_INFINITY): void {
+    const keep: NewsItem[] = []
+    const staged: NewsItem[] = []
+    for (const n of this.news) {
+      const k = Number(n.id.slice(1))
+      if (k >= counter && k < until) staged.push(n)
+      else keep.push(n)
+    }
+    if (staged.length === 0) return
+    this.news = keep
+    // Oldest first, so release order matches push order.
+    for (const item of staged.reverse()) this.stagedNews.push({ beat, item })
+  }
+
+  /** Release the staged mail for `beat` (or every beat ≤ it), dated. */
+  private releaseStagedNews(beat: number): void {
+    const due = this.stagedNews.filter((x) => x.beat <= beat)
+    if (due.length === 0) return
+    this.stagedNews = this.stagedNews.filter((x) => x.beat > beat)
+    const y = this.year + 1
+    for (const { beat: b, item } of due) {
+      item.dateISO = `${y}-${Career.SUMMER_BEAT_DATES[Math.min(3, b + 1)]}`
+      this.news.unshift(item)
+    }
+    if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
+  }
+
+  /** The staged summer (PHASE 0): each press releases the next dated beat;
+   *  the press after awards night opens the entry draft. */
+  private advanceSummerBeat(os: OffseasonState): boolean {
+    const beat = os.summerBeat ?? 0
+    if (beat >= 3) return this.openEntryDraft(os)
+    this.releaseStagedNews(beat)
+    os.summerBeat = beat + 1
+    return true
+  }
+
+  private openEntryDraft(os: OffseasonState): boolean {
+    this.releaseStagedNews(3)
+    delete os.summerBeat
+    os.stage = 'draft'
+    const draftYear = this.year + 1
+    const cls = this.data.league.draftClasses.find((d) => d.year === draftYear)
+    this.pushNews(
+      'draft',
+      `The ${draftYear} entry draft is open`,
+      `${cls?.prospects.length ?? 0} prospects are on the board across ${DRAFT_ROUNDS} rounds.`
+    )
+    // Fire draft preview report (once per season).
+    for (const kind of checkDraftStage(this.pressScheduleState)) {
+      this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+    }
+    return true
   }
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
@@ -7934,6 +8185,9 @@ export class Career {
     if (!os) return false
     switch (os.stage) {
       case 'awards': {
+        // PHASE 0: the awards stage is three dated presses, not one dump.
+        if ((os.summerBeat ?? 0) > 0) return this.advanceSummerBeat(os)
+        const cStart = this.newsCounter
         const rng = this.rngFor(8001)
         const sorted = sortStandings([...this.standings.values()])
         const championId = this.playoffs?.championTeamId ?? null
@@ -8152,6 +8406,7 @@ export class Career {
         }
 
         /* ── fold the season into the all-time records ── */
+        const cRecords = this.newsCounter
         const champTeam = championId ? this.data.teams.get(championId)! : null
         this.pushSeeds(
           archiveSeason({
@@ -8229,6 +8484,7 @@ export class Career {
         this.tentpoles.tournament = tour.tournament
         this.pushSeeds(tour.newsSeeds)
 
+        const cDev = this.newsCounter
         /* ── development: performance-relative, chemistry-aware, AHL-aware ── */
         // Ice-time weighting: combine NHL + AHL games played so a prospect
         // playing heavy AHL minutes develops at full rate, while a scratched
@@ -8454,6 +8710,7 @@ export class Career {
         this.pushSeeds(inductHallOfFame(this.recordsState, this.year))
 
         /* ── draft class ── */
+        const cDraftClass = this.newsCounter
         const draftYear = this.year + 1
         const classCount = Math.max(
           DRAFT_CLASS_SIZE,
@@ -8539,6 +8796,7 @@ export class Career {
         })
 
         /* ── scouting combine on the new class ── */
+        const cCombine = this.newsCounter
         const combine = runCombine({
           prospects: draftClass.prospects.map((pr) => {
             const p = this.resolve(pr.playerId)
@@ -8556,16 +8814,24 @@ export class Career {
         }
         this.scouting.knowledge = [...knowledge.entries()]
 
-        os.stage = 'draft'
-        this.pushNews(
-          'draft',
-          `The ${draftYear} entry draft is open`,
-          `${draftClass.prospects.length} prospects are on the board across ${DRAFT_ROUNDS} rounds.`
-        )
-        // Fire draft preview report (once per season).
-        for (const kind of checkDraftStage(this.pressScheduleState)) {
-          this.queueScheduledReport(kind as Parameters<typeof this.queueScheduledReport>[0])
+        // PHASE 0: stage the mail on the real calendar. This press is early
+        // May — the season closes and the lottery is drawn. The combine lands
+        // in early June; the records, development, retirements and trophies on
+        // awards night. (A dismissed GM gets it all now: nothing else moves.)
+        for (const n of this.news) {
+          const k = Number(n.id.slice(1))
+          if (k >= cStart) n.dateISO = `${this.year + 1}-${Career.SUMMER_BEAT_DATES[1]}`
         }
+        if (this.boardState.firedAtYear !== null) {
+          this.releaseStagedNews(3)
+          return this.openEntryDraft(os)
+        }
+        // Records, the worlds and the tournament read out with the combine;
+        // development, retirements and the Hall with the trophies.
+        this.stageNewsSince(cRecords, 1, cDev)
+        this.stageNewsSince(cDev, 2, cDraftClass)
+        this.stageNewsSince(cCombine, 1)
+        os.summerBeat = 1
         return true
       }
       case 'draft': {
@@ -11492,6 +11758,13 @@ export class Career {
         break
       case CUT_DAY:
         // Cut day: the decision screen is now live and the gate holds for the GM.
+        this.pushNews(
+          'contract',
+          'Cut day — camp verdicts are in',
+          'Training camp is over and the battles have verdicts. The final roster calls are yours — ' +
+          'make them before the opener, or the coach makes them for you.',
+          { teamId }
+        )
         break
     }
   }
@@ -11690,11 +11963,13 @@ export class Career {
           // Training Camp v2: flesh out the week (roster, schedule, box score,
           // reports) + push the rinkside evaluation mail.
           this.buildTrainingCampWeek(decisions)
+          // PHASE 0: this used to send "Training camp is over" on the day camp
+          // OPENED. Camp opens today; the verdict mail comes on cut day.
           this.pushNews(
             'contract',
-            'Cut day — camp verdicts are in',
-            'Training camp is over and the battles have verdicts. The final roster calls are yours — ' +
-            'make them before the opener, or the coach makes them for you.',
+            'Training camp opens',
+            `${decisions.length} roster call${decisions.length === 1 ? '' : 's'} to settle before opening night. ` +
+            'The staff will skate them for a week; cut day is Sep 22.',
             { teamId: this.userTeamId as string }
           )
         }
@@ -15687,6 +15962,65 @@ export class Career {
    * Derived, not stored: offers already carry their own expiry and are not in the
    * save snapshot, so a boolean flag would survive a load with nothing behind it.
    */
+  /**
+   * PHASE 0: does this inbound call deserve the GM (a desk item that holds
+   * Continue), or is it the AGM's to handle? It reaches the GM when:
+   *  - it asks about a man you have given a word to (key/core status,
+   *    untouchable) or one you are shopping (available/listed), or
+   *  - it clears the AGM's value bar on your own valuation (a clear win —
+   *    see FAIR_OFFER_BAR), or
+   *  - it is deadline week, when every call is the point.
+   */
+  private offerWorthTheGm(o: StoredTradeOffer): boolean {
+    if (o.userGivesPlayerIds.length === 0 && o.userGivesPicks.length === 0) return true
+    if (this.phase === 'regularSeason' && this.deadlineDay > 0 &&
+        this.currentDay >= this.deadlineDay - 7 && this.currentDay <= this.deadlineDay) return true
+    for (const id of o.userGivesPlayerIds) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      if (p.squadStatus === 'keyPlayer' || p.squadStatus === 'coreStarter') return true
+      if (p.tradeStatus === 'untouchable' || p.tradeStatus === 'available' || p.tradeStatus === 'listed') return true
+    }
+    const year = this.year
+    const give =
+      o.userGivesPlayerIds.reduce((s, id) => s + (this.data.players.get(id) ? playerValue(this.data.players.get(id)!) : 0), 0) +
+      o.userGivesPicks.reduce((s, pk) => s + pickValue(pk, { year }), 0)
+    const get =
+      o.userReceivesPlayerIds.reduce((s, id) => s + (this.data.players.get(id) ? playerValue(this.data.players.get(id)!) : 0), 0) +
+      o.userReceivesPicks.reduce((s, pk) => s + pickValue(pk, { year }), 0)
+    return give > 0 && get >= give * Career.FAIR_OFFER_BAR
+  }
+  /** The AGM's forwarding bar: an offer returning at least this multiple of
+   *  what it asks (on your own valuation) is a clear win and reaches the GM.
+   *  Measured: AI pitches already price in a premium — most return 1.05–1.45×
+   *  on `playerValue` — so a merely "fair" bar forwarded nearly every routine
+   *  call (the audit's firehose). 1.3× is "your staff would call it a win". */
+  static readonly FAIR_OFFER_BAR = 1.3
+
+  /** The weekly trade-desk digest: what the AGM fielded and passed on. */
+  private flushTradeDesk(day: number): void {
+    if (this.tradeDeskLog.length === 0) return
+    if (day - this.tradeDeskLog[0]!.day < 7 && day < this.deadlineDay) return
+    const log = this.tradeDeskLog
+    this.tradeDeskLog = []
+    const agm = this.getTeamStaff(this.userTeamId as string).assistantGM?.name ?? 'Your Assistant GM'
+    const lines = log.map((l) => `• ${l.club} asked about ${l.target}`)
+    // Headline names the week's story (who called about whom), so the weekly
+    // digest never reads the same twice in a row.
+    const asked = new Map<string, number>()
+    for (const l of log) asked.set(l.target, (asked.get(l.target) ?? 0) + 1)
+    const [topTarget, topN] = [...asked.entries()].sort((a, b) => b[1] - a[1])[0]!
+    const headline = log.length === 1
+      ? `Trade desk: ${log[0]!.club} asked about ${topTarget}`
+      : topN > 1
+        ? `Trade desk: ${topN} clubs called about ${topTarget}`
+        : `Trade desk: ${log.length} calls, from ${log[0]!.club} to ${log[log.length - 1]!.club}`
+    this.pushNews('trade', headline,
+      `${agm} fielded the routine calls and passed — none was a clear win on our numbers or touched a player you've made a promise to:\n\n${lines.join('\n')}\n\n` +
+      `Anything clearly in our favour, anything about your core, and every call in deadline week still comes straight to you.`,
+      { teamId: this.userTeamId as string })
+  }
+
   private pendingTradeOffers(): StoredTradeOffer[] {
     if (this.phase !== 'regularSeason') return []
     return this.tradeOffers.filter(
@@ -16008,6 +16342,21 @@ export class Career {
     if (this.tentpoles.emittedKeys.includes(key)) return
     this.tentpoles.emittedKeys.push(key)
     const day = this.currentDay
+    // PHASE 0: the board's DEADLINE CHECKPOINT — the second of its three
+    // moments a year (preseason expectations → this → the season verdict).
+    {
+      const sorted = sortStandings([...this.standings.values()])
+      const rank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+      const target = this.boardState.targetRank
+      const ahead = rank > 0 && rank <= target
+      this.pushNews('league', 'The board checks in before the deadline',
+        `You sit ${rank}${rank % 10 === 1 && rank !== 11 ? 'st' : rank % 10 === 2 && rank !== 12 ? 'nd' : rank % 10 === 3 && rank !== 13 ? 'rd' : 'th'} against a target of ${target}. ` +
+        (ahead
+          ? 'Ownership is happy with the direction. They will not stand in the way of a sensible addition — or thank you for a panic move.'
+          : 'Ownership wants to see a plan today, not a shrug. Buy or sell, but do not stand still.') +
+        ` ${boardMoodLine(this.boardState)}`,
+        { teamId: this.userTeamId as string, salience: 60 })
+    }
 
     /* (A) Concrete incoming offers for your movable players. */
     const alreadyShopping = new Set(
@@ -16678,14 +17027,26 @@ export class Career {
    *  anchor — free agency opens exactly there, day by day. */
   private offseasonDateISO(): string {
     const os = this.offseason
-    const summerYear = this.currentDay === 0 ? this.year : this.year + 1
+    // The summer always leads into the season AFTER `this.year` (the rollover
+    // at the end of the preseason bumps the year). The takeover summer used to
+    // be special-cased to `this.year` — dating it a year early, so its
+    // September read 2025 and the next press 2026 (PHASE 0 calendar pack).
+    const summerYear = this.year + 1
     if (!os) return `${summerYear}-07-01`
     switch (os.stage) {
-      case 'awards': return `${summerYear}-06-18`
-      case 'draft': return `${summerYear}-06-27`
+      case 'awards': return `${summerYear}-${Career.SUMMER_BEAT_DATES[Math.min(3, os.summerBeat ?? 0)]}`
+      // Draft night sits between awards night and development camp.
+      case 'draft': return `${summerYear}-06-20`
       // The re-signing window is the run-up to July 1: qualifying offers and
       // tabled offers play out across the last days of June.
       case 'resign': {
+        // Development camp runs its three beats on three real days (Jun 22–24)
+        // before the re-signing window opens — it used to stamp all three on
+        // the same date (PHASE 0 calendar pack).
+        if (this.devCampPending) {
+          const campDay = Math.min(3, Math.max(1, this.devCampState?.day ?? 1))
+          return `${summerYear}-06-${String(21 + campDay).padStart(2, '0')}`
+        }
         const d = 27 + Math.min(RESIGN_WINDOW_DAYS, os.resignDay ?? 0)
         return d > 30 ? `${summerYear}-07-01` : `${summerYear}-06-${String(d).padStart(2, '0')}`
       }
@@ -16985,62 +17346,40 @@ export class Career {
     // Asked once and reused: the label and the dashboard flag must agree, and
     // the question walks the schedule.
     const lineupGate = this.lineupGateMessage()
+    // PHASE 0 (interruption diet): Continue ALWAYS advances time, so the label
+    // names WHERE TIME GOES (the next date, the next camp day, the next summer
+    // beat) and never a destination room. Real moments open themselves as
+    // scenes when they arrive (beatGates.sceneToOpen); only the hard gates —
+    // which genuinely stop the clock — say what they need.
     const continueLabel = (() => {
       if (this.phase === 'regularSeason') {
-        // Pre-opening beats name themselves (beat-gate law, B2.2): camp week,
-        // cut day, then the boardroom — before the button names match days.
         if (this.trainingCamp && !this.trainingCamp.resolved) {
-          return (this.trainingCamp.campDay ?? 1) >= 8 ? 'Continue — cut day' : 'Continue — training camp'
+          const cd = this.trainingCamp.campDay ?? 1
+          return cd >= 8 ? 'Continue — break camp' : cd === 7 ? 'Continue to cut day' : `Continue — camp day ${cd + 1}`
         }
-        // The hardest gate of all: a club that cannot legally dress a team. It
-        // outranks every beat below because the engine refuses to play the game
-        // at all — no meeting is reachable, let alone spendable, until it's fixed.
+        // The one in-season hard gate: a club that cannot legally dress a team.
         if (lineupGate !== null) return 'Continue — your lineup is short'
-        if (this.currentDay === 0 && this.boardMeetingYear !== null) return 'Continue — board meeting'
-        // Review outranks the in-season gates but NOT camp/boardroom — the same
-        // order the shell routes them in. Getting this backwards would name a
-        // beat the GM doesn't actually land on, which is the bug being fixed.
-        if (this.reviewFacts !== null) return 'Continue — end-of-season review'
-        // The IN-SEASON gates have to name themselves too, and in the order the
-        // shell actually routes them. They used to fall through to the match-day
-        // label, so the button promised "Continue to Nov 12" and then dropped the
-        // GM into a staff meeting — a beat arriving unannounced is the same
-        // broken trust as one with no way out.
-        if (this.deadlineHold) return 'Continue — trade deadline'
-        // A6: a rival GM is holding for an answer on one of your players. That
-        // outranks the recurring meetings (offers expire; meetings don't) and
-        // sits under the deadline, which is the trade desk's own bigger beat.
-        {
-          const offers = this.pendingTradeOffers()
-          if (offers.length === 1) {
-            const abbr = this.data.teams.get(offers[0]!.partnerTeamId)?.abbreviation ?? 'a rival'
-            return `Continue — trade offer from ${abbr}`
-          }
-          if (offers.length > 1) return `Continue — ${offers.length} trade offers`
-        }
-        if (this.staffMeetingScene !== null) return 'Continue — staff meeting'
-        if (this.scoutMeetingScene !== null) return 'Continue — scout meeting'
-        if (this.scoutDigestPending) return 'Continue — scouting report'
         const next = this.matchDays.find((d) => d > this.currentDay)
         if (next === undefined) return 'Continue to playoffs'
         const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         const [, m, d] = dayToDateISO(this.year, next).split('-')
         return `Continue to ${MONTHS[parseInt(m ?? '1', 10) - 1]} ${parseInt(d ?? '1', 10)}`
       }
-      // Same gate, the other side of the calendar: the review holds through the
-      // playoffs and into the summer, so it names itself there too.
-      if (this.reviewFacts !== null) return 'Continue — end-of-season review'
-      if (this.phase === 'playoffs') return 'Continue — next playoff games'
+      if (this.phase === 'playoffs') {
+        return this.userOutOfPlayoffs() ? 'Continue — sim to the end of the playoffs' : 'Continue — next playoff games'
+      }
       // E3: dismissed — nothing moves until he takes a new chair.
       if (this.boardState.firedAtYear !== null) return 'Take a new job to continue'
-      // Dev camp is gated ahead of the market: while it's pending, the first
-      // Continue walks you into camp (not free agency), so say so — otherwise the
-      // button reads "open free agency" but routes to the rink.
-      if (this.devCampShowable()) return 'Continue — development camp'
+      // The draft is a HARD gate and outranks everything in the summer. (The
+      // review used to be checked first, so the button read "end-of-season
+      // review" on draft day while Continue routed to the draft — PHASE 0.)
+      if (this.draftPending()) return 'Go to the entry draft'
+      if (this.devCampShowable()) return `Continue — development camp, day ${Math.min(3, (this.devCampState?.day ?? 0) + 1)}`
       const stage = this.offseason?.stage ?? 'awards'
+      const beat = this.offseason?.summerBeat ?? 0
       const labels: Record<string, string> = {
-        awards: 'Continue — season awards & development',
-        draft: this.draftPending() ? 'Go to the entry draft' : 'Continue — open free agency',
+        awards: ['Continue to the draft lottery', 'Continue to the combine', 'Continue to awards night', 'Continue to the entry draft'][Math.min(3, beat)]!,
+        draft: 'Continue — open free agency',
         resign:
           (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
             ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
@@ -17161,6 +17500,8 @@ export class Career {
       deadlinePending: this.deadlineHold,
       ...(lineupGate !== null ? { lineupShortfall: lineupGate } : {}),
       tradeOffersPending: this.pendingTradeOffers().length,
+      staffMeetingMode: this.staffMeetingMode,
+      ...(this.phase === 'regularSeason' && this.staffBrief.length > 0 ? { staffBrief: [...this.staffBrief] } : {}),
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,
@@ -17915,8 +18256,7 @@ export class Career {
     // Injury risk (healthy but fragile/worn) — the physio's first concern.
     for (const p of roster) {
       if (p.injuryStatus !== null) continue
-      const fatigue = Math.max(0, Math.min(100, p.fatigue))
-      const risk = Math.round(Math.max(0, Math.min(100, (p.injuryProneness ?? 30) * 0.55 + fatigue * 0.45)))
+      const risk = this.modelledInjuryRisk(p)
       if (risk >= 55 && !used.has(p.id as string)) {
         used.add(p.id as string)
         findings.push({ kind: 'injuryRisk', playerId: p.id as string, name: p.name, risk, ltirEligible: this.ltirEligible(p) })
@@ -18748,6 +19088,64 @@ export class Career {
         ? `${applied.length} decision${applied.length === 1 ? '' : 's'} actioned.`
         : 'No changes made.',
     }
+  }
+
+  /** PHASE 0: the scouting windows where a convened scout meeting earns its
+   *  stop — World Juniors (Dec 20 – Jan 10), deadline week, and the draft
+   *  run-up (March onward). */
+  private scoutWindowOpen(day: number): boolean {
+    const [, mm, dd] = dayToDateISO(this.year, day).split('-').map((x) => parseInt(x, 10))
+    const m = mm ?? 1
+    const d = dd ?? 1
+    if ((m === 12 && d >= 20) || (m === 1 && d <= 10)) return true
+    if (this.deadlineDay > 0 && day >= this.deadlineDay - 7 && day <= this.deadlineDay) return true
+    return m >= 3 && m <= 6
+  }
+
+  /** Staff-meeting Responsibilities (FM's staff-meeting frequency):
+   *  'onDemand' (default) convenes only when a finding needs the GM;
+   *  'weekly' every week there is anything to decide; 'delegate' never — the
+   *  AGM acts on the same triggers and mails the minutes. */
+  private staffMeetingMode: 'weekly' | 'onDemand' | 'delegate' = 'onDemand'
+  /** When the last convened (or delegated) staff meeting sat, for the cap. */
+  private lastStaffMeeting: { year: number; day: number } | null = null
+  /** Info-only staff briefings for the dashboard's week ahead (not a stop). */
+  private staffBrief: string[] = []
+  /** A scout meeting came due while the staff room was sitting; it convenes
+   *  the next free day instead of being skipped. */
+  private scoutMeetingOwed = false
+  /** The season the board last sent its praise note (once a season). */
+  private boardPraisedYear = -1
+  /** Minimum days between event-triggered staff meetings. */
+  static readonly STAFF_MEETING_MIN_GAP = 21
+  /** Findings that justify convening the room. */
+  private static readonly STAFF_TRIGGERS = new Set(['coldTopSix', 'injuryRisk', 'fatigued', 'prospectReady'])
+
+  setStaffMeetingMode(mode: 'weekly' | 'onDemand' | 'delegate'): { ok: boolean } {
+    this.staffMeetingMode = mode
+    return { ok: true }
+  }
+
+  private maybeConveneStaffMeeting(day: number): void {
+    const findings = this.buildStaffFindings()
+    const decisions = findings.filter((f) => !isInfoFinding(f))
+    const triggers = decisions.filter((f) => Career.STAFF_TRIGGERS.has(f.kind))
+    const scene = findings.length > 0
+      ? buildStaffMeetingScene({ findings, cast: this.staffCast(), day, year: this.year, record: this.userRecordTriple() })
+      : null
+    // The week ahead gets the info briefings either way.
+    this.staffBrief = (scene?.proposals ?? []).filter((p) => p.info).map((p) => p.facts?.[0] ? `${p.title} — ${p.facts[0]}` : p.title).slice(0, 4)
+    if (!scene) return
+    const last = this.lastStaffMeeting
+    const since = last && last.year === this.year ? day - last.day : 999
+    const mode = this.staffMeetingMode
+    const convene = mode === 'weekly'
+      ? decisions.length > 0
+      : triggers.length > 0 && since >= Career.STAFF_MEETING_MIN_GAP
+    if (!convene) return
+    this.lastStaffMeeting = { year: this.year, day }
+    this.staffMeetingScene = scene
+    if (mode === 'delegate') this.delegateStaffMeeting()
   }
 
   /** Hand the scout meeting to the Head of Scouting — each item to its safe default. */
@@ -20057,6 +20455,42 @@ export class Career {
     return { ok: true, message: `${p.name} activated — cap relief removed.` }
   }
 
+  /** A physio's skill on the 40–90 display scale (the per-discipline
+   *  `physiotherapy` attribute when present, else the generic rating). */
+  private static physioSkill(s: { rating: number; attributes?: { physiotherapy?: number } }): number {
+    const disc = s.attributes?.physiotherapy
+    return disc !== undefined ? Math.round(40 + (disc / 20) * 50) : s.rating
+  }
+
+  /** The club's best-rated physio (the head of the medical room). */
+  private headPhysio(teamId: string): TeamStaff['physios'][number] | undefined {
+    return [...this.getTeamStaff(teamId).physios].sort((a, b) => Career.physioSkill(b) - Career.physioSkill(a))[0]
+  }
+
+  /** PHASE 0: medical-staff quality 0–1 for the injury model (0.5 ≈ the
+   *  league-average physio). NHL clubs only — farm and world teams are
+   *  treated as average. Undefined = average. */
+  private medicalQuality(teamId: TeamId | null | undefined): number | undefined {
+    if (!teamId || !this.data.league.teams.includes(teamId)) return undefined
+    const ph = this.headPhysio(teamId as string)
+    if (!ph) return undefined
+    return Math.max(0, Math.min(1, (Career.physioSkill(ph) - 40) / 50))
+  }
+
+  /**
+   * The injury-risk index (0–100) shown on the Medical Center and used by the
+   * staff meeting — derived from the SAME per-game chance the sim rolls, at
+   * his current fatigue, his usual minutes and your physio, relative to the
+   * league baseline: ~25 is an average fresh skater, 55+ is ~1.6× baseline.
+   */
+  private modelledInjuryRisk(p: Player): number {
+    const gp = this.gp.get(p.id) ?? 0
+    const toi = gp > 0 ? (this.totals.get(p.id)?.toi ?? 0) / gp : p.position === 'G' ? 3600 : 17 * 60
+    const chance = injuryChance(p, toi, this.medicalQuality(this.userTeamId))
+    const ratio = chance / baselineInjuryChance(p.position)
+    return Math.round(Math.max(0, Math.min(100, (ratio - 0.5) * 50)))
+  }
+
   /** Medical Center: condition / fatigue / injury / injury-risk for the user roster. */
   getMedical(): MedicalView {
     const team = this.data.teams.get(this.userTeamId)
@@ -20070,11 +20504,12 @@ export class Career {
       if (!p) continue
       const fatigue = Math.round(Math.max(0, Math.min(100, p.fatigue)))
       const condition = 100 - fatigue
-      const proneness = p.injuryProneness ?? 30
-      // Risk blends durability tendency with current fatigue; injured = max.
+      // PHASE 0: the risk shown is the risk the sim ROLLS (injuryChance, with
+      // fatigue and the physio in it) — it used to be a display-only blend of
+      // proneness and fatigue that the injury model never read.
       const injured = p.injuryStatus !== null
       if (injured) injuredCount++
-      const risk = injured ? 100 : Math.round(Math.max(0, Math.min(100, proneness * 0.55 + fatigue * 0.45)))
+      const risk = injured ? 100 : this.modelledInjuryRisk(p)
       const riskLabel: MedicalRow['riskLabel'] = risk >= 60 ? 'High' : risk >= 33 ? 'Increased' : 'Low'
       let timeline: { estReturn?: string; severity?: MedicalRow['severity'] } = {}
       if (p.injuryStatus) {
@@ -20113,12 +20548,8 @@ export class Career {
     // counted. The discipline runs 1–20 while `rating` (and the Medical Center's
     // colour thresholds) run 40–90, so map it into that space rather than mixing
     // the two scales in one comparison.
-    const physioSkill = (s: { rating: number; attributes?: { physiotherapy?: number } }): number => {
-      const disc = s.attributes?.physiotherapy
-      return disc !== undefined ? Math.round(40 + (disc / 20) * 50) : s.rating
-    }
-    const physio = [...this.getTeamStaff(this.userTeamId as string).physios]
-      .sort((a, b) => physioSkill(b) - physioSkill(a))[0]
+    const physioSkill = Career.physioSkill
+    const physio = this.headPhysio(this.userTeamId as string)
     return {
       teamName: team?.name ?? 'Team',
       injuredCount,
@@ -21423,14 +21854,14 @@ export class Career {
         ? {
             todayISO: this.offseasonDateISO(),
             extraKeyDates: (() => {
-              const y = this.currentDay === 0 ? this.year : this.year + 1
+              const y = this.year + 1
               return [
                 { dateISO: `${y}-07-01`, label: 'Free Agency Opens' },
-                // Dev camp fires as a beat at the re-sign stage, which the summer
-                // clock dates July 1 (takeover and normal path alike) — the marker
-                // must sit on the same day or the calendar re-announces a camp
-                // the GM already ran (playtest #3).
-                { dateISO: `${y}-07-01`, label: 'Development Camp' },
+                // Dev camp runs Jun 22–24 on the summer clock (takeover and
+                // normal path alike) — the marker sits on its first day so the
+                // calendar never re-announces a camp the GM already ran
+                // (playtest #3).
+                { dateISO: `${y}-06-22`, label: 'Development Camp' },
                 { dateISO: `${y}-09-15`, label: 'Training Camp Opens' },
                 // Camp week is Sep 15–22 (day 8 = final cuts); the boardroom
                 // follows the morning after camp breaks (playtest #5).
@@ -21455,10 +21886,8 @@ export class Career {
                   out.push({ dateISO: `${this.year}-09-23`, label: 'Preseason Board Meeting' })
                 }
               }
-              // Mark the recurring bi-weekly staff meetings so the GM sees them coming.
-              for (let d = STAFF_MEETING_INTERVAL; d <= lastMatchDay; d += STAFF_MEETING_INTERVAL) {
-                out.push({ dateISO: dayToDateISO(this.year, d), label: 'Staff Meeting' })
-              }
+              // Staff meetings are event-triggered now (PHASE 0) — there is no
+              // fixed date to mark.
               return out
             })(),
           }),
@@ -23148,12 +23577,28 @@ export class Career {
     return scaled
   }
 
+  /** PHASE 0: a status is a PROMISE, and promises are scarce. Uncapped, every
+   *  man could be told he was a key player and bank the weekly morale bump —
+   *  a free pump. An organisation has at most this many of each. */
+  static readonly SQUAD_STATUS_CAP: Partial<Record<SquadStatus, number>> = { keyPlayer: 2, coreStarter: 6 }
+
   /** #188: declare a player's squad status (his role/promise). null clears it. */
-  setSquadStatus(playerId: string, status: SquadStatus | null): { ok: boolean } {
+  setSquadStatus(playerId: string, status: SquadStatus | null): { ok: boolean; message?: string } {
     const p = this.data.players.get(asPlayerId(playerId))
     if (!p) return { ok: false }
-    if (status === null) delete p.squadStatus
-    else p.squadStatus = status
+    if (status === null) { delete p.squadStatus; return { ok: true } }
+    const cap = Career.SQUAD_STATUS_CAP[status]
+    if (cap !== undefined && p.squadStatus !== status) {
+      const holders = this.orgPlayersWithTier().filter(({ p: q }) => q.squadStatus === status)
+      if (holders.length >= cap) {
+        const names = holders.map(({ p: q }) => q.name).join(', ')
+        return {
+          ok: false,
+          message: `You can only promise ${cap} ${SQUAD_STATUS_LABEL[status]}${cap === 1 ? '' : 's'} — ${names} already ${holders.length === 1 ? 'has' : 'have'} that word. Change one of them first.`,
+        }
+      }
+    }
+    p.squadStatus = status
     return { ok: true }
   }
 
@@ -23223,7 +23668,20 @@ export class Career {
       return ovr >= 72 ? 'rotation' : 'surplus'
     }
     const out = new Map<string, SquadStatus>()
-    for (const { p, onNhl } of this.orgPlayersWithTier()) out.set(p.id as string, classify(p, onNhl))
+    const org = this.orgPlayersWithTier()
+    for (const { p, onNhl } of org) out.set(p.id as string, classify(p, onNhl))
+    // PHASE 0 caps: the best keep the word; the overflow steps down a tier.
+    const byAbility = [...org].sort((a, b) => ratedOverall(b.p) - ratedOverall(a.p) || Career.pidNum(a.p.id as string) - Career.pidNum(b.p.id as string))
+    let keys = 0
+    for (const { p } of byAbility) {
+      if (out.get(p.id as string) !== 'keyPlayer') continue
+      if (++keys > (Career.SQUAD_STATUS_CAP.keyPlayer ?? 99)) out.set(p.id as string, 'coreStarter')
+    }
+    let cores = 0
+    for (const { p } of byAbility) {
+      if (out.get(p.id as string) !== 'coreStarter') continue
+      if (++cores > (Career.SQUAD_STATUS_CAP.coreStarter ?? 99)) out.set(p.id as string, 'rotation')
+    }
     return out
   }
 
@@ -23462,14 +23920,35 @@ export class Career {
   private tickSquadPromises(): void {
     const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
     const scratched = new Set(this.practiceState.scratched)
-    for (const id of this.userTeam.roster.concat(ahl?.roster ?? [])) {
+    // PHASE 0: a save from before the caps may hold more "key"/"core" words
+    // than the caps allow. Only the best N of each earn the weekly lift; the
+    // rest are treated a tier down (the promise is diluted, not a pump).
+    const ids = this.userTeam.roster.concat(ahl?.roster ?? [])
+    const honoured = new Map<string, SquadStatus>()
+    {
+      const ranked = ids
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p?.squadStatus)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+      let keys = 0
+      let cores = 0
+      const keyCap = Career.SQUAD_STATUS_CAP.keyPlayer ?? 99
+      const coreCap = Career.SQUAD_STATUS_CAP.coreStarter ?? 99
+      for (const p of ranked) {
+        let st = p.squadStatus!
+        if (st === 'keyPlayer' && ++keys > keyCap) st = 'coreStarter'
+        if (st === 'coreStarter' && ++cores > coreCap) st = 'rotation'
+        honoured.set(p.id as string, st)
+      }
+    }
+    for (const id of ids) {
       const p = this.data.players.get(id)
       if (!p?.squadStatus) continue
       const onNhl = this.userTeam.roster.includes(id)
       const isScratched = scratched.has(id as string)
       let delta = 0
       let grievance = ''
-      switch (p.squadStatus) {
+      switch (honoured.get(id as string) ?? p.squadStatus) {
         case 'keyPlayer':
           if (!onNhl) { delta = -4; grievance = 'a franchise player left in the minors' }
           else if (isScratched) { delta = -3; grievance = 'a key man in the press box' }
@@ -23490,7 +23969,9 @@ export class Career {
           delta = 0.5 // developing as promised
           break
         case 'surplus':
-          delta = 0
+          // PHASE 0: telling a man he is surplus is not free. He knows he is
+          // not wanted, and the ambitious feel it more.
+          delta = -1 - (p.personality.ambition >= 14 ? 1 : 0)
           break
       }
       if (delta !== 0) p.morale = Math.max(0, Math.min(100, p.morale + delta))
@@ -24278,6 +24759,9 @@ export class Career {
       gmPersonas: structuredClone(this.gmPersonas),
       boardMeetingYear: this.boardMeetingYear,
       devCampPending: this.devCampPending,
+      ...(this.stagedNews.length > 0 ? { stagedNews: this.stagedNews } : {}),
+      ...(this.staffMeetingMode !== 'onDemand' ? { staffMeetingMode: this.staffMeetingMode } : {}),
+      ...(this.lastStaffMeeting ? { lastStaffMeeting: this.lastStaffMeeting } : {}),
       devCampRoster: this.devCampRoster ? [...this.devCampRoster] : undefined,
       campPtoInvites: this.campPtoInvites ? [...this.campPtoInvites] : undefined,
       devCampState: this.devCampState ? structuredClone(this.devCampState) : null,
@@ -24483,6 +24967,9 @@ export class Career {
     // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null
     career.devCampPending = snapshot.devCampPending ?? false
+    career.stagedNews = snapshot.stagedNews ?? []
+    career.staffMeetingMode = snapshot.staffMeetingMode ?? 'onDemand'
+    career.lastStaffMeeting = snapshot.lastStaffMeeting ?? null
     career.devCampRoster = snapshot.devCampRoster ? [...snapshot.devCampRoster] : undefined
     career.campPtoInvites = snapshot.campPtoInvites ? [...snapshot.campPtoInvites] : undefined
     career.devCampState = snapshot.devCampState ? structuredClone(snapshot.devCampState) : null

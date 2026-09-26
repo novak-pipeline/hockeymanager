@@ -33,6 +33,8 @@ export interface ProcessingData {
   pregame?: MatchDayPreviewView | null
   /** B6.2: postgame receipts when this advance played a user game. */
   receipt?: PostgameReceiptView | null
+  /** PHASE 0: a routine previous result shown on the match-day frame. */
+  lastReceipt?: PostgameReceiptView | null
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thur', 'Fri', 'Sat', 'Sun']
@@ -159,6 +161,8 @@ export function ProcessingOverlay({
             onWatch={onWatch ?? onContinue}
             onSimView={onSimView}
             onClose={onClose}
+            lastResult={data.lastReceipt}
+            onOpenLastBoxScore={data.lastReceipt && onOpenBoxScore ? () => onOpenBoxScore(data.lastReceipt!.gameId) : undefined}
           />
         </div>
       ) : (

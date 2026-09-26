@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { generateLeague } from '@data/generate'
 import { loadModDatabase, validateModDatabase } from '@data'
 import { Career } from './career'
-import { routeContinue, type LastRoute } from './beatGates'
+import { routeContinue, sceneToOpen, type LastRoute } from './beatGates'
 
 /** The whole visible state of the game, as the GM would judge "did anything
  *  happen?" — phase, date, offseason stage, camp day, and the button's promise. */
@@ -89,6 +89,12 @@ function walkPressingContinue(c: Career, presses: number): WalkResult {
       c.step()
     } catch (e) {
       throw new Error(`DEAD END at press ${i} (${key}): ${(e as Error).message}`)
+    }
+    // PHASE 0: a moment that arrived on this press opens its own room.
+    const scene = sceneToOpen(c.getDashboard(), d)
+    if (scene) {
+      gatesSeen.add(scene.key)
+      screen = scene.screen
     }
   }
   return { presses, end: stateKey(c), gatesSeen }

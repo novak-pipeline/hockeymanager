@@ -342,11 +342,6 @@ const REC_COLOR: Record<'A+' | 'A' | 'B' | 'C' | 'D', string> = {
   D: 'var(--muted)',
 }
 
-function stars5(v: number): string {
-  const full = Math.floor(v)
-  return '★'.repeat(full) + (v - full >= 0.5 ? '½' : '')
-}
-
 /* ── FM-style header strip ─────────────────────────────────────────────────── */
 
 function HeaderCard({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {

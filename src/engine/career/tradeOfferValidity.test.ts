@@ -221,6 +221,10 @@ describe('H3 — the GM\'s own trades obey the ceiling', () => {
     // callUpCap.test.ts — so this allows the same 5% the autopilot allows.)
     const { career, data, userId } = setup(4107)
     const user = data.teams.get(userId)!
+    // PHASE 0: routine calls go to the AGM unless they touch a man you are
+    // shopping — this greedy stand-in shops the whole roster so every call
+    // reaches his desk.
+    for (const id of user.roster) career.setTradeStatus(id as string, 'available')
     let taken = 0
     for (let i = 0; i < 60; i++) {
       career.advance(3)

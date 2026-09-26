@@ -163,7 +163,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                 <tr key={r.playerId}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <PlayerFace faceId={r.faceId} name={r.name} size={22} />
+                      <PlayerFace faceId={r.faceId !== undefined ? String(r.faceId) : undefined} name={r.name} size={22} />
                       <PlayerLink playerId={r.playerId} name={r.name} />
                     </span>
                   </td>
@@ -229,7 +229,7 @@ export function DevelopmentScreen(props: { teamId?: string } = {}): JSX.Element 
                 <tr key={r.playerId}>
                   <td>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      <PlayerFace faceId={r.faceId} name={r.name} size={22} />
+                      <PlayerFace faceId={r.faceId !== undefined ? String(r.faceId) : undefined} name={r.name} size={22} />
                       <PlayerLink playerId={r.playerId} name={r.name} />
                     </span>
                   </td>

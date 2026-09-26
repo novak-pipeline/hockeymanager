@@ -1291,7 +1291,7 @@ function HireAnalystPanel({
       <Panel title="Analytics department">
         <p style={{ margin: '0 0 4px', fontSize: 13, lineHeight: 1.6, color: 'var(--text)' }}>
           Your front office has no analytics staff. Hire a <strong>Data Analyst</strong> to open the Data Hub —
-          team & player radars, shot maps, xG and percentile tables, plus the NHLe projection models that inform
+          team & player radars, xG and percentile tables, plus the NHLe projection models that inform
           draft, trade and lineup decisions.
         </p>
         <div className="muted small">The better the analyst, the sharper the models.</div>
