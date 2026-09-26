@@ -63,7 +63,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
     { id: 'schedule', label: 'Schedule', icon: 'schedule', section: 'competition', screen: 'calendar', match: ['calendar', 'matchcenter'],
       subTabs: [{ id: 'calendar', label: 'Calendar' }, { id: 'matchcenter', label: 'Match' }] },
     { id: 'competitions', label: 'Competitions', icon: 'competitions', section: 'competition', screen: 'leagueOverview',
-      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
+      match: ['leagueOverview', 'standings', 'stats', 'leagueLeaders', 'leagueTeamStats', 'leagueTransactions', 'leagueScoreboard', 'leagueHistory', 'yearbook', 'dataHub', 'leagueSchedule', 'draft', 'offseason', 'playoffs'],
       subTabs: [
         { id: 'leagueOverview', label: 'Overview' },
         { id: 'standings', label: 'Standings' },
@@ -73,6 +73,7 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
         { id: 'leagueTransactions', label: 'Transactions' },
         { id: 'leagueScoreboard', label: 'Scoreboard' },
         { id: 'leagueHistory', label: 'History' },
+        { id: 'yearbook', label: 'Yearbook' },
         ...compExtra,
       ] },
     { id: 'world', label: 'World', icon: 'world', section: 'competition', screen: 'world', match: ['world', 'worldInternational'],

@@ -258,6 +258,19 @@ export class SimClient {
     return this.send({ type: 'getTeamLegends', teamId })
   }
 
+  /** Season Wrapped: a year's cards (omit `year` for the pending event). */
+  getWrapped(year?: number): Promise<WorkerResponse> {
+    return this.send(year === undefined ? { type: 'getWrapped' } : { type: 'getWrapped', year })
+  }
+
+  getYearbook(): Promise<WorkerResponse> {
+    return this.send({ type: 'getYearbook' })
+  }
+
+  markWrappedSeen(year: number): Promise<WorkerResponse> {
+    return this.send({ type: 'markWrappedSeen', year })
+  }
+
   getDevCamp(): Promise<WorkerResponse> {
     return this.send({ type: 'getDevCamp' })
   }
