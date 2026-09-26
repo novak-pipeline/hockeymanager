@@ -165,6 +165,7 @@ import {
   type ClubPosture,
   type GmPersona,
 } from '@engine/league/gmPersona'
+import { WorldTelemetry } from '@engine/league/worldTelemetry'
 import {
   buildBoardMeeting,
   buildSeasonReviewScene,
@@ -1202,6 +1203,9 @@ export class Career {
   private chronicle: ChronicleState = emptyChronicle()
   /** Named AI GM personas per club (Living World LW2). Lazily built, persisted. */
   private gmPersonas: Array<[string, GmPersona]> = []
+  /** League-wide economy/AI measurement arm (never read by the sim, never
+   *  persisted). The world-health harness reads it once a season. */
+  readonly telemetry = new WorldTelemetry()
   /** Year of the pending preseason board meeting, or null when attended (M1). */
   private boardMeetingYear: number | null = null
   /** M3 dev camp: soft gate — the first Continue after the draft (or at a new
@@ -8041,6 +8045,7 @@ export class Career {
           year: this.year,
           rng,
         })
+        this.telemetry.season(this.year).resigns.ai += ai.signings.length
         if (ai.signings.length > 0) {
           this.pushNews(
             'contract',
@@ -8210,6 +8215,11 @@ export class Career {
           postureOf: (tid) => this.clubPostureFor(tid, faRanks).posture,
         })
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
+        {
+          const tele = this.telemetry.season(this.year)
+          tele.faSignings.ai += res.signings.length
+          tele.faSignings.aiStars += res.signings.filter((s) => ratedOverall(this.resolve(s.playerId)) >= 78).length
+        }
         this.faPool = this.faPool.filter((id) => !signedIds.has(id as string))
         for (const s of res.signings) this.lockerArrival(s.teamId, s.playerId)
         // World Chronicle: every signing writes provenance (future "he walked on
@@ -11687,6 +11697,7 @@ export class Career {
       // June. Let it run out and the decision gets made for you.
       const decideDay = Math.min(RESIGN_WINDOW_DAYS, this.resignDay + (late ? 2 : 3))
       this.offerSheets.push({ playerId: id as string, fromTeamId: suitor.id as string, salary, years: Math.max(ask.years, 4), decideDay })
+      this.telemetry.season(this.year).offerSheets.atUser++
       const daysToMatch = Math.max(1, decideDay - this.resignDay)
       this.pushNews(
         'contract',
@@ -14025,6 +14036,7 @@ export class Career {
         bGivesPicks: receive.picks,
         allPicks: this.picks,
       })
+      this.telemetry.trade(this.year, { aiAi: false, window: this.userTradeWindow() })
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : undefined }
     }
@@ -14486,6 +14498,7 @@ export class Career {
       bGivesPicks: offer.userReceivesPicks,
       allPicks: this.picks,
     })
+    this.telemetry.trade(this.year, { aiAi: false, window: this.userTradeWindow() })
     for (const id of offer.userGivesPlayerIds) {
       if (farmIds.has(id as string)) this.moveProspectBetweenOrgs(id, this.userTeamId, offer.partnerTeamId)
     }
@@ -14614,6 +14627,12 @@ export class Career {
     const persona = buildGmPersona({ seed: this.seed, teamId: key, year: this.year, takenNames: taken })
     this.gmPersonas.push([key, persona])
     return persona
+  }
+
+  /** Where in the calendar a user trade lands, for the world-health telemetry. */
+  private userTradeWindow(): 'inSeason' | 'deadlineDay' | 'offseason' {
+    if (this.phase === 'offseason') return 'offseason'
+    return this.currentDay === this.deadlineDay ? 'deadlineDay' : 'inSeason'
   }
 
   /** League-wide roster-strength ranks (1 = strongest), computed once per call site. */
@@ -14761,7 +14780,7 @@ export class Career {
    * genuine roster piece — put it on your inbox. Shared by the daily rumour tick
    * and the deadline-day morning flurry so both read identically.
    */
-  private executeAiAiDeal(aiDeal: AiAiTradeResult, day: number): void {
+  private executeAiAiDeal(aiDeal: AiAiTradeResult, day: number, windowHint?: 'deadlineDay'): void {
     // Value of the piece changing hands — gates whether this reaches your inbox.
     const movedValue = Math.max(
       0,
@@ -14805,6 +14824,11 @@ export class Career {
     }
     repairLines(this.data.teams.get(aiDeal.sellerTeamId)!, this.data.players)
     repairLines(this.data.teams.get(aiDeal.buyerTeamId)!, this.data.players)
+    this.telemetry.trade(this.year, {
+      aiAi: true,
+      window: this.phase === 'offseason' ? 'offseason' : windowHint ?? (day === this.deadlineDay ? 'deadlineDay' : 'inSeason'),
+      shape: aiDeal.prospectIds.length > 0 ? 'prospectFor' : 'rental',
+    })
     const txResult = recordTransaction(this.transactionLedger, {
       day,
       year: this.year,
@@ -14927,7 +14951,7 @@ export class Career {
         postureOf,
       })
       if (!aiDeal) continue
-      this.executeAiAiDeal(aiDeal, day)
+      this.executeAiAiDeal(aiDeal, day, 'deadlineDay')
     }
   }
 

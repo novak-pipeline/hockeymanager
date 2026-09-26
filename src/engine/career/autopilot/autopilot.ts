@@ -13,6 +13,7 @@ import { Career } from '../career'
 import { auditSeason, type DayText, type FlavourReport } from './flavorAudit'
 import { diagnose, type Diagnosis, type NeedGroup } from './teamDiagnosis'
 import type { CareerPhase } from '../views'
+import { attachTelemetry, recordWorldSeason, samplePayroll, summarizeWorld, type WorldHealthSummary, type WorldSeasonRecord } from './worldHealth'
 
 /* ────────────────────────────── trace shapes ────────────────────────────── */
 
@@ -85,6 +86,9 @@ export interface AutopilotTrace {
    *  draft, a player profile, the dashboard), trimmed. Lets the persona reporter
    *  critique each screen's information design directly, as a player would see it. */
   viewSamples: Record<string, unknown>
+  /** League-wide world health, one record per season (the other 31 clubs). */
+  world?: WorldSeasonRecord[]
+  worldSummary?: WorldHealthSummary
   summary: {
     cups: number
     bestFinish: string
@@ -121,6 +125,8 @@ interface Ctx {
   plan: Plan
   planYear: number
   diagYear: number
+  /** Mid-season payroll sample for the world-health record, keyed by year. */
+  payroll: Map<number, ReturnType<typeof samplePayroll>>
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -790,6 +796,10 @@ function recordSeasonEnd(ctx: Ctx, s: SeasonRecord): void {
   flavourNotable.length = 0
   seenNewsIds.clear()
 
+  // The OTHER 31 clubs: points, champion, payroll, posture — league-wide health.
+  const world = guarded(ctx, 'recordWorldSeason', () => recordWorldSeason(ctx.career, s.year, ctx.payroll.get(s.year)))
+  if (world) (ctx.trace.world ??= []).push(world)
+
   const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
   if (dash) {
     s.rank = dash.userTeam.rank
@@ -839,7 +849,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {},
     summary: { cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false },
   }
-  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1 }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1, payroll: new Map() }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
@@ -888,6 +898,11 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     if (phase === 'regularSeason') {
       getPlan(ctx) // set + log the season's contend/retool/rebuild plan (once per year)
       if (dash.day >= 30) snapshotViews(ctx) // one mid-season capture of what the screens serve
+      // League payroll after camp and the summer market have settled.
+      if (dash.day >= 30 && !ctx.payroll.has(career.year)) {
+        const pay = guarded(ctx, 'samplePayroll', () => samplePayroll(career))
+        if (pay) ctx.payroll.set(career.year, pay)
+      }
       clearMeetings(ctx, dash)
       clearInteractions(ctx)
       maintainRoster(ctx)
@@ -927,6 +942,10 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
   if (season && !recorded.has(season.year)) recordSeasonEnd(ctx, season)
   runSanity(ctx)
 
+  if (trace.world) {
+    attachTelemetry(trace.world, career)
+    trace.worldSummary = summarizeWorld(trace.world)
+  }
   trace.meta.seasonsPlayed = trace.seasons.length
   trace.summary.cups = trace.seasons.filter((s) => s.wonCup).length
   trace.summary.totalTrades = trace.seasons.reduce((n, s) => n + s.trades, 0)
