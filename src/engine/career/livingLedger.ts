@@ -73,6 +73,31 @@ export interface ResidueFlag {
 
 /* ─────────────────────────── scheduling ─────────────────────────── */
 
+/**
+ * Personality bands on the scale personalities are ACTUALLY generated on:
+ * 1–20 (generate.ts makePersonality, the offseason intake, the mod schema).
+ * These used to be written as if the scale were 0–100 (temperament < 45,
+ * ambition > 55, professionalism > 60…), which made every "hot-headed" test
+ * true and every "proud / professional" test false — one flat reaction for
+ * every man (depth audit 2026-09, PHASE 0).
+ */
+export const PERSONALITY = {
+  /** At or below: a short fuse. */
+  HOT_TEMPER: 9,
+  /** At or above: slow to boil. */
+  CALM_TEMPER: 10,
+  /** Above: wants more than he has. */
+  AMBITIOUS: 11,
+  /** Above: handles things through the proper channels. */
+  PROFESSIONAL: 12,
+  /** At or above: a pro's pro — says it to your face, calmly. */
+  CONSUMMATE_PRO: 14,
+  /** At or above: has given this room years and feels it. */
+  LOYAL: 13,
+  /** Below: one foot out of the door already. */
+  DISLOYAL: 8,
+} as const
+
 /** Cap on concurrently scheduled person-scenes (confrontations/agent notes)
  *  so consequences land as scenes, not spam. Overflow → residue. */
 export const MAX_OPEN_THREADS = 3
@@ -141,10 +166,10 @@ export function scheduleReactions(args: ScheduleArgs): ScheduleResult {
     case 'scratched': {
       // A healthy scratch stings in proportion to pride. First time: he takes
       // it (residue). A repeat, or a proud low-temperament vet: he's at your door.
-      const proud = p.temperament < 45 && p.ambition > 55
+      const proud = p.temperament <= PERSONALITY.HOT_TEMPER && p.ambition > PERSONALITY.AMBITIOUS
       if ((repeat || proud) && !capped) {
         reactions.push({ id: nextId(), actionId: action.id, kind: 'confrontation', playerId: action.playerId, dueDay: action.day + 1, escalation })
-      } else if (!capped && p.professionalism > 60 && rng.chance(0.5)) {
+      } else if (!capped && p.professionalism > PERSONALITY.PROFESSIONAL && rng.chance(0.5)) {
         reactions.push({ id: nextId(), actionId: action.id, kind: 'agentNote', playerId: action.playerId, dueDay: action.day + 2, escalation })
       }
       residue.push(flag(true))
@@ -261,20 +286,54 @@ const LEAK_POOL: ContentVariant[] = [
     text2: `The league got the memo by lunch: {name}{callback: — {cb.phrase} —} can be had. Openness has its price, and the first installment is that he read it too.` },
 ]
 
-/** What he says at your door. Escalation gates the repeat scene; personality
- *  gates the rest (a variant's condition count IS its priority). */
+/** What he says at your door. Escalation gates the repeat scene; the action
+ *  (shopped vs. healthy-scratched) picks the family; personality gates the
+ *  rest (a variant's condition count IS its priority — siblings are authored
+ *  at equal specificity so no one line dominates; see the content-pool craft
+ *  rules). Thresholds are on the real 1–20 personality scale. */
 const CONFRONT_POOL: ContentVariant[] = [
-  { id: 'confront.repeat', conditions: { minEscalation: 1 },
+  // ── shopped ──
+  { id: 'confront.repeat', conditions: { actionKind: 'shopped', minEscalation: 1 },
     text: `"We did this dance already. You shopped me, I stayed, I kept my mouth shut. Now my name's out there again — so either move me or tell me to my face that this is how it ends here."` },
-  { id: 'confront.hot.loyal', conditions: { maxEscalation: 0, maxTemperament: 45, minLoyalty: 61 },
+  { id: 'confront.hot.loyal', conditions: { actionKind: 'shopped', maxEscalation: 0, maxTemperament: PERSONALITY.HOT_TEMPER, minLoyalty: PERSONALITY.LOYAL },
     text: `"I find out from a REPORTER that I'm on the block? After everything I've given this room? You want to trade me, fine — but you look me in the eye first."` },
-  { id: 'confront.hot', conditions: { maxEscalation: 0, maxTemperament: 45 },
+  { id: 'confront.hot', conditions: { actionKind: 'shopped', maxEscalation: 0, maxTemperament: PERSONALITY.HOT_TEMPER },
     text: `"I find out from a REPORTER that I'm on the block? You want to trade me, fine — but you look me in the eye first."` },
-  { id: 'confront.pro', conditions: { maxEscalation: 0, minProfessionalism: 66, minTemperament: 46 },
+  { id: 'confront.pro', conditions: { actionKind: 'shopped', maxEscalation: 0, minProfessionalism: PERSONALITY.CONSUMMATE_PRO, minTemperament: PERSONALITY.CALM_TEMPER },
     text: `"I'm not here to blow up. I saw the report. I'd rather hear it from you: am I part of this team's plans, or am I an asset? I can handle either answer — I can't handle reading it."` },
-  { id: 'confront.plain', conditions: { maxEscalation: 0 },
+  { id: 'confront.loyal', conditions: { actionKind: 'shopped', maxEscalation: 0, minLoyalty: PERSONALITY.LOYAL, minTemperament: PERSONALITY.CALM_TEMPER },
+    text: `"I turned down more money to stay here. I'm not saying that to guilt you — I'm saying it so you understand why reading my name in a trade column hurt more than it should have."` },
+  { id: 'confront.plain', conditions: { actionKind: 'shopped', maxEscalation: 0 },
     text: `"So the rumors are real. Look — I'm not going to pretend that doesn't sting. What's the plan for me here?"` },
+  // ── healthy scratch ──
+  { id: 'confront.scratch.repeat', conditions: { actionKind: 'scratched', minEscalation: 1 },
+    text: `"Twice now. I've watched two games from the press box with nothing wrong with me. If I'm not in your plans, say it — I'd rather be somewhere that wants to dress me."` },
+  { id: 'confront.scratch.proud', conditions: { actionKind: 'scratched', maxEscalation: 0, maxTemperament: PERSONALITY.HOT_TEMPER, minAmbition: PERSONALITY.AMBITIOUS + 1 },
+    text: `"A healthy scratch? Me? I've played through things in this league that would've put half that lineup on IR. I want to know who decided I was the problem, and I want to hear it from you."` },
+  { id: 'confront.scratch.hot', conditions: { actionKind: 'scratched', maxEscalation: 0, maxTemperament: PERSONALITY.HOT_TEMPER },
+    text: `"I found out I was out when I saw my name wasn't on the board. Nobody said a word. Is that how we do things here now?"` },
+  { id: 'confront.scratch.pro', conditions: { actionKind: 'scratched', maxEscalation: 0, minProfessionalism: PERSONALITY.CONSUMMATE_PRO, minTemperament: PERSONALITY.CALM_TEMPER },
+    text: `"I'm not here to complain. I just want to know what you need to see from me to get back in. Tell me what it is and I'll do it."` },
+  { id: 'confront.scratch.plain', conditions: { actionKind: 'scratched', maxEscalation: 0 },
+    text: `"Coach sat me. I get that it's his call — but you run this team, so I'm asking you: is this a message, or a plan?"` },
 ]
+
+/** The setup line under "X wants a word" — WHY he is at your door. */
+const CONFRONT_WHY: Record<WorldActionKind, string> = {
+  shopped: 'He saw the report. He is standing in your office because you shopped him.',
+  scratched: 'He watched the last game from the press box, healthy. He is standing in your office because you scratched him.',
+  sentDown: 'He took the call from the minors. He wants to know why you sent him down.',
+  released: 'He is gone, and the room wants to know why.',
+}
+
+const CONFRONT_OPTIONS_BY_KIND: Partial<Record<WorldActionKind, InteractionOption[]>> = {
+  scratched: [
+    { id: 'promise', label: 'Tell him what he has to show — and promise him a way back in', tone: 'promise' },
+    { id: 'supportive', label: 'Reassure him: it is a rest, not a verdict', tone: 'supportive' },
+    { id: 'firm', label: 'Tell him straight: the lineup is earned', tone: 'firm' },
+    { id: 'dismissive', label: 'This meeting is over', tone: 'dismissive' },
+  ],
+}
 
 /** Agent calls: text = headline, text2 = body. Keyed on what you did. */
 const AGENT_POOL: ContentVariant[] = [
@@ -357,9 +416,9 @@ export function reactionCopy(args: {
       const v = pick(CONFRONT_POOL)
       return {
         headline: `${player.name} wants a word`,
-        body: `He saw the report. He is standing in your office because you shopped him.`,
+        body: CONFRONT_WHY[action.kind],
         message: renderTemplate(v.text, slots),
-        options: CONFRONT_OPTIONS,
+        options: CONFRONT_OPTIONS_BY_KIND[action.kind] ?? CONFRONT_OPTIONS,
       }
     }
     case 'agentNote': {

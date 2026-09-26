@@ -302,7 +302,7 @@ export function maybeRaiseInteraction(args: {
 
 /* ─────────────────────────── response effects ─────────────────────────── */
 
-/** Base morale swing per tone, before personality scaling. */
+/** Base morale swing per tone, before personality and history. */
 const TONE_BASE: Record<ResponseTone, number> = {
   promise: 12,
   supportive: 8,
@@ -315,39 +315,86 @@ function clampDelta(v: number): number {
 }
 
 /**
+ * What this man has already heard from you — the HISTORY half of the tone
+ * model. Built by the career layer from the resolved interactions and the
+ * promise ledger. All optional: absent = a first conversation.
+ */
+export interface InteractionHistory {
+  /** Times he has already been answered with warm words (supportive), this
+   *  season or last. Reassurance with nothing behind it wears out. */
+  supportiveBefore?: number
+  /** Promises you made him that you BROKE. A promise from you is worth less. */
+  brokenPromises?: number
+  /** Promises you made him that you KEPT. Your word carries. */
+  keptPromises?: number
+}
+
+/**
+ * The morale swing of one tone for one man, before severity and the clamp.
+ *
+ * PHASE 0 (depth audit 2026-09): the old table was promise +12, supportive +8,
+ * firm +2, dismissive −10 with only professionalism nudging firm — so
+ * "supportive" beat "firm" for every player below professionalism 20 and a
+ * rational GM clicked it every time. Now the RIGHT answer depends on who he is
+ * and what you have already told him (all on the real 1–20 scale):
+ *
+ *  - supportive lands with the insecure and the unambitious; an ambitious pro
+ *    hears it as a pat on the head, and the same reassurance twice is noise.
+ *  - firm lands with professionals and the driven; it bruises the fragile.
+ *  - a promise is worth what your word is worth — broken ones cost you here,
+ *    and the ledger judges the new one later.
+ *  - dismissive is almost always wrong, but a pro with no ambition shrugs.
+ *
+ * LOW temperament is the short fuse (EHM's convention, and the Living
+ * Ledger's): it amplifies the swing either way.
+ */
+export function toneDelta(
+  tone: ResponseTone,
+  personality: Player['personality'],
+  history: InteractionHistory = {}
+): number {
+  const amb = personality.ambition - 10
+  const pro = personality.professionalism - 10
+  const det = personality.determination - 10
+  let delta = TONE_BASE[tone]
+  switch (tone) {
+    case 'supportive':
+      delta += -0.7 * amb - 0.5 * pro - 5 * Math.min(2, history.supportiveBefore ?? 0)
+      break
+    case 'firm':
+      delta += 0.7 * pro + 0.4 * det - 0.3 * amb
+      break
+    case 'promise':
+      delta += 0.3 * amb - 6 * Math.min(2, history.brokenPromises ?? 0) + 2 * Math.min(2, history.keptPromises ?? 0)
+      break
+    case 'dismissive':
+      delta += 0.5 * pro - 0.3 * amb
+      break
+  }
+  const volatility = 1 + Math.max(0, 10 - personality.temperament) * 0.05
+  return delta * volatility
+}
+
+/**
  * Apply a GM response. Pure — returns the deltas + prose; the caller mutates the
  * player's morale and the room mood and may push the follow-up news.
- *
- * Personality scaling:
- *  - High professionalism players respect a firm message and shrug off being told
- *    no; low-professionalism players sulk.
- *  - Volatile (high temperament) players swing harder in both directions.
- *  - Empty promises (promise tone) feel great now but the career layer can later
- *    punish a broken promise — for v1 we just bank the morale.
+ * The swing itself is {@link toneDelta}: personality × history.
  */
 export function applyInteractionResponse(args: {
   interaction: PlayerInteraction
   option: InteractionOption
   player: Player
+  history?: InteractionHistory
 }): InteractionResult {
   const { option, player, interaction } = args
-  const pro = player.personality.professionalism // 1–20
-  const temperament = player.personality.temperament // 1–20
 
-  let delta = TONE_BASE[option.tone]
+  let delta = toneDelta(option.tone, player.personality, args.history)
 
-  // Professionals reward firmness, take dismissal in stride; flakier players don't.
-  if (option.tone === 'firm') delta += (pro - 10) * 0.6
-  if (option.tone === 'dismissive') delta += (pro - 10) * 0.5
-
-  // Volatility amplifies the swing.
-  const volatility = 1 + Math.max(0, temperament - 10) * 0.05
-  delta *= volatility
-
-  // Serious concerns need more than a shrug — firm/dismissive sting more.
+  // Serious concerns need more than words or a shrug.
   if (interaction.severity === 'serious' && (option.tone === 'firm' || option.tone === 'dismissive')) {
     delta -= 4
   }
+  if (interaction.severity === 'serious' && option.tone === 'supportive') delta -= 2
 
   const moraleDelta = clampDelta(delta)
 

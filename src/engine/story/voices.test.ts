@@ -48,11 +48,11 @@ function makePlayer(over: {
     morale: 60,
     jerseyNumber: over.jersey ?? 91,
     personality: {
-      ambition: over.ambition ?? 50,
-      professionalism: over.professionalism ?? 55,
-      loyalty: over.loyalty ?? 55,
-      temperament: over.temperament ?? 60,
-      determination: over.determination ?? 55,
+      ambition: over.ambition ?? 10,
+      professionalism: over.professionalism ?? 11,
+      loyalty: over.loyalty ?? 11,
+      temperament: over.temperament ?? 12,
+      determination: over.determination ?? 11,
     },
   } as unknown as Player
 }
@@ -249,8 +249,8 @@ describe('voices — buildVoicePosts', () => {
   })
 
   it('personality scales the voice: a cocky sniper and a quiet vet do not sound alike', () => {
-    const cocky = subjectFor(makePlayer({ id: 'a', ambition: 90, professionalism: 30, age: 24 }))
-    const vet = subjectFor(makePlayer({ id: 'b', professionalism: 90, age: 33 }))
+    const cocky = subjectFor(makePlayer({ id: 'a', ambition: 18, professionalism: 6, age: 24 }))
+    const vet = subjectFor(makePlayer({ id: 'b', professionalism: 18, age: 33 }))
     const a = run({ kind: 'milestone', playerId: 'a', numbers: { n: 300, stat: 'career goals' } }, cocky)[0]!
     const b = run({ kind: 'milestone', playerId: 'b', numbers: { n: 300, stat: 'career goals' } }, vet)[0]!
     expect(a.text).not.toBe(b.text)
@@ -262,7 +262,7 @@ describe('voices — buildVoicePosts', () => {
     // A personality that unlocks most of the pool (rookie, cocky, fiery,
     // loyal, determined all at once) so freshness is what's under test.
     const subject = subjectFor(makePlayer({
-      age: 21, ambition: 90, professionalism: 30, temperament: 30, loyalty: 80, determination: 80,
+      age: 21, ambition: 18, professionalism: 6, temperament: 6, loyalty: 16, determination: 16,
     }))
     const seen: string[] = []
     // 6 hat tricks in a season: every text distinct while variants last.
@@ -375,10 +375,10 @@ describe('voices — career integration', () => {
     const c = new Career(data, 22, userId) as unknown as Record<string, any>
 
     const [a, b] = c.userTeam.roster.slice(0, 2).map((id: any) => c.data.players.get(id))
-    a.personality.temperament = 30 // fiery — he posts
-    a.personality.loyalty = 60
-    b.personality.temperament = 80 // pro — he doesn't
-    b.personality.loyalty = 80
+    a.personality.temperament = 6 // fiery — he posts
+    a.personality.loyalty = 12
+    b.personality.temperament = 16 // pro — he doesn't
+    b.personality.loyalty = 16
 
     c.recordWorldAction('scratched', a.id as string)
     c.recordWorldAction('scratched', b.id as string)
@@ -411,7 +411,7 @@ describe('voices — career integration', () => {
     const c = new Career(data, 24, userId) as unknown as Record<string, any>
 
     const p = c.data.players.get(c.userTeam.roster[0])!
-    p.personality.temperament = 25
+    p.personality.temperament = 5
     c.recordWorldAction('scratched', p.id as string)
     expect(c.pendingVoiceEvents.length).toBeGreaterThanOrEqual(1)
 

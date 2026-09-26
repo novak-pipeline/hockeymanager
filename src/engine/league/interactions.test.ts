@@ -9,8 +9,10 @@ import {
   maybeRaiseInteraction,
   promiseFromResponse,
   promiseDueLabel,
+  toneDelta,
   type PlayerInteraction,
 } from './interactions'
+import { generateLeague } from '@data/generate'
 
 function makePlayer(overrides: Partial<{
   id: string
@@ -187,5 +189,53 @@ describe('applyInteractionResponse — effects', () => {
       option: firm, player: makePlayer({ professionalism: 4 }),
     })
     expect(pro.moraleDelta).toBeGreaterThan(flaky.moraleDelta)
+  })
+})
+
+describe('tone model — no dominant answer (PHASE 0)', () => {
+  // The old table (promise 12 / supportive 8 / firm 2 / dismissive −10, only
+  // pro nudging firm) made "supportive" beat "firm" for every professionalism
+  // below 20, so a rational GM clicked it every time. The right answer now
+  // depends on who he is and what you've already told him.
+  it('across a generated league, supportive and firm each win for a real share of players', () => {
+    const data = generateLeague({ seed: 404 })
+    let supportiveWins = 0
+    let firmWins = 0
+    let n = 0
+    for (const p of data.players.values()) {
+      const s = toneDelta('supportive', p.personality)
+      const f = toneDelta('firm', p.personality)
+      n++
+      if (s > f) supportiveWins++
+      else if (f > s) firmWins++
+    }
+    expect(n).toBeGreaterThan(200)
+    expect(supportiveWins / n).toBeGreaterThan(0.2)
+    expect(firmWins / n).toBeGreaterThan(0.2)
+  })
+
+  it('an ambitious professional hears reassurance as a pat on the head — firm lands better', () => {
+    const vet = makePlayer({ ambition: 17, professionalism: 17, temperament: 14 }).personality
+    expect(toneDelta('firm', vet)).toBeGreaterThan(toneDelta('supportive', vet))
+    const kid = makePlayer({ ambition: 5, professionalism: 6, temperament: 12 }).personality
+    expect(toneDelta('supportive', kid)).toBeGreaterThan(toneDelta('firm', kid))
+  })
+
+  it('the same reassurance twice is worth less (history)', () => {
+    const p = makePlayer({}).personality
+    expect(toneDelta('supportive', p, { supportiveBefore: 1 })).toBeLessThan(toneDelta('supportive', p))
+    expect(toneDelta('supportive', p, { supportiveBefore: 2 })).toBeLessThan(toneDelta('firm', p))
+  })
+
+  it('a promise is worth what your word is worth', () => {
+    const p = makePlayer({}).personality
+    expect(toneDelta('promise', p, { brokenPromises: 1 })).toBeLessThan(toneDelta('promise', p))
+    expect(toneDelta('promise', p, { keptPromises: 1 })).toBeGreaterThan(toneDelta('promise', p))
+  })
+
+  it('a short fuse (LOW temperament, the EHM convention) swings harder', () => {
+    const hot = makePlayer({ temperament: 2 }).personality
+    const calm = makePlayer({ temperament: 18 }).personality
+    expect(Math.abs(toneDelta('dismissive', hot))).toBeGreaterThan(Math.abs(toneDelta('dismissive', calm)))
   })
 })

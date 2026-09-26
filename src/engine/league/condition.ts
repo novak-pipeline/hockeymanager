@@ -87,18 +87,48 @@ function rollKind(rng: Rng): InjuryKind {
  * Games out, from a discretized exponential: 1–3 games common, 8–20 rare.
  * Concussions draw from a longer-tailed scale (multi-week absences happen).
  */
-function rollGamesOut(rng: Rng, kind: InjuryKind): number {
+function rollGamesOut(rng: Rng, kind: InjuryKind, medical?: number): number {
   const scale = kind === 'concussion' ? 6 : 3.8
   const cap = kind === 'concussion' ? 45 : 30
-  const games = 1 + Math.floor(-Math.log(1 - rng.next()) * scale)
+  const games = 1 + Math.floor(-Math.log(1 - rng.next()) * scale * recoveryMult(medical))
   return Math.min(cap, games)
 }
 
 /**
- * Per-game injury probability. Base rate scaled up by low balance, high
- * aggression, and heavy minutes (toi in seconds, as in GamePlayerStat).
+ * PHASE 0 — the medical staff is not decoration. `medical` is the club's head
+ * physio quality on 0–1 (0.5 = league average; absent = average). A great
+ * physio gets men back ~20% sooner and trims the risk ~10%; a poor one the
+ * reverse. Before this, hiring a better physio did nothing at all.
  */
-function injuryChance(player: Player, toi: number): number {
+export function recoveryMult(medical?: number): number {
+  return medical === undefined ? 1 : 1.2 - 0.4 * clamp(medical, 0, 1)
+}
+function medicalRiskMult(medical?: number): number {
+  return medical === undefined ? 1 : 1.1 - 0.2 * clamp(medical, 0, 1)
+}
+
+/** Fatigue at which a worn body starts to break down more often. */
+const FATIGUE_RISK_FLOOR = 30
+/** Extra risk at fatigue 100 (1 + this). Modest by design: fatigue already
+ *  costs a player on the ice (the condition multiplier); this makes the
+ *  Medical Center's "tired = at risk" warning TRUE, not a new cliff. */
+const FATIGUE_RISK_MAX = 0.6
+
+/** The fatigue half of the injury model (1.0 when fresh). */
+export function fatigueRiskMult(fatigue: number): number {
+  return 1 + FATIGUE_RISK_MAX * clamp((fatigue - FATIGUE_RISK_FLOOR) / (100 - FATIGUE_RISK_FLOOR), 0, 1)
+}
+
+/**
+ * Per-game injury probability. Base rate scaled up by low balance, high
+ * aggression, heavy minutes (toi in seconds, as in GamePlayerStat), age, DB
+ * proneness, FATIGUE (a worn body breaks — PHASE 0: the Medical Center always
+ * said so, the model now agrees) and the club's medical staff.
+ *
+ * Exported so the Medical Center and the staff meeting quote THIS number, not
+ * a separate display formula that could drift from what the sim rolls.
+ */
+export function injuryChance(player: Player, toi: number, medical?: number): number {
   const goalie = player.position === 'G'
   const base = goalie ? GOALIE_INJURY_CHANCE : SKATER_INJURY_CHANCE
   const ref = goalie ? GOALIE_TOI_REF_SECONDS : SKATER_TOI_REF_SECONDS
@@ -112,7 +142,17 @@ function injuryChance(player: Player, toi: number): number {
   // glass player (high proneness) gets hurt more; an iron man less. Absent on
   // fictional players → 1.0× (unchanged).
   const proneFactor = player.injuryProneness !== undefined ? clamp(player.injuryProneness / 50, 0.2, 2.5) : 1
-  return clamp(base * balanceFactor * aggressionFactor * toiFactor * ageFactor * proneFactor, 0, 0.25)
+  const fatigueFactor = fatigueRiskMult(player.fatigue ?? 0)
+  return clamp(
+    base * balanceFactor * aggressionFactor * toiFactor * ageFactor * proneFactor * fatigueFactor * medicalRiskMult(medical),
+    0, 0.25,
+  )
+}
+
+/** League-baseline per-game chance for a position at reference minutes — the
+ *  denominator the Medical Center's risk index is quoted against. */
+export function baselineInjuryChance(position: Player['position']): number {
+  return position === 'G' ? GOALIE_INJURY_CHANCE : SKATER_INJURY_CHANCE
 }
 
 export interface InjuryRoll {
@@ -126,16 +166,17 @@ export interface InjuryRoll {
  * injuries so the caller can repair lineups and write news items.
  */
 export function rollInjuries(args: {
-  participants: Array<{ player: Player; toi: number }>
+  /** `medical`: the club's physio quality 0–1 (absent = league average). */
+  participants: Array<{ player: Player; toi: number; medical?: number }>
   rng: Rng
 }): InjuryRoll[] {
   const { participants, rng } = args
   const out: InjuryRoll[] = []
-  for (const { player, toi } of participants) {
+  for (const { player, toi, medical } of participants) {
     if (player.injuryStatus !== null) continue
-    if (!rng.chance(injuryChance(player, toi))) continue
+    if (!rng.chance(injuryChance(player, toi, medical))) continue
     const kind = rollKind(rng)
-    const gamesOut = rollGamesOut(rng, kind)
+    const gamesOut = rollGamesOut(rng, kind, medical)
     const injury: Injury = {
       kind,
       gamesRemaining: gamesOut,
@@ -154,10 +195,10 @@ export function rollInjuries(args: {
  * roll, so aggregate injury shape is unchanged; the difference is you saw it
  * happen. No-op (returns the existing injury) if he's already hurt.
  */
-export function injureNow(player: Player, rng: Rng): Injury {
+export function injureNow(player: Player, rng: Rng, medical?: number): Injury {
   if (player.injuryStatus !== null) return player.injuryStatus
   const kind = rollKind(rng)
-  const gamesOut = rollGamesOut(rng, kind)
+  const gamesOut = rollGamesOut(rng, kind, medical)
   const injury: Injury = {
     kind,
     gamesRemaining: gamesOut,
