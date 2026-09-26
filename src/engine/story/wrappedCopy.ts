@@ -203,6 +203,20 @@ export const COACHING_POOL: Pool = [
   { id: 'cc-2', text: 'New faces behind the bench.', text2: '{lead} Patience was in short supply this year.' },
 ]
 
+/** The season off the ice. ctx: heat = 'coach' | 'request' | 'room'.
+ *  slots: {lead} {countWords} */
+export const OFF_ICE_POOL: Pool = [
+  { id: 'oi-c1', conditions: { heat: 'coach' }, text: 'The coach question.', text2: '{lead} The press asked it, and you had to answer it on the record.' },
+  { id: 'oi-c2', conditions: { heat: 'coach' }, text: 'A seat got warm.', text2: '{lead} Some of the year was played at the podium.' },
+  { id: 'oi-c3', conditions: { heat: 'coach' }, text: 'Not just the games.', text2: '{lead} The bench was a story all year.' },
+  { id: 'oi-r1', conditions: { heat: 'request' }, text: 'Somebody wanted out.', text2: '{lead} Not every conversation this year happened on the ice.' },
+  { id: 'oi-r2', conditions: { heat: 'request' }, text: 'The office door stayed busy.', text2: '{lead} The dressing room kept you working away from the rink too.' },
+  { id: 'oi-r3', conditions: { heat: 'request' }, text: 'Off the ice.', text2: '{lead} {countWords} stories that never showed up in a box score.' },
+  { id: 'oi-m1', conditions: { heat: 'room' }, text: 'Off the ice.', text2: '{lead} {countWords} stories that never showed up in a box score.' },
+  { id: 'oi-m2', conditions: { heat: 'room' }, text: 'The dressing room had a year too.', text2: '{lead} Not all of it made the highlights.' },
+  { id: 'oi-m3', conditions: { heat: 'room' }, text: 'What the cameras missed.', text2: '{lead} The rest of it is in the chronicle.' },
+]
+
 /* ── HISTORY ───────────────────────────────────────────────────────────── */
 
 /** ctx: found = true/false (a prior mark exists in the book) */

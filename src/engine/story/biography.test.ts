@@ -418,6 +418,10 @@ describe('biography — craft', () => {
     injuryNow: [{ injuryGames: 1 }],
     prospect: [{}],
     intl: [{ intlApps: 1 }, { intlApps: 9 }],
+    clubRecord: [
+      { rel: 'tradeRequest', hasOther: false }, { rel: 'captaincy', hasOther: false }, { rel: 'captaincy', hasOther: true },
+      { rel: 'shopped', hasOther: false }, { rel: 'feud', hasOther: true }, { rel: 'confrontation', hasOther: false },
+    ],
     retired: [{}],
     totals: [{ careerGp: 200, careerPts: 0 }],
   }

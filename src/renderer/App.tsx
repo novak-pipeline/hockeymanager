@@ -891,7 +891,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'calendar':
       return <CalendarScreen />
     case 'feed':
-      return <FeedScreen />
+      return <FeedScreen {...(props.params.teamId ? { beatTeamId: props.params.teamId } : {})} />
     case 'devCamp':
       return <DevCampScreen />
     case 'trainingCamp':

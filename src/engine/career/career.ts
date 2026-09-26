@@ -168,6 +168,7 @@ import {
 import {
   DETECTORS,
   FEED_AUTHORS,
+  DAILY_POST_BUDGET,
   engagementFor,
   noveltyClassOf,
   selectPosts,
@@ -297,8 +298,60 @@ import {
   punditRead,
   toneVerb,
   mediaStandingSummary,
+  tiltOf,
+  nudgeRapport,
   type PunditState,
 } from '@engine/story/pundits'
+import { beatOutletFor, clubNickname, fanHandle, marketProfile, type BeatOutlet, type MarketProfile } from '@engine/story/mediaCast'
+import {
+  buildClaimPiece,
+  buildDaily,
+  buildFeature,
+  buildGameday,
+  buildGrades,
+  buildHotSeat,
+  buildInjury,
+  buildMailbag,
+  buildMoves,
+  buildNotebook,
+  buildProspects,
+  lastName as beatLastName,
+  moneyShort,
+  ordinalWord,
+  slotWord,
+  svpText,
+  type BeatArticle,
+  type BeatView,
+  type DeskCtx,
+  type FeatureFacts,
+  type GradeLine,
+  type LinesFacts,
+  type MailItem,
+  type ProspectLine,
+  type SeasonAct,
+  type Tilt,
+  type WatchItem,
+  type WireItem,
+} from '@engine/story/beatDesk'
+import { INSIDER_INJURY, LEAGUE_RADAR } from '@engine/story/beatPools'
+import {
+  discloseInjury,
+  nextDisclosureBeat,
+  officialLine,
+  type InjuryDisclosure,
+} from '@engine/story/injuryDisclosure'
+import {
+  dayKey,
+  emptyMediaState,
+  normalizeMediaState,
+  MAX_ARTICLES,
+  MAX_CLAIMS,
+  MAX_DISCLOSURES,
+  type ClaimKind,
+  type GmClaim,
+  type MediaState,
+} from '@engine/story/mediaState'
+import { presserPrompt, type PresserTopic } from '@engine/story/pressQuestions'
 import {
   checkAwardsStage,
   checkDraftStage,
@@ -342,7 +395,7 @@ import {
   type ResidueFlag,
 } from './livingLedger'
 import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
-import { oneSentence, possessive, prosaicList, renderStable } from '@engine/story/prose'
+import { oneSentence, possessive, prosaicList, renderStable, stableSeed } from '@engine/story/prose'
 import { writeBeat } from '@engine/story/beatWriter'
 import {
   ANNIVERSARY_POOL,
@@ -555,6 +608,7 @@ import {
   type PressureState,
 } from '@engine/league/pressure'
 import {
+  seatHeat,
   midSeasonFirings,
   offseasonFirings,
   type CoachFiring,
@@ -1341,6 +1395,9 @@ export class Career {
   /** #90: the GM's persistent standing with each named pundit. Serialized in the
    *  snapshot; old saves lazily seed neutral relationships on load. */
   private punditState: PunditState = seedPundits()
+  /** The media layer (docs/MEDIA-BEAT.md): the beat's articles, injury
+   *  disclosures, the GM's claims on the record, the coach hot seat. */
+  private media: MediaState = emptyMediaState()
   /** The GM's persistent standing with each contract agent (keyed by agent name).
    *  Serialized in the snapshot; old saves lazily seed an empty state on load.
    *  Neutral/absent ⇒ zero effect on negotiations. */
@@ -3154,6 +3211,9 @@ export class Career {
     }
     for (const a of out.arcSeeds) {
       if (a.kind === 'feud' || a.kind === 'mentorship') {
+        if (a.kind === 'feud' && teamId === this.userTeamId && a.playerIds.length >= 2) {
+          this.chronicleFeud(a.playerIds[0]!, a.playerIds[1]!, 'in the dressing room')
+        }
         // Relationship arcs dedupe on the player set: a recurring flare-up
         // intensifies the existing saga instead of spawning parallel copies.
         createOrEscalateRelationshipArc(
@@ -3355,7 +3415,22 @@ export class Career {
     const curTot = totals.get(pid)
     const club = team !== undefined ? splitClubName(team.name) : undefined
 
+    // 7. The people story the chronicle recorded (docs/MEDIA-BEAT.md).
+    const clubRecord: NonNullable<BiographyFacts['clubRecord']> = []
+    for (const e of this.chronicle.events) {
+      if (!e.playerIds.includes(pidStr)) continue
+      if (e.kind !== 'tradeRequest' && e.kind !== 'shopped' && e.kind !== 'captaincy' && e.kind !== 'feud' && e.kind !== 'confrontation') continue
+      // Captaincy: only the man who RECEIVED the C (the first id).
+      if (e.kind === 'captaincy' && (e.details?.media !== 'named' || e.playerIds[0] !== pidStr)) continue
+      const clubTeam = this.data.teams.get(asTeamId(e.teamIds[0] ?? ''))
+      if (!clubTeam) continue
+      const otherId = e.kind === 'captaincy' ? e.playerIds[1] : e.kind === 'feud' ? e.playerIds.find((x) => x !== pidStr) : undefined
+      const other = otherId ? this.data.players.get(asPlayerId(otherId))?.name : undefined
+      clubRecord.push({ kind: e.kind, year: e.year, clubShort: splitClubName(clubTeam.name).nickname, ...(other ? { other } : {}) })
+    }
+
     return {
+      ...(clubRecord.length > 0 ? { clubRecord } : {}),
       playerId: pidStr,
       name: p.name,
       age: p.age,
@@ -3439,6 +3514,11 @@ export class Career {
           this.pushNews('trade', copy.headline, copy.body, { playerId: r.playerId, teamId: this.userTeamId as string })
           for (const f of this.residueFlags) if (f.actionId === action.id) f.known = true
           player.morale = Math.max(0, player.morale - 4)
+          // The permanent record: the season his name went out in trade talk.
+          chronicleEvent(this.chronicle, {
+            year: this.year, day, kind: 'shopped', teamIds: [this.userTeamId as string], playerIds: [r.playerId],
+            headline: `Word gets out that ${this.userTeam.abbreviation} are shopping ${player.name}`, userInvolved: true,
+          })
           // FEED-V2-1: he read the report like everyone else — the subtweet.
           this.queueVoice({ kind: 'shopSubtweet', playerId: r.playerId, relevant: true })
           break
@@ -3449,6 +3529,12 @@ export class Career {
           // If he already has an open concern, don't stack scenes — the
           // grievance folds into residue instead (conservation of drama).
           if (this.interactions.some((i) => i.playerId === r.playerId && i.status === 'open')) break
+          chronicleEvent(this.chronicle, {
+            year: this.year, day, kind: 'confrontation', teamIds: [this.userTeamId as string], playerIds: [r.playerId],
+            headline: `${player.name} confronts the GM over being ${action.kind === 'shopped' ? 'shopped' : action.kind === 'scratched' ? 'scratched' : action.kind === 'sentDown' ? 'sent down' : 'let go'}`,
+            details: { media: action.kind }, userInvolved: true,
+          })
+          if (r.escalation > 0) this.chronicleTradeRequest(r.playerId, `after being ${action.kind === 'shopped' ? 'shopped' : action.kind === 'scratched' ? 'scratched' : 'sent down'}`)
           this.interactions.unshift({
             id: `i${this.interactionCounter++}`,
             playerId: r.playerId,
@@ -3957,6 +4043,7 @@ export class Career {
       interaction.teamId = this.userTeamId as string
       this.interactionCounter++
       this.interactions.unshift(interaction)
+      if (interaction.kind === 'tradeRequest') this.chronicleTradeRequest(interaction.playerId, 'unhappy with his situation')
       // One per day, max — the interaction surfaces as a card at the top of
       // the inbox (see getInbox); no separate news item crowds the feed.
       break
@@ -4061,7 +4148,8 @@ export class Career {
         teamId: interaction.teamId,
         playerId: interaction.playerId,
       })
-      // A formal trade demand becomes a story arc.
+      // A formal trade demand becomes a story arc, and part of the record.
+      this.chronicleTradeRequest(interaction.playerId, 'after a meeting with the GM')
       createArc(
         this.arcsState,
         'tradeRumor',
@@ -4302,6 +4390,19 @@ export class Career {
       if (!team) return undefined
       return clubAuthorFor({ teamId, name: team.name, abbreviation: team.abbreviation, city: team.city })
     }
+    if (authorId.startsWith('beat:')) {
+      // A club's daily beat writer (docs/MEDIA-BEAT.md).
+      const o = this.outletFor(authorId.slice(5))
+      if (!o) return undefined
+      return {
+        id: o.authorId,
+        name: o.writer.name,
+        handle: o.writer.handle,
+        kind: 'beat',
+        outlet: o.outlet,
+        bio: `Covers the ${this.data.teams.get(asTeamId(authorId.slice(5)))?.name ?? 'club'} every day for ${o.outlet}. ${o.tagline}`,
+      }
+    }
     return undefined
   }
 
@@ -4473,6 +4574,10 @@ export class Career {
       const a = clubAuthorFor({ teamId: team.id as string, name: team.name, abbreviation: team.abbreviation, city: team.city })
       authors[a.id] = a
     }
+    // Your club's beat writer is always in the directory — the outlet you read
+    // every day should be one click from the Feed.
+    const beat = this.feedAuthorFor(`beat:${this.userTeamId as string}`)
+    if (beat) authors[beat.id] = beat
     for (const p of this.feedPosts) {
       if (!p.authorId || authors[p.authorId]) continue
       const a = this.feedAuthorFor(p.authorId)
@@ -4566,6 +4671,7 @@ export class Career {
               ],
               status: 'open',
             })
+            this.chronicleTradeRequest(pr.playerId, 'after a broken promise')
           }
         }
         this.chroniclePromise(pr, day)
@@ -4873,22 +4979,6 @@ export class Career {
       }
     }
 
-    /* ── press conference: after a notable 4+ goal defeat ── */
-    for (const res of outcomes) {
-      const userIsHome = res.homeTeamId === this.userTeamId
-      const userIsAway = res.awayTeamId === this.userTeamId
-      if (!userIsHome && !userIsAway) continue
-      const us = userIsHome ? res.homeGoals : res.awayGoals
-      const them = userIsHome ? res.awayGoals : res.homeGoals
-      if (them - us >= 4 && this.pressConference === null) {
-        const opp = this.data.teams.get(userIsHome ? res.awayTeamId : res.homeTeamId)
-        this.queuePressConference(
-          `Your team just lost ${us}-${them}. What went wrong tonight?`,
-          `After a heavy ${them - us}-goal defeat against ${opp?.abbreviation ?? 'the opposition'} (day ${day}).`
-        )
-      }
-    }
-
     /* ── Coach quote: win streak milestones (5, 10, 15) ── */
     const WIN_STREAK_THRESHOLDS = [5, 10, 15]
     if (WIN_STREAK_THRESHOLDS.includes(this.userWinStreak)) {
@@ -4936,6 +5026,9 @@ export class Career {
     this.emitVoiceGameEvents(outcomes)
     // In-season chase/break of the all-time single-season record.
     this.emitRecordWatch(day, outcomes)
+    // The daily beat, the injury disclosure layer, the hot seat, the claims,
+    // and the presser (docs/MEDIA-BEAT.md). Last, so it reads the finished day.
+    this.runBeatDay(day, outcomes, false)
   }
 
   /** Dashboard ticker line for an arc: actor name + latest beat. */
@@ -5062,6 +5155,7 @@ export class Career {
         rank,
         teamsInLeague: this.data.league.teams.length,
         ...(expectedRank !== undefined ? { expectedRank } : {}),
+        city: team.city,
       },
       lastResults,
       topArcs,
@@ -5198,11 +5292,13 @@ export class Career {
     const personaId =
       Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]
     const args = this.scheduledReportArgs(kind)
+    // Rapport frames the piece (docs/MEDIA-BEAT.md): the writer's standing.
+    args.tilt = this.tiltFor(personaId)
     const factSheet = buildScheduledReportFactSheet(kind, args)
     const job: PressJob = { id: `pj${this.pressCounter++}`, kind, personaId, factSheet }
 
     const article = renderFallback(job)
-    const persona = PRESS_PERSONA_NAMES[personaId]
+    const persona = this.personaMeta(personaId)
     const byline = `${persona.name} — ${persona.outlet}`
     this.pushNews('league', article.headline, article.body, {
       teamId: this.userTeamId as string,
@@ -5224,6 +5320,9 @@ export class Career {
     const personaId =
       Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]
     const args = this.pressFactArgs()
+    // Rapport frames the piece (docs/MEDIA-BEAT.md): the writer's standing.
+    const tilt = this.tiltFor(personaId)
+    args.tilt = tilt
     const factSheet =
       kind === 'weekly'
         ? buildWeeklyFactSheet(args)
@@ -5234,12 +5333,18 @@ export class Career {
 
     // Always render + push the deterministic wire report immediately.
     const article = renderFallback(job)
-    const persona = PRESS_PERSONA_NAMES[personaId]
+    const persona = this.personaMeta(personaId)
     const byline = `${persona.name} — ${persona.outlet}`
     this.pushNews('league', article.headline, article.body, {
       teamId: this.userTeamId as string,
       press: { byline, kind },
     })
+    // The owner reads the weekly columns too (bounded, market-scaled).
+    if (kind === 'weekly') {
+      const recent = args.lastResults.slice(-5)
+      const wins = recent.filter((r) => r.goalsFor > r.goalsAgainst).length
+      this.applyColumnConduct(personaId, tilt, wins * 2 >= recent.length ? 'win' : 'loss')
+    }
     this.appendSaga(`Y${this.year} D${this.currentDay}: press — "${article.headline}".`)
 
     // Keep the job pending for an optional LLM upgrade from the renderer pump.
@@ -5259,6 +5364,7 @@ export class Career {
       day: this.currentDay,
       year: this.year,
       personaId,
+      askedBy: this.personaMeta(personaId),
     }
   }
 
@@ -5301,16 +5407,21 @@ export class Career {
    * a fiery rant rallies the room (+2 morale) but risks sparking a feud;
    * public praise nudges the room up one.
    */
-  answerPressConference(answer: string, tone: PressTone): void {
+  answerPressConference(answer: string, tone: PressTone, optionId?: string): void {
     const pc = this.pressConference
     if (!pc) throw new Error('no press conference pending')
     this.pressConference = null
+    // Delegated: the PR director fields it. Nobody is quoted, nothing moves.
+    if (optionId === 'delegate') return
+    const option = optionId ? pc.options?.find((o) => o.id === optionId) : undefined
+    if (option) tone = option.tone
     const lr = this.lockerRooms.get(this.userTeamId)
+    const classicFiery = tone === 'fiery' && (!option || option.id === 'fiery')
     if (lr) {
-      if (tone === 'fiery') lr.roomMorale = Math.min(100, lr.roomMorale + 2)
-      if (tone === 'praise') lr.roomMorale = Math.min(100, lr.roomMorale + 1)
+      if (classicFiery) lr.roomMorale = Math.min(100, lr.roomMorale + 2)
+      if (tone === 'praise' && !option) lr.roomMorale = Math.min(100, lr.roomMorale + 1)
     }
-    if (tone === 'fiery') {
+    if (classicFiery) {
       const rng = this.rngFor(7301, this.currentDay, this.pressCounter)
       if (rng.next() < 0.3) {
         const skaters = this.userTeam.roster
@@ -5329,10 +5440,14 @@ export class Career {
             this.currentDay,
             this.year
           )
+          this.chronicleFeud(a.id as string, b.id as string, "after the GM's fiery press conference")
         }
       }
     }
-    const quote = answer.trim().length > 0 ? answer.trim().slice(0, 240) : 'No comment.'
+    // An option's words are the GM's words; typed text is quoted as typed.
+    const optionQuote = option ? option.label.replace(/^["“]|["”]$/g, '') : ''
+    const quote = option ? optionQuote : answer.trim().length > 0 ? answer.trim().slice(0, 240) : 'No comment.'
+    if (option && pc.topic) this.applyPresserOption(pc, option.id, optionQuote)
     const toneLabel: Record<PressTone, string> = {
       measured: 'a measured',
       fiery: 'a fiery',
@@ -5344,23 +5459,27 @@ export class Career {
     // lasting relationship. Older pending pressers with no persona default to the
     // beat reporter.
     const personaId = pc.personaId ?? 'beat'
-    const persona = PRESS_PERSONA_NAMES[personaId]
+    const persona = pc.askedBy ?? this.personaMeta(personaId)
     const shift = applyPunditAnswer(this.punditState, personaId, tone, this.currentDay)
 
     this.pushNews(
       'league',
-      `GM faces the press`,
+      pc.subjectName ? `GM on ${pc.subjectName}: "${quote.length > 60 ? `${quote.slice(0, 57)}…` : quote}"` : `GM faces the press`,
       `Asked by ${persona.name} (${persona.outlet}): "${pc.question}"\n\n` +
         `In ${toneLabel[tone]} exchange, the ${this.userTeam.name} GM said: "${quote}"`,
       {
         teamId: this.userTeamId as string,
+        ...(pc.subjectId && this.data.players.has(asPlayerId(pc.subjectId)) ? { playerId: pc.subjectId } : {}),
         press: { byline: `${persona.name} — ${persona.outlet}`, kind: 'presser' },
       }
     )
 
     // When the answer tips the relationship across a standing boundary, surface a
     // short beat so the player feels the consequence. Only for the meaningful
-    // moves (into an alliance or into open hostility).
+    // moves (into an alliance or into open hostility). Every clause here is a
+    // behaviour the engine now performs (docs/MEDIA-BEAT.md §Rapport): the
+    // framing of his pieces follows the standing, and a critic's losing-week
+    // columns cost a little board confidence.
     if (shift.crossedBoundary) {
       if (shift.standingAfter === 'Ally' || shift.standingAfter === 'Feud') {
         const warming = shift.standingAfter === 'Ally'
@@ -5368,18 +5487,16 @@ export class Career {
           'league',
           warming ? `${persona.name} is now an ally` : `${persona.name} turns on the GM`,
           warming
-            ? `${persona.name} of ${persona.outlet} has become a reliable friend of the ${this.userTeam.name} front office — ` +
-                `his columns will now give the GM the benefit of the doubt.`
-            : `${persona.name} of ${persona.outlet} has soured completely on the ${this.userTeam.name} GM — ` +
-                `expect every misstep to become a headline.`,
+            ? `${persona.name} of ${persona.outlet} has become a reliable friend of the ${this.userTeam.name} front office. ` +
+                `A loss now reads as a bad night in his pieces, not as a verdict on how the team was built.`
+            : `${persona.name} of ${persona.outlet} has soured completely on the ${this.userTeam.name} GM. ` +
+                `His pieces will frame losses as front-office failures, and the owner reads his losing-week columns.`,
           { teamId: this.userTeamId as string }
         )
         // The homer is the fanbase's voice on the radio: a full break with him
         // nudges fan engagement, an alliance lifts it. Small and clamped.
         if (personaId === 'homer') {
-          const before = this.fanInterest
           this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + (warming ? 3 : -3)))
-          void before
         }
       }
     }
@@ -5397,14 +5514,14 @@ export class Career {
   getMediaCircuit(): MediaCircuitView {
     const summary = mediaStandingSummary(this.punditState)
     const rows: MediaCircuitRowView[] = this.punditState.pundits.map((rel) => {
-      const meta = PRESS_PERSONA_NAMES[rel.personaId]
+      const meta = this.personaMeta(rel.personaId)
       return {
         personaId: rel.personaId,
         name: meta.name,
         outlet: meta.outlet,
         rapport: rel.rapport,
         standing: punditStanding(rel.rapport),
-        read: punditRead(rel),
+        read: punditRead(rel, meta.name),
         interactions: rel.interactions,
         lastExchange: rel.lastTone ? toneVerb(rel.lastTone) : undefined,
       }
@@ -5412,9 +5529,2062 @@ export class Career {
     return {
       teamName: this.userTeam.name,
       rows,
-      allyName: summary.ally ? PRESS_PERSONA_NAMES[summary.ally].name : undefined,
-      criticName: summary.critic ? PRESS_PERSONA_NAMES[summary.critic].name : undefined,
+      allyName: summary.ally ? this.personaMeta(summary.ally).name : undefined,
+      criticName: summary.critic ? this.personaMeta(summary.critic).name : undefined,
     }
+  }
+
+  /* ══════════════════════════ THE DAILY BEAT (docs/MEDIA-BEAT.md) ══════════════════════════
+   *
+   * The media layer that behaves like a real market: the user's club has a
+   * credentialed daily outlet (practice notebooks, gameday previews, postgame
+   * grades, roster moves, injury follow-ups, a weekly mailbag, a morning
+   * roundup, prospect reports, act pieces), the club's injury statements are
+   * vaguer than the truth and the press closes the gap, the coach can land on
+   * the hot seat, and what the GM says on the record is remembered.
+   *
+   * Everything here READS sim state and writes prose, chronicle entries and a
+   * handful of small, bounded mood effects (morale, room, fan interest, board
+   * confidence) — the same levers the presser already pulled. No sim Rng is
+   * drawn: every choice is a stable hash, so coverage never moves an outcome.
+   */
+
+  /** The team as the media cast needs it. */
+  private castTeam(teamId: TeamId | string): { id: string; name: string; city: string; abbreviation: string } | null {
+    const t = this.data.teams.get(asTeamId(teamId as string))
+    return t ? { id: t.id as string, name: t.name, city: t.city, abbreviation: t.abbreviation } : null
+  }
+
+  private outletFor(teamId: TeamId | string): BeatOutlet | null {
+    const c = this.castTeam(teamId)
+    return c ? beatOutletFor(c) : null
+  }
+
+  /** The pundit class shares one daily budget (salience DAILY_POST_BUDGET);
+   *  the media layer's insider and columnist posts respect it too. */
+  private punditRoomToday(day: number): boolean {
+    const pundits = new Set(['insider', 'analyst', 'stats', 'wire'])
+    const n = this.feedPosts.filter((p) => p.year === this.year && p.day === day && p.authorId && pundits.has(p.authorId)).length
+    return n < DAILY_POST_BUDGET
+  }
+
+  /** The second sentence of a beat writer's link post. */
+  private static teaserTail(a: BeatArticle): string {
+    switch (a.kind) {
+      case 'gameday': return 'Projected lines and what to watch.'
+      case 'grades': return 'Grades for everyone who dressed.'
+      case 'mailbag': return `${a.qa?.length ?? 0} of your questions, answered.`
+      case 'notebook': return a.dek
+      case 'moves': return 'The day\u2019s transactions.'
+      default: return a.dek
+    }
+  }
+
+  private userMarket(): MarketProfile {
+    return marketProfile(this.castTeam(this.userTeamId)!)
+  }
+
+  /** A press persona's display identity. The beat writer is the user club's. */
+  private personaMeta(id: PressPersonaId): { name: string; outlet: string } {
+    if (id === 'beat') {
+      const o = this.outletFor(this.userTeamId)
+      if (o) return { name: o.writer.name, outlet: o.outlet }
+    }
+    return PRESS_PERSONA_NAMES[id]
+  }
+
+  private tiltFor(id: PressPersonaId): Tilt {
+    return tiltOf(this.punditState, id)
+  }
+
+  private mediaLast(kind: string): number {
+    return this.media.last.find(([k]) => k === kind)?.[1] ?? -99999
+  }
+
+  private setMediaLast(kind: string, key: number): void {
+    const i = this.media.last.findIndex(([k]) => k === kind)
+    if (i >= 0) this.media.last[i] = [kind, key]
+    else this.media.last.push([kind, key])
+  }
+
+  private mediaDone(tag: string): boolean {
+    return this.media.done.includes(`${this.year}|${tag}`)
+  }
+
+  private markMediaDone(tag: string): void {
+    this.media.done.push(`${this.year}|${tag}`)
+    if (this.media.done.length > 200) this.media.done = this.media.done.slice(-150)
+  }
+
+  /** The date a beat piece carries. */
+  private beatDateISO(day: number): string {
+    if (this.phase === 'offseason') return this.offseasonDateISO()
+    const pre = this.preseasonDateISO()
+    if (pre) return pre
+    return dayToDateISO(this.year, Math.max(1, day))
+  }
+
+  /** Which act of the hockey year we are in — the beat writes to the calendar. */
+  private seasonAct(day: number): SeasonAct {
+    if (this.phase === 'offseason') {
+      const st = this.offseason?.stage
+      if (st === 'awards') return 'exit'
+      if (st === 'draft') return 'draft'
+      if (st === 'freeAgency' && (this.offseason?.faDay ?? 0) <= 2) return 'july1'
+      return 'summer'
+    }
+    if (this.phase === 'playoffs') return 'playoffs'
+    if (this.trainingCamp && !this.trainingCamp.resolved) return 'camp'
+    const iso = dayToDateISO(this.year, Math.max(1, day))
+    const [, mm, dd] = iso.split('-').map((x) => parseInt(x, 10)) as [number, number, number]
+    if (mm === 12 && dd >= 19 && dd <= 27) return 'holiday'
+    if (this.isThanksgivingWeek(iso)) return 'thanksgiving'
+    if (this.deadlineDay > 0 && day >= this.deadlineDay - 10 && day <= this.deadlineDay) return 'deadline'
+    const gp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
+    const total = this.userGamesScheduled()
+    if (total - gp <= 15) return 'push'
+    if (gp >= total / 2 - 3 && gp <= total / 2 + 3) return 'midseason'
+    if (mm === 10 || mm === 11) return 'early'
+    return 'winter'
+  }
+
+  /** US Thanksgiving is the fourth Thursday of November: the standings'
+   *  first honest checkpoint (research §1.6). The window is that week. */
+  private isThanksgivingWeek(iso: string): boolean {
+    const [y, m, d] = iso.split('-').map((x) => parseInt(x, 10)) as [number, number, number]
+    if (m !== 11) return false
+    const firstDow = new Date(Date.UTC(y, 10, 1)).getUTCDay() // 0 = Sunday
+    const firstThu = 1 + ((4 - firstDow + 7) % 7)
+    const tg = firstThu + 21
+    return d >= tg - 1 && d <= tg + 4
+  }
+
+  private deskCtx(kind: string, day: number, teamId: TeamId | string = this.userTeamId, ledgered = true): DeskCtx | null {
+    const team = this.castTeam(teamId)
+    const outlet = this.outletFor(teamId)
+    if (!team || !outlet) return null
+    const isUser = (teamId as string) === (this.userTeamId as string)
+    return {
+      outlet,
+      teamId: team.id,
+      teamName: team.name,
+      nick: clubNickname(team),
+      city: team.city,
+      market: marketProfile(team),
+      act: this.seasonAct(day),
+      tilt: isUser ? this.tiltFor('beat') : 'neutral',
+      year: this.year,
+      day,
+      dateISO: this.beatDateISO(day),
+      ledger: ledgered && isUser ? this.contentLedger : null,
+      key: `beat|${kind}|${team.id}|${this.year}|${day}|${this.phase}|${this.offseason?.faDay ?? 0}|${this.trainingCamp?.campDay ?? 0}`,
+    }
+  }
+
+  /**
+   * Publish one beat article: into the outlet's archive, onto the Feed as the
+   * writer's link post, and — at most once a week, and only when it matters to
+   * the GM — into the inbox. The inbox stays curated: the beat is a readable
+   * layer, not an interruption (owner rule).
+   */
+  private publishBeat(a: BeatArticle, opts: { teaser?: boolean; inboxWeight?: number } = {}): BeatArticle {
+    a.id = `ba${this.media.counter++}`
+    this.media.articles.unshift(a)
+    if (this.media.articles.length > MAX_ARTICLES) this.media.articles.length = MAX_ARTICLES
+    const outlet = this.outletFor(a.teamId)
+    if (opts.teaser !== false && outlet) {
+      const today = this.feedPosts.filter(
+        (p) => p.year === this.year && p.day === a.day && p.authorId === outlet.authorId,
+      ).length
+      const teaser = `${a.headline}. ${Career.teaserTail(a)}`.replace(/\.\./g, '.')
+      if (today < 2 && !this.feedTextUsedThisSeason(teaser)) {
+        this.feedPosts.unshift({
+          id: `fp${this.feedCounter++}`,
+          day: a.day,
+          year: this.year,
+          ...(this.phase === 'offseason' ? { dateISO: a.dateISO } : {}),
+          category: 'league',
+          headline: `@${outlet.writer.handle}`,
+          body: teaser,
+          read: true,
+          teamId: a.teamId,
+          ...(a.playerIds?.[0] ? { playerId: a.playerIds[0] } : {}),
+          channel: 'feed',
+          authorId: outlet.authorId,
+          salience: 40,
+          engagement: { likes: 40 + (stableSeed(a.headline) % 400), reposts: 3 + (stableSeed(a.dek) % 40) },
+          articleId: a.id,
+        })
+        if (this.feedPosts.length > 400) this.feedPosts.length = 400
+      }
+    }
+    const weight = opts.inboxWeight ?? 0
+    const key = dayKey(this.year, this.phase === 'offseason' ? 900 + (this.offseason?.faDay ?? 0) : a.day)
+    if (weight >= 1 && outlet && (key - this.media.lastInboxKey >= 7 || Math.floor(key / 1000) !== Math.floor(this.media.lastInboxKey / 1000))) {
+      this.media.lastInboxKey = key
+      a.inbox = true
+      const body = [a.dek, ...a.body].join('\n\n')
+      this.pushNews('league', a.headline, body, {
+        teamId: a.teamId,
+        ...(a.playerIds?.[0] ? { playerId: a.playerIds[0] } : {}),
+        press: { byline: `${outlet.writer.name} — ${outlet.outlet}`, kind: `beat ${a.kind}` },
+      })
+    }
+    return a
+  }
+
+  /* ─────────────────────────── fact gathering ─────────────────────────── */
+
+  private linesFactsOf(team: Team): LinesFacts {
+    const nameOf = (id: PlayerId | null | undefined): string | null => (id ? this.data.players.get(id)?.name ?? null : null)
+    const names = (ids: ReadonlyArray<PlayerId | null | undefined>): string[] => ids.map(nameOf).filter((n): n is string => n !== null)
+    return {
+      forwards: team.lines.forwards.map((l) => names(l)).filter((l) => l.length > 0),
+      defence: team.lines.defensePairs.map((l) => names(l)).filter((l) => l.length > 0),
+      goalies: names(team.lines.goalies),
+      pp: (team.lines.powerPlayUnits ?? []).slice(0, 2).map((u) => names(u)),
+      pk: (team.lines.penaltyKillUnits ?? []).slice(0, 2).map((u) => names(u)),
+    }
+  }
+
+  /** Where each skater sits in the lineup: "top line", "third pair". */
+  private slotMap(team: Team): Map<string, { word: string; kind: 'F' | 'D'; index: number }> {
+    const out = new Map<string, { word: string; kind: 'F' | 'D'; index: number }>()
+    team.lines.forwards.forEach((l, i) => l.forEach((id) => id && out.set(id as string, { word: slotWord('F', i), kind: 'F', index: i })))
+    team.lines.defensePairs.forEach((l, i) => l.forEach((id) => id && out.set(id as string, { word: slotWord('D', i), kind: 'D', index: i })))
+    return out
+  }
+
+  /** The official line for an injured player: the disclosure if we have one. */
+  private officialFor(p: Player): string {
+    const d = this.media.disclosures.find((x) => x.playerId === (p.id as string) && !x.returned)
+    if (d) return officialLine(d)
+    const inj = p.injuryStatus
+    if (!inj) return 'day-to-day'
+    return officialLine({ region: inj.kind === 'lowerBody' ? 'lower-body' : inj.kind === 'illness' ? 'illness' : 'upper-body', band: 'day-to-day' })
+  }
+
+  /** Is he one of the men a lineup is built around (top-six F, top-four D, the starter)? */
+  private isKeyMan(team: Team, playerId: string): boolean {
+    if ((team.lines.goalies[0] as string | undefined) === playerId) return true
+    if (team.lines.forwards.slice(0, 2).some((l) => l.some((id) => (id as string) === playerId))) return true
+    if (team.lines.defensePairs.slice(0, 2).some((l) => l.some((id) => (id as string) === playerId))) return true
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return false
+    const better = team.roster.filter((id) => {
+      const q = this.data.players.get(id)
+      return q && q.position !== 'G' && ratedOverall(q) > ratedOverall(p)
+    }).length
+    return p.position !== 'G' && better < 6
+  }
+
+  private seasonLineOf(pid: PlayerId): { gp: number; g: number; pts: number } {
+    const t = this.totals.get(pid)
+    return { gp: this.gp.get(pid) ?? 0, g: t?.goals ?? 0, pts: (t?.goals ?? 0) + (t?.assists ?? 0) }
+  }
+
+  private goalieSeasonLine(pid: PlayerId): string {
+    const t = this.totals.get(pid)
+    const w = this.goalieWins.get(pid) ?? 0
+    const l = this.goalieLosses.get(pid) ?? 0
+    if (!t || t.shotsAgainst <= 0) return 'first start of the season'
+    return `${svpText(t.saves, t.shotsAgainst)}, ${w}-${l}`
+  }
+
+  private recordOf(teamId: TeamId): string {
+    const st = this.standings.get(teamId)
+    return st ? `${st.wins}-${st.losses}-${st.overtimeLosses}` : '0-0-0'
+  }
+
+  /** Signed streak: +3 = three straight wins, -2 = two straight losses. */
+  private streakOf(teamId: TeamId): number {
+    return this.teamStreaks.get(teamId as string) ?? 0
+  }
+
+  /** Conference rank, the playoff field, and the points gap to the cut line
+   *  (positive = clear of it, negative = chasing). */
+  private raceOf(teamId: TeamId): { confRank: number; inSpot: boolean; gap: number; pts: number; gp: number } {
+    const sorted = sortStandings([...this.standings.values()])
+    const field = this.currentPlayoffField(sorted)
+    const team = this.data.teams.get(teamId)
+    const conf = sorted.filter((s) => this.data.teams.get(s.teamId)?.conferenceId === team?.conferenceId)
+    const me = this.standings.get(teamId)
+    const pts = me?.points ?? 0
+    const inSpot = field.has(teamId as string)
+    const inConf = conf.filter((s) => field.has(s.teamId as string))
+    const outConf = conf.filter((s) => !field.has(s.teamId as string))
+    const lastIn = inConf[inConf.length - 1]?.points ?? pts
+    const firstOut = outConf[0]?.points ?? pts
+    const gap = inSpot ? pts - firstOut : pts - lastIn
+    return {
+      confRank: Math.max(1, conf.findIndex((s) => s.teamId === teamId) + 1),
+      inSpot,
+      gap,
+      pts,
+      gp: me?.gamesPlayed ?? 0,
+    }
+  }
+
+  /** The user's next game after `day`, if any (regular season). */
+  private nextUserGame(afterDay: number): { day: number; oppId: TeamId; home: boolean } | null {
+    for (const g of this.data.league.schedule) {
+      if (g.result || g.day <= afterDay) continue
+      if (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId) continue
+      const home = g.homeTeamId === this.userTeamId
+      return { day: g.day, oppId: home ? g.awayTeamId : g.homeTeamId, home }
+    }
+    return null
+  }
+
+  private weekdayOf(iso: string): string {
+    const [y, m, d] = iso.split('-').map((x) => parseInt(x, 10)) as [number, number, number]
+    return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(Date.UTC(y, m - 1, d)).getUTCDay()]!
+  }
+
+  private monthOf(iso: string): string {
+    const m = parseInt(iso.split('-')[1] ?? '1', 10)
+    return ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][m - 1] ?? ''
+  }
+
+  /* ─────────────────────────── injury disclosure ─────────────────────────── */
+
+  /** The club's statement on a new injury (every NHL club; the sim's truth is untouched). */
+  private noteInjury(p: Player, injury: NonNullable<Player['injuryStatus']>, teamId: TeamId | null): void {
+    if (!teamId) return
+    const team = this.data.teams.get(teamId)
+    if (!team || (team.tier !== undefined && team.tier !== 'nhl')) return
+    const d = discloseInjury({
+      playerId: p.id as string,
+      playerName: p.name,
+      teamId: teamId as string,
+      year: this.year,
+      day: this.currentDay,
+      kind: injury.kind,
+      truth: injuryNoun(injury.description),
+      description: injury.description,
+      totalGames: injury.totalGames ?? injury.gamesRemaining,
+      playoff: this.phase === 'playoffs',
+    })
+    this.media.disclosures = this.media.disclosures.filter((x) => !(x.playerId === d.playerId && !x.returned))
+    this.media.disclosures.push(d)
+    if (this.media.disclosures.length > MAX_DISCLOSURES) {
+      // Drop the oldest resolved ones first; open injuries always stay.
+      const closed = this.media.disclosures.filter((x) => x.returned)
+      const drop = new Set(closed.slice(0, this.media.disclosures.length - MAX_DISCLOSURES).map((x) => `${x.playerId}|${x.year}|${x.day}`))
+      this.media.disclosures = this.media.disclosures.filter((x) => !drop.has(`${x.playerId}|${x.year}|${x.day}`))
+    }
+  }
+
+  /** Update every open disclosure from the sim's live injury counts. */
+  private updateDisclosures(day: number): void {
+    for (const d of this.media.disclosures) {
+      if (d.returned) continue
+      const p = this.data.players.get(asPlayerId(d.playerId))
+      const inj = p?.injuryStatus
+      if (!p || !inj) {
+        d.returned = true
+        d.returnDay = day
+        d.gamesMissed = d.truthGames
+        continue
+      }
+      d.gamesMissed = Math.max(0, d.truthGames - inj.gamesRemaining)
+    }
+  }
+
+  /** Injury news on the user's club, plus league-wide insider reveals on stars.
+   *  Returns how many beat pieces were published. */
+  private beatInjuries(day: number): number {
+    const team = this.userTeam
+    let published = 0
+    // New injuries to key men: the official line, same day.
+    for (const d of this.media.disclosures) {
+      if (d.teamId !== (this.userTeamId as string) || d.year !== this.year || d.returned) continue
+      if ((d as InjuryDisclosure & { told?: boolean }).told) continue
+      ;(d as InjuryDisclosure & { told?: boolean }).told = true
+      // A key man on a real absence gets his own piece; a day-to-day knock
+      // lives in the notebook's Absent list and the gameday preview.
+      if (!this.isKeyMan(team, d.playerId) || d.band === 'day-to-day' || published >= 1) continue
+      const c = this.deskCtx(`inj-new-${d.playerId}`, day)
+      if (!c) continue
+      this.publishBeat(
+        buildInjury(c, {
+          beat: 'new', playerId: d.playerId, name: d.playerName, official: officialLine(d),
+          band: d.band, truth: d.truth, missed: d.gamesMissed, key: true,
+        }),
+      )
+      published++
+    }
+    // Follow-ups: the truth, "worse than thought", "ahead of schedule".
+    for (const d of this.media.disclosures) {
+      if (d.year !== this.year) continue
+      const p = this.data.players.get(asPlayerId(d.playerId))
+      const beat = nextDisclosureBeat(d, day - d.day, p?.injuryStatus?.gamesRemaining ?? 0)
+      if (!beat) continue
+      if (d.teamId === (this.userTeamId as string)) {
+        const key = this.isKeyMan(team, d.playerId)
+        // A reveal about a depth man on a short injury is not a story.
+        if (beat === 'reveal' && !key && d.truthGames < 8) { d.revealed = true; continue }
+        if (published >= 2) break
+        if (beat === 'reveal') d.revealed = true
+        if (beat === 'worse') { d.worse = true; d.revealed = true }
+        if (beat === 'ahead') d.ahead = true
+        const c = this.deskCtx(`inj-${beat}-${d.playerId}`, day)
+        if (!c) continue
+        this.publishBeat(
+          buildInjury(c, {
+            beat, playerId: d.playerId, name: d.playerName, official: officialLine(d),
+            band: d.band, truth: d.truth, missed: d.gamesMissed, key,
+          }),
+          { inboxWeight: beat === 'worse' && key ? 2 : 0 },
+        )
+        published++
+      } else if (beat === 'reveal' || beat === 'worse') {
+        // Another club: only the national insider, only a star, only when the
+        // club shaded it light. He is the one who knows more than the club says.
+        d.revealed = true
+        if (beat === 'worse') d.worse = true
+        if (!p || ratedOverall(p) < 82 || d.stance !== 'optimistic' || !d.specific || d.truthGames < 8) continue
+        // One insider injury scoop every few days, league-wide: a scoop is news.
+        if (dayKey(this.year, day) - this.mediaLast('insiderInjury') < 5) continue
+        this.setMediaLast('insiderInjury', dayKey(this.year, day))
+        const t = this.data.teams.get(asTeamId(d.teamId))
+        if (!this.punditRoomToday(day)) continue
+        const text = renderStable(INSIDER_INJURY, {}, `ii|${d.playerId}|${d.year}|${d.day}`, {
+          namePoss: possessive(d.playerName),
+          name: d.playerName, team: t ? clubNickname({ id: t.id as string, name: t.name, city: t.city, abbreviation: t.abbreviation }) : 'club',
+          truth: d.truth, official: officialLine(d),
+        })
+        if (!text || this.feedTextUsedThisSeason(text)) continue
+        this.feedPosts.unshift({
+          id: `fp${this.feedCounter++}`, day, year: this.year, category: 'injury',
+          headline: `@${FEED_AUTHORS.insider!.handle}`, body: text, read: true,
+          teamId: d.teamId, playerId: d.playerId, channel: 'feed', authorId: 'insider', salience: 55,
+          engagement: { likes: 300 + (stableSeed(text) % 2000), reposts: 40 + (stableSeed(d.playerId) % 300) },
+        })
+        if (this.feedPosts.length > 400) this.feedPosts.length = 400
+      }
+    }
+    return published
+  }
+
+  /* ─────────────────────────── the day's coverage ─────────────────────────── */
+
+  /**
+   * The beat's day. Called at the end of every regular-season and playoff
+   * match day, after the games and the rest of the story tick. Market size
+   * sets how many pieces run (1–3 beyond the grades); the grades always run.
+   */
+  private runBeatDay(day: number, outcomes: GameOutcome[], playoff: boolean): void {
+    this.updateDisclosures(day)
+    const market = this.userMarket()
+    let budget = market.piecesPerGameDay
+    const userGame = outcomes.find((o) => o.homeTeamId === this.userTeamId || o.awayTeamId === this.userTeamId)
+
+    if (!playoff) this.maybeCampCutsPiece(day)
+    if (userGame) this.beatGrades(day, userGame, playoff)
+    budget -= this.beatInjuries(day)
+    if (budget > 0 && this.beatMoves(day)) budget--
+    if (!playoff && budget > 0 && this.beatActFeature(day)) budget--
+    if (!playoff) this.tickHotSeat(day)
+    if (!userGame && !playoff) {
+      if (budget > 0 && this.maybeMailbag(day)) budget--
+      if (budget > 0 && this.maybeNotebook(day)) budget--
+      if (budget > 0 && this.maybeProspects(day)) budget--
+    }
+    if (budget > 0) this.maybeDaily(day, userGame)
+    this.maybeGameday(day, playoff)
+    this.checkClaims(day)
+    if (!playoff) {
+      this.maybeLeagueRadar(day)
+      this.maybeQueuePresser(day, userGame)
+    }
+  }
+
+  /* ── grades ── */
+  private beatGrades(day: number, res: GameOutcome, playoff: boolean): void {
+    const home = res.homeTeamId === this.userTeamId
+    const opp = this.data.teams.get(home ? res.awayTeamId : res.homeTeamId)
+    if (!opp) return
+    const roster = new Set(this.userTeam.roster.map((id) => id as string))
+    const lines: GradeLine[] = []
+    for (const [pid, s] of res.playerStats) {
+      if (s.toi <= 0 || !roster.has(pid as string)) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const window = this.playerRatings.get(pid as string) ?? []
+      lines.push({
+        playerId: pid as string, name: p.name, pos: p.position,
+        goals: s.goals, assists: s.assists, shots: s.shots, hits: s.hits, blocks: s.blockedShots,
+        pm: s.plusMinus, toi: s.toi, saves: s.saves, sa: s.shotsAgainst, ga: s.goalsAgainst,
+        rating: window[window.length - 1] ?? 6,
+      })
+    }
+    const next = this.nextUserGame(day)
+    const nextTeam = next ? this.data.teams.get(next.oppId) : undefined
+    const nextLine = playoff
+      ? 'the next game of the series'
+      : nextTeam && next
+        ? `${next.home ? '' : 'at '}the ${clubNickname({ id: nextTeam.id as string, name: nextTeam.name, city: nextTeam.city, abbreviation: nextTeam.abbreviation })} on ${this.weekdayOf(dayToDateISO(this.year, next.day))}`.trim()
+        : 'the summer'
+    const c = this.deskCtx('grades', day)
+    if (!c) return
+    const a = buildGrades(c, {
+      opp: { name: opp.name, nick: clubNickname({ id: opp.id as string, name: opp.name, city: opp.city, abbreviation: opp.abbreviation }) },
+      gf: home ? res.homeGoals : res.awayGoals,
+      ga: home ? res.awayGoals : res.homeGoals,
+      decidedBy: res.decidedBy,
+      playoff,
+      lines,
+      next: nextLine,
+    })
+    if (!a) return
+    this.publishBeat(a)
+    // A critic's F in a big market lands on the man named: a small, real sting.
+    if (c.tilt === 'critic' && c.market.tier === 3 && a.grades) {
+      const worst = a.grades[a.grades.length - 1]
+      if (worst && (worst.grade === 'F' || worst.grade === 'D')) {
+        const p = this.data.players.get(asPlayerId(worst.playerId))
+        if (p) p.morale = Math.max(0, p.morale - 1)
+      }
+    }
+  }
+
+  /* ── roster moves ── */
+  private beatMoves(day: number): boolean {
+    const abbr = this.userTeam.abbreviation
+    const mark = this.mediaLast('movesTx')
+    const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
+    const fresh = this.transactionLedger.items.filter(
+      (t) => num(t.id) > mark && t.teamIds.includes(this.userTeamId as string) && t.kind !== 'trade',
+    )
+    const top = Math.max(mark, ...this.transactionLedger.items.map((t) => num(t.id)))
+    this.setMediaLast('movesTx', top)
+    if (fresh.length === 0) return false
+    const c = this.deskCtx('moves', day)
+    if (!c) return false
+    const camp = this.trainingCamp !== null && this.currentDay <= 1 && fresh.length >= 3
+    const a = buildMoves(c, { items: fresh.map((t) => ({ kind: t.kind, summary: t.summary.replace(new RegExp(`^${abbr} `), `${c.nick} `) })), camp })
+    if (!a) return false
+    this.publishBeat(a, { teaser: fresh.length >= 2 })
+    return true
+  }
+
+  /* ── notebook ── */
+  private maybeNotebook(day: number, campDay?: number): boolean {
+    const gap = dayKey(this.year, day) - this.mediaLast('notebook')
+    const team = this.userTeam
+    const slots = this.slotMap(team)
+    const prev = new Map(this.media.lastSlots)
+    const changes: Array<{ name: string; from: string; to: string; up: boolean; size: number }> = []
+    const idxOf = (w: string): number => {
+      const i = ['top line', 'second line', 'third line', 'fourth line'].indexOf(w)
+      if (i >= 0) return i
+      const j = ['top pair', 'second pair', 'third pair'].indexOf(w)
+      return j >= 0 ? j : 4 // the press box
+    }
+    if (prev.size > 0) {
+      for (const [pid, now] of slots) {
+        const before = prev.get(pid) ?? 'press box'
+        if (before === now.word) continue
+        const p = this.data.players.get(asPlayerId(pid))
+        if (!p) continue
+        const bIndex = idxOf(before)
+        changes.push({ name: p.name, from: before, to: now.word, up: now.index < bIndex, size: Math.abs(now.index - bIndex) })
+      }
+      for (const [pid, before] of prev) {
+        if (slots.has(pid)) continue
+        const p = this.data.players.get(asPlayerId(pid))
+        // Hurt or gone: that is the Absent list or the transactions, not a demotion.
+        if (!p || p.injuryStatus || !team.roster.includes(p.id)) continue
+        changes.push({ name: p.name, from: before, to: 'press box', up: false, size: 4 - idxOf(before) })
+      }
+    }
+    changes.sort((a, b) => b.size - a.size || (a.up === b.up ? a.name.localeCompare(b.name) : a.up ? -1 : 1))
+    const injured = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && p.injuryStatus !== null)
+    const dressedIds = new Set<string>([...slots.keys(), ...team.lines.goalies.filter(Boolean).map((g) => g as string)])
+    const scratches = team.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.injuryStatus === null && !dressedIds.has(p.id as string) && p.position !== 'G')
+    // Nothing new and we wrote one recently: no notebook (camp always runs).
+    if (campDay === undefined && changes.length === 0 && gap < 3) return false
+    const chopping: Array<{ name: string; why: string }> = []
+    const teamGp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
+    for (const p of scratches.slice(0, 2)) {
+      const gp = this.gp.get(p.id) ?? 0
+      chopping.push({ name: p.name, why: teamGp > 0 ? `healthy scratch; ${gp} of ${teamGp} games played` : 'healthy scratch' })
+    }
+    const depth = [...slots.entries()]
+      .filter(([, s]) => (s.kind === 'F' && s.index >= 2) || (s.kind === 'D' && s.index >= 2))
+      .map(([pid]) => this.data.players.get(asPlayerId(pid)))
+      .filter((p): p is Player => !!p)
+      .map((p) => ({ p, line: this.seasonLineOf(p.id) }))
+      .filter(({ line }) => line.gp >= 10 && line.pts <= Math.floor(line.gp * 0.12))
+      .sort((a, b) => a.line.pts / a.line.gp - b.line.pts / b.line.gp)
+    for (const { p, line } of depth.slice(0, 1)) chopping.push({ name: p.name, why: `${line.pts} point${line.pts === 1 ? '' : 's'} in ${line.gp} games` })
+    for (const f of this.residueFlags) {
+      if (f.kind !== 'wasShopped' || !f.known || f.year !== this.year) continue
+      const p = this.data.players.get(asPlayerId(f.playerId))
+      if (p && team.roster.includes(p.id) && !chopping.some((c) => c.name === p.name)) {
+        chopping.push({ name: p.name, why: 'his name has been out there in trade talk' })
+        break
+      }
+    }
+    let pushing: { name: string; league: string; line: string } | undefined
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    if (ahl) {
+      const best = ahl.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.position !== 'G' && p.age <= 25)
+        .map((p) => {
+          const t = this.ahlTotals.get(p.id)
+          const gp = this.ahlGp.get(p.id) ?? 0
+          return { p, gp, pts: (t?.goals ?? 0) + (t?.assists ?? 0) }
+        })
+        .filter((x) => x.gp >= 8 && x.pts / x.gp >= 0.9)
+        .sort((a, b) => b.pts / b.gp - a.pts / a.gp)[0]
+      if (best) pushing = { name: best.p.name, league: 'AHL', line: `at ${best.pts} points in ${best.gp} games` }
+    }
+    const camp = this.trainingCamp
+    const nextG = this.nextUserGame(day)
+    const nextT = nextG ? this.castTeam(nextG.oppId) : null
+    const nextOppLine = nextG && nextT ? `the ${clubNickname(nextT)} on ${this.weekdayOf(dayToDateISO(this.year, nextG.day))}` : null
+    const c = this.deskCtx(campDay !== undefined ? `camp-notebook-${campDay}` : 'notebook', day)
+    if (!c) return false
+    const a = buildNotebook(c, {
+      lines: this.linesFactsOf(team),
+      changes: changes.slice(0, 4),
+      absent: injured.slice(0, 4).map((p) => ({ name: p.name, official: this.officialFor(p) })),
+      scratches: scratches.map((p) => p.name).filter((n) => !chopping.some((c) => c.name === n)),
+      chopping: chopping.slice(0, 3),
+      ...(pushing ? { pushing } : {}),
+      coachName: this.getTeamStaff(this.userTeamId as string).headCoach.name,
+      record: this.recordOf(this.userTeamId),
+      ...(nextOppLine ? { nextOpp: nextOppLine } : {}),
+      ...(campDay !== undefined && camp
+        ? {
+            camp: {
+              day: campDay,
+              battles: camp.decisions
+                .filter((d) => d.current !== d.coachPlan || d.tryout || d.waiverRequired || d.age <= 21)
+                .slice(0, 8)
+                .map((d) => ({ name: d.name, age: d.age, pos: d.position, plan: d.coachPlan, waivers: d.waiverRequired, tryout: d.tryout === true })),
+              ...(camp.scrimmage?.results[campDay >= 4 ? 1 : 0] ? { scrimmage: camp.scrimmage.results[campDay >= 4 ? 1 : 0]! } : {}),
+            },
+          }
+        : {}),
+    })
+    this.media.lastSlots = [...slots.entries()].map(([k, v]) => [k, v.word] as [string, string])
+    this.setMediaLast('notebook', dayKey(this.year, day))
+    if (!a) return false
+    this.publishBeat(a, { teaser: changes.length > 0 || injured.length > 0 || campDay !== undefined })
+    return true
+  }
+
+  /* ── gameday ── */
+  private maybeGameday(day: number, playoff: boolean): void {
+    let gameDay: number | null = null
+    let oppId: TeamId | null = null
+    let home = false
+    if (playoff) {
+      const po = this.playoffs
+      if (!po || po.championTeamId) return
+      const g = pendingGames(po).find((x) => x.homeTeamId === this.userTeamId || x.awayTeamId === this.userTeamId)
+      if (!g) return
+      gameDay = day + 1
+      home = g.homeTeamId === this.userTeamId
+      oppId = home ? g.awayTeamId : g.homeTeamId
+    } else {
+      const nextMatchDay = this.matchDays.find((d) => d > day)
+      const next = this.nextUserGame(day)
+      if (!next || next.day !== nextMatchDay) return
+      gameDay = next.day
+      oppId = next.oppId
+      home = next.home
+    }
+    const opp = this.data.teams.get(oppId)
+    if (!opp || gameDay === null) return
+    const team = this.userTeam
+    const watch: WatchItem[] = []
+    // Slumps and streaks among the men expected to score.
+    for (const id of team.roster) {
+      const p = this.data.players.get(id)
+      if (!p || p.position === 'G' || p.injuryStatus) continue
+      const pts = this.pointStreaks.get(id as string) ?? 0
+      const dry = this.scorelessStreaks.get(id as string) ?? 0
+      const expected = expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+      if (pts >= 5) watch.push({ kind: 'streak', name: p.name, n: pts, playerId: id as string })
+      else if (expected >= 0.55 && dry >= 6) watch.push({ kind: 'slump', name: p.name, n: dry, playerId: id as string })
+    }
+    // Revenge: a man on either bench who came from the other club.
+    for (const id of [...team.roster, ...opp.roster]) {
+      const prov = this.chronicle.provenance.find(([pid]) => pid === (id as string))?.[1]
+      if (!prov) continue
+      const mine = team.roster.includes(id)
+      const other = mine ? (opp.id as string) : (this.userTeamId as string)
+      const moved = prov.acquisitions.some((a) => a.fromTeamId === other && this.year - a.year <= 2)
+      if (!moved) continue
+      const p = this.data.players.get(id)
+      if (p) {
+        watch.push({ kind: 'revenge', name: p.name, playerId: id as string })
+        break
+      }
+    }
+    // Key men out.
+    for (const id of team.roster) {
+      const p = this.data.players.get(id)
+      if (p?.injuryStatus && this.isKeyMan(team, id as string)) {
+        watch.push({ kind: 'injury', name: p.name, other: this.officialFor(p), playerId: id as string })
+        break
+      }
+    }
+    if (!playoff) {
+      const a = this.standings.get(this.userTeamId)
+      const b = this.standings.get(opp.id)
+      if (a && b && opp.conferenceId === team.conferenceId && Math.abs(a.points - b.points) <= 4 && (a.gamesPlayed ?? 0) >= 20) {
+        watch.push({ kind: 'stakes', n: Math.abs(a.points - b.points) })
+      }
+    }
+    // The opponent's best scorer.
+    const oppStar = opp.roster
+      .map((id) => ({ id, p: this.data.players.get(id), line: this.seasonLineOf(id) }))
+      .filter((x) => x.p && x.p.position !== 'G')
+      .sort((x, y) => y.line.pts - x.line.pts)[0]
+    if (oppStar?.p && oppStar.line.pts >= 10) watch.push({ kind: 'oppStar', name: oppStar.p.name, n: oppStar.line.pts })
+    const order: WatchItem['kind'][] = ['injury', 'revenge', 'stakes', 'streak', 'slump', 'oppStar']
+    watch.sort((x, y) => order.indexOf(x.kind) - order.indexOf(y.kind))
+    const starterId = team.lines.goalies[0]
+    const starter = starterId ? this.data.players.get(starterId) : undefined
+    const c = this.deskCtx('gameday', gameDay)
+    if (!c) return
+    const a = buildGameday(c, {
+      opp: {
+        name: opp.name,
+        nick: clubNickname({ id: opp.id as string, name: opp.name, city: opp.city, abbreviation: opp.abbreviation }),
+        city: opp.city,
+        record: this.recordOf(opp.id),
+        streak: this.streakOf(opp.id),
+      },
+      home,
+      usRecord: this.recordOf(this.userTeamId),
+      usStreak: this.streakOf(this.userTeamId),
+      lines: this.linesFactsOf(team),
+      starter: starter ? { name: starter.name, line: this.goalieSeasonLine(starter.id) } : null,
+      ...(team.lines.goalies[1] && team.lines.goalies[1] !== starterId && this.data.players.get(team.lines.goalies[1])
+        ? { backup: this.data.players.get(team.lines.goalies[1])!.name }
+        : {}),
+      watch,
+      playoff,
+    })
+    if (a) this.publishBeat(a, { teaser: this.userMarket().tier >= 2 || playoff })
+  }
+
+  /* ── mailbag ── */
+  private maybeMailbag(day: number, force = false): boolean {
+    const key = dayKey(this.year, this.phase === 'offseason' ? 900 + (this.offseason?.faDay ?? 0) : day)
+    if (!force && key - this.mediaLast('mailbag') < 7) return false
+    // Readers ask about what is new. A topic (and the man it names) asked in
+    // the last mailbag drops well down the pile, the one before that a little.
+    const memory = this.media.lastMailTopics
+    const recent = new Set(memory.slice(-5))
+    const older = new Set(memory.slice(-15, -5))
+    const items = this.mailbagItems(day).map((i) => {
+      const k = `${i.topic}|${i.label}`
+      return { ...i, weight: i.weight - (recent.has(k) ? 6 : older.has(k) ? 2.5 : 0) - (recent.has(i.topic) ? 1.5 : 0) }
+    })
+    const c = this.deskCtx('mailbag', day)
+    if (!c) return false
+    const team = this.castTeam(this.userTeamId)!
+    const a = buildMailbag(c, items, (k) => fanHandle(team, k))
+    this.setMediaLast('mailbag', key)
+    if (!a) return false
+    const used = [...items].sort((x, y) => y.weight - x.weight || x.topic.localeCompare(y.topic)).slice(0, 5)
+    this.media.lastMailTopics = [...memory, ...used.map((i) => `${i.topic}|${i.label}`), ...used.map((i) => i.topic)].slice(-30)
+    this.publishBeat(a)
+    return true
+  }
+
+  /** Fan questions the state actually raises — every answer cites a real number. */
+  private mailbagItems(day: number): MailItem[] {
+    const team = this.userTeam
+    const items: MailItem[] = []
+    const roster = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+    const inSeason = this.phase === 'regularSeason'
+    const deadlineNear = inSeason && this.deadlineDay > 0 && day < this.deadlineDay && day >= this.deadlineDay - 30
+    // Cap.
+    const space = team.finances.salaryCap - this.userCapUsed()
+    const expiring = roster.filter((p) => p.contract.yearsRemaining <= 1)
+    const ufas = expiring.length > 0 ? `${expiring.length} contract${expiring.length === 1 ? '' : 's'} come off the books after the season. ` : ''
+    items.push({
+      topic: 'cap', verdict: space >= 3_000_000 ? 'room' : 'tight', label: 'the cap',
+      slots: { space: moneyShort(Math.max(0, space)), used: `${Math.round((this.userCapUsed() / Math.max(1, team.finances.salaryCap)) * 100)}%`, ufas, nick: clubNickname(this.castTeam(team.id)!) },
+      weight: deadlineNear || this.phase === 'offseason' ? 5 : 2,
+    })
+    // Prospect.
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    const prospect = (ahl?.roster ?? [])
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.position !== 'G' && p.age <= 23)
+      .map((p) => {
+        const t = this.ahlTotals.get(p.id)
+        const gp = this.ahlGp.get(p.id) ?? 0
+        return { p, gp, g: t?.goals ?? 0, pts: (t?.goals ?? 0) + (t?.assists ?? 0) }
+      })
+      .filter((x) => x.gp >= 8)
+      .sort((a, b) => b.pts / b.gp - a.pts / a.gp)[0]
+    if (prospect) {
+      const ppg = prospect.pts / prospect.gp
+      items.push({
+        topic: 'prospect', verdict: ppg >= 1 && prospect.p.age >= 20 ? 'ready' : ppg >= 0.7 ? 'close' : 'notyet',
+        label: prospect.p.name, playerId: prospect.p.id as string,
+        slots: { name: prospect.p.name, league: 'AHL', gp: String(prospect.gp), pts: String(prospect.pts), g: String(prospect.g), age: String(prospect.p.age), pos: prospect.p.position },
+        weight: ppg >= 1 ? 5 : 3,
+      })
+    }
+    // Deployment: a good player buried.
+    const slots = this.slotMap(team)
+    const skaters = roster.filter((p) => p.position !== 'G').sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    for (const [i, p] of skaters.entries()) {
+      const s = slots.get(p.id as string)
+      const topF = p.position !== 'D' && i < 6
+      const buried = !s ? !p.injuryStatus : (s.kind === 'F' && s.index >= 2) || (s.kind === 'D' && s.index >= 2)
+      if (topF && buried && inSeason) {
+        const line = this.seasonLineOf(p.id)
+        items.push({
+          topic: 'deployment', verdict: '', label: `${beatLastName(p.name)} on the ${s ? s.word : 'press box'}`, playerId: p.id as string,
+          slots: { name: p.name, slot: s ? s.word : 'press box', pts: String(line.pts), rank: String(i + 1) },
+          weight: 4,
+        })
+        break
+      }
+    }
+    // Goalies.
+    const [gA, gB] = team.lines.goalies
+    if (gA && gB && inSeason) {
+      const ta = this.totals.get(gA), tb = this.totals.get(gB)
+      const ga = this.gp.get(gA) ?? 0, gb = this.gp.get(gB) ?? 0
+      if (ta && tb && ta.shotsAgainst > 100 && tb.shotsAgainst > 60) {
+        const sa = ta.saves / ta.shotsAgainst, sb = tb.saves / tb.shotsAgainst
+        const pa = this.data.players.get(gA)!, pb = this.data.players.get(gB)!
+        if (sb - sa >= 0.012 || sa < 0.9) {
+          items.push({
+            topic: 'goalie', verdict: sb - sa >= 0.012 && gb >= 4 ? 'switch' : 'stay', label: 'the goaltending',
+            slots: { starter: pa.name, backup: pb.name, ssv: svpText(ta.saves, ta.shotsAgainst), bsv: svpText(tb.saves, tb.shotsAgainst), sgp: String(ga), bgp: String(gb) },
+            weight: 4,
+          })
+        }
+      }
+    }
+    // Slump.
+    for (const p of roster) {
+      if (p.position === 'G' || !inSeason) continue
+      const dry = this.scorelessStreaks.get(p.id as string) ?? 0
+      const expected = expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+      if (expected >= 0.55 && dry >= 6) {
+        const line = this.seasonLineOf(p.id)
+        items.push({
+          topic: 'slump', verdict: '', label: `${possessive(beatLastName(p.name))} slump`, playerId: p.id as string,
+          slots: { name: p.name, games: String(dry), pts: String(line.pts), g: String(line.g) },
+          weight: 4,
+        })
+        break
+      }
+    }
+    // Trade.
+    const request = this.interactions.find((i) => i.status === 'open' && i.kind === 'tradeRequest')
+    const shopped = this.residueFlags.find((f) => f.kind === 'wasShopped' && f.known && f.year === this.year && team.roster.includes(asPlayerId(f.playerId)))
+    const race = inSeason ? this.raceOf(this.userTeamId) : null
+    const tradeSubject = request
+      ? { id: request.playerId, verdict: 'request' }
+      : shopped
+        ? { id: shopped.playerId, verdict: 'block' }
+        : deadlineNear && race && !race.inSpot
+          ? (() => {
+              const v = roster
+                .filter((p) => p.contract.yearsRemaining <= 1 && p.age >= 27 && p.position !== 'G')
+                .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+              return v ? { id: v.id as string, verdict: 'expiring' } : null
+            })()
+          : null
+    if (tradeSubject) {
+      const p = this.data.players.get(asPlayerId(tradeSubject.id))
+      if (p) {
+        items.push({
+          topic: 'trade', verdict: tradeSubject.verdict, label: `${p.name}'s future`, playerId: p.id as string,
+          slots: { name: p.name, aav: moneyShort(p.contract.salary), years: `${p.contract.yearsRemaining} year${p.contract.yearsRemaining === 1 ? '' : 's'}` },
+          weight: 5,
+        })
+      }
+    }
+    // Playoffs + draft.
+    if (race && race.gp >= 20) {
+      const left = this.userGamesScheduled() - race.gp
+      items.push({
+        topic: 'playoffs', verdict: race.gap >= 6 ? 'in' : race.gap <= -6 ? 'out' : 'bubble', label: 'the playoff race',
+        slots: { rank: ordinalWord(race.confRank), gap: String(Math.abs(race.gap)), left: String(left), nick: clubNickname(this.castTeam(team.id)!) },
+        weight: left <= 25 ? 5 : 3,
+      })
+      const sorted = sortStandings([...this.standings.values()])
+      const leagueRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+      const fromBottom = sorted.length - leagueRank + 1
+      if (fromBottom <= 8 && race.gp >= 25) {
+        items.push({ topic: 'draft', verdict: '', label: 'the draft', slots: { slot: ordinalWord(fromBottom), nick: clubNickname(this.castTeam(team.id)!) }, weight: 3 })
+      }
+    }
+    // Coach.
+    const hs = this.media.hotSeat
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    if (inSeason && (hs || (race && race.gp >= 20 && !race.inSpot))) {
+      items.push({
+        topic: 'coach', verdict: hs && hs.year === this.year && hs.stage !== 'recovered' ? 'hot' : 'safe', label: `${possessive(beatLastName(coach.name))} job`,
+        slots: { coach: coach.name, record: this.recordOf(this.userTeamId) },
+        weight: hs ? 5 : 2,
+      })
+    }
+    // Special teams.
+    if (inSeason && (this.standings.get(this.userTeamId)?.gamesPlayed ?? 0) >= 10) {
+      const all = finalizeSpecialTeams(this.specialTeams)
+      const nhl = new Set(this.data.league.teams.map((t) => t as string))
+      const league = all.filter((t) => nhl.has(t.teamId))
+      const me = league.find((t) => t.teamId === (this.userTeamId as string))
+      if (me && league.length > 8) {
+        const ppRank = [...league].sort((a, b) => b.ppPct - a.ppPct).findIndex((t) => t.teamId === me.teamId) + 1
+        const pkRank = [...league].sort((a, b) => b.pkPct - a.pkPct).findIndex((t) => t.teamId === me.teamId) + 1
+        const pct = (x: number): string => `${(Math.round(x * 1000) / 10).toFixed(1)} percent`
+        const verdict = ppRank <= 8 ? 'good' : ppRank >= league.length - 7 ? 'bad' : 'mid'
+        items.push({
+          topic: 'special', verdict, label: 'the power play',
+          slots: { pp: pct(me.ppPct), ppRank: ordinalWord(ppRank), pk: pct(me.pkPct), pkRank: ordinalWord(pkRank) },
+          weight: verdict === 'mid' ? 1.5 : 3.5,
+        })
+      }
+    }
+    // The best player so far.
+    const leader = roster
+      .filter((p) => p.position !== 'G')
+      .map((p) => ({ p, line: this.seasonLineOf(p.id) }))
+      .filter((x) => x.line.gp >= 5)
+      .sort((a, b) => b.line.pts - a.line.pts || b.line.g - a.line.g)[0]
+    if (leader && inSeason) {
+      items.push({
+        topic: 'standout', verdict: '', label: 'the team MVP', playerId: leader.p.id as string,
+        slots: { name: leader.p.name, line: `${leader.line.g} goals and ${leader.line.pts} points in ${leader.line.gp} games`, nick: clubNickname(this.castTeam(team.id)!) },
+        weight: 2,
+      })
+    }
+    // A young man getting his first real look.
+    const rookie = roster
+      .filter((p) => p.age <= 22 && p.position !== 'G')
+      .map((p) => ({ p, line: this.seasonLineOf(p.id) }))
+      .filter((x) => x.line.gp >= 5)
+      .sort((a, b) => b.line.gp - a.line.gp)[0]
+    if (rookie && inSeason) {
+      items.push({
+        topic: 'rookie', verdict: rookie.line.pts / rookie.line.gp >= 0.45 ? 'up' : 'flat', label: rookie.p.name, playerId: rookie.p.id as string,
+        slots: { name: rookie.p.name, gp: String(rookie.line.gp), pts: String(rookie.line.pts), age: String(rookie.p.age) },
+        weight: 2.5,
+      })
+    }
+    // A hot hand.
+    const hot = roster
+      .filter((p) => p.position !== 'G')
+      .map((p) => ({ p, n: this.pointStreaks.get(p.id as string) ?? 0 }))
+      .filter((x) => x.n >= 5)
+      .sort((a, b) => b.n - a.n)[0]
+    if (hot && inSeason) {
+      items.push({
+        topic: 'streak', verdict: '', label: `${possessive(beatLastName(hot.p.name))} streak`, playerId: hot.p.id as string,
+        slots: { name: hot.p.name, n: String(hot.n), pts: String(this.seasonLineOf(hot.p.id).pts) },
+        weight: 3.5,
+      })
+    }
+    // Extension.
+    const ext = roster
+      .filter((p) => p.contract.yearsRemaining <= 1 && p.position !== 'G' && p.age <= 33)
+      .map((p) => ({ p, line: this.seasonLineOf(p.id) }))
+      .sort((a, b) => ratedOverall(b.p) - ratedOverall(a.p))[0]
+    if (ext && (ext.line.pts >= 10 || ratedOverall(ext.p) >= 75)) {
+      items.push({
+        topic: 'extension', verdict: ext.p.age <= 29 && (ext.line.gp === 0 || ext.line.pts / Math.max(1, ext.line.gp) >= 0.45) ? 'yes' : 'no',
+        label: `${possessive(beatLastName(ext.p.name))} contract`, playerId: ext.p.id as string,
+        slots: { name: ext.p.name, age: String(ext.p.age), pts: String(ext.line.pts), aav: moneyShort(ext.p.contract.salary) },
+        weight: 3,
+      })
+    }
+    return items
+  }
+
+  /* ── prospects ── */
+  private maybeProspects(day: number): boolean {
+    if (dayKey(this.year, day) - this.mediaLast('prospects') < 21) return false
+    const facts = this.orgProspectFacts(23).filter((f) => f.where !== 'nhl')
+    const list: ProspectLine[] = facts.map((f) => ({
+      playerId: f.playerId, name: f.name, age: f.age, pos: f.position,
+      where: f.where === 'ahl' ? 'ahl' : 'junior', league: f.leagueLabel,
+      ...(f.clubLabel ? { club: `${f.clubLabel} (${f.leagueLabel})` } : { club: f.leagueLabel }),
+      gp: f.gamesPlayed, g: f.goals, pts: f.points,
+      ...(f.savePct !== undefined ? { svPct: f.savePct } : {}),
+    }))
+    this.setMediaLast('prospects', dayKey(this.year, day))
+    const c = this.deskCtx('prospects', day)
+    if (!c) return false
+    const a = buildProspects(c, list)
+    if (!a) return false
+    this.publishBeat(a)
+    return true
+  }
+
+  /* ── the Daily ── */
+  private maybeDaily(day: number, userGame: GameOutcome | undefined): void {
+    const tier = this.userMarket().tier
+    const every = tier === 3 ? 1 : tier === 2 ? 2 : 3
+    if (dayKey(this.year, day) - this.mediaLast('daily') < every) return
+    const team = this.userTeam
+    let yesterday: { text: string; won: boolean } | undefined
+    if (userGame) {
+      const home = userGame.homeTeamId === this.userTeamId
+      const us = home ? userGame.homeGoals : userGame.awayGoals
+      const them = home ? userGame.awayGoals : userGame.homeGoals
+      const opp = this.data.teams.get(home ? userGame.awayTeamId : userGame.homeTeamId)
+      yesterday = { text: `a ${Math.max(us, them)}-${Math.min(us, them)} ${us > them ? 'win over' : 'loss to'} ${opp?.name ?? 'the opposition'}`, won: us > them }
+    }
+    const mine = this.standings.get(this.userTeamId)
+    const division: string[] = []
+    let divisionLead: string | null = null
+    for (const g of this.data.league.schedule) {
+      if (g.day !== day || !g.result) continue
+      // Our own game is the lede, not division news.
+      if (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId) continue
+      for (const tid of [g.homeTeamId, g.awayTeamId]) {
+        if (tid === this.userTeamId) continue
+        const t = this.data.teams.get(tid)
+        if (!t || t.divisionId !== team.divisionId) continue
+        const home = g.homeTeamId === tid
+        const us = home ? g.result.homeGoals : g.result.awayGoals
+        const them = home ? g.result.awayGoals : g.result.homeGoals
+        const oppT = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)
+        const st = this.standings.get(tid)
+        const gap = st && mine ? st.points - mine.points : 0
+        if (!divisionLead && us > them && oppT) divisionLead = `${possessive(clubNickname(this.castTeam(t.id)!))} ${us}-${them} win over the ${clubNickname(this.castTeam(oppT.id)!)}`
+        division.push(
+          `${t.name} ${us > them ? 'beat' : 'lost to'} ${oppT?.name ?? 'the opposition'} ${Math.max(us, them)}-${Math.min(us, them)}` +
+            `${g.result.decidedBy !== 'regulation' ? ` in ${g.result.decidedBy === 'overtime' ? 'overtime' : 'a shootout'}` : ''}. ` +
+            (gap === 0 ? `Level with the ${clubNickname(this.castTeam(team.id)!)} on points.` : `${Math.abs(gap)} point${Math.abs(gap) === 1 ? '' : 's'} ${gap > 0 ? 'ahead of' : 'behind'} the ${clubNickname(this.castTeam(team.id)!)}.`),
+        )
+        if (division.length >= 3) break
+      }
+      if (division.length >= 3) break
+    }
+    const wire: WireItem[] = []
+    const why = (teamId: string | undefined): Pick<WireItem, 'why' | 'team' | 'gap' | 'days'> => {
+      if (!teamId) return { why: 'league' }
+      const t = this.data.teams.get(asTeamId(teamId))
+      if (!t) return { why: 'league' }
+      const st = this.standings.get(t.id)
+      const gapN = st && mine ? st.points - mine.points : 0
+      const gapText = gapN === 0 ? 'level on points' : `${Math.abs(gapN)} point${Math.abs(gapN) === 1 ? '' : 's'} ${gapN > 0 ? 'ahead' : 'back'}`
+      const next = this.data.league.schedule.find(
+        (g) => !g.result && g.day > day && g.day <= day + 6 &&
+          ((g.homeTeamId === this.userTeamId && g.awayTeamId === t.id) || (g.awayTeamId === this.userTeamId && g.homeTeamId === t.id)),
+      )
+      if (next) return { why: 'opponent', team: t.name, days: next.day - day <= 1 ? 'next' : `in ${next.day - day} days` }
+      if (t.divisionId === team.divisionId) return { why: 'division', team: t.name, gap: gapText }
+      if (t.conferenceId === team.conferenceId && Math.abs(gapN) <= 4) return { why: 'race', team: t.name, gap: gapText }
+      return { why: 'league', team: t.name }
+    }
+    const nameOfAuthor = (id: string): string => FEED_AUTHORS[id]?.name ?? 'league sources'
+    for (const p of this.feedPosts) {
+      if (p.year !== this.year || p.day !== day) continue
+      if (!p.authorId || !['insider', 'analyst', 'stats', 'wire'].includes(p.authorId)) continue
+      if (p.teamId === (this.userTeamId as string)) continue
+      const text = p.body.length > 220 ? `${p.body.slice(0, 217)}…` : p.body
+      wire.push({ source: nameOfAuthor(p.authorId), text, ...why(p.teamId) })
+      if (wire.length >= 3) break
+    }
+    const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
+    const tradeMark = this.mediaLast('dailyTx')
+    let tradeTop: string | null = null
+    for (const t of this.transactionLedger.items) {
+      if (num(t.id) <= tradeMark || t.kind !== 'trade' || t.teamIds.includes(this.userTeamId as string)) continue
+      wire.push({ source: 'League wire', text: t.summary.replace(/\.$/, ''), ...why(t.teamIds.find((x) => x !== (this.userTeamId as string))) })
+      if (!tradeTop) {
+        const [a, b] = t.teamIds.map((x) => this.castTeam(x)).filter((x): x is NonNullable<typeof x> => !!x)
+        if (a && b) tradeTop = `the ${clubNickname(a)}-${clubNickname(b)} trade`
+      }
+      if (wire.length >= 5) break
+    }
+    this.setMediaLast('dailyTx', Math.max(tradeMark, ...this.transactionLedger.items.map((t) => num(t.id))))
+    // Division / opponent news first: the local reason is the point of the Daily.
+    const rank = { opponent: 0, division: 1, race: 2, league: 3 } as const
+    wire.sort((a, b) => rank[a.why] - rank[b.why])
+    const next = this.nextUserGame(day)
+    const nextOpp = next ? this.data.teams.get(next.oppId) : undefined
+    const todayLine = next && nextOpp && next.day === this.matchDays.find((d) => d > day)
+      ? `Next for the ${clubNickname(this.castTeam(team.id)!)}: ${next.home ? 'home to' : 'at'} the ${clubNickname(this.castTeam(nextOpp.id)!)}, ${this.weekdayOf(dayToDateISO(this.year, next.day))}.`
+      : undefined
+    this.setMediaLast('daily', dayKey(this.year, day))
+    const c = this.deskCtx('daily', day)
+    if (!c) return
+    // The lead: a trade beats everything, then a local wire item, then the
+    // division, then our own result.
+    const lead = wire[0]
+    const leadTeam = lead?.team ? this.data.league.teams.map((x) => this.castTeam(x)).find((t) => t?.name === lead.team) : undefined
+    const top =
+      tradeTop ??
+      (lead && lead.why !== 'league' && leadTeam ? `${clubNickname(leadTeam)} news` : undefined) ??
+      (divisionLead ? `the ${divisionLead}` : undefined) ??
+      (yesterday ? (yesterday.won ? `the morning after a win` : `the morning after a loss`) : undefined)
+    const a = buildDaily(c, { record: this.recordOf(this.userTeamId), ...(top ? { top } : {}), ...(yesterday ? { yesterday } : {}), ...(todayLine ? { todayLine } : {}), division, wire })
+    if (a) this.publishBeat(a, { teaser: false })
+  }
+
+  /* ── act features ── */
+  private beatActFeature(day: number): boolean {
+    const act = this.seasonAct(day)
+    const team = this.userTeam
+    const record = this.recordOf(this.userTeamId)
+    const c0 = (tag: string): DeskCtx | null => this.deskCtx(`feature-${tag}`, day)
+    const race = this.raceOf(this.userTeamId)
+    const nick = clubNickname(this.castTeam(team.id)!)
+    const publish = (tag: string, f: FeatureFacts, inboxWeight = 0): boolean => {
+      const c = c0(tag)
+      if (!c) return false
+      const a = buildFeature(c, f)
+      this.markMediaDone(tag)
+      if (!a) return false
+      this.publishBeat(a, { inboxWeight })
+      return true
+    }
+    if (act === 'thanksgiving' && !this.mediaDone('thanksgiving') && race.gp >= 12) {
+      return publish('thanksgiving', {
+        feature: 'thanksgiving',
+        ctx: { inSpot: race.inSpot },
+        slots: { rank: `${ordinalWord(race.confRank)} in the conference`, gap: `${Math.abs(race.gap)} point${Math.abs(race.gap) === 1 ? '' : 's'}`, pts: String(race.pts), gp: String(race.gp), record },
+        paragraphs: [
+          race.inSpot
+            ? `They are ${race.gap === 0 ? 'level with' : `${race.gap} point${race.gap === 1 ? '' : 's'} clear of`} the first team outside the field. The rule is not a guarantee; it is a strong lean.`
+            : `They are ${Math.abs(race.gap)} point${Math.abs(race.gap) === 1 ? '' : 's'} behind the last team in. Closing that means passing people, and the teams above them do not have to cooperate.`,
+          this.topScorersLine(team),
+        ],
+        dek: `${record}, ${ordinalWord(race.confRank)} in the conference at American Thanksgiving.`,
+      })
+    }
+    if (act === 'holiday' && !this.mediaDone('holiday')) {
+      const hurt = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && p.injuryStatus !== null)
+      return publish('holiday', {
+        feature: 'holiday',
+        ctx: {},
+        slots: { record },
+        paragraphs: [
+          this.topScorersLine(team),
+          hurt.length > 0 ? `The break helps the injured: ${hurt.slice(0, 3).map((p) => `${p.name} (${this.officialFor(p)})`).join(', ')}.` : `Nobody of note is hurt, which is a gift in itself this time of year.`,
+          `When the freeze lifts, the market reopens with the ${nick} ${race.inSpot ? 'in a playoff spot' : `${Math.abs(race.gap)} points out of one`}.`,
+        ],
+        dek: `The holiday roster freeze: ${record} at the break.`,
+      })
+    }
+    if (act === 'midseason' && !this.mediaDone('midseason')) {
+      const st = this.standings.get(this.userTeamId)
+      const pct = st && st.gamesPlayed > 0 ? st.points / (st.gamesPlayed * 2) : 0.5
+      const expected = expectedRankOf(this.expectationsState, this.userTeamId as string)
+      const sorted = sortStandings([...this.standings.values()])
+      const rankNow = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+      const beat = expected !== undefined ? expected - rankNow : 0
+      const score = (pct - 0.5) * 10 + beat * 0.25
+      const grade = score >= 2.2 ? 'A' : score >= 1.4 ? 'A-' : score >= 0.8 ? 'B+' : score >= 0.2 ? 'B' : score >= -0.4 ? 'C+' : score >= -1 ? 'C' : score >= -1.8 ? 'D' : 'F'
+      const disappointment = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.position !== 'G')
+        .map((p) => ({ p, line: this.seasonLineOf(p.id), exp: expectedPointsFor(overall(p.composites, p.position), p.position, p.role) }))
+        .filter((x) => x.line.gp >= 15 && x.exp >= 0.5)
+        .sort((a, b) => a.line.pts / a.line.gp - a.exp - (b.line.pts / b.line.gp - b.exp))[0]
+      return publish('midseason', {
+        feature: 'midseason',
+        ctx: {},
+        slots: { record, rank: `${ordinalWord(race.confRank)} in the conference`, grade },
+        paragraphs: [
+          expected !== undefined
+            ? `They were picked ${ordinalWord(expected)} in the league before the season. They are ${ordinalWord(rankNow)}.`
+            : `They sit ${ordinalWord(rankNow)} in the league.`,
+          this.topScorersLine(team),
+          disappointment
+            ? `The disappointment: ${disappointment.p.name}, ${disappointment.line.pts} points in ${disappointment.line.gp} games. More was expected, and he knows it.`
+            : `No one has fallen badly short, which is its own kind of compliment.`,
+        ],
+        dek: `${record} at the halfway mark. Overall grade: ${grade}.`,
+      })
+    }
+    if (act === 'deadline' && !this.mediaDone('deadline')) {
+      const stance = this.clubDirection === 'rebuild' || race.gap <= -6 ? 'sell' : race.inSpot && this.clubDirection === 'compete' ? 'buy' : 'hold'
+      const need = this.weakestGroup(team)
+      const space = moneyShort(Math.max(0, team.finances.salaryCap - this.userCapUsed()))
+      const expiring = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && p.contract.yearsRemaining <= 1)
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))
+        .slice(0, 5)
+      return publish('deadline', {
+        feature: 'deadline',
+        ctx: { stance },
+        slots: { rank: `${ordinalWord(race.confRank)} in the conference`, need, space, record },
+        paragraphs: [
+          stance === 'buy'
+            ? `A contender with room should add. The price for rentals only goes up as the day gets closer.`
+            : stance === 'sell'
+              ? `The standings have made the call. Expiring contracts are worth the most right now and nothing in July.`
+              : `This is the hardest spot to be in: close enough to hope, far enough to worry. Expect small moves, if any.`,
+        ],
+        sections: expiring.length > 0 ? [{ title: 'Expiring contracts', lines: expiring.map((p) => `${p.name} (${p.position}, ${p.age}): ${moneyShort(p.contract.salary)}`) }] : [],
+        dek: `${stance === 'buy' ? 'Buyers' : stance === 'sell' ? 'Sellers' : 'In between'}: ${space} in space, a need at ${need}.`,
+      })
+    }
+    if (act === 'push' && !this.mediaDone('push')) {
+      const left = this.userGamesScheduled() - race.gp
+      const upcoming: string[] = []
+      for (const g of this.data.league.schedule) {
+        if (g.result || (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId)) continue
+        const home = g.homeTeamId === this.userTeamId
+        const o = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)
+        if (o) upcoming.push(`${home ? 'vs.' : 'at'} ${o.name} (${this.recordOf(o.id)})`)
+        if (upcoming.length >= 5) break
+      }
+      return publish('push', {
+        feature: 'push',
+        ctx: { race: race.inSpot ? 'in' : 'out' },
+        slots: { gap: String(Math.abs(race.gap)), left: String(left), pts: String(race.pts), rank: `${ordinalWord(race.confRank)} in the conference` },
+        paragraphs: [
+          race.inSpot
+            ? `A team ${race.gap} points clear with ${left} to play controls its own fate. Win the games against the teams chasing and it is over.`
+            : `${Math.abs(race.gap)} points is a lot of ground with ${left} left. It takes a run, and help.`,
+        ],
+        sections: upcoming.length > 0 ? [{ title: 'Next five', lines: upcoming }] : [],
+        dek: `${left} games left; ${race.inSpot ? `${race.gap} clear` : `${Math.abs(race.gap)} back`}.`,
+      })
+    }
+    return false
+  }
+
+  /** "Crosby (14-20-34) and Malkin (12-15-27) lead the way." */
+  private topScorersLine(team: Team): string {
+    const top = team.roster
+      .map((id) => ({ p: this.data.players.get(id), t: this.totals.get(id) }))
+      .filter((x): x is { p: Player; t: GamePlayerStat } => !!x.p && !!x.t && x.p.position !== 'G')
+      .sort((a, b) => b.t.goals + b.t.assists - (a.t.goals + a.t.assists))
+      .slice(0, 3)
+    if (top.length === 0) return ''
+    return `Leading the way: ${top.map(({ p, t }) => `${p.name} (${t.goals}-${t.assists}-${t.goals + t.assists})`).join(', ')}.`
+  }
+
+  /** The position group furthest below the rest of the lineup. */
+  private weakestGroup(team: Team): string {
+    const groups: Record<string, number[]> = { centre: [], wing: [], defence: [], goal: [] }
+    for (const id of team.roster) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      const g = p.position === 'C' ? 'centre' : p.position === 'W' ? 'wing' : p.position === 'D' ? 'defence' : 'goal'
+      groups[g]!.push(ratedOverall(p))
+    }
+    const top = (xs: number[], n: number): number => {
+      const s = [...xs].sort((a, b) => b - a).slice(0, n)
+      return s.length === 0 ? 0 : s.reduce((a, b) => a + b, 0) / s.length
+    }
+    const scores: Array<[string, number]> = [
+      ['a top-six centre', top(groups.centre!, 2)],
+      ['a scoring winger', top(groups.wing!, 4)],
+      ['a top-four defenceman', top(groups.defence!, 4)],
+      ['a starting goaltender', top(groups.goal!, 1) - 2],
+    ]
+    scores.sort((a, b) => a[1] - b[1])
+    return scores[0]![0]
+  }
+
+  /** The first regular-season day after camp breaks: who made it. */
+  private maybeCampCutsPiece(day: number): void {
+    const camp = this.trainingCamp
+    if (!camp || !camp.resolved || this.mediaDone('campCuts')) return
+    this.markMediaDone('campCuts')
+    const nhl = new Set(this.userTeam.roster.map((id) => id as string))
+    const ahlTeam = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const ahl = new Set((ahlTeam?.roster ?? []).map((id) => id as string))
+    const made: string[] = []
+    const down: string[] = []
+    const gone: string[] = []
+    for (const d of camp.decisions) {
+      if (nhl.has(d.playerId)) made.push(`${d.name} (${d.position}, ${d.age})`)
+      else if (ahl.has(d.playerId)) down.push(`${d.name} (${d.position}, ${d.age})`)
+      else gone.push(`${d.name} (${d.position}, ${d.age})`)
+    }
+    if (made.length + down.length + gone.length === 0) return
+    const sections = [
+      ...(made.length ? [{ title: 'Made the team', lines: made }] : []),
+      ...(down.length ? [{ title: `Sent to ${ahlTeam?.name ?? 'the farm'}`, lines: down }] : []),
+      ...(gone.length ? [{ title: 'Released or claimed', lines: gone }] : []),
+    ]
+    const c = this.deskCtx('feature-campCuts', day)
+    if (!c) return
+    const a = buildFeature(c, {
+      feature: 'campCuts',
+      ctx: {},
+      slots: { n: String(made.length) },
+      paragraphs: [
+        made.length > 0 ? `The bubble players who stuck: ${made.slice(0, 3).join(', ')}.` : '',
+        down.length > 0 ? `Heading down: ${down.slice(0, 3).join(', ')}. For most of them this is a detour, not a verdict.` : '',
+      ],
+      sections,
+      dek: `${made.length} on the bubble made it; ${down.length + gone.length} did not.`,
+    })
+    if (a) this.publishBeat(a)
+  }
+
+  /* ─────────────────────────── training camp ─────────────────────────── */
+
+  /** Each camp day: the notebook (lines, bubble board, scrimmage). Day 1 opens
+   *  with the battles piece. */
+  private runBeatCampDay(campDay: number): void {
+    if (campDay <= 2 && !this.mediaDone('campOpen')) {
+      const camp = this.trainingCamp
+      const battles = (camp?.decisions ?? []).filter((d) => d.current !== d.coachPlan || d.tryout || d.waiverRequired || d.age <= 21)
+      this.markMediaDone('campOpen')
+      const c = this.deskCtx('feature-campOpen', 0)
+      if (c && battles.length > 0) {
+        const a = buildFeature(c, {
+          feature: 'campOpen',
+          ctx: {},
+          slots: { n: String(Math.max(1, battles.filter((b) => b.coachPlan === 'nhl').length)) },
+          paragraphs: [`The coaches' early read has ${battles.filter((b) => b.coachPlan === 'nhl').length} of them on the roster and ${battles.filter((b) => b.coachPlan === 'ahl').length} in the minors. Early reads change.`],
+          sections: [{
+            title: 'Bubble board',
+            lines: battles.slice(0, 10).map((b) => `${b.name} (${b.position}, ${b.age}): ${b.line}${b.tryout ? ' Tryout.' : b.waiverRequired ? ' Needs waivers to go down.' : ''}`),
+          }],
+          dek: `${battles.length} players on the bubble as camp opens.`,
+        })
+        if (a) this.publishBeat(a)
+      }
+    }
+    if (campDay >= 2 && campDay <= 7) this.maybeNotebook(0, campDay)
+  }
+
+  /* ─────────────────────────── the offseason ─────────────────────────── */
+
+  /** Summer coverage: the exit piece, the draft, July 1, the dead of summer. */
+  private runBeatOffseason(): void {
+    const os = this.offseason
+    if (!os) return
+    const faDay = os.faDay ?? 0
+    const key = 900 + faDay
+    const team = this.userTeam
+    const nick = clubNickname(this.castTeam(team.id)!)
+    if (os.stage === 'awards' && !this.mediaDone('exit')) {
+      this.markMediaDone('exit')
+      const champ = this.playoffs?.championTeamId === this.userTeamId
+      // The injuries the club never fully explained: now it can be said.
+      const hidden = this.media.disclosures
+        .filter((d) => d.teamId === (this.userTeamId as string) && d.year === this.year && d.specific && d.truthGames >= 4 && (d.stance === 'optimistic' || !d.revealed))
+        .slice(0, 3)
+      const c = this.deskCtx('feature-exit', key)
+      if (c) {
+        const a = buildFeature(c, {
+          feature: 'exit',
+          ctx: {},
+          slots: { record: this.recordOf(this.userTeamId) },
+          paragraphs: [
+            champ ? `They won it all. Nothing below changes that.` : '',
+            this.topScorersLine(team),
+            ...hidden.map((d) => `${d.playerName}'s "${d.region === 'undisclosed' ? 'undisclosed' : d.region}" injury in ${this.monthOf(dayToDateISO(d.year, Math.max(1, d.day)))} was ${d.truth}. He missed ${d.gamesMissed} games; the club called it ${d.band}.`),
+          ],
+          dek: `${this.recordOf(this.userTeamId)}. Exit day, and what the summer has to fix.`,
+        })
+        if (a) this.publishBeat(a, { teaser: true })
+      }
+      for (const d of hidden) d.revealed = true
+    }
+    if ((os.stage === 'resign' || os.stage === 'freeAgency') && !this.mediaDone('draft')) {
+      this.markMediaDone('draft')
+      const all = this.chronicle.events.filter((e) => e.kind === 'draftPick' && e.teamIds.includes(this.userTeamId as string))
+      const newest = all.reduce((m, e) => Math.max(m, e.year), -1)
+      const mine = newest >= this.year ? all.filter((e) => e.year === newest) : []
+      const lines = mine.slice(0, 8).map((e) => {
+        const p = e.playerIds[0] ? this.data.players.get(asPlayerId(e.playerIds[0])) : undefined
+        return p ? `Round ${e.details?.round ?? '?'}, No. ${e.details?.overallPick ?? '?'}: ${p.name} (${p.position}, ${p.age})` : e.headline
+      })
+      const firstP = mine[0]?.playerIds[0] ? this.data.players.get(asPlayerId(mine[0].playerIds[0])) : undefined
+      const c = this.deskCtx('feature-draft', key)
+      if (c && firstP && lines.length > 0) {
+        const a = buildFeature(c, {
+          feature: 'draft',
+          ctx: {},
+          slots: { name: firstP.name, n: String(lines.length) },
+          paragraphs: [`${firstP.name} is the headline, a ${firstP.age}-year-old ${firstP.position === 'D' ? 'defenceman' : firstP.position === 'G' ? 'goaltender' : firstP.position === 'C' ? 'centre' : 'winger'}. The rest of the class is a longer bet, as the rest of every class is.`],
+          sections: [{ title: `The ${nick} class`, lines }],
+          dek: `${lines.length} picks, led by ${firstP.name}.`,
+          playerIds: [firstP.id as string],
+        })
+        if (a) this.publishBeat(a)
+      }
+    }
+    if (os.stage === 'freeAgency' && faDay >= 1 && !this.mediaDone('july1')) {
+      this.markMediaDone('july1')
+      const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
+      const since = this.mediaLast('faTx')
+      const signings = this.transactionLedger.items.filter((t) => t.kind === 'signing' && num(t.id) > since && !/fire head coach/.test(t.summary))
+      this.setMediaLast('faTx', Math.max(since, ...this.transactionLedger.items.map((t) => num(t.id))))
+      const ours = signings.filter((t) => t.teamIds.includes(this.userTeamId as string))
+      const league = signings.filter((t) => !t.teamIds.includes(this.userTeamId as string)).slice(-8)
+      const firstName = ours[0]?.summary.replace(/^[A-Z]{2,4} (sign|signs|re-sign|re-signs) /, '').split(/[ ,(]/).slice(0, 2).join(' ') ?? ''
+      const c = this.deskCtx('feature-july1', key)
+      if (c) {
+        const a = buildFeature(c, {
+          feature: 'july1',
+          ctx: { busy: ours.length > 0 },
+          slots: { name: firstName || 'a new face' },
+          paragraphs: [ours.length > 0 ? `The ${nick} were active early.` : `The ${nick} did not add anyone on the first day. That can change quickly; it can also be the plan.`],
+          sections: [
+            ...(ours.length > 0 ? [{ title: `${nick} moves`, lines: ours.map((t) => t.summary) }] : []),
+            ...(league.length > 0 ? [{ title: 'Around the league', lines: league.map((t) => t.summary) }] : []),
+          ],
+          dek: ours.length > 0 ? `${ours.length} ${nick} signing${ours.length === 1 ? '' : 's'} on day one.` : `A quiet first day for the ${nick}.`,
+        })
+        if (a) this.publishBeat(a, { teaser: true })
+      }
+    }
+    if ((os.stage === 'freeAgency' && faDay >= 8 && !this.mediaDone('summer')) || (os.stage === 'preseason' && !this.mediaDone('summer'))) {
+      this.markMediaDone('summer')
+      const qs = this.summerQuestions(team)
+      const c = this.deskCtx('feature-summer', key)
+      if (c && qs.length >= 2) {
+        const a = buildFeature(c, {
+          feature: 'summer',
+          ctx: {},
+          slots: { n: String(qs.length) },
+          paragraphs: qs.map((q, i) => `${i + 1}. ${q}`),
+          dek: `${qs.length} questions before camp.`,
+        })
+        if (a) this.publishBeat(a)
+      }
+      if (!this.mediaDone('summerMail')) {
+        this.markMediaDone('summerMail')
+        this.maybeMailbag(0, true)
+      }
+    }
+  }
+
+  private summerQuestions(team: Team): string[] {
+    const out: string[] = []
+    const roster = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+    const goalies = roster.filter((p) => p.position === 'G').sort((a, b) => ratedOverall(b) - ratedOverall(a))
+    if (goalies.length < 2) out.push(`Who backs up ${goalies[0]?.name ?? 'the starter'}? There is one goaltender on the roster who has proven anything.`)
+    else if (ratedOverall(goalies[0]!) - ratedOverall(goalies[1]!) <= 3) out.push(`Who is the starter? ${goalies[0]!.name} and ${goalies[1]!.name} are close enough that camp could decide it.`)
+    const space = team.finances.salaryCap - this.userCapUsed()
+    out.push(space >= 5_000_000 ? `What happens with ${moneyShort(space)} in cap space? That is too much to leave unspent on a team that wants to win.` : `Can they fit everything under the cap? There is ${moneyShort(Math.max(0, space))} of room and not much flexibility.`)
+    out.push(`Is ${this.weakestGroup(team)} still the biggest need? On paper, it is the thinnest part of the lineup.`)
+    const ahl = team.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
+    const kid = (ahl?.roster ?? []).map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && p.age <= 22).sort((a, b) => ratedPotential(b) - ratedPotential(a))[0]
+    if (kid) out.push(`Does ${kid.name} push for a job? He is ${kid.age}, and camp is where these things start.`)
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    out.push(`How much rope does ${coach.name} have? A slow start will bring the question back.`)
+    return out.slice(0, 5)
+  }
+
+  /* ─────────────────────────── the coach hot seat ─────────────────────────── */
+
+  /** The user club's coach: results against expectations, scaled by market. */
+  private tickHotSeat(day: number): void {
+    const st = this.standings.get(this.userTeamId)
+    if (!st || st.gamesPlayed < 15) return
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const sorted = sortStandings([...this.standings.values()])
+    const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    const predicted = expectedRankOf(this.expectationsState, this.userTeamId as string) ?? currentRank
+    const market = this.userMarket()
+    const rebuilding = this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true
+    let heat = seatHeat(
+      {
+        teamId: this.userTeamId as string, teamName: this.userTeam.name, teamAbbr: this.userTeam.abbreviation,
+        coachId: coach.id, coachName: coach.name, tenure: this.coachTenure.get(this.userTeamId as string) ?? 0,
+        predictedRank: predicted, currentRank, pointsPct: st.points / Math.max(1, st.gamesPlayed * 2), gamesPlayed: st.gamesPlayed,
+      },
+      this.data.league.teams.length,
+    )
+    if (rebuilding) heat *= 0.6
+    let hs = this.media.hotSeat
+    if (hs && (hs.year !== this.year || hs.coachId !== coach.id)) hs = this.media.hotSeat = null
+    const slotsFor = (): { coach: string; record: string; rank: string; expected: string; gm: string } => ({
+      coach: coach.name,
+      record: this.recordOf(this.userTeamId),
+      rank: `${ordinalWord(currentRank)} in the league`,
+      expected: `top-${Math.max(4, Math.ceil(predicted / 4) * 4)}`,
+      gm: 'the GM',
+    })
+    if (!hs) {
+      if (heat < market.hotSeatAt) return
+      hs = this.media.hotSeat = { year: this.year, coachId: coach.id, coachName: coach.name, stage: 'radar', since: day, heat, coolChecks: 0 }
+      const c = this.deskCtx('hotSeat-radar', day)
+      if (c) this.publishBeat(buildHotSeat(c, 'radar', slotsFor()), { inboxWeight: 1 })
+      chronicleEvent(this.chronicle, {
+        year: this.year, day, kind: 'hotSeat', teamIds: [this.userTeamId as string], staffIds: [coach.id],
+        headline: `${coach.name} on the hot seat at ${this.recordOf(this.userTeamId)}`, details: { media: 'radar' }, userInvolved: true,
+      })
+      return
+    }
+    hs.heat = heat
+    if (hs.stage === 'recovered' || hs.stage === 'fired') return
+    if (heat < 0.25) hs.coolChecks += 1
+    else hs.coolChecks = 0
+    if (hs.coolChecks >= 3) {
+      hs.stage = 'recovered'
+      const c = this.deskCtx('hotSeat-recovered', day)
+      if (c) this.publishBeat(buildHotSeat(c, 'recovered', slotsFor()))
+      chronicleEvent(this.chronicle, {
+        year: this.year, day, kind: 'hotSeat', teamIds: [this.userTeamId as string], staffIds: [coach.id],
+        headline: `${coach.name} off the hot seat; ${this.userTeam.abbreviation} ${this.recordOf(this.userTeamId)}`, details: { media: 'recovered' }, userInvolved: true,
+      })
+      for (const cl of this.media.claims) {
+        if (cl.kind === 'coachBacked' && cl.status === 'open' && cl.subjectId === coach.id) this.resolveClaim(cl, true, day)
+      }
+    }
+  }
+
+  /** The user fired his coach: the hot-seat arc closes, and any vote of
+   *  confidence he gave is quoted back if it was recent. */
+  private mediaOnCoachFired(outgoingId: string, outgoingName: string): void {
+    const day = this.phase === 'regularSeason' ? this.currentDay : 0
+    const hs = this.media.hotSeat
+    if (hs && hs.coachId === outgoingId && hs.year === this.year) {
+      hs.stage = 'fired'
+      const c = this.deskCtx('hotSeat-fired', day)
+      if (c) {
+        const sorted = sortStandings([...this.standings.values()])
+        const rank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+        this.publishBeat(buildHotSeat(c, 'fired', { coach: outgoingName, record: this.recordOf(this.userTeamId), rank: `${ordinalWord(rank)} in the league`, expected: '', gm: 'the GM' }))
+      }
+      chronicleEvent(this.chronicle, {
+        year: this.year, day, kind: 'hotSeat', teamIds: [this.userTeamId as string], staffIds: [outgoingId],
+        headline: `${outgoingName}'s hot seat ends in his firing`, details: { media: 'fired' }, userInvolved: true,
+      })
+    }
+    for (const cl of this.media.claims) {
+      if (cl.kind !== 'coachBacked' || cl.status !== 'open' || cl.subjectId !== outgoingId) continue
+      const recent = cl.year === this.year && day - cl.day <= 60
+      if (recent) this.resolveClaim(cl, false, day)
+      else { cl.status = 'right'; cl.resolvedYear = this.year; cl.resolvedDay = day }
+    }
+  }
+
+  /** Around the league: the columnist's hot-seat radar on the AI benches. */
+  private maybeLeagueRadar(day: number): void {
+    const act = this.seasonAct(day)
+    const first = act === 'thanksgiving' && !this.mediaDone('radar-first')
+    if (!first && dayKey(this.year, day) - this.mediaLast('radar') < 30) return
+    if (!first && !this.mediaDone('radar-first')) return
+    const sorted = sortStandings([...this.standings.values()])
+    const seats = this.coachSeats(sorted)
+      .filter((s) => s.gamesPlayed >= 15 && s.hiredThisSeason !== true)
+      .map((s) => ({ s, heat: seatHeat(s, this.data.league.teams.length) }))
+      .filter((x) => x.heat >= 0.35)
+      .sort((a, b) => b.heat - a.heat)
+      .slice(0, 3)
+    if (first) this.markMediaDone('radar-first')
+    this.setMediaLast('radar', dayKey(this.year, day))
+    if (seats.length === 0) return
+    if (!this.punditRoomToday(day)) return
+    const list = seats.map(({ s }) => `${s.coachName} (${s.teamName}, ${this.recordOf(asTeamId(s.teamId))})`).join('; ')
+    const text = renderStable(LEAGUE_RADAR, {}, `radar|${this.year}|${day}`, { list })
+    if (!text || this.feedTextUsedThisSeason(text)) return
+    this.feedPosts.unshift({
+      id: `fp${this.feedCounter++}`, day, year: this.year, category: 'league',
+      headline: `@${FEED_AUTHORS.analyst!.handle}`, body: text, read: true, channel: 'feed', authorId: 'analyst', salience: 60,
+      engagement: { likes: 500 + (stableSeed(text) % 1500), reposts: 60 + (stableSeed(list) % 200) },
+    })
+    if (this.feedPosts.length > 400) this.feedPosts.length = 400
+    for (const { s } of seats) {
+      if (this.chronicle.events.some((e) => e.kind === 'hotSeat' && e.year === this.year && e.staffIds?.includes(s.coachId))) continue
+      chronicleEvent(this.chronicle, {
+        year: this.year, day, kind: 'hotSeat', teamIds: [s.teamId], staffIds: [s.coachId],
+        headline: `${s.coachName} on the hot-seat radar (${s.teamAbbr})`, details: { media: 'radar' }, userInvolved: false,
+      })
+    }
+  }
+
+  /* ─────────────────────────── claims on the record ─────────────────────────── */
+
+  private recordClaim(kind: ClaimKind, personaId: PressPersonaId, quote: string, subject?: { id: string; name: string }): void {
+    const claim: GmClaim = {
+      id: `cl${this.media.counter++}`,
+      kind,
+      personaId,
+      quote,
+      ...(subject ? { subjectId: subject.id, subjectName: subject.name } : {}),
+      year: this.year,
+      day: this.currentDay,
+      dateISO: this.beatDateISO(this.currentDay),
+      status: 'open',
+    }
+    this.media.claims.push(claim)
+    if (this.media.claims.length > MAX_CLAIMS) this.media.claims = this.media.claims.slice(-MAX_CLAIMS)
+  }
+
+  /**
+   * A claim comes due. The press quotes it back (a beat piece — the week's
+   * inbox item when there is room), the asker's rapport moves, and the room,
+   * the building and the owner react by small, bounded amounts.
+   */
+  private resolveClaim(cl: GmClaim, right: boolean, day: number, outcome = ''): void {
+    cl.status = right ? 'right' : 'wrong'
+    cl.resolvedYear = this.year
+    cl.resolvedDay = day
+    const edge = this.userMarket().boardEdge
+    const lr = this.lockerRooms.get(this.userTeamId)
+    switch (cl.kind) {
+      case 'playoffs':
+        this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + (right ? 2 : -3)))
+        if (!right) this.boardState.confidence = Math.max(0, this.boardState.confidence - Math.round(2 * edge))
+        nudgeRapport(this.punditState, cl.personaId, right ? 5 : -2)
+        break
+      case 'building':
+        this.fanInterest = Math.max(0, Math.min(100, this.fanInterest + (right ? 2 : -1)))
+        break
+      case 'coachBacked':
+        if (!right) {
+          for (const id of ['beat', 'national', 'homer'] as PressPersonaId[]) nudgeRapport(this.punditState, id, -4)
+          if (lr) lr.roomMorale = Math.max(0, lr.roomMorale - 3)
+        } else nudgeRapport(this.punditState, cl.personaId, 4)
+        break
+      case 'playerCore':
+        if (!right && lr) lr.roomMorale = Math.max(0, lr.roomMorale - 2)
+        break
+    }
+    const monthYear = `${this.monthOf(cl.dateISO)} ${cl.dateISO.slice(0, 4)}`
+    chronicleEvent(this.chronicle, {
+      year: this.year, day, kind: 'claimResolved', teamIds: [this.userTeamId as string],
+      playerIds: cl.kind === 'playerCore' && cl.subjectId ? [cl.subjectId] : [],
+      ...(cl.kind === 'coachBacked' && cl.subjectId ? { staffIds: [cl.subjectId] } : {}),
+      headline: `GM's ${monthYear} claim ("${cl.quote}") proved ${right ? 'right' : 'wrong'}`,
+      details: { media: cl.kind, quote: cl.quote, verdict: right ? 'right' : 'wrong' },
+      userInvolved: true,
+    })
+    // Only the stories worth telling get written: every wrong claim, and a
+    // right one that was a real call (a playoff promise, a coach backed).
+    if (cl.kind === 'playerCore' && right) return
+    const c = this.deskCtx(`claim-${cl.id}`, day)
+    if (!c) return
+    this.publishBeat(
+      buildClaimPiece(c, cl.kind, right, {
+        gm: 'the GM', when: monthYear, quote: cl.quote, name: cl.subjectName ?? '', coach: cl.subjectName ?? '',
+        outcome: outcome || (right ? 'It held up.' : 'It did not hold up.'),
+      }),
+      { inboxWeight: 2 },
+    )
+  }
+
+  /** Daily: a player called "core" who has since left the organisation. */
+  private checkClaims(day: number): void {
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    for (const cl of this.media.claims) {
+      if (cl.status !== 'open' || cl.kind !== 'playerCore' || !cl.subjectId) continue
+      const pid = asPlayerId(cl.subjectId)
+      const stillHere = this.userTeam.roster.includes(pid) || (ahl?.roster.includes(pid) ?? false)
+      const age = cl.year === this.year ? day - cl.day : 999
+      if (!stillHere && age <= 120) this.resolveClaim(cl, false, day)
+      else if (age > 120) { cl.status = 'right'; cl.resolvedYear = this.year; cl.resolvedDay = day }
+    }
+  }
+
+  /** Season over for the regular season: the playoff and building claims. */
+  private resolveSeasonClaims(madePlayoffs: boolean): void {
+    const day = this.currentDay
+    for (const cl of this.media.claims) {
+      if (cl.status !== 'open' || cl.year !== this.year) continue
+      if (cl.kind === 'playoffs') {
+        this.resolveClaim(cl, madePlayoffs, day, madePlayoffs ? 'They made it.' : 'They finished outside the playoffs.')
+      } else if (cl.kind === 'building') {
+        this.resolveClaim(cl, madePlayoffs, day, madePlayoffs ? 'The playoffs came early.' : 'No playoffs, as advertised.')
+      } else if (cl.kind === 'coachBacked') {
+        const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+        if (cl.subjectId === coach.id) this.resolveClaim(cl, true, day, 'He is still behind the bench.')
+      }
+    }
+  }
+
+  /* ─────────────────────────── pressers v2 ─────────────────────────── */
+
+  /**
+   * Fewer, better pressers (docs/MEDIA-BEAT.md §Pressers): at most one every
+   * eight days, about something — the coach on the hot seat, the season's
+   * ambition, a named player, a blowout, a skid. A presser left unanswered
+   * for four days lapses quietly (the PR department fielded it).
+   */
+  private maybeQueuePresser(day: number, userGame: GameOutcome | undefined): void {
+    const pc = this.pressConference
+    if (pc) {
+      if (pc.year !== this.year || day - pc.day > 4) this.pressConference = null
+      else return
+    }
+    // Fewer, better: twelve days between pressers, and the stock questions
+    // (a blowout, a skid) are rationed so the named ones stay special.
+    if (dayKey(this.year, day) - this.media.lastPresserKey < 12) return
+    const asked = (topic: string): number => this.media.askedThisSeason.filter((k) => k.startsWith(`${this.year}|topic:${topic}`)).length
+    const market = this.userMarket()
+    const team = this.userTeam
+    const st = this.standings.get(this.userTeamId)
+    const gp = st?.gamesPlayed ?? 0
+    const hs = this.media.hotSeat
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const sorted = sortStandings([...this.standings.values()])
+    const rank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+    // 1. The vote of confidence.
+    if (hs && hs.year === this.year && hs.stage === 'radar') {
+      hs.stage = 'asked'
+      this.queuePresserV2('hotSeat', { coach: coach.name, record: this.recordOf(this.userTeamId), rank: `${ordinalWord(rank)} in the league` }, day, {}, { id: coach.id, name: coach.name })
+      return
+    }
+    // 2. The season's ambition, early.
+    if (gp >= 3 && gp <= 12 && !this.mediaDone('seasonClaim')) {
+      this.markMediaDone('seasonClaim')
+      this.queuePresserV2('seasonClaim', {}, day)
+      return
+    }
+    // 3. A named player whose situation is a story.
+    const askedIds = new Set(this.media.askedThisSeason.filter((k) => k.startsWith(`${this.year}|`)).map((k) => k.split('|')[1]))
+    const request = this.interactions.find((i) => i.kind === 'tradeRequest' && i.year === this.year && !askedIds.has(i.playerId) && team.roster.includes(asPlayerId(i.playerId)))
+    let subject: { p: Player; why: string; n?: number } | null = null
+    if (request) {
+      const p = this.data.players.get(asPlayerId(request.playerId))
+      if (p) subject = { p, why: 'request' }
+    }
+    if (!subject) {
+      for (const id of team.roster) {
+        const p = this.data.players.get(id)
+        if (!p || p.position === 'G' || askedIds.has(id as string)) continue
+        const dry = this.scorelessStreaks.get(id as string) ?? 0
+        if (ratedOverall(p) >= 78 && dry >= 8) { subject = { p, why: 'slump', n: dry }; break }
+      }
+    }
+    if (!subject && this.deadlineDay > 0 && day >= this.deadlineDay - 25 && day < this.deadlineDay) {
+      const p = team.roster
+        .map((id) => this.data.players.get(id))
+        .filter((x): x is Player => !!x && x.contract.yearsRemaining <= 1 && ratedOverall(x) >= 76 && !askedIds.has(x.id as string))
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+      if (p) subject = { p, why: 'expiring' }
+    }
+    if (subject) {
+      this.media.askedThisSeason.push(`${this.year}|${subject.p.id as string}`)
+      if (this.media.askedThisSeason.length > 60) this.media.askedThisSeason = this.media.askedThisSeason.slice(-40)
+      this.queuePresserV2(
+        'playerPlans',
+        { name: subject.p.name, first: subject.p.name.split(' ')[0] ?? subject.p.name, n: String(subject.n ?? '') },
+        day,
+        { why: subject.why },
+        { id: subject.p.id as string, name: subject.p.name },
+      )
+      return
+    }
+    // 4. A blowout.
+    if (userGame) {
+      const home = userGame.homeTeamId === this.userTeamId
+      const us = home ? userGame.homeGoals : userGame.awayGoals
+      const them = home ? userGame.awayGoals : userGame.homeGoals
+      if (them - us >= (market.tier === 3 ? 3 : 4) && asked('blowout') < 3) {
+        this.media.askedThisSeason.push(`${this.year}|topic:blowout`)
+        const opp = this.data.teams.get(home ? userGame.awayTeamId : userGame.homeTeamId)
+        let goalie: Player | undefined
+        for (const [pid, s] of userGame.playerStats) {
+          const p = this.data.players.get(pid)
+          if (p?.position === 'G' && team.roster.includes(pid) && s.goalsAgainst >= 4 && s.shotsAgainst > 0 && s.saves / s.shotsAgainst < 0.87) goalie = p
+        }
+        this.queuePresserV2(
+          'blowout',
+          { score: `${them}-${us}`, opp: opp?.name ?? 'the opposition' },
+          day,
+          goalie ? { goalieName: goalie.name } : {},
+          goalie ? { id: goalie.id as string, name: goalie.name } : undefined,
+        )
+        return
+      }
+    }
+    // 5. A skid, the moment it reaches the market's threshold.
+    const skid = this.losingStreaks.get(this.userTeamId as string) ?? 0
+    if (skid === market.presserSkid && asked('skid') < 2) {
+      this.media.askedThisSeason.push(`${this.year}|topic:skid`)
+      this.queuePresserV2('skid', { n: String(skid) }, day)
+    }
+  }
+
+  private queuePresserV2(
+    topic: PresserTopic,
+    slots: Record<string, string>,
+    day: number,
+    extra: { why?: string; goalieName?: string } = {},
+    subject?: { id: string; name: string },
+  ): void {
+    // The beat writer asks about his players; the rest rotate.
+    const personaId: PressPersonaId =
+      topic === 'playerPlans' ? 'beat' : Career.PRESS_PERSONA_ROTATION[this.pressCounter % Career.PRESS_PERSONA_ROTATION.length]!
+    const prompt = presserPrompt(topic, slots, `${this.year}|${day}|${topic}|${subject?.id ?? ''}`, extra)
+    this.pressConference = {
+      id: `pc${this.pressCounter++}`,
+      question: prompt.question,
+      context: prompt.context,
+      day,
+      year: this.year,
+      personaId,
+      askedBy: this.personaMeta(personaId),
+      topic,
+      ...(subject ? { subjectId: subject.id, subjectName: subject.name } : {}),
+      options: prompt.options,
+    }
+    this.media.lastPresserKey = dayKey(this.year, day)
+  }
+
+  /**
+   * What an answer DOES. Each option trades one real thing for another; none
+   * is free (docs/MEDIA-BEAT.md has the table). Tone and rapport are handled
+   * by the caller exactly as before.
+   */
+  private applyPresserOption(pc: PressConferenceState, optionId: string, quote: string): void {
+    const lr = this.lockerRooms.get(this.userTeamId)
+    const room = (d: number): void => { if (lr) lr.roomMorale = Math.max(0, Math.min(100, lr.roomMorale + d)) }
+    const subject = pc.subjectId ? this.data.players.get(asPlayerId(pc.subjectId)) : undefined
+    const personaId = pc.personaId ?? 'beat'
+    const day = this.currentDay
+    switch (pc.topic) {
+      case 'playerPlans': {
+        if (!subject) return
+        if (optionId === 'core') {
+          const wantsOut = this.interactions.some((i) => i.playerId === pc.subjectId && i.status === 'open' && i.kind === 'tradeRequest')
+          subject.morale = Math.min(100, subject.morale + (wantsOut ? 2 : 6))
+          this.recordClaim('playerCore', personaId, quote, { id: pc.subjectId!, name: subject.name })
+        } else if (optionId === 'evaluate') {
+          subject.morale = Math.max(0, subject.morale - 6)
+          nudgeRapport(this.punditState, 'national', 2)
+          const c = this.deskCtx(`presser-evaluate-${subject.id as string}`, day)
+          if (c) {
+            this.publishBeat({
+              id: '', teamId: this.userTeamId as string, kind: 'notebook', year: this.year, day, dateISO: c.dateISO,
+              headline: `GM won't commit to ${subject.name}`,
+              dek: `"Everybody in that room is being evaluated. Him included."`,
+              body: [
+                `Asked whether ${subject.name} is part of the plans, the GM did not say yes. "Everybody in that room is being evaluated. Him included."`,
+                `${subject.name} will read that the same way everyone else did.`,
+              ],
+              playerIds: [subject.id as string],
+              act: c.act,
+            })
+          }
+        }
+        return
+      }
+      case 'hotSeat': {
+        const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+        const hs = this.media.hotSeat
+        const stage = optionId === 'back' ? 'backed' : 'hedged'
+        if (hs && hs.coachId === coach.id) hs.stage = stage
+        if (optionId === 'back') {
+          room(3)
+          this.recordClaim('coachBacked', personaId, quote, { id: coach.id, name: coach.name })
+        } else if (optionId === 'evaluate') {
+          room(-3)
+          this.boardState.confidence = Math.min(100, this.boardState.confidence + 1)
+        } else room(-2)
+        chronicleEvent(this.chronicle, {
+          year: this.year, day, kind: 'voteOfConfidence', teamIds: [this.userTeamId as string], staffIds: [coach.id],
+          headline: optionId === 'back' ? `GM publicly backs ${coach.name}` : `GM declines to back ${coach.name}`,
+          details: { media: stage, quote }, userInvolved: true,
+        })
+        const sorted = sortStandings([...this.standings.values()])
+        const rank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
+        const c = this.deskCtx(`hotSeat-${stage}`, day)
+        if (c) this.publishBeat(buildHotSeat(c, stage, { coach: coach.name, record: this.recordOf(this.userTeamId), rank: `${ordinalWord(rank)} in the league`, expected: '', gm: 'the GM' }))
+        return
+      }
+      case 'seasonClaim':
+        if (optionId === 'playoffs') {
+          this.fanInterest = Math.min(100, this.fanInterest + 3)
+          this.recordClaim('playoffs', personaId, quote)
+        } else if (optionId === 'building') {
+          this.fanInterest = Math.max(0, this.fanInterest - 3)
+          const sanctioned = this.clubDirection === 'rebuild' || this.boardState.rebuildSanctioned === true
+          this.boardState.confidence = Math.max(0, Math.min(100, this.boardState.confidence + (sanctioned ? 2 : -1)))
+          this.recordClaim('building', personaId, quote)
+        }
+        return
+      case 'blowout':
+        if (optionId === 'goalie' && subject) {
+          subject.morale = Math.max(0, subject.morale - 6)
+          room(1)
+        } else if (optionId === 'credit' && this.userMarket().tier === 3) {
+          this.fanInterest = Math.max(0, this.fanInterest - 1)
+        }
+        return
+      case 'skid': {
+        if (optionId === 'changes') {
+          const slots = this.slotMap(this.userTeam)
+          for (const id of this.userTeam.roster) {
+            const p = this.data.players.get(id)
+            if (!p || p.position === 'G') continue
+            const s = slots.get(id as string)
+            const depth = !s || s.index >= 2
+            p.morale = Math.max(0, Math.min(100, p.morale + (depth ? 3 : -2)))
+          }
+        } else if (optionId === 'patience') {
+          room(3)
+          this.fanInterest = Math.max(0, this.fanInterest - 2)
+        }
+        return
+      }
+    }
+  }
+
+  /**
+   * The owner reads the columns. A critic's column after a losing week costs a
+   * little board confidence (scaled by market, capped per season); an ally's
+   * after a winning week warms the building a touch. This is the "conduct /
+   * media" component the audit asked for — small, measured, and real.
+   */
+  private applyColumnConduct(personaId: PressPersonaId, tilt: Tilt, mood: 'win' | 'loss'): void {
+    const capKey = `conduct|${this.year}`
+    const used = this.mediaLast(capKey) < 0 ? 0 : this.mediaLast(capKey)
+    if (tilt === 'critic' && mood === 'loss') {
+      const hit = Math.max(1, Math.round(this.userMarket().boardEdge))
+      if (used >= 6) return
+      this.boardState.confidence = Math.max(0, this.boardState.confidence - hit)
+      this.setMediaLast(capKey, used + hit)
+    } else if (tilt === 'ally' && mood === 'win') {
+      this.fanInterest = Math.min(100, this.fanInterest + 1)
+    }
+    void personaId
+  }
+
+  /* ─────────────────────────── people in the chronicle ─────────────────────────── */
+
+  /** A trade request enters the permanent record — once per man per season. */
+  private chronicleTradeRequest(playerId: string, cause: string): void {
+    if (this.chronicle.events.some((e) => e.kind === 'tradeRequest' && e.year === this.year && e.playerIds.includes(playerId))) return
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.phase === 'regularSeason' ? this.currentDay : 0, kind: 'tradeRequest',
+      teamIds: [this.userTeamId as string], playerIds: [playerId],
+      headline: `${p.name} asks the ${this.userTeam.name} for a trade, ${cause}`, userInvolved: true,
+    })
+  }
+
+  /** A feud breaks into the open — once per pair per season. */
+  private chronicleFeud(a: string, b: string, cause: string): void {
+    if (this.chronicle.events.some((e) => e.kind === 'feud' && e.year === this.year && e.playerIds.includes(a) && e.playerIds.includes(b))) return
+    const pa = this.data.players.get(asPlayerId(a))
+    const pb = this.data.players.get(asPlayerId(b))
+    if (!pa || !pb) return
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.phase === 'regularSeason' ? this.currentDay : 0, kind: 'feud',
+      teamIds: [this.userTeamId as string], playerIds: [a, b],
+      headline: `${pa.name} and ${pb.name} feud ${cause}`, userInvolved: true,
+    })
+  }
+
+  /** The C changes hands (or is taken away). */
+  private chronicleCaptaincy(newId: string | null, previousId: string | null): void {
+    const np = newId ? this.data.players.get(asPlayerId(newId)) : undefined
+    const pp = previousId ? this.data.players.get(asPlayerId(previousId)) : undefined
+    if (!np && !pp) return
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.phase === 'regularSeason' ? this.currentDay : 0, kind: 'captaincy',
+      teamIds: [this.userTeamId as string],
+      playerIds: [np?.id as string | undefined, pp?.id as string | undefined].filter((x): x is string => !!x),
+      headline: np
+        ? `${np.name} named captain of the ${this.userTeam.name}${pp ? `, succeeding ${pp.name}` : ''}`
+        : `${pp!.name} loses the captaincy of the ${this.userTeam.name}`,
+      details: { media: np ? 'named' : 'stripped' },
+      userInvolved: true,
+    })
+  }
+
+  /* ─────────────────────────── the reader (view) ─────────────────────────── */
+
+  /**
+   * The News reader's beat view. The user's club: the persisted archive. Any
+   * other NHL club: lighter coverage built on demand from live state — the
+   * notebook as the lines stand, the injury report in the club's own words,
+   * and the latest roster moves (view text, never ledgered or saved).
+   */
+  getBeat(teamId?: string): BeatView {
+    const tid = asTeamId(teamId && this.data.teams.has(asTeamId(teamId)) ? teamId : (this.userTeamId as string))
+    const isUser = tid === this.userTeamId
+    const cast = this.castTeam(tid)!
+    const outlet = beatOutletFor(cast)
+    const market = marketProfile(cast)
+    const clubs = this.data.league.teams
+      .map((id) => this.data.teams.get(id))
+      .filter((t): t is Team => !!t && (t.tier === undefined || t.tier === 'nhl'))
+      .map((t) => ({ teamId: t.id as string, name: t.name, abbreviation: t.abbreviation }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    const base = {
+      teamId: tid as string,
+      teamName: cast.name,
+      outlet: outlet.outlet,
+      tagline: outlet.tagline,
+      writer: { name: outlet.writer.name, handle: outlet.writer.handle },
+      authorId: outlet.authorId,
+      market: { tier: market.tier, label: market.label },
+      clubs,
+    }
+    if (isUser) {
+      const rel = this.punditState.pundits.find((r) => r.personaId === 'beat')
+      return {
+        ...base,
+        isUserClub: true,
+        light: false,
+        ...(rel ? { standing: punditStanding(rel.rapport) } : {}),
+        articles: this.media.articles.map((a) => structuredClone(a)),
+      }
+    }
+    return { ...base, isUserClub: false, light: true, articles: this.lightBeatFor(tid) }
+  }
+
+  /** On-demand coverage of another club (pickStable; no ledger, nothing saved). */
+  private lightBeatFor(tid: TeamId): BeatArticle[] {
+    const team = this.data.teams.get(tid)
+    if (!team) return []
+    const day = this.currentDay
+    const out: BeatArticle[] = []
+    const c = this.deskCtx('light-notebook', day, tid, false)
+    if (!c) return out
+    const injured = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && p.injuryStatus !== null)
+    const slots = this.slotMap(team)
+    const dressed = new Set<string>([...slots.keys(), ...team.lines.goalies.filter(Boolean).map((g) => g as string)])
+    const scratches = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && !p.injuryStatus && !dressed.has(p.id as string) && p.position !== 'G')
+    const nb = buildNotebook(c, {
+      lines: this.linesFactsOf(team),
+      changes: [],
+      absent: injured.slice(0, 5).map((p) => ({ name: p.name, official: this.officialFor(p) })),
+      scratches: scratches.map((p) => p.name),
+      chopping: [],
+      coachName: this.getTeamStaff(tid as string).headCoach.name,
+    })
+    if (nb) out.push({ ...nb, id: `light-nb-${tid as string}` })
+    // Form piece: record, streak, the last five, the scorers.
+    const st = this.standings.get(tid)
+    if (st && st.gamesPlayed > 0) {
+      const form = this.recentFormFor(tid, 5)
+      const cf = this.deskCtx('light-form', day, tid, false)!
+      const streak = this.streakOf(tid)
+      out.push({
+        id: `light-form-${tid as string}`, teamId: tid as string, kind: 'feature', year: this.year, day, dateISO: cf.dateISO,
+        headline: `${cf.nick} at ${this.recordOf(tid)}: ${streak >= 3 ? `${streak} straight wins` : streak <= -3 ? `${-streak} straight losses` : 'where things stand'}`,
+        dek: `Last five: ${form.split('').join('-') || 'none yet'}.`,
+        body: [
+          `The ${cf.nick} are ${this.recordOf(tid)} with ${st.points} points.`,
+          this.topScorersLine(team),
+        ].filter(Boolean),
+        act: cf.act,
+      })
+    }
+    // Their roster moves.
+    const moves = this.transactionLedger.items.filter((t) => t.year === this.year && t.teamIds.includes(tid as string)).slice(-6).reverse()
+    if (moves.length > 0) {
+      const cm = this.deskCtx('light-moves', day, tid, false)!
+      const mv = buildMoves(cm, { items: moves.map((t) => ({ kind: t.kind, summary: t.summary })), camp: false })
+      if (mv) out.push({ ...mv, id: `light-mv-${tid as string}` })
+    }
+    return out
   }
 
   /* ────────────────────────── outcome bookkeeping ────────────────────────── */
@@ -5653,6 +7823,7 @@ export class Career {
       if (s.leftGame && player.injuryStatus === null) {
         const injury = injureNow(player, dayRng)
         const teamId = this.teamOf(pid)
+        this.noteInjury(player, injury, teamId)
         if (teamId === this.userTeamId) {
           const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
           this.pushInjuryNews(player, injury, true, this.data.teams.get(oppId)?.name ?? 'the opposition')
@@ -5663,6 +7834,7 @@ export class Career {
     for (const inj of injuries) {
       const p = this.resolve(inj.playerId)
       const teamId = this.teamOf(inj.playerId)
+      this.noteInjury(p, inj.injury, teamId)
       if (teamId === this.userTeamId) {
         const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
         this.pushInjuryNews(p, inj.injury, false, this.data.teams.get(oppId)?.name ?? 'the opposition')
@@ -7550,6 +9722,8 @@ export class Career {
         ? `The ${this.userTeam.name} qualified for the postseason. Best-of-${this.playoffs.bestOf} series, win ${seriesWinsNeeded(this.playoffs)} to advance.`
         : `The ${this.userTeam.name} missed the playoffs. The draft order smiles on the fallen.`
     )
+    // The claims made on the record in the autumn come due (docs/MEDIA-BEAT.md).
+    this.resolveSeasonClaims(made)
     // E1: the farm has its own spring. Resolve it here, so a GM whose NHL club
     // is out still has something at stake — his next roster is playing.
     this.runFarmPostseason()
@@ -7683,6 +9857,7 @@ export class Career {
     let watched: WatchedGame | null = null
     const played = new Set<PlayerId>()
     const day = this.currentDay + 1
+    const beatOutcomes: GameOutcome[] = []
 
     for (const g of games) {
       const home = this.data.teams.get(g.homeTeamId)!
@@ -7707,6 +9882,7 @@ export class Career {
       }
       this.creditPhysicalStats(res)
       applySeriesResult(po, g.seriesId, result)
+      beatOutcomes.push(res)
       for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber))) played.add(pid)
 
       /* ── Wave 4: rivalry registration for playoff games ── */
@@ -7809,6 +9985,10 @@ export class Career {
       this.losingStreaks.set(teamId, won ? 0 : (this.losingStreaks.get(teamId) ?? 0) + 1)
       this.tickTeamLockerRoom(asTeamId(teamId), day, won)
     }
+    // The beat covers every playoff game of yours: grades, injuries, gameday.
+    if (beatOutcomes.some((o) => o.homeTeamId === this.userTeamId || o.awayTeamId === this.userTeamId)) {
+      this.runBeatDay(day, beatOutcomes, true)
+    }
 
     if (po.championTeamId) {
       const champ = this.data.teams.get(po.championTeamId)!
@@ -7890,6 +10070,15 @@ export class Career {
 
   /** Move the offseason forward one stage (or one FA day). Returns true if it moved. */
   advanceOffseason(): boolean {
+    // Exit day is written while the stage still says 'awards'.
+    if (this.phase === 'offseason') this.runBeatOffseason()
+    const moved = this.advanceOffseasonInner()
+    // Summer coverage runs after the stage has moved (docs/MEDIA-BEAT.md).
+    if (this.phase === 'offseason') this.runBeatOffseason()
+    return moved
+  }
+
+  private advanceOffseasonInner(): boolean {
     // #184: the trade market keeps moving through the summer — any proposal a GM
     // is sitting on gets its answer as the offseason days tick by.
     this.resolvePendingTrades()
@@ -9599,6 +11788,11 @@ export class Career {
       .filter((e) => e.kind === 'coachFired' || e.kind === 'coachHired' || e.kind === 'gmChange')
       .filter((e) => e.teamIds.some((t) => nhlIds.has(t)))
       .map((e) => ({ kind: e.kind as 'coachFired' | 'coachHired' | 'gmChange', teamId: e.teamIds.find((t) => nhlIds.has(t))!, headline: e.headline }))
+    /* the season off the ice at your club (docs/MEDIA-BEAT.md) */
+    const OFF_ICE = new Set(['tradeRequest', 'shopped', 'confrontation', 'captaincy', 'feud', 'hotSeat', 'voteOfConfidence', 'claimResolved'])
+    const offIce = windowEvents
+      .filter((e) => OFF_ICE.has(e.kind) && e.userInvolved)
+      .map((e) => ({ kind: e.kind as string, headline: e.headline, ...(e.playerIds[0] ? { playerId: e.playerIds[0] } : {}) }))
 
     return {
       year: Y,
@@ -9625,6 +11819,7 @@ export class Career {
       championHistory,
       markHistory,
       coachChanges,
+      ...(offIce.length > 0 ? { offIce } : {}),
       told: [...this.wrapped.told],
       hindsight: this.gatherWrappedHindsight(lineOf, awardOf, nhlClub, wp),
     }
@@ -11494,6 +13689,8 @@ export class Career {
         // Cut day: the decision screen is now live and the gate holds for the GM.
         break
     }
+    // The beat is at camp every day (docs/MEDIA-BEAT.md).
+    this.runBeatCampDay(day)
   }
 
   /** Resolve cut day. `placements` overrides the coach's plan per player;
@@ -16526,8 +18723,9 @@ export class Career {
     const kicker = ` Good deal? ${partner.abbreviation} think they won it too. That's usually how the interesting ones look.`
     const body = `${lead}${cost}${kicker}`
 
-    const persona =
-      PRESS_PERSONA_NAMES[Career.PRESS_PERSONA_ROTATION[this.pressCounter++ % Career.PRESS_PERSONA_ROTATION.length]]
+    const persona = this.personaMeta(
+      Career.PRESS_PERSONA_ROTATION[this.pressCounter++ % Career.PRESS_PERSONA_ROTATION.length]!,
+    )
     this.pushNews('trade', headline, body, {
       teamId: partnerId as string,
       ...(inBest ? { playerId: inBest.id as string } : {}),
@@ -19126,6 +21324,7 @@ export class Career {
     if (!team) return { ok: false, message: 'No team.' }
     const ts = this.getTeamStaff(this.userTeamId as string)
     const outgoing = ts.headCoach.name
+    const outgoingId = ts.headCoach.id
 
     // Caretaker: a modest interim coach, deterministically generated.
     const rng = new Rng(deriveSeed(this.seed, Career.COACH_MARKET_NS, this.year * 100 + 9000 + this.currentDay))
@@ -19162,6 +21361,7 @@ export class Career {
       details: { window: this.phase === 'regularSeason' ? 'midseason' : 'offseason' },
       userInvolved: true,
     })
+    this.mediaOnCoachFired(outgoingId, outgoing)
     return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
@@ -23347,10 +25547,12 @@ export class Career {
   setCaptain(playerId: string | null): { ok: boolean; message?: string } {
     const team = this.userTeam
     const lr = this.lockerRooms.get(this.userTeamId)
+    const previous = (team.captainId as string | undefined) ?? null
     if (playerId === null) {
       team.captainId = undefined
       if (lr) lr.captainId = null
       this.syncCaptainOverride(this.userTeamId)
+      if (previous) this.chronicleCaptaincy(null, previous)
       return { ok: true }
     }
     const p = this.data.players.get(asPlayerId(playerId))
@@ -23363,6 +25565,7 @@ export class Career {
       .slice(0, 2)
     this.syncCaptainOverride(this.userTeamId)
     p.morale = Math.max(0, Math.min(100, p.morale + 5))
+    if (previous !== playerId) this.chronicleCaptaincy(playerId, previous)
     this.pushNews('league', `${p.name} named captain`,
       `${p.name} will wear the C for the ${team.name}. A vote of confidence from the front office.`,
       { playerId, teamId: this.userTeamId as string })
@@ -24371,6 +26574,7 @@ export class Career {
         pressConference: this.pressConference ? structuredClone(this.pressConference) : null,
         pundits: structuredClone(this.punditState),
       },
+      media: structuredClone(this.media),
       staff: this.staff ? structuredClone(this.staff) : undefined,
       teamStaff: this.teamStaffMap.size > 0
         ? [...this.teamStaffMap.entries()].map(([k, v]) => [k, structuredClone(v)] as [string, TeamStaff])
@@ -24623,6 +26827,9 @@ export class Career {
       // backfills any persona a stored state is missing.
       career.punditState = normalizePundits(snapshot.pressState.pundits)
     }
+    // Media layer (docs/MEDIA-BEAT.md) — additive; an old save starts empty
+    // and the beat begins writing from the next day.
+    career.media = normalizeMediaState(snapshot.media)
 
     // Restore plumbing module state (all optional for backward compat).
     if (snapshot.staff) {

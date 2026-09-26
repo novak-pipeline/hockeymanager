@@ -31,15 +31,17 @@ import { Icons } from '../components/icons'
 import { fmtDate } from '../components/format'
 import { useNav } from '../components/NavContext'
 import { ScreenHeader, ScreenStateNotices } from '../components/ui'
+import { BeatReader } from '../components/BeatReader'
 import { useClient, useScreenData } from '../hooks/useSim'
 
-type Tab = 'foryou' | 'following' | 'media' | 'wire'
+type Tab = 'foryou' | 'following' | 'media' | 'wire' | 'beat'
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
   { id: 'foryou', label: 'For you', hint: 'Everything the league is talking about' },
   { id: 'following', label: 'Following', hint: 'Only the accounts you follow' },
   { id: 'media', label: 'Media', hint: 'Reporters, columnists and models' },
   { id: 'wire', label: 'Wire', hint: 'The GM terminal — official and back-channel' },
+  { id: 'beat', label: 'The Beat', hint: 'Your club’s daily beat outlet: notebooks, grades, the mailbag' },
 ]
 
 /** What each account IS, and the colour its verified badge is drawn in. The
@@ -48,6 +50,7 @@ const TABS: Array<{ id: Tab; label: string; hint: string }> = [
 const KIND_META: Record<string, { label: string; color: string }> = {
   player:  { label: 'Player',       color: 'var(--cyan)' },
   club:    { label: 'Club',         color: 'var(--green)' },
+  beat:    { label: 'Beat',         color: 'var(--red)' },
   gm:      { label: 'Front Office', color: 'var(--orange)' },
   insider: { label: 'Insider',      color: 'var(--pink)' },
   analyst: { label: 'Journalist',   color: 'var(--amber)' },
@@ -97,11 +100,13 @@ function stamp(post: { day: number; year: number; dateISO?: string }, today: num
   return fmtDate(iso).replace(/ \d{4}$/, '')
 }
 
-export function FeedScreen(): JSX.Element {
+export function FeedScreen(props: { beatTeamId?: string } = {}): JSX.Element {
   const client = useClient()
   const nav = useNav()
-  const [tab, setTab] = useState<Tab>('foryou')
+  // Arriving from a club's page opens that club's beat.
+  const [tab, setTab] = useState<Tab>(props.beatTeamId ? 'beat' : 'foryou')
   const [account, setAccount] = useState<string | null>(null)
+  const [article, setArticle] = useState<string | null>(null)
   const { data, loading, error, refetch } = useScreenData<FeedView>(
     () => client.getFeed(),
     (r) => (r.type === 'feed' ? r.feed : null)
@@ -135,6 +140,10 @@ export function FeedScreen(): JSX.Element {
           onTeam={(id) => nav.navigate('teamInfo', { teamId: id })}
           onPlayer={(id) => nav.navigate('player', { playerId: id })}
           onFollow={toggleFollow}
+          article={article}
+          {...(props.beatTeamId ? { beatTeamId: props.beatTeamId } : {})}
+          onArticle={(id) => { setArticle(id); setTab('beat'); setAccount(null) }}
+          onArticleShown={() => setArticle(null)}
         />
       )}
     </section>
@@ -150,6 +159,10 @@ function FeedBody(props: {
   onTeam: (teamId: string) => void
   onPlayer: (playerId: string) => void
   onFollow: (authorId: string) => void
+  article: string | null
+  beatTeamId?: string
+  onArticle: (articleId: string) => void
+  onArticleShown: () => void
 }): JSX.Element {
   const { feed, tab, account } = props
   const following = useMemo(() => new Set(feed.following ?? []), [feed.following])
@@ -221,7 +234,13 @@ function FeedBody(props: {
           />
         )}
 
-        {posts.length === 0 ? (
+        {tab === 'beat' && !account ? (
+          <BeatReader
+            articleId={props.article}
+            onArticleShown={props.onArticleShown}
+            {...(props.beatTeamId ? { teamId: props.beatTeamId } : {})}
+          />
+        ) : posts.length === 0 ? (
           <EmptyTimeline tab={tab} account={!!account} followed={following.size} />
         ) : (
           posts.map((p) => (
@@ -240,6 +259,7 @@ function FeedBody(props: {
               onAccount={() => p.authorId && props.setAccount(p.authorId)}
               onTeam={props.onTeam}
               onPlayer={props.onPlayer}
+              onArticle={props.onArticle}
             />
           ))
         )}
@@ -283,6 +303,7 @@ function PostCard(props: {
   onAccount: () => void
   onTeam: (teamId: string) => void
   onPlayer: (playerId: string) => void
+  onArticle: (articleId: string) => void
 }): JSX.Element {
   const { post, author } = props
   const meta = kindMeta(author?.kind ?? 'wire')
@@ -339,6 +360,11 @@ function PostCard(props: {
             <Icon size={14}><Icons.Trade /></Icon> {fmtCount(post.engagement?.reposts ?? 0)}
           </span>
           <span className="feed-spacer" />
+          {post.articleId && (
+            <button className="feed-link" onClick={() => props.onArticle(post.articleId!)} title="Open the article in The Beat">
+              <Icon size={14}><Icons.News /></Icon> read
+            </button>
+          )}
           {post.playerId && (
             <button className="feed-link" onClick={() => props.onPlayer(post.playerId!)}>
               <Icon size={14}><Icons.Person /></Icon> profile

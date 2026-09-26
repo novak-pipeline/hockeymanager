@@ -64,8 +64,10 @@ describe('renderFallback — basic contract', () => {
     const art = renderFallback(weeklyJob())
     expect(art.headline.length).toBeGreaterThan(5)
     expect(art.body.length).toBeGreaterThan(100)
-    expect(art.byline).toContain('Sam Carver')
-    expect(art.byline).toContain('The Daily Gazette')
+    // The beat byline is the club's own beat writer (career overrides it with
+    // the named writer); it is never the columnist Sam Carver (G11).
+    expect(art.byline).toContain('—')
+    expect(art.byline).not.toContain('Sam Carver')
   })
 
   it('is deterministic: same job renders byte-identical output', () => {
@@ -101,7 +103,7 @@ describe('renderFallback — basic contract', () => {
     const beat = renderFallback(weeklyJob('pj1', 'beat'))
     const national = renderFallback(weeklyJob('pj1', 'national'))
     const homer = renderFallback(weeklyJob('pj1', 'homer'))
-    expect(beat.byline).toContain('Sam Carver')
+    expect(beat.byline).not.toContain('Sam Carver')
     expect(national.byline).toContain('Vic Mercer')
     expect(homer.byline).toContain('990 The Fan')
     // All three must differ.

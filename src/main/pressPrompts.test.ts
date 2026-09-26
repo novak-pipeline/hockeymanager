@@ -69,7 +69,7 @@ describe('buildSystemPrompt', () => {
   })
 
   it('each persona contains its name and outlet', () => {
-    expect(buildSystemPrompt('beat')).toContain('Sam Carver')
+    expect(buildSystemPrompt('beat')).toContain('beat reporter')
     expect(buildSystemPrompt('national')).toContain('Vic Mercer')
     expect(buildSystemPrompt('homer')).toContain('Bobby')
   })
@@ -225,7 +225,7 @@ describe('parseGrade', () => {
 
 describe('personaByline', () => {
   it('returns "Name — Outlet" for each persona', () => {
-    expect(personaByline('beat')).toBe('Sam Carver — The Daily Gazette')
+    expect(personaByline('beat')).not.toContain('Sam Carver')
     expect(personaByline('national')).toBe('Vic Mercer — National Hockey Wire')
     expect(personaByline('homer')).toContain('990 The Fan')
   })

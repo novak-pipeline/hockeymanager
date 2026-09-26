@@ -101,8 +101,10 @@ describe('pundits — standing + reads', () => {
   it('reads are non-empty and name the pundit', () => {
     const s = seedPundits()
     applyPunditAnswer(s, 'beat', 'praise', 1)
-    const read = punditRead(relationOf(s, 'beat'))
-    expect(read).toContain('Sam Carver')
+    const read = punditRead(relationOf(s, 'national'))
+    expect(read).toContain('Vic Mercer')
+    // The beat writer is per club: the caller passes his name.
+    expect(punditRead(relationOf(s, 'beat'), 'Dana Kowal')).toContain('Dana Kowal')
     expect(read.length).toBeGreaterThan(10)
   })
 

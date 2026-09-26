@@ -6,7 +6,8 @@
  * Design principles:
  *  - Multiple template variants per kind × persona, selected by a stable hash of
  *    (teamAbbr + year + day + pressCounter) so repeat pieces differ naturally.
- *  - Three distinct voices: Sam Carver (beat — measured/close), Vic Mercer
+ *  - Three distinct voices: the club's beat writer (beat — measured/close;
+ *    a different person per club, see mediaCast.ts), Vic Mercer
  *    (national — analytical/sharp), Bobby "Buzz" Doyle (homer — excitable/warm).
  *  - Real prose: a genuine headline + lede + 2-4 body paragraphs, all woven from
  *    the fact sheet. Reads like The Athletic / a real beat desk, not a mad-lib.
@@ -22,6 +23,7 @@ import {
 } from './factSheet'
 import type { ContentVariant } from './contentEngine'
 import { pickStable, possessive, renderStable } from './prose'
+import { TILT_FRAME } from './beatPools'
 
 export interface FallbackArticle {
   headline: string
@@ -1695,6 +1697,43 @@ const TENTPOLE_TEMPLATES: Record<string, Record<PressPersonaId, TentpoleTemplate
  * naturally without any external randomness.
  */
 export function renderFallback(job: PressJob): FallbackArticle {
+  return finishArticle(job, renderFallbackRaw(job))
+}
+
+const PARA_BREAK = '\n\n'
+
+/** Kinds where the writer's standing with the GM frames the piece. */
+const TILTED_KINDS = new Set(['weekly', 'monthlyReport', 'seasonReview', 'deadline'])
+
+/**
+ * The last pass over every fallback article:
+ *  - the dateline names the club's real city (the templates were written with
+ *    a placeholder "HARBOR CITY" that shipped in every league);
+ *  - RAPPORT frames the piece (docs/MEDIA-BEAT.md): an ally's column gives the
+ *    front office the benefit of the doubt, a critic's makes the week a
+ *    verdict on it. This is the behaviour the Media Circuit promises.
+ */
+function finishArticle(job: PressJob, art: FallbackArticle): FallbackArticle {
+  const sheet = job.factSheet
+  let body = art.body
+  if (sheet.team.city) body = body.replace(/HARBOR CITY/g, sheet.team.city.toUpperCase())
+  const tilt = sheet.tilt
+  if (tilt && tilt !== 'neutral' && TILTED_KINDS.has(sheet.kind)) {
+    const { wins, losses } = recentRecord(sheet)
+    const mood = losses > wins ? 'loss' : 'win'
+    const frame = renderStable(TILT_FRAME, { tilt, mood }, `${job.id}|${sheet.year}|${sheet.day}|tilt`, {
+      team: sheet.team.name,
+    })
+    if (frame) {
+      const paras = body.split(PARA_BREAK)
+      paras.splice(Math.min(1, paras.length), 0, frame)
+      body = paras.join(PARA_BREAK)
+    }
+  }
+  return { ...art, body }
+}
+
+function renderFallbackRaw(job: PressJob): FallbackArticle {
   const sheet = job.factSheet
   const persona = job.personaId
 

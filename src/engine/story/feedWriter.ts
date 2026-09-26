@@ -42,6 +42,7 @@ const VOICE: Record<FeedAuthor['kind'], string> = {
   player: 'an NHL player posting on his own account — first person, casual, emoji welcome, never corporate',
   gm: 'a team general manager speaking for the front office — confident PR, measured, on the record',
   club: "an official club account run by the team's comms staff — announcement voice, short, hashtag at the end, never a take",
+  beat: "a club's daily beat writer at an independent local outlet — at every practice, conversational, blunt, first person when it fits, facts first",
 }
 
 const MAX_WORDS = 55

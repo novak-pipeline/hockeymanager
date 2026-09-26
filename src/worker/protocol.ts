@@ -17,6 +17,9 @@ import type { BoardMeetingScene } from '@engine/career/boardMeeting'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
+/* MEDIA-BEAT (2026-09, additive): the daily beat outlet's reader view. */
+export type { BeatView, BeatArticle, BeatKind, BeatSection, BeatGrade, BeatQA } from '@engine/story/beatDesk'
+import type { BeatView } from '@engine/story/beatDesk'
 export type {
   AgmReportView,
   AhlSquadView,
@@ -505,8 +508,13 @@ export type WorkerRequestBody =
   | { type: 'skipPressJob'; jobId: string }
   /** Poll for a pending press-conference question, if any. */
   | { type: 'getPresser' }
-  /** Submit the user's press-conference answer. */
-  | { type: 'answerPresser'; answer: string; tone: PressTone }
+  /** Submit the user's press-conference answer. `optionId` (additive,
+   *  MEDIA-BEAT) picks one of the presser's authored answers; 'delegate'
+   *  sends the PR director instead (no quote, no effect). */
+  | { type: 'answerPresser'; answer: string; tone: PressTone; optionId?: string }
+  /** MEDIA-BEAT (additive): a club's beat outlet — the user's persisted archive,
+   *  or lighter on-demand coverage of any other NHL club. */
+  | { type: 'getBeat'; teamId?: string }
   /* ── EHM plumbing modules (Wave 3) ── */
   /** AGM depth chart and category bests (EHM Team > Report tab). */
   | { type: 'getReport' }
@@ -629,6 +637,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'yearbook'; yearbook: WrappedYearbookView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
   | { type: 'feed'; feed: FeedView }
+  | { type: 'beat'; beat: BeatView }
   | { type: 'negotiation'; negotiation: NegotiationView | null; signed?: boolean; message?: string }
   | { type: 'faHub'; faHub: FaHubView }
   | { type: 'devCamp'; devCamp: DevCampView | null }

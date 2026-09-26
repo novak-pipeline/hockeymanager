@@ -28,9 +28,11 @@ export interface FeedAuthor {
   handle: string
   /** Voice: insider = terse facts, analyst = takes, stats = numbers, wire = official.
    *  FEED-V2-1 adds dynamic voices: player = the men themselves, gm = front offices.
-   *  F5 adds club = the official team account. The UI colour-codes the verified
-   *  badge by this, so a new kind must also get a colour there. */
-  kind: 'insider' | 'analyst' | 'stats' | 'wire' | 'player' | 'gm' | 'club'
+   *  F5 adds club = the official team account. MEDIA-BEAT adds beat = a club's
+   *  daily beat writer (his link posts open the article in the News reader).
+   *  The UI colour-codes the verified badge by this, so a new kind must also
+   *  get a colour there. */
+  kind: 'insider' | 'analyst' | 'stats' | 'wire' | 'player' | 'gm' | 'club' | 'beat'
   outlet: string
   /** One line under the name on a profile/who-to-follow card. Optional/additive. */
   bio?: string
@@ -52,6 +54,7 @@ export function authorFollowers(author: FeedAuthor): number {
     stats: [90_000, 260_000],
     wire: [1_100_000, 2_200_000],
     club: [420_000, 1_800_000],
+    beat: [18_000, 90_000],
     gm: [40_000, 190_000],
     player: [25_000, 900_000],
   }
@@ -68,9 +71,11 @@ export const FEED_AUTHORS: Record<string, FeedAuthor> = {
     bio: 'Breaking it first, then explaining it. Twenty-two years on the beat. DMs open, sources protected.',
   },
   analyst: {
+    // Sam Carver is the COLUMNIST — opinion and verdicts, never practice
+    // notes. Each club's daily beat is its own writer (mediaCast.ts).
     id: 'analyst', name: 'Sam Carver', handle: 'CarverNotes', kind: 'analyst',
     outlet: 'The Daily Gazette',
-    bio: 'Columns, arguments and the occasional apology. If you disagree you are probably right and I will not admit it.',
+    bio: 'Columnist. Columns, arguments and the occasional apology. If you disagree you are probably right and I will not admit it.',
   },
   stats: {
     id: 'stats', name: 'PuckModel', handle: 'puckmodel', kind: 'stats',
