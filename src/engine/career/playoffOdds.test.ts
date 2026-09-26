@@ -42,7 +42,11 @@ describe('playoff odds — the forecast answers to results', () => {
     const { before, after } = oddsBeforeAndAfter(15)
     expect(after.rows[0]!.gamesPlayed).toBeGreaterThanOrEqual(15)
 
-    const byPoints = [...after.rows].sort((a, b) => b.points - a.points)
+    // The points leader among clubs whose opening odds had room to rise — a
+    // preseason 99% favourite cannot gain five points of odds by winning.
+    const byPoints = [...after.rows]
+      .filter((r) => before.get(r.teamId)!.pct <= 90)
+      .sort((a, b) => b.points - a.points)
     const leader = byPoints[0]!
     // The leader is winning; the forecast has to notice.
     expect(leader.playoffPct).toBeGreaterThan(before.get(leader.teamId)!.pct + 5)
