@@ -305,6 +305,23 @@ const SLO_FIRST = ['Luka', 'Jan', 'Žiga', 'Anže', 'Nejc', 'Rok', 'Tilen', 'Mat
 const SLO_LAST = ['Horvat', 'Kranjc', 'Zupan', 'Potočnik', 'Kovačič', 'Mlakar', 'Vidmar', 'Golob', 'Rozman', 'Jerše']
 const SLO_TOWNS = ['Ljubljana, SLO', 'Jesenice, SLO', 'Bled, SLO', 'Kranj, SLO', 'Celje, SLO']
 
+/* Morphological generators widen the big pools so a 90-kid Canadian cohort
+ * does not repeat surnames. Stems are common English/French/Slavic word parts,
+ * checked against FAMOUS_HOCKEY_SURNAMES like everything else. */
+const ANGLO_STEMS = ['Ash', 'Brad', 'Brook', 'Kel', 'Hol', 'Whit', 'Fair', 'Hart', 'Lang', 'Mor', 'Pen', 'Ried', 'Stan', 'Thorn', 'Wal', 'Win', 'Ald', 'Bar', 'Carl', 'Dal', 'Eller', 'Farn', 'Gold', 'Hazel', 'Kings', 'Lock', 'Mill', 'Nor', 'Red', 'Shel', 'Stock', 'Wood', 'Brom', 'Crom', 'Hew', 'Ing', 'Rut', 'Tal', 'Wes', 'Yard']
+const ANGLO_ENDS = ['ley', 'ton', 'ford', 'wood', 'by', 'well', 'field', 'worth', 'man', 'ridge', 'dale', 'combe', 'stead', 'more', 'ham', 'wick', 'er', 'land', 'brook', 'croft']
+const angloSurname = (r: NamePicker): string => {
+  if (r.next() < 0.2) return `Mac${pick(r, ['Allister', 'Donnell', 'Kinnon', 'Lellan', 'Quarrie', 'Tavish', 'Gillivray', 'Iver', 'Aulay', 'Ewan', 'Crimmon', 'Farlane'])}`
+  return pick(r, ANGLO_STEMS) + pick(r, ANGLO_ENDS)
+}
+const QC_STEMS = ['Beau', 'Belle', 'Char', 'Chev', 'Des', 'Dubr', 'Fer', 'Gau', 'Lab', 'Lan', 'Mar', 'Mont', 'Pel', 'Riv', 'Rob', 'Sau', 'Ther', 'Val', 'Bour', 'Cour']
+const QC_ENDS = ['champ', 'chesne', 'lette', 'rault', 'ville', 'rier', 'geau', 'bois', 'mont', 'aire', 'ette', 'lier', 'nault', 'deau', 'reau']
+const quebecSurname = (r: NamePicker): string => pick(r, QC_STEMS) + pick(r, QC_ENDS)
+const RUS_STEMS = ['Belov', 'Grach', 'Dubin', 'Kozl', 'Lav', 'Mel', 'Nechay', 'Pashk', 'Rog', 'Sidor', 'Stolyar', 'Tuman', 'Fedot', 'Khar', 'Shub', 'Yashin', 'Zhil', 'Bobr', 'Vetr', 'Gusl', 'Kudr', 'Lyub', 'Mikh', 'Ozer', 'Pril', 'Sukh', 'Tereh', 'Chud']
+const russianSurname = (r: NamePicker): string => pick(r, RUS_STEMS) + pick(r, ['ov', 'ev', 'in', 'kin', 'ichev', 'ovsky', 'yakov', 'ilov', 'enko'])
+const CZE_STEMS = ['Kopř', 'Hruš', 'Vrb', 'Sk', 'Kalous', 'Trn', 'Holub', 'Dvor', 'Brabec', 'Lešk', 'Mrk', 'Pech', 'Rys', 'Stran', 'Tům', 'Vacul', 'Zvoník', 'Jíl', 'Klím', 'Pták']
+const czechSurname = (r: NamePicker): string => pick(r, CZE_STEMS) + pick(r, ['a', 'ek', 'ík', 'ec', 'ák', 'ovský', 'íček', 'ka', 'ář'])
+
 const swedishSurname = (r: NamePicker): string => {
   if (r.next() < 0.35) return `${pick(r, SWE_PATRO)}sson`
   const stem = pick(r, SWE_STEMS)
@@ -327,13 +344,13 @@ const finnishSurname = (r: NamePicker): string => {
 }
 
 export const NATION_POOLS: Record<string, NationPool> = {
-  'Canada': { nation: 'Canada', first: CAN_FIRST, last: CAN_LAST, towns: CAN_TOWNS },
-  'Canada-QC': { nation: 'Canada', first: QC_FIRST, last: QC_LAST, towns: QC_TOWNS },
-  'United States': { nation: 'United States', first: USA_FIRST, last: USA_LAST, towns: USA_TOWNS },
+  'Canada': { nation: 'Canada', first: CAN_FIRST, last: CAN_LAST, surname: angloSurname, towns: CAN_TOWNS },
+  'Canada-QC': { nation: 'Canada', first: QC_FIRST, last: QC_LAST, surname: quebecSurname, towns: QC_TOWNS },
+  'United States': { nation: 'United States', first: USA_FIRST, last: USA_LAST, surname: angloSurname, towns: USA_TOWNS },
   'Sweden': { nation: 'Sweden', first: SWE_FIRST, last: [], surname: swedishSurname, towns: SWE_TOWNS },
   'Finland': { nation: 'Finland', first: FIN_FIRST, last: [], surname: finnishSurname, towns: FIN_TOWNS },
-  'Russia': { nation: 'Russia', first: RUS_FIRST, last: RUS_LAST, towns: RUS_TOWNS },
-  'Czechia': { nation: 'Czechia', first: CZE_FIRST, last: CZE_LAST, towns: CZE_TOWNS },
+  'Russia': { nation: 'Russia', first: RUS_FIRST, last: RUS_LAST, surname: russianSurname, towns: RUS_TOWNS },
+  'Czechia': { nation: 'Czechia', first: CZE_FIRST, last: CZE_LAST, surname: czechSurname, towns: CZE_TOWNS },
   'Slovakia': { nation: 'Slovakia', first: SVK_FIRST, last: SVK_LAST, towns: SVK_TOWNS },
   'Germany': { nation: 'Germany', first: GER_FIRST, last: GER_LAST, towns: GER_TOWNS },
   'Switzerland': { nation: 'Switzerland', first: SUI_FIRST, last: SUI_LAST, towns: SUI_TOWNS },
@@ -365,7 +382,9 @@ export function generateNationName(
   let name = ''
   for (let attempt = 0; attempt < 12; attempt++) {
     const first = pick(r, pool.first)
-    const last = pool.surname && (pool.last.length === 0 || r.next() < 0.8) ? pool.surname(r) : pick(r, pool.last.length ? pool.last : ['Nordin'])
+    // Authored pools carry the flavour; the generators carry the variety.
+    const genShare = pool.last.length === 0 ? 1 : pool.nation === 'Sweden' || pool.nation === 'Finland' ? 0.8 : 0.45
+    const last = pool.surname && r.next() < genShare ? pool.surname(r) : pick(r, pool.last.length ? pool.last : ['Nordin'])
     if (FAMOUS_HOCKEY_SURNAMES.has(last)) continue
     name = `${first} ${last}`
     if (taken && taken.has(name)) continue

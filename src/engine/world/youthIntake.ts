@@ -97,8 +97,8 @@ export function youthProfileOf(comp: Pick<Competition, 'abbrev' | 'name'>): Leag
  * mix (see file header) given each nation's junior capacity in the world.
  */
 export const NATION_TALENT: Readonly<Record<string, number>> = {
-  'Canada': 1.85, 'Canada-QC': 1.55, 'United States': 1.05, 'Sweden': 1.9, 'Finland': 1.2,
-  'Russia': 0.35, 'Czechia': 0.75, 'Slovakia': 0.3, 'Germany': 0.25, 'Switzerland': 0.9,
+  'Canada': 1.6, 'Canada-QC': 1.35, 'United States': 1.0, 'Sweden': 2.2, 'Finland': 1.35,
+  'Russia': 0.38, 'Czechia': 0.9, 'Slovakia': 0.4, 'Germany': 0.25, 'Switzerland': 1.4,
   'Latvia': 0.55, 'Norway': 0.5, 'Denmark': 0.45, 'Austria': 0.4, 'Belarus': 0.6,
   'Kazakhstan': 0.3, 'Slovenia': 0.35,
 }
@@ -108,8 +108,8 @@ export const NATION_TALENT: Readonly<Record<string, number>> = {
  * world birth-cohort (~1,000 kids). Anchored to the real imported 2026 class.
  */
 const PA_QUANTILES: ReadonlyArray<readonly [number, number]> = [
-  [0, 97], [0.001, 91], [0.004, 82], [0.01, 74], [0.03, 64], [0.06, 58], [0.1, 54],
-  [0.2, 50], [0.35, 46], [0.5, 43], [0.75, 39], [0.9, 36], [1, 31],
+  [0, 97], [0.001, 91], [0.004, 81], [0.01, 72], [0.03, 62], [0.06, 57], [0.1, 52],
+  [0.2, 48], [0.35, 45], [0.5, 43], [0.75, 39], [0.9, 36], [1, 31],
 ]
 
 /** Interpolated ceiling for a top fraction in [0,1]. */

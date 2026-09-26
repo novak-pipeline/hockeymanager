@@ -40,6 +40,7 @@ interface SeasonReport {
   }
   juniors: Record<string, { teams: number; avgRoster: number; ages: Record<number, number> }>
   world?: { champions: string[]; intl: string[]; careerRowsAdded: number }
+  census?: Record<string, number>
 }
 
 function q(a: number[], f: number): number {
@@ -127,6 +128,23 @@ describe.skipIf(!process.env.WR_RUN || !existsSync(MOD_DB))('world renewal harne
             intl: wh.international.filter((e) => e.year === y0).map((e) => `${e.kind}:${e.gold}/${e.silver}/${e.bronze}`),
             careerRowsAdded: [...career.data.players.values()].filter((p) => p.careerHistory?.[0]?.year === y0).length,
           }
+        }
+        {
+          const rostered = new Set<string>()
+          for (const t of career.data.teams.values()) for (const id of t.roster) rostered.add(id as string)
+          const fa = new Set((career as unknown as { faPool: string[] }).faPool.map((x) => x as string))
+          const c: Record<string, number> = {}
+          const bump = (k: string): void => { c[k] = (c[k] ?? 0) + 1 }
+          let hist = 0
+          for (const p of career.data.players.values()) {
+            const gen = p.externalId?.startsWith('gen-') ? 'gen' : 'imp'
+            const st = p.retiredYear !== undefined ? 'retired' : rostered.has(p.id as string) ? 'rostered' : fa.has(p.id as string) ? 'fa' : 'limbo'
+            bump(gen + ':' + st)
+            hist += p.careerHistory?.length ?? 0
+          }
+          c.careerRows = hist
+          c.faPool = fa.size
+          cur!.census = c
         }
         reports.push(cur!)
         console.log(JSON.stringify(cur))

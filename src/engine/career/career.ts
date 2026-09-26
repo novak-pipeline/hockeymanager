@@ -7186,6 +7186,25 @@ export class Career {
    * year forever; with it the world's population stays flat.
    */
   private pruneWorldWashouts(): void {
+    // A world free agent nobody has signed for a full year — never an NHL/AHL
+    // player in this save, no rights held — leaves professional hockey. Without
+    // this the unsigned dregs of every European and minor league pile up in the
+    // free-agent pool forever (+~600 a season once the juniors run full).
+    {
+      const nhlLabel = this.historyLeagueLabel()
+      const stay: PlayerId[] = []
+      for (const id of this.faPool) {
+        const p = this.data.players.get(id)
+        if (p && p.retiredYear === undefined && p.stats.length === 0 && !p.rightsTeamId &&
+          p.age >= 22 && p.contract.expiryYear <= this.year - 2 &&
+          !(nhlLabel !== null && (p.careerHistory ?? []).some((h) => h.league === nhlLabel && h.gamesPlayed > 0))) {
+          p.retiredYear = this.year - 1
+          continue
+        }
+        stay.push(id)
+      }
+      this.faPool = stay
+    }
     const keep = new Set<string>()
     for (const a of this.recordsState.awards) keep.add(a.playerId)
     for (const l of this.recordsState.retiredLegends) keep.add(l.playerId)
@@ -7194,12 +7213,16 @@ export class Career {
     for (const id of this.faPool) keep.add(id as string)
     const wh = this.data.league.worldHistory
     if (wh) for (const [, r] of wh.records) { if (r.points) keep.add(r.points.playerId); if (r.goals) keep.add(r.goals.playerId) }
+    const label = this.historyLeagueLabel()
     const doomed = new Set<string>()
     for (const p of this.data.players.values()) {
       if (p.retiredYear === undefined || p.retiredYear > this.year - 1) continue
-      if (!p.externalId?.startsWith('gen-')) continue
       if (p.nhlDrafted || p.rightsTeamId || p.stats.length > 0) continue
       if (keep.has(p.id as string)) continue
+      // Imported players are forgotten only if they never played in OUR league
+      // (a real NHL career stays in the record book forever).
+      if (!p.externalId?.startsWith('gen-') && label !== null &&
+        (p.careerHistory ?? []).some((h) => h.league === label && h.gamesPlayed > 0)) continue
       doomed.add(p.id as string)
     }
     if (doomed.size === 0) return
