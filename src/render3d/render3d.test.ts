@@ -24,7 +24,7 @@ import {
   clampSpeed,
   type Spring1D,
 } from './math'
-import type { GameStream } from '@domain'
+import { asPlayerId, type GameStream } from '@domain'
 
 // ── coordinate helpers ────────────────────────────────────────────────────────
 
@@ -205,13 +205,14 @@ describe('jerseyNumber', () => {
 // ── event cue extraction ──────────────────────────────────────────────────
 
 describe('extractCues', () => {
+  const P = asPlayerId
   const stream: GameStream = [
-    { type: 'shot', period: 1, t: 300, shooter: 'p1', from: { x: 0.5, y: 0.1 }, target: { x: 0.89, y: 0 }, danger: 0.7 },
-    { type: 'save', period: 1, t: 300, goalie: 'g1', rebound: false, pos: { x: 0.89, y: 0 } },
-    { type: 'goal', period: 2, t: 600, scorer: 'p2', assists: [], strength: 'ev', pos: { x: -0.89, y: 0.1 } },
-    { type: 'hit', period: 3, t: 100, by: 'p3', on: 'p4', pos: { x: 0, y: 0 } },
+    { type: 'shot', period: 1, t: 300, shooter: P('p1'), from: { x: 0.5, y: 0.1 }, target: { x: 0.89, y: 0 }, danger: 0.7 },
+    { type: 'save', period: 1, t: 300, goalie: P('g1'), rebound: false, pos: { x: 0.89, y: 0 } },
+    { type: 'goal', period: 2, t: 600, scorer: P('p2'), assists: [], strength: 'ev', pos: { x: -0.89, y: 0.1 } },
+    { type: 'hit', period: 3, t: 100, by: P('p3'), on: P('p4'), pos: { x: 0, y: 0 } },
     // Ignored event types
-    { type: 'faceoff', period: 1, t: 0, zone: 'neutral', winner: 'p1', pos: { x: 0, y: 0 } },
+    { type: 'faceoff', period: 1, t: 0, zone: 'neutral', winner: P('p1'), pos: { x: 0, y: 0 } },
   ]
 
   it('extracts shot cue with correct absT', () => {
@@ -264,20 +265,29 @@ describe('extractCues', () => {
 // ── camera target helpers ─────────────────────────────────────────────────
 
 describe('cameraTargetFor', () => {
-  it('broadcast: looks at puck x (scaled), elevated behind the glass', () => {
+  it('broadcast: high in the near stands, behind the near boards', () => {
     const t = cameraTargetFor('broadcast', 50)
-    expect(t.pz).toBeLessThan(0) // behind the net
-    expect(t.py).toBeGreaterThan(0) // above ice
-    expect(t.px).toBeCloseTo(50 * 0.35, 2)
+    expect(t.pz).toBeLessThan(-42.5 - 40) // well back from the near glass
+    expect(t.py).toBeGreaterThan(30) // high "home" camera position
+    expect(t.px).toBeCloseTo(50 * 0.3, 2)
   })
 
-  it('broadcast: camera x tracks puck x at 35% scale', () => {
+  it('broadcast: mostly PANS — look-at follows the puck far more than the body trucks', () => {
     const t1 = cameraTargetFor('broadcast', 0)
     const t2 = cameraTargetFor('broadcast', 80)
     expect(t1.px).toBeCloseTo(0, 4)
-    expect(t2.px).toBeCloseTo(80 * 0.35, 4)
+    expect(t2.px).toBeCloseTo(80 * 0.3, 4)
+    expect(t2.lx).toBeCloseTo(80 * 0.8, 4)
+    expect(t2.lx - t1.lx).toBeGreaterThan(2 * (t2.px - t1.px))
     // pz constant regardless of puck position
     expect(t1.pz).toBe(t2.pz)
+  })
+
+  it('broadcast: look-at tilts only gently toward the play across the ice', () => {
+    const a = cameraTargetFor('broadcast', 0, { puckWz: -40 })
+    const b = cameraTargetFor('broadcast', 0, { puckWz: 40 })
+    expect(b.lz - a.lz).toBeGreaterThan(0)
+    expect(b.lz - a.lz).toBeLessThan(25) // never whips across the rink
   })
 
   it('overhead: very high y (≥110), centered, pz = 0', () => {

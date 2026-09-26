@@ -25,6 +25,9 @@ export function normToWorld(nx: number, ny: number): { wx: number; wz: number } 
 
 // ── critically-damped spring follow ─────────────────────────────────────────
 
+/** Root of (1+x)·e^(−x) = ½ — converts a half-life into ω for critical damping. */
+const CRIT_HALF_LIFE_X = 1.6783469900166612
+
 export interface Spring1D {
   pos: number
   vel: number
@@ -42,12 +45,16 @@ export function springStep(
   halfLife: number
 ): Spring1D {
   if (dt <= 0) return spring
-  // omega for critical damping from half-life
-  const omega = Math.LN2 / halfLife
+  // EXACT critically-damped solution x(t) = (y0 + (v0 + ω·y0)·t)·e^(−ωt).
+  // (The previous closed form dropped the ω·y0·t term, which made it
+  // under-damped: it overshot moving targets — a camera/player wobble source.)
+  // ω is chosen so a step gap really halves in `halfLife`: (1+x)e^(−x) = ½ → x ≈ 1.678.
+  const omega = CRIT_HALF_LIFE_X / halfLife
   const exp = Math.exp(-omega * dt)
-  const d = spring.pos - target
-  const newPos = target + (d + spring.vel * dt) * exp
-  const newVel = (spring.vel - omega * (d + spring.vel * dt)) * exp
+  const y0 = spring.pos - target
+  const j1 = spring.vel + omega * y0
+  const newPos = target + (y0 + j1 * dt) * exp
+  const newVel = (spring.vel - omega * j1 * dt) * exp
   return { pos: newPos, vel: newVel }
 }
 
@@ -232,13 +239,21 @@ export function cameraTargetFor(
     carrierAngle?: number
     carrierWx?: number
     carrierWz?: number
+    /** Play-focus Z (across the ice) — broadcast tilts slightly toward it. */
+    puckWz?: number
   } = {}
 ): CameraTarget {
   switch (preset) {
     case 'broadcast': {
-      // Damped x-follow: camera and look-at both track puck x at 35% amplitude.
-      const fx = puckWx * 0.35
-      return { px: fx, py: 40, pz: -75, lx: fx, ly: 0, lz: 0 }
+      // The real "high home" game camera: mounted high in the stands at
+      // centre ice, well back from the glass, and it mostly PANS (the look-at
+      // tracks the play at 80%) while the body only trucks a little (30%).
+      // Paired with a long lens (cameraFovFor → 30°) this keeps the players
+      // big and the perspective honest instead of a wide, distorted shot.
+      // Geometry: near boards sit just above the bottom edge (no near-side
+      // crowd in frame), far boards ~quarter-height from the top.
+      const lz = 2 + (opts.puckWz ?? 0) * 0.25
+      return { px: puckWx * 0.3, py: 50, pz: -100, lx: puckWx * 0.8, ly: 0, lz }
     }
 
     case 'overhead': {
@@ -283,6 +298,34 @@ export function cameraTargetFor(
   }
 }
 
+/** Vertical field of view (degrees) per camera preset — broadcast is a long lens. */
+export function cameraFovFor(preset: CameraPreset): number {
+  switch (preset) {
+    case 'broadcast': return 30
+    case 'overhead': return 45
+    case 'endzone': return 50
+    case 'follow': return 55
+  }
+}
+
+/**
+ * Goal-celebration framing: the same broadcast side, lower and tighter on the
+ * scorer. Blended in by celebrationWeight (pose.ts) — never a hard cut.
+ */
+export function celebrationTarget(spotWx: number, spotWz: number): CameraTarget & { fov: number } {
+  // A modest push-in from the same side as the game camera: a little lower,
+  // a little tighter. Nothing here moves while the cue plays.
+  return {
+    px: spotWx * 0.5,
+    py: 34,
+    pz: -92,
+    lx: spotWx,
+    ly: 2,
+    lz: spotWz,
+    fov: 22,
+  }
+}
+
 // ── play-focus smoothing helpers ─────────────────────────────────────────────
 
 /**
@@ -299,6 +342,20 @@ export function cameraTargetFor(
 export function applyDeadzone(value: number, center: number, threshold: number): number {
   if (threshold <= 0) return value
   return Math.abs(value - center) < threshold ? center : value
+}
+
+/**
+ * Soft dead-band follow: returns the point the focus should move toward so
+ * that it trails `value` by at most `band`. Unlike applyDeadzone (a hard
+ * step the moment the band is escaped → stop/start "stick-slip" pans), this
+ * is continuous — the pan eases in from zero as the play leaves the band.
+ */
+export function softDeadzone(value: number, center: number, band: number): number {
+  if (band <= 0) return value
+  const d = value - center
+  if (d > band) return value - band
+  if (d < -band) return value + band
+  return center
 }
 
 /**
