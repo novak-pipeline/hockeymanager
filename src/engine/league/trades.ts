@@ -33,7 +33,7 @@
 import type { DraftPick, Handedness, Player, PlayerId, Position, Team, TeamId } from '@domain'
 import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
-import { wageIndex } from './economy'
+import { talentShift, wageIndex } from './economy'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
@@ -101,8 +101,10 @@ function ageMultiplier(age: number): number {
 /** The market's fair AAV for an overall, in TODAY's dollars (the base curve
  *  moved with the cap — economy.ts), so contracts don't all read "rich" as the
  *  ceiling grows. */
-export const fairSalaryFor = (ovr: number): number =>
-  (0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11) * 1e6 * wageIndex()
+export const fairSalaryFor = (rawOvr: number): number => {
+  const ovr = rawOvr + talentShift()
+  return (0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11) * 1e6 * wageIndex()
+}
 
 /**
  * Core player value computation for a GIVEN overall, in trade points.

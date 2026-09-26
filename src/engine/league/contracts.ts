@@ -29,7 +29,7 @@
 import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
 import { ratedOverall } from '@engine/ratings/composites'
 import { deriveSeed, Rng } from '@engine/shared/rng'
-import { askModifierFor, indexed, wageIndex } from './economy'
+import { askModifierFor, indexed, talentShift, wageIndex } from './economy'
 
 /** Cheapest legal contract in BASE-YEAR dollars; asks never fall below the
  *  indexed value ({@link leagueMinSalary}). */
@@ -173,7 +173,8 @@ function askYears(age: number, ovr: number, rng: Rng): number {
  * the same terms every time they're queried in a given offseason.
  */
 export function askTerms(player: Player, year: number): { salary: number; years: number } {
-  const ovr = playerOverall(player)
+  // Priced by his standing in today's league (economy.ts talent anchor).
+  const ovr = playerOverall(player) + talentShift()
   const rng = new Rng(deriveSeed(hashId(player.id), year))
 
   // Same shape as the generation curve, in millions.

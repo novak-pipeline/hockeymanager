@@ -37,6 +37,8 @@ export interface WorldSeasonRecord {
   minPts: number
   payroll?: { medianAiPct: number; minAiPct: number; maxAiPct: number; belowFloor: number; overCap: number; cap: number }
   postures: Record<string, number>
+  /** Mean overall of the league's top-200 NHL players (talent drift). */
+  talent?: number
   telemetry?: SeasonTelemetry
 }
 
@@ -153,6 +155,7 @@ export function recordWorldSeason(
         }
       : {}),
     postures,
+    talent: Math.round(career.leagueTopTalent() * 10) / 10,
   }
 }
 
@@ -258,12 +261,12 @@ export function renderWorldSummary(records: WorldSeasonRecord[], s: WorldHealthS
   L.push(`| offer sheets / season | AI-AI ${s.offerSheets.aiAi} (walked ${s.offerSheets.aiAiWalked}), at user ${s.offerSheets.atUser} | ~0–1 | |`)
   L.push(`| user Cups | ${s.userCups} | — | |`)
   L.push('')
-  L.push('| season | champion | Pres. | SD | max/min pts | AI payroll med (min–max) | <floor | trades AI/user | postures c/r/r |')
-  L.push('|---|---|---|---|---|---|---|---|---|')
+  L.push('| season | champion | Pres. | SD | max/min pts | AI payroll med (min–max) | <floor | trades AI/user | postures c/r/r | top-200 talent |')
+  L.push('|---|---|---|---|---|---|---|---|---|---|')
   for (const r of records) {
     const p = r.payroll
     const t = r.telemetry
-    L.push(`| ${r.year} | ${r.champion ?? '—'} | ${r.presidents} | ${r.pointsSD.toFixed(1)} | ${r.maxPts}/${r.minPts} | ${p ? `${(p.medianAiPct * 100).toFixed(0)}% (${(p.minAiPct * 100).toFixed(0)}–${(p.maxAiPct * 100).toFixed(0)})` : '—'} | ${p?.belowFloor ?? '—'} | ${t ? `${t.trades.aiAi}/${t.trades.withUser}` : '—'} | ${r.postures.contend ?? 0}/${r.postures.retool ?? 0}/${r.postures.rebuild ?? 0} |`)
+    L.push(`| ${r.year} | ${r.champion ?? '—'} | ${r.presidents} | ${r.pointsSD.toFixed(1)} | ${r.maxPts}/${r.minPts} | ${p ? `${(p.medianAiPct * 100).toFixed(0)}% (${(p.minAiPct * 100).toFixed(0)}–${(p.maxAiPct * 100).toFixed(0)})` : '—'} | ${p?.belowFloor ?? '—'} | ${t ? `${t.trades.aiAi}/${t.trades.withUser}` : '—'} | ${r.postures.contend ?? 0}/${r.postures.retool ?? 0}/${r.postures.rebuild ?? 0} | ${r.talent ?? '—'} |`)
   }
   L.push('')
   return L.join('\n')

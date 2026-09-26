@@ -273,7 +273,9 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   const buyers = clubs
     .filter((c) => c !== seller && (c.posture === 'contend' || (c.posture === 'retool' && c.persona.aggression >= 0.6 && args.window !== 'inSeason')))
     .filter((c) => c.team.roster.length < 26)
-    .filter((c) => vetOvr >= replacementLevel(c.team, players, g) + (g === 'G' ? 1 : 2))
+    // A real upgrade over his weakest regular (the deadline's bar is lower —
+    // depth for the run counts).
+    .filter((c) => vetOvr >= replacementLevel(c.team, players, g) + (args.window === 'deadline' ? 0 : g === 'G' ? 1 : 2))
   const buyer = weightedPick(rng, buyers, (c) => 0.4 + c.persona.aggression + (c.posture === 'contend' ? 0.4 : 0))
   if (!buyer) { args.why?.(`sellVeteran:L265`); return null }
   const room = buyer.team.finances.salaryCap - capUsed(buyer.team, players)
@@ -304,38 +306,58 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
     .sort((a, b) => playerValue(b) - playerValue(a))
   const wantsKid = !rental || rng.chance(0.2 + 0.6 * (1 - seller.persona.pickHoarding))
   const kid = wantsKid ? prospects[rng.int(Math.min(2, prospects.length))] ?? prospects[0] : undefined
-  if (!rental && !kid) { args.why?.(`sellVeteran:L281`); return null }
-  // Aggressive buyers pay a little over; a hoarding seller holds out for more.
-  const target = vetValue * (0.9 + 0.3 * buyer.persona.aggression + 0.1 * seller.persona.pickHoarding)
-  const chosen: DraftPick[] = []
-  let total = (kid ? playerValue(kid) : 0) + (filler ? playerValue(filler) * 0.5 : 0)
-  for (const c of pool) {
-    if (chosen.length >= 2 || total >= target * 0.92) break
-    if (total + c.value > target * 1.15) continue
-    chosen.push(c.pick)
-    total += c.value
+  if (!rental && !kid && pool.length === 0) { args.why?.(`sellVeteran:L281`); return null }
+  // Out of picks (the deadline eats them): a young roster player headlines instead.
+  let youngster: Player | undefined
+  if (!kid && pool.length === 0 && seller.team.roster.length < 26) {
+    youngster = buyer.team.roster
+      .map((id) => players.get(id))
+      .filter((p): p is Player => movable(p, busy) && p.age <= 25 && p.position !== 'G' && p.id !== filler?.id)
+      .filter((p) => playerValue(p) >= vetValue * 0.5 && playerValue(p) <= vetValue * 1.1)
+      .sort((x, y) => Math.abs(playerValue(x) - vetValue * 0.8) - Math.abs(playerValue(y) - vetValue * 0.8))[0]
   }
-  if (!kid && chosen.length === 0) { args.why?.(`sellVeteran:L292`); return null }
+  if (!kid && pool.length === 0 && !youngster) { args.why?.(`sellVeteran:L292`); return null }
+  const base = (kid ? playerValue(kid) : 0) + (youngster ? playerValue(youngster) : 0) + (filler ? playerValue(filler) * 0.5 : 0)
+  // The phone calls: candidate packages (no pick, one pick, two picks), closest
+  // to what an aggressive / hoarding pair would land on first. Each is put to
+  // BOTH clubs' books; the first they both sign off on is the deal. An eager
+  // buyer makes more calls than a cautious one.
+  const target = vetValue * (0.9 + 0.3 * buyer.persona.aggression + 0.1 * seller.persona.pickHoarding)
+  const packages: Array<{ picks: DraftPick[]; total: number }> = []
+  if (kid || youngster) packages.push({ picks: [], total: base })
+  for (let i = 0; i < pool.length; i++) {
+    packages.push({ picks: [pool[i]!.pick], total: base + pool[i]!.value })
+    for (let j = i + 1; j < pool.length; j++) {
+      packages.push({ picks: [pool[i]!.pick, pool[j]!.pick], total: base + pool[i]!.value + pool[j]!.value })
+    }
+  }
+  packages.sort((x, y) => Math.abs(x.total - target) - Math.abs(y.total - target) || x.picks.length - y.picks.length)
+  const calls = 2 + Math.round(3 * buyer.persona.aggression)
   const farmIds = new Set<string>(kid ? [kid.id as string] : [])
-  const ok = bothAccept({
-    a: seller, b: buyer,
-    aGives: { players: [vet], picks: [] },
-    bGives: { players: [...(kid ? [kid] : []), ...(filler ? [filler] : [])], picks: chosen },
-    players, rng, deadlineProximity: args.deadlineProximity, farmIds, why: args.why,
-    ...(retained > 0 ? { retainedByA: retained } : {}),
-  })
-  if (!ok) { args.why?.(`sellVeteran:reject`); return null }
-  const parts = [...chosen.map(pickLabel), ...(kid ? [`${kid.position} ${kid.name}`] : []), ...(filler ? [`${filler.position} ${filler.name} (salary)`] : [])]
+  let chosen: DraftPick[] | null = null
+  for (const pk of packages.slice(0, calls)) {
+    if (pk.total < vetValue * 0.45) continue
+    const ok = bothAccept({
+      a: seller, b: buyer,
+      aGives: { players: [vet], picks: [] },
+      bGives: { players: [...(kid ? [kid] : []), ...(filler ? [filler] : []), ...(youngster ? [youngster] : [])], picks: pk.picks },
+      players, rng, deadlineProximity: args.deadlineProximity, farmIds, why: args.why,
+      ...(retained > 0 ? { retainedByA: retained } : {}),
+    })
+    if (ok) { chosen = pk.picks; break }
+  }
+  if (!chosen) { args.why?.(`sellVeteran:reject`); return null }
+  const parts = [...chosen.map(pickLabel), ...(kid ? [`${kid.position} ${kid.name}`] : []), ...(youngster ? [`${youngster.position} ${youngster.name}`] : []), ...(filler ? [`${filler.position} ${filler.name} (salary)`] : [])]
   const isGoalie = vet.position === 'G'
   const retainNote = retained > 0 ? ` ${seller.team.abbreviation} retain ${money(retained)}.` : ''
   return {
-    shape: isGoalie ? 'goalie' : shape,
+    shape: isGoalie ? 'goalie' : kid || youngster ? 'prospectFor' : 'rental',
     sellerTeamId: seller.team.id,
     buyerTeamId: buyer.team.id,
     playerIds: [vet.id],
     picks: chosen,
     prospectIds: kid ? [kid.id] : [],
-    ...(filler ? { buyerPlayerIds: [filler.id] } : {}),
+    ...(filler || youngster ? { buyerPlayerIds: [...(filler ? [filler.id] : []), ...(youngster ? [youngster.id] : [])] } : {}),
     ...(retained > 0 ? { retainedAmount: retained } : {}),
     summary: `${seller.team.abbreviation} send ${vet.position} ${vet.name} to ${buyer.team.abbreviation} for ${parts.join(' and ')}.${retainNote}`,
     rationale: {

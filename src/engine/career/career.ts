@@ -173,7 +173,7 @@ import {
 } from '@engine/league/gmPersona'
 import { generateLeagueDeal, type LeagueDeal, type MarketClub, type MarketWindow } from '@engine/league/aiMarket'
 import { WorldTelemetry, type AiTradeShape } from '@engine/league/worldTelemetry'
-import { indexed, setAskModifier, setWageIndex, wageIndex } from '@engine/league/economy'
+import { indexed, setAskModifier, setTalentShift, setWageIndex, wageIndex } from '@engine/league/economy'
 import {
   buildBoardMeeting,
   buildSeasonReviewScene,
@@ -14885,7 +14885,31 @@ export class Career {
     const cap = this.leagueCeiling()
     if (!league.economy || !(league.economy.baseCap > 0)) league.economy = { baseCap: cap }
     setWageIndex(cap / league.economy.baseCap)
+    if (this.talentYear !== this.year) {
+      this.talentYear = this.year
+      this.talentNow = this.leagueTopTalent()
+    }
+    if (!(league.economy.baseTalent && league.economy.baseTalent > 0)) league.economy.baseTalent = this.talentNow
+    setTalentShift(league.economy.baseTalent - this.talentNow)
     setAskModifier((p) => this.askPerformanceFactor(p))
+  }
+
+  private talentYear = -1
+  private talentNow = 0
+
+  /** Mean rated overall of the 200 best players on NHL rosters (the talent anchor). */
+  leagueTopTalent(): number {
+    const ovrs: number[] = []
+    for (const tid of this.data.league.teams) {
+      const t = this.data.teams.get(tid)
+      for (const id of t?.roster ?? []) {
+        const p = this.data.players.get(id)
+        if (p) ovrs.push(ratedOverall(p))
+      }
+    }
+    ovrs.sort((a, b) => b - a)
+    const top = ovrs.slice(0, 200)
+    return top.length ? top.reduce((a, b) => a + b, 0) / top.length : 70
   }
 
   /**
@@ -15086,6 +15110,8 @@ export class Career {
     willClose: boolean
   }> = []
   private marketClock = 0
+  /** Test/harness hook: told why a market attempt came back empty. */
+  marketDiagnostics: ((reason: string) => void) | null = null
   private leagueDealCounter = 0
   /** Talks that died (most recent 40) — the "wrong" half of the insider hook. */
   private lastFizzledTalks: Array<{ id: string; year: number; deal: LeagueDeal }> = []
@@ -15149,6 +15175,7 @@ export class Career {
         floorOf,
         prospectsOf,
         busy,
+        ...(this.marketDiagnostics ? { why: this.marketDiagnostics } : {}),
       })
       if (!deal) continue
       const aggr = (this.gmPersonaFor(deal.sellerTeamId).aggression + this.gmPersonaFor(deal.buyerTeamId).aggression) / 2
@@ -15210,13 +15237,8 @@ export class Career {
     const sellerAfter = rosterCapUsed(seller, this.data.players) - sal(d.playerIds) + toSeller + (d.retainedAmount ?? 0)
     const buyerAfter = rosterCapUsed(buyer, this.data.players) - toSeller + toBuyer
     if (buyerAfter > buyer.finances.salaryCap || sellerAfter > seller.finances.salaryCap) return false
-    // The floor binds in-season too: nobody trades himself under the lower limit.
-    if (this.phase === 'regularSeason') {
-      const sellerBefore = rosterCapUsed(seller, this.data.players)
-      const buyerBefore = rosterCapUsed(buyer, this.data.players)
-      if (sellerAfter < capFloorFor(seller.finances.salaryCap) && sellerAfter < sellerBefore) return false
-      if (buyerAfter < capFloorFor(buyer.finances.salaryCap) && buyerAfter < buyerBefore) return false
-    }
+    // (The floor is enforced where the NHL enforces it for a seller — the summer
+    // top-up before camp — not by vetoing February deadline deals.)
     const sellerSize = seller.roster.length - d.playerIds.length + (d.buyerPlayerIds?.length ?? 0)
     const buyerSize = buyer.roster.length + d.playerIds.length - (d.buyerPlayerIds?.length ?? 0)
     return sellerSize <= 26 && buyerSize <= 26 && sellerSize >= 18

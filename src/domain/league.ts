@@ -140,5 +140,10 @@ export interface League {
    * dollars and moved by today's ceiling / baseCap (engine/league/economy.ts).
    * Optional/additive — an older save anchors to the ceiling it loads with.
    */
-  economy?: { baseCap: number }
+  economy?: {
+    baseCap: number
+    /** Mean overall of the league's top 200 NHL players in the base year (the
+     *  talent anchor). Optional — set the first time the economy installs. */
+    baseTalent?: number
+  }
 }

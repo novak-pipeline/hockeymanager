@@ -24,7 +24,23 @@
 import type { Player } from '@domain'
 
 let currentIndex = 1
+let currentTalentShift = 0
 let askModifier: ((p: Player) => number) | null = null
+
+/**
+ * THE TALENT ANCHOR. Prices follow a player's standing in TODAY's league, not
+ * an absolute overall: if the league's top-end talent drifts down over decades
+ * (aging imports, thinner classes), a player who is now the 20th-best in the
+ * league still asks what the 20th-best asked in the base year. This is the
+ * overall-points shift (base top-end mean − today's), bounded.
+ */
+export function talentShift(): number {
+  return currentTalentShift
+}
+
+export function setTalentShift(shift: number): void {
+  currentTalentShift = Number.isFinite(shift) ? Math.max(-4, Math.min(10, shift)) : 0
+}
 
 /** Today's ceiling as a multiple of the ceiling the league opened with. */
 export function wageIndex(): number {

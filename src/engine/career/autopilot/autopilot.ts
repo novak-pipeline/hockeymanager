@@ -396,14 +396,23 @@ function maintainRoster(ctx: Ctx): void {
     return b.overall - a.overall
   })
   let recalled = 0
+  let recalledG = 0
   for (const p of pool) {
     if (squad.rosterCount + recalled >= 23) break
     const r = ctx.career.callUp(p.playerId)
     if (r.ok) {
       recalled++
+      if (p.position === 'G') recalledG++
       log(ctx, { kind: 'callup', summary: `Recalled ${p.name} (${p.overall} OVR ${p.position})`, drivers: ['keeping NHL depth', wantG ? 'needed a goalie' : 'thin up front'], result: 'recalled', ok: true })
       if (skaters + recalled >= 16 && !wantG) break
     }
+  }
+  // Nobody in the system to recall at a position the lineup can't do without
+  // (a trade took the backup goalie): do what the GM's AGM button does — sign
+  // emergency cover off the market rather than forfeit the next game.
+  if (goalies + recalledG < 2) {
+    const r = guarded(ctx, 'signEmergencyCover', () => ctx.career.signEmergencyCover())
+    if (r?.ok) log(ctx, { kind: 'callup', summary: `Signed emergency cover: ${r.signed.join(', ')}`, drivers: ['no goalie left to recall'], result: r.message, ok: true })
   }
 }
 
