@@ -193,3 +193,19 @@ describe('presentation director', () => {
     expect(elapsedLabel(5)).toBe('0:05')
   })
 })
+
+import { SHOT_FRAMING, MOMENT_CHOREOGRAPHY } from './types'
+describe('3D hand-off tables', () => {
+  it('every shot has a framing and nothing asks for a fast camera', () => {
+    for (const f of Object.values(SHOT_FRAMING)) {
+      expect(['hold', 'push', 'pan']).toContain(f.motion)
+      expect(f.fovDeg).toBeGreaterThan(10)
+    }
+    expect(SHOT_FRAMING.broadcast.preset).toBe('broadcast')
+  })
+  it('rookie lap path stays on the sheet and closes', () => {
+    const p = MOMENT_CHOREOGRAPHY.rookieLap.path!
+    for (const pt of p) { expect(Math.abs(pt.x)).toBeLessThanOrEqual(1); expect(Math.abs(pt.y)).toBeLessThanOrEqual(1) }
+    expect(p[0]).toEqual(p[p.length - 1])
+  })
+})

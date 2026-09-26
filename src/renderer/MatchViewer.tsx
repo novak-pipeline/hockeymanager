@@ -132,7 +132,12 @@ function _absToClock(absT: number): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): JSX.Element {
+export function MatchViewer(props: {
+  game: WatchedGame
+  onClose: () => void
+  /** Pregame context supplied directly (dev harness). Normally fetched. */
+  broadcast?: BroadcastContext
+}): JSX.Element {
   const { game } = props
 
   // DOM refs
@@ -216,7 +221,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const client = useContext(SimContext)
   const [presentation, setPresentation] = useState<PresentationSetting>(readPresentation)
   const [commentaryOn, setCommentaryOn] = useState<boolean>(isCommentaryEnabled)
-  const [bctx, setBctx] = useState<BroadcastContext>(() => fallbackBroadcastContext(game))
+  const [bctx, setBctx] = useState<BroadcastContext>(() => props.broadcast ?? fallbackBroadcastContext(game))
   const [liveOverlays, setLiveOverlays] = useState<OverlayCue[]>([])
   const [namesPending, setNamesPending] = useState<number>(0)
   const [hostSize, setHostSize] = useState<{ w: number; h: number }>({ w: 900, h: 383 })
@@ -244,6 +249,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
   // ── Broadcast: tonight's context from the worker (built before the sim ran) ──
   useEffect(() => {
+    if (props.broadcast) { setBctx(props.broadcast); return }
     setBctx(fallbackBroadcastContext(game))
     if (!client) return
     let live = true
@@ -255,7 +261,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       setBctx(c)
     }).catch(() => undefined)
     return () => { live = false }
-  }, [game, client])
+  }, [game, client, props.broadcast])
 
   // ── Broadcast: the booth (stems + name clips + scheduler) ───────────────────
   useEffect(() => {

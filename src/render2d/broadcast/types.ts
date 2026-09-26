@@ -219,3 +219,68 @@ export interface BroadcastShotConsumer {
 export interface BroadcastProjector {
   projectPlayer(playerId: string): { x: number; y: number } | null
 }
+
+/* ───────────────────────────── 3D hand-off tables ───────────────────────────── */
+
+/**
+ * How the 3D renderer should frame each shot, matched to its camera rig
+ * (src/render3d: CameraPreset 'broadcast' | 'overhead' | 'endzone' | 'follow',
+ * critically-damped springs, soft dead-band, NO shake). `preset` names the
+ * existing preset to reuse when one fits; `custom` shots are new framings the
+ * renderer adds behind requestShot(). All motion is slow: 'hold' = locked off,
+ * 'push' = slow dolly-in, 'pan' = slow pan following the subject. Never a whip.
+ */
+export interface ShotFraming {
+  preset: 'broadcast' | 'overhead' | 'endzone' | 'follow' | 'custom'
+  subject: 'play' | 'player' | 'centreDot' | 'bench' | 'crowd' | 'penaltyBox' | 'videoBoard' | 'blueLine' | 'arena'
+  /** Vertical field of view hint (degrees). The broadcast camera runs ~30°. */
+  fovDeg: number
+  motion: 'hold' | 'push' | 'pan'
+}
+
+export const SHOT_FRAMING: Readonly<Record<ShotKind, ShotFraming>> = {
+  establishing: { preset: 'custom', subject: 'arena', fovDeg: 55, motion: 'pan' },
+  lineups: { preset: 'custom', subject: 'blueLine', fovDeg: 28, motion: 'pan' },
+  anthem: { preset: 'custom', subject: 'blueLine', fovDeg: 35, motion: 'hold' },
+  faceoffClose: { preset: 'custom', subject: 'centreDot', fovDeg: 22, motion: 'push' },
+  broadcast: { preset: 'broadcast', subject: 'play', fovDeg: 30, motion: 'pan' },
+  goalReplay: { preset: 'endzone', subject: 'play', fovDeg: 34, motion: 'hold' },
+  saveReplay: { preset: 'endzone', subject: 'player', fovDeg: 26, motion: 'push' },
+  benchReaction: { preset: 'custom', subject: 'bench', fovDeg: 24, motion: 'hold' },
+  coachCloseup: { preset: 'custom', subject: 'bench', fovDeg: 14, motion: 'hold' },
+  crowd: { preset: 'custom', subject: 'crowd', fovDeg: 30, motion: 'pan' },
+  penaltyBox: { preset: 'custom', subject: 'penaltyBox', fovDeg: 20, motion: 'hold' },
+  jumbotron: { preset: 'custom', subject: 'videoBoard', fovDeg: 26, motion: 'push' },
+}
+
+/**
+ * Moment choreography for the 3D skeleton (bone names from src/render3d
+ * athlete.ts BONE_NAMES: root, hips, spine, chest, neck, head, shoulder_*,
+ * upperarm_*, forearm_*, hand_*, thigh_*, shin_*, foot_*, stick, stick_blade).
+ * Everything is expressed as existing pose drivers (stride/lean/facing/IK) plus
+ * the renderer's crowd + video board, so no new rig is needed:
+ */
+export interface MomentChoreography {
+  /** Which skaters are on the ice for it. */
+  cast: 'subjectOnly' | 'subjectAndTeam' | 'bothTeams' | 'none'
+  /** Path for the subject in normalized rink space ([-1,1]), skated at `pace`. */
+  path?: Array<{ x: number; y: number }>
+  pace?: 'glide' | 'stride'
+  /** Pose beats on the subject, in order. 'stickRaise' is the existing
+   *  celebration pose; 'tap' = stick tapping the ice (teammates' salute). */
+  poses: Array<'stickRaise' | 'wave' | 'tap' | 'helmetOff' | 'standStill'>
+  crowd: 'seated' | 'cheer' | 'standing'
+  videoBoard?: 'tribute' | 'milestone' | 'banner'
+}
+
+export const MOMENT_CHOREOGRAPHY: Readonly<Record<MomentKind, MomentChoreography>> = {
+  // Warmups: teammates hang back at the bench, the rookie does a solo lap.
+  rookieLap: {
+    cast: 'subjectAndTeam', pace: 'glide', poses: ['wave'], crowd: 'cheer',
+    path: [{ x: 0, y: 0.8 }, { x: 0.85, y: 0.55 }, { x: 0.85, y: -0.55 }, { x: 0, y: -0.8 }, { x: -0.85, y: -0.55 }, { x: -0.85, y: 0.55 }, { x: 0, y: 0.8 }],
+  },
+  standingOvation: { cast: 'subjectAndTeam', poses: ['stickRaise', 'tap'], crowd: 'standing' },
+  bannerRaising: { cast: 'bothTeams', poses: ['standStill'], crowd: 'standing', videoBoard: 'banner' },
+  jerseyRetirement: { cast: 'none', poses: [], crowd: 'standing', videoBoard: 'banner' },
+  tributeVideo: { cast: 'subjectOnly', poses: ['wave', 'helmetOff'], crowd: 'standing', videoBoard: 'tribute' },
+}
