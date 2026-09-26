@@ -1,0 +1,431 @@
+/*
+ * Broadcast package overlays — TV graphics over the match canvas (2D and 3D).
+ * Team colours arrive as --bc-home / --bc-away / --bc-team / --bc-team2 custom
+ * properties set inline per graphic. Motion is framer-motion (MotionConfig
+ * reducedMotion="user" in App); CSS transitions below also honour
+ * prefers-reduced-motion.
+ */
+.bc-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: 10px;
+  z-index: 16;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  color: #f4f6fb;
+  --bc-ink: #0b0f18;
+  --bc-panel: rgba(12, 16, 26, 0.94);
+  --bc-panel-2: rgba(22, 28, 44, 0.96);
+  --bc-line: rgba(255, 255, 255, 0.12);
+  --bc-muted: rgba(230, 236, 250, 0.62);
+  --bc-gold: #f2c14e;
+}
+
+.bc-caps { text-transform: uppercase; letter-spacing: 0.02em; }
+.bc-num { font-variant-numeric: tabular-nums; }
+
+/* Subtle hex texture for panels (pure CSS, no asset). */
+.bc-texture {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.045) 1px, transparent 1.2px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 45%);
+  background-size: 7px 7px, 100% 100%;
+}
+
+/* ── scorebug (top-left, fixed width so digits never shift layout) ── */
+.bc-scorebug {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-weight: 800;
+  font-size: 14px;
+}
+.bc-scorebug .team {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 92px;
+  padding: 0 8px 0 0;
+  background: var(--bc-panel);
+}
+.bc-scorebug .team .chip {
+  width: 6px;
+  align-self: stretch;
+  background: var(--bc-team);
+}
+.bc-scorebug .team .abbr { flex: 1; letter-spacing: 0.06em; }
+.bc-scorebug .team .score {
+  width: 22px;
+  text-align: center;
+  font-size: 16px;
+}
+.bc-scorebug .clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  width: 104px;
+  justify-content: center;
+  background: var(--bc-panel-2);
+  color: #fff;
+  font-size: 13px;
+}
+.bc-scorebug .clock .per { color: var(--bc-muted); font-size: 11px; }
+.bc-scorebug .pp {
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  background: var(--bc-gold);
+  color: var(--bc-ink);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/* ── lower third (goal) ── */
+.bc-lt {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  width: min(760px, 86%);
+  transform: translateX(-50%);
+  height: 86px;
+}
+.bc-lt .panel {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background-color: var(--bc-panel);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), inset 0 -3px 0 var(--bc-team);
+  overflow: hidden;
+}
+.bc-lt .panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 34%;
+  background: linear-gradient(90deg, var(--bc-team) 0%, transparent 100%);
+  opacity: 0.35;
+}
+.bc-lt .face {
+  position: absolute;
+  left: 18px;
+  bottom: 0;
+  width: 116px;
+  height: 124px; /* taller than the panel: the cut-out breaks out of the top */
+  z-index: 2;
+}
+.bc-lt .crest {
+  position: absolute;
+  left: 118px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 58px;
+  height: 58px;
+  z-index: 1;
+  opacity: 0.95;
+}
+.bc-lt .body {
+  position: absolute;
+  left: 190px;
+  right: 18px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 3;
+}
+.bc-lt .numpos {
+  width: 40px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: #eef1f7;
+  color: var(--bc-ink);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  line-height: 1.05;
+}
+.bc-lt .numpos .n { font-size: 20px; }
+.bc-lt .numpos .p { font-size: 16px; border-top: 2px solid var(--bc-ink); padding-top: 1px; min-width: 20px; text-align: center; }
+.bc-lt .who { flex: 1; min-width: 0; }
+.bc-lt .name {
+  font-size: 27px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.005em;
+}
+.bc-lt .name .first { font-weight: 400; margin-right: 8px; }
+.bc-lt .name .last { font-weight: 900; }
+.bc-lt .rule { height: 1px; background: var(--bc-line); margin: 8px 0 6px; }
+.bc-lt .facts { display: flex; gap: 28px; }
+.bc-lt .fact .k { font-size: 10px; color: var(--bc-muted); font-weight: 700; letter-spacing: 0.12em; }
+.bc-lt .fact .v { font-size: 15px; font-weight: 800; letter-spacing: 0.04em; }
+.bc-lt .tag {
+  align-self: center;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--bc-gold);
+  color: var(--bc-ink);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+/* ── on-ice player tag (world anchored) ── */
+.bc-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+.bc-tag .inner { display: flex; flex-direction: column; align-items: flex-start; }
+.bc-tag .face { width: 58px; height: 62px; margin-left: 12px; }
+.bc-tag .row1 { display: flex; align-items: stretch; height: 17px; }
+.bc-tag .goal {
+  background: var(--bc-gold);
+  color: var(--bc-ink);
+  font-weight: 900;
+  font-size: 12px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.06em;
+}
+.bc-tag .stat {
+  background: rgba(12, 16, 26, 0.92);
+  color: var(--bc-gold);
+  font-size: 10px;
+  font-weight: 800;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.06em;
+}
+.bc-tag .row2 { display: flex; height: 25px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45); }
+.bc-tag .nm {
+  background: var(--bc-team);
+  color: #fff;
+  font-weight: 900;
+  font-size: 15px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.bc-tag .np {
+  background: var(--bc-team2);
+  color: #fff;
+  font-weight: 900;
+  font-size: 14px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.bc-tag.small .chip {
+  background: rgba(40, 56, 80, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #e8eefa;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 7px;
+  letter-spacing: 0.06em;
+}
+
+/* ── pregame: arena title / story card / lineup / goalie tape ── */
+.bc-full {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 40%, rgba(14, 20, 34, 0.9), rgba(5, 7, 12, 0.97));
+}
+.bc-title {
+  text-align: center;
+}
+.bc-title .kicker { font-size: 12px; letter-spacing: 0.35em; color: var(--bc-gold); font-weight: 800; }
+.bc-title .arena { font-size: 15px; letter-spacing: 0.22em; color: var(--bc-muted); font-weight: 700; margin-top: 6px; }
+.bc-title .matchup { display: flex; align-items: center; justify-content: center; gap: 26px; margin-top: 18px; }
+.bc-title .side { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 220px; }
+.bc-title .side .nm { font-size: 22px; font-weight: 900; }
+.bc-title .side .rec { font-size: 12px; color: var(--bc-muted); font-weight: 700; letter-spacing: 0.1em; }
+.bc-title .at { font-size: 18px; color: var(--bc-muted); font-weight: 800; }
+.bc-title .bar { height: 3px; width: 320px; margin: 20px auto 0; background: linear-gradient(90deg, var(--bc-away), var(--bc-home)); border-radius: 2px; }
+
+.bc-card {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  min-width: 460px;
+  max-width: 82%;
+  border-radius: 10px;
+  overflow: visible;
+  background-color: var(--bc-panel);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55), inset 4px 0 0 var(--bc-team);
+}
+.bc-card .face { width: 92px; height: 96px; margin: -22px 0 0 14px; flex-shrink: 0; align-self: flex-end; }
+.bc-card .txt { padding: 14px 20px 14px 16px; }
+.bc-card .k { font-size: 11px; font-weight: 900; letter-spacing: 0.22em; color: var(--bc-gold); }
+.bc-card .d { font-size: 19px; font-weight: 700; margin-top: 5px; line-height: 1.25; }
+
+.bc-lineup {
+  width: min(820px, 90%);
+  border-radius: 12px;
+  background-color: var(--bc-panel);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), inset 0 4px 0 var(--bc-team);
+  padding: 16px 20px 18px;
+}
+.bc-lineup .hd { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bc-lineup .hd .t { font-size: 12px; letter-spacing: 0.26em; color: var(--bc-gold); font-weight: 900; }
+.bc-lineup .hd .n { font-size: 20px; font-weight: 900; }
+.bc-lineup .row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.bc-lineup .pl { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.bc-lineup .pl .face { width: 84px; height: 88px; border-bottom: 2px solid var(--bc-team); }
+.bc-lineup .pl .pos { font-size: 10px; color: var(--bc-muted); font-weight: 800; letter-spacing: 0.14em; }
+.bc-lineup .pl .ln { font-size: 13px; font-weight: 900; text-align: center; line-height: 1.1; }
+.bc-lineup .pl .sl { font-size: 10px; color: var(--bc-muted); font-weight: 600; }
+
+.bc-tape {
+  width: min(760px, 88%);
+  display: grid;
+  grid-template-columns: 1fr 120px 1fr;
+  align-items: center;
+  border-radius: 12px;
+  background-color: var(--bc-panel);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  padding: 16px 18px;
+}
+.bc-tape .g { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.bc-tape .g .face { width: 110px; height: 116px; }
+.bc-tape .g .nm { font-size: 18px; font-weight: 900; }
+.bc-tape .g .stat { font-size: 13px; color: var(--bc-muted); font-weight: 700; }
+.bc-tape .mid { text-align: center; font-size: 12px; font-weight: 900; letter-spacing: 0.24em; color: var(--bc-gold); }
+
+/* ── moment caption / milestone / period summary ── */
+.bc-caption {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 8px;
+  border-radius: 999px;
+  background: rgba(10, 14, 24, 0.9);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+.bc-caption .dot { width: 28px; height: 28px; border-radius: 50%; background: var(--bc-gold); color: var(--bc-ink); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; }
+.bc-caption .c { font-size: 15px; font-weight: 700; }
+
+.bc-milestone {
+  position: absolute;
+  right: 16px;
+  top: 54px;
+  width: 300px;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: var(--bc-panel);
+  border: 1px solid rgba(242, 193, 78, 0.55);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+.bc-milestone .top { background: var(--bc-gold); color: var(--bc-ink); font-size: 11px; font-weight: 900; letter-spacing: 0.2em; padding: 5px 12px; }
+.bc-milestone .mid { display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px 0; }
+.bc-milestone .mid .face { width: 70px; height: 74px; }
+.bc-milestone .big { font-size: 26px; font-weight: 900; line-height: 1; padding-bottom: 12px; }
+.bc-milestone .d { font-size: 13px; color: var(--bc-muted); padding: 0 12px 12px; }
+
+.bc-summary {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  width: min(520px, 80%);
+  border-radius: 10px;
+  background-color: var(--bc-panel);
+  border: 1px solid var(--bc-line);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.bc-summary .hd { padding: 6px 14px; font-size: 11px; font-weight: 900; letter-spacing: 0.24em; color: var(--bc-ink); background: var(--bc-gold); }
+.bc-summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bc-summary td { padding: 6px 14px; border-top: 1px solid var(--bc-line); }
+.bc-summary td.n { text-align: right; width: 64px; font-weight: 800; }
+.bc-summary .goals { padding: 6px 14px 10px; font-size: 12px; color: var(--bc-muted); line-height: 1.5; }
+
+/* ── pregame chrome ── */
+.bc-skip {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  pointer-events: auto;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 5px 10px;
+  border-radius: 4px;
+  color: #e8eefa;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  z-index: 30;
+}
+.bc-live {
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  padding: 4px 8px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.bc-live i { width: 7px; height: 7px; border-radius: 50%; background: #e0393e; display: inline-block; }
+
+/* Face cut-out: transparent PNG from the facepack, or a clean silhouette. */
+.bc-face { position: relative; display: flex; align-items: flex-end; justify-content: center; }
+.bc-face img { max-width: 100%; max-height: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45)); }
+.bc-face svg { width: 100%; height: 100%; }
+
+/* Crest fallback tile (no logo pack): a clean roundel, not a square label. */
+.bc-crest {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+.bc-lt .crest.bc-crest { font-size: 15px; }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from 'react'
 import {
   MatchTimeline,
   type MatchView,
@@ -9,16 +9,27 @@ import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
-import type { Announcer } from './lib/announcer'
 import { MatchSfx } from './lib/sfx'
 import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/playbackDirector'
 import type { SpeedSegment } from '../render2d/playbackDirector'
-import { kokoroState } from './lib/kokoroVoice'
-import { sharedAnnouncer, isAutoNeuralEnabled, setAutoNeuralEnabled } from './lib/speak'
+import { cancelSpeech } from './lib/speak'
 import { EventCursor } from '../render2d/eventCursor'
 import type { GoalEvent, StoppageReason } from '@domain'
 import { Icons } from './components/icons'
 import { Icon } from './components/primitives'
+import { SimContext } from './hooks/useSim'
+import type { BroadcastContext } from '@engine/story/broadcastStorylines'
+import { directBroadcast, powerPlayWindows } from '../render2d/broadcast/director'
+import type {
+  BroadcastPlan, BroadcastProjector, BroadcastShotConsumer, CommentaryCue, OverlayCue, PresentationCue,
+} from '../render2d/broadcast/types'
+import { CommentaryScheduler } from '../render2d/broadcast/audioScheduler'
+import {
+  BoothAudio, isCommentaryEnabled, setCommentaryEnabled, readPresentation, writePresentation,
+  type PresentationSetting,
+} from './lib/commentaryAudio'
+import { fallbackBroadcastContext, ppRemaining } from './lib/broadcastContext'
+import { BroadcastOverlayLayer, Scorebug } from './components/broadcast/BroadcastOverlays'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -32,15 +43,25 @@ const LS_RENDERER = 'hockeyMatchRenderer'
 const NUDGE_MULTIPLIERS = [0.5, 1, 2] as const
 
 type PlaybackMode = 'full' | 'extended' | 'key'
-type Phase = 'hero' | 'playing'
+type Phase = 'hero' | 'pregame' | 'playing'
 
 // ── Module-level singletons (survive re-renders, disposed on unmount) ──────────
 
-/** The app-wide Announcer. Resolved per call, never cached: this is also the hook
- *  that swaps in the neural engine once its background download lands, so match
- *  commentary rides the app-wide default instead of needing its own button. */
-const announcer = (): Announcer => sharedAnnouncer()
 const sfx = new MatchSfx()
+const SFX_VOLUME = 0.7
+const SFX_DUCKED = 0.3
+
+/** A game-clock jump bigger than this (seek, fast-forward, replay) passes cues
+ *  without firing them — the broadcast only calls what it actually showed. */
+const CUE_JUMP_S = 4
+
+/** Does this renderer take the director's camera/moment requests? (3D, later.) */
+function shotConsumerOf(r: unknown): BroadcastShotConsumer | null {
+  return r && typeof (r as BroadcastShotConsumer).requestShot === 'function' ? (r as BroadcastShotConsumer) : null
+}
+function projectorOf(r: unknown): BroadcastProjector | null {
+  return r && typeof (r as BroadcastProjector).projectPlayer === 'function' ? (r as BroadcastProjector) : null
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -111,7 +132,12 @@ function _absToClock(absT: number): string {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): JSX.Element {
+export function MatchViewer(props: {
+  game: WatchedGame
+  onClose: () => void
+  /** Pregame context supplied directly (dev harness). Normally fetched. */
+  broadcast?: BroadcastContext
+}): JSX.Element {
   const { game } = props
 
   // DOM refs
@@ -189,16 +215,146 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
 
   // Controls
-  const [announcerEnabled, setAnnouncerEnabled] = useState(announcer().isEnabled)
   const [sfxEnabled, setSfxEnabled]             = useState<boolean>(true)
 
-  // Enhanced voice
-  const [kokoroWanted, setKokoroWanted]         = useState<boolean>(isAutoNeuralEnabled)
-  const [kokoroStatus, setKokoroStatus]         = useState<ReturnType<typeof kokoroState>>(kokoroState())
+  // ── Broadcast package ────────────────────────────────────────────────────────
+  const client = useContext(SimContext)
+  const [presentation, setPresentation] = useState<PresentationSetting>(readPresentation)
+  const [commentaryOn, setCommentaryOn] = useState<boolean>(isCommentaryEnabled)
+  const [bctx, setBctx] = useState<BroadcastContext>(() => props.broadcast ?? fallbackBroadcastContext(game))
+  const [liveOverlays, setLiveOverlays] = useState<OverlayCue[]>([])
+  const [namesPending, setNamesPending] = useState<number>(0)
+  const [hostSize, setHostSize] = useState<{ w: number; h: number }>({ w: 900, h: 383 })
+  const plan: BroadcastPlan = useMemo(
+    () => directBroadcast(game.stream, bctx, { presentation }),
+    [game, bctx, presentation],
+  )
+  const planRefB = useRef<BroadcastPlan>(plan)
+  planRefB.current = plan
+  const firedCuesRef = useRef<Set<string>>(new Set())
+  const cueTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  const pregameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const boothRef = useRef<BoothAudio | null>(null)
+  const schedulerRef = useRef<CommentaryScheduler | null>(null)
+  const commentaryOnRef = useRef(commentaryOn)
+  commentaryOnRef.current = commentaryOn
+  const ppWindows = useMemo(() => {
+    const homeIds = new Set(game.homePlayerIds)
+    return powerPlayWindows(game.stream, (id) => homeIds.has(id))
+  }, [game])
 
   // Sync refs
   nudgeRef.current       = nudge
   replayActiveRef.current = replayActive
+
+  // ── Broadcast: tonight's context from the worker (built before the sim ran) ──
+  useEffect(() => {
+    if (props.broadcast) { setBctx(props.broadcast); return }
+    setBctx(fallbackBroadcastContext(game))
+    if (!client) return
+    let live = true
+    client.getBroadcastContext().then((res) => {
+      if (!live || res.type !== 'broadcastContext' || !res.context) return
+      const c = res.context
+      // Only trust it for THIS game (the worker keeps the last watched one).
+      if (c.homeAbbr !== game.homeAbbr || c.awayAbbr !== game.awayAbbr) return
+      setBctx(c)
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, [game, client, props.broadcast])
+
+  // ── Broadcast: the booth (stems + name clips + scheduler) ───────────────────
+  useEffect(() => {
+    if (!commentaryOn) return
+    const booth = new BoothAudio()
+    booth.setDuckHandler((on) => sfx.setVolume(on ? SFX_DUCKED : SFX_VOLUME))
+    const sched = new CommentaryScheduler(booth, booth, () => performance.now())
+    boothRef.current = booth
+    schedulerRef.current = sched
+    void booth.loadStems()
+    const id = window.setInterval(() => {
+      sched.tick()
+      setNamesPending(booth.tonightPending)
+    }, 60)
+    return () => {
+      clearInterval(id)
+      sched.cancel()
+      booth.dispose()
+      boothRef.current = null
+      schedulerRef.current = null
+      sfx.setVolume(SFX_VOLUME)
+    }
+  }, [commentaryOn, game])
+
+  // Tonight's two rosters get their name clips first (background, before puck
+  // drop); the rest of the league trickles in afterwards in idle time.
+  useEffect(() => {
+    const booth = boothRef.current
+    if (!booth || !commentaryOn) return
+    const starters = new Set([...bctx.home.starters, ...bctx.away.starters])
+    booth.queueNames(Object.values(bctx.players).map((p) => ({
+      id: p.id, name: p.name, starter: starters.has(p.id),
+      ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+      ...(p.pronunciation !== undefined ? { pronunciation: p.pronunciation } : {}),
+    })))
+    if (!client) return
+    const t = setTimeout(() => {
+      client.searchPlayers({ leagueIds: ['nhl'], sort: 'points', limit: 500 }).then((res) => {
+        if (res.type !== 'playerSearch' || boothRef.current !== booth) return
+        booth.queueNames(res.playerSearch.rows.map((r) => ({
+          id: r.playerId, name: r.name, starter: false,
+          ...(r.nationality !== undefined ? { nationality: r.nationality } : {}),
+        })), { league: true })
+      }).catch(() => undefined)
+    }, 20_000)
+    return () => clearTimeout(t)
+  }, [bctx, commentaryOn, client])
+
+  // Host size, for clamping world-anchored tags inside the frame.
+  useEffect(() => {
+    const el = hostRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setHostSize({ w: el.clientWidth, h: el.clientHeight }))
+    ro.observe(el)
+    setHostSize({ w: el.clientWidth, h: el.clientHeight })
+    return () => ro.disconnect()
+  }, [])
+
+  /** Put an overlay on screen for its hold time. One graphic per kind at a time
+   *  (a new lower third replaces the old); on-ice tags may stack. */
+  const showOverlay = useCallback((cue: OverlayCue): void => {
+    setLiveOverlays((prev) => [
+      ...prev.filter((c) => c.id !== cue.id && (cue.data.kind === 'playerTag' || c.data.kind !== cue.data.kind)),
+      cue,
+    ])
+    const t = setTimeout(() => setLiveOverlays((prev) => prev.filter((c) => c.id !== cue.id)), cue.holdMs)
+    cueTimersRef.current.push(t)
+  }, [])
+
+  /** Route one director cue to its channel, after its delay. */
+  const fireCue = useCallback((cue: PresentationCue): void => {
+    const run = (): void => {
+      switch (cue.channel) {
+        case 'overlay': showOverlay(cue); break
+        case 'commentary': if (commentaryOnRef.current) schedulerRef.current?.trigger(cue as CommentaryCue); break
+        case 'shot': shotConsumerOf(rendererRef.current)?.requestShot(cue); break
+        case 'moment': shotConsumerOf(rendererRef.current)?.playMoment?.(cue); break
+      }
+    }
+    if (cue.delayMs && cue.delayMs > 0) cueTimersRef.current.push(setTimeout(run, cue.delayMs))
+    else run()
+  }, [showOverlay])
+
+  /** Drop every pending/visible broadcast element (seek, skip, leave). */
+  const clearBroadcast = useCallback((): void => {
+    for (const t of cueTimersRef.current) clearTimeout(t)
+    cueTimersRef.current = []
+    if (pregameTimerRef.current) clearTimeout(pregameTimerRef.current)
+    pregameTimerRef.current = null
+    setLiveOverlays([])
+    schedulerRef.current?.cancel()
+  }, [])
+  useEffect(() => clearBroadcast, [clearBroadcast])
 
   // ── Build/rebuild renderer when game or rendererMode changes ─────────────────
   useEffect(() => {
@@ -298,7 +454,9 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       renderer?.destroy()
       rendererRef.current    = null
       renderer3dRef.current  = null
-      announcer().cancel()
+      cancelSpeech()
+      clearBroadcast()
+      firedCuesRef.current = new Set()
       sfx.dispose()
       if (goalBannerTimerRef.current)  clearTimeout(goalBannerTimerRef.current)
       if (stoppageTimerRef.current)    clearTimeout(stoppageTimerRef.current)
@@ -330,21 +488,29 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       } else {
         const newLines = lines.filter((l) => l.absT > lastCmt && l.absT <= currentAbsT)
         if (newLines.length > 0) {
+          // The ticker is TEXT only. The spoken voice is the broadcast booth
+          // (pre-rendered clips on the director's cues, below) — never live TTS.
           setVisibleLines((prev) => [...prev, ...newLines].slice(-50))
-          if (v.playing) {
-            const planSpd = currentSpeed(planRef.current, currentAbsT)
-            const minImp: number = planSpd >= 8 ? 99 : planSpd >= 4 ? 2 : 1
-            for (const line of newLines) {
-              // Goal calls (importance 3) are spoken immediately, with barge-in,
-              // by the goal-detection block below — skip them here so the spoken
-              // "GOAL!" lands exactly on the goal, not behind queued chatter.
-              if (line.importance >= minImp && line.importance < 3) {
-                announcer().speak(line.speech, line.importance)
-              }
-            }
-          }
         }
         lastCommentaryAbsT.current = currentAbsT
+      }
+    }
+
+    // ── Broadcast cues crossed this frame ─────────────────────────────────────
+    // Only on continuous playback: a seek / fast-forward / replay jump passes
+    // cues without firing them, and a cue fires at most once.
+    {
+      const prevAbs = lastAbsTRef.current
+      const continuous = prevAbs < 0 || (currentAbsT >= prevAbs && currentAbsT - prevAbs <= CUE_JUMP_S)
+      if (continuous && !replayActiveRef.current && !ffActiveRef.current) {
+        const lower = prevAbs < 0 ? -1 : prevAbs
+        const fired = firedCuesRef.current
+        for (const cue of planRefB.current.game) {
+          if (cue.at > currentAbsT) break
+          if (cue.at <= lower || fired.has(cue.id)) continue
+          fired.add(cue.id)
+          fireCue(cue)
+        }
       }
     }
 
@@ -384,16 +550,12 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
         sfx.goalHorn()
         sfx.crowd(1.0)
 
-        // Spoken goal call — barge in so "GOAL!" lands exactly on the goal,
-        // ahead of any queued play-by-play. Prefer the generated goal line's
-        // phrasing (TTS-friendly) if present, else a concise call.
-        const goalLine = commentaryLinesRef.current.find(
-          (l) => l.importance === 3 && Math.abs(l.absT - currentAbsT) <= 4,
-        )
-        announcer().cancel()
-        announcer().speak(goalLine?.speech ?? `Goal! Scored by ${scorerName}.`, 3)
+        // The spoken goal call is the booth's (a priority-3 director cue at the
+        // goal's absT, fired above) — it barges in so "GOAL" lands on the goal.
 
-        // Banner stays up through the celebration + the replay.
+        // Banner stays up through the celebration + the replay. With the
+        // broadcast package on, the on-ice tag + lower third ARE the goal
+        // graphics, so the old centre banner only carries the replay controls.
         setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
         if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
 
@@ -409,7 +571,8 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             if (!replaySkipRef.current) return // superseded / left
             setReplayActive(true)
             replayActiveRef.current = true
-            announcer().cancel() // go silent for the replay
+            // The booth keeps talking over the replay (the analyst's line is
+            // cued for it); only NEW cues are held while the replay re-crosses.
             const r = rendererRef.current
             if (!r) return
             r.seekFraction(replayStart)
@@ -471,7 +634,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
     ffActiveRef.current = true
     rendererRef.current?.pause()
-    announcer().cancel()
+    schedulerRef.current?.cancel()
 
     const SPIN_MS = 900
     let startTs: number | null = null
@@ -533,23 +696,42 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
   }, [visibleLines])
 
   // ── Hero overlay: user picks a mode ──────────────────────────────────────────
+  /** Picked a mode: run the broadcast open (skippable), then drop the puck. */
   function handleDropPuck(mode: PlaybackMode): void {
-    // User gesture — unlock AudioContext
+    // User gesture — unlock the AudioContexts
     sfx.resume()
     sfx.crowd(0.15)
+    boothRef.current?.resume()
+    pendingModeRef.current = mode
 
+    const open = planRefB.current
+    if (open.pregameMs <= 0 || open.pregame.length === 0) {
+      startPlay(mode)
+      return
+    }
+    setPhase('pregame')
+    for (const cue of open.pregame) {
+      cueTimersRef.current.push(setTimeout(() => fireCue(cue), cue.at))
+    }
+    pregameTimerRef.current = setTimeout(() => startPlay(mode), open.pregameMs)
+  }
+
+  const pendingModeRef = useRef<PlaybackMode>('full')
+
+  /** Skip the open (click or Space): straight to puck drop. */
+  function skipPregame(): void {
+    clearBroadcast()
+    startPlay(pendingModeRef.current)
+  }
+
+  function startPlay(mode: PlaybackMode): void {
+    if (pregameTimerRef.current) clearTimeout(pregameTimerRef.current)
+    pregameTimerRef.current = null
+    setLiveOverlays([])
     // Build speed plan for chosen mode
     planRef.current = planFor(game.stream, mode)
     setPlaybackMode(mode)
     setPhase('playing')
-
-    // Announcer greeting
-    const greets: Record<PlaybackMode, string> = {
-      full:     'Welcome to the game. The puck is about to drop.',
-      extended: 'Here are the extended highlights.',
-      key:      'Key moments, coming up.',
-    }
-    announcer().speak(greets[mode], 2)
 
     // Set initial speed and play. In extended/key, cut straight to the first
     // highlight so we open on the action, not on a 30× skip.
@@ -560,12 +742,25 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
       if (segs.length > 0 && dur > 0) {
         startAbsT = segs[0].fromAbsT
         rendererRef.current?.seekFraction(startAbsT / dur)
+        // Cues before the first highlight were never shown — don't fire them.
+        for (const c of planRefB.current.game) if (c.at < startAbsT) firedCuesRef.current.add(c.id)
       }
     }
     const initSpd = dur > 0 ? currentSpeed(planRef.current, startAbsT) : 2
     rendererRef.current?.setSpeed(initSpd)
     rendererRef.current?.play()
   }
+
+  // Space skips the open.
+  useEffect(() => {
+    if (phase !== 'pregame') return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code === 'Space') { e.preventDefault(); skipPregame() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
 
   // ── Controls ──────────────────────────────────────────────────────────────────
   function handleToggleRenderer(): void {
@@ -575,7 +770,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     setView(null)
     setErr(null)
     setPhase('hero')
-    announcer().cancel()
+    clearBroadcast()
   }
 
   function handleCamPreset(preset: CameraPreset): void {
@@ -583,9 +778,15 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     renderer3dRef.current?.setCamera(preset)
   }
 
-  function handleAnnouncerToggle(): void {
-    announcer().toggle()
-    setAnnouncerEnabled(announcer().isEnabled)
+  function handleCommentaryToggle(): void {
+    const next = !commentaryOn
+    setCommentaryEnabled(next)
+    setCommentaryOn(next)
+  }
+
+  function handlePresentation(p: PresentationSetting): void {
+    writePresentation(p)
+    setPresentation(p)
   }
 
   function handleSfxToggle(): void {
@@ -609,15 +810,18 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
   function handlePause(): void {
     rendererRef.current?.toggle()
-    announcer().cancel()
+    schedulerRef.current?.cancel()
   }
 
   function handleSeek(fraction: number): void {
     rendererRef.current?.seekFraction(fraction)
-    announcer().cancel()
+    clearBroadcast()
     const dur = gameDurationRef.current
     if (dur > 0) {
       const at = fraction * dur
+      // Seeking back re-arms the cues after the seek point.
+      const fired = firedCuesRef.current
+      for (const c of planRefB.current.game) if (c.at > at) fired.delete(c.id)
       const backfill = commentaryLinesRef.current.filter((l) => l.absT <= at)
       setVisibleLines(backfill.slice(-50))
       lastCommentaryAbsT.current = at
@@ -640,7 +844,6 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     replaySkipRef.current = true
     setReplayActive(true)
     replayActiveRef.current = true
-    announcer().cancel() // silent during the replay
     rendererRef.current?.seekFraction(replayStart)
     rendererRef.current?.setSpeed(0.6)
     rendererRef.current?.play()
@@ -649,26 +852,10 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
     }, 8000)
   }
 
-  // ── Enhanced voice ────────────────────────────────────────────────────────────
-  // Neural voices are the app-wide default and download themselves in the
-  // background; this is an opt-OUT, not the switch that turns them on. It used to
-  // be a private per-screen preference (default off) over a private Announcer,
-  // which is why commentary stayed robotic until you found this button.
-  function handleKokoroToggle(): void {
-    const next = !kokoroWanted
-    setKokoroWanted(next)
-    setAutoNeuralEnabled(next)
-    if (!next) announcer().useEngine('system')
-  }
-
-  // Track the shared engine's download so the match screen can report it. The
-  // switch-over itself is the shared announcer's job, not this screen's.
-  useEffect(() => {
-    if (!kokoroWanted) return
-    const id = window.setInterval(() => setKokoroStatus(kokoroState()), 1000)
-    setKokoroStatus(kokoroState())
-    return () => clearInterval(id)
-  }, [kokoroWanted])
+  // Scorebug power-play strip, from the stream's own penalties.
+  const absNow = view ? view.progress * gameDurationRef.current : 0
+  const ppNow = ppWindows.find((w) => w.fromAbsT <= absNow && absNow < w.toAbsT) ?? null
+  const showBroadcast = presentation !== 'off'
 
   const userSide = game.userIsHome ? 'home' : 'away'
 
@@ -694,14 +881,12 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             ))}
           </div>
 
-          {/* Announcer toggle */}
-          {announcer().available && (
-            <button className="btn btn-ghost" onClick={handleAnnouncerToggle}
-              title={announcerEnabled ? 'Mute commentary' : 'Enable commentary'}
-              style={announcerEnabled ? modeActiveStyle : { opacity: 0.5 }}>
-              <Icon size={14}>{announcerEnabled ? <Icons.Volume /> : <Icons.VolumeOff />}</Icon> Cmt
-            </button>
-          )}
+          {/* Broadcast booth commentary (pre-rendered; off by default) */}
+          <button className="btn btn-ghost" onClick={handleCommentaryToggle}
+            title={commentaryOn ? 'Mute the broadcast booth' : 'Turn on booth commentary (experimental)'}
+            style={commentaryOn ? modeActiveStyle : { opacity: 0.5 }}>
+            <Icon size={14}>{commentaryOn ? <Icons.Volume /> : <Icons.VolumeOff />}</Icon> Commentary
+          </button>
 
           {/* SFX toggle */}
           <button className="btn btn-ghost" onClick={handleSfxToggle}
@@ -725,6 +910,24 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             width: '100%', aspectRatio: '2.35 / 1',
             background: '#0c1016', borderRadius: 10, overflow: 'hidden',
           }} />
+
+          {/* Broadcast package: scorebug + TV graphics over either renderer */}
+          {showBroadcast && phase !== 'hero' && (
+            <div className="bc-layer">
+              {phase === 'playing' && (
+                <Scorebug ctx={bctx} view={view} pp={ppNow}
+                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} />
+              )}
+              {phase === 'pregame' && <div className="bc-live"><i /> LIVE</div>}
+              <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
+                projector={projectorOf(rendererRef.current)} bounds={hostSize} />
+            </div>
+          )}
+          {phase === 'pregame' && (
+            <button className="bc-skip" onClick={skipPregame} title="Skip the open (Space)">
+              SKIP OPEN ›
+            </button>
+          )}
 
           {/* Hero overlay — pick a mode before play starts */}
           {phase === 'hero' && (
@@ -765,9 +968,9 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
           {/* GOAL banner */}
           {goalBanner && (
-            <div style={goalBannerStyle}>
-              <div style={{ fontSize: 26, fontWeight: 800 }}>{goalBanner.text}</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, justifyContent: 'center' }}>
+            <div style={showBroadcast ? replayChipStyle : goalBannerStyle}>
+              {!showBroadcast && <div style={{ fontSize: 26, fontWeight: 800 }}>{goalBanner.text}</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: showBroadcast ? 0 : 10, justifyContent: 'center' }}>
                 {replayActive ? (
                   <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
                     onClick={handleSkipReplay}>
@@ -785,7 +988,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
 
           {/* REPLAY watermark */}
           {replayActive && (
-            <div style={replayBadgeStyle}>REPLAY</div>
+            <div style={{ ...replayBadgeStyle, ...(showBroadcast ? { top: 48 } : {}) }}>REPLAY</div>
           )}
 
           {/* Stoppage chip */}
@@ -897,23 +1100,18 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             </div>
           )}
 
-          {/* Row 3: enhanced voice opt-in */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost"
-              style={{ fontSize: 12, padding: '4px 12px', ...(kokoroWanted ? modeActiveStyle : { opacity: 0.7 }) }}
-              onClick={handleKokoroToggle}
-              title="Neural voices — on by default, downloaded in the background and cached. Turn off to use the system voice."
-            >
-              <Icon size={14}><Icons.Interview /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(off)'}
-            </button>
-            {kokoroWanted && kokoroStatus === 'downloading' && (
-              <span style={{ color: MUTED, fontSize: 11 }}>Downloading…</span>
-            )}
-            {kokoroWanted && kokoroStatus === 'ready' && (
-              <span style={{ color: 'var(--green)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Icons.Tick /></Icon> Neural voice active</span>
-            )}
-            {kokoroWanted && kokoroStatus === 'failed' && (
-              <span style={{ color: 'var(--red)', fontSize: 11 }}>Download failed</span>
+          {/* Row 3: broadcast presentation + booth status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <span style={{ color: MUTED, fontSize: 12 }}>Presentation:</span>
+            {(['full', 'compact', 'off'] as const).map((p) => (
+              <button key={p} className="btn"
+                style={{ fontSize: 12, padding: '4px 10px', ...(presentation === p ? speedActiveStyle : {}) }}
+                onClick={() => handlePresentation(p)}>
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+            {commentaryOn && namesPending > 0 && (
+              <span style={{ color: MUTED, fontSize: 11 }}>Booth: preparing {namesPending} name clips…</span>
             )}
           </div>
         </div>
@@ -1024,6 +1222,13 @@ const goalBannerStyle: CSSProperties = {
   textShadow: '0 2px 6px rgba(0,0,0,0.5)',
   animation: 'fadeIn 0.18s ease',
   minWidth: 240,
+}
+
+/** With the broadcast package on, the goal graphics are the tag + lower third;
+ *  the replay controls sit in a small chip out of the lower third's way. */
+const replayChipStyle: CSSProperties = {
+  position: 'absolute', top: 12, right: 14,
+  pointerEvents: 'auto', zIndex: 18,
 }
 
 const replayBadgeStyle: CSSProperties = {

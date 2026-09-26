@@ -129,6 +129,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'matchDayPreview', preview: must().getMatchDayPreview() }
     case 'getPostgameReceipt':
       return { id: req.id, type: 'postgameReceipt', receipt: must().getPostgameReceipt() }
+    case 'getBroadcastContext':
+      return { id: req.id, type: 'broadcastContext', context: must().getBroadcastContext() }
 
     /* ── mutations ── */
     case 'setLines':
