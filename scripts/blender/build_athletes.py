@@ -6,7 +6,7 @@ fully headless:
       --python scripts/blender/build_athletes.py -- [--preview] [--out build/blender]
 
 Outputs (build outputs — regenerate, don't hand-edit):
-  build/blender/athletes.blend           the working file (open it in Blender to tweak)
+  build/blender/{skater,goalie}.blend    the working files (open in Blender to inspect)
   src/render3d/assets/skater.glb         skinned skater + clips
   src/render3d/assets/goalie.glb         skinned goalie + clips
   build/blender/preview-*.png            (--preview) Workbench turnarounds

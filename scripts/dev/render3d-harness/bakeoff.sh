@@ -23,8 +23,8 @@ names=("$@")
 [ ${#names[@]} -eq 0 ] && names=("${!SHOTS[@]}")
 for n in "${names[@]}"; do
   IFS='|' read -r q w <<<"${SHOTS[$n]}"
-  node scripts/dev/render3d-harness/shot.mjs "$TMP/p-$n.png" "$q" --wait="$w" >/dev/null
-  node scripts/dev/render3d-harness/shot.mjs "$TMP/b-$n.png" "$q&model=blender" --wait="$w" >/dev/null
+  node scripts/dev/render3d-harness/shot.mjs "$TMP/p-$n.png" "$q&model=procedural&loco=code" --wait="$w" >/dev/null
+  node scripts/dev/render3d-harness/shot.mjs "$TMP/b-$n.png" "$q&model=blender&loco=hybrid" --wait="$w" >/dev/null
   python - "$TMP/p-$n.png" "$TMP/b-$n.png" "$OUT/bakeoff-$n.png" <<'EOF'
 import sys
 from PIL import Image, ImageDraw

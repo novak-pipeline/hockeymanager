@@ -68,7 +68,10 @@ export interface Render3dOptions {
   athletes?: 'blender' | 'procedural'
   locomotion?: LocoMode
 }
-export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'procedural', locomotion: 'code' }
+// Bake-off verdict (docs/graphics/BLENDER-PIPELINE.md): the Blender body wins;
+// the code stride stays (locked to sim speed), authored cycles add crossovers +
+// backward skating, authored actions ride on top. Procedural is the fallback.
+export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'blender', locomotion: 'hybrid' }
 
 const PUCK_R = 0.36
 const PUCK_H = 0.1

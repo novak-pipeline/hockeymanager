@@ -33,10 +33,10 @@ const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('aw
 const oldPath = './old-rink3dRenderer.ts'
 const Impl: typeof Rink3dRenderer =
   q.get('old') === '1' ? ((await import(/* @vite-ignore */ oldPath)).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
-// ?model=blender mounts the Blender-authored athletes (scripts/blender), &loco=code|clip|hybrid
+// Defaults follow the app (RENDER3D_DEFAULTS): ?model=procedural|blender, &loco=code|clip|hybrid override
 const r = await Impl.create(host, colors, {
-  athletes: q.get('model') === 'blender' ? 'blender' : 'procedural',
-  locomotion: (q.get('loco') ?? 'code') as 'code' | 'clip' | 'hybrid',
+  ...(q.has('model') ? { athletes: q.get('model') === 'procedural' ? 'procedural' : 'blender' } : {}),
+  ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
 })
 r.setEventStream(out.stream)
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
