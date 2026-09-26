@@ -48,6 +48,11 @@ import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial } from './athlete'
 import { kitFor, type Kit } from './palette'
 import { buildAtlasCanvas, paintJerseySlot } from './textures'
+import { RINK_HALF_W } from './iceCanvas'
+import { assignRigs, capStep, type RigMode } from './lineChange'
+
+/** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
+const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
 
 const PUCK_R = 0.36
 const PUCK_H = 0.1
@@ -71,8 +76,24 @@ const PLAY_FOCUS_DEADZONE_X = 6.0   // ft on the long axis
 const PLAY_FOCUS_DEADZONE_Z = 5.0   // ft on the width axis
 
 // ── Orientation turn-rate clamp ─────────────────────────────────────────────
-// Max body rotation speed: ~270°/s. Prevents 180° whips on direction reversal.
-const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 270) / 180
+// Max body rotation speed: ~200°/s. Prevents whips on direction reversal and the
+// twitch that the sim's constant micro-steering caused at 270°/s.
+const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 200) / 180
+// Facing follows a SMOOTHED direction of travel, not the per-frame velocity.
+const FACING_VEL_TAU = 0.3
+
+// ── Movement limits ─────────────────────────────────────────────────────────
+// Nothing on the ice moves faster than an elite skater: a residual teleport in
+// the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
+const MAX_RENDER_SPEED = 40   // ft/s
+const ARRIVE_SPEED = 30       // skating out from the bench gate
+const DEPART_SPEED = 22       // coasting off to the bench
+const DEPART_TIMEOUT_S = 5    // a departing player steps off the ice after this
+// Rigs per team: up to 6 skaters on the ice + 6 skating off during a full change.
+const SKATER_RIGS_PER_TEAM = 12
+// Body yaw eases toward its target on a critically damped spring (no chasing a
+// wobbling target at the max turn rate), then the rate clamp still applies.
+const FACING_HL = 0.16
 
 // ── Animation smoothing ─────────────────────────────────────────────────────
 const SPEED_TAU = 0.18        // stride-amplitude smoothing (s) — no leg flicker
@@ -80,10 +101,10 @@ const TURN_TAU = 0.25         // bank-into-turn smoothing (s)
 const SHOT_SWING_S = 0.32     // stick swing duration on a shot cue
 const GOAL_CUE_S = 4.2        // lifetime of the goal cue (celebration cam)
 
-// Atlas cells (4×4): row 0-1 home (skaters 0-5, G 6), rows 2-3 away (skaters 8-13, G 14)
-// — same-team neighbours, so mip bleed between cells never mixes teams.
-const HOME_G_SLOT = 6
-const AWAY_G_SLOT = 14
+// Atlas cells (6×6): home rigs 0-11 + G 12, away rigs 13-24 + G 25, 26-35 spare
+// — same-team neighbours, so mip bleed between cells rarely mixes teams.
+const HOME_G_SLOT = 12
+const AWAY_G_SLOT = 25
 
 interface PlayerPose {
   worldX: Spring1D
@@ -102,6 +123,13 @@ interface PlayerPose {
   staggerTimer: number     // hit reaction
   shotTimer: number        // stick swing
   playerId: PlayerId | null
+  /** Line-change state: 'play' follows the sim; 'arriving'/'departing' skate to/from the bench gate. */
+  mode: RigMode
+  departT: number          // seconds spent skating off (departing only)
+  departSeq: number        // when he started departing (oldest is reused first)
+  velSmX: number           // smoothed velocity (ft/s) — drives facing
+  velSmZ: number
+  angVel: number           // body-yaw spring velocity (rad/s)
   rig: AthleteRig
   team: 'home' | 'away'
   labelSprite: THREE.Sprite
@@ -403,6 +431,7 @@ export class Rink3dRenderer implements MatchRenderer {
         worldX: snapSpring(wx),
         worldZ: snapSpring(wz),
         angle: team === 'home' ? Math.PI / 2 : -Math.PI / 2,
+        angVel: 0,
         prevWx: wx,
         prevWz: wz,
         speed: 0,
@@ -416,14 +445,23 @@ export class Rink3dRenderer implements MatchRenderer {
         staggerTimer: 0,
         shotTimer: -1,
         playerId: null,
+        mode: 'idle' as RigMode,
+        departT: 0,
+        departSeq: 0,
+        velSmX: 0,
+        velSmZ: 0,
         rig,
         team,
         labelSprite: this.makeLabelSprite(),
       }
     }
-    for (let i = 0; i < 6; i++) {
-      this.homePoses.push(mk('home', false, i, -10, (i - 2.5) * 8))
-      this.awayPoses.push(mk('away', false, 8 + i, 10, (i - 2.5) * 8))
+    for (let i = 0; i < SKATER_RIGS_PER_TEAM; i++) {
+      const h = mk('home', false, i, BENCH_GATE.home.x, BENCH_GATE.home.z)
+      const a = mk('away', false, 13 + i, BENCH_GATE.away.x, BENCH_GATE.away.z)
+      h.rig.visible = false
+      a.rig.visible = false
+      this.homePoses.push(h)
+      this.awayPoses.push(a)
     }
     this.homeGoaliePose = mk('home', true, HOME_G_SLOT, -NET_X + 4, 0)
     this.awayGoaliePose = mk('away', true, AWAY_G_SLOT, NET_X - 4, 0)
@@ -837,30 +875,9 @@ export class Rink3dRenderer implements MatchRenderer {
     const puckWx = normXtoWorld(snap.puck.x)
     const puckWz = normYtoWorld(snap.puck.y)
 
-    // Home skaters
-    for (let i = 0; i < this.homePoses.length; i++) {
-      const pose = this.homePoses[i]!
-      if (i < snap.home.length) {
-        pose.rig.visible = true
-        this.updatePoseLabelForPlayer(pose, snap.homeIds?.[i])
-        this.updatePose(pose, snap.home[i]?.x ?? 0, snap.home[i]?.y ?? 0, dt, simDt, puckWx, puckWz)
-      } else {
-        pose.rig.visible = false
-        pose.labelSprite.visible = false
-      }
-    }
-    // Away skaters
-    for (let i = 0; i < this.awayPoses.length; i++) {
-      const pose = this.awayPoses[i]!
-      if (i < snap.away.length) {
-        pose.rig.visible = true
-        this.updatePoseLabelForPlayer(pose, snap.awayIds?.[i])
-        this.updatePose(pose, snap.away[i]?.x ?? 0, snap.away[i]?.y ?? 0, dt, simDt, puckWx, puckWz)
-      } else {
-        pose.rig.visible = false
-        pose.labelSprite.visible = false
-      }
-    }
+    // Skaters: rigs are bound to PLAYERS, not timeline slots (see lineChange.ts)
+    this.syncSide('home', this.homePoses, snap.home, snap.homeIds, dt, simDt, puckWx, puckWz)
+    this.syncSide('away', this.awayPoses, snap.away, snap.awayIds, dt, simDt, puckWx, puckWz)
 
     // Goalies
     if (this.homeGoaliePose) {
@@ -929,13 +946,92 @@ export class Rink3dRenderer implements MatchRenderer {
     this.blobs.instanceMatrix.needsUpdate = true
   }
 
-  private updatePose(pose: PlayerPose, nx: number, ny: number, dt: number, simDt: number, puckWx: number, puckWz: number): void {
-    const wx = normXtoWorld(nx)
-    const wz = normYtoWorld(ny)
+  private departSeq = 0
 
+  /**
+   * Bind one team's on-ice skaters to rigs and move every rig: players in play
+   * follow the sim, a player who just came on skates out from the bench gate, a
+   * player who just went off coasts to the gate and steps off. On a seek (dt 0)
+   * everything snaps and nobody is mid-change.
+   */
+  private syncSide(
+    team: 'home' | 'away',
+    poses: PlayerPose[],
+    pos: ReadonlyArray<{ x: number; y: number } | undefined>,
+    ids: ReadonlyArray<PlayerId | undefined> | undefined,
+    dt: number, simDt: number, puckWx: number, puckWz: number,
+  ): void {
+    const gate = BENCH_GATE[team]
+    const idList = (ids ?? []).map((id) => (id as string | undefined))
+    const slots = poses.map((p) => ({ id: p.playerId as string | null, mode: p.mode }))
+    const { follow, entered, left } = assignRigs(slots, idList, poses.map((p) => p.departSeq))
+    for (const r of left) {
+      poses[r]!.departT = 0
+      poses[r]!.departSeq = ++this.departSeq
+      poses[r]!.labelSprite.visible = false
+    }
+    poses.forEach((pose, r) => {
+      const slot = slots[r]!
+      pose.mode = slot.mode
+      if (slot.id !== (pose.playerId as string | null)) this.updatePoseLabelForPlayer(pose, slot.id as PlayerId | null)
+      const k = follow[r]!
+      if (pose.mode === 'idle' || (pose.mode === 'departing' && dt === 0)) {
+        // idle, or a seek landed mid-change: nobody is skating off
+        pose.mode = 'idle'
+        pose.playerId = null
+        pose.rig.visible = false
+        pose.labelSprite.visible = false
+        return
+      }
+      pose.rig.visible = true
+      if (pose.mode === 'departing') {
+        pose.departT += dt
+        this.updatePose(pose, gate.x, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
+        const home = Math.hypot(pose.worldX.pos - gate.x, pose.worldZ.pos - gate.z)
+        if (home < 2 || pose.departT > DEPART_TIMEOUT_S) {
+          pose.mode = 'idle'
+          pose.playerId = null
+          pose.rig.visible = false
+        }
+        return
+      }
+      const p = pos[k]
+      const tx = normXtoWorld(p?.x ?? 0)
+      const tz = normYtoWorld(p?.y ?? 0)
+      if (entered.includes(r)) {
+        if (dt === 0) pose.mode = 'play'
+        else {
+          // enter from the bench gate, not from wherever this rig last was
+          pose.worldX = snapSpring(gate.x)
+          pose.worldZ = snapSpring(gate.z)
+          pose.prevWx = gate.x
+          pose.prevWz = gate.z
+          pose.velSmX = 0
+          pose.velSmZ = 0
+          pose.angle = Math.atan2(tx - gate.x, tz - gate.z)
+        }
+      }
+      if (pose.mode === 'arriving') {
+        this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, ARRIVE_SPEED)
+        if (Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) pose.mode = 'play'
+        return
+      }
+      this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED)
+    })
+  }
+
+  private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED): void {
     if (dt > 0) {
+      const px = pose.worldX.pos
+      const pz = pose.worldZ.pos
       pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
       pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+      // Nothing skates faster than a skater: a jump in the stream becomes a skate.
+      const c = capStep(px, pz, pose.worldX.pos, pose.worldZ.pos, dt, maxSpeed)
+      if (c.capped) {
+        pose.worldX = { pos: c.x, vel: (c.x - px) / dt }
+        pose.worldZ = { pos: c.z, vel: (c.z - pz) / dt }
+      }
     } else {
       // dt === 0 is a seek/scrub/replay jump — snap directly to the sampled
       // position (zero velocity) so the player doesn't fly in from his old spot
@@ -961,11 +1057,25 @@ export class Rink3dRenderer implements MatchRenderer {
     // play, where (like real players) they square up to the puck.
     const prevAngle = pose.angle
     if (dt > 0) {
-      const target = facingTarget(Math.atan2(vx, vz), speedFt, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
-      if (target !== null) pose.angle = clampTurnRate(pose.angle, target, dt, MAX_TURN_RATE_RAD_PER_SEC)
+      // Face along a SMOOTHED direction of travel: the sim steers continuously,
+      // and the raw per-frame velocity made bodies twitch side to side.
+      pose.velSmX = emaStep(pose.velSmX, vx / dt, dt, FACING_VEL_TAU)
+      pose.velSmZ = emaStep(pose.velSmZ, vz / dt, dt, FACING_VEL_TAU)
+      const smSpeed = Math.hypot(pose.velSmX, pose.velSmZ)
+      const target = facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
+      if (target !== null) {
+        // spring toward the nearest equivalent of the target angle, then clamp the rate
+        const goal = pose.angle + wrapAngle(target - pose.angle)
+        const sp = springStep({ pos: pose.angle, vel: pose.angVel }, goal, dt, FACING_HL)
+        pose.angle = clampTurnRate(pose.angle, sp.pos, dt, MAX_TURN_RATE_RAD_PER_SEC)
+        pose.angVel = (pose.angle - prevAngle) / dt
+      }
     } else {
       // seek/load: no velocity yet — start squared up to the puck
       pose.angle = Math.atan2(puckWx - wx, puckWz - wz)
+      pose.angVel = 0
+      pose.velSmX = 0
+      pose.velSmZ = 0
     }
     const turnRate = dt > 0 ? wrapAngle(pose.angle - prevAngle) / dt : 0
 

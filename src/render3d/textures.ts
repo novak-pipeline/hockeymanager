@@ -111,8 +111,9 @@ export function buildRibbonCanvas(homeColor: number): HTMLCanvasElement {
 
 // ── jersey atlas ─────────────────────────────────────────────────────────────
 
-/** Atlas: 4×4 slots of 256 px; one slot per on-ice player slot. */
-export const ATLAS_GRID = 4
+/** Atlas: 6×6 slots of 256 px; one slot per rig (skaters on the ice, players
+ *  skating off during a line change, and the goalies). */
+export const ATLAS_GRID = 6
 export const ATLAS_SLOT_PX = 256
 
 /**
