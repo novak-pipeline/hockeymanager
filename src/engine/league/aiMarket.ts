@@ -167,7 +167,7 @@ function bothAccept(args: {
   /** Farm / rights assets in either package (no cap hit, no roster slot). */
   farmIds: ReadonlySet<string>
   retainedByA?: number
-  why?: (reason: string) => void
+  why?: ((reason: string) => void) | undefined
 }): boolean {
   const { a, b, aGives, bGives, players, rng, deadlineProximity, farmIds } = args
   const rel = (c: MarketClub): number => 50 + (c.persona.aggression - 0.5) * 60
@@ -206,9 +206,9 @@ function bothAccept(args: {
 
 /** Shape weights per window — the variety the wire should show. */
 const SHAPE_WEIGHTS: Record<MarketWindow, Array<[AiTradeShape, number]>> = {
-  inSeason: [['rental', 34], ['prospectFor', 16], ['hockey', 22], ['goalie', 10], ['capDump', 10], ['pickSwap', 0]],
-  deadline: [['rental', 55], ['prospectFor', 20], ['hockey', 10], ['goalie', 10], ['capDump', 5], ['pickSwap', 0]],
-  offseason: [['rental', 0], ['prospectFor', 22], ['hockey', 34], ['goalie', 12], ['capDump', 32], ['pickSwap', 0]],
+  inSeason: [['rental', 36], ['prospectFor', 16], ['hockey', 28], ['goalie', 12], ['capDump', 3], ['pickSwap', 0]],
+  deadline: [['rental', 60], ['prospectFor', 18], ['hockey', 10], ['goalie', 10], ['capDump', 2], ['pickSwap', 0]],
+  offseason: [['rental', 30], ['prospectFor', 20], ['hockey', 34], ['goalie', 10], ['capDump', 6], ['pickSwap', 0]],
 }
 
 export function generateLeagueDeal(args: LeagueDealArgs): LeagueDeal | null {
@@ -221,12 +221,12 @@ export function generateLeagueDeal(args: LeagueDealArgs): LeagueDeal | null {
   const order = first ? [first, ...weights.map(([s]) => s).filter((s) => s !== first)] : []
   const ranks = new Map(args.clubs.map((c) => [c.team.id as string, c.strengthRank]))
   const year = args.picks.length ? Math.min(...args.picks.map((p) => p.year)) : 0
-  for (let i = 0; i < Math.min(2, order.length); i++) {
+  for (let i = 0; i < Math.min(3, order.length); i++) {
     const shape = order[i]!
     const deal =
       shape === 'rental' ? sellVeteran(args, ranks, year, 'rental')
       : shape === 'prospectFor' ? sellVeteran(args, ranks, year, 'prospectFor')
-      : shape === 'hockey' ? hockeyTrade(args)
+      : shape === 'hockey' ? hockeyTrade(args, ranks, year)
       : shape === 'goalie' ? goalieTrade(args, ranks, year)
       : shape === 'capDump' ? capDump(args, ranks, year)
       : null
@@ -245,7 +245,8 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   const vetsOf = (seller: MarketClub): Player[] => seller.team.roster
     .map((id) => players.get(id))
     .filter((p): p is Player => movable(p, busy))
-    .filter((p) => p.age >= 26 && playerValue(p) >= MIN_SHOP_VALUE)
+    // Deadline day moves depth too (a bottom-six rental for a late pick).
+    .filter((p) => p.age >= 26 && playerValue(p) >= (args.window === 'deadline' ? MIN_SHOP_VALUE * 0.5 : MIN_SHOP_VALUE))
     .filter((p) => (rental ? p.contract.yearsRemaining <= 2 : p.contract.yearsRemaining >= 2 && p.contract.yearsRemaining <= 4))
     // A goalie sells only if the club keeps two.
     .filter((p) => p.position !== 'G' || groupCount(seller.team, players, 'G') >= 3)
@@ -270,7 +271,7 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   // Buyers: contenders — and at the deadline an aggressive retooler — who have
   // a real hole where he plays, a roster spot and the money (retention helps).
   const buyers = clubs
-    .filter((c) => c !== seller && (c.posture === 'contend' || (c.posture === 'retool' && c.persona.aggression >= 0.6 && args.window === 'deadline')))
+    .filter((c) => c !== seller && (c.posture === 'contend' || (c.posture === 'retool' && c.persona.aggression >= 0.6 && args.window !== 'inSeason')))
     .filter((c) => c.team.roster.length < 26)
     .filter((c) => vetOvr >= replacementLevel(c.team, players, g) + (g === 'G' ? 1 : 2))
   const buyer = weightedPick(rng, buyers, (c) => 0.4 + c.persona.aggression + (c.posture === 'contend' ? 0.4 : 0))
@@ -348,7 +349,7 @@ function sellVeteran(args: LeagueDealArgs, ranks: Map<string, number>, year: num
 
 /* ── hockey trade: need for need ── */
 
-function hockeyTrade(args: LeagueDealArgs): LeagueDeal | null {
+function hockeyTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: number): LeagueDeal | null {
   const { clubs, players, rng, busy } = args
   // Each club's need: the group whose weakest regular sits furthest below the
   // league's typical regular there; it can deal from the other group when it
@@ -374,7 +375,7 @@ function hockeyTrade(args: LeagueDealArgs): LeagueDeal | null {
   // A offers a middle player from its surplus group (never its top two there).
   const aSide = a.team.roster
     .map((id) => players.get(id))
-    .filter((p): p is Player => movable(p, busy) && groupOf(p.position) === giveG && playerValue(p) >= MIN_SHOP_VALUE)
+    .filter((p): p is Player => movable(p, busy) && groupOf(p.position) === giveG && playerValue(p) >= MIN_SHOP_VALUE * 0.5)
     .filter((p) => !(a.persona.loyalty >= 0.65 && isOwnDraftee(p, a.team)))
     .sort((x, y) => ratedOverall(y) - ratedOverall(x))
     .slice(1)
@@ -384,7 +385,7 @@ function hockeyTrade(args: LeagueDealArgs): LeagueDeal | null {
   const bSide = b.team.roster
     .map((id) => players.get(id))
     .filter((p): p is Player => movable(p, busy) && groupOf(p.position) === needA)
-    .filter((p) => Math.abs(playerValue(p) - gv) <= gv * 0.3)
+    .filter((p) => Math.abs(playerValue(p) - gv) <= gv * 0.6)
     .filter((p) => ratedOverall(p) >= replacementLevel(a.team, players, needA))
     .filter((p) => !(b.persona.loyalty >= 0.65 && isOwnDraftee(p, b.team)))
     .sort((x, y) => Math.abs(playerValue(x) - gv) - Math.abs(playerValue(y) - gv))
@@ -394,25 +395,41 @@ function hockeyTrade(args: LeagueDealArgs): LeagueDeal | null {
   const aRoom = a.team.finances.salaryCap - capUsed(a.team, players) + give.contract.salary
   const bRoom = b.team.finances.salaryCap - capUsed(b.team, players) + get.contract.salary
   if (get.contract.salary > aRoom || give.contract.salary > bRoom) { args.why?.(`hockeyTrade:L365`); return null }
+  // Balance the gap with a pick from the side getting the better player.
+  const diff = playerValue(get) - gv
+  let aPick: DraftPick | undefined
+  let bPick: DraftPick | undefined
+  if (Math.abs(diff) > gv * 0.1) {
+    const payer = diff > 0 ? a : b
+    const fit = ownedPicks(args.picks, payer.team.id, year, ranks)
+      .filter((c) => c.value <= Math.abs(diff) * 1.25)[0]
+    if (fit) {
+      if (diff > 0) aPick = fit.pick
+      else bPick = fit.pick
+    }
+  }
   const ok = bothAccept({
     a, b,
-    aGives: { players: [give], picks: [] },
-    bGives: { players: [get], picks: [] },
+    aGives: { players: [give], picks: aPick ? [aPick] : [] },
+    bGives: { players: [get], picks: bPick ? [bPick] : [] },
     players, rng, deadlineProximity: args.deadlineProximity, farmIds: new Set(),
   })
   if (!ok) { args.why?.(`hockeyTrade:reject`); return null }
   const word = (g: PositionGroup): string => (g === 'D' ? 'defenceman' : 'forward')
+  const pickNote = aPick ? ` and ${pickLabel(aPick)}` : ''
+  const backNote = bPick ? ` and ${pickLabel(bPick)}` : ''
   return {
     shape: 'hockey',
     sellerTeamId: a.team.id,
     buyerTeamId: b.team.id,
     playerIds: [give.id],
     buyerPlayerIds: [get.id],
-    picks: [],
+    picks: bPick ? [bPick] : [],
+    ...(aPick ? { sellerPicks: [aPick] } : {}),
     prospectIds: [],
-    summary: `Hockey trade: ${a.team.abbreviation} send ${give.position} ${give.name} to ${b.team.abbreviation} for ${get.position} ${get.name}.`,
+    summary: `Hockey trade: ${a.team.abbreviation} send ${give.position} ${give.name}${pickNote} to ${b.team.abbreviation} for ${get.position} ${get.name}${backNote}.`,
     rationale: {
-      seller: `${a.persona.name} dealt from depth up front${giveG === 'D' ? ' — or rather, on the blue line' : ''} to fix a ${word(needA)} hole`,
+      seller: `${a.persona.name} dealt a spare ${word(giveG)} to fix a ${word(needA)} hole`,
       buyer: `${b.persona.name} swaps a ${word(needA)} he could spare for the ${word(giveG)} he needed`,
     },
   }
@@ -432,36 +449,44 @@ function goalieTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: num
   for (const c of clubs) {
     if (c === buyer) continue
     const gs = c.team.roster.map((id) => players.get(id)).filter((p): p is Player => movable(p, busy) && p.position === 'G')
-    if (gs.length < 3) continue // a club never leaves itself one goalie
+    if (gs.length < 2) continue
     for (const g of gs) {
       if (ratedOverall(g) < need || g.contract.yearsRemaining > 3 || playerValue(g) < MIN_SHOP_VALUE) continue
       // A club keeps its starter unless it is selling or has a better one.
       const better = gs.some((o) => o !== g && ratedOverall(o) >= ratedOverall(g) - 1)
       if (c.posture !== 'rebuild' && !better) continue
-      if (groupCount(c.team, players, 'G') < 3 && !better) continue
       cands.push({ club: c, g })
     }
   }
   const pickC = cands[rng.int(Math.max(1, cands.length))]
   if (!pickC) { args.why?.(`goalieTrade:L415`); return null }
   const { club: seller, g } = pickC
-  const room = buyer.team.finances.salaryCap - capUsed(buyer.team, players)
+  // A club never leaves itself one goalie: if the seller carries only two, the
+  // buyer's own backup goes the other way (a goalie swap plus the return).
+  const backup = groupCount(seller.team, players, 'G') < 3
+    ? buyer.team.roster
+      .map((id) => players.get(id))
+      .filter((p): p is Player => movable(p, busy) && p.position === 'G')
+      .sort((x, y) => ratedOverall(x) - ratedOverall(y))[0]
+    : undefined
+  if (groupCount(seller.team, players, 'G') < 3 && !backup) { args.why?.(`goalieTrade:noBackup`); return null }
+  const room = buyer.team.finances.salaryCap - capUsed(buyer.team, players) + (backup?.contract.salary ?? 0)
   if (g.contract.salary > room) { args.why?.(`goalieTrade:L418`); return null }
   const pool = ownedPicks(args.picks, buyer.team.id, year, ranks)
   const target = playerValue(g) * (0.9 + 0.2 * buyer.persona.aggression)
   const chosen: DraftPick[] = []
-  let total = 0
+  let total = backup ? playerValue(backup) : 0
   for (const c of pool) {
     if (chosen.length >= 2 || total >= target * 0.92) break
     if (total + c.value > target * 1.15) continue
     chosen.push(c.pick)
     total += c.value
   }
-  if (chosen.length === 0) { args.why?.(`goalieTrade:L429`); return null }
+  if (chosen.length === 0 && !backup) { args.why?.(`goalieTrade:L429`); return null }
   const ok = bothAccept({
     a: seller, b: buyer,
     aGives: { players: [g], picks: [] },
-    bGives: { players: [], picks: chosen },
+    bGives: { players: backup ? [backup] : [], picks: chosen },
     players, rng, deadlineProximity: args.deadlineProximity, farmIds: new Set(),
   })
   if (!ok) { args.why?.(`goalieTrade:reject`); return null }
@@ -470,9 +495,10 @@ function goalieTrade(args: LeagueDealArgs, ranks: Map<string, number>, year: num
     sellerTeamId: seller.team.id,
     buyerTeamId: buyer.team.id,
     playerIds: [g.id],
+    ...(backup ? { buyerPlayerIds: [backup.id] } : {}),
     picks: chosen,
     prospectIds: [],
-    summary: `${seller.team.abbreviation} send G ${g.name} to ${buyer.team.abbreviation} for ${chosen.map(pickLabel).join(' and ')}.`,
+    summary: `${seller.team.abbreviation} send G ${g.name} to ${buyer.team.abbreviation} for ${[...(backup ? [`G ${backup.name}`] : []), ...chosen.map(pickLabel)].join(' and ')}.`,
     rationale: {
       seller: seller.posture === 'rebuild' ? `${seller.persona.name} won't need a starter for the years it takes` : `${seller.persona.name} had a goalie to spare`,
       buyer: `${buyer.persona.name} fixes the crease — the one position a ${buyer.posture === 'contend' ? 'contender' : 'club'} cannot hide`,
@@ -500,7 +526,7 @@ function capDump(args: LeagueDealArgs, ranks: Map<string, number>, year: number)
     .filter((p) => p.contract.salary >= cap * 0.025 && p.contract.yearsRemaining >= 1)
     .filter((p) => p.position !== 'G' || groupCount(dumper.team, players, 'G') >= 3)
     .map((p) => ({ p, over: p.contract.salary - fairSalaryFor(ratedOverall(p)) }))
-    .filter((x) => x.over > 0 || x.p.age >= 31)
+    .filter((x) => x.over > 0)
     .sort((x, y) => y.over - x.over)
   const dump = cands[0]?.p
   if (!dump) { args.why?.(`capDump:L475`); return null }

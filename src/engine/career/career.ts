@@ -6478,7 +6478,7 @@ export class Career {
       // vet isn't traded twice and the market thins as pieces move.
       // Talks open and close over days (two-phase) — see leagueMarketTick.
       const dl = this.deadlineDay - day
-      const attempts = dl <= 5 ? 5 : dl <= 20 ? 3 : 1.6
+      const attempts = dl <= 5 ? 1.6 : dl <= 20 ? 1.4 : 1.3
       this.leagueMarketTick(dl <= 5 ? 'deadline' : 'inSeason', attempts, day)
     }
     this.currentDay = day
@@ -8025,7 +8025,7 @@ export class Career {
         // The June checkpoint: GMs re-read their clubs, then the draft floor —
         // the first summer trades (hockey trades, dumps, goalies) open talks.
         this.commitPostures('summer')
-        this.leagueMarketTick('offseason', 14, this.currentDay)
+        this.leagueMarketTick('offseason', 30, this.currentDay)
         // E1: the call to your best pick, made from the floor.
         this.raisePostDraftCall()
         const rng = this.rngFor(8003)
@@ -8369,7 +8369,7 @@ export class Career {
           if (session && session.status !== 'signed') session.status = 'walked'
         }
         // July trades: the summer market keeps talking (two-phase, closes later).
-        this.leagueMarketTick('offseason', 5, this.currentDay)
+        this.leagueMarketTick('offseason', 10, this.currentDay)
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         if (os.faDay >= FA_WINDOW_DAYS) {
           // Summer talks still open close (or die) before camp.
@@ -11824,7 +11824,7 @@ export class Career {
     if (targets.length === 0) return
     targets.sort((a, b) => ratedOverall(b.p) - ratedOverall(a.p) || (a.p.id < b.p.id ? -1 : 1))
     for (const tgt of targets.slice(0, 3)) {
-      if (!rng.chance(0.3)) continue
+      if (!rng.chance(0.45)) continue
       const suitors = clubs
         .filter((t) => t.id !== tgt.owner.id && t.roster.length < ROSTER_HARD_CAP)
         .map((t) => ({ t, gm: this.gmPersonaFor(t.id) }))
@@ -15210,6 +15210,13 @@ export class Career {
     const sellerAfter = rosterCapUsed(seller, this.data.players) - sal(d.playerIds) + toSeller + (d.retainedAmount ?? 0)
     const buyerAfter = rosterCapUsed(buyer, this.data.players) - toSeller + toBuyer
     if (buyerAfter > buyer.finances.salaryCap || sellerAfter > seller.finances.salaryCap) return false
+    // The floor binds in-season too: nobody trades himself under the lower limit.
+    if (this.phase === 'regularSeason') {
+      const sellerBefore = rosterCapUsed(seller, this.data.players)
+      const buyerBefore = rosterCapUsed(buyer, this.data.players)
+      if (sellerAfter < capFloorFor(seller.finances.salaryCap) && sellerAfter < sellerBefore) return false
+      if (buyerAfter < capFloorFor(buyer.finances.salaryCap) && buyerAfter < buyerBefore) return false
+    }
     const sellerSize = seller.roster.length - d.playerIds.length + (d.buyerPlayerIds?.length ?? 0)
     const buyerSize = buyer.roster.length + d.playerIds.length - (d.buyerPlayerIds?.length ?? 0)
     return sellerSize <= 26 && buyerSize <= 26 && sellerSize >= 18
@@ -15540,7 +15547,7 @@ export class Career {
      * sellers, the all-in), then the flurry — talks that close within hours,
      * plus every deal still in talks from the run-up closes or dies today. */
     this.commitPostures('deadline')
-    this.leagueMarketTick('deadline', 40, day, { deadlineDay: true, closeAll: true })
+    this.leagueMarketTick('deadline', 90, day, { deadlineDay: true, closeAll: true })
   }
 
   /** The league-wide "who's being shopped" board: every selling/retooling club's
