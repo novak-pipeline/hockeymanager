@@ -156,6 +156,15 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'ok' }
     case 'getTeamLegends':
       return { id: req.id, type: 'teamLegends', legends: must().getTeamLegends(req.teamId) }
+    case 'getWrapped': {
+      const c = must()
+      return { id: req.id, type: 'wrapped', wrapped: req.year === undefined ? c.getWrappedPending() : c.getWrappedYear(req.year) }
+    }
+    case 'getYearbook':
+      return { id: req.id, type: 'yearbook', yearbook: must().getWrappedYearbook() }
+    case 'markWrappedSeen':
+      must().markWrappedSeen(req.year)
+      return { id: req.id, type: 'ok' }
     case 'getTeamDynamics':
       return { id: req.id, type: 'teamDynamics', dynamics: must().getTeamDynamics(req.teamId) }
     case 'getDevCamp':

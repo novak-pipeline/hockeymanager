@@ -2638,6 +2638,9 @@ export interface CareerSnapshot {
   }
   /** World Chronicle — permanent event memory (Living World LW1). Optional/additive. */
   chronicle?: ChronicleState
+  /** Season Wrapped — every year's built card sequence + its bookkeeping
+   *  (docs/SEASON-WRAPPED.md). Optional/additive: absent on older saves. */
+  wrapped?: import('@engine/story/wrapped').WrappedState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */
   gmPersonas?: Array<[string, GmPersona]>
   /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */

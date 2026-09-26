@@ -54,6 +54,8 @@ export type ScreenId =
   | 'leagueTransactions'
   | 'leagueScoreboard'
   | 'leagueHistory'
+  /** Season Wrapped yearbook — every wrapped season, replayable. */
+  | 'yearbook'
   | 'world'
   | 'worldInternational'
   | 'scouting'
@@ -122,6 +124,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'leagueTransactions':
     case 'leagueScoreboard':
     case 'leagueHistory':
+    case 'yearbook':
     case 'world':
     case 'worldInternational':
     case 'scouting':

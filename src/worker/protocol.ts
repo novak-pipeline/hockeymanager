@@ -102,6 +102,19 @@ export type {
 export type { PlayerInteractionView, InteractionOptionView } from '@engine/career/views'
 export type { InterviewView, InterviewAnswerView } from '@engine/career/views'
 export type { TeamLegendsView, ClubLegend } from '@engine/career/views'
+// Season Wrapped — NEW view types, added alongside (no existing shape touched).
+export type {
+  WrappedCard,
+  WrappedListRow,
+  WrappedPlayerChip,
+  WrappedSection,
+  WrappedStat,
+  WrappedTeamChip,
+  WrappedYear,
+  WrappedYearbookRow,
+  WrappedYearbookView,
+} from '@engine/story/wrapped'
+import type { WrappedYear, WrappedYearbookView } from '@engine/story/wrapped'
 import type { TeamLegendsView } from '@engine/career/views'
 export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar, DynamicsSocialGroup } from '@engine/career/views'
 import type { TeamDynamicsView } from '@engine/career/views'
@@ -275,6 +288,12 @@ export type WorkerRequestBody =
   | { type: 'setTicketPricing'; tier: 'value' | 'standard' | 'premium' }
   | { type: 'getInbox' }
   | { type: 'getTeamLegends'; teamId: string }
+  /* ── Season Wrapped (additive; docs/SEASON-WRAPPED.md) ── */
+  /** One year's card sequence; omit `year` for the one pending as an event. */
+  | { type: 'getWrapped'; year?: number }
+  | { type: 'getYearbook' }
+  /** The GM watched or skipped the pending sequence. */
+  | { type: 'markWrappedSeen'; year: number }
   | { type: 'getTeamDynamics'; teamId: string }
   | { type: 'getDevCamp' }
   | { type: 'getDevCampInvites' }
@@ -606,6 +625,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'ownerRequest'; ownerRequest: OwnerRequestView | null }
   | { type: 'inbox'; inbox: InboxView }
   | { type: 'teamLegends'; legends: TeamLegendsView }
+  | { type: 'wrapped'; wrapped: WrappedYear | null }
+  | { type: 'yearbook'; yearbook: WrappedYearbookView }
   | { type: 'teamDynamics'; dynamics: TeamDynamicsView }
   | { type: 'feed'; feed: FeedView }
   | { type: 'negotiation'; negotiation: NegotiationView | null; signed?: boolean; message?: string }

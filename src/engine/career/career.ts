@@ -134,8 +134,37 @@ import {
   anniversaries as chronicleAnniversaries,
   provenanceOf as chronicleProvenanceOf,
   eventsForPlayer as chronicleEventsForPlayer,
+  pickBecame as chroniclePickBecame,
   type ChronicleState,
 } from '@engine/story/chronicle'
+import {
+  assetProduction,
+  buildWrapped,
+  commitYear,
+  emptyWrapped,
+  normalizeWrapped,
+  tradeSideSummary,
+  yearbookOrder,
+  yearbookRow,
+  MAX_SCOUT_CALLS,
+  type WHindsightDraft,
+  type WHindsightScout,
+  type WHindsightTrade,
+  type WHindsightWalked,
+  type WLine,
+  type WMilestone,
+  type WPlayer,
+  type WRecord,
+  type WRetirement,
+  type WSigning,
+  type WTrade,
+  type WTradeAsset,
+  type WrappedFacts,
+  type WrappedState,
+  type WrappedTeamChip,
+  type WrappedYear,
+  type WrappedYearbookView,
+} from '@engine/story/wrapped'
 import {
   DETECTORS,
   FEED_AUTHORS,
@@ -1200,6 +1229,9 @@ export class Career {
   private arcsState!: ArcsState
   /** World Chronicle — permanent event memory (Living World LW1). */
   private chronicle: ChronicleState = emptyChronicle()
+  /** SEASON WRAPPED: every year's built card sequence + the bookkeeping the
+   *  next one needs (docs/SEASON-WRAPPED.md). */
+  private wrapped: WrappedState = emptyWrapped()
   /** Named AI GM personas per club (Living World LW2). Lazily built, persisted. */
   private gmPersonas: Array<[string, GmPersona]> = []
   /** Year of the pending preseason board meeting, or null when attended (M1). */
@@ -7325,7 +7357,11 @@ export class Career {
         `${champ.name} are the champions of year ${this.year}.`,
         po.championTeamId === this.userTeamId ? 'This is a historic moment for your franchise.' : '',
       ].filter(Boolean)
-      this.queuePressJob('champion', champSpecial)
+      // The champion tentpole is written ABOUT the user's club (its fact sheet
+      // is the user's team), so it only runs when the user actually won. It
+      // used to fire every spring and tell the GM his club were champions
+      // whoever lifted the Cup.
+      if (po.championTeamId === this.userTeamId) this.queuePressJob('champion', champSpecial)
       // Press conference: playoff elimination or championship
       if (po.championTeamId !== this.userTeamId) {
         const userSeries = po.rounds.flatMap((r) => r.series).find(
@@ -7824,6 +7860,22 @@ export class Career {
           }
         }
 
+        /* ── World Chronicle: notable retirements are durable history ── */
+        for (const id of retired.retired) {
+          const p = this.data.players.get(id)
+          if (!p) continue
+          const c = this.careerTotalsOf(id)
+          if (overall(p.composites, p.position) < 76 && p.stats.length < 12 && c.points < 450 && c.gamesPlayed < 700) continue
+          const teamId = rosterTeamOf.get(id as string)
+          chronicleEvent(this.chronicle, {
+            year: this.year, day: 0, kind: 'retirement',
+            teamIds: teamId ? [teamId as string] : [],
+            playerIds: [id as string],
+            headline: `${p.name} retires${teamId ? ` (${this.data.teams.get(teamId)?.abbreviation ?? ''})` : ''}`,
+            userInvolved: teamId === this.userTeamId,
+          })
+        }
+
         /* ── notable retirees → club legends registry ("where are they now") ── */
         for (const id of retired.retired) {
           const p = this.data.players.get(id)
@@ -8017,6 +8069,10 @@ export class Career {
         // offseason resume. Returning false halts advance() / step() cleanly.
         if (os.draft && os.draft.selections.length < os.draft.order.length) return false
         this.pushDraftRecap()
+        // SEASON WRAPPED: the draft closes the league year — Cup, awards,
+        // retirements and the first-overall pick are all settled now, and
+        // nothing has rolled over yet. Build the year's Wrapped here.
+        this.buildSeasonWrapped()
         // E1: the call to your best pick, made from the floor.
         this.raisePostDraftCall()
         const rng = this.rngFor(8003)
@@ -8699,6 +8755,567 @@ export class Career {
     this.pushNews('draft', `${d.year} Draft recap — ${this.userTeam.abbreviation}`, lines.join(' '), {
       playerId: mine[0].playerId as string,
     })
+  }
+
+  /* ────────────────────────── SEASON WRAPPED ────────────────────────── */
+  /*
+   * The league year closes at the entry draft: the Cup is won, the awards are
+   * handed out, the veterans have retired and the first-overall pick has been
+   * called. That is the wrap point (docs/SEASON-WRAPPED.md). The facts are
+   * gathered here from SETTLED data — the season's totals, the playoff result,
+   * the archived awards, the chronicle since the last wrap — and frozen into a
+   * persisted WrappedYear before any of them roll over.
+   */
+
+  /** Build + persist this season's Wrapped (idempotent per year). */
+  private buildSeasonWrapped(): void {
+    const Y = this.year
+    if (this.wrapped.years.some((y) => y.year === Y)) return
+    // A takeover summer or a season nobody played has nothing to wrap.
+    let gp = 0
+    for (const s of this.standings.values()) gp += s.gamesPlayed
+    if (gp === 0) return
+    const facts = this.gatherWrappedFacts()
+    const built = buildWrapped(facts)
+    commitYear(this.wrapped, built)
+    for (const c of built.cards) if (c.subject) this.wrapped.told.push(c.subject)
+    if (this.wrapped.told.length > 400) this.wrapped.told.splice(0, this.wrapped.told.length - 300)
+    this.wrapped.cursor = this.chronicle.counter
+    this.wrapped.lastRoster = [...this.orgPlayerIds()]
+    this.wrapped.lastRosterYear = Y
+    this.recordWrappedScoutCalls()
+  }
+
+  /** Every player the user's organisation holds (NHL roster + affiliate). */
+  private orgPlayerIds(): string[] {
+    const ids = this.userTeam.roster.map((id) => id as string)
+    const aff = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    if (aff) ids.push(...aff.roster.map((id) => id as string))
+    return ids
+  }
+
+  /** Counter embedded in a chronicle id (`ch-2027-000123` → 123). */
+  private static chronicleSeq(id: string): number {
+    return Number(id.slice(id.lastIndexOf('-') + 1)) || 0
+  }
+
+  /** Write down what the scouts said about this draft's notable picks — graded
+   *  in a later year's HINDSIGHT (the call is only worth something if it was
+   *  made BEFORE anyone knew). Only players the staff actually watched. */
+  private recordWrappedScoutCalls(): void {
+    const Y = this.year
+    const scouts = this.userScoutStaff()
+    const history = new Map((this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, new Set(pids)] as const))
+    for (const e of this.chronicle.events) {
+      if (e.kind !== 'draftPick' || e.year !== Y) continue
+      const overallPick = e.details?.overallPick ?? 999
+      const userPick = e.userInvolved
+      if (!(userPick && (e.details?.round ?? 9) <= 2) && overallPick > 10) continue
+      const pid = e.playerIds[0]
+      const p = pid ? this.data.players.get(asPlayerId(pid)) : undefined
+      if (!p || this.wrapped.scoutCalls.some((c) => c.playerId === pid)) continue
+      const knowledge = knowledgeOf(this.scouting, pid!)
+      if (knowledge < 35) continue
+      const ceiling = this.scoutedCeilingWith(p, knowledge, accuracyOf(this.scouting, pid!))
+      const watcher = scouts
+        .filter((s) => history.get(s.id)?.has(pid!))
+        .sort((a, b) => (b.judgment ?? 0) - (a.judgment ?? 0))[0] ?? scouts[0]
+      this.wrapped.scoutCalls.push({
+        playerId: pid!, playerName: p.name, pos: p.position, year: Y, overallPick,
+        teamId: e.teamIds[0] ?? '', userPick,
+        scoutName: watcher?.name ?? 'Your scouts',
+        ceiling: Math.round(ceiling), role: ceilingRoleShort(ceiling, p.position),
+      })
+    }
+    // A call is graded once, then retired; ancient ones age out.
+    this.wrapped.scoutCalls = this.wrapped.scoutCalls
+      .filter((c) => Y - c.year <= 8)
+      .slice(-MAX_SCOUT_CALLS)
+  }
+
+  private wrappedTeamChip(id: string): WrappedTeamChip | null {
+    const t = this.data.teams.get(asTeamId(id))
+    if (!t) return null
+    const nick = t.city && t.name.startsWith(t.city) ? t.name.slice(t.city.length).trim() : ''
+    return {
+      id: t.id as string, abbr: t.abbreviation, name: t.name, short: nick || t.name,
+      primary: t.colors.primary, secondary: t.colors.secondary,
+    }
+  }
+
+  private gatherWrappedFacts(): WrappedFacts {
+    const Y = this.year
+    const nhlIds = new Set(this.data.league.teams.map((id) => id as string))
+    // One pass: player → current club (the per-call teamOf scan is O(league)).
+    const clubOf = new Map<string, string>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) clubOf.set(id as string, t.id as string)
+    const nhlClub = (pid: string): string | null => {
+      const c = clubOf.get(pid)
+      return c && nhlIds.has(c) ? c : null
+    }
+    const wp = (pid: string, teamId?: string | null): WPlayer | null => {
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) return null
+      const tid = teamId ?? nhlClub(pid)
+      return {
+        id: pid, name: p.name, pos: p.position, age: p.age,
+        ...(p.faceId ? { faceId: p.faceId } : {}),
+        ...(tid ? { teamId: tid } : {}),
+      }
+    }
+    const teams = [...nhlIds].map((id) => this.wrappedTeamChip(id)).filter((t): t is WrappedTeamChip => !!t)
+
+    /* standings + playoffs — the champion comes from the bracket, never the user */
+    const sorted = sortStandings([...this.standings.values()])
+    const standings = sorted.map((s, i) => ({
+      teamId: s.teamId as string, rank: i + 1, gp: s.gamesPlayed, w: s.wins, l: s.losses, otl: s.overtimeLosses,
+      pts: s.points, gf: s.goalsFor, ga: s.goalsAgainst,
+    }))
+    const po = this.playoffs
+    const series = (po?.rounds ?? []).flatMap((r) => r.series
+      .filter((s) => s.status === 'finished' && s.winnerTeamId)
+      .map((s) => {
+        const hiWon = s.winnerTeamId === s.highSeedTeamId
+        return {
+          round: r.round, roundName: r.name,
+          winnerId: s.winnerTeamId as string,
+          loserId: (hiWon ? s.lowSeedTeamId : s.highSeedTeamId) as string,
+          winnerWins: hiWon ? s.highSeedWins : s.lowSeedWins,
+          loserWins: hiWon ? s.lowSeedWins : s.highSeedWins,
+        }
+      }))
+    const qualifiers = (po?.rounds[0]?.series ?? []).flatMap((s) => [s.highSeedTeamId as string, s.lowSeedTeamId as string])
+    const conferenceOf: Record<string, string> = {}
+    for (const id of nhlIds) {
+      const t = this.data.teams.get(asTeamId(id))
+      if (t?.conferenceId) conferenceOf[id] = t.conferenceId
+    }
+
+    /* awards (the archive is canonical) */
+    const awards = this.recordsState.awards
+      .filter((a) => a.year === Y && !a.award.includes('Cup') && !a.award.includes('medal') && !/Olympic|World Championship/.test(a.award))
+      .map((a) => {
+        const player = wp(a.playerId)
+        return player ? { award: a.award, player, teamId: nhlClub(a.playerId), value: a.value } : null
+      })
+      .filter((a): a is NonNullable<typeof a> => !!a)
+    const awardOf = new Map<string, string>()
+    for (const a of awards) if (!awardOf.has(a.player.id)) awardOf.set(a.player.id, a.award)
+
+    /* season lines — settled regular-season totals, NHL clubs only */
+    const lines: WLine[] = []
+    for (const [pid, t] of this.totals) {
+      const gpN = this.gp.get(pid) ?? 0
+      if (gpN <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      // this.totals is the NHL tier only; a man since sent down keeps his line
+      // (teamId null), his club is simply not an NHL one right now.
+      const club = nhlClub(pid as string)
+      let prevPts: number | null = null
+      let prevGp: number | null = null
+      for (const s of p.stats) {
+        if (s.season !== Y - 1 || s.league === 'ahl') continue
+        prevPts = (prevPts ?? 0) + s.ev.goals + s.pp.goals + s.pk.goals + s.ev.assists + s.pp.assists + s.pk.assists
+        prevGp = (prevGp ?? 0) + s.gamesPlayed
+      }
+      if (prevPts === null) {
+        const label = this.historyLeagueLabel()
+        for (const h of p.careerHistory ?? []) {
+          if (h.league !== label || h.year !== Y - 1) continue
+          prevPts = (prevPts ?? 0) + h.goals + h.assists
+          prevGp = (prevGp ?? 0) + h.gamesPlayed
+        }
+      }
+      const player = wp(pid as string)!
+      lines.push({
+        player, teamId: club, gp: gpN, g: t.goals, a: t.assists, pts: t.goals + t.assists,
+        prevPts, prevGp,
+        goalieWins: this.goalieWins.get(pid) ?? 0,
+        svPct: t.shotsAgainst > 0 ? t.saves / t.shotsAgainst : 0,
+        shotsAgainst: t.shotsAgainst,
+        shutouts: this.shutouts.get(pid) ?? 0,
+        rookie: isTrueRookieSeason({ age: p.age, simSeasons: p.stats.length, imported: this.importedCareerOf(p) }),
+      })
+    }
+    const lineOf = new Map(lines.map((l) => [l.player.id, l]))
+
+    /* the chronicle since the last wrap */
+    const cursor = this.wrapped.cursor
+    const windowEvents = this.chronicle.events.filter((e) => Career.chronicleSeq(e.id) > cursor)
+
+    const draft = windowEvents
+      .filter((e) => e.kind === 'draftPick' && e.year === Y)
+      .map((e) => {
+        const player = wp(e.playerIds[0] ?? '', e.teamIds[0] ?? null)
+        return player ? { player, teamId: e.teamIds[0] ?? '', overall: e.details?.overallPick ?? 0, round: e.details?.round ?? 0 } : null
+      })
+      .filter((d): d is NonNullable<typeof d> => !!d)
+      .sort((a, b) => a.overall - b.overall)
+    const firstPick = draft.find((d) => d.overall === 1)
+    const lotteryWinnerId = firstPick && this.lastLottery?.movedUp?.to === 1 &&
+      this.data.teams.get(asTeamId(firstPick.teamId))?.abbreviation === this.lastLottery.movedUp.teamAbbr
+      ? firstPick.teamId : null
+
+    const assetFor = (a: { kind: 'player' | 'pick'; playerId?: string; pickRef?: string; label: string }, tradeId: string): WTradeAsset | null => {
+      if (a.kind === 'player' && a.playerId) {
+        const p = this.data.players.get(asPlayerId(a.playerId))
+        const player = wp(a.playerId)
+        if (!p || !player) return null
+        const l = lineOf.get(a.playerId)
+        return { player, pts: l?.pts ?? 0, gp: l?.gp ?? 0, goalieWins: l?.goalieWins ?? 0, ovr: ratedOverall(p) }
+      }
+      const m = /^(\d{4})-R(\d+)-/.exec(a.pickRef ?? '')
+      const pickYear = Number(m?.[1] ?? 0)
+      const round = Number(m?.[2] ?? 0)
+      // A pick's class year is the chronicle season year + 1.
+      const becameEv = chroniclePickBecame(this.chronicle, tradeId)
+        .find((e) => e.year + 1 === pickYear && e.details?.round === round)
+      const became = becameEv ? wp(becameEv.playerIds[0] ?? '') : null
+      return { pickLabel: a.label, pickRound: round, ...(became ? { became } : {}) }
+    }
+    const trades: WTrade[] = windowEvents
+      .filter((e) => e.kind === 'trade' && e.teamIds.length === 2 && e.teamIds.every((t) => nhlIds.has(t)))
+      .map((e) => {
+        const outA = (e.details?.assetsOut ?? []).map((a) => assetFor(a, e.id)).filter((x): x is WTradeAsset => !!x)
+        const inA = (e.details?.assetsIn ?? []).map((a) => assetFor(a, e.id)).filter((x): x is WTradeAsset => !!x)
+        // Side 0 received assetsIn; side 1 received assetsOut. For user trades
+        // teamIds[0] is always the user (chronicleTrade writes it that way).
+        return { id: e.id, teams: [e.teamIds[0]!, e.teamIds[1]!] as [string, string], received: [inA, outA] as [WTradeAsset[], WTradeAsset[]], userInvolved: e.userInvolved }
+      })
+
+    /* your signings since the last wrap — new faces on a signed deal */
+    const lastRoster = new Set(this.wrapped.lastRosterYear === Y - 1 ? this.wrapped.lastRoster : [])
+    const userSignings: WSigning[] = []
+    if (this.wrapped.lastRosterYear === Y - 1) {
+      for (const id of this.userTeam.roster) {
+        const pid = id as string
+        if (lastRoster.has(pid)) continue
+        const prov = chronicleProvenanceOf(this.chronicle, pid)
+        const acq = prov?.acquisitions[prov.acquisitions.length - 1]
+        if (!acq || acq.via !== 'signing' || acq.teamId !== (this.userTeamId as string) || acq.year < Y - 1) continue
+        const p = this.data.players.get(id)!
+        const l = lineOf.get(pid)
+        userSignings.push({
+          player: wp(pid)!, teamId: this.userTeamId as string, salary: p.contract.salary, years: p.contract.yearsRemaining,
+          pts: l?.pts ?? 0, gp: l?.gp ?? 0, goalieWins: l?.goalieWins ?? 0, ovr: ratedOverall(p),
+        })
+      }
+    }
+
+    /* retirements this summer */
+    const retireEvents = new Map(windowEvents.filter((e) => e.kind === 'retirement').map((e) => [e.playerIds[0] ?? '', e.teamIds[0] ?? null]))
+    const retirements: WRetirement[] = []
+    for (const p of this.data.players.values()) {
+      if (p.retiredYear !== Y) continue
+      const c = this.careerTotalsOf(p.id)
+      if (c.gamesPlayed < 200) continue
+      const imported = this.importedCareerOf(p)
+      const lastStat = [...p.stats].reverse().find((s) => s.league !== 'ahl')
+      const lastTeamId = retireEvents.get(p.id as string) ?? (lastStat && nhlIds.has(lastStat.teamId) ? lastStat.teamId : null)
+      const player = wp(p.id as string, lastTeamId)!
+      retirements.push({
+        player, seasons: p.stats.filter((s) => s.league !== 'ahl').length + (imported?.seasons ?? 0),
+        gp: c.gamesPlayed, g: c.goals, pts: c.points, shutouts: c.shutouts, lastTeamId,
+      })
+    }
+
+    /* records the season's best took off the book (judged as archiveSeason does) */
+    const records: WRecord[] = []
+    const boards: Array<[WRecord['stat'], Array<{ value: number; playerId: string; playerName: string; year: number }>]> = [
+      ['goals', this.recordsState.singleSeason.goals], ['points', this.recordsState.singleSeason.points],
+      ['assists', this.recordsState.singleSeason.assists], ['wins', this.recordsState.singleSeason.wins],
+      ['shutouts', this.recordsState.singleSeason.shutouts ?? []], ['savePct', this.recordsState.singleSeason.savePct],
+    ]
+    for (const [stat, board] of boards) {
+      const top = board[0]
+      if (!top || top.year !== Y) continue
+      const prior = board.filter((e) => e.year !== Y)
+      if (prior.length < RECORD_BOOK_MIN_ENTRIES) continue
+      // A book written over two or three of OUR seasons is not history yet:
+      // a Wrapped record needs marks from at least five different years.
+      if (new Set(prior.map((e) => e.year)).size < 5) continue
+      const prev = prior[0]!
+      if (top.value <= prev.value) continue
+      const player = wp(top.playerId)
+      if (!player) continue
+      records.push({ stat, value: top.value, player, teamId: nhlClub(top.playerId), prevName: prev.playerName, prevValue: prev.value, prevYear: prev.year })
+    }
+
+    /* career milestones crossed this season (before = career − this season) */
+    const milestones: WMilestone[] = []
+    const MILES: Array<{ kind: WMilestone['kind']; steps: number[]; majorAt: number }> = [
+      { kind: 'g', steps: [300, 400, 500, 600, 700, 800], majorAt: 500 },
+      { kind: 'p', steps: [500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500], majorAt: 1000 },
+      { kind: 'gp', steps: [800, 900, 1000, 1100, 1200, 1300, 1400, 1500], majorAt: 1000 },
+      { kind: 'so', steps: [40, 50, 60, 70, 80], majorAt: 50 },
+    ]
+    for (const l of lines) {
+      const c = this.careerTotalsOf(asPlayerId(l.player.id))
+      const now = { g: c.goals, p: c.points, gp: c.gamesPlayed, so: c.shutouts }
+      const season = { g: l.g, p: l.pts, gp: l.gp, so: l.shutouts }
+      for (const m of MILES) {
+        const after = now[m.kind]
+        const before = after - season[m.kind]
+        const crossed = m.steps.filter((n) => before < n && after >= n).pop()
+        if (crossed !== undefined) milestones.push({ player: l.player, teamId: l.teamId, kind: m.kind, n: crossed, major: crossed >= m.majorAt })
+      }
+    }
+
+    /* history: champions + best marks from earlier seasons */
+    const championHistory = this.recordsState.seasons
+      .filter((s) => s.year < Y)
+      .map((s) => ({ year: s.year, teamId: s.championTeamId, name: s.championName }))
+    const markHistory: WrappedFacts['markHistory'] = []
+    for (const s of this.recordsState.seasons) {
+      if (s.year >= Y) continue
+      if (s.leaders.goals) markHistory.push({ year: s.year, stat: 'goals', value: s.leaders.goals.value })
+      if (s.leaders.points) markHistory.push({ year: s.year, stat: 'points', value: s.leaders.points.value })
+    }
+    for (const [stat, board] of [['goals', this.recordsState.singleSeason.goals], ['points', this.recordsState.singleSeason.points], ['assists', this.recordsState.singleSeason.assists]] as const) {
+      for (const e of board) if (e.year < Y) markHistory.push({ year: e.year, stat, value: e.value })
+    }
+
+    /* coaching carousel — written by the pressure system when present */
+    const coachChanges = windowEvents
+      .filter((e) => e.kind === 'coachFired' || e.kind === 'coachHired' || e.kind === 'gmChange')
+      .filter((e) => e.teamIds.some((t) => nhlIds.has(t)))
+      .map((e) => ({ kind: e.kind as 'coachFired' | 'coachHired' | 'gmChange', teamId: e.teamIds.find((t) => nhlIds.has(t))!, headline: e.headline }))
+
+    return {
+      year: Y,
+      userTeamId: this.userTeamId as string,
+      teams,
+      standings,
+      predictedRank: expectedRankOf(this.expectationsState, this.userTeamId as string) ?? null,
+      series,
+      championId: (po?.championTeamId as string | null | undefined) ?? null,
+      playoffRounds: po?.rounds.length ?? 0,
+      bestOf: po?.bestOf ?? 7,
+      qualifiers,
+      conferenceOf,
+      awards,
+      lines,
+      userRoster: this.userTeam.roster.map((id) => id as string),
+      draft,
+      lotteryWinnerId,
+      trades,
+      userSignings,
+      retirements,
+      records,
+      milestones,
+      championHistory,
+      markHistory,
+      coachChanges,
+      told: [...this.wrapped.told],
+      hindsight: this.gatherWrappedHindsight(lineOf, awardOf, nhlClub, wp),
+    }
+  }
+
+  /** HINDSIGHT inputs: old picks vs the field, old trades re-graded with what
+   *  each side has produced since, scouting calls vs outcomes, and the players
+   *  you let walk last summer. Consumes the chronicle's lookups (pickBecame,
+   *  provenance) that used to sit uncalled. */
+  private gatherWrappedHindsight(
+    lineOf: Map<string, WLine>,
+    awardOf: Map<string, string>,
+    nhlClub: (pid: string) => string | null,
+    wp: (pid: string, teamId?: string | null) => WPlayer | null,
+  ): WrappedFacts['hindsight'] {
+    const Y = this.year
+    const user = this.userTeamId as string
+    const career = (pid: string): { pts: number; gp: number } => {
+      const c = this.careerTotalsOf(asPlayerId(pid))
+      return { pts: c.points, gp: c.gamesPlayed }
+    }
+    const ovrOf = (pid: string): number => {
+      const p = this.data.players.get(asPlayerId(pid))
+      return p ? ratedOverall(p) : 0
+    }
+
+    /* draft: every user pick in rounds 1–2 at least two seasons old */
+    const draft: WHindsightDraft[] = []
+    const picksByYear = new Map<number, Array<{ pid: string; overall: number; teamId: string; user: boolean }>>()
+    for (const e of this.chronicle.events) {
+      if (e.kind !== 'draftPick' || Y - e.year < 2 || Y - e.year > 10) continue
+      const pid = e.playerIds[0]
+      if (!pid) continue
+      const arr = picksByYear.get(e.year) ?? []
+      arr.push({ pid, overall: e.details?.overallPick ?? 999, teamId: e.teamIds[0] ?? '', user: e.userInvolved })
+      picksByYear.set(e.year, arr)
+    }
+    for (const [year, picks] of picksByYear) {
+      for (const mine of picks.filter((p) => p.user && p.overall <= 64)) {
+        const me = wp(mine.pid, nhlClub(mine.pid))
+        if (!me) continue
+        const myCareer = career(mine.pid)
+        const after = picks
+          .filter((p) => p.overall > mine.overall && !p.user)
+          .map((p) => ({ p, c: career(p.pid) }))
+          .sort((a, b) => b.c.pts - a.c.pts)[0]
+        const ahead = picks.filter((p) => p.overall < mine.overall)
+        const outscoredAhead = ahead.filter((p) => career(p.pid).pts < myCareer.pts).length
+        const laterPlayer = after ? wp(after.p.pid, nhlClub(after.p.pid)) : null
+        const myAward = awardOf.get(mine.pid)
+        const laterAward = after ? awardOf.get(after.p.pid) : undefined
+        draft.push({
+          draftYear: year + 1,
+          userPick: {
+            player: me, overall: mine.overall, careerPts: myCareer.pts, gp: myCareer.gp, ovr: ovrOf(mine.pid),
+            ...(myAward ? { award: myAward } : {}),
+          },
+          ...(after && laterPlayer ? {
+            bestAfter: {
+              player: laterPlayer, overall: after.p.overall, teamId: after.p.teamId, careerPts: after.c.pts, gp: after.c.gp,
+              ovr: ovrOf(after.p.pid), ...(laterAward ? { award: laterAward } : {}),
+            },
+          } : {}),
+          outscoredAhead,
+          pickedAhead: ahead.length,
+        })
+      }
+    }
+
+    /* trades: your deals from past years, re-graded on everything since */
+    const trades: WHindsightTrade[] = []
+    const producedFor = (pid: string, teamId: string, sinceYear: number): number => {
+      const p = this.data.players.get(asPlayerId(pid))
+      if (!p) return 0
+      let v = 0
+      for (const s of p.stats) {
+        if (s.season <= sinceYear || s.league === 'ahl' || s.teamId !== teamId) continue
+        v += p.position === 'G'
+          ? Math.round((s.wins ?? 0) * 1.5)
+          : s.ev.goals + s.pp.goals + s.pk.goals + s.ev.assists + s.pp.assists + s.pk.assists
+      }
+      const l = lineOf.get(pid)
+      if (l && Y > sinceYear && l.teamId === teamId) v += assetProduction({ pts: l.pts, goalieWins: l.goalieWins, pos: l.player.pos })
+      return v
+    }
+    const cursor = this.wrapped.cursor
+    for (const e of this.chronicle.events) {
+      if (e.kind !== 'trade' || !e.userInvolved || e.teamIds[0] !== user) continue
+      if (Career.chronicleSeq(e.id) > cursor || Y - e.year > 6) continue // this year's deals are YOUR YEAR's
+      // At least one full season with the new club.
+      if (Y - e.year < 1 || (Y - e.year === 1 && e.day > 0)) continue
+      const partner = e.teamIds[1] ?? ''
+      let gotValue = 0, gaveValue = 0
+      const gotNames: string[] = [], gaveNames: string[] = []
+      let gotLead: WPlayer | undefined, gaveLead: WPlayer | undefined
+      let gotBest = -1, gaveBest = -1
+      // Prose for each side, and whether it still holds unripe futures: a pick
+      // not yet used, or one that became a player still 21 or younger.
+      const became = chroniclePickBecame(this.chronicle, e.id)
+      const sideProse = (assets: Array<{ kind: 'player' | 'pick'; playerId?: string; pickRef?: string; label: string }>): { summary: string; unripe: boolean } => {
+        let unripe = false
+        const items = assets.map((a) => {
+          if (a.kind === 'player') return { name: this.data.players.get(asPlayerId(a.playerId ?? ''))?.name ?? a.label }
+          const m = /^(\d{4})-R(\d+)-/.exec(a.pickRef ?? '')
+          const ev = became.find((b) => b.year + 1 === Number(m?.[1] ?? 0) && b.details?.round === Number(m?.[2] ?? 0))
+          const pl = ev ? this.data.players.get(asPlayerId(ev.playerIds[0] ?? '')) : undefined
+          if (!pl || pl.age <= 21) unripe = true
+          return { pickLabel: a.label, ...(pl ? { became: pl.name } : {}) }
+        })
+        return { summary: tradeSideSummary(items), unripe }
+      }
+      const gotProse = sideProse(e.details?.assetsIn ?? [])
+      const gaveProse = sideProse(e.details?.assetsOut ?? [])
+      for (const a of e.details?.assetsIn ?? []) {
+        if (a.kind !== 'player' || !a.playerId) continue
+        const v = producedFor(a.playerId, user, e.year)
+        gotValue += v
+        const p = wp(a.playerId)
+        if (p) { gotNames.push(p.name); if (v > gotBest) { gotBest = v; gotLead = p } }
+      }
+      for (const a of e.details?.assetsOut ?? []) {
+        if (a.kind !== 'player' || !a.playerId) continue
+        const v = producedFor(a.playerId, partner, e.year)
+        gaveValue += v
+        const p = wp(a.playerId)
+        if (p) { gaveNames.push(p.name); if (v > gaveBest) { gaveBest = v; gaveLead = p } }
+      }
+      // Picks that changed hands in this deal, and who they became.
+      for (const pe of chroniclePickBecame(this.chronicle, e.id)) {
+        const pid = pe.playerIds[0]
+        const owner = pe.teamIds[0]
+        if (!pid || (owner !== user && owner !== partner)) continue
+        const v = producedFor(pid, owner, pe.year)
+        const p = wp(pid)
+        if (owner === user) { gotValue += v; if (p) { gotNames.push(p.name); if (v > gotBest) { gotBest = v; gotLead = p } } }
+        else { gaveValue += v; if (p) { gaveNames.push(p.name); if (v > gaveBest) { gaveBest = v; gaveLead = p } } }
+      }
+      trades.push({
+        id: e.id, tradeYear: e.year, partnerId: partner, headline: e.headline,
+        gotSummary: gotProse.summary, gaveSummary: gaveProse.summary,
+        gotUnripe: gotProse.unripe, gaveUnripe: gaveProse.unripe,
+        gotValue, gaveValue, gotNames, gaveNames,
+        ...(gotLead ? { gotLead } : {}), ...(gaveLead ? { gaveLead } : {}),
+      })
+    }
+
+    /* scouting calls, graded */
+    const scout: WHindsightScout[] = []
+    for (const call of this.wrapped.scoutCalls) {
+      if (Y - call.year < 3) continue
+      const p = this.data.players.get(asPlayerId(call.playerId))
+      const player = wp(call.playerId)
+      if (!p || !player || p.retiredYear !== undefined) continue
+      const c = career(call.playerId)
+      const nowOvr = ratedOverall(p)
+      scout.push({ call, nowOvr, nowRole: ceilingRoleShort(nowOvr, p.position), gp: c.gp, pts: c.pts, age: p.age, player })
+    }
+
+    /* the ones you let walk last summer */
+    const walked: WHindsightWalked[] = []
+    if (this.wrapped.lastRosterYear === Y - 1) {
+      const nowOrg = new Set(this.orgPlayerIds())
+      for (const pid of this.wrapped.lastRoster) {
+        if (nowOrg.has(pid)) continue
+        const club = nhlClub(pid)
+        if (!club || club === user) continue
+        const prov = chronicleProvenanceOf(this.chronicle, pid)
+        const acq = prov?.acquisitions[prov.acquisitions.length - 1]
+        if (!acq || acq.via !== 'signing' || acq.teamId !== club || acq.year !== Y - 1) continue
+        const p = this.data.players.get(asPlayerId(pid))
+        const player = wp(pid, club)
+        const l = lineOf.get(pid)
+        if (!p || !player || !l) continue
+        const award = awardOf.get(pid)
+        walked.push({
+          player, newTeamId: club, pts: l.pts, gp: l.gp, goalieWins: l.goalieWins, salary: p.contract.salary,
+          ...(award ? { award } : {}),
+        })
+      }
+    }
+
+    return { draft, trades, scout, walked }
+  }
+
+  /** The Wrapped waiting to be played as an event (null when none). */
+  getWrappedPending(): WrappedYear | null {
+    const y = this.wrapped.pendingYear
+    if (y === null) return null
+    const found = this.wrapped.years.find((w) => w.year === y)
+    return found ? structuredClone(found) : null
+  }
+
+  /** One year of the yearbook, by season year. */
+  getWrappedYear(year: number): WrappedYear | null {
+    const found = this.wrapped.years.find((w) => w.year === year)
+    return found ? structuredClone(found) : null
+  }
+
+  /** Every wrapped season, newest first — the history book. */
+  getWrappedYearbook(): WrappedYearbookView {
+    return {
+      pendingYear: this.wrapped.pendingYear,
+      years: yearbookOrder(this.wrapped).map(yearbookRow),
+    }
+  }
+
+  /** The GM watched (or skipped) the sequence: it stops being an event. */
+  markWrappedSeen(year: number): void {
+    if (this.wrapped.pendingYear === year) this.wrapped.pendingYear = null
   }
 
   /* ────────────────────────── season rollover ────────────────────────── */
@@ -22653,6 +23270,7 @@ export class Career {
       },
       arcs: structuredClone(this.arcsState),
       chronicle: structuredClone(this.chronicle),
+      wrapped: structuredClone(this.wrapped),
       gmPersonas: structuredClone(this.gmPersonas),
       boardMeetingYear: this.boardMeetingYear,
       devCampPending: this.devCampPending,
@@ -22852,6 +23470,11 @@ export class Career {
     // Restore the story layer; older saves fall back to fresh initial states.
     career.arcsState = snapshot.arcs ? structuredClone(snapshot.arcs) : createInitialArcsState()
     career.chronicle = snapshot.chronicle ? structuredClone(snapshot.chronicle) : emptyChronicle()
+    // Older saves predate Season Wrapped: an empty yearbook, cursor at the
+    // chronicle's current end so the first wrap covers only what follows.
+    career.wrapped = snapshot.wrapped
+      ? normalizeWrapped(snapshot.wrapped)
+      : { ...emptyWrapped(), cursor: career.chronicle.counter }
     career.gmPersonas = snapshot.gmPersonas ? structuredClone(snapshot.gmPersonas) : []
     // Old saves: no pending meeting (they're mid-flow) rather than surprising one.
     career.boardMeetingYear = snapshot.boardMeetingYear ?? null

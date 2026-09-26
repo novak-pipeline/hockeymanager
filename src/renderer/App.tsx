@@ -66,6 +66,8 @@ import { TitleScreen, type ResumeInfo } from './screens/TitleScreen'
 import { NewCareerScreen, randomSeed } from './screens/NewCareerScreen'
 import { ClubPickerScreen } from './screens/ClubPickerScreen'
 import { SaveManager } from './components/SaveManager'
+import { WrappedHost } from './components/WrappedOverlay'
+import { YearbookScreen } from './screens/YearbookScreen'
 
 /** The pre-career flow (F6): title → new career → club picker → the game. */
 type AppPhase = 'title' | 'setup' | 'picking' | 'settings' | 'shell'
@@ -735,6 +737,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         )}
         <PlayerActionMenu />
+        {/* Season Wrapped: plays the year the draft just closed as an event,
+          * and any yearbook page on request. Held while a match is on screen. */}
+        <WrappedHost suppressed={!!watched} onOpenYearbook={() => navigate('yearbook')} />
         {savesOpen && (
           <SaveManager
             mode="manage"
@@ -929,5 +934,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
       return <ScheduleScreen />
     case 'history':
       return <HistoryScreen />
+    case 'yearbook':
+      return <YearbookScreen />
   }
 }
