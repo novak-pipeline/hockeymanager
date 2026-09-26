@@ -13,6 +13,8 @@ const browser = await chromium.launch({
   headless: false,
   args: [
     '--window-size=1960,1180',
+    '--window-position=-4000,-4000', // off-screen: never pops over the desktop (real GPU still used)
+    '--disable-backgrounding-occluded-windows',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
     // --perf: uncap the frame rate so avgMs is the real cost, not the vsync interval
