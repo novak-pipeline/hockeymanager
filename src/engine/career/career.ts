@@ -7192,10 +7192,12 @@ export class Career {
     // free-agent pool forever (+~600 a season once the juniors run full).
     {
       const nhlLabel = this.historyLeagueLabel()
+      const onRoster = new Set<string>()
+      for (const t of this.data.teams.values()) for (const id of t.roster) onRoster.add(id as string)
       const stay: PlayerId[] = []
       for (const id of this.faPool) {
         const p = this.data.players.get(id)
-        if (p && p.retiredYear === undefined && p.stats.length === 0 && !p.rightsTeamId &&
+        if (p && !onRoster.has(id as string) && p.retiredYear === undefined && p.stats.length === 0 && !p.rightsTeamId &&
           p.age >= 22 && p.contract.expiryYear <= this.year - 2 &&
           !(nhlLabel !== null && (p.careerHistory ?? []).some((h) => h.league === nhlLabel && h.gamesPlayed > 0))) {
           p.retiredYear = this.year - 1
@@ -7211,6 +7213,14 @@ export class Career {
     for (const e of this.chronicle.events) for (const id of e.playerIds) keep.add(id)
     for (const c of this.data.league.draftClasses) for (const pr of c.prospects) keep.add(pr.playerId as string)
     for (const id of this.faPool) keep.add(id as string)
+    // Never forget anyone still on a roster or in a lineup (a retiree the
+    // offseason has not yet cleared off a world club would crash the sim).
+    for (const t of this.data.teams.values()) {
+      for (const id of t.roster) keep.add(id as string)
+      for (const line of t.lines?.forwards ?? []) for (const id of line) keep.add(id as string)
+      for (const pair of t.lines?.defensePairs ?? []) for (const id of pair) keep.add(id as string)
+      for (const id of t.lines?.goalies ?? []) keep.add(id as string)
+    }
     const wh = this.data.league.worldHistory
     if (wh) for (const [, r] of wh.records) { if (r.points) keep.add(r.points.playerId); if (r.goals) keep.add(r.goals.playerId) }
     const label = this.historyLeagueLabel()
