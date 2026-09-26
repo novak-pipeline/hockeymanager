@@ -73,7 +73,7 @@ describe.skipIf(!process.env.AP_RUN)('autopilot — Cup campaign', () => {
     // The harness is a bug-hunter, not a pass/fail gate — it just must have played.
     expect(trace.meta.seasonsPlayed).toBeGreaterThan(0)
     expect(trace.decisions.length).toBeGreaterThan(0)
-  }, 1_800_000)
+  }, Number(process.env.AP_TIMEOUT_MS ?? 1_800_000))
 })
 
 function renderSummary(t: ReturnType<typeof runAutopilot>): string {
