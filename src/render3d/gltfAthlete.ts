@@ -1,0 +1,272 @@
+/**
+ * Blender-authored athletes: turns the glTF built by scripts/blender/
+ * (skater.glb / goalie.glb) into
+ *   - an AthleteTemplate: ONE shared set of vertex buffers (positions, normals,
+ *     skin indices/weights) that every AthleteRig of that kind reuses; the
+ *     per-player UVs (jersey-atlas slot) and vertex colours (kit) are the only
+ *     per-rig attributes, so the GPU holds one copy of the body;
+ *   - BakedClips: every authored action, RETARGETED onto the renderer's own
+ *     skeleton convention (identity rest frames, see athlete.ts) and resampled
+ *     at a fixed rate so runtime sampling is two array reads + a slerp.
+ *
+ * The glTF's own bones are never used at runtime. Its mesh is bound to the
+ * AthleteRig's bones by NAME, which works because the Blender rig is built
+ * from the same rest positions (a test checks the .glb against
+ * restBonePositions()).
+ *
+ * Retarget maths (glTF rest local rotation R_j, rest world rotation of the
+ * parent Wp, animated local A_j; renderer rest frames are identity):
+ *   renderer local rotation  Q_j = Wp · A_j · R_j⁻¹ · Wp⁻¹
+ *   renderer local position  p_j = Wp · T_j
+ */
+
+import * as THREE from 'three'
+import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { BONE_NAMES, type BoneName } from './athlete'
+
+export const CLIP_FPS = 30
+
+export interface BakedClip {
+  name: string
+  /** Number of samples (frames + 1: the last sample is the end pose). */
+  samples: number
+  duration: number
+  /** Renderer-space local rotations, 4 floats per sample, per animated bone. */
+  rot: Partial<Record<BoneName, Float32Array>>
+  /** Renderer-space local positions (hips / stick / stick_blade), 3 floats per sample. */
+  pos: Partial<Record<BoneName, Float32Array>>
+}
+
+export interface AthleteTemplate {
+  goalie: boolean
+  position: THREE.BufferAttribute
+  normal: THREE.BufferAttribute
+  skinIndex: THREE.BufferAttribute
+  skinWeight: THREE.BufferAttribute
+  /** Slot-local UVs (0..1 inside one jersey-atlas cell). */
+  uvLocal: Float32Array
+  /** Material role per vertex ('jersey', 'pants', …) — from the Blender material names. */
+  roles: string[]
+  /** Rest world position of every joint found in the file (renderer space). */
+  joints: Partial<Record<BoneName, THREE.Vector3>>
+  clips: Map<string, BakedClip>
+  triangles: number
+}
+
+const isBone = (n: string): n is BoneName => (BONE_NAMES as readonly string[]).includes(n)
+
+/** Rest rotation of `obj` relative to `stop` (exclusive), from the loaded (rest) TRS. */
+function restRotationUpTo(obj: THREE.Object3D, stop: THREE.Object3D | null): THREE.Quaternion {
+  const chain: THREE.Object3D[] = []
+  for (let o: THREE.Object3D | null = obj; o && o !== stop; o = o.parent) chain.push(o)
+  const q = new THREE.Quaternion()
+  for (let i = chain.length - 1; i >= 0; i--) q.multiply(chain[i]!.quaternion)
+  return q
+}
+
+/** Build the template (geometry + retargeted clips) from a parsed glTF. */
+export function templateFromGltf(gltf: GLTF, goalie: boolean): AthleteTemplate {
+  const meshes: THREE.SkinnedMesh[] = []
+  gltf.scene.traverse((o) => {
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh)
+  })
+  if (meshes.length === 0) throw new Error('athlete glTF: no skinned mesh')
+  const skeleton = meshes[0]!.skeleton
+  const rootBone = skeleton.bones.find((b) => b.name === 'root')
+  if (!rootBone) throw new Error('athlete glTF: no root joint')
+  const armatureNode = rootBone.parent // the Blender armature object (frame of the renderer's root space)
+
+  // ── rest joints (renderer space = the armature node's local frame) ──
+  gltf.scene.updateMatrixWorld(true)
+  const toArm = new THREE.Matrix4().copy(armatureNode ? armatureNode.matrixWorld : new THREE.Matrix4()).invert()
+  const joints: Partial<Record<BoneName, THREE.Vector3>> = {}
+  for (const b of skeleton.bones) {
+    if (isBone(b.name)) joints[b.name] = new THREE.Vector3().setFromMatrixPosition(b.matrixWorld).applyMatrix4(toArm)
+  }
+
+  // ── merge every primitive into one geometry, remapping joints by name ──
+  let count = 0
+  for (const m of meshes) count += m.geometry.getAttribute('position').count
+  const pos = new Float32Array(count * 3)
+  const nor = new Float32Array(count * 3)
+  const uv = new Float32Array(count * 2)
+  const si = new Uint16Array(count * 4)
+  const sw = new Float32Array(count * 4)
+  const roles: string[] = new Array(count)
+  const indices: number[] = []
+  let base = 0
+  const meshToArm = new THREE.Matrix4()
+  const nrm = new THREE.Matrix3()
+  const v = new THREE.Vector3()
+  for (const m of meshes) {
+    const g = m.geometry
+    const P = g.getAttribute('position')
+    const N = g.getAttribute('normal')
+    const T = g.getAttribute('uv')
+    const J = g.getAttribute('skinIndex')
+    const W = g.getAttribute('skinWeight')
+    meshToArm.copy(toArm).multiply(m.matrixWorld)
+    nrm.getNormalMatrix(meshToArm)
+    const mat = Array.isArray(m.material) ? m.material[0] : m.material
+    const role = (mat?.name ?? '').replace(/^role:/, '') || 'jersey'
+    const remap = m.skeleton.bones.map((b) => (isBone(b.name) ? BONE_NAMES.indexOf(b.name) : 0))
+    for (let i = 0; i < P.count; i++) {
+      const k = base + i
+      v.fromBufferAttribute(P, i).applyMatrix4(meshToArm)
+      pos.set([v.x, v.y, v.z], k * 3)
+      if (N) {
+        v.fromBufferAttribute(N, i).applyMatrix3(nrm).normalize()
+        nor.set([v.x, v.y, v.z], k * 3)
+      }
+      if (T) uv.set([T.getX(i), 1 - T.getY(i)], k * 2) // GLTFLoader flips V; undo → Blender's UV space
+      for (let c = 0; c < 4; c++) {
+        si[k * 4 + c] = remap[J.getComponent(i, c)] ?? 0
+        sw[k * 4 + c] = W.getComponent(i, c)
+      }
+      roles[k] = role
+    }
+    const idx = g.getIndex()
+    if (idx) for (let i = 0; i < idx.count; i++) indices.push(base + idx.getX(i))
+    else for (let i = 0; i < P.count; i++) indices.push(base + i)
+    base += P.count
+  }
+  // de-index: the rig geometry is non-indexed (matches the procedural path)
+  const n = indices.length
+  const dp = new Float32Array(n * 3)
+  const dn = new Float32Array(n * 3)
+  const du = new Float32Array(n * 2)
+  const di = new Uint16Array(n * 4)
+  const dw = new Float32Array(n * 4)
+  const dr: string[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const s = indices[i]!
+    dp.set(pos.subarray(s * 3, s * 3 + 3), i * 3)
+    dn.set(nor.subarray(s * 3, s * 3 + 3), i * 3)
+    du.set(uv.subarray(s * 2, s * 2 + 2), i * 2)
+    di.set(si.subarray(s * 4, s * 4 + 4), i * 4)
+    dw.set(sw.subarray(s * 4, s * 4 + 4), i * 4)
+    dr[i] = roles[s]!
+  }
+
+  return {
+    goalie,
+    position: new THREE.BufferAttribute(dp, 3),
+    normal: new THREE.BufferAttribute(dn, 3),
+    skinIndex: new THREE.Uint16BufferAttribute(di, 4),
+    skinWeight: new THREE.BufferAttribute(dw, 4),
+    uvLocal: du,
+    roles: dr,
+    joints,
+    clips: bakeClips(gltf.animations, skeleton, armatureNode),
+    triangles: n / 3,
+  }
+}
+
+/** Retarget + resample every glTF animation onto the renderer's rig convention. */
+export function bakeClips(anims: THREE.AnimationClip[], skeleton: THREE.Skeleton, armatureNode: THREE.Object3D | null): Map<string, BakedClip> {
+  const byName = new Map<string, THREE.Bone>()
+  for (const b of skeleton.bones) byName.set(b.name, b)
+  const restLocal = new Map<string, THREE.Quaternion>()
+  const parentWorld = new Map<string, THREE.Quaternion>()
+  for (const b of skeleton.bones) {
+    restLocal.set(b.name, b.quaternion.clone())
+    parentWorld.set(b.name, b.parent && b.parent !== armatureNode ? restRotationUpTo(b.parent, armatureNode) : new THREE.Quaternion())
+  }
+  const out = new Map<string, BakedClip>()
+  const a = new THREE.Quaternion()
+  const t3 = new THREE.Vector3()
+  for (const clip of anims) {
+    const samples = Math.max(2, Math.round(clip.duration * CLIP_FPS) + 1)
+    const baked: BakedClip = { name: clip.name, samples, duration: (samples - 1) / CLIP_FPS, rot: {}, pos: {} }
+    for (const track of clip.tracks) {
+      const dot = track.name.lastIndexOf('.')
+      const node = track.name.slice(0, dot)
+      const prop = track.name.slice(dot + 1)
+      if (!isBone(node) || node === 'root') continue
+      const Wp = parentWorld.get(node)
+      const R = restLocal.get(node)
+      if (!Wp || !R) continue
+      const interp = (track as unknown as { createInterpolant(): THREE.Interpolant }).createInterpolant()
+      if (prop === 'quaternion') {
+        const WpInv = Wp.clone().invert()
+        const Rinv = R.clone().invert()
+        const arr = new Float32Array(samples * 4)
+        for (let s = 0; s < samples; s++) {
+          const r = interp.evaluate(Math.min(clip.duration, s / CLIP_FPS)) as ArrayLike<number>
+          a.set(r[0]!, r[1]!, r[2]!, r[3]!)
+          const q = Wp.clone().multiply(a).multiply(Rinv).multiply(WpInv)
+          arr.set([q.x, q.y, q.z, q.w], s * 4)
+        }
+        baked.rot[node] = arr
+      } else if (prop === 'position' && (node === 'hips' || node === 'stick' || node === 'stick_blade')) {
+        const arr = new Float32Array(samples * 3)
+        for (let s = 0; s < samples; s++) {
+          const r = interp.evaluate(Math.min(clip.duration, s / CLIP_FPS)) as ArrayLike<number>
+          t3.set(r[0]!, r[1]!, r[2]!).applyQuaternion(Wp)
+          arr.set([t3.x, t3.y, t3.z], s * 3)
+        }
+        baked.pos[node] = arr
+      }
+    }
+    // bones the exporter optimised away (constant) still need their rest-relative value
+    for (const name of BONE_NAMES) {
+      if (name === 'root' || baked.rot[name]) continue
+      const b = byName.get(name)
+      if (!b) continue
+      const Wp = parentWorld.get(name)!
+      const q = Wp.clone().multiply(b.quaternion).multiply(restLocal.get(name)!.clone().invert()).multiply(Wp.clone().invert())
+      const arr = new Float32Array(samples * 4)
+      for (let s = 0; s < samples; s++) arr.set([q.x, q.y, q.z, q.w], s * 4)
+      baked.rot[name] = arr
+    }
+    for (const name of ['hips', 'stick', 'stick_blade'] as const) {
+      const b = byName.get(name)
+      if (baked.pos[name] || !b) continue
+      t3.copy(b.position).applyQuaternion(parentWorld.get(name)!)
+      const arr = new Float32Array(samples * 3)
+      for (let s = 0; s < samples; s++) arr.set([t3.x, t3.y, t3.z], s * 3)
+      baked.pos[name] = arr
+    }
+    out.set(clip.name, baked)
+  }
+  return out
+}
+
+// ── loading ─────────────────────────────────────────────────────────────────
+
+export interface AthleteAssets {
+  skater: AthleteTemplate
+  goalie: AthleteTemplate
+}
+
+let cached: Promise<AthleteAssets | null> | null = null
+
+/**
+ * Load both athlete .glb files (inlined as data: URLs by Vite so they load
+ * the same from the dev server, file:// in the packaged app and the harness).
+ * Resolves null (→ procedural athletes) if anything fails.
+ */
+export function loadAthleteAssets(): Promise<AthleteAssets | null> {
+  if (!cached) {
+    cached = (async () => {
+      try {
+        const [{ GLTFLoader }, sk, gk] = await Promise.all([
+          import('three/examples/jsm/loaders/GLTFLoader.js'),
+          import('./assets/skater.glb?inline'),
+          import('./assets/goalie.glb?inline'),
+        ])
+        const loader = new GLTFLoader()
+        const parse = async (url: string): Promise<GLTF> => {
+          const buf = await (await fetch(url)).arrayBuffer()
+          return loader.parseAsync(buf, '')
+        }
+        const [s, g] = await Promise.all([parse(sk.default), parse(gk.default)])
+        return { skater: templateFromGltf(s, false), goalie: templateFromGltf(g, true) }
+      } catch (e) {
+        console.warn('[render3d] Blender athletes unavailable, using procedural bodies', e)
+        return null
+      }
+    })()
+  }
+  return cached
+}

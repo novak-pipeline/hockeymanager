@@ -33,7 +33,11 @@ const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('aw
 const oldPath = './old-rink3dRenderer.ts'
 const Impl: typeof Rink3dRenderer =
   q.get('old') === '1' ? ((await import(/* @vite-ignore */ oldPath)).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
-const r = await Impl.create(host, colors)
+// ?model=blender mounts the Blender-authored athletes (scripts/blender), &loco=code|clip|hybrid
+const r = await Impl.create(host, colors, {
+  athletes: q.get('model') === 'blender' ? 'blender' : 'procedural',
+  locomotion: (q.get('loco') ?? 'code') as 'code' | 'clip' | 'hybrid',
+})
 r.setEventStream(out.stream)
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
 let last = ''
@@ -66,6 +70,12 @@ if (q.get('fly') === '1') {
   g.awayGoaliePose.butterflyTimer = 1e6
   r.setSpeed(0.05)
   r.play()
+}
+// ?clip=shot_slap&who=home:2&at=0.5&freeze=1 plays (or freezes) one authored clip on one player
+if (q.has('clip')) {
+  const [team, idx] = (q.get('who') ?? 'home:0').split(':')
+  const dbg = r as unknown as { debugClip?: (t: 'home' | 'away', i: number, n: string, at: number, f: boolean) => boolean }
+  dbg.debugClip?.(team as 'home' | 'away', Number(idx), q.get('clip')!, Number(q.get('at') ?? 0), q.get('freeze') === '1')
 }
 if (q.get('hud') === '0') hud.style.display = 'none'
 // ?look=px,py,pz,lx,ly,lz[,fov] pins a debug camera (close-ups of the athletes)

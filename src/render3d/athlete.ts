@@ -32,6 +32,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { RIG, solveTwoBone, type BodyPose, type V3 } from './pose'
 import { ATLAS_GRID, ATLAS_REGIONS, atlasOffset } from './textures'
 import type { Kit } from './palette'
+import type { AthleteTemplate } from './gltfAthlete'
 
 export const BONE_NAMES = [
   'root', 'hips', 'spine', 'chest', 'neck', 'head',
@@ -417,6 +418,60 @@ function buildBody(slot: number, goalie: boolean): { geo: THREE.BufferGeometry; 
   return { geo: b.build(), roles: b.roles }
 }
 
+// ── Blender-authored body (scripts/blender → gltfAthlete.ts) ────────────────
+
+const ROLE_SET = new Set(Object.keys(ROUGH))
+const roughCache = new WeakMap<AthleteTemplate, THREE.BufferAttribute>()
+
+/**
+ * A rig geometry that SHARES the template's vertex buffers (positions,
+ * normals, skin indices/weights, roughness) — the GPU keeps one copy of the
+ * body per kind — and owns only its UVs (its jersey-atlas slot) and colours.
+ */
+export function templateGeometry(t: AthleteTemplate, slot: number): { geo: THREE.BufferGeometry; roles: Role[] } {
+  const n = t.position.count
+  const roles = t.roles.map((r) => (ROLE_SET.has(r) ? (r as Role) : 'jersey'))
+  let rough = roughCache.get(t)
+  if (!rough) {
+    const a = new Float32Array(n)
+    for (let i = 0; i < n; i++) a[i] = ROUGH[roles[i]!]
+    rough = new THREE.BufferAttribute(a, 1)
+    roughCache.set(t, rough)
+  }
+  const [cu, cv] = atlasOffset(slot)
+  const whiteV = (ATLAS_REGIONS.white[0] + ATLAS_REGIONS.white[1]) / 2
+  const uv = new Float32Array(n * 2)
+  for (let i = 0; i < n; i++) {
+    const atlas = roles[i] === 'jersey'
+    const lu = atlas ? Math.min(0.998, Math.max(0.002, t.uvLocal[i * 2]!)) : 0.5
+    const lv = atlas ? Math.min(0.998, Math.max(0.002, t.uvLocal[i * 2 + 1]!)) : whiteV
+    uv[i * 2] = cu + lu / ATLAS_GRID
+    uv[i * 2 + 1] = cv + lv / ATLAS_GRID
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', t.position)
+  g.setAttribute('normal', t.normal)
+  g.setAttribute('skinIndex', t.skinIndex)
+  g.setAttribute('skinWeight', t.skinWeight)
+  g.setAttribute('aRough', rough)
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3))
+  return { geo: g, roles }
+}
+
+/**
+ * Hooks a clip layer (animLayer.ts) uses to blend authored motion into the
+ * procedural pose at the right points of AthleteRig.apply().
+ */
+export interface PoseOverlay {
+  /** After the procedural body pose (torso, legs, hips) is written. */
+  body(bones: Record<BoneName, THREE.Bone>): void
+  /** After the procedural stick is placed, before the hands are solved onto it. */
+  stick(bones: Record<BoneName, THREE.Bone>): void
+  /** After the IK: clips that own the arms (hands off the stick). */
+  arms(bones: Record<BoneName, THREE.Bone>): void
+}
+
 // ── rig ─────────────────────────────────────────────────────────────────────
 
 const _v = new THREE.Vector3()
@@ -439,7 +494,10 @@ export class AthleteRig {
   readonly stickColor: number
   private readonly roles: Role[]
 
-  constructor(readonly goalie: boolean, readonly slot: number, material: THREE.Material) {
+  /** True when the body is the Blender-authored mesh (template), false = procedural. */
+  readonly authored: boolean
+
+  constructor(readonly goalie: boolean, readonly slot: number, material: THREE.Material, template?: AthleteTemplate | null) {
     this.skin = SKIN_TONES[slot % SKIN_TONES.length]!
     this.stickColor = STICK_TONES[(slot * 7) % STICK_TONES.length]!
     const off = restBoneOffsets(goalie)
@@ -457,7 +515,8 @@ export class AthleteRig {
     for (const n of ['thigh_L', 'thigh_R'] as const) this.bones[n].rotation.order = 'ZXY'
     for (const n of ['shin_L', 'shin_R'] as const) this.bones[n].rotation.order = 'YXZ'
 
-    const { geo, roles } = buildBody(slot, goalie)
+    const { geo, roles } = template ? templateGeometry(template, slot) : buildBody(slot, goalie)
+    this.authored = !!template
     this.roles = roles
     this.mesh = new THREE.SkinnedMesh(geo, material)
     this.mesh.name = goalie ? 'goalie' : 'skater'
@@ -516,12 +575,18 @@ export class AthleteRig {
    * @param stick   'carry' (blade on the ice at the puck spot), 'shoot'
    *                (0..1 swing progress), 'raise' (celebration)
    */
-  apply(wx: number, wz: number, heading: number, pose: BodyPose, stick: { mode: 'carry' | 'shoot' | 'raise'; t?: number }): void {
+  apply(wx: number, wz: number, heading: number, pose: BodyPose, stick: { mode: 'carry' | 'shoot' | 'raise'; t?: number }, overlay?: PoseOverlay | null): void {
     const B = this.bones
     const r = this.root
     r.position.set(wx, 0, wz)
     r.rotation.set(0, heading, -pose.bodyRoll)
     B.hips.position.set(0, pose.hipHeight, 0)
+    // bones only clips rotate: back to rest every frame (the code never sets them)
+    B.hips.quaternion.identity()
+    B.shoulder_L.quaternion.identity()
+    B.shoulder_R.quaternion.identity()
+    B.hand_L.quaternion.identity()
+    B.hand_R.quaternion.identity()
     B.spine.rotation.set(pose.lean * 0.8, pose.torsoYaw * 0.6, -pose.torsoRoll)
     B.chest.rotation.set(pose.lean * 0.2, pose.torsoYaw * 0.4, 0)
     B.neck.rotation.set(-pose.lean * 0.45, -pose.torsoYaw * 0.4, 0)
@@ -535,6 +600,7 @@ export class AthleteRig {
       shin.rotation.set(leg.knee, -side * leg.splay, 0)
       foot.rotation.set(-leg.ankle, 0, 0)
     }
+    overlay?.body(B)
     r.updateMatrixWorld(true)
 
     // ── hands & stick, solved in root space ──
@@ -601,11 +667,23 @@ export class AthleteRig {
     B.stick.quaternion.setFromUnitVectors(UP, _v.set(shaftDir.x, shaftDir.y, shaftDir.z))
     B.stick_blade.position.set(heel.x, heel.y, heel.z)
     B.stick_blade.rotation.set(0, Math.atan2(-bladeDir.z, bladeDir.x), 0)
+    if (overlay) {
+      // a clip may move the stick: re-derive the grips along wherever it now is
+      overlay.stick(B)
+      heel = toV3(B.stick.position)
+      shaftDir = toV3(_v.copy(UP).applyQuaternion(B.stick.quaternion))
+      handR = add3(heel, scale3(shaftDir, topGrip))
+      if (!this.goalie) handL = add3(heel, scale3(shaftDir, lowGrip))
+    }
     B.stick.updateMatrixWorld(true)
     B.stick_blade.updateMatrixWorld(true)
 
     this.placeArm(shL, handL, B.upperarm_L, B.forearm_L, 1)
     this.placeArm(shR, handR, B.upperarm_R, B.forearm_R, -1)
+    if (overlay) {
+      overlay.arms(B)
+      r.updateMatrixWorld(true)
+    }
   }
 
   /** Two-bone IK → bone-local rotations (bones keep their fixed lengths). */

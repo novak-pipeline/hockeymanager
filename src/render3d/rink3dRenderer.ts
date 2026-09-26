@@ -45,7 +45,10 @@ import {
 } from './math'
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
-import { AthleteBatch, AthleteRig, athleteMaterial } from './athlete'
+import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
+import { loadAthleteAssets, type AthleteAssets } from './gltfAthlete'
+import { ActionLayer } from './animLayer'
+import { Choreographer, extractActionCues, type LocoMode } from './choreo'
 import { kitFor, type Kit } from './palette'
 import { buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
@@ -53,6 +56,19 @@ import { assignRigs, capStep, type RigMode } from './lineChange'
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
+
+/**
+ * Athlete source: 'blender' = the rigged glTF bodies + authored clips built by
+ * scripts/blender (falls back to procedural if the assets fail to load);
+ * 'procedural' = athlete.ts's code-built bodies. Locomotion: 'code' = the
+ * integrated procedural stride, 'clip' = the authored cycles phase-locked to
+ * the sim, 'hybrid' = code stride + authored crossovers / backward skating.
+ */
+export interface Render3dOptions {
+  athletes?: 'blender' | 'procedural'
+  locomotion?: LocoMode
+}
+export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'procedural', locomotion: 'code' }
 
 const PUCK_R = 0.36
 const PUCK_H = 0.1
@@ -133,6 +149,15 @@ interface PlayerPose {
   rig: AthleteRig
   team: 'home' | 'away'
   labelSprite: THREE.Sprite
+  // authored-clip state (Blender athletes; see choreo.ts)
+  vx: number
+  vz: number
+  layer: ActionLayer | null
+  overlay: PoseOverlay | null
+  faceOverride: { angle: number; until: number } | null
+  followHL: number
+  lastSpeedFt: number
+  stopCooldown: number
 }
 
 interface ActiveCue {
@@ -235,7 +260,13 @@ export class Rink3dRenderer implements MatchRenderer {
     this.camera.lookAt(0, 0, 0)
   }
 
-  static async create(parent: HTMLElement, colors?: RinkColors): Promise<Rink3dRenderer> {
+  private assets: AthleteAssets | null = null
+  private locoMode: LocoMode = 'code'
+  private choreo: Choreographer | null = null
+  private choreoClock = 0
+
+  static async create(parent: HTMLElement, colors?: RinkColors, opts: Render3dOptions = {}): Promise<Rink3dRenderer> {
+    const o = { ...RENDER3D_DEFAULTS, ...opts }
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.shadowMap.enabled = true
@@ -252,6 +283,8 @@ export class Rink3dRenderer implements MatchRenderer {
 
     const inst = new Rink3dRenderer(renderer)
     if (colors) inst.setKits(colors)
+    inst.assets = o.athletes === 'blender' ? await loadAthleteAssets() : null
+    inst.locoMode = o.locomotion
 
     inst.camera.aspect = w / h
     inst.camera.updateProjectionMatrix()
@@ -424,7 +457,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const rigs: AthleteRig[] = []
     const material = athleteMaterial(this.atlasTex)
     const mk = (team: 'home' | 'away', goalie: boolean, slot: number, wx: number, wz: number): PlayerPose => {
-      const rig = new AthleteRig(goalie, slot, material)
+      const template = this.assets ? (goalie ? this.assets.goalie : this.assets.skater) : null
+      const rig = new AthleteRig(goalie, slot, material, template)
       rig.kit = team === 'home' ? this.homeKit : this.awayKit
       rigs.push(rig)
       return {
@@ -453,6 +487,14 @@ export class Rink3dRenderer implements MatchRenderer {
         rig,
         team,
         labelSprite: this.makeLabelSprite(),
+        vx: 0,
+        vz: 0,
+        layer: template ? new ActionLayer(template.clips) : null,
+        overlay: null,
+        faceOverride: null,
+        followHL: PLAYER_FOLLOW_HL,
+        lastSpeedFt: 0,
+        stopCooldown: 0,
       }
     }
     for (let i = 0; i < SKATER_RIGS_PER_TEAM; i++) {
@@ -468,6 +510,20 @@ export class Rink3dRenderer implements MatchRenderer {
     for (const p of this.allPoses()) {
       this.paintSlot(p)
       this.scene.add(p.labelSprite)
+    }
+
+    if (this.assets) {
+      const all = () => this.allPoses()
+      this.choreo = new Choreographer(
+        (id) => all().find((p) => p.playerId === id && p.rig.visible) ?? null,
+        all,
+        // the left net is defended by whichever goalie stands on the left
+        (side) => [this.homeGoaliePose, this.awayGoaliePose].find((g) => g !== null && (side === 'left') === g.worldX.pos < 0) ?? null,
+        this.locoMode,
+        { skater: this.assets.skater.clips },
+        PLAYER_FOLLOW_HL
+      )
+      for (const p of all()) p.overlay = this.choreo.overlayFor(p)
     }
 
     this.batch = new AthleteBatch(rigs, material)
@@ -578,6 +634,8 @@ export class Rink3dRenderer implements MatchRenderer {
     this.celebration = null
     this.sinceGoal = Infinity
 
+    this.choreo?.reset()
+    this.choreoClock = 0
     // Reset per-slot state so jerseys/labels repaint for the new game
     for (const p of this.allPoses()) {
       p.playerId = null
@@ -640,6 +698,8 @@ export class Rink3dRenderer implements MatchRenderer {
       p.butterflyTimer = p.armsTimer = p.staggerTimer = 0
       p.shotTimer = -1
     }
+    this.choreo?.reset()
+    this.choreoClock = this.clockPos
 
     this.renderAt(this.clockPos)
     this.playFocusX = this.puckMesh.position.x
@@ -737,6 +797,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   setEventStream(stream: GameStream): void {
     this.cues = extractCues(stream)
+    this.choreo?.setCues(extractActionCues(stream))
   }
 
   /**
@@ -762,8 +823,20 @@ export class Rink3dRenderer implements MatchRenderer {
   private debugCam: { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov?: number } | null = null
 
   /** Dev/perf probe: draw calls, triangles, CPU ms per frame (EMA). */
-  debugInfo(): { calls: number; triangles: number; cpuMs: number; athleteDraws: number; quality: number } {
+  /**
+   * Dev harness only: play a clip on one player (team slot index; goalie =
+   * index 99), optionally frozen at time `at` (speed 0) for close-ups.
+   */
+  debugClip(team: 'home' | 'away', index: number, name: string, at = 0, freeze = false): boolean {
+    const p = index === 99 ? (team === 'home' ? this.homeGoaliePose : this.awayGoaliePose) : (team === 'home' ? this.homePoses : this.awayPoses)[index]
+    if (!p?.layer) return false
+    p.layer.clear()
+    return p.layer.play(name, { at, speed: freeze ? 0 : 1, fadeless: freeze })
+  }
+
+  debugInfo(): { calls: number; triangles: number; cpuMs: number; athleteDraws: number; quality: number; athletes: string } {
     return {
+      athletes: this.assets ? `blender/${this.locoMode}` : 'procedural',
       quality: this.quality,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
@@ -792,6 +865,10 @@ export class Rink3dRenderer implements MatchRenderer {
     // Animation time only advances while the game clock does — a paused game
     // is a frozen frame (crowd keeps breathing via wallTime).
     const simDt = this.playing ? dt * Math.min(this.speed, 4) : 0
+    if (this.choreo) {
+      if (this.clockPos > this.choreoClock) this.choreo.tick(this.choreoClock, this.clockPos)
+      this.choreoClock = this.clockPos
+    }
     this.renderAt(this.clockPos, dt, simDt)
     this.updateCues(this.clockPos, dt)
     this.updateCamera(dt)
@@ -1024,8 +1101,10 @@ export class Rink3dRenderer implements MatchRenderer {
     if (dt > 0) {
       const px = pose.worldX.pos
       const pz = pose.worldZ.pos
-      pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
-      pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+      // followHL: slower while a player is knocked down (choreo.ts), so his
+      // body slides and then catches up on the spring instead of snapping
+      pose.worldX = springStep(pose.worldX, wx, dt, pose.followHL)
+      pose.worldZ = springStep(pose.worldZ, wz, dt, pose.followHL)
       // Nothing skates faster than a skater: a jump in the stream becomes a skate.
       const c = capStep(px, pz, pose.worldX.pos, pose.worldZ.pos, dt, maxSpeed)
       if (c.capped) {
@@ -1049,6 +1128,10 @@ export class Rink3dRenderer implements MatchRenderer {
     const distSq = vx * vx + vz * vz
     const speedFt = dt > 0 ? Math.sqrt(distSq) / dt : 0
     pose.speed = Math.min(1, speedFt / 22)
+    if (dt > 0) {
+      pose.vx = emaStep(pose.vx, vx / dt, dt, 0.12)
+      pose.vz = emaStep(pose.vz, vz / dt, dt, 0.12)
+    } else pose.vx = pose.vz = 0
     pose.prevWx = pose.worldX.pos
     pose.prevWz = pose.worldZ.pos
 
@@ -1062,7 +1145,11 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.velSmX = emaStep(pose.velSmX, vx / dt, dt, FACING_VEL_TAU)
       pose.velSmZ = emaStep(pose.velSmZ, vz / dt, dt, FACING_VEL_TAU)
       const smSpeed = Math.hypot(pose.velSmX, pose.velSmZ)
-      const target = facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
+      let target = facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
+      // a hit reaction / check faces the other man (choreo.ts) — through the same spring, never a snap
+      const fo = pose.faceOverride
+      if (fo && this.choreo && this.choreo.clock < fo.until) target = fo.angle
+      else pose.faceOverride = null
       if (target !== null) {
         // spring toward the nearest equivalent of the target angle, then clamp the rate
         const goal = pose.angle + wrapAngle(target - pose.angle)
@@ -1108,7 +1195,11 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.shotTimer += simDt
       if (pose.shotTimer > SHOT_SWING_S) pose.shotTimer = -1
     }
-    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick)
+    if (pose.layer) {
+      pose.layer.update(simDt)
+      this.choreo?.locomotionEvents(pose, speedFt, simDt)
+    }
+    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
     pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.4, pose.worldZ.pos)
     pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
@@ -1155,7 +1246,8 @@ export class Rink3dRenderer implements MatchRenderer {
     else if (simDt > 0) pose.butterfly = emaStep(pose.butterfly, wantDown, simDt, wantDown ? 0.06 : 0.22)
 
     const body = goaliePose(pose.butterfly)
-    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, { mode: 'carry' })
+    pose.layer?.update(simDt)
+    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, { mode: 'carry' }, pose.overlay)
 
     pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.6, pose.worldZ.pos)
     pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
@@ -1213,7 +1305,7 @@ export class Rink3dRenderer implements MatchRenderer {
       const side = cue.nx < 0 ? 'left' : 'right'
       const gl = this.goalLights.find((g) => g.side === side)
       if (gl) gl.timer = 3
-      this.setPoseEffect(cue.actorId, 'arms', 2.4)
+      if (!this.choreo) this.setPoseEffect(cue.actorId, 'arms', 2.4)
       this.sinceGoal = 0
       // Frame the spot the goal went in from, pulled toward the slot so the
       // net and the celebration both stay in shot. Fixed for the whole cue.
@@ -1221,6 +1313,8 @@ export class Rink3dRenderer implements MatchRenderer {
       const gz = normYtoWorld(cue.ny)
       const netX = Math.sign(gx || 1) * NET_X
       this.celebration = { elapsed: 0, x: gx + (netX - gx) * 0.35, z: gz * 0.6 }
+    } else if (this.choreo) {
+      // authored clips (shots, saves, hits) are started by the choreographer
     } else if (cue.kind === 'save') {
       this.setGoalieEffect(cue.actorId, cue.nx, 0.55)
     } else if (cue.kind === 'hit') {
