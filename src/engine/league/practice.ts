@@ -62,6 +62,10 @@ export interface TeamPracticeState {
   teamFocus: PracticeFocus
   perPlayerFocus: Array<[string, PracticeFocus]> // [playerId, focus]
   scratched: string[] // healthy scratches for the next game
+  /** Scratches that were for ONE game ("sit him a game"): [playerId, the
+   *  club's games played when he was sat]. Lifted once a game has been played
+   *  since. Optional/additive — absent on older saves. */
+  oneGame?: Array<[string, number]>
 }
 
 /** Construct a fresh state (e.g. start of career or first time screen is opened). */

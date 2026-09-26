@@ -33,6 +33,14 @@ export interface GmPersona {
   styleLabel: string
   /** Year he took the job (for tenure references). */
   sinceYear: number
+  /** 0 (or absent) = the GM the career opened with; each successor +1. Salts
+   *  the persona roll so a new man is a genuinely different operator. */
+  generation?: number
+  /** Consecutive disappointing seasons on his watch (gmCarousel.ts). */
+  missStreak?: number
+  /** Set when ownership dismissed him and the chair is still empty; the
+   *  persona is replaced outright when the successor is named. */
+  dismissedYear?: number
 }
 
 /** A club's seasonal stance — recomputed from roster shape, not hand-set. */
@@ -58,15 +66,23 @@ export function buildGmPersona(args: {
   year: number
   /** Names already in use (coaches etc.) so the GM doesn't collide. */
   takenNames?: ReadonlySet<string>
+  /** Successor number (E3 front-office carousel). 0/absent = the original GM,
+   *  whose roll is unchanged so existing careers meet the same people. */
+  generation?: number
 }): GmPersona {
-  const rng = new Rng(deriveSeed(args.seed, GM_NS, hashId(args.teamId)))
+  const gen = args.generation ?? 0
+  const rng = new Rng(
+    gen > 0
+      ? deriveSeed(args.seed, GM_NS, hashId(args.teamId), gen)
+      : deriveSeed(args.seed, GM_NS, hashId(args.teamId))
+  )
   let name = `${FIRST_NAMES[rng.int(FIRST_NAMES.length)]!} ${LAST_NAMES[rng.int(LAST_NAMES.length)]!}`
   for (let i = 0; args.takenNames?.has(name) && i < 20; i++) {
     name = `${FIRST_NAMES[rng.int(FIRST_NAMES.length)]!} ${LAST_NAMES[rng.int(LAST_NAMES.length)]!}`
   }
   const axis = (): number => Math.round(rng.float(0.08, 0.92) * 100) / 100
   const persona: GmPersona = {
-    id: `gm-${args.teamId}`,
+    id: gen > 0 ? `gm-${args.teamId}-${gen}` : `gm-${args.teamId}`,
     teamId: args.teamId,
     name,
     aggression: axis(),
@@ -78,6 +94,7 @@ export function buildGmPersona(args: {
     analyticsLean: axis(),
     styleLabel: '',
     sinceYear: args.year,
+    ...(gen > 0 ? { generation: gen } : {}),
   }
   persona.styleLabel = styleLabel(persona)
   return persona

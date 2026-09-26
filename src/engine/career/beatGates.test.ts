@@ -111,3 +111,13 @@ describe('beat gates — Continue never dead-ends', () => {
     expect(liveBeatGates(d)[0]).toEqual({ key: 'scoutDigest', screen: 'inbox', params: { newsId: 'news-9' } })
   })
 })
+
+describe('beat gates — dismissed (E3)', () => {
+  it('the review where he is told comes first; then only the job market, even on draft day', () => {
+    const told: GateFlags = { gmFired: true, reviewPending: true, draftPending: true, continueLabel: 'Continue — end-of-season review' }
+    expect(press(told, 'dashboard', 2)).toEqual(['route:seasonReview', 'spend:seasonReview:attending'])
+    const held: GateFlags = { gmFired: true, draftPending: true, continueLabel: 'Take a new job to continue' }
+    expect(routeContinue({ dashboard: held, screen: 'draft', lastRoute: null })).toMatchObject({ kind: 'hardGate', screen: 'gmCareer', alreadyThere: false })
+    expect(routeContinue({ dashboard: held, screen: 'gmCareer', lastRoute: null })).toMatchObject({ kind: 'hardGate', screen: 'gmCareer', alreadyThere: true })
+  })
+})

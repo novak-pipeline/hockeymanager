@@ -85,6 +85,10 @@ export interface ChronicleEvent {
     /** gameMoment/milestone: which match-night moment this was
      *  ('firstGoal' | 'goalieSteal' | 'rivalScrap') — B6.3 dedupe + queries. */
     moment?: string
+    /** coachFired / gmChange: which window the change landed in (E3 carousel). */
+    window?: 'midseason' | 'offseason'
+    /** gmChange: the dismissal and the appointment are separate events. */
+    change?: 'dismissed' | 'hired'
   }
   /** True when the user's club was involved (fast filter for "your history"). */
   userInvolved: boolean

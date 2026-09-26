@@ -252,7 +252,9 @@ function optionsFor(kind: InteractionKind): InteractionOption[] {
       ]
     case 'feud':
       return [
-        { id: 'supportive', label: 'Promise to address the room',        tone: 'supportive' },
+        // E3 audit: this used to PROMISE to address the room — an action the
+        // game had no way to perform or check. Choosing it now does it.
+        { id: 'supportive', label: 'Step in and address the room',      tone: 'supportive' },
         { id: 'firm',       label: 'Tell him to sort it out himself',    tone: 'firm' },
         { id: 'dismissive', label: 'Tell him to focus on hockey',        tone: 'dismissive' },
       ]

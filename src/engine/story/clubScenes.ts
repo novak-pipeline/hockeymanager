@@ -40,11 +40,13 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
     options: [
       {
         id: 'camp-shot',
-        label: `"Come to camp and take a job off somebody."`,
-        effects: { morale: 12, promise: 'iceTime', roomRespect: -2 },
+        label: `"Come to development camp and make us notice you."`,
+        // No iceTime promise: a drafted junior cannot make the NHL roster out of
+        // camp here (rights held, AHL at 20), so that promise could only break.
+        effects: { morale: 12, roomRespect: -2 },
         outcome:
-          `You told an eighteen-year-old he can win an NHL job in September. He believed you, which means ` +
-          `camp is now a promise with his name on it, and every veteran on the bubble just got a rival.`,
+          `You told an eighteen-year-old that July is an audition. He believed you, which means development ` +
+          `camp now has his name on it — and the staff will be asked, in front of him, what they saw.`,
       },
       {
         id: 'go-back',
@@ -75,7 +77,9 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
       {
         id: 'tell-him',
         label: `Tell him exactly what the reports said`,
-        effects: { morale: -8, roomRespect: 7, promise: 'iceTime' },
+        // No iceTime promise: he is a drafted junior who cannot dress for you
+        // this season, so the ledger could only ever record it as broken.
+        effects: { morale: -8, roomRespect: 7 },
         outcome:
           `You read him his own scouting file. It was not kind and it was not wrong, and he now knows precisely ` +
           `what he has to disprove — to you, in writing, this season.`,

@@ -60,6 +60,38 @@ export interface SeasonRecord {
   /** A sample of the season's most salient news headlines — raw material for the
    *  fun-judging persona to assess whether the world felt alive and dramatic. */
   newsSample?: string[]
+  /** The club the GM ran this season (he can be fired and move — E3). */
+  team?: string
+  /** E3 pressure: how the board saw the GM this season. `warnings` is the
+   *  in-season escalation count (3 = ultimatum); `missStreak` is the run of
+   *  disappointing seasons AFTER this one's review. */
+  board?: {
+    mandate: string
+    targetRank: number
+    warnings: number
+    confidence: number
+    patience: number
+    fanMoodLabel: string
+    missStreakAfter?: number
+    fired: boolean
+    jeopardy?: string
+  }
+  /** E3: league-wide front-office churn this season (chronicle-backed). */
+  league?: {
+    coachMidseason: number
+    coachOffseason: number
+    gmDismissals: number
+    changes: string[]
+  }
+}
+
+export interface JobChange {
+  year: number
+  from: string
+  to: string
+  interest: string
+  projectedRank: number
+  openings: number
 }
 
 export interface AutopilotTrace {
@@ -87,6 +119,8 @@ export interface AutopilotTrace {
    *  draft, a player profile, the dashboard), trimmed. Lets the persona reporter
    *  critique each screen's information design directly, as a player would see it. */
   viewSamples: Record<string, unknown>
+  /** E3: every time the GM was dismissed and which chair he took next. */
+  jobs: JobChange[]
   summary: {
     cups: number
     bestFinish: string
@@ -98,6 +132,13 @@ export interface AutopilotTrace {
     minor: number
     endedEarly: boolean
     endReason?: string
+    /** E3 pressure roll-up across the campaign. */
+    firings: number
+    boardWarnings: number
+    ultimatums: number
+    coachChangesPerSeason: number
+    coachMidseasonPerSeason: number
+    gmChangesPerSeason: number
   }
 }
 
@@ -123,6 +164,8 @@ interface Ctx {
   plan: Plan
   planYear: number
   diagYear: number
+  /** Board warnings already logged this season (a rise = a new warning). */
+  lastWarnings: number
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -761,6 +804,10 @@ function doFreeAgency(ctx: Ctx): void {
   noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
   const plan = getPlan(ctx)
   let remaining = hub.capSpace
+  // Offers are ASYNC: a tabled offer is a body that may arrive. Table only as
+  // many as there are open spots, counting the offers already out — a GM who
+  // took over a gutted roster tabled 31 at once and opened the season with 29.
+  let slots = 23 - (squad?.rosterCount ?? 23) - hub.rows.filter((r) => r.pendingOffer).length
   const affordable = hub.rows
     // A rebuilder doesn't hand term/money to win-now vets — only cheap young upside.
     .filter((r) => !r.pendingOffer && !r.inTalks && (plan !== 'rebuild' || r.age <= 25))
@@ -768,6 +815,7 @@ function doFreeAgency(ctx: Ctx): void {
   for (const fa of affordable.slice(0, 8)) {
     if (remaining < 1e6) break
     if (fa.askSalary > remaining) continue
+    if (slots <= 0) break
     if (hub.windowOpen) {
       const res = guarded(ctx, 'submitFaOffer', () => ctx.career.submitFaOffer(fa.playerId, fa.askSalary, fa.askYears))
       // Count the offer. Free agency went ASYNC (the camp answers days later), so
@@ -776,14 +824,99 @@ function doFreeAgency(ctx: Ctx): void {
       // says a busy GM did nothing is worse than no metric: it was about to be
       // read as a behaviour regression.
       const sa = ctx.trace.seasons.at(-1)
-      if (res?.ok && sa) { sa.signings++; remaining -= fa.askSalary }
+      if (res?.ok && sa) { sa.signings++; remaining -= fa.askSalary; slots-- }
       log(ctx, { kind: 'sign-fa', summary: `Tabled ${money(fa.askSalary)}×${fa.askYears} for UFA ${fa.name} (${fa.overall} OVR)`, drivers: ['roster spot open', `fits cap (${money(remaining)} left)`], result: res?.message ?? 'tabled', ok: !!res?.ok })
     } else {
       const res = trySign(ctx, remaining, fa.askSalary, () => ctx.career.signFreeAgent(fa.playerId, fa.askSalary, fa.askYears), 'signFreeAgent')
-      const s = ctx.trace.seasons.at(-1); if (res?.signed && s) { s.signings++; remaining -= fa.askSalary }
+      const s = ctx.trace.seasons.at(-1); if (res?.signed && s) { s.signings++; remaining -= fa.askSalary; slots-- }
       log(ctx, { kind: 'sign-fa', summary: `${res?.signed ? 'Signed' : 'Passed on'} UFA ${fa.name} (${fa.overall} OVR) ${fa.askYears}yr @ ${money(fa.askSalary)}`, drivers: ['roster spot open', 'best affordable body'], result: res?.message ?? 'no', ok: !!res?.signed })
     }
     if (remaining < 1e6) break
+  }
+}
+
+/* ─────────────── E3: pressure, dismissal, and the next job ─────────────── */
+
+/** Log each new board escalation the moment it lands (1 concern, 2 formal
+ *  warning, 3 ultimatum) — the trail a firing should never arrive without. */
+function watchBoard(ctx: Ctx, dash: ReturnType<Career['getDashboard']>): void {
+  const b = dash.board
+  const w = b?.warnings ?? 0
+  if (b && w > ctx.lastWarnings) {
+    const label = w >= 3 ? 'ULTIMATUM' : w === 2 ? 'formal warning' : 'expressed concern'
+    log(ctx, {
+      kind: 'board',
+      summary: `Board ${label} (#${w}) — confidence ${b.confidence}, patience ${b.patience}`,
+      drivers: [b.jeopardyLabel, `mandate: ${b.mandateText}`, `target ${b.targetRank}, sitting #${dash.userTeam.rank}`],
+      result: label,
+      ok: true,
+    })
+  }
+  ctx.lastWarnings = w
+}
+
+/** After the season review: what the board concluded (read BEFORE any move). */
+function captureReview(ctx: Ctx): void {
+  const s = ctx.trace.seasons.find((x) => x.year === ctx.career.year)
+  if (!s?.board || s.board.missStreakAfter !== undefined) return
+  const b = guarded(ctx, 'getBoard', () => ctx.career.getBoard())
+  if (!b) return
+  s.board.missStreakAfter = b.missStreak
+  s.board.fired = b.fired
+  s.board.jeopardy = b.jeopardyLabel
+}
+
+/**
+ * Dismissed. A reusable AI-GM brain does what a real one does: takes the best
+ * chair on offer and gets back to work. "Best" = the strongest club among the
+ * jobs that would actually hire him (a long shot is not an offer). The engine
+ * guarantees one takeable opening; none is a softlock and reported as such.
+ */
+function takeNewJob(ctx: Ctx): boolean {
+  captureReview(ctx)
+  const market = guarded(ctx, 'getGMJobMarket', () => ctx.career.getGMJobMarket())
+  const from = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())?.userTeam.name ?? '?'
+  if (!market) return false
+  const takeable = market.openings
+    .filter((o) => o.interest !== 'longshot')
+    .sort((a, b) => a.projectedRank - b.projectedRank || (a.interest === 'courting' ? -1 : 1))
+  if (takeable.length === 0) {
+    issue(ctx, 'critical', 'softlock', `fired with no takeable job — ${market.openings.length} opening(s), all long shots`, `reputation ${market.reputation}`)
+    return false
+  }
+  const pick = takeable[0]!
+  const res = guarded(ctx, 'acceptGMJob', () => ctx.career.acceptGMJob(pick.teamId))
+  log(ctx, {
+    kind: 'job',
+    summary: `Fired by ${from}; took the ${pick.teamName} job (${pick.interest}, finished #${pick.projectedRank})`,
+    drivers: [
+      `${market.openings.length} opening(s): ${market.openings.map((o) => `${o.teamAbbr} #${o.projectedRank} ${o.interest}`).join(', ')}`,
+      `reputation ${market.reputation} (${market.tier})`,
+      'best club among the chairs that would actually hire me',
+    ],
+    result: res?.message ?? 'error',
+    ok: !!res?.ok,
+  })
+  if (!res?.ok) return false
+  ctx.trace.jobs.push({ year: ctx.career.year, from, to: pick.teamName, interest: pick.interest, projectedRank: pick.projectedRank, openings: market.openings.length })
+  noteFeature(ctx, 'gm-career', `Fired after the ${ctx.career.year} review. The job market listed ${market.openings.length} real vacanc${market.openings.length === 1 ? 'y' : 'ies'} (clubs that had just dismissed their GM) with each club's interest in me; Continue was held until I took one.`)
+  // A new club is a new plan, a new board, a new trade book.
+  ctx.planYear = -1
+  ctx.diagYear = -1
+  ctx.offered.clear()
+  ctx.lastWarnings = 0
+  return true
+}
+
+/** Attach the season's league-wide front-office churn from the chronicle. */
+function attachLeagueChurn(ctx: Ctx, s: SeasonRecord): void {
+  const log = guarded(ctx, 'carouselLog', () => ctx.career.carouselLog(s.year))
+  if (!log) return
+  s.league = {
+    coachMidseason: log.coachMidseason,
+    coachOffseason: log.coachOffseason,
+    gmDismissals: log.gmDismissals,
+    changes: log.entries.map((e) => `${e.window === 'midseason' ? 'MID' : 'SUMMER'} ${e.headline}`),
   }
 }
 
@@ -810,6 +943,19 @@ function recordSeasonEnd(ctx: Ctx, s: SeasonRecord): void {
     const st = dash.userTeam.standing
     s.record = `${st.wins}-${st.losses}-${st.overtimeLosses}`
     s.points = st.points
+    s.team = dash.userTeam.name
+  }
+  const board = guarded(ctx, 'getBoard', () => ctx.career.getBoard())
+  if (board) {
+    s.board = {
+      mandate: board.mandate,
+      targetRank: board.targetRank,
+      warnings: board.warnings,
+      confidence: board.confidence,
+      patience: board.patience,
+      fanMoodLabel: board.fanMoodLabel,
+      fired: false,
+    }
   }
   const po = guarded(ctx, 'getPlayoffs', () => ctx.career.getPlayoffs())
   if (po) {
@@ -849,10 +995,13 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
   const dash0 = career.getDashboard()
   const trace: AutopilotTrace = {
     meta: { seed: career.seed, userTeamId: career.userTeamId as unknown as string, userTeamName: dash0.userTeam.name, leagueName: dash0.leagueName, teams: career.data.league.teams.length, seasonsRequested: opts.seasons, seasonsPlayed: 0, source: opts.source },
-    decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {},
-    summary: { cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false },
+    decisions: [], issues: [], seasons: [], featureNotes: [], viewSamples: {}, jobs: [],
+    summary: {
+      cups: 0, bestFinish: '—', totalTrades: 0, totalSignings: 0, totalDrafted: 0, critical: 0, major: 0, minor: 0, endedEarly: false,
+      firings: 0, boardWarnings: 0, ultimatums: 0, coachChangesPerSeason: 0, coachMidseasonPerSeason: 0, gmChangesPerSeason: 0,
+    },
   }
-  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1 }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1, lastWarnings: 0 }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
@@ -871,6 +1020,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     }
     if (career.year !== curYear) {
       if (!recorded.has(curYear)) { recordSeasonEnd(ctx, season); recorded.add(curYear) }
+      attachLeagueChurn(ctx, season)
       curYear = career.year
       if (career.year >= targetYear) break
       season = beginSeason(ctx, curYear)
@@ -878,6 +1028,17 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
 
     const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
     if (!dash) { issue(ctx, 'critical', 'softlock', 'getDashboard() failed — cannot read state'); trace.summary.endedEarly = true; trace.summary.endReason = 'dashboard unreadable'; break }
+
+    // E3: dismissed. The review lapses on the next step (that is where he is
+    // told); after it, Continue is held until he takes a new chair — and a
+    // fired GM does not run his old club's draft.
+    if (dash.gmFired && !dash.reviewPending) {
+      if (!takeNewJob(ctx)) {
+        trace.summary.endedEarly = true; trace.summary.endReason = `fired ${career.year} and could not take a job`
+        break
+      }
+      continue
+    }
 
     if (career.draftPending()) {
       doDraft(ctx)
@@ -898,7 +1059,9 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
     if (dash.captainsPending) { doCaptain(ctx); continue }
 
     const phase: CareerPhase = career.seasonPhase
+    if (phase === 'offseason' && guarded(ctx, 'getOffseason', () => ctx.career.getOffseason())?.stage !== 'awards') captureReview(ctx)
     if (phase === 'regularSeason') {
+      watchBoard(ctx, dash)
       getPlan(ctx) // set + log the season's contend/retool/rebuild plan (once per year)
       if (dash.day >= 30) snapshotViews(ctx) // one mid-season capture of what the screens serve
       clearMeetings(ctx, dash)
@@ -938,6 +1101,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
   if (hardGuard >= HARD_LIMIT) { issue(ctx, 'critical', 'softlock', 'hit the hard iteration limit — likely an infinite loop'); trace.summary.endedEarly = true; trace.summary.endReason = 'hard limit' }
 
   if (season && !recorded.has(season.year)) recordSeasonEnd(ctx, season)
+  if (season && !season.league) attachLeagueChurn(ctx, season)
   runSanity(ctx)
 
   trace.meta.seasonsPlayed = trace.seasons.length
@@ -949,6 +1113,17 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
   trace.summary.major = trace.issues.filter((i) => i.severity === 'major').length
   trace.summary.minor = trace.issues.filter((i) => i.severity === 'minor').length
   trace.summary.bestFinish = bestOf(trace.seasons.map((s) => s.playoffResult))
+  // E3 roll-up. League churn is averaged over seasons whose summer has been
+  // played (the last season may end before its review).
+  trace.summary.firings = trace.jobs.length
+  trace.summary.boardWarnings = trace.decisions.filter((d) => d.kind === 'board').length
+  trace.summary.ultimatums = trace.decisions.filter((d) => d.kind === 'board' && d.result === 'ULTIMATUM').length
+  const full = trace.seasons.filter((s) => s.league && s.board?.missStreakAfter !== undefined)
+  const avg = (f: (s: SeasonRecord) => number): number =>
+    full.length ? Math.round((full.reduce((n, s) => n + f(s), 0) / full.length) * 100) / 100 : 0
+  trace.summary.coachChangesPerSeason = avg((s) => (s.league?.coachMidseason ?? 0) + (s.league?.coachOffseason ?? 0))
+  trace.summary.coachMidseasonPerSeason = avg((s) => s.league?.coachMidseason ?? 0)
+  trace.summary.gmChangesPerSeason = avg((s) => s.league?.gmDismissals ?? 0)
   return trace
 }
 

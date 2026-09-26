@@ -85,7 +85,7 @@ import {
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
 import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
-import { generateOwnerRequest, type OwnerRequest } from '@engine/league/ownerMeddling'
+import { generateOwnerRequest, judgeOwnerCommitment, type OwnerRequest } from '@engine/league/ownerMeddling'
 import { fanInterestDelta, budgetFactor, fanInterestLabel } from '@engine/league/fanbase'
 import { buildSponsors, sponsorTotal, sponsorKindLabel } from '@engine/league/sponsors'
 import {
@@ -358,7 +358,7 @@ import {
   walkThread,
   type TradeThread,
 } from './tradeThread'
-import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionEffects } from '@engine/story/decisionEvents'
+import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionAct, type DecisionEffects } from '@engine/story/decisionEvents'
 import {
   ARRIVAL_EVENTS,
   CLUB_SCENES,
@@ -531,6 +531,14 @@ import {
   type CoachFiring,
   type CoachSeat,
 } from '@engine/league/coachCarousel'
+import {
+  buildDismissal,
+  hottestGmSeat,
+  isDisappointingSeason,
+  offseasonGmDismissals,
+  type GmDismissal,
+  type GmSeat,
+} from '@engine/league/gmCarousel'
 import {
   MAX_EXTENSION_YEARS,
   describeExtension,
@@ -3529,6 +3537,7 @@ export class Career {
         losingStreak,
         mediaHeat: Math.min(100, losingStreak * 14),
         nursingInjury: p.injuryStatus !== null,
+        injuryGames: p.injuryStatus?.gamesRemaining ?? 0,
         importance: ratedOverall(p),
         contractYearsRemaining: p.contract.yearsRemaining,
         position: p.position,
@@ -3603,13 +3612,17 @@ export class Career {
   ): void {
     const e = chosen.effects
     const day = this.currentDay
+    // E3 audit: the thing the option says happens, happens — or the receipt says
+    // why it could not. Performed first, so a refused act plants no promise the
+    // GM was never able to keep.
+    const acted = e.act ? this.performDecisionAct(e.act, player) : null
+    const refused = acted !== null && !acted.ok
     if (e.morale) player.morale = Math.max(0, Math.min(100, player.morale + e.morale))
     const lr = this.lockerRooms.get(this.userTeamId)
     if (lr && (e.roomMorale || e.roomRespect)) {
       lr.roomMorale = Math.max(0, Math.min(100, lr.roomMorale + (e.roomMorale ?? 0) + (e.roomRespect ?? 0) * 0.5))
     }
-    if (e.promise) {
-      const cur = player.stats.find((s) => s.season === this.year)
+    if (e.promise && !refused) {
       this.playerPromises.push({
         id: `pp${this.interactionCounter++}`,
         playerId: player.id as string,
@@ -3617,13 +3630,20 @@ export class Career {
         // "Your words, quoted back to you" — so the GM's own line, not the
         // narrator's receipt. Storing the outcome made the rollover mail read
         // "Last season you told him 'He believed you completely, which is the
-        // problem…'" — a sentence nobody said to anybody.
+        // problem…'" — a sentence nobody said to anybody. (Year and due date
+        // come from promiseTerms below.)
         text: interaction.options.find((o) => o.id === chosen.id)?.label ?? chosen.outcome,
-        year: this.year,
         day,
-        ...(cur ? { baselineGp: cur.gamesPlayed } : {}),
+        ...this.promiseTerms(e.promise, player),
         baselineYears: player.contract.yearsRemaining,
         status: 'open',
+      })
+    }
+    if (refused) {
+      this.pushNews('contract', `It didn't happen: ${player.name}`, acted.message, {
+        playerId: player.id as string,
+        teamId: this.userTeamId as string,
+        salience: 60,
       })
     }
     if (e.residue) {
@@ -3668,15 +3688,155 @@ export class Career {
         { playerId: player.id as string, teamId: this.userTeamId as string, salience: 62 }
       )
     }
+    // A refused act rewrites the receipt: the authored outcome describes the
+    // thing as done, and it was not.
+    const receipt = refused ? acted.message : acted?.message ? `${chosen.outcome} ${acted.message}` : chosen.outcome
     if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
       this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
-        `What was said behind your office door did not stay there. ${chosen.outcome}`,
+        `What was said behind your office door did not stay there. ${receipt}`,
         { playerId: player.id as string, teamId: this.userTeamId as string })
     }
     interaction.status = 'resolved'
     interaction.chosenOptionId = chosen.id
-    interaction.outcome = chosen.outcome
+    interaction.outcome = receipt
     interaction.resolvedDay = day
+  }
+
+  /**
+   * When a promise comes due, and in which season. In-season: ice time is
+   * judged five weeks on and a trade promise at the deadline (the LW5 rules).
+   * Made in the summer or the playoffs, the promise is about NEXT season and is
+   * judged five weeks into it — before this, such promises (and every one a
+   * decision scene made, which never got a due day at all) were settled as
+   * "kept" at the rollover without anyone looking (E3 audit).
+   */
+  private promiseTerms(
+    kind: 'iceTime' | 'newDeal' | 'exploreTrade',
+    player: Player
+  ): { year: number; dueDay?: number; baselineGp?: number; baselineToi?: number } {
+    const inSeason = this.phase === 'regularSeason'
+    if (!inSeason) return { year: this.year + 1, ...(kind === 'iceTime' ? { dueDay: 35, baselineGp: 0, baselineToi: 0 } : {}) }
+    const cur = player.stats.find((s) => s.season === this.year)
+    const baseline = cur
+      ? { baselineGp: cur.gamesPlayed, baselineToi: cur.ev.timeOnIce + cur.pp.timeOnIce + cur.pk.timeOnIce }
+      : { baselineGp: 0, baselineToi: 0 }
+    if (kind === 'iceTime') return { year: this.year, dueDay: this.currentDay + 35, ...baseline }
+    if (kind === 'exploreTrade' && this.currentDay < this.deadlineDay) return { year: this.year, dueDay: this.deadlineDay }
+    return { year: this.year }
+  }
+
+  /**
+   * Perform a decision scene's act through the same API the screens use.
+   * Every refusal is a sentence (E2's rule: a blocked action is never silent).
+   * `message` on success is an optional addendum to the receipt.
+   */
+  private performDecisionAct(act: DecisionAct, player: Player): { ok: boolean; message: string } {
+    const pid = player.id as string
+    const team = this.userTeam
+    const onNhl = team.roster.some((id) => (id as string) === pid)
+    const last = player.name.split(' ').pop() ?? player.name
+    switch (act) {
+      case 'dress': {
+        if (player.injuryStatus !== null) return { ok: false, message: `${player.name} is injured — he cannot dress until the medical staff clear him.` }
+        if (this.isScratchedFor(pid)) this.practiceState = toggleScratch(this.practiceState, pid)
+        return { ok: true, message: '' }
+      }
+      case 'playThrough': {
+        const inj = player.injuryStatus
+        if (!inj) return { ok: true, message: '' }
+        if (inj.gamesRemaining > 8) return { ok: false, message: `The medical staff would not sign off: ${player.name}'s injury is not one a player can play through.` }
+        // Cleared against advice: he dresses, hurt — heavy legs and a cold stick
+        // until it settles. That is the price the physio's report warned about.
+        player.injuryStatus = null
+        player.fatigue = Math.min(100, player.fatigue + 22)
+        player.form = Math.max(-5, player.form - 1)
+        if (this.isScratchedFor(pid)) this.practiceState = toggleScratch(this.practiceState, pid)
+        repairLines(team, this.data.players)
+        return { ok: true, message: `(Medical overruled: ${last} is cleared to dress, and he will be playing hurt.)` }
+      }
+      case 'callUp': {
+        if (onNhl) return { ok: true, message: '' }
+        const r = this.callUp(pid)
+        return r.ok ? { ok: true, message: `(${last} has been recalled.)` } : { ok: false, message: `You went to bring ${player.name} up and could not: ${r.reason}` }
+      }
+      case 'release': {
+        const ahl = [...this.data.teams.values()].find((t) => t.tier === 'ahl' && t.roster.some((id) => (id as string) === pid))
+        if (!ahl) return { ok: false, message: `${player.name} is not on the farm roster any more — there is nothing to release him from.` }
+        releaseFromTeam({ team: ahl, playerId: player.id, players: this.data.players })
+        player.contract.yearsRemaining = 0
+        if (!this.faPool.some((id) => (id as string) === pid)) this.faPool.push(player.id)
+        repairLines(ahl, this.data.players)
+        this.pushNews('contract', `${player.name} granted his release`,
+          `The club and ${player.name} have agreed to terminate his contract. He is an unrestricted free agent, free to sign anywhere.`,
+          { playerId: pid, teamId: this.userTeamId as string })
+        const tx = recordTransaction(this.transactionLedger, {
+          day: this.currentDay, year: this.year, kind: 'release', teamIds: [this.userTeamId as string],
+          summary: `${team.abbreviation} grant ${player.name} his release (mutual termination).`,
+        })
+        this.transactionLedger = tx.ledger
+        return { ok: true, message: '' }
+      }
+      case 'sell': {
+        if (!onNhl) return { ok: false, message: `${player.name} is not on the NHL roster, so there was nobody to move.` }
+        if (!this.tradingOpen()) return { ok: false, message: `The trade market is closed — there is no move to make for ${player.name} until it reopens.` }
+        const shopped = this.shopPlayer(pid)
+        const offers = this.tradeOffers.filter(
+          (o) => o.userGivesPlayerIds.length === 1 && (o.userGivesPlayerIds[0] as string) === pid
+        )
+        if (offers.length === 0) return { ok: false, message: `You called around on ${player.name} and nobody bit. ${shopped.message}` }
+        // "Take the picks": the offer with the most draft capital, then the first tabled.
+        const best = [...offers].sort((a, b) => b.userReceivesPicks.length - a.userReceivesPicks.length)[0]!
+        const r = this.acceptTrade(best.offerId)
+        if (!r.ok) return { ok: false, message: `The deal for ${player.name} could not be completed: ${r.message ?? 'it fell through'}.` }
+        const partner = this.data.teams.get(best.partnerTeamId)?.name ?? 'a rival club'
+        return { ok: true, message: `(${last} has been traded to ${partner}.)` }
+      }
+      case 'untouchable': {
+        this.setTradeStatus(pid, 'untouchable')
+        return { ok: true, message: '' }
+      }
+      case 'makeStarter': {
+        if (player.position !== 'G' || !onNhl) return { ok: false, message: `${player.name} is not a goaltender on your roster.` }
+        if (this.isScratchedFor(pid)) this.practiceState = toggleScratch(this.practiceState, pid)
+        const [g1] = team.lines.goalies
+        if ((g1 as string) !== pid) {
+          // Whether he was the backup or the third man, the old starter backs him up.
+          team.lines.goalies = [player.id, g1] as Team['lines']['goalies']
+        }
+        return { ok: true, message: '' }
+      }
+      case 'benchStarter': {
+        if (player.position !== 'G' || !onNhl) return { ok: false, message: `${player.name} is not a goaltender on your roster.` }
+        const other = team.roster
+          .map((id) => this.data.players.get(id))
+          .filter((p): p is Player => !!p && p.position === 'G' && (p.id as string) !== pid && p.injuryStatus === null)
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+        if (!other) return { ok: false, message: `There is no healthy backup to hand the net to — ${player.name} starts by default.` }
+        team.lines.goalies = [other.id, player.id] as Team['lines']['goalies']
+        return { ok: true, message: `(${other.name} takes the net.)` }
+      }
+      case 'topPowerPlay': {
+        if (!onNhl || player.position === 'G') return { ok: false, message: `${player.name} is not a skater on your NHL roster, so there is no unit to put him on.` }
+        const units = team.lines.powerPlayUnits
+        const pp1 = units[0]
+        if (!pp1 || pp1.length === 0) return { ok: false, message: `There is no first power-play unit set to put ${player.name} on.` }
+        if (pp1.some((id) => (id as string) === pid)) return { ok: true, message: '' }
+        // The minutes come from the longest-serving man on the unit — the scene's veteran.
+        let vIdx = 0
+        pp1.forEach((id, i) => {
+          const cand = this.data.players.get(id)
+          const cur = this.data.players.get(pp1[vIdx]!)
+          if (cand && cur && cand.age > cur.age) vIdx = i
+        })
+        const displaced = pp1[vIdx]!
+        const pp2 = units[1]
+        const inPp2 = pp2 ? pp2.findIndex((id) => (id as string) === pid) : -1
+        if (pp2 && inPp2 >= 0) pp2[inPp2] = displaced
+        pp1[vIdx] = player.id
+        const vetName = this.data.players.get(displaced)?.name ?? 'The veteran'
+        return { ok: true, message: `(${last} is on the first unit; ${vetName} drops ${inPp2 >= 0 ? 'to the second' : 'off it'}.)` }
+      }
+    }
   }
 
   /** The user's GM state, lazily created for old saves that predate the GM career. */
@@ -3807,7 +3967,8 @@ export class Career {
       if (ev && chosen) {
         this.applyDecisionEffects(interaction, player, chosen)
         this.decisionEventFor.delete(interactionId)
-        return { ok: true, message: chosen.outcome }
+        // The receipt, not the authored outcome: a refused act rewrote it.
+        return { ok: true, message: interaction.outcome ?? chosen.outcome }
       }
     }
 
@@ -3832,6 +3993,18 @@ export class Career {
     interaction.chosenOptionId = optionId
     interaction.outcome = result.outcome
     interaction.resolvedDay = this.currentDay
+
+    // E3 audit: "address the room" was a promise with no action behind it and
+    // nothing that ever checked it. Choosing it IS addressing the room now: the
+    // feud he came about is settled, in the arc and in the dressing room.
+    if (interaction.kind === 'feud' && option.id === 'supportive') {
+      for (const arc of this.arcsState.arcs) {
+        if (arc.kind !== 'feud' || arc.status === 'resolved') continue
+        if (!arc.actors.playerIds.includes(interaction.playerId)) continue
+        resolveArc(this.arcsState, arc.id, 'The GM stepped in and addressed the room.', this.currentDay, this.year)
+      }
+      interaction.outcome = `${result.outcome} You took it to the room the same afternoon.`
+    }
 
     // LW5: a promise-tone answer is written into the ledger — measurable
     // keep-condition, due date, and your exact words for later quoting.
@@ -4560,7 +4733,11 @@ export class Career {
     if (boardDayIdx >= 0 && boardDayIdx % 10 === 9) {
       const userStanding = this.standings.get(this.userTeamId)
       const currentRank = sorted.findIndex((s) => s.teamId === this.userTeamId) + 1
-      const totalGames = this.matchDays.length
+      // GAMES, not dates: matchDays counts every league date (~2x a club's
+      // schedule), which capped "progress" near 0.5 — the board's late-season
+      // patience drain barely ran and the carousel's 80%-of-season cutoff never
+      // bit (docs/PRESSURE-AND-FIRINGS.md).
+      const totalGames = this.userGamesScheduled()
       const gamesPlayed = userStanding?.gamesPlayed ?? 0
       const confResult = updateConfidence({
         state: this.boardState,
@@ -6000,6 +6177,20 @@ export class Career {
    * being replaced (there are only two).
    */
   private enforceUserScratches(): void {
+    // A one-game scratch ("sit him a game") is served once a game has been
+    // played since it was set — lift it, exactly as the staff proposed.
+    const oneGame = this.practiceState.oneGame ?? []
+    if (oneGame.length > 0) {
+      const gp = this.userGamesPlayed()
+      const served = new Set(oneGame.filter(([, at]) => gp > at).map(([id]) => id))
+      if (served.size > 0) {
+        this.practiceState = {
+          ...this.practiceState,
+          scratched: this.practiceState.scratched.filter((id) => !served.has(id)),
+          oneGame: oneGame.filter(([id]) => !served.has(id)),
+        }
+      }
+    }
     if (this.practiceState.scratched.length === 0) return
     const scratched = new Set(this.practiceState.scratched)
     const team = this.userTeam
@@ -6916,6 +7107,8 @@ export class Career {
     }
     // ── owner meddling: occasionally (~every 6 weeks, and not always), the owner
     //    leans on the GM — kept infrequent so it's flavour, not a nag. ──────
+    // What the GM told the owner is judged on its due day (E3 audit).
+    this.judgeOwnerCommitmentIfDue(nextDay)
     if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
@@ -7690,6 +7883,16 @@ export class Career {
         'The board met to close the book on the season; you sent regrets. The minutes note your absence.',
         { teamId: this.userTeamId as string }
       )
+      // Skipping the meeting where you were dismissed is still progress.
+      if (this.boardState.firedAtYear !== null) return true
+    }
+    // E3: a dismissed GM does not run the club's draft, re-signings or July 1.
+    // The calendar is HELD until he takes one of the real vacancies (hard gate,
+    // escape = the GM Career screen). The old flow let him keep working and then
+    // silently re-hired him at the rollover — a dismissal the game didn't honour.
+    if (this.boardState.firedAtYear !== null) {
+      this.ensureGMJobMarket()
+      return false
     }
     const os = this.offseason
     if (!os) return false
@@ -7744,6 +7947,7 @@ export class Career {
             teamId: this.userTeamId as string,
             teamName: this.userTeam.name,
             seasonsWithClub,
+            teamsInLeague: this.data.league.teams.length,
           })
           this.pushSeeds(reviewResult.newsSeeds.map((s) => ({ ...s, teamId: this.userTeamId as string })))
 
@@ -7759,12 +7963,30 @@ export class Career {
             finalRank: userFinalRank,
             n: this.data.league.teams.length,
           })
+          // E3: the front-office carousel — AI owners judge their GMs on the
+          // same night the user's board judges him.
+          this.runGmCarousel(sorted)
           if (reviewResult.fired) {
             // The board has fired the GM. Close his stint and open the job market so
-            // he can catch on elsewhere (the user keeps playing — see acceptGMJob).
+            // he can catch on elsewhere. Continue is HELD until he takes a job
+            // (see advanceOffseason): the dismissal is honoured, never undone.
             endStint(gm, this.year, 'fired')
+            chronicleEvent(this.chronicle, {
+              year: this.year,
+              day: 0,
+              kind: 'gmChange',
+              teamIds: [this.userTeamId as string],
+              headline: `${this.userTeam.abbreviation} dismiss general manager ${gm.name}`,
+              details: { window: 'offseason', change: 'dismissed' },
+              userInvolved: true,
+            })
             this.gmJobMarket = this.buildGMOpenings(sorted)
+          } else {
+            // Nobody is waiting on the user to pick a chair: name the successors now.
+            this.fillGmVacancies()
           }
+          // ...and then the benches: a new GM often wants his own coach.
+          this.runSummerCoachCarousel(sorted)
 
           // Season Rhythm M4: stage the End-of-Season Review — same boardroom,
           // same people, your September promises read back with verdicts.
@@ -9396,21 +9618,8 @@ export class Career {
     // Number this year's new arrivals (draft picks, signings) who lack a jersey.
     this.ensureJerseyNumbers()
 
-    /* ── E3: the summer carousel. Every surviving bench serves another year;
-     *  the clubs that finished well below their September projection move on.
-     *  Done BEFORE applyCoachSystems so the new men's systems take hold. ── */
-    {
-      for (const teamId of this.data.league.teams) {
-        const key = teamId as string
-        this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
-      }
-      const firings = offseasonFirings({
-        seats: this.coachSeats(sorted),
-        teamsInLeague: this.data.league.teams.length,
-        rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
-      })
-      firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i))
-    }
+    // (E3: the summer coaching carousel runs at the season review — see
+    // runSummerCoachCarousel — the week the season ends, as NHL firings do.)
 
     // Re-derive each team's system from its head coach for the new roster.
     this.applyCoachSystems()
@@ -9512,6 +9721,8 @@ export class Career {
       // LW5: settle the season's remaining promise debts before the page turns.
       for (const pr of this.playerPromises) {
         if (pr.status !== 'open') continue
+        // Made in the summer about the season now starting: not due yet.
+        if (pr.year >= this.year) continue
         const p = this.data.players.get(asPlayerId(pr.playerId))
         const onOrg = p ? this.ownOrgIds().has(pr.playerId as string) : false
         if (pr.kind === 'newDeal') {
@@ -10804,7 +11015,12 @@ export class Career {
             ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
           })
         }
-        for (const id of split.demoted.slice(0, 6)) {
+        // Cut day must get the club to 23. Six verdicts is the usual camp, but a
+        // GM who took over a gutted roster in July and filled it (E3: a new job
+        // mid-summer) can arrive with far more; every surplus body needs a
+        // verdict or opening night dresses 28.
+        const mustCut = Math.max(0, team.roster.length + Math.min(6, split.promoted.length) - 23)
+        for (const id of split.demoted.slice(0, Math.max(6, mustCut))) {
           const p = this.data.players.get(id)
           if (!p) continue
           const waiver = this.requiresWaivers(p)
@@ -13164,15 +13380,16 @@ export class Career {
       // E1: a role promised at the table is a debt from the day he signs. The
       // LW5 promise machinery already knows how to collect on ice time.
       if (state.rolePitch !== undefined && rolePitchValue(state.rolePitch, ratedOverall(player)) > 0) {
-        const cur = player.stats.find((s) => s.season === this.year)
+        // Judged five weeks after he starts playing for you — in the summer,
+        // that is next season (E3 audit: summer promises used to be settled
+        // as 'kept' at the rollover without anyone looking).
         this.playerPromises.push({
           id: `pp${this.interactionCounter++}`,
           playerId: player.id as string,
           kind: 'iceTime',
           text: `Promised at the table: ${ROLE_PITCH_LABEL[state.rolePitch]}`,
-          year: this.year,
           day: this.currentDay,
-          ...(cur ? { baselineGp: cur.gamesPlayed } : {}),
+          ...this.promiseTerms('iceTime', player),
           baselineYears: player.contract.yearsRemaining,
           status: 'open',
         })
@@ -16197,6 +16414,8 @@ export class Career {
       // playoffs and into the summer, so it names itself there too.
       if (this.reviewFacts !== null) return 'Continue — end-of-season review'
       if (this.phase === 'playoffs') return 'Continue — next playoff games'
+      // E3: dismissed — nothing moves until he takes a new chair.
+      if (this.boardState.firedAtYear !== null) return 'Take a new job to continue'
       // Dev camp is gated ahead of the market: while it's pending, the first
       // Continue walks you into camp (not free agency), so say so — otherwise the
       // button reads "open free agency" but routes to the rink.
@@ -16364,7 +16583,7 @@ export class Career {
       board: boardSummary(this.boardState),
       gmFired: this.boardState.firedAtYear !== null,
       ...(this.waiverWire.length > 0 ? { waiverClaimsAvailable: this.waiverWire.length } : {}),
-      ...(this.ownerRequest ? { ownerRequestPending: true } : {}),
+      ...(this.ownerRequest && !this.ownerRequest.commitment ? { ownerRequestPending: true } : {}),
     }
   }
 
@@ -17262,7 +17481,18 @@ export class Career {
       if (!team) return
       const ts = this.getTeamStaff(teamId)
       const predicted = expectedRankOf(this.expectationsState, teamId) ?? i + 1
+      // A GM dismissed or replaced this summer: the incoming man picks his bench.
+      const gmP = this.gmPersonas.find(([id]) => id === teamId)?.[1]
+      const newGm =
+        gmP !== undefined &&
+        (gmP.dismissedYear === this.year || ((gmP.generation ?? 0) > 0 && gmP.sinceYear === this.year + 1))
+      // A bench changed hands earlier THIS season (interim ids carry the
+      // season and the day): the owner does not fire the man he just hired.
+      const hiredThisSeason =
+        this.phase === 'regularSeason' && ts.headCoach.id.startsWith(`bench-${teamId}-${this.year}-`)
       seats.push({
+        ...(newGm ? { newGm: true } : {}),
+        ...(hiredThisSeason ? { hiredThisSeason: true } : {}),
         teamId,
         teamName: team.name,
         teamAbbr: team.abbreviation,
@@ -17279,12 +17509,16 @@ export class Career {
   }
 
   /** Replace a fired coach with a deterministic interim and tell the league. */
-  private applyCoachFiring(f: CoachFiring, salt: number): void {
+  private applyCoachFiring(f: CoachFiring, salt: number, window: 'midseason' | 'offseason'): void {
     const team = this.data.teams.get(asTeamId(f.teamId))
     if (!team) return
     const ts = this.getTeamStaff(f.teamId)
     const rng = new Rng(deriveSeed(this.seed, Career.CAROUSEL_NS, this.year, salt, f.teamId.length))
-    const replacement = generateTeamStaff(rng).headCoach
+    // Two clubs must never hire the same (generated) man: re-roll a name that
+    // is already behind a bench somewhere in the league.
+    const benchNames = new Set(this.data.league.teams.map((t) => this.getTeamStaff(t as string).headCoach.name))
+    let replacement = generateTeamStaff(rng).headCoach
+    for (let i = 0; i < 12 && benchNames.has(replacement.name); i++) replacement = generateTeamStaff(rng).headCoach
     replacement.id = `bench-${f.teamId}-${this.year}-${salt}`
     replacement.profile = buildCoachProfile(replacement, rng)
     ts.headCoach = replacement
@@ -17305,6 +17539,37 @@ export class Career {
       summary: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over.`,
     })
     this.transactionLedger = tx.ledger
+    // The permanent record: which benches changed hands, and when. The carousel
+    // is calibrated against these (docs/PRESSURE-AND-FIRINGS.md).
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: window === 'midseason' ? this.currentDay : 0,
+      kind: 'coachFired',
+      teamIds: [f.teamId],
+      staffIds: [f.coachId],
+      headline: `${team.abbreviation} fire head coach ${f.coachName}; ${replacement.name} takes over`,
+      details: { window },
+      userInvolved: false,
+    })
+  }
+
+  /**
+   * The summer carousel, run at the season review. Every surviving bench has
+   * now completed another season; the clubs that finished well below their
+   * September projection — and the clubs with a new GM who wants his own man —
+   * move on. The new coaches' systems are re-derived at the rollover.
+   */
+  private runSummerCoachCarousel(sorted: ReturnType<typeof sortStandings>): void {
+    for (const teamId of this.data.league.teams) {
+      const key = teamId as string
+      this.coachTenure.set(key, (this.coachTenure.get(key) ?? 0) + 1)
+    }
+    const firings = offseasonFirings({
+      seats: this.coachSeats(sorted),
+      teamsInLeague: this.data.league.teams.length,
+      rng: this.rngFor(Career.CAROUSEL_NS, this.year, 77),
+    })
+    firings.forEach((f, i) => this.applyCoachFiring(f, 5000 + i, 'offseason'))
   }
 
   /** Mid-season bench changes around the league. Rare, capped, and earned. */
@@ -17318,7 +17583,7 @@ export class Career {
       rng: this.rngFor(Career.CAROUSEL_NS, day),
     })
     for (const f of firings) {
-      this.applyCoachFiring(f, day)
+      this.applyCoachFiring(f, day, 'midseason')
       this.midSeasonCoachFirings += 1
     }
   }
@@ -18056,21 +18321,40 @@ export class Career {
     switch (action.type) {
       case 'none':
         return null
+      // E3 audit: a proposal the GM accepted either happens or the receipt says
+      // why not — the old handlers returned null (silence) on every refusal, and
+      // 'scratch' TOGGLED, so accepting "sit him a game" for a man already
+      // scratched put him back in the lineup, permanently.
       case 'rest': {
+        // restPlayer TOGGLES; a man already resting stays resting.
+        if (this.data.players.get(asPlayerId(action.playerId))?.resting === true) {
+          return `${nameOf(action.playerId)} is already being rested.`
+        }
         const r = this.restPlayer(action.playerId)
-        return r.ok && r.resting ? `${nameOf(action.playerId)} is being rested.` : null
+        if (r.ok && r.resting) return `${nameOf(action.playerId)} is being rested.`
+        return `${nameOf(action.playerId)} could not be rested${'message' in r && r.message ? `: ${r.message}` : '.'}`
       }
       case 'scratch': {
-        this.toggleScratchPlayer(action.playerId)
-        return `${nameOf(action.playerId)} is a healthy scratch.`
+        const pid = action.playerId
+        if (this.isScratchedFor(pid)) return `${nameOf(pid)} was already a healthy scratch.`
+        const before = this.practiceState.scratched.length
+        this.toggleScratchPlayer(pid)
+        if (this.practiceState.scratched.length === before) {
+          return `${nameOf(pid)} could not be scratched — four men are already sitting, the most the lineup allows.`
+        }
+        this.practiceState = {
+          ...this.practiceState,
+          oneGame: [...(this.practiceState.oneGame ?? []).filter(([id]) => id !== pid), [pid, this.userGamesPlayed()]],
+        }
+        return `${nameOf(pid)} sits the next game.`
       }
       case 'ltir': {
         const r = this.placeOnLtir(action.playerId)
-        return r.ok ? `${nameOf(action.playerId)} placed on LTIR.` : null
+        return r.ok ? `${nameOf(action.playerId)} placed on LTIR.` : `${nameOf(action.playerId)} could not go on LTIR${'message' in r && r.message ? `: ${r.message}` : '.'}`
       }
       case 'callUp': {
         const r = this.callUp(action.playerId)
-        return r.ok ? `${nameOf(action.playerId)} recalled to the NHL.` : null
+        return r.ok ? `${nameOf(action.playerId)} recalled to the NHL.` : `${nameOf(action.playerId)} could not be recalled: ${r.reason}`
       }
       case 'tactic': {
         const r = this.suggestToCoach(action.direction)
@@ -18085,7 +18369,9 @@ export class Career {
       case 'moveLine': {
         const moved = this.moveForwardToLine(action.playerId, action.toLine)
         const where = action.toLine === 2 ? 'third' : action.toLine === 3 ? 'fourth' : action.toLine === 1 ? 'second' : 'top'
-        return moved ? `${nameOf(action.playerId)} moved to the ${where} line.` : null
+        return moved
+          ? `${nameOf(action.playerId)} moved to the ${where} line.`
+          : `${nameOf(action.playerId)} could not be moved to the ${where} line — he is not on the forward lines as proposed.`
       }
     }
   }
@@ -18250,40 +18536,239 @@ export class Career {
       summary: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis.`,
     })
     this.transactionLedger = tx.ledger
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: this.phase === 'regularSeason' ? this.currentDay : 0,
+      kind: 'coachFired',
+      teamIds: [this.userTeamId as string],
+      headline: `${team.abbreviation} fire head coach ${outgoing}; ${caretaker.name} takes over on an interim basis`,
+      details: { window: this.phase === 'regularSeason' ? 'midseason' : 'offseason' },
+      userInvolved: true,
+    })
     return { ok: true, message: `${outgoing} fired. ${caretaker.name} is interim head coach — hire a replacement from the market.` }
   }
 
   /* ────────────────────────── GM career ────────────────────────── */
 
-  /** Build the rival GM vacancy list. The weakest non-playoff clubs (plus a little
-   *  deterministic churn) are treated as having an opening; the user's reputation
-   *  decides how keenly each would hire him. `sorted` is worst-last standings. */
+  /**
+   * Build the GM vacancy list the fired user can choose from. The openings are
+   * the REAL vacancies — AI clubs whose owners dismissed their GM this summer
+   * (runGmCarousel) — so a job on this list is a chair that is genuinely empty,
+   * and taking it is the appointment the league reads about. The user's
+   * reputation decides how keenly each would hire him.
+   *
+   * The game has no "unemployed" state to sim through, so the list is never a
+   * dead end: if no AI club made a change, the hottest seat in the league goes
+   * (a dismissal like any other, with its news), and if every opening is a
+   * long shot for a GM with this record, the least attractive job — the club at
+   * the bottom that cannot be choosy — takes the flier.
+   */
   private buildGMOpenings(sorted: ReturnType<typeof sortStandings>): GMJobOpening[] {
     const gm = this.ensureGM()
     const n = this.data.league.teams.length
     const rankOf = new Map<string, number>()
     sorted.forEach((s, i) => rankOf.set(s.teamId as string, i + 1))
-    const rng = new Rng(deriveSeed(this.seed, 9331, this.year))
-    const openings: Array<{ teamId: string; teamName: string; teamAbbr: string; marketSize: number; projectedRank: number }> = []
-    for (const tid of this.data.league.teams) {
-      if ((tid as string) === (this.userTeamId as string)) continue
-      const team = this.data.teams.get(tid)
-      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
-      const rank = rankOf.get(tid as string) ?? n
-      // Bottom third of the league is most likely to make a change; a little churn
-      // higher up keeps the carousel alive.
-      const bottomThird = rank > Math.ceil(n * 0.66)
-      const fires = bottomThird ? rng.chance(0.5) : rng.chance(0.08)
-      if (!fires) continue
-      openings.push({
-        teamId: tid as string,
+    // An owner who fired him in the last five years does not hire him back —
+    // the calibration run found a GM rehired by the club that sacked him two
+    // summers earlier.
+    const firedBy = new Set(
+      gm.stints.filter((st) => st.endReason === 'fired' && (st.toYear ?? 0) >= this.year - 5).map((st) => st.teamId)
+    )
+    let vacant = this.gmVacancies().filter((tid) => !firedBy.has(tid))
+    if (vacant.length === 0) {
+      const seats = this.gmSeats(sorted, false).filter((st) => !firedBy.has(st.teamId))
+      const seat = hottestGmSeat(seats, n)
+      if (seat) {
+        this.applyGmDismissal(buildDismissal(seat, 0, this.rngFor(Career.GM_CAROUSEL_NS, 2)))
+        vacant = this.gmVacancies().filter((tid) => !firedBy.has(tid))
+      }
+    }
+    const openings = vacant.flatMap((tid) => {
+      const team = this.data.teams.get(asTeamId(tid))
+      if (!team) return []
+      return [{ teamId: tid, teamName: team.name, teamAbbr: team.abbreviation, marketSize: 3, projectedRank: rankOf.get(tid) ?? n }]
+    })
+    const market = buildGMJobMarket({ openings, userTeamId: this.userTeamId as string, reputation: gm.reputation, n })
+    if (market.length > 0 && !market.some((o) => o.interest !== 'longshot')) {
+      const flier = [...market].sort((a, b) => b.projectedRank - a.projectedRank)[0]!
+      flier.interest = 'open'
+      flier.blurb = 'They are in no position to be choosy. The job is yours if you want it.'
+    }
+    return market
+  }
+
+  /** The fired user must always have a chair he can actually take (old saves
+   *  fired before this model existed carry an empty or long-shot-only list). */
+  private ensureGMJobMarket(): void {
+    if (this.boardState.firedAtYear === null) return
+    const market = this.gmJobMarket ?? []
+    if (market.some((o) => o.interest !== 'longshot')) return
+    this.gmJobMarket = this.buildGMOpenings(sortStandings([...this.standings.values()]))
+  }
+
+  /* ══════════════════ E3: the front-office carousel ══════════════════ */
+
+  private static readonly GM_CAROUSEL_NS = 9413
+  /** The GMs a career opens with have been in the job a while already. */
+  private static readonly ORIGINAL_GM_PRIOR_SEASONS = 4
+
+  /** AI clubs whose GM chair is empty right now (dismissed, successor unnamed). */
+  private gmVacancies(): string[] {
+    return this.gmPersonas
+      .filter(([tid, p]) => p.dismissedYear !== undefined && tid !== (this.userTeamId as string))
+      .map(([tid]) => tid)
+  }
+
+  /**
+   * One seat per AI club with a sitting GM. With `advance`, this season's
+   * result is folded into each GM's run of disappointments (once, at the season
+   * review); without it, the seats are read as they stand.
+   */
+  private gmSeats(sorted: ReturnType<typeof sortStandings>, advance: boolean): GmSeat[] {
+    const n = this.data.league.teams.length
+    const ranks = this.strengthRanks()
+    const playoffTeams = new Set<string>()
+    for (const s of this.playoffs?.rounds[0]?.series ?? []) {
+      playoffTeams.add(s.highSeedTeamId as string)
+      playoffTeams.add(s.lowSeedTeamId as string)
+    }
+    const seats: GmSeat[] = []
+    sorted.forEach((s, i) => {
+      const teamId = s.teamId as string
+      if (teamId === (this.userTeamId as string)) return
+      const team = this.data.teams.get(s.teamId)
+      if (!team) return
+      const persona = this.gmPersonaFor(s.teamId)
+      if (persona.dismissedYear !== undefined) return
+      const base = {
+        predictedRank: expectedRankOf(this.expectationsState, teamId) ?? i + 1,
+        finalRank: i + 1,
+        madePlayoffs: playoffTeams.has(teamId),
+        rebuilding: this.clubPostureFor(s.teamId, ranks).posture === 'rebuild',
+      }
+      if (advance) persona.missStreak = isDisappointingSeason(base, n) ? (persona.missStreak ?? 0) + 1 : 0
+      const prior = (persona.generation ?? 0) > 0 ? 0 : Career.ORIGINAL_GM_PRIOR_SEASONS
+      seats.push({
+        teamId,
         teamName: team.name,
         teamAbbr: team.abbreviation,
-        marketSize: 3,
-        projectedRank: rank,
+        gmName: persona.name,
+        tenure: prior + Math.max(0, this.year - persona.sinceYear) + 1,
+        missStreak: persona.missStreak ?? 0,
+        ...base,
       })
+    })
+    return seats
+  }
+
+  /** The season review for every AI front office. */
+  private runGmCarousel(sorted: ReturnType<typeof sortStandings>): void {
+    const seats = this.gmSeats(sorted, true)
+    const dismissals = offseasonGmDismissals({
+      seats,
+      teamsInLeague: this.data.league.teams.length,
+      rng: this.rngFor(Career.GM_CAROUSEL_NS, 1),
+    })
+    for (const d of dismissals) this.applyGmDismissal(d)
+  }
+
+  private applyGmDismissal(d: GmDismissal): void {
+    const team = this.data.teams.get(asTeamId(d.teamId))
+    if (!team) return
+    const persona = this.gmPersonaFor(asTeamId(d.teamId))
+    persona.dismissedYear = this.year
+    this.pushNews('league', d.headline, d.body, { teamId: d.teamId, salience: 64 })
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: 0,
+      kind: 'gmChange',
+      teamIds: [d.teamId],
+      headline: `${team.abbreviation} dismiss general manager ${d.gmName}`,
+      details: { window: 'offseason', change: 'dismissed' },
+      userInvolved: false,
+    })
+    const tx = recordTransaction(this.transactionLedger, {
+      day: this.currentDay,
+      year: this.year,
+      kind: 'signing',
+      teamIds: [d.teamId],
+      summary: `${team.abbreviation} dismiss general manager ${d.gmName}.`,
+    })
+    this.transactionLedger = tx.ledger
+  }
+
+  /** Name a new GM for a club. He is a different operator — a fresh persona
+   *  roll — so the club trades, drafts and negotiates the way HE does, and he
+   *  carries none of his predecessor's history with the user. */
+  private hireGmSuccessor(teamId: string, replacing: string): void {
+    const team = this.data.teams.get(asTeamId(teamId))
+    if (!team) return
+    const idx = this.gmPersonas.findIndex(([tid]) => tid === teamId)
+    const prevGen = idx >= 0 ? (this.gmPersonas[idx]![1].generation ?? 0) : 0
+    const taken = new Set(this.gmPersonas.map(([, p]) => p.name))
+    taken.add(replacing)
+    const successor = buildGmPersona({
+      seed: this.seed,
+      teamId,
+      year: this.year + 1, // his first season in charge is the one ahead
+      takenNames: taken,
+      generation: prevGen + 1,
+    })
+    if (idx >= 0) this.gmPersonas[idx] = [teamId, successor]
+    else this.gmPersonas.push([teamId, successor])
+    this.gmRelationships.delete(teamId)
+    this.pushNews(
+      'league',
+      `${team.name} name ${successor.name} general manager`,
+      `${team.name} have hired ${successor.name} to run the hockey department, replacing ${replacing}. ` +
+        `Around the league he is known as a ${successor.styleLabel} — expect the club to deal the way he does. ` +
+        `He arrives with no history with anyone, you included.`,
+      { teamId, salience: 56 }
+    )
+    chronicleEvent(this.chronicle, {
+      year: this.year,
+      day: 0,
+      kind: 'gmChange',
+      teamIds: [teamId],
+      headline: `${team.abbreviation} hire ${successor.name} as general manager`,
+      details: { window: 'offseason', change: 'hired' },
+      userInvolved: false,
+    })
+  }
+
+  /** Fill every empty AI chair. */
+  private fillGmVacancies(): void {
+    for (const tid of this.gmVacancies()) {
+      const outgoing = this.gmPersonas.find(([id]) => id === tid)?.[1].name ?? 'the previous regime'
+      this.hireGmSuccessor(tid, outgoing)
     }
-    return buildGMJobMarket({ openings, userTeamId: this.userTeamId as string, reputation: gm.reputation, n })
+  }
+
+  /**
+   * League changes for one season, read from the chronicle — the numbers the
+   * autopilot reports and the carousel is calibrated against. Not a view (the
+   * frozen contracts stay untouched); an engine-side read for harnesses.
+   */
+  carouselLog(year: number): {
+    coachMidseason: number
+    coachOffseason: number
+    gmDismissals: number
+    entries: Array<{ kind: 'coachFired' | 'gmChange'; window: string; headline: string; userInvolved: boolean }>
+  } {
+    const evs = this.chronicle.events.filter(
+      (e) => e.year === year && (e.kind === 'coachFired' || (e.kind === 'gmChange' && e.details?.change === 'dismissed'))
+    )
+    return {
+      coachMidseason: evs.filter((e) => e.kind === 'coachFired' && e.details?.window === 'midseason').length,
+      coachOffseason: evs.filter((e) => e.kind === 'coachFired' && e.details?.window !== 'midseason').length,
+      gmDismissals: evs.filter((e) => e.kind === 'gmChange').length,
+      entries: evs.map((e) => ({
+        kind: e.kind as 'coachFired' | 'gmChange',
+        window: e.details?.window ?? 'offseason',
+        headline: e.headline,
+        userInvolved: e.userInvolved,
+      })),
+    }
   }
 
   /** The user's GM profile (identity, reputation, career record, job history). */
@@ -18317,6 +18802,7 @@ export class Career {
 
   /** Open GM vacancies the user can take (populated when he's fired). */
   getGMJobMarket(): GMJobMarketView {
+    this.ensureGMJobMarket()
     const gm = this.ensureGM()
     return {
       reputation: gm.reputation,
@@ -18353,9 +18839,43 @@ export class Career {
     if (!newTeam) return { ok: false, message: 'Club not found.' }
 
     const gm = this.ensureGM()
+    const oldTeamId = this.userTeamId as string
     // Switch the user's club.
     this.userTeamId = asTeamId(teamId)
     startStint(gm, this.year, teamId, newTeam.abbreviation, newTeam.name)
+
+    // E3: the chair he takes was genuinely empty (the AI GM was dismissed at the
+    // season review) — it is his now, not a vacancy. His old club needs a GM,
+    // and every other empty chair is filled now the market has settled.
+    {
+      const mine = this.gmPersonas.find(([tid]) => tid === teamId)?.[1]
+      if (mine) delete mine.dismissedYear
+      this.hireGmSuccessor(oldTeamId, gm.name)
+      this.fillGmVacancies()
+      chronicleEvent(this.chronicle, {
+        year: this.year,
+        day: 0,
+        kind: 'gmChange',
+        teamIds: [teamId],
+        headline: `${newTeam.abbreviation} hire ${gm.name} as general manager`,
+        details: { window: 'offseason', change: 'hired' },
+        userInvolved: true,
+      })
+      // The desk he left behind stays behind: offers, concerns, promises and
+      // talks were with the old club's people, and the old owner's asks and
+      // the old building's mood are not his problem any more.
+      this.tradeOffers = []
+      this.interactions = []
+      this.playerPromises = []
+      this.negotiations.clear()
+      this.mentorships.clear()
+      this.ownerRequest = null
+      this.clubDirection = 'compete'
+      this.ticketPricing = 'standard'
+      this.fanInterest = 60
+      this.baseBudget = 0
+      this.pressureState = null
+    }
 
     // Rebuild the board mandate for the new club; clears firedAtYear via fresh state.
     const boardResult = setSeasonMandate({
@@ -18397,14 +18917,20 @@ export class Career {
       rng: new Rng(deriveSeed(this.seed, 9340, this.year, day)),
     })
     if (!req) return
+    // E3 audit: never ask for something the GM cannot do. A stretch-run
+    // acquisition asked for after the deadline cannot be delivered (the market
+    // is shut), so the owner keeps it to himself.
+    if (req.kind === 'pushForPlayoffs' && day >= this.deadlineDay - 5) return
     // Name the specific player the owner means, so it isn't an anonymous "a
     // beloved veteran". Pick an expiring, long-in-the-tooth fan favourite.
     if (req.kind === 'extendFanFavourite') {
       const vet = this.fanFavouriteVeteran()
-      if (vet) {
-        const last = vet.name.split(' ').pop() ?? vet.name
-        req.body = `${vet.name} — a beloved veteran — is up for a new deal, and the owner does not want to read the backlash if he walks: "${last} stays, figure it out." Keeping him is good PR; letting him go is a fight with the boss.`
-      }
+      // No such man on the roster → no such ask. The old card went out anyway,
+      // about a veteran who did not exist.
+      if (!vet) return
+      const last = vet.name.split(' ').pop() ?? vet.name
+      req.subjectId = vet.id as string
+      req.body = `${vet.name} — a beloved veteran — is up for a new deal, and the owner does not want to read the backlash if he walks: "${last} stays, figure it out." Keeping him is good PR; letting him go is a fight with the boss.`
     }
     this.ownerRequest = req
     this.pushNews('league', req.title, `${req.body}\n\nHead to Club Vision to respond to the owner.`, {
@@ -18425,7 +18951,8 @@ export class Career {
   /** The pending owner directive, if any. */
   getOwnerRequest(): OwnerRequestView | null {
     const r = this.ownerRequest
-    if (!r) return null
+    // An accepted ask is a commitment being watched, not a question on the desk.
+    if (!r || r.commitment) return null
     const sign = (n: number): string => (n >= 0 ? `+${n}` : `${n}`)
     return {
       kind: r.kind,
@@ -18442,19 +18969,109 @@ export class Career {
   /** Respond to the pending owner directive; swings board confidence + patience. */
   respondToOwnerRequest(accept: boolean): { ok: boolean; message: string } {
     const r = this.ownerRequest
-    if (!r) return { ok: false, message: 'There is no owner request right now.' }
+    if (!r || r.commitment) return { ok: false, message: 'There is no owner request right now.' }
     const dC = accept ? r.acceptConfidence : r.declineConfidence
     const dP = accept ? r.acceptPatience : r.declinePatience
     this.boardState.confidence = Math.max(0, Math.min(100, this.boardState.confidence + dC))
     this.boardState.patience = Math.max(0, Math.min(100, this.boardState.patience + dP))
-    this.ownerRequest = null
+    // E3 audit: "go along with it" is a commitment the owner will check.
+    this.ownerRequest = accept ? { ...r, commitment: this.ownerCommitmentFor(r) } : null
     const msg = accept
-      ? 'You assured the owner you would deliver. He is pleased.'
+      ? `You assured the owner you would deliver. He is pleased — and he has written it down: ${this.ownerCommitmentDueLabel(r)}.`
       : 'You pushed back and backed your own plan. The owner is not thrilled.'
     this.pushNews('league', accept ? 'GM backs the owner' : 'GM pushes back on ownership', msg, {
       teamId: this.userTeamId as string,
     })
     return { ok: true, message: msg }
+  }
+
+  /** Games played by the club's under-24s (NHL roster, this season). */
+  private userYouthGp(): number {
+    let n = 0
+    for (const id of this.userTeam.roster) {
+      const p = this.data.players.get(id)
+      if (p && p.age <= 23) n += this.gp.get(id) ?? 0
+    }
+    return n
+  }
+
+  /** The owner's due day for an ask, in match days. */
+  private ownerCommitmentDueDay(r: OwnerRequest): number {
+    const lastDay = this.matchDays[this.matchDays.length - 1] ?? this.currentDay + 60
+    switch (r.kind) {
+      case 'pushForPlayoffs':
+        return this.deadlineDay
+      case 'extendFanFavourite':
+        return Math.max(this.currentDay + 1, lastDay - 1)
+      case 'signMarketableStar':
+      case 'trimPayroll':
+      case 'developYouth':
+        return Math.min(lastDay - 1, this.currentDay + 30)
+    }
+  }
+
+  private ownerCommitmentDueLabel(r: OwnerRequest): string {
+    const due = dayToDateISO(this.year, this.ownerCommitmentDueDay(r))
+    return r.kind === 'pushForPlayoffs'
+      ? `he expects the move by the trade deadline (${due})`
+      : r.kind === 'extendFanFavourite'
+        ? `he expects the new deal done before the season ends (${due})`
+        : `he will look again on ${due}`
+  }
+
+  private ownerCommitmentFor(r: OwnerRequest): NonNullable<OwnerRequest['commitment']> {
+    return {
+      year: this.year,
+      day: this.currentDay,
+      dueDay: this.ownerCommitmentDueDay(r),
+      rosterAtAccept: this.userTeam.roster.map((id) => id as string),
+      capAtAccept: capUsedFor(this.userTeam, this.data.players),
+      youthGpAtAccept: this.userYouthGp(),
+      clubGpAtAccept: this.userGamesPlayed(),
+    }
+  }
+
+  /** Judge an accepted owner ask once its day comes. Kept buys a little; broken
+   *  costs more than the yes ever earned — the owner remembers who told him what. */
+  private judgeOwnerCommitmentIfDue(day: number): void {
+    const r = this.ownerRequest
+    const c = r?.commitment
+    if (!r || !c) return
+    if (c.year !== this.year) { this.ownerRequest = null; return } // stale (old season)
+    if (day < c.dueDay) return
+    const before = new Set(c.rosterAtAccept)
+    const arrivals = this.userTeam.roster
+      .filter((id) => !before.has(id as string))
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p)
+      .map((p) => ({ overall: ratedOverall(p), age: p.age }))
+    const subject = r.subjectId ? this.data.players.get(asPlayerId(r.subjectId)) : undefined
+    const subjectSigned =
+      !!subject &&
+      (subject.contract.yearsRemaining > 1 || this.pendingExtensions.some((x) => x.playerId === r.subjectId)) &&
+      this.ownOrgIds().has(r.subjectId as string)
+    const verdict = judgeOwnerCommitment(r, {
+      arrivals,
+      capUsed: capUsedFor(this.userTeam, this.data.players),
+      salaryCap: this.userTeam.finances.salaryCap,
+      youthGp: this.userYouthGp(),
+      clubGp: this.userGamesPlayed(),
+      subjectSigned,
+    })
+    this.ownerRequest = null
+    if (verdict.kept) {
+      this.boardState.confidence = Math.min(100, this.boardState.confidence + 3)
+      this.pushNews('league', 'The owner got what he asked for',
+        `"${r.title}" — and ${verdict.why}. You told him you would deliver, and you did. That is remembered upstairs.`,
+        { teamId: this.userTeamId as string, salience: 55 })
+    } else {
+      this.boardState.confidence = Math.max(0, this.boardState.confidence - (r.acceptConfidence * 2 + 2))
+      this.boardState.patience = Math.max(0, this.boardState.patience - 5)
+      this.pushNews('league', 'The owner remembers what you told him',
+        `You said yes to "${r.title.toLowerCase()}". The date he wrote down has come and ${verdict.why}. ` +
+          `A promise to the man who signs the cheques costs more broken than it ever earned kept.`,
+        { teamId: this.userTeamId as string, salience: 66 })
+    }
   }
 
   /* ────────────────────── rival-GM relationships ────────────────────── */
