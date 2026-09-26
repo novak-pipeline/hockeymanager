@@ -28,8 +28,11 @@ for (const [id, p] of data.players) labels[id] = { lastName: p.name.split(' ').p
 const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('away') ?? 0xc8102e) }
 // ?old=1 mounts the pre-upgrade renderer (scripts/dev/render3d-harness/old-*.ts,
 // extracted from git, untracked) for A/B screenshots + perf.
+// The path is a variable so Vite's import analysis skips it: the old-*.ts files are
+// untracked, and a literal specifier breaks the harness on a clean checkout.
+const oldPath = './old-rink3dRenderer.ts'
 const Impl: typeof Rink3dRenderer =
-  q.get('old') === '1' ? ((await import(/* @vite-ignore */ './old-rink3dRenderer.ts')).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
+  q.get('old') === '1' ? ((await import(/* @vite-ignore */ oldPath)).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
 const r = await Impl.create(host, colors)
 r.setEventStream(out.stream)
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
