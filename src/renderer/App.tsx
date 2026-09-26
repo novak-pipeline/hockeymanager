@@ -46,6 +46,7 @@ import { StaffBriefingScreen } from './screens/StaffBriefingScreen'
 import { ScoutMeetingScreen } from './screens/ScoutMeetingScreen'
 import { CommandPalette } from './components/CommandPalette'
 import { PhoneCallOverlay, resetPhoneSeen } from './components/PhoneCallOverlay'
+import { PressConference } from './components/PressConference'
 import { WarRoomScreen } from './screens/WarRoomScreen'
 import { DeadlineDayScreen } from './screens/DeadlineDayScreen'
 import { GMCareerScreen } from './screens/GMCareerScreen'
@@ -352,8 +353,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     (r) => (r.type === 'dashboard' ? r.dashboard : null)
   )
 
-  // Press-conference pop-up disabled for now (got in the way of testing).
-  // To re-enable: restore the pollPress pump + <PressConference /> render below.
+  // Press conferences (docs/MEDIA-BEAT.md): the modal polls the engine itself;
+  // Settings > Pressers turns it off, and an unanswered presser lapses quietly.
 
   // Autosave: after world-mutating calls, snapshot to the 'autosave' slot at
   // most once every ~12s. Silent and fire-and-forget — so a code reload (dev) or
@@ -704,6 +705,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                 {nav.screen === 'dashboard' && <LeagueTicker />}
                 <CommandPalette />
                 <PhoneCallOverlay />
+                {/* MEDIA-BEAT: pressers are back — rare (≤1 per 12 days), about
+                  * a named situation, and one click to send the PR director. */}
+                <PressConference />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <MotionConfig reducedMotion="user">

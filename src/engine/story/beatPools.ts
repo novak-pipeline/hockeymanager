@@ -390,7 +390,7 @@ export const MB_HEAD: ContentVariant[] = [
   { id: 'mb.h.e', text: `{nick} mailbag: {q1}, plus a word on {q2}` },
   { id: 'mb.h.f', text: `Mailbag: {q1} and {q2}` },
   { id: 'mb.h.g', text: `Friday mailbag: {q1}, {q2}, more` },
-  { id: 'mb.h.h', text: `{nick} mailbag: the {q1} question and others` },
+  { id: 'mb.h.h', text: `{nick} mailbag: {q1}, and the rest of your questions` },
 ]
 
 export const MB_LEDE: ContentVariant[] = [
