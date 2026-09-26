@@ -1821,7 +1821,10 @@ button.topnav-beat:hover { filter: brightness(1.25); }
   transition: width var(--dur-3) var(--ease-out);
 }
 
-/* Icon primitive — lucide/inline SVG sizing + alignment */
+/* Icon primitive — Phosphor/inline SVG sizing + alignment.
+ * Phosphor glyphs are FILLED paths on a 256 grid (duotone = outline + a 20%
+ * tint of the same colour), so there is no stroke to thin as the box shrinks —
+ * the old per-size stroke-width ladder for lucide's 2px outlines is gone. */
 .ui-icon { display: inline-flex; flex-shrink: 0; vertical-align: middle; }
 .ui-icon > svg { display: block; width: 1em; height: 1em; }
 .icon-14 > svg { width: 14px; height: 14px; }
@@ -1830,19 +1833,26 @@ button.topnav-beat:hover { filter: brightness(1.25); }
 .icon-20 > svg { width: 20px; height: 20px; }
 .icon-24 > svg { width: 24px; height: 24px; }
 
-/* Playtest #1 — the icons read as muddy grey blobs ("worse than emojis").
- * lucide is drawn on a 24px grid with a 2px stroke. Render that same artwork at
- * 14px without thinning the stroke and it scales to a ~3.4px equivalent: the
- * counters close up, the joints blob, and every glyph collapses toward the same
- * grey smudge — which is precisely the legibility emoji had and these lost.
- * Thin the stroke as the box shrinks so the ink-to-space ratio stays constant.
- * One place, because every screen consumes `Icon`/`CategoryIcon`. */
-.ui-icon > svg { stroke-width: 1.75; }
-.icon-14 > svg { stroke-width: 1.45; }
-.icon-16 > svg { stroke-width: 1.6; }
-.icon-18 > svg { stroke-width: 1.7; }
-.icon-20 > svg { stroke-width: 1.8; }
-.icon-24 > svg { stroke-width: 2; }
+/* Category tile — the icon on a rounded, category-tinted square (FM's badge
+ * register). `--tile-c` is set inline from the category colour token. */
+.icon-tile {
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tile-c, var(--accent)) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tile-c, var(--accent)) 28%, transparent);
+}
+.icon-tile > svg { width: auto; height: auto; }
+
+/* Nav rail glyphs: the icon carries the state as much as the row does. */
+.sidebar-item .nav-glyph { transition: transform var(--dur-1) var(--ease-out), color var(--dur-1) ease; }
+.sidebar-item:hover .nav-glyph { transform: translateX(1px) scale(1.06); }
+.sidebar-item:active .nav-glyph { transform: scale(0.94); }
+.sidebar-item.active .nav-glyph { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-item .nav-glyph { transition: none; }
+  .sidebar-item:hover .nav-glyph, .sidebar-item:active .nav-glyph { transform: none; }
+}
 
 /* Sparkline wrapper */
 .ui-sparkline { display: block; overflow: visible; }

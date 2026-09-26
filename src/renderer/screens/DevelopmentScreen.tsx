@@ -4,6 +4,7 @@
  * star read, projection tier and a plain-English development note. Read-only.
  */
 import { useMemo, useState } from 'react'
+import { PotentialStars, StarRating } from '../components/Stars'
 import type { DevelopmentCenterView, DevelopmentRow } from '../../worker/protocol'
 import type { PracticeFocus } from '../../engine/league/practice'
 import { PlayerLink } from '../components/NavContext'
@@ -54,19 +55,11 @@ const FOCUS_OPTIONS: Array<{ value: PracticeFocus; label: string }> = [
   { value: 'goaltending', label: 'Goaltending' },
 ]
 
-/** Render half-step stars out of 5. */
+/** Half-step stars out of 5: current = solid ability, potential = outlined ceiling. */
 function Stars(props: { value: number; muted?: boolean }): JSX.Element {
-  const full = Math.floor(props.value)
-  const half = props.value - full >= 0.5
-  const stars = '★'.repeat(full) + (half ? '½' : '')
-  return (
-    <span
-      title={`${props.value} / 5`}
-      style={{ color: props.muted ? 'var(--muted)' : 'var(--accent, #f5b301)', letterSpacing: 1, fontSize: 12 }}
-    >
-      {stars || '–'}
-    </span>
-  )
+  return props.muted
+    ? <StarRating value={props.value} />
+    : <PotentialStars stars={props.value} />
 }
 
 function tierColor(tier: DevelopmentRow['tier']): string {

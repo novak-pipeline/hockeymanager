@@ -7,6 +7,7 @@
  * the GM hire and release scouts.
  */
 import { useEffect, useRef, useState } from 'react'
+import { PotentialStars, StarRating } from '../components/Stars'
 import type { ScoutingView, WorkerResponse } from '../../worker/protocol'
 import type {
   ScoutCardView, ScoutCoverageRow, ScoutFindView, ScoutingBriefingView,
@@ -20,7 +21,7 @@ import { FlagIcon } from '../components/FlagIcon'
 import { ScoutGlobe, type GlobeNation } from '../components/ScoutGlobe'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
-import type { LucideIcon } from 'lucide-react'
+import type { AppIcon } from '../components/icons'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -411,16 +412,12 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
   )
 }
 
-/** Fog-aware star cell: a dash where the department has no read to give. */
+/** Fog-aware star cell: dashed "?" stars where the department has no read to give. */
 function ReadStars({ value, accent }: { value: number | null; accent?: boolean }): JSX.Element {
   if (value === null) {
-    return <span className="muted" style={{ fontSize: 11 }} title="Your scouts have not seen enough of him to hold an opinion">—</span>
+    return <StarRating value={0} unknown kind={accent ? 'potential' : 'ability'} title="Your scouts have not seen enough of him to hold an opinion" />
   }
-  return (
-    <span style={{ color: accent ? 'var(--accent, #f5b301)' : 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>
-      {stars5(value) || '–'}
-    </span>
-  )
+  return accent ? <PotentialStars stars={value} /> : <StarRating value={value} />
 }
 
 /**
@@ -591,8 +588,8 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
-        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(find.currentStars) || '–'}</div></div>
-        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(find.potentialStars) || '–'}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div><StarRating value={find.currentStars} /></div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div><PotentialStars stars={find.potentialStars} /></div></div>
       </div>
       <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{find.reason}</div>
       {find.fitNotes && find.fitNotes.length > 0 && (
@@ -684,8 +681,8 @@ function ReportCard({ find }: { find: ScoutFindView }): JSX.Element {
           <div style={{ fontWeight: 900, fontSize: 30, color, lineHeight: 1 }} title={`The scout's grade — his reasons are spelled out below`}>{f.grade}</div>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-5)', margin: '10px 0' }}>
-          <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(f.currentStars) || '–'}</div></div>
-          <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(f.potentialStars) || '–'}</div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div><StarRating value={f.currentStars} /></div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div><PotentialStars stars={f.potentialStars} /></div></div>
           <div><div className="muted" style={{ fontSize: 10 }}>KNOWLEDGE</div><div style={{ fontWeight: 700 }}>{f.knowledge}%</div></div>
         </div>
         <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>{f.reason}</div>
@@ -1333,7 +1330,7 @@ function ScoutPickerCell({ playerId, scouts, onPick }: {
 interface FocusDef {
   key: string
   target: ScoutTarget
-  icon: LucideIcon
+  icon: AppIcon
   label: string
   desc: string
   /** Nation the focus maps to (drives specialist fit), if any. */

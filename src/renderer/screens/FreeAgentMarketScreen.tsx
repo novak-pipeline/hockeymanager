@@ -262,7 +262,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                         {t.position} · {t.age}
                       </td>
                       <td className="num">
-                        <OverallStars overall={t.overall} />
+                        <OverallStars value={t.overall} />
                       </td>
                       <td className="small">{t.teamAbbr}</td>
                       <td className="mono small">

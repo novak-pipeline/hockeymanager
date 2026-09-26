@@ -816,7 +816,7 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
             style={{ fontSize: 11 }}
             title="Mark every message as read"
             onClick={onMarkAllRead}
-          >✓ Mark all read</button>
+          ><Icon size={14}><Icons.Tick /></Icon> Mark all read</button>
         )}
       </div>
       <div className="dash-scroll">
@@ -841,7 +841,7 @@ function MessagesPane({ inbox, unread, onOpen, onOpenItem, onMarkAllRead }: {
               }}
             >
               <span style={{ display: 'inline-flex', flexShrink: 0, color: CAT_COLOR[item.category] }}>
-                <CategoryIcon category={item.category} size={14} />
+                <CategoryIcon category={item.category} size={14} tile />
               </span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div className="muted" style={{ fontSize: 10 }}>

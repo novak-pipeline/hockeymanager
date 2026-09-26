@@ -48,7 +48,7 @@ export function CardHead(props: { eyebrow?: string; children?: ReactNode }): JSX
 
 /* ── Icon ──────────────────────────────────────────────────────────────── */
 
-/** Sizing/alignment wrapper around any SVG (lucide component or inline svg). */
+/** Sizing/alignment wrapper around any SVG (an Icons.X glyph or inline svg). */
 export function Icon(props: {
   children: ReactNode
   size?: 14 | 16 | 18 | 20 | 24

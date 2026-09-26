@@ -17,7 +17,7 @@ import { kokoroState } from './lib/kokoroVoice'
 import { sharedAnnouncer, isAutoNeuralEnabled, setAutoNeuralEnabled } from './lib/speak'
 import { EventCursor } from '../render2d/eventCursor'
 import type { GoalEvent, StoppageReason } from '@domain'
-import { Volume2, VolumeX, Mic, Check, Disc } from 'lucide-react'
+import { Icons } from './components/icons'
 import { Icon } from './components/primitives'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -699,7 +699,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             <button className="btn btn-ghost" onClick={handleAnnouncerToggle}
               title={announcerEnabled ? 'Mute commentary' : 'Enable commentary'}
               style={announcerEnabled ? modeActiveStyle : { opacity: 0.5 }}>
-              <Icon size={14}>{announcerEnabled ? <Volume2 /> : <VolumeX />}</Icon> Cmt
+              <Icon size={14}>{announcerEnabled ? <Icons.Volume /> : <Icons.VolumeOff />}</Icon> Cmt
             </button>
           )}
 
@@ -707,7 +707,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           <button className="btn btn-ghost" onClick={handleSfxToggle}
             title={sfxEnabled ? 'Mute SFX' : 'Enable SFX'}
             style={sfxEnabled ? modeActiveStyle : { opacity: 0.5 }}>
-            <Icon size={14}>{sfxEnabled ? <Volume2 /> : <VolumeX />}</Icon> SFX
+            <Icon size={14}>{sfxEnabled ? <Icons.Volume /> : <Icons.VolumeOff />}</Icon> SFX
           </button>
 
           <button onClick={props.onClose} className="btn">
@@ -731,7 +731,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
             <div style={heroOverlayStyle}>
               <div style={{ textAlign: 'center', marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-                  <Icon color="var(--violet-h)" style={{ fontSize: 36 }}><Disc /></Icon>
+                  <Icon color="var(--violet-h)" style={{ fontSize: 36 }}><Icons.Replay /></Icon>
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', letterSpacing: 1 }}>
                   DROP THE PUCK
@@ -776,7 +776,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
                 ) : (
                   <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
                     onClick={handleWatchReplay}>
-                    ▶ Watch replay
+                    <Icon size={14}><Icons.Play /></Icon> Watch replay
                   </button>
                 )}
               </div>
@@ -797,7 +797,7 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           {ffClock && (
             <div style={ffOverlayStyle}>
               <div style={{ fontSize: 12, letterSpacing: 2, color: MUTED, marginBottom: 6 }}>
-                ⏩ FAST-FORWARDING
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.FastForward /></Icon> FAST-FORWARDING</span>
               </div>
               <div style={{ fontSize: 44, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
                 {ffClock}
@@ -855,7 +855,11 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
           {/* Row 1: pause + scrubber + nudge */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" style={{ minWidth: 88 }} onClick={handlePause}>
-              {view?.playing ? '⏸ Pause' : view?.ended ? '↺ Replay' : '▶ Play'}
+              {view?.playing
+                ? <><Icon size={14}><Icons.Pause /></Icon> Pause</>
+                : view?.ended
+                  ? <><Icon size={14}><Icons.Restart /></Icon> Replay</>
+                  : <><Icon size={14}><Icons.Play /></Icon> Play</>}
             </button>
 
             <input type="range" min={0} max={1000}
@@ -900,13 +904,13 @@ export function MatchViewer(props: { game: WatchedGame; onClose: () => void }): 
               onClick={handleKokoroToggle}
               title="Neural voices — on by default, downloaded in the background and cached. Turn off to use the system voice."
             >
-              <Icon size={14}><Mic /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(off)'}
+              <Icon size={14}><Icons.Interview /></Icon> Enhanced voice {kokoroWanted ? '(on)' : '(off)'}
             </button>
             {kokoroWanted && kokoroStatus === 'downloading' && (
               <span style={{ color: MUTED, fontSize: 11 }}>Downloading…</span>
             )}
             {kokoroWanted && kokoroStatus === 'ready' && (
-              <span style={{ color: 'var(--green)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Check /></Icon> Neural voice active</span>
+              <span style={{ color: 'var(--green)', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon size={14}><Icons.Tick /></Icon> Neural voice active</span>
             )}
             {kokoroWanted && kokoroStatus === 'failed' && (
               <span style={{ color: 'var(--red)', fontSize: 11 }}>Download failed</span>

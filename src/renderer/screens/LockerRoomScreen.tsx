@@ -1,5 +1,4 @@
-import type { ComponentType } from 'react'
-import { Handshake, GraduationCap, Zap, type LucideProps } from 'lucide-react'
+import { Icons, type AppIcon } from '../components/icons'
 import type { LockerRoomView } from '../../worker/protocol'
 import type { RelationshipView } from '../../engine/career/views'
 import { PlayerLink } from '../components/NavContext'
@@ -228,10 +227,10 @@ function MoralePanel({ morale }: { morale: number }): JSX.Element {
 
 /* ── Relationship card ── */
 
-const REL_ICON: Record<RelationshipView['kind'], ComponentType<LucideProps>> = {
-  friendship: Handshake,
-  mentorship: GraduationCap,
-  feud: Zap,
+const REL_ICON: Record<RelationshipView['kind'], AppIcon> = {
+  friendship: Icons.Deal,
+  mentorship: Icons.DevCamp,
+  feud: Icons.Result,
 }
 
 const REL_COLOR: Record<RelationshipView['kind'], string> = {

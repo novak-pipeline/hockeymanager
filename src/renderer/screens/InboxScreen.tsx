@@ -28,7 +28,7 @@ const CATEGORY_META: Record<
   contract:  { colorClass: 'chip-warn',   label: 'Contract',  color: 'var(--amber)',  sender: 'Front Office' },
   draft:     { colorClass: 'chip-accent', label: 'Draft',     color: 'var(--cyan)',   sender: 'Scouting Dept' },
   award:     { colorClass: 'chip-warn',   label: 'Award',     color: 'var(--amber)',  sender: 'League Office' },
-  league:    { colorClass: '',            label: 'League',    color: 'var(--muted)',  sender: 'League Office' },
+  league:    { colorClass: '',            label: 'League',    color: 'var(--accent)', sender: 'League Office' },
   milestone: { colorClass: 'chip-warn',   label: 'Milestone', color: 'var(--amber)',  sender: 'Club News' },
   playoffs:  { colorClass: 'chip-warn',   label: 'Playoffs',  color: 'var(--orange)', sender: 'League Office' },
   scouting:  { colorClass: 'chip-accent', label: 'Scouting',  color: 'var(--cyan)',   sender: 'Scouting Dept' },
@@ -92,8 +92,10 @@ function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.E
         width: size,
         height: size,
         borderRadius: '50%',
-        background: 'var(--bg2)',
-        border: '1px solid var(--line)',
+        // Tinted by the category (UI polish): a grey disc with a grey glyph read
+        // as "nothing here"; the tint makes the category the row's identity.
+        background: `color-mix(in srgb, ${meta.color} 16%, var(--bg2))`,
+        border: `1px solid color-mix(in srgb, ${meta.color} 30%, transparent)`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

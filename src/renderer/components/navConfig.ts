@@ -1,12 +1,12 @@
 import type { DashboardView } from '../../worker/protocol'
 import type { ScreenId } from './NavContext'
 
-/** Icon keys resolved to line-art SVGs by <NavIcon>. */
+/** Icon keys resolved to Phosphor glyphs by <NavIcon>. */
 export type IconKey =
   | 'home' | 'inbox' | 'feed' | 'squad' | 'squadPlanner' | 'dynamics' | 'tactics'
   | 'dataHub' | 'staff' | 'training' | 'medical' | 'devCenter'
   | 'schedule' | 'competitions' | 'world' | 'scouting' | 'transfers'
-  | 'clubInfo' | 'clubVision' | 'finances' | 'match'
+  | 'clubInfo' | 'clubVision' | 'finances' | 'match' | 'freeAgents' | 'gmCareer'
 
 export interface SubTab { id: ScreenId; label: string }
 
@@ -92,11 +92,11 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
       ] },
     { id: 'transfers', label: 'Transfers', icon: 'transfers', section: 'competition', screen: 'trades', match: ['trades', 'waivers'],
       subTabs: [{ id: 'trades', label: 'Trade Block' }, { id: 'waivers', label: 'Waiver Wire' }] },
-    { id: 'faMarket', label: 'Free Agents', icon: 'transfers', section: 'competition', screen: 'faMarket', match: ['faMarket', 'negotiation'] },
+    { id: 'faMarket', label: 'Free Agents', icon: 'freeAgents', section: 'competition', screen: 'faMarket', match: ['faMarket', 'negotiation'] },
     { id: 'clubInfo', label: 'Club Info', icon: 'clubInfo', section: 'club', screen: 'teamInfo', match: ['teamInfo', 'teamHistory'],
       subTabs: [{ id: 'teamInfo', label: 'Profile' }, { id: 'teamHistory', label: 'History' }] },
     { id: 'clubVision', label: 'Club Vision', icon: 'clubVision', section: 'club', screen: 'board', match: ['board'] },
-    { id: 'gmCareer', label: 'GM Career', icon: 'clubInfo', section: 'club', screen: 'gmCareer', match: ['gmCareer', 'mediaCircuit'],
+    { id: 'gmCareer', label: 'GM Career', icon: 'gmCareer', section: 'club', screen: 'gmCareer', match: ['gmCareer', 'mediaCircuit'],
       subTabs: [{ id: 'gmCareer', label: 'Career' }, { id: 'mediaCircuit', label: 'Media' }] },
     { id: 'finances', label: 'Finances', icon: 'finances', section: 'club', screen: 'finances', match: ['finances'] },
   ]
