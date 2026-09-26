@@ -7,6 +7,8 @@
 import { useMemo, useState } from 'react'
 import { PotentialStars, StarRating } from '../components/Stars'
 import type { CompetitionNotableView, CompetitionView, NationView, WorldJuniorsView } from '../../engine/career/views'
+import type { IntlEventView, WorldHistoryView, WorldLeagueHistoryView } from '../../engine/career/worldHistoryView'
+import type { IntlPlayerLine, WorldSeasonRecord } from '../../domain'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
@@ -104,6 +106,7 @@ function LeaguesPanel(): JSX.Element {
     (r) => (r.type === 'competitions' ? r.competitions : null)
   )
   const [selected, setSelected] = useState<string | null>(null)
+  const history = useWorldHistory()
 
   const comps = [...(data?.competitions ?? [])].sort((a, b) => a.strengthRank - b.strengthRank)
   const current = comps.find((c) => c.id === selected) ?? comps[0] ?? null
@@ -148,6 +151,10 @@ function LeaguesPanel(): JSX.Element {
                 </Panel>
               </div>
               <SelectedLeagueRest current={current} />
+              <LeagueHistoryPanel
+                league={history?.leagues.find((l) => l.competitionId === current.id) ?? null}
+                memorialCup={['OHL', 'WHL', 'QMJHL', 'LHJMQ'].includes(current.abbrev.toUpperCase()) ? history?.memorialCup ?? [] : []}
+              />
             </>
           )}
         </>
@@ -374,8 +381,216 @@ function InternationalPanel(): JSX.Element {
         </div>
       )}
 
+      <TournamentResultsPanel />
       {data?.worldJuniors && <WorldJuniorsPanel wj={data.worldJuniors} />}
     </div>
+  )
+}
+
+/* ───────────────────────── World Renewal: history + tournaments ───────────────────────── */
+
+function useWorldHistory(): WorldHistoryView | null {
+  const client = useClient()
+  const { data } = useScreenData(
+    () => client.getWorldHistory(),
+    (r) => (r.type === 'worldHistory' ? r.worldHistory : null)
+  )
+  return data ?? null
+}
+
+const seasonLabel = (y: number): string => `${y}–${String((y + 1) % 100).padStart(2, '0')}`
+
+type Ref = { playerId: string; name: string; teamAbbr: string; value: string }
+
+function RefCell({ r }: { r: Ref | undefined }): JSX.Element {
+  if (!r) return <td className="muted">—</td>
+  return (
+    <td>
+      <PlayerLink playerId={r.playerId} name={r.name} />{' '}
+      <span className="muted small">{r.teamAbbr} · {r.value}</span>
+    </td>
+  )
+}
+
+/** A league's roll of honour: every champion + award slate on file. */
+function LeagueHistoryPanel({ league, memorialCup }: { league: WorldLeagueHistoryView | null; memorialCup: WorldSeasonRecord[] }): JSX.Element {
+  if (!league) {
+    return (
+      <Panel title="Champions & awards">
+        <div className="muted small">No season has finished yet. Each league crowns its champion during the NHL postseason.</div>
+      </Panel>
+    )
+  }
+  const rec = league.records
+  return (
+    <Panel title={`${league.trophy} — champions & awards`}>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 18, marginBottom: 10, fontSize: 13 }}>
+        {league.titles.slice(0, 4).map((t) => (
+          <span key={t.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Icon size={14} color="var(--accent, #f5b301)"><Icons.Award /></Icon>
+            <b>{t.name}</b> <span className="muted">×{t.titles}</span>
+          </span>
+        ))}
+        {rec.points && (
+          <span className="muted">
+            League record: {rec.points.value} pts, {rec.points.name} ({seasonLabel(rec.points.year)})
+          </span>
+        )}
+      </div>
+      <table className="data-table" style={{ width: '100%' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>Season</th>
+            <th style={{ textAlign: 'left' }}>Champion</th>
+            <th>Final</th>
+            <th style={{ textAlign: 'left' }}>Playoff MVP</th>
+            <th style={{ textAlign: 'left' }}>MVP</th>
+            <th style={{ textAlign: 'left' }}>Top scorer</th>
+            <th style={{ textAlign: 'left' }}>Top goalie</th>
+            <th style={{ textAlign: 'left' }}>Rookie</th>
+          </tr>
+        </thead>
+        <tbody>
+          {league.seasons.map((s) => (
+            <tr key={s.year}>
+              <td className="muted">{seasonLabel(s.year)}</td>
+              <td>
+                {s.championTeamId ? <TeamLink teamId={s.championTeamId} name={s.championName ?? '—'} /> : '—'}
+                {s.runnerUpName && <span className="muted small"> over {s.runnerUpName}</span>}
+              </td>
+              <td style={{ textAlign: 'center' }}>{s.finalScore ?? '—'}</td>
+              <RefCell r={s.playoffMvp} />
+              <RefCell r={s.mvp} />
+              <RefCell r={s.topScorer} />
+              <RefCell r={s.topGoalie} />
+              <RefCell r={s.rookie} />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {memorialCup.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="muted small" style={{ marginBottom: 4 }}>Memorial Cup</div>
+          <table className="data-table" style={{ width: '100%' }}>
+            <tbody>
+              {memorialCup.map((s) => (
+                <tr key={s.year}>
+                  <td className="muted">{s.year + 1}</td>
+                  <td>{s.championTeamId ? <TeamLink teamId={s.championTeamId} name={s.championName ?? '—'} /> : '—'}</td>
+                  <td className="muted">def. {s.runnerUpName ?? '—'} {s.finalScore ?? ''}</td>
+                  <td className="muted small">host: {s.regularSeasonWinner ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+const lineStat = (l: IntlPlayerLine): string =>
+  l.position === 'G' && l.sa
+    ? `${((l.sv ?? 0) / l.sa).toFixed(3).replace(/^0/, '')} SV%, ${l.gp} GP`
+    : `${l.g}G ${l.a}A ${l.g + l.a}P, ${l.gp} GP`
+
+/** Played tournaments (World Juniors, Olympics, Nations Cup), newest first. */
+function TournamentResultsPanel(): JSX.Element | null {
+  const history = useWorldHistory()
+  const [sel, setSel] = useState(0)
+  const events = history?.international ?? []
+  if (events.length === 0) return null
+  const e: IntlEventView = events[Math.min(sel, events.length - 1)]!
+  const medal = (n: string | null, label: string, color: string): JSX.Element => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <Icon size={18} color={color}><Icons.Award /></Icon>
+      <span className="muted small" style={{ width: 48 }}>{label}</span>
+      <span style={{ fontWeight: 800 }}>{n ?? '—'}</span>
+    </div>
+  )
+  return (
+    <Panel title="Tournament results">
+      <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        {events.map((ev, i) => (
+          <button
+            key={`${ev.kind}-${ev.year}`}
+            onClick={() => setSel(i)}
+            style={{
+              padding: '3px 10px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+              border: '1px solid var(--line)', color: 'inherit',
+              background: i === sel ? 'var(--accent-soft, rgba(120,120,255,0.16))' : 'transparent',
+              fontWeight: i === sel ? 700 : 400,
+            }}
+          >{ev.year + 1} {ev.name}</button>
+        ))}
+      </div>
+      {e.yours.length > 0 && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'var(--accent-soft, rgba(120,120,255,0.12))', border: '1px solid var(--accent, var(--violet-h))' }}>
+          <div className="small" style={{ fontWeight: 700, marginBottom: 4 }}>Your players at the tournament ({e.yours.length})</div>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            {e.yours.map((l) => (
+              <span key={l.playerId} className="small">
+                <PlayerLink playerId={l.playerId} name={l.name} /> <span className="muted">({l.nation}, {lineStat(l)})</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 'var(--sp-4)', alignItems: 'start' }}>
+        <div className="stack" style={{ gap: 6 }}>
+          {medal(e.gold, 'Gold', 'var(--accent, #f5b301)')}
+          {medal(e.silver, 'Silver', 'var(--muted)')}
+          {e.bronze !== null && medal(e.bronze, 'Bronze', '#cd7f32')}
+          {e.finalLine && <div className="muted small" style={{ marginTop: 4 }}>Final: {e.finalLine}</div>}
+          <div className="small" style={{ marginTop: 8 }}>
+            {e.mvp && <div><span className="muted">MVP</span> <PlayerLink playerId={e.mvp.playerId} name={e.mvp.name} /> <span className="muted">({e.mvp.nation}, {lineStat(e.mvp)})</span></div>}
+            {e.topScorer && <div><span className="muted">Top scorer</span> <PlayerLink playerId={e.topScorer.playerId} name={e.topScorer.name} /> <span className="muted">({lineStat(e.topScorer)})</span></div>}
+            {e.bestGoalie && <div><span className="muted">Best goalie</span> <PlayerLink playerId={e.bestGoalie.playerId} name={e.bestGoalie.name} /> <span className="muted">({lineStat(e.bestGoalie)})</span></div>}
+          </div>
+          <div className="muted small" style={{ marginTop: 8 }}>Final standings</div>
+          <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13 }}>
+            {e.standings.map((n) => <li key={n}>{n}</li>)}
+          </ol>
+        </div>
+        <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>All-tournament team</div>
+            <table className="data-table" style={{ width: '100%' }}>
+              <tbody>
+                {e.allStars.map((l) => (
+                  <tr key={l.playerId}>
+                    <td className="muted" style={{ textAlign: 'center', width: 32 }}>{l.position}</td>
+                    <td style={{ fontWeight: 700 }}><PlayerLink playerId={l.playerId} name={l.name} /></td>
+                    <td className="muted">{l.nation}</td>
+                    <td className="muted" style={{ textAlign: 'right' }}>{lineStat(l)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>Scoring leaders</div>
+            <table className="data-table" style={{ width: '100%' }}>
+              <thead>
+                <tr><th style={{ textAlign: 'left' }}>Player</th><th style={{ textAlign: 'left' }}>Nation</th><th>GP</th><th>G</th><th>A</th><th>P</th></tr>
+              </thead>
+              <tbody>
+                {e.leaders.map((l) => (
+                  <tr key={l.playerId}>
+                    <td><PlayerLink playerId={l.playerId} name={l.name} /></td>
+                    <td className="muted">{l.nation}</td>
+                    <td style={{ textAlign: 'center' }}>{l.gp}</td>
+                    <td style={{ textAlign: 'center' }}>{l.g}</td>
+                    <td style={{ textAlign: 'center' }}>{l.a}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 700 }}>{l.g + l.a}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Panel>
   )
 }
 
@@ -389,7 +604,7 @@ function WorldJuniorsPanel({ wj }: { wj: WorldJuniorsView }): JSX.Element {
     </div>
   )
   return (
-    <Panel title="World Juniors (U20) — projected">
+    <Panel title="Next World Juniors (U20) — projected">
       <div className="muted small" style={{ marginBottom: 10 }}>
         If the World Juniors were held now, here's how the U20 field would shake out — the marquee
         prospect showcase.
