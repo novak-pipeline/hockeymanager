@@ -93,6 +93,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'competitions', competitions: must().getCompetitions() }
     case 'getInternational':
       return { id: req.id, type: 'international', international: must().getInternational() }
+    case 'getWorldHistory':
+      return { id: req.id, type: 'worldHistory', worldHistory: must().getWorldHistory() }
     case 'getDraftRankings':
       return { id: req.id, type: 'draftRankings', draftRankings: must().getDraftRankings() }
     case 'getDataAnalyst':

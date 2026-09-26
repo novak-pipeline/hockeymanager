@@ -14,6 +14,7 @@
 export type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { BoardMeetingScene, MeetingAgendaItem, MeetingLine, MeetingOption, MeetingSpeaker } from '@engine/career/boardMeeting'
 import type { BoardMeetingScene } from '@engine/career/boardMeeting'
+import type { WorldHistoryView } from '@engine/career/worldHistoryView'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
@@ -264,6 +265,8 @@ export type WorkerRequestBody =
   | { type: 'getStandings' }
   | { type: 'getCompetitions' }
   | { type: 'getInternational' }
+  /** World Renewal (additive): world champions/awards + international tournaments. */
+  | { type: 'getWorldHistory' }
   | { type: 'getDraftRankings' }
   | { type: 'getDataAnalyst' }
   | { type: 'hireDataAnalyst'; candidateId: string }
@@ -588,6 +591,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'standings'; standings: StandingsView }
   | { type: 'competitions'; competitions: CompetitionsView }
   | { type: 'international'; international: InternationalView }
+  | { type: 'worldHistory'; worldHistory: WorldHistoryView }
   | { type: 'draftRankings'; draftRankings: DraftRankingsView }
   | { type: 'dataAnalyst'; dataAnalyst: DataAnalystView }
   | { type: 'stats'; stats: StatsView }

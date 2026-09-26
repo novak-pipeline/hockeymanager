@@ -827,3 +827,26 @@ describe('multi-season integration', () => {
     expect(state.retiredLegends[0]!.hallOfFame).toBe(true)
   })
 })
+
+describe('Hall of Fame is position-aware (World Renewal)', () => {
+  it('admits a long-career goalie on wins, and a defenceman below the 900-point bar', async () => {
+    const { emptyRecords, registerRetirements, inductHallOfFame, hallOfFameWorthy } = await import('./records')
+    const s = emptyRecords()
+    registerRetirements({
+      state: s,
+      year: 2030,
+      retirees: [
+        { playerId: 'g1', name: 'Goalie One', careerGoals: 0, careerAssists: 12, careerPoints: 12, careerGames: 780, position: 'G', careerWins: 402, careerShutouts: 55 },
+        { playerId: 'd1', name: 'Dman One', careerGoals: 150, careerAssists: 480, careerPoints: 630, careerGames: 1200, position: 'D' },
+        { playerId: 'g2', name: 'Backup Two', careerGoals: 0, careerAssists: 2, careerPoints: 2, careerGames: 150, position: 'G', careerWins: 60, careerShutouts: 4 },
+      ],
+    })
+    expect(s.retiredLegends.map((l) => l.playerId).sort()).toEqual(['d1', 'g1'])
+    const seeds = inductHallOfFame(s, 2033)
+    expect(seeds.map((x) => x.playerId).sort()).toEqual(['d1', 'g1'])
+    expect(seeds.find((x) => x.playerId === 'g1')!.body).toContain('402 W')
+    expect(hallOfFameWorthy({ position: 'G', careerPoints: 0, careerWins: 260 }, ['Best Goaltender'])).toBe(true)
+    expect(hallOfFameWorthy({ position: 'G', careerPoints: 0, careerWins: 260 }, [])).toBe(false)
+    expect(hallOfFameWorthy({ position: 'C', careerPoints: 800 }, [])).toBe(false)
+  })
+})

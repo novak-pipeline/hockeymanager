@@ -83,6 +83,42 @@ import {
   type WorldSimState,
 } from '@engine/league/worldSim'
 import { worldFreeAgencySweep } from '@engine/league/worldFreeAgency'
+import { DEFAULT_TACTICS } from '@data/generate'
+import {
+  emptyWorldHistory,
+  type Competition,
+  type IntlEventKind,
+  type IntlPlayerLine,
+  type WorldHistory,
+  type WorldPlayerRef,
+  type WorldRecordEntry,
+  type WorldSeasonRecord,
+} from '@domain'
+import { runYouthIntake } from '@engine/world/youthIntake'
+import { runJuniorPathways } from '@engine/world/juniorPathways'
+import {
+  CHL_KEYS,
+  MEMORIAL_CUP_ID,
+  RESOLVE_ORDER,
+  leagueAwards,
+  leagueFormat,
+  orderStandings as orderWorldStandings,
+  runBracket,
+  runMemorialCup,
+} from '@engine/world/worldSeason'
+import {
+  SENIOR_BREAK_DAYS,
+  SENIOR_EVENT_DAY,
+  WJC_DAY,
+  nationCode,
+  runNationsCup,
+  runOlympics,
+  runWorldJuniors as runWorldJuniorsTournament,
+  selectSquads,
+  seniorEventFor,
+} from '@engine/world/international'
+import type { WorldStatLine } from '@engine/league/worldSim'
+import { buildWorldHistoryView, type WorldHistoryView } from '@engine/career/worldHistoryView'
 import { applyConsistency } from '@engine/league/consistency'
 import { streakMilestone } from '@engine/league/ambientNews'
 import { generateOwnerRequest, type OwnerRequest } from '@engine/league/ownerMeddling'
@@ -110,7 +146,7 @@ import { farmSplit } from '@engine/career/farmReassign'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
-import { nhleFactorByAbbrev, isProLeagueAbbrev } from '@engine/league/leagueStrength'
+import { nhleFactorByAbbrev, isProLeagueAbbrev, canonicalLeagueKey } from '@engine/league/leagueStrength'
 import { scoutDraftBias, buildNhlComp } from '@engine/career/multiScout'
 import { selectNationalTeam, nationInfo, runWorldChampionship } from '@engine/league/nationalTeam'
 import {
@@ -1413,6 +1449,9 @@ export class Career {
     this.normalizeContracts() // #185: strip illegal NTCs (runs for new + loaded)
     this.playerCounter = this.computePlayerCounter()
     if (!restored) {
+      // World Renewal: seed the missing youngest cohorts before the scouts'
+      // fog is built, so every 16-year-old starts unknown.
+      this.bootstrapWorldRenewal()
       for (const teamId of data.league.teams) this.standings.set(teamId, freshStanding(teamId))
       // Initialize AHL standings from the AHL schedule's team ids.
       for (const teamId of data.league.ahlTeams ?? []) this.ahlStandings.set(teamId, freshStanding(teamId))
@@ -6706,6 +6745,638 @@ export class Career {
     }
   }
 
+  /* ═══════════════════════ WORLD RENEWAL (docs/LIVING-WORLD-RENEWAL.md) ═══════════════════════
+   * Youth intake + junior pathways at rollover, world-league postseasons and
+   * awards through the NHL playoffs, world seasons archived into careers, and
+   * the World Juniors / Olympics / Nations Cup played mid-season. All state
+   * lives on league.worldHistory (rides leagueData) — no snapshot shape change.
+   * ═══════════════════════════════════════════════════════════════════════════════ */
+
+  private static readonly WR_NS = 9700
+  /** Tournaments already attempted this session — a world too thin to ice a
+   *  field is not re-tried every match day. Transient by design. */
+  private intlAttempted = new Set<string>()
+
+  private worldHist(): WorldHistory {
+    const lg = this.data.league
+    if (!lg.worldHistory) lg.worldHistory = emptyWorldHistory()
+    return lg.worldHistory
+  }
+
+  /** Read-only world history for views (empty when the world has none). */
+  getWorldHistory(): WorldHistoryView {
+    return buildWorldHistoryView({
+      history: this.data.league.worldHistory ?? emptyWorldHistory(),
+      competitions: this.data.league.competitions ?? [],
+      year: this.year,
+      yourPlayerIds: this.yourProspectIds(),
+    })
+  }
+
+  /** Your org's players anywhere: NHL roster, farm, and rights held abroad. */
+  private yourProspectIds(): Set<string> {
+    const ids = this.ownOrgIds()
+    for (const p of this.data.players.values()) {
+      if ((p.rightsTeamId as string | undefined) === (this.userTeamId as string)) ids.add(p.id as string)
+    }
+    return ids
+  }
+
+  /** Fresh careers: pause the NHL for an Olympic winter. (The imported world's
+   *  missing youngest cohorts are seeded by the FIRST summer intake, which runs
+   *  in bootstrap mode — see renewWorld.) */
+  private bootstrapWorldRenewal(): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    const senior = seniorEventFor(this.year)
+    if (senior) this.applyIntlBreak(senior)
+  }
+
+  /** Shift the NHL calendar to open the Olympic / Nations Cup break. Game ids
+   *  (and so every game seed) are untouched — only the dates move. */
+  private applyIntlBreak(kind: IntlEventKind): void {
+    if (kind === 'worldJuniors') return
+    const gap = SENIOR_BREAK_DAYS[kind]
+    for (const g of this.data.league.schedule) if (g.day >= SENIOR_EVENT_DAY) g.day += gap
+    this.refreshMatchDays()
+  }
+
+  private repairWorldRosters(comps: Competition[]): void {
+    for (const c of comps) for (const tid of c.teamIds) {
+      const t = this.data.teams.get(tid)
+      if (t) repairLines(t, this.data.players)
+    }
+  }
+
+  /* ── world postseasons ── */
+
+  /** Simulated competitions still without a result this season, in the order
+   *  the real calendar crowns them (junior loops first, the KHL last). */
+  private pendingWorldPostseasons(): Competition[] {
+    const comps = (this.data.league.competitions ?? []).filter((c) => c.tier === 'simulated' && c.teamIds.length >= 2)
+    if (comps.length === 0) return []
+    const done = new Set(this.worldHist().seasons.filter((s) => s.year === this.year).map((s) => s.competitionId))
+    const rank = (c: Competition): number => {
+      const i = RESOLVE_ORDER.indexOf(canonicalLeagueKey(c.abbrev, c.name))
+      return i < 0 ? RESOLVE_ORDER.length / 2 : i
+    }
+    return comps.filter((c) => !done.has(c.id)).sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1))
+  }
+
+  /** Crown up to `n` world champions (one a day through the NHL playoffs;
+   *  everything left on the offseason flush), then the Memorial Cup. */
+  private tickWorldPostseason(n: number): void {
+    const pending = this.pendingWorldPostseasons()
+    for (const c of pending.slice(0, n)) this.resolveWorldCompetition(c)
+    this.maybeRunMemorialCup()
+  }
+
+  private resolveWorldCompetition(comp: Competition): void {
+    const hist = this.worldHist()
+    const fmt = leagueFormat(comp)
+    const standingsMap = this.worldSim.standings.get(comp.id)
+    const rows = orderWorldStandings(standingsMap ? [...standingsMap.values()] : comp.standings)
+    const seeds = rows.map((r) => r.teamId as string).filter((id) => this.data.teams.has(asTeamId(id)))
+    const lgAvg = this.worldSim.leagueAvg.get(comp.id)
+    const po = new Map<PlayerId, GamePlayerStat>()
+    const bracket = runBracket({
+      seeds,
+      format: fmt,
+      playGame: (h, a, gi) => {
+        const home = this.data.teams.get(asTeamId(h))
+        const away = this.data.teams.get(asTeamId(a))
+        if (!home || !away) return h
+        const res = quickSimGame(home, away, this.resolve, {
+          seed: gameSeed(this.seed ^ 0x5eed2200, this.year, `wpo-${comp.id}-${gi}`),
+          rules: 'playoff',
+          ...(lgAvg !== undefined ? { leagueAvg: lgAvg } : {}),
+        })
+        mergePlayerStats(po, res.playerStats)
+        return res.awayGoals > res.homeGoals ? a : h
+      },
+    })
+    const teamOfPid = new Map<string, Team>()
+    const pids: PlayerId[] = []
+    for (const tid of comp.teamIds) {
+      const t = this.data.teams.get(tid)
+      if (!t) continue
+      for (const pid of t.roster) { teamOfPid.set(pid as string, t); pids.push(pid) }
+    }
+    const abbr = (id: PlayerId): string => teamOfPid.get(id as string)?.abbreviation ?? '—'
+    const awards = leagueAwards({
+      comp, playerIds: pids, players: this.data.players,
+      totals: this.worldSim.totals, gp: this.worldSim.gp,
+      teamAbbrOf: abbr,
+      teamPointsOf: (id) => {
+        const t = teamOfPid.get(id as string)
+        return t ? (standingsMap?.get(t.id)?.points ?? 0) : 0
+      },
+    })
+    const champ = bracket ? this.data.teams.get(asTeamId(bracket.champion)) : undefined
+    const runner = bracket ? this.data.teams.get(asTeamId(bracket.runnerUp)) : undefined
+    let playoffMvp: WorldPlayerRef | undefined
+    if (champ) {
+      let best: { id: PlayerId; pts: number } | null = null
+      for (const pid of champ.roster) {
+        const s = po.get(pid)
+        if (!s) continue
+        const pts = s.goals + s.assists
+        if (!best || pts > best.pts) best = { id: pid, pts }
+      }
+      if (best) playoffMvp = { playerId: best.id as string, name: this.data.players.get(best.id)?.name ?? '?', teamAbbr: champ.abbreviation, value: `${best.pts} PTS` }
+    }
+    const first = rows[0] ? this.data.teams.get(rows[0].teamId) : undefined
+    const rec: WorldSeasonRecord = {
+      year: this.year,
+      competitionId: comp.id,
+      abbrev: comp.abbrev,
+      trophy: fmt.trophy,
+      championTeamId: champ ? (champ.id as string) : null,
+      championName: champ?.name ?? null,
+      runnerUpName: runner?.name ?? null,
+      finalScore: bracket?.finalScore ?? null,
+      regularSeasonWinner: first?.name ?? null,
+      ...awards,
+      ...(playoffMvp ? { playoffMvp } : {}),
+    }
+    hist.seasons.push(rec)
+
+    // Honours on the profiles: every man on the champion's roster, plus the
+    // individual award winners (scoped so the NHL awards tab stays the NHL's).
+    if (champ) {
+      for (const pid of champ.roster) {
+        const p = this.data.players.get(pid)
+        if (!p) continue
+        this.recordsState.awards.push({ year: this.year, award: fmt.trophy, playerId: pid as string, playerName: p.name, teamAbbr: champ.abbreviation, value: 'Champion', scope: 'world' })
+      }
+    }
+    const indiv: Array<[string, WorldPlayerRef | undefined]> = [
+      [`${comp.abbrev} MVP`, rec.mvp], [`${comp.abbrev} scoring champion`, rec.topScorer],
+      [`${comp.abbrev} top goaltender`, rec.topGoalie], [`${comp.abbrev} rookie of the year`, rec.rookie],
+      [`${fmt.trophy} playoff MVP`, rec.playoffMvp],
+    ]
+    for (const [award, ref] of indiv) {
+      if (!ref) continue
+      this.recordsState.awards.push({ year: this.year, award, playerId: ref.playerId, playerName: ref.name, teamAbbr: ref.teamAbbr, value: ref.value, scope: 'world' })
+    }
+
+    this.checkWorldRecords(comp, pids, abbr)
+    // Archive every player's season in this league into his career history —
+    // AFTER the rookie award read the old history.
+    this.archiveWorldLines(comp, teamOfPid)
+
+    if (champ) {
+      const yours = champ.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p && (p.rightsTeamId as string | undefined) === (this.userTeamId as string))
+      const major = ['KHL', 'SHL', 'LIIGA', 'NL', 'OHL', 'WHL', 'QMJHL', 'NCAA', 'DEL', 'EXTRALIGA', 'MHL', 'USHL'].includes(canonicalLeagueKey(comp.abbrev, comp.name))
+      if (major || yours.length > 0) {
+        const lines = [
+          `${champ.name} win the ${fmt.trophy}${rec.finalScore ? `, beating ${rec.runnerUpName} ${rec.finalScore} in the final` : ''}.`,
+          rec.playoffMvp ? `Playoff MVP: ${rec.playoffMvp.name} (${rec.playoffMvp.value}).` : '',
+          rec.mvp ? `Regular-season MVP: ${rec.mvp.name}, ${rec.mvp.teamAbbr} (${rec.mvp.value}).` : '',
+          yours.length > 0 ? `Your prospect${yours.length > 1 ? 's' : ''} ${yours.map((p) => p.name).join(', ')} lift${yours.length > 1 ? '' : 's'} the trophy.` : '',
+        ].filter(Boolean)
+        this.pushNews('league', `${champ.name} win the ${fmt.trophy}`, lines.join(' '), {
+          teamId: champ.id as string,
+          ...(yours[0] ? { playerId: yours[0].id as string } : {}),
+          channel: 'wire',
+          salience: yours.length > 0 ? 55 : 30,
+        })
+      }
+      chronicleEvent(this.chronicle, {
+        year: this.year, day: this.currentDay, kind: 'championship',
+        teamIds: [champ.id as string],
+        playerIds: [rec.playoffMvp?.playerId, rec.mvp?.playerId].filter((x): x is string => !!x),
+        headline: `${champ.abbreviation} win the ${this.year}–${String((this.year + 1) % 100).padStart(2, '0')} ${fmt.trophy} (${comp.abbrev})`,
+        details: rec.finalScore ? { result: `${champ.abbreviation} def. ${runner?.abbreviation ?? '?'} ${rec.finalScore}` } : {},
+        userInvolved: champ.roster.some((id) => (this.data.players.get(id)?.rightsTeamId as string | undefined) === (this.userTeamId as string)),
+      })
+    }
+  }
+
+  /** Memorial Cup: the three CHL champions + the best other CHL club as host. */
+  private maybeRunMemorialCup(): void {
+    const hist = this.worldHist()
+    if (hist.seasons.some((s) => s.year === this.year && s.competitionId === MEMORIAL_CUP_ID)) return
+    const comps = this.data.league.competitions ?? []
+    const chl = CHL_KEYS.map((k) => comps.find((c) => canonicalLeagueKey(c.abbrev, c.name) === k))
+    if (chl.some((c) => !c)) return
+    const recs = chl.map((c) => hist.seasons.find((s) => s.year === this.year && s.competitionId === c!.id))
+    if (recs.some((r) => !r || !r.championTeamId)) return
+    const champs = recs.map((r) => r!.championTeamId!)
+    // Host: the best regular-season CHL club that did not win its league.
+    let host: { id: string; pts: number } | null = null
+    for (const c of chl) {
+      const st = this.worldSim.standings.get(c!.id)
+      for (const s of st?.values() ?? []) {
+        if (champs.includes(s.teamId as string)) continue
+        if (!host || s.points > host.pts) host = { id: s.teamId as string, pts: s.points }
+      }
+    }
+    if (!host) return
+    const teams = [...champs, host.id]
+    const res = runMemorialCup({
+      teams,
+      playGame: (h, a, gi) => {
+        const home = this.data.teams.get(asTeamId(h))!
+        const away = this.data.teams.get(asTeamId(a))!
+        const r = quickSimGame(home, away, this.resolve, {
+          seed: gameSeed(this.seed ^ 0x5eed2201, this.year, `memcup-${gi}`), rules: 'playoff',
+        })
+        const hw = r.homeGoals > r.awayGoals
+        return { winner: hw ? h : a, score: `${Math.max(r.homeGoals, r.awayGoals)}–${Math.min(r.homeGoals, r.awayGoals)}${r.decidedBy !== 'regulation' ? ' (OT)' : ''}` }
+      },
+    })
+    if (!res) return
+    const champ = this.data.teams.get(asTeamId(res.champion))!
+    const runner = this.data.teams.get(asTeamId(res.runnerUp))
+    hist.seasons.push({
+      year: this.year, competitionId: MEMORIAL_CUP_ID, abbrev: 'MC', trophy: 'Memorial Cup',
+      championTeamId: champ.id as string, championName: champ.name, runnerUpName: runner?.name ?? null,
+      finalScore: res.finalScore, regularSeasonWinner: this.data.teams.get(asTeamId(host.id))?.name ?? null,
+    })
+    for (const pid of champ.roster) {
+      const p = this.data.players.get(pid)
+      if (p) this.recordsState.awards.push({ year: this.year, award: 'Memorial Cup', playerId: pid as string, playerName: p.name, teamAbbr: champ.abbreviation, value: 'Champion', scope: 'world' })
+    }
+    const yours = champ.roster.map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && (p.rightsTeamId as string | undefined) === (this.userTeamId as string))
+    this.pushNews('league', `${champ.name} win the Memorial Cup`,
+      `${champ.name} are the champions of major junior hockey, beating ${runner?.name ?? 'the host'} ${res.finalScore} in the Memorial Cup final.` +
+      (yours.length > 0 ? ` Your prospect${yours.length > 1 ? 's' : ''} ${yours.map((p) => p.name).join(', ')} ${yours.length > 1 ? 'are' : 'is'} on the champion's roster.` : ''),
+      { teamId: champ.id as string, channel: 'wire', salience: yours.length > 0 ? 60 : 40, ...(yours[0] ? { playerId: yours[0].id as string } : {}) })
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.currentDay, kind: 'championship', teamIds: [champ.id as string], playerIds: [],
+      headline: `${champ.abbreviation} win the ${this.year + 1} Memorial Cup`,
+      details: { result: `${champ.abbreviation} def. ${runner?.abbreviation ?? '?'} ${res.finalScore}` },
+      userInvolved: yours.length > 0,
+    })
+  }
+
+  /** League single-season records (points, goals) in each world league. The
+   *  first seasons of a save only set the bar; after that a break is news. */
+  private checkWorldRecords(comp: Competition, pids: PlayerId[], abbr: (id: PlayerId) => string): void {
+    const hist = this.worldHist()
+    let entry = hist.records.find(([id]) => id === comp.id)
+    if (!entry) { entry = [comp.id, {}]; hist.records.push(entry) }
+    const rec = entry[1]
+    const seasonsOnFile = hist.seasons.filter((s) => s.competitionId === comp.id).length
+    let bestPts: WorldRecordEntry | null = null
+    let bestG: WorldRecordEntry | null = null
+    for (const pid of pids) {
+      const t = this.worldSim.totals.get(pid)
+      const p = this.data.players.get(pid)
+      if (!t || !p || p.position === 'G') continue
+      const pts = t.goals + t.assists
+      if (!bestPts || pts > bestPts.value) bestPts = { value: pts, playerId: pid as string, name: p.name, teamAbbr: abbr(pid), year: this.year }
+      if (!bestG || t.goals > bestG.value) bestG = { value: t.goals, playerId: pid as string, name: p.name, teamAbbr: abbr(pid), year: this.year }
+    }
+    const check = (key: 'points' | 'goals', cand: WorldRecordEntry | null, label: string): void => {
+      if (!cand || cand.value <= 0) return
+      const prev = rec[key]
+      if (prev && cand.value <= prev.value) return
+      rec[key] = cand
+      if (!prev || seasonsOnFile <= 3) return
+      this.pushNews('league', `${cand.name} sets the ${comp.abbrev} ${label} record`,
+        `${cand.name} (${cand.teamAbbr}) finishes with ${cand.value} ${label} — a new ${comp.name} single-season mark, beating ${prev.name}'s ${prev.value} from ${prev.year}–${String((prev.year + 1) % 100).padStart(2, '0')}.`,
+        { playerId: cand.playerId, channel: 'wire', salience: 40 })
+      chronicleEvent(this.chronicle, {
+        year: this.year, day: this.currentDay, kind: 'recordBroken', teamIds: [], playerIds: [cand.playerId],
+        headline: `${cand.name} sets the ${comp.abbrev} single-season ${label} record (${cand.value})`,
+        details: { value: cand.value },
+        userInvolved: (this.data.players.get(asPlayerId(cand.playerId))?.rightsTeamId as string | undefined) === (this.userTeamId as string),
+      })
+    }
+    check('points', bestPts, 'points')
+    check('goals', bestG, 'goals')
+  }
+
+  /** Fold one world league's season into each player's career history (newest
+   *  first, the imported DB's own shape), then zero his live line so the
+   *  rollover sweep never archives it twice. */
+  private archiveWorldLines(comp: Competition, teamOfPid: Map<string, Team>): void {
+    for (const [pidStr, team] of teamOfPid) {
+      const pid = asPlayerId(pidStr)
+      const gp = this.worldSim.gp.get(pid) ?? 0
+      if (gp <= 0) continue
+      const p = this.data.players.get(pid)
+      const t = this.worldSim.totals.get(pid) as WorldStatLine | undefined
+      if (!p || !t) continue
+      this.pushWorldLine(p, team.name, comp.name, gp, t)
+    }
+  }
+
+  private pushWorldLine(p: Player, club: string, league: string, gp: number, t: WorldStatLine): void {
+    const h = p.careerHistory ?? (p.careerHistory = [])
+    if (h.some((r) => r.year === this.year && r.league === league)) return
+    h.unshift({
+      year: this.year, club, league, gamesPlayed: gp,
+      goals: t.goals, assists: t.assists, penaltyMinutes: t.penaltyMinutes, plusMinus: t.plusMinus,
+      minutes: p.position === 'G' ? Math.round(t.toi / 60) : 0,
+      goalsAgainst: t.goalsAgainst, shutouts: t.so ?? 0,
+      wins: t.w ?? 0, losses: t.l ?? 0, otLosses: t.otl ?? 0, saves: t.saves,
+    })
+  }
+
+  /** Rollover safety net: any world line not yet archived (a league without a
+   *  postseason, a man who moved clubs) is folded in before the reset. */
+  private archiveRemainingWorldLines(): void {
+    const where = new Map<string, { team: Team; comp: Competition }>()
+    for (const c of this.data.league.competitions ?? []) for (const tid of c.teamIds) {
+      const t = this.data.teams.get(tid)
+      if (t) for (const pid of t.roster) where.set(pid as string, { team: t, comp: c })
+    }
+    for (const [pid, gp] of this.worldSim.gp) {
+      if (gp <= 0) continue
+      const p = this.data.players.get(pid)
+      const t = this.worldSim.totals.get(pid) as WorldStatLine | undefined
+      if (!p || !t) continue
+      if ((p.careerHistory ?? []).some((r) => r.year === this.year && r.gamesPlayed === gp)) continue
+      const w = where.get(pid as string)
+      this.pushWorldLine(p, w?.team.name ?? '—', w?.comp.name ?? 'Other leagues', gp, t)
+    }
+  }
+
+  /** Summer renewal, run at rollover once the new season's year is set:
+   *  junior age-outs + college commits + pro/Europe placements, then the new
+   *  cohort of 16–17-year-olds. */
+  private renewWorld(): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    const aiOrgIds = this.data.league.teams.filter((id) => id !== this.userTeamId)
+    const path = runJuniorPathways({
+      competitions: comps, teams: this.data.teams, players: this.data.players,
+      year: this.year, rng: this.rngFor(Career.WR_NS, 2), aiOrgIds,
+    })
+    // The first summer of a save (or of an old save meeting this system) runs
+    // the intake in bootstrap mode: the imported world has almost no 16–17s,
+    // so both cohorts are seeded at once and the next draft is already real.
+    const wh = this.worldHist()
+    runYouthIntake({
+      competitions: comps, teams: this.data.teams, players: this.data.players,
+      year: this.year, rng: this.rngFor(Career.WR_NS, 3),
+      nextId: () => asPlayerId('p' + this.playerCounter++),
+      ...(wh.intakeStarted ? {} : { bootstrap: true }),
+    })
+    wh.intakeStarted = true
+    this.repairWorldRosters(comps)
+    for (const aid of this.data.league.ahlTeams ?? []) {
+      const t = this.data.teams.get(aid)
+      if (t) repairLines(t, this.data.players)
+    }
+    // The GM hears about his own: rights-held kids changing routes.
+    const mine = path.moves.filter((m) => (this.data.players.get(m.playerId)?.rightsTeamId as string | undefined) === (this.userTeamId as string))
+    for (const m of mine.slice(0, 4)) {
+      const p = this.data.players.get(m.playerId)!
+      const to = m.kind === 'leftGame' ? null : this.data.teams.get(m.toTeamId)
+      this.pushNews('contract',
+        m.kind === 'college' ? `${p.name} commits to ${to?.name ?? 'college'}` : m.kind === 'leftGame' ? `${p.name} steps away from the game` : `${p.name} moves on from junior`,
+        m.kind === 'college'
+          ? `Your prospect ${p.name} (${p.position}, ${p.age}) has aged out of the ${m.fromLeague} route and committed to ${to?.name ?? 'an NCAA program'}. You keep his rights while he plays college hockey.`
+          : m.kind === 'leftGame'
+            ? `Your prospect ${p.name} (${p.age}) has no pro offer and has left the game.`
+            : `Your prospect ${p.name} (${p.position}, ${p.age}) has aged out of the ${m.fromLeague} and joins ${to?.name ?? 'a new club'}. You keep his rights.`,
+        { playerId: p.id as string })
+    }
+    this.pruneWorldWashouts()
+    const ufa = path.moves.filter((m) => m.kind === 'proFarm').map((m) => this.data.players.get(m.playerId)).filter((p): p is Player => !!p)
+    if (ufa.length > 0) {
+      const top = [...ufa].sort((a, b) => ratedPotential(b) - ratedPotential(a)).slice(0, 5)
+      this.pushNews('contract', `${ufa.length} undrafted free agents turn pro`,
+        `Passed over at the draft, ${ufa.length} junior and college free agents signed AHL deals this summer. ` +
+        `The names to know: ${top.map((p) => `${p.name} (${p.position}, ${p.age})`).join(', ')}.`,
+        { channel: 'wire', salience: 30 })
+    }
+  }
+
+  /**
+   * Keep the save lean: a GENERATED kid who left the game at least a season ago,
+   * never played a pro game in this save, was never drafted and never won or
+   * appeared in anything the history references is forgotten. Imported (real)
+   * players are never pruned. Without this the intake adds ~1,100 players a
+   * year forever; with it the world's population stays flat.
+   */
+  private pruneWorldWashouts(): void {
+    const keep = new Set<string>()
+    for (const a of this.recordsState.awards) keep.add(a.playerId)
+    for (const l of this.recordsState.retiredLegends) keep.add(l.playerId)
+    for (const e of this.chronicle.events) for (const id of e.playerIds) keep.add(id)
+    for (const c of this.data.league.draftClasses) for (const pr of c.prospects) keep.add(pr.playerId as string)
+    for (const id of this.faPool) keep.add(id as string)
+    const wh = this.data.league.worldHistory
+    if (wh) for (const [, r] of wh.records) { if (r.points) keep.add(r.points.playerId); if (r.goals) keep.add(r.goals.playerId) }
+    const doomed = new Set<string>()
+    for (const p of this.data.players.values()) {
+      if (p.retiredYear === undefined || p.retiredYear > this.year - 1) continue
+      if (!p.externalId?.startsWith('gen-')) continue
+      if (p.nhlDrafted || p.rightsTeamId || p.stats.length > 0) continue
+      if (keep.has(p.id as string)) continue
+      doomed.add(p.id as string)
+    }
+    if (doomed.size === 0) return
+    for (const id of doomed) this.data.players.delete(asPlayerId(id))
+    const sc = this.scouting
+    sc.knowledge = sc.knowledge.filter(([id]) => !doomed.has(id))
+    if (sc.judgment) sc.judgment = sc.judgment.filter(([id]) => !doomed.has(id))
+    if (sc.seen) sc.seen = sc.seen.filter((id) => !doomed.has(id))
+    if (sc.scoutHistory) sc.scoutHistory = sc.scoutHistory.map(([s, ids]) => [s, ids.filter((id) => !doomed.has(id))] as [string, string[]])
+    this.data.league.players = this.data.league.players.filter((id) => !doomed.has(id as string))
+  }
+
+  /* ── international: World Juniors, Olympics, Nations Cup ── */
+
+  private tickInternational(day: number): void {
+    const comps = this.data.league.competitions
+    if (!comps || comps.length === 0) return
+    const hist = this.worldHist()
+    const has = (k: IntlEventKind): boolean => hist.international.some((e) => e.kind === k && e.year === this.year)
+    if (day >= WJC_DAY && !has('worldJuniors') && !this.intlAttempted.has(`worldJuniors-${this.year}`)) {
+      this.intlAttempted.add(`worldJuniors-${this.year}`)
+      this.runIntlEvent('worldJuniors')
+    }
+    const senior = seniorEventFor(this.year)
+    if (senior && day >= SENIOR_EVENT_DAY && !has(senior) && !this.intlAttempted.has(`${senior}-${this.year}`)) {
+      this.intlAttempted.add(`${senior}-${this.year}`)
+      this.runIntlEvent(senior)
+    }
+  }
+
+  private runIntlEvent(kind: IntlEventKind): void {
+    const nhl = new Set<string>()
+    for (const tid of this.data.league.teams) for (const pid of this.data.teams.get(tid)?.roster ?? []) nhl.add(pid as string)
+    const rostered = new Set<string>()
+    for (const t of this.data.teams.values()) for (const pid of t.roster) rostered.add(pid as string)
+    const u20 = kind === 'worldJuniors'
+    const pool: Player[] = []
+    for (const p of this.data.players.values()) {
+      if (p.retiredYear !== undefined || p.injuryStatus !== null) continue
+      if (!rostered.has(p.id as string)) continue
+      if (u20) {
+        // Under-20s from every league; NHL regulars stay with their clubs.
+        if (p.age > 19 || nhl.has(p.id as string)) continue
+      } else if (p.age < 18) continue
+      pool.push(p)
+    }
+    const squads = selectSquads({
+      pool, players: this.data.players,
+      fieldSize: kind === 'worldJuniors' ? 10 : kind === 'olympics' ? 12 : 4,
+      tactics: DEFAULT_TACTICS, tag: `${kind}${this.year}`,
+    })
+    const seed = deriveSeed(this.seed, Career.WR_NS, 0x1e7, this.year, kind.length)
+    const res = kind === 'worldJuniors' ? runWorldJuniorsTournament({ squads, players: this.data.players, year: this.year, seed })
+      : kind === 'olympics' ? runOlympics({ squads, players: this.data.players, year: this.year, seed })
+        : runNationsCup({ squads, players: this.data.players, year: this.year, seed })
+    if (!res) return
+    const rec = res.record
+    this.worldHist().international.push(rec)
+    const eventLabel = kind === 'worldJuniors' ? `${this.year + 1} World Juniors` : kind === 'olympics' ? `${this.year + 1} Winter Olympics` : `${this.year + 1} Nations Cup`
+
+    // Per-player tournament lines → the international columns on his record.
+    const lineOf = new Map<string, IntlPlayerLine>()
+    for (const [, ids] of rec.rosters) for (const id of ids) {
+      const p = this.data.players.get(asPlayerId(id))
+      if (p) p.intlApps = (p.intlApps ?? 0) + 1
+    }
+    for (const l of [...res.lines]) {
+      lineOf.set(l.playerId, l)
+      const p = this.data.players.get(asPlayerId(l.playerId))
+      if (!p) continue
+      p.intlGoals = (p.intlGoals ?? 0) + l.g
+      p.intlAssists = (p.intlAssists ?? 0) + l.a
+    }
+
+    // Medals as honours (scoped: they live on profiles, not the NHL awards tab).
+    const medalWord = kind === 'worldJuniors' ? 'World Juniors' : kind === 'olympics' ? 'Olympic' : 'Nations Cup'
+    const medals: Array<[string | null, string]> = [[rec.gold, 'Gold'], [rec.silver, 'Silver'], [rec.bronze, 'Bronze']]
+    for (const [nation, medal] of medals) {
+      if (!nation) continue
+      const ids = rec.rosters.find(([n]) => n === nation)?.[1] ?? []
+      for (const id of ids) {
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p) continue
+        this.recordsState.awards.push({ year: this.year, award: `${medalWord} ${medal}`, playerId: id, playerName: p.name, teamAbbr: nationCode(nation), value: `${medal} medal`, scope: 'intl' })
+        p.morale = Math.min(100, p.morale + (medal === 'Gold' ? 5 : 2))
+      }
+    }
+    const indiv: Array<[string, IntlPlayerLine | null]> = [
+      [`${medalWord} MVP`, rec.mvp], [`${medalWord} top scorer`, rec.topScorer], [`${medalWord} best goaltender`, rec.bestGoalie],
+    ]
+    for (const [award, l] of indiv) {
+      if (!l) continue
+      const v = l.position === 'G' && l.sa ? `.${Math.round(((l.sv ?? 0) / l.sa) * 1000)} SV%` : `${l.g + l.a} PTS`
+      this.recordsState.awards.push({ year: this.year, award, playerId: l.playerId, playerName: l.name, teamAbbr: nationCode(l.nation), value: v, scope: 'intl' })
+    }
+    for (const l of rec.allStars) {
+      this.recordsState.awards.push({ year: this.year, award: `${medalWord} all-star team`, playerId: l.playerId, playerName: l.name, teamAbbr: nationCode(l.nation), value: `${l.g + l.a} PTS`, scope: 'intl' })
+    }
+
+    // Scouts attend the World Juniors: every kid there is seen, the standouts
+    // studied — and a big tournament moves a draft-year kid's stock.
+    const mine = this.yourProspectIds()
+    if (u20) {
+      const standout = new Set<string>([...rec.leaders.map((l) => l.playerId), ...rec.allStars.map((l) => l.playerId)])
+      const knowledge = new Map(this.scouting.knowledge)
+      for (const [, ids] of rec.rosters) for (const id of ids) {
+        const floor = standout.has(id) ? 70 : 45
+        knowledge.set(id, Math.max(knowledge.get(id) ?? 0, floor))
+        const p = this.data.players.get(asPlayerId(id))
+        if (p && standout.has(id)) {
+          p.worldReputation = Math.min(200, (p.worldReputation ?? 60) + 12)
+          p.currentReputation = Math.min(200, (p.currentReputation ?? 60) + 8)
+        }
+      }
+      this.scouting.knowledge = [...knowledge.entries()]
+      this.draftRankCache = null
+    }
+
+    // Selection beats for your own men (senior events): picked, or snubbed.
+    if (!u20) {
+      const selected = new Set<string>(rec.rosters.flatMap(([, ids]) => ids))
+      const picked: Player[] = []
+      const snubbed: Player[] = []
+      for (const pid of this.userTeam.roster) {
+        const p = this.data.players.get(pid)
+        if (!p) continue
+        if (selected.has(pid as string)) { picked.push(p); p.morale = Math.min(100, p.morale + 4); continue }
+        const nat = p.nationality
+        const squad = rec.rosters.find(([n]) => n === nat)
+        if (!squad) continue
+        // A snub: good enough to be in the conversation (within 3 of the
+        // squad's weakest pick at his position group), and left home.
+        const grp = (x: Player): string => (x.position === 'G' ? 'G' : x.position === 'D' ? 'D' : 'F')
+        const same = squad[1].map((id) => this.data.players.get(asPlayerId(id))).filter((x): x is Player => !!x && grp(x) === grp(p))
+        const floor = Math.min(...same.map((x) => ratedOverall(x)))
+        if (same.length > 0 && ratedOverall(p) >= floor - 3) { snubbed.push(p); p.morale = Math.max(0, p.morale - 4) }
+      }
+      if (picked.length > 0) {
+        this.pushNews('league', `${picked.length === 1 ? picked[0]!.name : `${picked.length} of your players`} named for the ${eventLabel}`,
+          `${picked.map((p) => `${p.name} (${p.nationality})`).join(', ')} ${picked.length === 1 ? 'has' : 'have'} been selected. The NHL pauses for the tournament; the room is proud of them.`,
+          { playerId: picked[0]!.id as string, salience: 55 })
+      }
+      for (const p of snubbed.slice(0, 2)) {
+        this.pushNews('league', `${p.name} left off ${p.nationality}'s roster`,
+          `${p.name} was in the conversation for the ${eventLabel} and did not make the cut. He is taking it hard — expect a quiet week in the room.`,
+          { playerId: p.id as string, salience: 50 })
+      }
+    }
+
+    // Injuries suffered at the tournament that land on your club.
+    for (const inj of res.injured) {
+      if (!mine.has(inj.playerId)) continue
+      const p = this.data.players.get(asPlayerId(inj.playerId))
+      if (!p) continue
+      this.pushNews('injury', `${p.name} injured at the ${eventLabel}`,
+        `${p.name} got hurt playing for ${inj.nation} and is expected to miss about ${inj.games} games on his return.`,
+        { playerId: p.id as string, salience: 60 })
+    }
+
+    // The tournament story, with your prospects called out.
+    const stat = (l: IntlPlayerLine): string => l.position === 'G' && l.sa ? `.${Math.round(((l.sv ?? 0) / l.sa) * 1000)} SV%` : `${l.g}G ${l.a}A`
+    const yoursOnShow = [...lineOf.values()].filter((l) => mine.has(l.playerId)).sort((a, b) => (b.g + b.a) - (a.g + a.a)).slice(0, 5)
+    const body = [
+      `${rec.gold} win ${kind === 'nationsCup' ? 'the Nations Cup' : 'gold'}${rec.finalLine ? ` — ${rec.finalLine} in the final` : ''}. ${rec.silver ? `${rec.silver} take silver` : ''}${rec.bronze ? `, ${rec.bronze} bronze` : ''}.`,
+      rec.mvp ? `Tournament MVP: ${rec.mvp.name} (${rec.mvp.nation}, ${stat(rec.mvp)}).` : '',
+      rec.topScorer ? `Top scorer: ${rec.topScorer.name} (${rec.topScorer.g + rec.topScorer.a} points).` : '',
+      rec.allStars.length > 0 ? `All-tournament team: ${rec.allStars.map((l) => `${l.name} (${nationCode(l.nation)})`).join(', ')}.` : '',
+      yoursOnShow.length > 0 ? `Your players at the tournament: ${yoursOnShow.map((l) => `${l.name} (${nationCode(l.nation)}, ${stat(l)})`).join(', ')}.` : '',
+    ].filter(Boolean).join(' ')
+    const yourStar = yoursOnShow[0]
+    this.pushNews('league', kind === 'nationsCup' ? `${rec.gold} win the Nations Cup` : `${rec.gold} win ${eventLabel} gold`, body, {
+      ...(yourStar ? { playerId: yourStar.playerId } : {}), salience: kind === 'olympics' ? 75 : kind === 'worldJuniors' ? 65 : 60,
+    })
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.currentDay, kind: 'championship', teamIds: [],
+      playerIds: rec.allStars.map((l) => l.playerId),
+      headline: `${rec.gold} win the ${eventLabel}${rec.finalLine ? ` (${rec.finalLine})` : ''}`,
+      details: rec.finalLine ? { result: rec.finalLine } : {},
+      userInvolved: yoursOnShow.length > 0,
+    })
+  }
+
+  /** Goalie career line (NHL: this save + the imported history of our league). */
+  private goalieCareerOf(p: Player): { wins: number; shutouts: number } {
+    let wins = 0
+    let shutouts = 0
+    for (const s of p.stats) {
+      if (s.league === 'ahl') continue
+      wins += s.wins ?? 0
+      shutouts += s.shutouts
+    }
+    const label = this.historyLeagueLabel()
+    if (label !== null) for (const h of p.careerHistory ?? []) if (h.league === label) { wins += h.wins; shutouts += h.shutouts }
+    wins += this.goalieWins.get(p.id) ?? 0
+    shutouts += this.shutouts.get(p.id) ?? 0
+    return { wins, shutouts }
+  }
+
+  /** Position + goalie line for a retirement entry (Hall of Fame is position-aware). */
+  private retireeExtras(p: Player): { position: string; careerWins?: number; careerShutouts?: number } {
+    if (p.position !== 'G') return { position: p.position }
+    const g = this.goalieCareerOf(p)
+    return { position: 'G', careerWins: g.wins, careerShutouts: g.shutouts }
+  }
+
   /** Quick-sim the wider world's (other leagues') games scheduled on `day`.
    *  No-op when the league has no competitions (generated league / plain mods). */
   private tickWorld(day: number): void {
@@ -6721,6 +7392,9 @@ export class Career {
       year: this.year,
       rng: this.rngFor(7401, day), // prospects in other leagues can be injured too
     })
+    // The World Juniors (Dec 26) and the February best-on-best fire on the
+    // first match day past their date.
+    this.tickInternational(day)
   }
 
   /** playerId → NHLe strength of the simulated competition he plays in (for
@@ -7044,6 +7718,8 @@ export class Career {
     // E1: the farm has its own spring. Resolve it here, so a GM whose NHL club
     // is out still has something at stake — his next roster is playing.
     this.runFarmPostseason()
+    // The wider world's springs: one league crowned per playoff day.
+    this.tickWorldPostseason(1)
   }
 
   /* ── E1: the affiliate's playoff run ── */
@@ -7170,6 +7846,7 @@ export class Career {
     if (!po || po.championTeamId) return undefined
     const games = pendingGames(po)
     if (games.length === 0) return undefined
+    this.tickWorldPostseason(1)
     this.prepareTeamsForDay()
     let watched: WatchedGame | null = null
     const played = new Set<PlayerId>()
@@ -7354,6 +8031,8 @@ export class Career {
   private enterOffseason(): void {
     this.phase = 'offseason'
     this.offseason = { year: this.year, stage: 'awards', draft: null, faDay: 0 }
+    // Any world league not yet crowned is crowned now (a short NHL spring).
+    this.tickWorldPostseason(Number.MAX_SAFE_INTEGER)
     // The summer's spending is managed against NEXT season's cap — advance the
     // buyout dead-cap tail to that season's slice (0 once a buyout runs its course).
     const priorDeadCap = this.userDeadCap
@@ -7646,7 +8325,9 @@ export class Career {
         // earns a medal (→ medal badge on his profile). No-ops on single-nation DBs.
         // The marquee senior international event: an Olympics every fourth year
         // (best-on-best, far bigger prize), the World Championship otherwise.
-        const isOlympicYear = this.year % 4 === 0
+        // The Olympics are now a real mid-season tournament (tickInternational);
+        // the spring event is always the World Championship.
+        const isOlympicYear = false
         const intlEvent = isOlympicYear ? 'Olympics' : 'World Championship'
         const worlds = runWorldChampionship({ players: this.data.players.values(), rng: this.rngFor(8013) })
         for (const m of worlds.medals) {
@@ -7885,6 +8566,7 @@ export class Career {
                 careerAssists: c.assists,
                 careerPoints: c.points,
                 careerGames: c.gamesPlayed,
+                ...this.retireeExtras(p),
               }
             }),
             year: this.year,
@@ -8923,6 +9605,7 @@ export class Career {
           careerAssists: tot.assists,
           careerPoints: tot.points,
           careerGames: tot.gp,
+          ...this.retireeExtras(p),
         })),
         year: this.year,
       })
@@ -8973,6 +9656,11 @@ export class Career {
     })
 
     this.archiveSeasonStats()
+    // World Renewal: crown anything left, then fold every world line into careers.
+    if (this.data.league.competitions) {
+      this.tickWorldPostseason(Number.MAX_SAFE_INTEGER)
+      this.archiveRemainingWorldLines()
+    }
 
     // Fanbase → owner budget: an engaged fanbase fills the building and the owner
     // opens the chequebook; an empty barn tightens it. Scales a captured baseline
@@ -9030,6 +9718,11 @@ export class Career {
       : buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
     this.data.league.season.standings = this.data.league.teams.map(freshStanding)
     this.refreshMatchDays()
+    // Olympic / Nations Cup winter: the NHL calendar opens a break.
+    if (this.data.league.competitions?.length) {
+      const senior = seniorEventFor(newYear)
+      if (senior) this.applyIntlBreak(senior)
+    }
 
     this.standings.clear()
     for (const teamId of this.data.league.teams) this.standings.set(teamId, freshStanding(teamId))
@@ -9050,6 +9743,8 @@ export class Career {
     // Reset the wider world for the new season (standings, stats, game results).
     if (this.data.league.competitions) {
       resetWorldSim(this.worldSim, this.data.league.competitions)
+      // World Renewal: junior age-outs, college commits, the new youth cohort.
+      this.renewWorld()
     }
 
     this.totals.clear()
@@ -9607,6 +10302,14 @@ export class Career {
     const touchedNhl = new Set<TeamId>()
     for (const c of comps) {
       if (isProLeagueAbbrev(c.abbrev)) continue
+      // World Renewal: not every drafted 20-year-old crosses the ocean. College
+      // players finish their degrees and Europeans in a men's league at home
+      // keep developing there — to 22 — unless they're ready now.
+      const cKey = canonicalLeagueKey(c.abbrev, c.name)
+      const nationLc = c.nation.toLowerCase()
+      const europeanMen = !['OHL', 'WHL', 'QMJHL', 'USHL', 'NTDP', 'NAHL', 'BCHL', 'MHL', 'J20', 'U20SM', 'CZEJR', 'SVKJR', 'DNL', 'NCAA', 'ECHL'].includes(cKey) &&
+        nationLc !== 'canada' && nationLc !== 'united states' && nationLc !== 'usa'
+      const holdToAge = cKey === 'NCAA' || europeanMen ? 22 : 20
       for (const tid of c.teamIds) {
         const wt = this.data.teams.get(tid as TeamId)
         if (!wt) continue
@@ -9620,7 +10323,8 @@ export class Career {
           const ovr = ratedOverall(p)
           // Elite teenager who'd crack the NHL lineup → straight to the NHL.
           const nhlReady = p.age < 20 && ovr >= 72 && ovr >= this.orgNhlBar(org, grp)
-          if (p.age >= 20 || nhlReady) {
+          const readyToCross = p.age >= 20 && ovr >= 60
+          if (p.age >= holdToAge || nhlReady || readyToCross) {
             const ahl = org.affiliateId ? this.data.teams.get(org.affiliateId) : undefined
             let dest = nhlReady ? org : ahl
             // A full NHL roster can't absorb him no matter how good he looks —
@@ -22120,7 +22824,9 @@ export class Career {
         gamesPlayed: [...r.career.gamesPlayed],
       },
       seasons: [...r.seasons],
-      awards: [...r.awards],
+      // NHL honours only — other leagues' trophies and international medals
+      // live on player profiles and the World screen (scope-tagged).
+      awards: r.awards.filter((a) => a.scope === undefined),
       legends: [...r.retiredLegends],
       franchises: this.buildFranchiseHistory(),
     }

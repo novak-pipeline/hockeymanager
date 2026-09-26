@@ -1,4 +1,5 @@
 import type { GameId, LeagueId, PlayerId, TeamId } from './ids'
+import type { WorldHistory } from './worldHistory'
 
 export interface Division {
   id: string
@@ -134,4 +135,7 @@ export interface League {
    * generated (non-mod) league. Teams referenced here live in LeagueData.teams.
    */
   competitions?: Competition[]
+  /** World Renewal: champions, awards, league records and international
+   *  tournaments of the wider world. Additive — absent on old saves. */
+  worldHistory?: WorldHistory
 }

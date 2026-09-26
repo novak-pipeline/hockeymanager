@@ -39,6 +39,7 @@ interface SeasonReport {
     potP10: number; potP50: number; potP90: number; top1: number; top10: number; top32: number
   }
   juniors: Record<string, { teams: number; avgRoster: number; ages: Record<number, number> }>
+  world?: { champions: string[]; intl: string[]; careerRowsAdded: number }
 }
 
 function q(a: number[], f: number): number {
@@ -118,6 +119,14 @@ describe.skipIf(!process.env.WR_RUN || !existsSync(MOD_DB))('world renewal harne
             ages[p.age] = (ages[p.age] ?? 0) + 1; n++
           }
           cur!.juniors[c.abbrev] = { teams: c.teamIds.length, avgRoster: Math.round((n / Math.max(1, c.teamIds.length)) * 10) / 10, ages }
+        }
+        const wh = career.data.league.worldHistory
+        if (wh) {
+          cur!.world = {
+            champions: wh.seasons.filter((s) => s.year === y0).map((s) => `${s.abbrev}:${s.championName}`),
+            intl: wh.international.filter((e) => e.year === y0).map((e) => `${e.kind}:${e.gold}/${e.silver}/${e.bronze}`),
+            careerRowsAdded: [...career.data.players.values()].filter((p) => p.careerHistory?.[0]?.year === y0).length,
+          }
         }
         reports.push(cur!)
         console.log(JSON.stringify(cur))

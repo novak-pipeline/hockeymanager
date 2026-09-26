@@ -97,8 +97,8 @@ export function youthProfileOf(comp: Pick<Competition, 'abbrev' | 'name'>): Leag
  * mix (see file header) given each nation's junior capacity in the world.
  */
 export const NATION_TALENT: Readonly<Record<string, number>> = {
-  'Canada': 1.75, 'Canada-QC': 1.5, 'United States': 1.05, 'Sweden': 1.45, 'Finland': 0.9,
-  'Russia': 0.55, 'Czechia': 0.75, 'Slovakia': 0.3, 'Germany': 0.25, 'Switzerland': 0.9,
+  'Canada': 1.85, 'Canada-QC': 1.55, 'United States': 1.05, 'Sweden': 1.9, 'Finland': 1.2,
+  'Russia': 0.35, 'Czechia': 0.75, 'Slovakia': 0.3, 'Germany': 0.25, 'Switzerland': 0.9,
   'Latvia': 0.55, 'Norway': 0.5, 'Denmark': 0.45, 'Austria': 0.4, 'Belarus': 0.6,
   'Kazakhstan': 0.3, 'Slovenia': 0.35,
 }
@@ -108,7 +108,7 @@ export const NATION_TALENT: Readonly<Record<string, number>> = {
  * world birth-cohort (~1,000 kids). Anchored to the real imported 2026 class.
  */
 const PA_QUANTILES: ReadonlyArray<readonly [number, number]> = [
-  [0, 97], [0.001, 91], [0.004, 84], [0.01, 76], [0.03, 66], [0.06, 60], [0.1, 55],
+  [0, 97], [0.001, 91], [0.004, 82], [0.01, 74], [0.03, 64], [0.06, 58], [0.1, 54],
   [0.2, 50], [0.35, 46], [0.5, 43], [0.75, 39], [0.9, 36], [1, 31],
 ]
 
@@ -258,6 +258,9 @@ export function runYouthIntake(args: {
   year: number
   rng: Rng
   nextId: () => PlayerId
+  /** Career start: the imported world has almost no 16–17-year-olds, so the
+   *  first intake seeds both cohorts at once (an even 16/17 split). */
+  bootstrap?: boolean
 }): IntakeResult {
   const { rng } = args
   const created: Player[] = []
@@ -272,13 +275,15 @@ export function runYouthIntake(args: {
     for (const tid of comp.teamIds) {
       const team = args.teams.get(tid)
       if (!team) continue
-      const n = Math.max(2, Math.min(8, prof.target - team.roster.length))
+      const n = args.bootstrap
+        ? Math.max(4, Math.min(10, prof.target + 2 - team.roster.length))
+        : Math.max(2, Math.min(8, prof.target - team.roster.length))
       // Keep the goalie pipeline alive: a club with <3 goalies takes one.
       let goalies = 0
       for (const pid of team.roster) if (args.players.get(pid)?.position === 'G') goalies++
       for (let i = 0; i < n; i++) {
         const poolKey = rng.chance(prof.importShare) ? weighted(rng, IMPORT_MIX) : weighted(rng, prof.mix)
-        const age = weighted(rng, prof.intakeAges)
+        const age = args.bootstrap ? (i % 2 === 0 ? 17 : 16) : weighted(rng, prof.intakeAges)
         const p = makeNewgen({
           rng, id: args.nextId(), year: args.year, age, poolKey, profile: prof, leagueKey, taken,
           ...(i === 0 && goalies < 3 ? { position: 'G' as const } : {}),

@@ -156,6 +156,10 @@ export class SimClient {
     return this.send({ type: 'getInternational' })
   }
 
+  getWorldHistory(): Promise<WorkerResponse> {
+    return this.send({ type: 'getWorldHistory' })
+  }
+
   getDraftRankings(): Promise<WorkerResponse> {
     return this.send({ type: 'getDraftRankings' })
   }
