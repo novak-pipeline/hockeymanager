@@ -791,6 +791,10 @@ function doFreeAgency(ctx: Ctx): void {
   noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
   const plan = getPlan(ctx)
   let remaining = hub.capSpace
+  // Offers are ASYNC: a tabled offer is a body that may arrive. Table only as
+  // many as there are open spots, counting the offers already out — a GM who
+  // took over a gutted roster tabled 31 at once and opened the season with 29.
+  let slots = 23 - (squad?.rosterCount ?? 23) - hub.rows.filter((r) => r.pendingOffer).length
   const affordable = hub.rows
     // A rebuilder doesn't hand term/money to win-now vets — only cheap young upside.
     .filter((r) => !r.pendingOffer && !r.inTalks && (plan !== 'rebuild' || r.age <= 25))
@@ -798,6 +802,7 @@ function doFreeAgency(ctx: Ctx): void {
   for (const fa of affordable.slice(0, 8)) {
     if (remaining < 1e6) break
     if (fa.askSalary > remaining) continue
+    if (slots <= 0) break
     if (hub.windowOpen) {
       const res = guarded(ctx, 'submitFaOffer', () => ctx.career.submitFaOffer(fa.playerId, fa.askSalary, fa.askYears))
       // Count the offer. Free agency went ASYNC (the camp answers days later), so
@@ -806,11 +811,11 @@ function doFreeAgency(ctx: Ctx): void {
       // says a busy GM did nothing is worse than no metric: it was about to be
       // read as a behaviour regression.
       const sa = ctx.trace.seasons.at(-1)
-      if (res?.ok && sa) { sa.signings++; remaining -= fa.askSalary }
+      if (res?.ok && sa) { sa.signings++; remaining -= fa.askSalary; slots-- }
       log(ctx, { kind: 'sign-fa', summary: `Tabled ${money(fa.askSalary)}×${fa.askYears} for UFA ${fa.name} (${fa.overall} OVR)`, drivers: ['roster spot open', `fits cap (${money(remaining)} left)`], result: res?.message ?? 'tabled', ok: !!res?.ok })
     } else {
       const res = trySign(ctx, remaining, fa.askSalary, () => ctx.career.signFreeAgent(fa.playerId, fa.askSalary, fa.askYears), 'signFreeAgent')
-      const s = ctx.trace.seasons.at(-1); if (res?.signed && s) { s.signings++; remaining -= fa.askSalary }
+      const s = ctx.trace.seasons.at(-1); if (res?.signed && s) { s.signings++; remaining -= fa.askSalary; slots-- }
       log(ctx, { kind: 'sign-fa', summary: `${res?.signed ? 'Signed' : 'Passed on'} UFA ${fa.name} (${fa.overall} OVR) ${fa.askYears}yr @ ${money(fa.askSalary)}`, drivers: ['roster spot open', 'best affordable body'], result: res?.message ?? 'no', ok: !!res?.signed })
     }
     if (remaining < 1e6) break

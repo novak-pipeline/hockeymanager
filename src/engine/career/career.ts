@@ -10715,7 +10715,12 @@ export class Career {
             ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
           })
         }
-        for (const id of split.demoted.slice(0, 6)) {
+        // Cut day must get the club to 23. Six verdicts is the usual camp, but a
+        // GM who took over a gutted roster in July and filled it (E3: a new job
+        // mid-summer) can arrive with far more; every surplus body needs a
+        // verdict or opening night dresses 28.
+        const mustCut = Math.max(0, team.roster.length + Math.min(6, split.promoted.length) - 23)
+        for (const id of split.demoted.slice(0, Math.max(6, mustCut))) {
           const p = this.data.players.get(id)
           if (!p) continue
           const waiver = this.requiresWaivers(p)
@@ -18210,13 +18215,19 @@ export class Career {
     const n = this.data.league.teams.length
     const rankOf = new Map<string, number>()
     sorted.forEach((s, i) => rankOf.set(s.teamId as string, i + 1))
-    let vacant = this.gmVacancies()
+    // An owner who fired him in the last five years does not hire him back —
+    // the calibration run found a GM rehired by the club that sacked him two
+    // summers earlier.
+    const firedBy = new Set(
+      gm.stints.filter((st) => st.endReason === 'fired' && (st.toYear ?? 0) >= this.year - 5).map((st) => st.teamId)
+    )
+    let vacant = this.gmVacancies().filter((tid) => !firedBy.has(tid))
     if (vacant.length === 0) {
-      const seats = this.gmSeats(sorted, false)
+      const seats = this.gmSeats(sorted, false).filter((st) => !firedBy.has(st.teamId))
       const seat = hottestGmSeat(seats, n)
       if (seat) {
         this.applyGmDismissal(buildDismissal(seat, 0, this.rngFor(Career.GM_CAROUSEL_NS, 2)))
-        vacant = this.gmVacancies()
+        vacant = this.gmVacancies().filter((tid) => !firedBy.has(tid))
       }
     }
     const openings = vacant.flatMap((tid) => {

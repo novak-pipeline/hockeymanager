@@ -133,3 +133,24 @@ describe('E3: the front-office carousel', () => {
     expect(internals.gmPersonas.filter(([, p]) => p.dismissedYear !== undefined)).toHaveLength(0)
   }, 180_000)
 })
+
+describe('E3: the club that sacked you does not hire you back', () => {
+  it('a vacancy at a club that fired him within five years is not on his market', () => {
+    const { career, internals } = toSeasonEnd(74)
+    const c = career as unknown as {
+      buildGMOpenings: (s: unknown) => Array<{ teamId: string }>
+      standings: Map<string, unknown>
+      gmStateInternal: { stints: Array<{ teamId: string; endReason?: string; toYear: number | null }> }
+    }
+    career.getGMProfile()
+    const other = career.getStandings().overall.map((r) => r.teamId).filter((t) => t !== (career.userTeamId as string))
+    const [sacker, open] = [other[0]!, other[1]!]
+    c.gmStateInternal.stints.unshift({ teamId: sacker, endReason: 'fired', toYear: career.year - 2 })
+    for (const tid of [sacker, open]) career.gmPersonaFor(tid as never).dismissedYear = career.year
+    const sorted = [...c.standings.values()]
+    const openings = c.buildGMOpenings(sorted.sort(() => 0)).map((o) => o.teamId)
+    expect(openings).toContain(open)
+    expect(openings).not.toContain(sacker)
+    void internals
+  }, 180_000)
+})
