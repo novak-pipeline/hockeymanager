@@ -15,6 +15,8 @@ export type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
 export type { BoardMeetingScene, MeetingAgendaItem, MeetingLine, MeetingOption, MeetingSpeaker } from '@engine/career/boardMeeting'
 import type { BoardMeetingScene } from '@engine/career/boardMeeting'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
+export type { BroadcastContext } from '@engine/story/broadcastStorylines'
+import type { BroadcastContext } from '@engine/story/broadcastStorylines'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 import type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
 export type {
@@ -364,6 +366,9 @@ export type WorkerRequestBody =
   | { type: 'getMatchDayPreview' }
   /** B6.2: postgame receipts for the latest user game (score, stars, turning point). */
   | { type: 'getPostgameReceipt' }
+  /** Broadcast package (additive): the watched game's pregame context —
+   *  lineups, season lines and earned storylines, built before the sim ran. */
+  | { type: 'getBroadcastContext' }
   /* ── mutations ── */
   | { type: 'setLines'; lines: LinesUpdate }
   | { type: 'setTactics'; tactics: TeamTactics }
@@ -660,6 +665,8 @@ export type WorkerResponse = { id: number } & (
   | { type: 'matchDayPreview'; preview: MatchDayPreviewView | null }
   /** B6.2: null when the latest advance didn't play a user game. */
   | { type: 'postgameReceipt'; receipt: PostgameReceiptView | null }
+  /** Broadcast package: null when no watched game has been played. */
+  | { type: 'broadcastContext'; context: BroadcastContext | null }
   /** Result of a trade proposal: AI verdict, possibly a counter-offer. */
   | { type: 'tradeEvaluation'; evaluation: TradeEvaluation }
   /** Your assistant GM's live read as you build a package (advice, not an answer). */

@@ -239,12 +239,20 @@ import {
 } from '@engine/story/records'
 import {
   canClaimFirstGoal,
+  DEBUT_PLAUSIBLE_MAX_AGE,
   detectHistoryLeagueLabel,
   hasImportedHistory,
   importedCareerIn,
   isTrueRookieSeason,
   type ImportedCareer,
 } from '@engine/story/careerLedger'
+import {
+  detectStorylines,
+  type BroadcastContext,
+  type BroadcastLineup,
+  type BroadcastPlayer,
+  type PlayerStoryFacts,
+} from '@engine/story/broadcastStorylines'
 import {
   buildBiography,
   splitClubName,
@@ -1212,6 +1220,14 @@ export class Career {
   /** B6.2: the latest user game presented as postgame receipts (transient —
    *  consumed by the processing overlay right after the advance). */
   private lastReceipt: PostgameReceiptView | null = null
+  /** Broadcast package: the watched game's pregame context (lineups, season
+   *  lines, EARNED storylines), built BEFORE the sim runs so every count is
+   *  "before tonight". Transient — fetched once via getBroadcastContext(). */
+  private lastBroadcast: BroadcastContext | null = null
+  /** Players cleared from a long layoff whose first game back is still ahead:
+   *  id → rust counter at clearance. Transient (not serialized): after a load the
+   *  worst case is a missed "back in the lineup" card, never a false one. */
+  private readonly awaitingReturnGame = new Map<string, number>()
   /** Box scores for every played user game this season (calendar click-through). */
   private boxScoreHistory: Array<[string, BoxScoreView]> = []
   private readonly resignStatus = new Map<PlayerId, ResignStatus>()
@@ -6694,7 +6710,13 @@ export class Career {
     const recovery = tickRecovery({ players: this.data.players.values(), playedToday: played, rng: dayRng })
     // A cleared injury on your club: note the return, and flag if he'll be
     // shaking off rust for a few games (a long layoff carries match rust).
+    // Broadcast "back in the lineup": forget anyone who has since played (his
+    // rust counter moved) before noting today's fresh returns.
+    for (const [id, rust] of this.awaitingReturnGame) {
+      if (this.data.players.get(asPlayerId(id))?.rustGames !== rust) this.awaitingReturnGame.delete(id)
+    }
     for (const ret of recovery.returns) {
+      this.awaitingReturnGame.set(ret.id as string, ret.rustGames)
       if (this.teamOf(ret.id) !== this.userTeamId) continue
       const p = this.data.players.get(ret.id)
       if (!p) continue
@@ -7454,11 +7476,14 @@ export class Career {
     let watched: WatchedGame | null = null
     const played = new Set<PlayerId>()
     const outcomes: GameOutcome[] = []
+    this.lastBroadcast = null
     for (const game of this.data.league.schedule) {
       if (game.day !== nextDay) continue
       const home = this.data.teams.get(game.homeTeamId)!
       const away = this.data.teams.get(game.awayTeamId)!
       const isUser = game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId
+      // Broadcast context BEFORE the sim, so every count is "before tonight".
+      if (isUser) this.lastBroadcast = this.buildBroadcastContext(game.homeTeamId, game.awayTeamId, nextDay, false)
       const sim = isUser ? fullSimGame : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
@@ -7689,6 +7714,7 @@ export class Career {
       const away = this.data.teams.get(g.awayTeamId)!
       const isUser = g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId
       const seed = gameSeed(this.seed, this.year, `${g.seriesId}-g${g.gameNumber}`)
+      if (isUser && watchUser) this.lastBroadcast = this.buildBroadcastContext(g.homeTeamId, g.awayTeamId, day, true)
       const sim = isUser && watchUser ? fullSimGame : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed,
@@ -16785,6 +16811,203 @@ export class Career {
     if (window.length < 3) return null
     const last = window.slice(-5)
     return last.reduce((s, r) => s + r, 0) / last.length
+  }
+
+  /* ─────────────────────── broadcast package (pregame context) ─────────────────────── */
+
+  /** The watched game's broadcast context (null when none was built). */
+  getBroadcastContext(): BroadcastContext | null {
+    return this.lastBroadcast
+  }
+
+  /** Dressed tonight, in TV order: lines (C, LW, RW), pairs, starting goalie. */
+  private dressedIds(team: Team): string[] {
+    const ids: string[] = []
+    const add = (id: PlayerId | undefined | null): void => {
+      if (id && !ids.includes(id as string)) ids.push(id as string)
+    }
+    for (const line of team.lines.forwards) { add(line[1]); add(line[0]); add(line[2]) }
+    for (const pair of team.lines.defensePairs) { add(pair[0]); add(pair[1]) }
+    add(team.lines.goalies[0])
+    return ids
+  }
+
+  /**
+   * Is this man's NHL career one the broadcast may make claims about? Same
+   * evidence rule as the first-goal beat (careerLedger.ts): the imported history
+   * covers him, or the sim archived NHL seasons for him, or he's young enough
+   * that nothing can be hiding.
+   */
+  private careerKnownFor(p: Player): boolean {
+    if (this.importedCareerOf(p) !== null) return true
+    if (p.stats.some((s) => s.league !== 'ahl' && s.gamesPlayed > 0)) return true
+    return p.age <= DEBUT_PLAUSIBLE_MAX_AGE && !hasImportedHistory(p)
+  }
+
+  /** The club he most recently left, with enough to judge a homecoming. */
+  private formerClubFacts(p: Player, currentTeamId: TeamId, oppId: TeamId, homeId: TeamId): PlayerStoryFacts['formerClub'] {
+    const opp = this.data.teams.get(oppId)
+    if (!opp) return undefined
+    let leftTeamId: string | null = null
+    let leftYear = -1
+    let via: 'trade' | 'signing' = 'trade'
+    const prov = this.chronicle.provenance.find(([id]) => id === (p.id as string))?.[1]
+    if (prov && prov.acquisitions.length > 0) {
+      const last = prov.acquisitions[prov.acquisitions.length - 1]!
+      if (last.teamId === (currentTeamId as string)) {
+        if (last.fromTeamId) { leftTeamId = last.fromTeamId; via = last.via === 'signing' ? 'signing' : 'trade' }
+        else if (prov.acquisitions.length > 1) { leftTeamId = prov.acquisitions[prov.acquisitions.length - 2]!.teamId; via = 'signing' }
+        leftYear = last.year
+      }
+    }
+    // Imported history: he arrived before the save began. The newest NHL row
+    // naming a different club is the one he left.
+    const label = this.historyLeagueLabel()
+    if (leftTeamId === null && label !== null && p.careerHistory && p.careerHistory.length > 0) {
+      const cur = this.data.teams.get(currentTeamId)
+      const rows = p.careerHistory.filter((h) => h.league === label).sort((a, b) => b.year - a.year)
+      const newest = rows[0]
+      if (cur && newest && newest.club !== cur.name && newest.club === opp.name && this.year - newest.year <= 1) {
+        leftTeamId = oppId as string
+        leftYear = this.year
+        via = 'trade'
+      }
+    }
+    if (leftTeamId !== (oppId as string)) return undefined
+    // Tenure with the old club: imported rows by name + sim seasons by id.
+    let tenureGames = 0
+    if (label !== null) for (const h of p.careerHistory ?? []) if (h.league === label && h.club === opp.name) tenureGames += h.gamesPlayed
+    for (const s of p.stats) if (s.league !== 'ahl' && s.teamId === (oppId as string)) tenureGames += s.gamesPlayed
+    // First visit: no completed game this season at the old building with his
+    // current club as the visitor. Conservative — a meeting before his move
+    // also suppresses the ceremony (a missed ovation beats a false one).
+    const firstVisitSinceLeaving = !this.data.league.schedule.some(
+      (g) => g.result !== undefined && g.result !== null &&
+        g.homeTeamId === oppId && g.awayTeamId === currentTeamId,
+    ) && !(this.playoffs?.rounds.some((r) => r.series.some((s) => s.games.some(
+      (g) => g.homeTeamId === oppId && g.awayTeamId === currentTeamId,
+    ))) ?? false)
+    return {
+      teamName: opp.name,
+      isTonightsHome: oppId === homeId,
+      isTonightsOpponent: true,
+      tenureGames,
+      leftYear,
+      firstVisitSinceLeaving,
+      via,
+    }
+  }
+
+  /**
+   * Build tonight's broadcast context BEFORE the full sim runs, so season lines
+   * and career counts are "before tonight". Storylines are decided by the pure
+   * detectStorylines() from facts gathered here.
+   */
+  private buildBroadcastContext(homeId: TeamId, awayId: TeamId, day: number, playoff: boolean): BroadcastContext | null {
+    const home = this.data.teams.get(homeId)
+    const away = this.data.teams.get(awayId)
+    if (!home || !away) return null
+    const players: Record<string, BroadcastPlayer> = {}
+    const facts: PlayerStoryFacts[] = []
+
+    const sideFor = (team: Team, side: 'home' | 'away'): BroadcastLineup => {
+      const ids = this.dressedIds(team)
+      const oppId = side === 'home' ? awayId : homeId
+      for (const id of ids) {
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p) continue
+        const t = this.totals.get(p.id)
+        const g = t?.goals ?? 0
+        const a = t?.assists ?? 0
+        const isG = p.position === 'G'
+        let seasonLine: string
+        if (isG) {
+          const sv = t && t.shotsAgainst > 0 ? `.${Math.round((t.saves / t.shotsAgainst) * 1000).toString().padStart(3, '0')}` : '—'
+          seasonLine = `${sv} SV% · ${this.goalieWins.get(p.id) ?? 0}-${this.goalieLosses.get(p.id) ?? 0}`
+        } else {
+          seasonLine = `${g} G · ${a} A · ${g + a} P`
+        }
+        const known = this.careerKnownFor(p)
+        const career = this.careerTotalsOf(p.id)
+        players[id] = {
+          id,
+          name: p.name,
+          side,
+          position: p.position,
+          seasonLine,
+          seasonGoals: g,
+          seasonAssists: a,
+          ...(isG ? { seasonSaves: t?.saves ?? 0 } : {}),
+          ...(known ? { careerGoalsBefore: career.goals } : {}),
+          ...(p.jerseyNumber !== undefined ? { jerseyNumber: p.jerseyNumber } : {}),
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
+          ...(p.pronunciation !== undefined ? { pronunciation: p.pronunciation } : {}),
+          ...(team.captainId === p.id ? { captain: true } : {}),
+        }
+        const rust = this.awaitingReturnGame.get(id)
+        const formerClub = this.formerClubFacts(p, team.id, oppId, homeId)
+        facts.push({
+          id,
+          name: p.name,
+          age: p.age,
+          position: p.position,
+          side,
+          ...(isG ? { isStartingGoalie: team.lines.goalies[0] === p.id } : {}),
+          career: { goals: career.goals, points: career.points, gamesPlayed: career.gamesPlayed },
+          careerKnown: known,
+          ...(rust !== undefined && p.rustGames === rust && p.injuryStatus === null ? { firstGameBackFromInjury: true } : {}),
+          ...(formerClub ? { formerClub } : {}),
+        })
+      }
+      const st = this.standings.get(team.id)
+      return {
+        starters: [...ids.slice(0, 3), ...team.lines.defensePairs.flatMap((pr) => pr.map((x) => x as string)).slice(0, 2), ...(team.lines.goalies[0] ? [team.lines.goalies[0] as string] : [])]
+          .filter((x, i, arr) => x && arr.indexOf(x) === i && players[x] !== undefined),
+        goalieId: (team.lines.goalies[0] as string | undefined) ?? null,
+        record: st ? `${st.wins}-${st.losses}-${st.overtimeLosses}` : '0-0-0',
+      }
+    }
+    const homeLineup = sideFor(home, 'home')
+    const awayLineup = sideFor(away, 'away')
+
+    // Defending champion: the newest season on the record book (sim-won, or the
+    // imported real past) — and only if that season was the one just finished.
+    const seasons = this.recordsState.seasons
+    const lastSeason = seasons.length > 0 ? seasons.reduce((a, b) => (b.year > a.year ? b : a)) : null
+    const homeIsDefendingChampion =
+      !!lastSeason && lastSeason.year >= this.year - 1 &&
+      (lastSeason.championTeamId === (homeId as string) || lastSeason.championName === home.name)
+    const homeOpener = !playoff && !this.data.league.schedule.some(
+      (g) => g.homeTeamId === homeId && g.result !== undefined && g.result !== null && g.day < day,
+    )
+
+    return {
+      gameKey: `${this.year}:${day}:${homeId as string}:${awayId as string}`,
+      year: this.year,
+      playoff,
+      arenaName: home.arena ?? null,
+      homeTeamId: homeId as string,
+      awayTeamId: awayId as string,
+      homeName: home.name,
+      awayName: away.name,
+      homeAbbr: home.abbreviation,
+      awayAbbr: away.abbreviation,
+      homeColors: { ...home.colors },
+      awayColors: { ...away.colors },
+      home: homeLineup,
+      away: awayLineup,
+      players,
+      storylines: detectStorylines({
+        year: this.year,
+        playoff,
+        homeName: home.name,
+        homeIsDefendingChampion,
+        homeOpener,
+        ...(lastSeason && homeIsDefendingChampion ? { championshipYear: lastSeason.year } : {}),
+        players: facts,
+      }),
+    }
   }
 
   /**

@@ -166,6 +166,9 @@ export interface ModPlayer {
   jerseyNumber?: number
   heightCm?: number
   weightKg?: number
+  /** Optional broadcast respelling ("MAR-tin NEH-chahs" or "NEH-chahs") — how
+   *  the commentary booth says the name. See docs/BROADCAST-PACKAGE.md. */
+  pronunciation?: string
 
   /**
    * Extended EHM-sourced gameplay attributes (1–99). Absent on thin/fictional
@@ -1048,6 +1051,7 @@ function bioFields(mp: ModPlayer): Partial<Player> {
     ...(mp.jerseyNumber !== undefined ? { jerseyNumber: mp.jerseyNumber } : {}),
     ...(mp.heightCm !== undefined ? { heightCm: mp.heightCm } : {}),
     ...(mp.weightKg !== undefined ? { weightKg: mp.weightKg } : {}),
+    ...(typeof mp.pronunciation === 'string' && mp.pronunciation.trim() !== '' ? { pronunciation: mp.pronunciation.trim() } : {}),
     // Extended EHM gameplay attributes (1–99)
     ...(mp.injuryProneness !== undefined ? { injuryProneness: mp.injuryProneness } : {}),
     ...(mp.naturalFitness !== undefined ? { naturalFitness: mp.naturalFitness } : {}),

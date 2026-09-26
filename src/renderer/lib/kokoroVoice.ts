@@ -273,6 +273,29 @@ export function getKokoroEngine(): VoiceEngine | null {
   return _engine
 }
 
+/** The transport serving synthesis once loaded (for raw clip rendering). */
+let _transport: SynthTransport | null = null
+
+/**
+ * Broadcast package: render ONE clip to raw PCM on the voice WORKER, without
+ * playing it and without any fallback — used to pre-render the booth's player-
+ * name clips before puck drop (src/renderer/lib/commentaryAudio.ts). Returns
+ * null when the model isn't loaded, when synthesis would run on the main thread
+ * (it would freeze the match), or on any failure. Never touches the system voice.
+ */
+export async function renderClipPcm(
+  text: string, voice: string, speed: number,
+): Promise<{ pcm: Float32Array; sampleRate: number } | null> {
+  const t = _transport
+  if (!t || t.kind !== 'worker') return null
+  try {
+    const raw = await t.synth(text, voice, speed)
+    return { pcm: raw.audio, sampleRate: raw.sampling_rate }
+  } catch {
+    return null
+  }
+}
+
 // ── Internal loader ────────────────────────────────────────────────────────
 
 async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngine> {
@@ -281,6 +304,7 @@ async function _doLoad(onProgress?: (info: unknown) => void): Promise<VoiceEngin
       const t = new WorkerTransport()
       await t.load(onProgress)
       _transportName = 'worker'
+      _transport = t
       return new KokoroVoiceEngine(t)
     } catch (err) {
       // A worker that won't start (or a model load that failed inside it) must

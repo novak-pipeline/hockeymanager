@@ -340,6 +340,26 @@ export class RinkRenderer implements MatchRenderer {
     this.emit()
   }
 
+  /**
+   * Broadcast package (BroadcastProjector): where a player is on screen right
+   * now, in CSS px relative to the host element — for world-anchored overlays
+   * like the on-ice goal tag. Not part of the frozen MatchRenderer contract.
+   */
+  projectPlayer(playerId: string): { x: number; y: number } | null {
+    if (!this.timeline) return null
+    const s = this.timeline.sampleAt(this.clockPos)
+    if (!s) return null
+    let at: { x: number; y: number } | null = null
+    const hi = s.homeIds?.indexOf(playerId as never) ?? -1
+    if (hi >= 0) at = s.home[hi] ?? null
+    const ai = at ? -1 : s.awayIds?.indexOf(playerId as never) ?? -1
+    if (ai >= 0) at = s.away[ai] ?? null
+    if (!at && s.homeGoalieId === playerId) at = s.homeGoalie
+    if (!at && s.awayGoalieId === playerId) at = s.awayGoalie
+    if (!at) return null
+    return { x: this.mx(at.x), y: this.my(at.y) }
+  }
+
   resize(): void {
     const parent = this.app.canvas.parentElement
     if (!parent) return

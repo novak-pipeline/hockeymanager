@@ -126,6 +126,11 @@ export interface Player {
   jerseyNumber?: number
   heightCm?: number
   weightKg?: number
+  /** Broadcast booth respelling of the name ("MAR-tin NEH-chahs", or just the
+   *  surname "NEH-chahs"): hyphenated syllables, stressed syllable in caps.
+   *  Optional, mod-supplied, display/audio only. See
+   *  src/render2d/broadcast/pronunciation.ts. */
+  pronunciation?: string
 
   /**
    * Extended EHM-sourced attributes (1–99 each). Loaded by mods that supply
