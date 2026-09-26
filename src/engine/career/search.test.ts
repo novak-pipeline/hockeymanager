@@ -901,7 +901,9 @@ describe('trade counter-offers (DEPTH 3)', () => {
     let counter: ReturnType<Career['getTrades']>['incoming'][number] | undefined
     for (let g = 0; g < 6 && !counter; g++) {
       c.advanceOffseason()
-      counter = c.getTrades().incoming.find((o) => /Add /.test(o.message))
+      // Counters carry a `c`-prefixed offer id (buildCounterOffer). The message
+      // itself is authored dialogue now, so it can't be pattern-matched.
+      counter = c.getTrades().incoming.find((o) => o.offerId.startsWith('c'))
     }
     expect(counter).toBeTruthy()
     // The counter asks for MORE than the original one-player offer.

@@ -314,6 +314,24 @@ import {
 } from './livingLedger'
 import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
 import { oneSentence, prosaicList, renderStable } from '@engine/story/prose'
+import {
+  speakTradeLine,
+  talkPersona,
+  talkRapport,
+  type TalkBeat,
+  type TalkCtx,
+  type TalkSlots,
+} from '@engine/story/tradeTalk'
+import {
+  advanceThread,
+  inCoolOff,
+  openThread,
+  pruneThreads,
+  threadKey,
+  threadStage,
+  walkThread,
+  type TradeThread,
+} from './tradeThread'
 import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionEffects } from '@engine/story/decisionEvents'
 import {
   ARRIVAL_EVENTS,
@@ -1105,7 +1123,20 @@ export class Career {
   /** #184: trade proposals the AI GM has taken "under advisement" — real GMs
    *  don't answer serious offers on the spot. Each resolves after a short
    *  deliberation (accept → execute, or counter), delivered by inbox. */
-  private pendingTrades: Array<{ proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number; daysLeft: number }> = []
+  private pendingTrades: Array<{
+    proposal: TradeProposal
+    verdict: 'accept' | 'counter'
+    counterAskValue: number
+    daysLeft: number
+    /** Which conversation this belongs to, and how it moved — captured when the
+     *  package arrived so the answer days later still knows the history. */
+    threadKey?: string | undefined
+    moved?: TalkCtx['moved'] | undefined
+    gapBand?: TalkCtx['gap'] | undefined
+  }> = []
+  /** Live trade conversations — round, positions, movement, patience. What lets
+   *  a rival GM's second call reference his first instead of starting over. */
+  private tradeThreads: TradeThread[] = []
   private offerCounter = 0
   private history: SeasonSummary[] = []
   private lastBoxScore: BoxScoreView | null = null
@@ -6415,13 +6446,14 @@ export class Career {
         userDeadCap: this.userDeadCap,
       })
       for (const o of offers) {
+        this.voiceIncomingOffer(o)
         this.tradeOffers.push(o)
         const partner = this.data.teams.get(o.partnerTeamId)!
         const gm = this.gmPersonaFor(o.partnerTeamId)
         this.pushNews(
           'trade',
           `Trade offer from ${partner.abbreviation}`,
-          `${gm.name} (${gm.styleLabel}) is on the phone. ${o.message}`,
+          `${gm.name} (${gm.styleLabel}) is on the phone: “${o.message}”`,
           { teamId: o.partnerTeamId as string }
         )
       }
@@ -13344,18 +13376,228 @@ export class Career {
     })
 
     // Map the verdict to a NON-BINDING interest phrasing. Even "accept" reads as
-    // "worth a serious look", never a promise.
+    // "worth a serious look", never a promise. The words come from the authored
+    // pools and know what round of this conversation you are on — gauging the
+    // same club a third time should not get you the first answer again.
     if (evaln.verdict === 'reject' && evaln.counterAskValue <= 0) {
       // Hard dealbreaker (NTC / cap / roster-gutting) — surface the concrete reason.
       return { gmName, lean: 'blocked', line: `${gmName}: "${evaln.message}"` }
     }
-    if (evaln.verdict === 'accept') {
-      return { gmName, lean: 'warm', line: `${gmName}: "This definitely deserves a look — put it in front of me and I’ll give it real thought."` }
+    const lean: 'warm' | 'tepid' | 'cool' =
+      evaln.verdict === 'accept' ? 'warm' : evaln.verdict === 'counter' ? 'tepid' : 'cool'
+    const gKey = threadKey(partnerId as string, proposal.receivePlayerIds, proposal.receivePickIds)
+    const gThread = this.tradeThreads.find((t) => t.key === gKey) ?? null
+    // A read must NOT mutate: no thread is opened and no ledger entry is spent,
+    // so repeated gauges of the same package answer identically (it is one
+    // question, asked twice) while a different package gets different words.
+    const said = this.sayTrade({
+      beat: 'gauge',
+      partnerId,
+      ctx: this.talkCtx({ beat: 'gauge', partnerId, thread: gThread, lean }),
+      slots: this.talkSlots(partnerId, {
+        target: receive.players[0]?.name ?? 'this one',
+      }),
+      seedKey: `${gKey}#${stableKey}`,
+      persist: false,
+    })
+    return { gmName, lean, line: `${gmName}: "${said}"` }
+  }
+
+  /* ───────────────── negotiation threads + spoken dialogue ─────────────────
+   * A trade is a conversation with memory. The thread remembers the round,
+   * both sides' last positions, whether HE moved, and how much patience is
+   * left; tradeTalk.ts turns that into what he actually says. The engine still
+   * owns every number — this only chooses the voice.
+   */
+
+  /** Stable numeric key for seeding off a thread id. */
+  private static keyNum(s: string): number {
+    let h = 0
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+    return h
+  }
+
+  /** Deadline week — the register changes when the clock is the loudest thing
+   *  in the room. */
+  private deadlineSoon(): boolean {
+    if (this.phase !== 'regularSeason') return false
+    const left = this.deadlineDay - this.currentDay
+    return left >= 0 && left <= 7
+  }
+
+  /** The live thread for this conversation, opened on first contact. */
+  private threadFor(key: string, partnerId: TeamId, targetValue: number): TradeThread {
+    const found = this.tradeThreads.find((t) => t.key === key)
+    if (found) return found
+    const opened = openThread({
+      key,
+      partnerTeamId: partnerId as string,
+      day: this.currentDay,
+      year: this.year,
+      targetValue,
+      persona: this.gmPersonaFor(partnerId),
+    })
+    this.tradeThreads.push(opened)
+    // Bounded: every AI cold-call opens one of these, so prune on the way in
+    // as well as on the way out.
+    this.tradeThreads = pruneThreads(this.tradeThreads, { day: this.currentDay, year: this.year })
+    return opened
+  }
+
+  private storeThread(t: TradeThread): void {
+    const i = this.tradeThreads.findIndex((x) => x.key === t.key)
+    if (i >= 0) this.tradeThreads[i] = t
+    else this.tradeThreads.push(t)
+    this.tradeThreads = pruneThreads(this.tradeThreads, { day: this.currentDay, year: this.year })
+  }
+
+  /** Is the user reaching for this club's single best player? */
+  private chasingCore(partnerId: TeamId, receivePlayerIds: readonly PlayerId[]): boolean {
+    if (receivePlayerIds.length === 0) return false
+    const partner = this.data.teams.get(partnerId)
+    if (!partner) return false
+    let bestId: string | null = null
+    let best = -1
+    for (const id of partner.roster) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      const ovr = ratedOverall(p)
+      if (ovr > best) { best = ovr; bestId = p.id as string }
     }
-    if (evaln.verdict === 'counter') {
-      return { gmName, lean: 'tepid', line: `${gmName}: "There might be something here, but you’d have to sweeten it — send it and I’ll tell you what I’d need."` }
+    return bestId !== null && receivePlayerIds.some((id) => (id as string) === bestId)
+  }
+
+  /** Build the dialogue state a line is selected on. */
+  private talkCtx(args: {
+    beat: TalkBeat
+    partnerId: TeamId
+    thread?: TradeThread | null | undefined
+    moved?: TalkCtx['moved'] | undefined
+    gap?: TalkCtx['gap'] | undefined
+    chasingCore?: boolean | undefined
+    lean?: TalkCtx['lean'] | undefined
+  }): TalkCtx {
+    const gm = this.gmPersonaFor(args.partnerId)
+    const t = args.thread ?? null
+    return {
+      beat: args.beat,
+      round: Math.max(1, t?.round ?? 1),
+      persona: talkPersona(gm),
+      moved: args.moved ?? 'opening',
+      gap: args.gap ?? 'real',
+      concessions: t?.concessions ?? 0,
+      stalls: t?.stalls ?? 0,
+      rapport: talkRapport(this.relationshipWith(args.partnerId as string)),
+      deadline: this.deadlineSoon(),
+      chasingCore: args.chasingCore ?? false,
+      lean: args.lean ?? 'none',
     }
-    return { gmName, lean: 'cool', line: `${gmName}: "We’re not close on this one. It’d take a lot more coming back before I’d bite."` }
+  }
+
+  /** "Ruiz", "Ruiz and your 2027 second", "Ruiz, Kane and a third". */
+  private static assetPhrase(names: readonly string[]): string {
+    if (names.length === 0) return 'a sweetener'
+    if (names.length === 1) return names[0]!
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]!}`
+  }
+
+  /**
+   * Say it. Seeded on (thread, round, beat) so the same moment of the same
+   * conversation always produces the same words — and the no-repeat ledger
+   * keeps a season from ever hearing one twice. `persist: false` is for the
+   * non-binding gauge, which the UI asks for on every package change and must
+   * not burn pool freshness.
+   */
+  private sayTrade(args: {
+    beat: TalkBeat
+    partnerId: TeamId
+    ctx: TalkCtx
+    slots: TalkSlots
+    seedKey: string
+    persist?: boolean | undefined
+  }): string {
+    const persist = args.persist !== false
+    const rng = this.rngFor(
+      7014,
+      Career.keyNum(args.seedKey),
+      Career.keyNum(args.beat),
+      args.ctx.round,
+      persist ? this.currentDay : 0,
+    )
+    return speakTradeLine({
+      ctx: args.ctx,
+      slots: args.slots,
+      rng,
+      year: this.year,
+      day: this.currentDay,
+      ...(persist ? { ledger: this.contentLedger } : {}),
+    })
+  }
+
+  /** Slot fill shared by every trade beat. */
+  private talkSlots(partnerId: TeamId, over: Partial<TalkSlots>): TalkSlots {
+    const partner = this.data.teams.get(partnerId)
+    return {
+      target: over.target ?? 'this one',
+      ask: over.ask ?? 'a bit more',
+      package: over.package ?? 'what we have',
+      need: over.need ?? 'lineup',
+      team: over.team ?? partner?.name ?? 'the club',
+      short: over.short ?? 'a fair bit',
+    }
+  }
+
+  /**
+   * Re-voice an AI-initiated offer as something a GM would actually SAY on the
+   * phone. The generator builds the package (the numbers are its business);
+   * this puts first-person words around it — the living phone reads this line
+   * aloud, so third-person prose ("Nashville are after X") was never right.
+   * Also opens the conversation at round one, so his next call can remember it.
+   */
+  private voiceIncomingOffer(o: StoredTradeOffer): void {
+    const target = o.userGivesPlayerIds[0]
+      ? this.data.players.get(o.userGivesPlayerIds[0]!)
+      : undefined
+    if (!target) return
+    const NEED: Record<string, string> = { F: 'forward group', D: 'blue line', G: 'crease' }
+    const group = target.position === 'G' ? 'G' : target.position === 'D' ? 'D' : 'F'
+    const pkg = Career.assetPhrase([
+      ...o.userReceivesPlayerIds.map((id) => this.data.players.get(id)?.name ?? 'a player'),
+      ...o.userReceivesPicks.map((pk) => `their ${pk.year} round-${pk.round} pick`),
+    ])
+    const key = threadKey(
+      o.partnerTeamId as string,
+      o.userReceivesPlayerIds.map((id) => id as string),
+      o.userReceivesPicks.map((pk) => this.pickId(pk)),
+    )
+    const thread = this.threadFor(key, o.partnerTeamId, playerValue(target))
+    o.message = this.sayTrade({
+      beat: 'pitch',
+      partnerId: o.partnerTeamId,
+      ctx: this.talkCtx({
+        beat: 'pitch',
+        partnerId: o.partnerTeamId,
+        thread,
+        chasingCore: false,
+      }),
+      slots: this.talkSlots(o.partnerTeamId, {
+        target: target.name,
+        package: pkg,
+        need: NEED[group] ?? 'lineup',
+      }),
+      seedKey: `${key}#${o.offerId}`,
+    })
+  }
+
+  /** Total trade value of one side of a package. */
+  private packageValue(playerIds: readonly PlayerId[], picks: readonly DraftPick[]): number {
+    let v = 0
+    for (const id of playerIds) {
+      const p = this.data.players.get(id)
+      if (p) v += playerValue(p)
+    }
+    for (const pk of picks) v += pickValue(pk, { year: this.year })
+    return v
   }
 
   proposeTrade(proposal: TradeProposal): TradeEvaluation {
@@ -13395,6 +13637,28 @@ export class Career {
     const waivedNtcIds = new Set(
       give.players.filter((p) => p.contract.noTradeClause).map((p) => p.id as string),
     )
+    // The conversation this proposal belongs to. If he walked away from this
+    // exact pursuit, he isn't picking up yet — and he says so in his own voice.
+    const tKey = threadKey(partnerId as string, proposal.receivePlayerIds, proposal.receivePickIds)
+    const targetValue = this.packageValue(
+      receive.players.map((p) => p.id),
+      receive.picks,
+    )
+    const thread = this.threadFor(tKey, partnerId, targetValue)
+    if (inCoolOff(thread, this.currentDay)) {
+      const chased = receive.players[0]?.name ?? 'that deal'
+      return {
+        verdict: 'reject',
+        counter: null,
+        message: this.sayTrade({
+          beat: 'cooloff',
+          partnerId,
+          ctx: this.talkCtx({ beat: 'cooloff', partnerId, thread }),
+          slots: this.talkSlots(partnerId, { target: chased }),
+          seedKey: tKey,
+        }),
+      }
+    }
     const nonRosterIds = this.farmIdsIn(give.players, receive.players, partnerId)
     const rng = this.rngFor(7006, this.currentDay, this.offerCounter)
     const evaln = evaluateProposal({
@@ -13416,11 +13680,106 @@ export class Career {
         deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
       },
     })
+    // The package has landed on his desk: fold this round into the conversation
+    // now, while the numbers are live. What he SAYS — today or days later —
+    // reads off this. A hard blocker (NTC / cap / nothing of substance) carries
+    // no value gap and isn't a round of anything, so it doesn't count.
+    const giveValue = this.packageValue(give.players.map((p) => p.id), give.picks)
+    const advanced =
+      evaln.counterAskValue > 0
+        ? advanceThread(thread, {
+            gap: evaln.counterAskValue,
+            giveValue,
+            day: this.currentDay,
+            year: this.year,
+          })
+        : { thread, moved: 'opening' as const, gap: 'wide' as const }
+    if (evaln.counterAskValue > 0) this.storeThread(advanced.thread)
+    const chasedName = receive.players[0]?.name ?? 'this one'
+    const core = this.chasingCore(partnerId, receive.players.map((p) => p.id))
+
     // #184 fast-no: a clear non-starter (NTC / cap-impossible / lowball with no
     // counter to be had) bounces back on the spot — real GMs say no to those
-    // instantly.
+    // instantly. Keep hurling lowballs at him and he stops taking the call.
     if (evaln.verdict === 'reject' || (evaln.verdict === 'counter' && evaln.counterAskValue <= 0)) {
-      return { verdict: 'reject', message: evaln.message, counter: null }
+      if (evaln.counterAskValue > 0 && threadStage(advanced.thread) === 'walk') {
+        this.storeThread(walkThread(advanced.thread, this.currentDay, this.deadlineSoon()))
+        this.adjustRelationship(partnerId as string, -3)
+        return {
+          verdict: 'reject',
+          counter: null,
+          message: this.sayTrade({
+            beat: 'walk',
+            partnerId,
+            ctx: this.talkCtx({
+              beat: 'walk', partnerId, thread: advanced.thread,
+              moved: advanced.moved, gap: advanced.gap, chasingCore: core,
+            }),
+            slots: this.talkSlots(partnerId, { target: chasedName }),
+            seedKey: tKey,
+          }),
+        }
+      }
+      // The shortfall figure stays the ENGINE's; only the delivery is authored.
+      // A blocker with no percentage in it (no-trade clause, cap, "nothing of
+      // substance") is a concrete fact the GM needs verbatim — leave it alone.
+      const pct = /(\d+)%/.exec(evaln.message)
+      if (!pct) return { verdict: 'reject', message: evaln.message, counter: null }
+      return {
+        verdict: 'reject',
+        counter: null,
+        message: this.sayTrade({
+          beat: 'shortfall',
+          partnerId,
+          ctx: this.talkCtx({
+            beat: 'shortfall', partnerId, thread: advanced.thread,
+            moved: advanced.moved, gap: advanced.gap, chasingCore: core,
+          }),
+          slots: this.talkSlots(partnerId, { target: chasedName, short: `${pct[1]}%` }),
+          seedKey: tKey,
+        }),
+      }
+    }
+    // A 'counter' the user cannot actually cover is not a live counter: the
+    // partner wants more than your remaining, cap-legal assets can add. Rather
+    // than take it "under advisement" and then pass in silence two days later
+    // (which left a whole pursuit stuck on "he's weighing it" forever), he tells
+    // you now that you're short — and the pursuit ages toward a walk on repeats,
+    // exactly as a lowball does. Answered inline in his own voice.
+    if (evaln.verdict === 'counter' && !this.canBuildCounterOffer(give, receive, evaln.counterAskValue)) {
+      if (threadStage(advanced.thread) === 'walk') {
+        this.storeThread(walkThread(advanced.thread, this.currentDay, this.deadlineSoon()))
+        this.adjustRelationship(partnerId as string, -3)
+        return {
+          verdict: 'reject',
+          counter: null,
+          message: this.sayTrade({
+            beat: 'walk',
+            partnerId,
+            ctx: this.talkCtx({
+              beat: 'walk', partnerId, thread: advanced.thread,
+              moved: advanced.moved, gap: advanced.gap, chasingCore: core,
+            }),
+            slots: this.talkSlots(partnerId, { target: chasedName }),
+            seedKey: tKey,
+          }),
+        }
+      }
+      const shortPct = Math.max(1, Math.round((evaln.counterAskValue / Math.max(1, targetValue)) * 100))
+      return {
+        verdict: 'reject',
+        counter: null,
+        message: this.sayTrade({
+          beat: 'shortfall',
+          partnerId,
+          ctx: this.talkCtx({
+            beat: 'shortfall', partnerId, thread: advanced.thread,
+            moved: advanced.moved, gap: advanced.gap, chasingCore: core,
+          }),
+          slots: this.talkSlots(partnerId, { target: chasedName, short: `${shortPct}%` }),
+          seedKey: tKey,
+        }),
+      }
     }
     // #14: on the trade DEADLINE itself and at the DRAFT table, GMs answer on the
     // spot — no sleeping on it. Resolve inline (execute or counter) instead of
@@ -13433,7 +13792,14 @@ export class Career {
           ? { verdict: 'accept', message: 'Deal struck — it is official.', counter: null }
           : { verdict: 'reject', message: done.message ?? 'The deal fell through under the cap.', counter: null }
       }
-      this.deliverPendingTrade({ proposal, verdict: 'counter', counterAskValue: evaln.counterAskValue })
+      this.deliverPendingTrade({
+        proposal,
+        verdict: 'counter',
+        counterAskValue: evaln.counterAskValue,
+        threadKey: tKey,
+        moved: advanced.moved,
+        gapBand: advanced.gap,
+      })
       return { verdict: 'counter', message: 'They came right back — check your trade offers.', counter: null }
     }
     // Deliberate-yes: a serious offer (would accept, or a workable counter) is
@@ -13446,6 +13812,9 @@ export class Career {
       verdict: evaln.verdict === 'accept' ? 'accept' : 'counter',
       counterAskValue: evaln.counterAskValue,
       daysLeft: days,
+      threadKey: tKey,
+      moved: advanced.moved,
+      gapBand: advanced.gap,
     })
     const gmName = this.gmPersonaFor(partnerId)?.name ?? `${partner.name}'s GM`
     this.pushNews(
@@ -13493,7 +13862,14 @@ export class Career {
     this.pendingTrades = carry
   }
 
-  private deliverPendingTrade(pt: { proposal: TradeProposal; verdict: 'accept' | 'counter'; counterAskValue: number }): void {
+  private deliverPendingTrade(pt: {
+    proposal: TradeProposal
+    verdict: 'accept' | 'counter'
+    counterAskValue: number
+    threadKey?: string | undefined
+    moved?: TalkCtx['moved'] | undefined
+    gapBand?: TalkCtx['gap'] | undefined
+  }): void {
     const partnerId = asTeamId(pt.proposal.partnerTeamId)
     const partner = this.data.teams.get(partnerId)
     if (!partner || !this.tradingOpen()) {
@@ -13519,16 +13895,95 @@ export class Career {
       }
       return
     }
-    // Counter: name the extra the GM wants and table it as a real, acceptable offer.
+    // Counter: name the extra the GM wants and table it as a real, acceptable
+    // offer — but WHERE in the arc he is decides whether that is a counter, a
+    // last offer, or the end of it.
     const give = { players: pt.proposal.givePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(pt.proposal.givePickIds) }
     const receive = { players: pt.proposal.receivePlayerIds.map((id) => this.resolve(asPlayerId(id))), picks: this.pickByIds(pt.proposal.receivePickIds) }
-    const counter = this.buildCounterOffer(partnerId, give, receive, pt.counterAskValue)
+    const thread = pt.threadKey ? this.tradeThreads.find((t) => t.key === pt.threadKey) ?? null : null
+    const chased =
+      receive.players[0]?.name ??
+      (receive.picks[0] ? `that ${receive.picks[0].year} pick` : 'this one')
+    const core = this.chasingCore(partnerId, receive.players.map((p) => p.id))
+    const stage = thread ? threadStage(thread) : 'counter'
+    const gm = this.gmPersonaFor(partnerId)
+
+    if (stage === 'walk' && thread) {
+      // He meant it. Talks close, he stops picking up for a fortnight, and the
+      // relationship carries the mark of having been ground down.
+      const line = this.sayTrade({
+        beat: 'walk',
+        partnerId,
+        ctx: this.talkCtx({
+          beat: 'walk', partnerId, thread, moved: pt.moved, gap: pt.gapBand, chasingCore: core,
+        }),
+        slots: this.talkSlots(partnerId, { target: chased }),
+        seedKey: thread.key,
+      })
+      this.storeThread(walkThread(thread, this.currentDay, this.deadlineSoon()))
+      this.adjustRelationship(partnerId as string, -3)
+      this.pushNews('trade', `${gm.name} walks away`, `${gm.name}: “${line}”`, { teamId: partnerId as string })
+      return
+    }
+
+    const counter = this.buildCounterOffer(partnerId, give, receive, pt.counterAskValue, {
+      thread,
+      moved: pt.moved,
+      gapBand: pt.gapBand,
+      chasingCore: core,
+      target: chased,
+      final: stage === 'final',
+    })
     if (counter) {
       this.tradeOffers.push(counter)
-      this.pushNews('trade', `${partner.abbreviation} counter your offer`, counter.message, { teamId: partnerId as string })
+      this.pushNews(
+        'trade',
+        stage === 'final'
+          ? `${partner.abbreviation} table a final offer`
+          : `${partner.abbreviation} counter your offer`,
+        `${gm.name}: “${counter.message}”`,
+        { teamId: partnerId as string },
+      )
     } else {
-      this.pushNews('trade', `${partner.abbreviation} pass on your offer`,
-        `${partner.name} slept on it and came back a no — nothing on your side bridged the gap.`, { teamId: partnerId as string })
+      // The pieces to cover his ask aren't there — you're asking him to eat a
+      // shortfall. He doesn't sit on that in silence and then pass (which left a
+      // pursuit stuck on "he's weighing it" round after round): he tells you
+      // you're short, and the pursuit ages toward a walk each time the same
+      // weight comes back. His own no-repeat ledger keeps every reply fresh.
+      const giveValue = this.packageValue(give.players.map((p) => p.id), give.picks)
+      const escalated = thread
+        ? advanceThread(thread, { gap: pt.counterAskValue, giveValue, day: this.currentDay, year: this.year })
+        : null
+      if (escalated) this.storeThread(escalated.thread)
+      const atWalk = escalated ? threadStage(escalated.thread) === 'walk' : false
+      const shortPct = Math.max(
+        1,
+        Math.round((pt.counterAskValue / Math.max(1, this.packageValue(receive.players.map((p) => p.id), receive.picks))) * 100),
+      )
+      const line = this.sayTrade({
+        beat: atWalk ? 'walk' : 'shortfall',
+        partnerId,
+        ctx: this.talkCtx({
+          beat: atWalk ? 'walk' : 'shortfall',
+          partnerId,
+          thread: escalated?.thread ?? thread,
+          moved: escalated?.moved ?? pt.moved,
+          gap: escalated?.gap ?? pt.gapBand,
+          chasingCore: core,
+        }),
+        slots: this.talkSlots(partnerId, { target: chased, short: `${shortPct}%` }),
+        seedKey: pt.threadKey ?? (partnerId as string),
+      })
+      if (atWalk && escalated) {
+        this.storeThread(walkThread(escalated.thread, this.currentDay, this.deadlineSoon()))
+        this.adjustRelationship(partnerId as string, -3)
+      }
+      this.pushNews(
+        'trade',
+        atWalk ? `${gm.name} walks away` : `${partner.abbreviation} can’t make your offer work`,
+        `${gm.name}: “${line}”`,
+        { teamId: partnerId as string },
+      )
     }
   }
 
@@ -13609,12 +14064,15 @@ export class Career {
   /** DEPTH 3: turn the partner's residual "wants this much more" into a concrete
    *  counter — the smallest user asset that covers the gap (or the two biggest
    *  if none does), tabled as a real, acceptable {@link StoredTradeOffer}. */
-  private buildCounterOffer(
-    partnerId: TeamId,
+  /** The user-side sweetener a counter would ask for, or null if none exists:
+   *  the least-overpaying single asset that covers the gap, else the two best
+   *  pieces if together they get there. A counter has to be one you could
+   *  actually SAY YES to, so sweeteners that break your cap are excluded. */
+  private selectCounterAssets(
     give: { players: Player[]; picks: DraftPick[] },
     receive: { players: Player[]; picks: DraftPick[] },
-    gap: number
-  ): StoredTradeOffer | null {
+    gap: number,
+  ): Array<{ value: number; player?: Player; pick?: DraftPick }> | null {
     const inGivePlayers = new Set(give.players.map((p) => p.id as string))
     const inGivePicks = new Set(give.picks.map((pk) => this.pickId(pk)))
     const assets: Array<{ value: number; player?: Player; pick?: DraftPick }> = []
@@ -13629,9 +14087,6 @@ export class Career {
     }
     if (assets.length === 0) return null
 
-    // A counter has to be one you could actually SAY YES to. Work out where the
-    // base deal leaves your cap, and only table sweeteners that keep you legal —
-    // a GM who asks for a sweetener you can't fit hasn't made an offer.
     const salOf = (p: Player): number => p.contract.salary - (p.contract.retainedByOthers ?? 0)
     const capAfterBase =
       rosterCapUsed(this.userTeam, this.data.players) +
@@ -13641,30 +14096,71 @@ export class Career {
     const fits = (picked: Array<{ player?: Player }>): boolean =>
       capAfterBase - picked.reduce((s, a) => s + (a.player ? salOf(a.player) : 0), 0) <= ceiling
 
-    // Prefer the least-overpaying single asset that covers the gap; failing
-    // that, the two most valuable pieces — but only if together they get there.
     const covering = assets.filter((a) => a.value >= gap).sort((a, b) => a.value - b.value)
-    let chosen: Array<{ value: number; player?: Player; pick?: DraftPick }>
     const affordableSingle = covering.find((a) => fits([a]))
-    if (affordableSingle) {
-      chosen = [affordableSingle]
-    } else {
-      const top = [...assets].sort((a, b) => b.value - a.value).slice(0, 2)
-      if (top.reduce((s, a) => s + a.value, 0) < gap * 0.9) return null
-      if (!fits(top)) return null
-      chosen = top
+    if (affordableSingle) return [affordableSingle]
+    const top = [...assets].sort((a, b) => b.value - a.value).slice(0, 2)
+    if (top.reduce((s, a) => s + a.value, 0) < gap * 0.9) return null
+    if (!fits(top)) return null
+    return top
+  }
+
+  /** Whether the partner's counter is one the user could actually cover. When
+   *  false, a 'counter' verdict is really a shortfall — he wants more than your
+   *  remaining, cap-legal assets can add — and should be answered as one. */
+  private canBuildCounterOffer(
+    give: { players: Player[]; picks: DraftPick[] },
+    receive: { players: Player[]; picks: DraftPick[] },
+    gap: number,
+  ): boolean {
+    return this.selectCounterAssets(give, receive, gap) !== null
+  }
+
+  private buildCounterOffer(
+    partnerId: TeamId,
+    give: { players: Player[]; picks: DraftPick[] },
+    receive: { players: Player[]; picks: DraftPick[] },
+    gap: number,
+    talk?: {
+      thread: TradeThread | null
+      moved?: TalkCtx['moved'] | undefined
+      gapBand?: TalkCtx['gap'] | undefined
+      chasingCore?: boolean | undefined
+      target?: string | undefined
+      final?: boolean | undefined
     }
+  ): StoredTradeOffer | null {
+    const chosen = this.selectCounterAssets(give, receive, gap)
+    if (!chosen) return null
 
     const addPlayers = chosen.filter((a) => a.player).map((a) => a.player!)
     const addPicks = chosen.filter((a) => a.pick).map((a) => a.pick!)
-    const gm = this.gmPersonaFor(partnerId)
-    const names = [
+    const nameList = Career.assetPhrase([
       ...addPlayers.map((p) => p.name),
       ...addPicks.map((pk) => `a ${pk.year} round-${pk.round} pick`),
-    ]
-    const nameList =
-      names.length <= 1 ? (names[0] ?? 'a sweetener')
-        : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    ])
+    // What he SAYS depends on where the conversation stands — the round, whether
+    // he moved off his last ask, how far apart you still are, and whether this
+    // is his last word. Round one with no thread falls back to the opening
+    // register, which is exactly right for a first contact.
+    const beat: TalkBeat = talk?.final ? 'final' : 'counter'
+    const message = this.sayTrade({
+      beat,
+      partnerId,
+      ctx: this.talkCtx({
+        beat,
+        partnerId,
+        thread: talk?.thread ?? null,
+        moved: talk?.moved,
+        gap: talk?.gapBand,
+        chasingCore: talk?.chasingCore,
+      }),
+      slots: this.talkSlots(partnerId, {
+        target: talk?.target ?? receive.players[0]?.name ?? 'this one',
+        ask: nameList,
+      }),
+      seedKey: talk?.thread?.key ?? `${partnerId as string}|c${this.offerCounter}`,
+    })
     return {
       offerId: `c${this.offerCounter++}`,
       partnerTeamId: partnerId,
@@ -13672,8 +14168,9 @@ export class Career {
       userReceivesPicks: [...receive.picks],
       userGivesPlayerIds: [...give.players.map((p) => p.id), ...addPlayers.map((p) => p.id)],
       userGivesPicks: [...give.picks, ...addPicks],
-      message: `${gm.name}: We're close. Add ${nameList} and you've got a deal.`,
-      expiresOnDay: this.currentDay + 3,
+      message,
+      // A final offer is a short clock by definition.
+      expiresOnDay: this.currentDay + (talk?.final ? 2 : 3),
     }
   }
 
@@ -13712,7 +14209,10 @@ export class Career {
       deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
       maxOffers: 4,
     })
-    for (const o of offers) this.tradeOffers.push(o)
+    for (const o of offers) {
+      this.voiceIncomingOffer(o)
+      this.tradeOffers.push(o)
+    }
     // Living Ledger: his name is in other GMs' mouths now. Quiet feelers can
     // leak — and if they do, expect him in your office (docs/NARRATIVE-ENGINE.md).
     this.recordWorldAction('shopped', playerId, 'quiet')
@@ -14397,6 +14897,7 @@ export class Career {
       })
       for (const o of offers) {
         if (tabled >= 6) break
+        this.voiceIncomingOffer(o)
         this.tradeOffers.push(o)
         tabled++
         const partner = this.data.teams.get(o.partnerTeamId)!
@@ -14404,7 +14905,7 @@ export class Career {
         this.pushNews(
           'trade',
           `Deadline call from ${partner.abbreviation}`,
-          `${gm.name} (${gm.styleLabel}) is on the line. ${o.message}`,
+          `${gm.name} (${gm.styleLabel}) is on the line: “${o.message}”`,
           { teamId: o.partnerTeamId as string },
         )
       }
@@ -22221,6 +22722,7 @@ export class Career {
       resignPatience: [...this.resignPatience.entries()],
       qualifyingOffers: [...this.qualifyingOffers.entries()],
       pendingTrades: this.pendingTrades.map((o) => ({ ...o, proposal: { ...o.proposal } })),
+      tradeThreads: this.tradeThreads.map((t) => ({ ...t })),
       interviews: [...this.interviews.entries()].map(([k, v]) => [k, [...v]] as [string, string[]]),
       pendingInterviews: this.pendingInterviews.map((i) => ({ ...i })),
       prevDraftBoard: [...this.prevDraftBoard.entries()],
@@ -22420,6 +22922,9 @@ export class Career {
     if (snapshot.resignPatience) career.resignPatience = new Map(snapshot.resignPatience)
     if (snapshot.qualifyingOffers) career.qualifyingOffers = new Map(snapshot.qualifyingOffers)
     if (snapshot.pendingTrades) career.pendingTrades = snapshot.pendingTrades.map((o: typeof career.pendingTrades[number]) => ({ ...o, proposal: { ...o.proposal } }))
+    // A negotiation in progress keeps its teeth across a reload: the round it
+    // reached, what he conceded, and how much patience he has left.
+    if (snapshot.tradeThreads) career.tradeThreads = snapshot.tradeThreads.map((t) => ({ ...t }))
     if (snapshot.interviews) {
       career.interviews = new Map(snapshot.interviews.map(([k, v]) => [k, [...v]]))
     }
