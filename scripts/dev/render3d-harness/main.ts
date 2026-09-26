@@ -68,7 +68,24 @@ if (q.get('hud') === '0') hud.style.display = 'none'
 // ?look=px,py,pz,lx,ly,lz[,fov] pins a debug camera (close-ups of the athletes)
 if (q.has('look')) {
   const [px, py, pz, lx, ly, lz, fov] = q.get('look')!.split(',').map(Number)
-  r.setDebugCamera({ px: px!, py: py!, pz: pz!, lx: lx!, ly: ly!, lz: lz!, ...(fov ? { fov } : {}) })
+  const pose = { px: px!, py: py!, pz: pz!, lx: lx!, ly: ly!, lz: lz!, ...(fov ? { fov } : {}) }
+  const anyR = r as unknown as {
+    setDebugCamera?: (p: typeof pose) => void
+    updateCamera: (dt: number) => void
+    camera: THREE.PerspectiveCamera
+  }
+  if (anyR.setDebugCamera) anyR.setDebugCamera(pose)
+  else {
+    // the pre-upgrade renderer has no debug hook: pin the camera after its update
+    const orig = anyR.updateCamera.bind(anyR)
+    anyR.updateCamera = (dt: number) => {
+      orig(dt)
+      anyR.camera.fov = pose.fov ?? 35
+      anyR.camera.updateProjectionMatrix()
+      anyR.camera.position.set(pose.px, pose.py, pose.pz)
+      anyR.camera.lookAt(pose.lx, pose.ly, pose.lz)
+    }
+  }
 }
 
 if (q.get('nobloom') === '1') (r as unknown as { bloom: { enabled: boolean } }).bloom.enabled = false

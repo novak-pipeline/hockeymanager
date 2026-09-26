@@ -230,6 +230,9 @@ export class Rink3dRenderer implements MatchRenderer {
 
     inst.buildScene()
     inst.buildPost(w, h)
+    // Compile every material now (all rigs are visible at creation), so the
+    // first line change / goal never hitches on a shader compile mid-game.
+    renderer.compile(inst.scene, inst.camera)
     renderer.setAnimationLoop((time) => inst.animLoop(time))
     return inst
   }
@@ -248,8 +251,15 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.arena = new Arena(this.renderer, this.colors)
     this.scene.add(this.arena.group)
+    // the arena never moves: bake its matrices once
+    this.arena.group.updateMatrixWorld(true)
+    this.arena.group.traverse((o) => {
+      o.matrixAutoUpdate = false
+      o.matrixWorldAutoUpdate = false
+    })
+    this.scene.matrixWorldAutoUpdate = false
     this.scene.environment = this.arena.environment
-    this.scene.environmentIntensity = 0.8
+    this.scene.environmentIntensity = 1.15
 
     this.buildLighting()
     this.buildPuck()
@@ -306,11 +316,14 @@ export class Rink3dRenderer implements MatchRenderer {
     // Arena lighting reads as a big overhead rig: a strong near-vertical key
     // (short, soft shadows under the players), a cool sky fill, and two low
     // rim lights from the ends so the athletes separate from the white ice.
-    const hemi = new THREE.HemisphereLight(0xe4ecff, 0x2a2e36, 0.55)
+    const hemi = new THREE.HemisphereLight(0xe4ecff, 0x2a2e36, 0.75)
     this.scene.add(hemi)
 
-    const key = new THREE.DirectionalLight(0xfff7ee, 2.1)
-    key.position.set(18, 160, -42)
+    const key = new THREE.DirectionalLight(0xfff7ee, 1.35)
+    // Tilted toward the broadcast side just enough (|z/y| > 0.4) that its mirror
+    // glint on the glossy ice lands off the sheet for the overhead AND the
+    // broadcast camera, while shadows stay short and soft under the players.
+    key.position.set(20, 160, -72)
     key.target.position.set(0, 0, 0)
     key.castShadow = true
     key.shadow.mapSize.setScalar(2048)
@@ -324,6 +337,14 @@ export class Rink3dRenderer implements MatchRenderer {
     key.shadow.normalBias = 0.03
     key.shadow.radius = 3
     this.scene.add(key, key.target)
+
+    // Goal lights: red wash behind each net, dark until a goal.
+    for (const side of ['left', 'right'] as const) {
+      const light = new THREE.PointLight(0xff2222, 0, 60, 1.6)
+      light.position.set(side === 'left' ? -NET_X - 6 : NET_X + 6, 12, 0)
+      this.scene.add(light)
+      this.goalLights.push({ light, lamp: this.arena.goalLamps[side === 'left' ? 0 : 1], timer: 0, side })
+    }
 
     for (const x of [-1, 1]) {
       const rim = new THREE.DirectionalLight(0xcfe0ff, 0.55)
@@ -529,15 +550,9 @@ export class Rink3dRenderer implements MatchRenderer {
       this.paintSlot(p)
     }
 
-    // Goal lights (hidden until triggered)
-    for (const glData of this.goalLights) this.scene.remove(glData.light)
-    this.goalLights = []
-    for (const side of ['left', 'right'] as const) {
-      const light = new THREE.PointLight(0xff2222, 0, 60, 1.6)
-      light.position.set(side === 'left' ? -NET_X - 6 : NET_X + 6, 12, 0)
-      this.scene.add(light)
-      this.goalLights.push({ light, lamp: this.arena.goalLamps[side === 'left' ? 0 : 1], timer: 0, side })
-    }
+    // Goal lights off (they live for the renderer's lifetime — re-adding
+    // lights would change the light set and recompile every material)
+    for (const gl of this.goalLights) gl.timer = 0
 
     this.renderAt(0)
     // Snap play-focus to initial puck position so there is no EMA warmup lag
@@ -633,6 +648,8 @@ export class Rink3dRenderer implements MatchRenderer {
     this.arena.setCeilingVisible(this.camPreset !== 'overhead')
     this.applyFov(this.fov.pos)
     this.camera.position.set(target.px, target.py, target.pz)
+    // top-down: screen-up = far boards (+Z), matching the broadcast orientation
+    this.camera.up.set(0, this.camPreset === 'overhead' ? 0 : 1, this.camPreset === 'overhead' ? 1 : 0)
     this.camera.lookAt(target.lx, target.ly, target.lz)
   }
 
@@ -748,6 +765,9 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.adaptQuality(dtMs / 1000)
     this.renderer.info.reset()
+    // one world-matrix pass per frame (not one per render call: reflection,
+    // shadow and main passes each used to re-traverse the whole scene)
+    this.scene.updateMatrixWorld()
     if (this.quality < 2) this.renderReflection()
     this.composer.render(dt)
     const cpu = performance.now() - t0
@@ -1200,6 +1220,7 @@ export class Rink3dRenderer implements MatchRenderer {
     if (this.debugCam) {
       const d = this.debugCam
       this.applyFov(d.fov ?? 35)
+      this.camera.up.set(0, 1, 0)
       this.camera.position.set(d.px, d.py, d.pz)
       this.camera.lookAt(d.lx, d.ly, d.lz)
     }

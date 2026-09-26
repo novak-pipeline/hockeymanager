@@ -181,7 +181,7 @@ export class Arena {
       roughnessMap: rough,
       metalness: 0,
       clearcoat: 1,
-      clearcoatRoughness: 0.6,
+      clearcoatRoughness: 0.85,
       clearcoatRoughnessMap: rough,
       envMapIntensity: 0.85,
       specularIntensity: 0.6,
