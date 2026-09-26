@@ -1,0 +1,799 @@
+{
+  "version": 1,
+  "engine": "kokoro",
+  "voices": {
+    "pbp": "bm_george",
+    "color": "am_michael"
+  },
+  "sampleRate": 24000,
+  "format": "wav",
+  "clips": {
+    "stem.open.welcome.1": {
+      "file": "clips/stem.open.welcome.1.wav",
+      "durationMs": 5023,
+      "speaker": "pbp",
+      "text": "Good evening, and welcome in. The building is full, and we are just about ready for hockey."
+    },
+    "stem.open.welcome.2": {
+      "file": "clips/stem.open.welcome.2.wav",
+      "durationMs": 4644,
+      "speaker": "pbp",
+      "text": "Hello again, everyone. A big crowd in tonight, and a big one on the ice."
+    },
+    "stem.open.welcome.3": {
+      "file": "clips/stem.open.welcome.3.wav",
+      "durationMs": 4317,
+      "speaker": "pbp",
+      "text": "Welcome along. The anthem is done, the lines are set, and here we go."
+    },
+    "stem.open.debut.1": {
+      "file": "clips/stem.open.debut.1.wav",
+      "durationMs": 4145,
+      "speaker": "color",
+      "text": "A night he will never forget. First game in the National Hockey League for"
+    },
+    "bare.open.debut.1": {
+      "file": "clips/bare.open.debut.1.wav",
+      "durationMs": 4206,
+      "speaker": "color",
+      "text": "A night he will never forget. A first game in the National Hockey League."
+    },
+    "stem.open.debut.2": {
+      "file": "clips/stem.open.debut.2.wav",
+      "durationMs": 3037,
+      "speaker": "color",
+      "text": "You only get one debut. Tonight it belongs to"
+    },
+    "bare.open.debut.2": {
+      "file": "clips/bare.open.debut.2.wav",
+      "durationMs": 3453,
+      "speaker": "color",
+      "text": "You only get one debut, and a young man gets his tonight."
+    },
+    "stem.open.homecoming.1": {
+      "file": "clips/stem.open.homecoming.1.wav",
+      "durationMs": 2466,
+      "speaker": "color",
+      "text": "This building knows him well. Welcome back,"
+    },
+    "bare.open.homecoming.1": {
+      "file": "clips/bare.open.homecoming.1.wav",
+      "durationMs": 2726,
+      "speaker": "color",
+      "text": "This building knows him well. A homecoming tonight."
+    },
+    "stem.open.homecoming.2": {
+      "file": "clips/stem.open.homecoming.2.wav",
+      "durationMs": 1796,
+      "speaker": "color",
+      "text": "Plenty of history in this rink for"
+    },
+    "bare.open.homecoming.2": {
+      "file": "clips/bare.open.homecoming.2.wav",
+      "durationMs": 3458,
+      "speaker": "color",
+      "text": "Plenty of history in this rink for one man in particular."
+    },
+    "stem.open.milestone.1": {
+      "file": "clips/stem.open.milestone.1.wav",
+      "durationMs": 3886,
+      "speaker": "color",
+      "text": "Keep an eye on the milestone watch tonight. It is right there for"
+    },
+    "bare.open.milestone.1": {
+      "file": "clips/bare.open.milestone.1.wav",
+      "durationMs": 3709,
+      "speaker": "color",
+      "text": "Keep an eye on the milestone watch tonight. It is right there."
+    },
+    "stem.open.milestone.2": {
+      "file": "clips/stem.open.milestone.2.wav",
+      "durationMs": 2824,
+      "speaker": "color",
+      "text": "The whole building knows what could happen tonight for"
+    },
+    "bare.open.milestone.2": {
+      "file": "clips/bare.open.milestone.2.wav",
+      "durationMs": 2584,
+      "speaker": "color",
+      "text": "The whole building knows what could happen tonight."
+    },
+    "stem.open.banner.1": {
+      "file": "clips/stem.open.banner.1.wav",
+      "durationMs": 3055,
+      "speaker": "pbp",
+      "text": "The champions are home, and tonight the banner goes up."
+    },
+    "stem.moment.rookieLap.1": {
+      "file": "clips/stem.moment.rookieLap.1.wav",
+      "durationMs": 3904,
+      "speaker": "pbp",
+      "text": "The veterans hang back, and out he goes alone. The rookie lap for"
+    },
+    "bare.moment.rookieLap.1": {
+      "file": "clips/bare.moment.rookieLap.1.wav",
+      "durationMs": 3804,
+      "speaker": "pbp",
+      "text": "The veterans hang back, and out he goes alone. The rookie lap."
+    },
+    "stem.moment.rookieLap.2": {
+      "file": "clips/stem.moment.rookieLap.2.wav",
+      "durationMs": 4008,
+      "speaker": "pbp",
+      "text": "An empty sheet, one lap, and a whole career ahead. Enjoy it,"
+    },
+    "bare.moment.rookieLap.2": {
+      "file": "clips/bare.moment.rookieLap.2.wav",
+      "durationMs": 3212,
+      "speaker": "pbp",
+      "text": "An empty sheet, one lap, and a whole career ahead."
+    },
+    "stem.moment.tribute.1": {
+      "file": "clips/stem.moment.tribute.1.wav",
+      "durationMs": 2213,
+      "speaker": "pbp",
+      "text": "Up on the video board, a tribute for"
+    },
+    "bare.moment.tribute.1": {
+      "file": "clips/bare.moment.tribute.1.wav",
+      "durationMs": 3064,
+      "speaker": "pbp",
+      "text": "Up on the video board, a tribute for an old friend."
+    },
+    "stem.moment.ovation.1": {
+      "file": "clips/stem.moment.ovation.1.wav",
+      "durationMs": 2484,
+      "speaker": "color",
+      "text": "Listen to this building. They are on their feet."
+    },
+    "stem.moment.ovation.2": {
+      "file": "clips/stem.moment.ovation.2.wav",
+      "durationMs": 3600,
+      "speaker": "color",
+      "text": "That is a standing ovation, and he has earned every second of it."
+    },
+    "stem.moment.banner.1": {
+      "file": "clips/stem.moment.banner.1.wav",
+      "durationMs": 3035,
+      "speaker": "pbp",
+      "text": "And up it goes. Champions, forever, in the rafters."
+    },
+    "stem.puckDrop.1": {
+      "file": "clips/stem.puckDrop.1.wav",
+      "durationMs": 2398,
+      "speaker": "pbp",
+      "text": "The puck is down, and we are underway."
+    },
+    "stem.puckDrop.2": {
+      "file": "clips/stem.puckDrop.2.wav",
+      "durationMs": 1256,
+      "speaker": "pbp",
+      "text": "And we are away."
+    },
+    "stem.goal.1": {
+      "file": "clips/stem.goal.1.wav",
+      "durationMs": 1226,
+      "speaker": "pbp",
+      "text": "shoots, and scores!"
+    },
+    "bare.goal.1": {
+      "file": "clips/bare.goal.1.wav",
+      "durationMs": 1393,
+      "speaker": "pbp",
+      "text": "He shoots, and scores!"
+    },
+    "stem.goal.2": {
+      "file": "clips/stem.goal.2.wav",
+      "durationMs": 1734,
+      "speaker": "pbp",
+      "text": "In the back of the net! Goal,"
+    },
+    "bare.goal.2": {
+      "file": "clips/bare.goal.2.wav",
+      "durationMs": 1690,
+      "speaker": "pbp",
+      "text": "In the back of the net! Goal!"
+    },
+    "stem.goal.3": {
+      "file": "clips/stem.goal.3.wav",
+      "durationMs": 899,
+      "speaker": "pbp",
+      "text": "He buries it!"
+    },
+    "bare.goal.3": {
+      "file": "clips/bare.goal.3.wav",
+      "durationMs": 899,
+      "speaker": "pbp",
+      "text": "He buries it!"
+    },
+    "stem.goal.4": {
+      "file": "clips/stem.goal.4.wav",
+      "durationMs": 1001,
+      "speaker": "pbp",
+      "text": "and it is in!"
+    },
+    "bare.goal.4": {
+      "file": "clips/bare.goal.4.wav",
+      "durationMs": 1001,
+      "speaker": "pbp",
+      "text": "And it is in!"
+    },
+    "stem.goal.tie.1": {
+      "file": "clips/stem.goal.tie.1.wav",
+      "durationMs": 1294,
+      "speaker": "pbp",
+      "text": "And we are all square!"
+    },
+    "bare.goal.tie.1": {
+      "file": "clips/bare.goal.tie.1.wav",
+      "durationMs": 1294,
+      "speaker": "pbp",
+      "text": "And we are all square!"
+    },
+    "stem.goal.tie.2": {
+      "file": "clips/stem.goal.tie.2.wav",
+      "durationMs": 927,
+      "speaker": "pbp",
+      "text": "ties it up!"
+    },
+    "bare.goal.tie.2": {
+      "file": "clips/bare.goal.tie.2.wav",
+      "durationMs": 874,
+      "speaker": "pbp",
+      "text": "Tie game!"
+    },
+    "stem.goal.goAhead.1": {
+      "file": "clips/stem.goal.goAhead.1.wav",
+      "durationMs": 1177,
+      "speaker": "pbp",
+      "text": "puts them in front!"
+    },
+    "bare.goal.goAhead.1": {
+      "file": "clips/bare.goal.goAhead.1.wav",
+      "durationMs": 1399,
+      "speaker": "pbp",
+      "text": "And they are in front!"
+    },
+    "stem.goal.goAhead.2": {
+      "file": "clips/stem.goal.goAhead.2.wav",
+      "durationMs": 2289,
+      "speaker": "pbp",
+      "text": "He scores, and the lead belongs to them!"
+    },
+    "bare.goal.goAhead.2": {
+      "file": "clips/bare.goal.goAhead.2.wav",
+      "durationMs": 2289,
+      "speaker": "pbp",
+      "text": "He scores, and the lead belongs to them!"
+    },
+    "stem.goal.lateTie.1": {
+      "file": "clips/stem.goal.lateTie.1.wav",
+      "durationMs": 2017,
+      "speaker": "pbp",
+      "text": "Scores! Scores! Tied up late, by"
+    },
+    "bare.goal.lateTie.1": {
+      "file": "clips/bare.goal.lateTie.1.wav",
+      "durationMs": 1782,
+      "speaker": "pbp",
+      "text": "Scores! Scores! Tied up late!"
+    },
+    "stem.goal.lateTie.2": {
+      "file": "clips/stem.goal.lateTie.2.wav",
+      "durationMs": 1414,
+      "speaker": "pbp",
+      "text": "With time running out!"
+    },
+    "bare.goal.lateTie.2": {
+      "file": "clips/bare.goal.lateTie.2.wav",
+      "durationMs": 2067,
+      "speaker": "pbp",
+      "text": "With time running out, they have tied it!"
+    },
+    "stem.goal.overtime.1": {
+      "file": "clips/stem.goal.overtime.1.wav",
+      "durationMs": 2431,
+      "speaker": "pbp",
+      "text": "Overtime winner! It is over, and it is"
+    },
+    "bare.goal.overtime.1": {
+      "file": "clips/bare.goal.overtime.1.wav",
+      "durationMs": 1821,
+      "speaker": "pbp",
+      "text": "Overtime winner! It is over!"
+    },
+    "stem.goal.overtime.2": {
+      "file": "clips/stem.goal.overtime.2.wav",
+      "durationMs": 1545,
+      "speaker": "pbp",
+      "text": "He scores, and they win it!"
+    },
+    "bare.goal.overtime.2": {
+      "file": "clips/bare.goal.overtime.2.wav",
+      "durationMs": 1545,
+      "speaker": "pbp",
+      "text": "He scores, and they win it!"
+    },
+    "stem.goal.hatTrick.1": {
+      "file": "clips/stem.goal.hatTrick.1.wav",
+      "durationMs": 1978,
+      "speaker": "pbp",
+      "text": "Here come the hats! A hat trick for"
+    },
+    "bare.goal.hatTrick.1": {
+      "file": "clips/bare.goal.hatTrick.1.wav",
+      "durationMs": 1737,
+      "speaker": "pbp",
+      "text": "Here come the hats! A hat trick!"
+    },
+    "stem.goal.powerPlay.1": {
+      "file": "clips/stem.goal.powerPlay.1.wav",
+      "durationMs": 1601,
+      "speaker": "pbp",
+      "text": "The power play cashes in!"
+    },
+    "bare.goal.powerPlay.1": {
+      "file": "clips/bare.goal.powerPlay.1.wav",
+      "durationMs": 1601,
+      "speaker": "pbp",
+      "text": "The power play cashes in!"
+    },
+    "stem.goal.powerPlay.2": {
+      "file": "clips/stem.goal.powerPlay.2.wav",
+      "durationMs": 1845,
+      "speaker": "pbp",
+      "text": "on the power play, and it is in!"
+    },
+    "bare.goal.powerPlay.2": {
+      "file": "clips/bare.goal.powerPlay.2.wav",
+      "durationMs": 1845,
+      "speaker": "pbp",
+      "text": "On the power play, and it is in!"
+    },
+    "stem.goal.shortHanded.1": {
+      "file": "clips/stem.goal.shortHanded.1.wav",
+      "durationMs": 1778,
+      "speaker": "pbp",
+      "text": "Shorthanded, and he scores!"
+    },
+    "bare.goal.shortHanded.1": {
+      "file": "clips/bare.goal.shortHanded.1.wav",
+      "durationMs": 1778,
+      "speaker": "pbp",
+      "text": "Shorthanded, and he scores!"
+    },
+    "stem.goal.emptyNet.1": {
+      "file": "clips/stem.goal.emptyNet.1.wav",
+      "durationMs": 2544,
+      "speaker": "pbp",
+      "text": "Into the empty net, and that one goes to"
+    },
+    "bare.goal.emptyNet.1": {
+      "file": "clips/bare.goal.emptyNet.1.wav",
+      "durationMs": 2420,
+      "speaker": "pbp",
+      "text": "Into the empty net, and that should seal it."
+    },
+    "stem.goal.emptyNet.2": {
+      "file": "clips/stem.goal.emptyNet.2.wav",
+      "durationMs": 2021,
+      "speaker": "pbp",
+      "text": "That is the empty netter, from"
+    },
+    "bare.goal.emptyNet.2": {
+      "file": "clips/bare.goal.emptyNet.2.wav",
+      "durationMs": 1660,
+      "speaker": "pbp",
+      "text": "That is the empty netter."
+    },
+    "stem.goal.revenge.1": {
+      "file": "clips/stem.goal.revenge.1.wav",
+      "durationMs": 1315,
+      "speaker": "pbp",
+      "text": "Against his old team!"
+    },
+    "bare.goal.revenge.1": {
+      "file": "clips/bare.goal.revenge.1.wav",
+      "durationMs": 2479,
+      "speaker": "pbp",
+      "text": "Against his old team! Of course it is him!"
+    },
+    "stem.goal.milestone.1": {
+      "file": "clips/stem.goal.milestone.1.wav",
+      "durationMs": 2041,
+      "speaker": "pbp",
+      "text": "There it is! A milestone night for"
+    },
+    "bare.goal.milestone.1": {
+      "file": "clips/bare.goal.milestone.1.wav",
+      "durationMs": 1894,
+      "speaker": "pbp",
+      "text": "There it is! A milestone night!"
+    },
+    "stem.goal.first.1": {
+      "file": "clips/stem.goal.first.1.wav",
+      "durationMs": 2095,
+      "speaker": "pbp",
+      "text": "His first in the National Hockey League!"
+    },
+    "bare.goal.first.1": {
+      "file": "clips/bare.goal.first.1.wav",
+      "durationMs": 2095,
+      "speaker": "pbp",
+      "text": "His first in the National Hockey League!"
+    },
+    "stem.goal.color.1": {
+      "file": "clips/stem.goal.color.1.wav",
+      "durationMs": 3102,
+      "speaker": "color",
+      "text": "What a finish. The goalie had no chance on that one."
+    },
+    "stem.goal.color.2": {
+      "file": "clips/stem.goal.color.2.wav",
+      "durationMs": 3124,
+      "speaker": "color",
+      "text": "Watch the pass that sets it up. That is the whole play."
+    },
+    "stem.goal.color.3": {
+      "file": "clips/stem.goal.color.3.wav",
+      "durationMs": 3235,
+      "speaker": "color",
+      "text": "They have been knocking on the door, and it finally opens."
+    },
+    "stem.goal.color.4": {
+      "file": "clips/stem.goal.color.4.wav",
+      "durationMs": 3738,
+      "speaker": "color",
+      "text": "You leave a man that open in the slot, and this is what happens."
+    },
+    "stem.save.big.1": {
+      "file": "clips/stem.save.big.1.wav",
+      "durationMs": 812,
+      "speaker": "pbp",
+      "text": "Big save,"
+    },
+    "bare.save.big.1": {
+      "file": "clips/bare.save.big.1.wav",
+      "durationMs": 836,
+      "speaker": "pbp",
+      "text": "Big save!"
+    },
+    "stem.save.big.2": {
+      "file": "clips/stem.save.big.2.wav",
+      "durationMs": 850,
+      "speaker": "pbp",
+      "text": "says no!"
+    },
+    "bare.save.big.2": {
+      "file": "clips/bare.save.big.2.wav",
+      "durationMs": 1444,
+      "speaker": "pbp",
+      "text": "And the goalie says no!"
+    },
+    "stem.save.robbery.1": {
+      "file": "clips/stem.save.robbery.1.wav",
+      "durationMs": 1278,
+      "speaker": "pbp",
+      "text": "Oh, what a save by"
+    },
+    "bare.save.robbery.1": {
+      "file": "clips/bare.save.robbery.1.wav",
+      "durationMs": 1109,
+      "speaker": "pbp",
+      "text": "Oh, what a save!"
+    },
+    "stem.save.robbery.2": {
+      "file": "clips/stem.save.robbery.2.wav",
+      "durationMs": 1565,
+      "speaker": "pbp",
+      "text": "Robbed! Absolutely robbed by"
+    },
+    "bare.save.robbery.2": {
+      "file": "clips/bare.save.robbery.2.wav",
+      "durationMs": 1428,
+      "speaker": "pbp",
+      "text": "Robbed! Absolutely robbed!"
+    },
+    "stem.save.color.1": {
+      "file": "clips/stem.save.color.1.wav",
+      "durationMs": 2607,
+      "speaker": "color",
+      "text": "He had no business getting across for that one."
+    },
+    "stem.save.color.2": {
+      "file": "clips/stem.save.color.2.wav",
+      "durationMs": 2992,
+      "speaker": "color",
+      "text": "That is a goal ninety nine times out of a hundred."
+    },
+    "stem.penalty.1": {
+      "file": "clips/stem.penalty.1.wav",
+      "durationMs": 1219,
+      "speaker": "pbp",
+      "text": "heads to the box."
+    },
+    "bare.penalty.1": {
+      "file": "clips/bare.penalty.1.wav",
+      "durationMs": 1487,
+      "speaker": "pbp",
+      "text": "And he heads to the box."
+    },
+    "stem.penalty.2": {
+      "file": "clips/stem.penalty.2.wav",
+      "durationMs": 2727,
+      "speaker": "pbp",
+      "text": "The arm goes up, and that is a penalty on"
+    },
+    "bare.penalty.2": {
+      "file": "clips/bare.penalty.2.wav",
+      "durationMs": 2592,
+      "speaker": "pbp",
+      "text": "The arm goes up, and that is a penalty."
+    },
+    "stem.fight.1": {
+      "file": "clips/stem.fight.1.wav",
+      "durationMs": 1353,
+      "speaker": "pbp",
+      "text": "And the gloves are off!"
+    },
+    "stem.fight.2": {
+      "file": "clips/stem.fight.2.wav",
+      "durationMs": 1859,
+      "speaker": "pbp",
+      "text": "They drop them, and here we go!"
+    },
+    "stem.hit.big.1": {
+      "file": "clips/stem.hit.big.1.wav",
+      "durationMs": 1277,
+      "speaker": "color",
+      "text": "Oh, he felt that one."
+    },
+    "stem.hit.big.2": {
+      "file": "clips/stem.hit.big.2.wav",
+      "durationMs": 1716,
+      "speaker": "pbp",
+      "text": "Big hit along the wall!"
+    },
+    "stem.periodEnd.1": {
+      "file": "clips/stem.periodEnd.1.wav",
+      "durationMs": 2475,
+      "speaker": "pbp",
+      "text": "And there is the horn to end the period."
+    },
+    "stem.periodEnd.2": {
+      "file": "clips/stem.periodEnd.2.wav",
+      "durationMs": 1805,
+      "speaker": "pbp",
+      "text": "That will do it for the period."
+    },
+    "stem.gameEnd.1": {
+      "file": "clips/stem.gameEnd.1.wav",
+      "durationMs": 1859,
+      "speaker": "pbp",
+      "text": "And that is the final horn."
+    },
+    "stem.gameEnd.2": {
+      "file": "clips/stem.gameEnd.2.wav",
+      "durationMs": 2386,
+      "speaker": "pbp",
+      "text": "It is over. Handshakes at the benches."
+    },
+    "stem.gameEnd.close.1": {
+      "file": "clips/stem.gameEnd.close.1.wav",
+      "durationMs": 2258,
+      "speaker": "pbp",
+      "text": "They hang on! That is the final horn!"
+    }
+  },
+  "sampleNames": [
+    {
+      "playerName": "David Pastrnak",
+      "spoken": "David pahs-ter-nyahk",
+      "files": {
+        "surname.neutral": "samples/david-pastrnak.surname.neutral.wav",
+        "surname.excited": "samples/david-pastrnak.surname.excited.wav",
+        "demo.lead": "samples/david-pastrnak.demo.goal.wav",
+        "demo.tail": "samples/david-pastrnak.demo.save.wav",
+        "full.neutral": "samples/david-pastrnak.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Rasmus Dahlin",
+      "spoken": "Rasmus dah-leen",
+      "files": {
+        "surname.neutral": "samples/rasmus-dahlin.surname.neutral.wav",
+        "surname.excited": "samples/rasmus-dahlin.surname.excited.wav",
+        "demo.lead": "samples/rasmus-dahlin.demo.goal.wav",
+        "demo.tail": "samples/rasmus-dahlin.demo.save.wav",
+        "full.neutral": "samples/rasmus-dahlin.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Aleksander Barkov",
+      "spoken": "Aleksander bar-koff",
+      "files": {
+        "surname.neutral": "samples/aleksander-barkov.surname.neutral.wav",
+        "surname.excited": "samples/aleksander-barkov.surname.excited.wav",
+        "demo.lead": "samples/aleksander-barkov.demo.goal.wav",
+        "demo.tail": "samples/aleksander-barkov.demo.save.wav",
+        "full.neutral": "samples/aleksander-barkov.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Andrei Vasilevsky",
+      "spoken": "Andrei vas-ih-lef-skee",
+      "files": {
+        "surname.neutral": "samples/andrei-vasilevsky.surname.neutral.wav",
+        "surname.excited": "samples/andrei-vasilevsky.surname.excited.wav",
+        "demo.lead": "samples/andrei-vasilevsky.demo.goal.wav",
+        "demo.tail": "samples/andrei-vasilevsky.demo.save.wav",
+        "full.neutral": "samples/andrei-vasilevsky.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Oliver Ekman Larsson",
+      "spoken": "ol-ih-ver ek-mun lar-son",
+      "files": {
+        "surname.neutral": "samples/oliver-ekman-larsson.surname.neutral.wav",
+        "surname.excited": "samples/oliver-ekman-larsson.surname.excited.wav",
+        "demo.lead": "samples/oliver-ekman-larsson.demo.goal.wav",
+        "demo.tail": "samples/oliver-ekman-larsson.demo.save.wav",
+        "full.neutral": "samples/oliver-ekman-larsson.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Jesperi Kotkaniemi",
+      "spoken": "Yesperi kot-kuh-nee-em-ee",
+      "files": {
+        "surname.neutral": "samples/jesperi-kotkaniemi.surname.neutral.wav",
+        "surname.excited": "samples/jesperi-kotkaniemi.surname.excited.wav",
+        "demo.lead": "samples/jesperi-kotkaniemi.demo.goal.wav",
+        "demo.tail": "samples/jesperi-kotkaniemi.demo.save.wav",
+        "full.neutral": "samples/jesperi-kotkaniemi.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Nico Hischier",
+      "spoken": "Nico hish-ee-er",
+      "files": {
+        "surname.neutral": "samples/nico-hischier.surname.neutral.wav",
+        "surname.excited": "samples/nico-hischier.surname.excited.wav",
+        "demo.lead": "samples/nico-hischier.demo.goal.wav",
+        "demo.tail": "samples/nico-hischier.demo.save.wav",
+        "full.neutral": "samples/nico-hischier.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Mika Zibanejad",
+      "spoken": "Mika zib-uh-nuh-jad",
+      "files": {
+        "surname.neutral": "samples/mika-zibanejad.surname.neutral.wav",
+        "surname.excited": "samples/mika-zibanejad.surname.excited.wav",
+        "demo.lead": "samples/mika-zibanejad.demo.goal.wav",
+        "demo.tail": "samples/mika-zibanejad.demo.save.wav",
+        "full.neutral": "samples/mika-zibanejad.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Elmer Söderblom",
+      "spoken": "Elmer suh-der-bloom",
+      "files": {
+        "surname.neutral": "samples/elmer-soderblom.surname.neutral.wav",
+        "surname.excited": "samples/elmer-soderblom.surname.excited.wav",
+        "demo.lead": "samples/elmer-soderblom.demo.goal.wav",
+        "demo.tail": "samples/elmer-soderblom.demo.save.wav",
+        "full.neutral": "samples/elmer-soderblom.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Arvid Söderblom",
+      "spoken": "Arvid suh-der-bloom",
+      "files": {
+        "surname.neutral": "samples/arvid-soderblom.surname.neutral.wav",
+        "surname.excited": "samples/arvid-soderblom.surname.excited.wav",
+        "demo.lead": "samples/arvid-soderblom.demo.goal.wav",
+        "demo.tail": "samples/arvid-soderblom.demo.save.wav",
+        "full.neutral": "samples/arvid-soderblom.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Martin Necas",
+      "spoken": "Martin neh-chahs",
+      "files": {
+        "surname.neutral": "samples/martin-necas.surname.neutral.wav",
+        "surname.excited": "samples/martin-necas.surname.excited.wav",
+        "demo.lead": "samples/martin-necas.demo.goal.wav",
+        "demo.tail": "samples/martin-necas.demo.save.wav",
+        "full.neutral": "samples/martin-necas.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Mikko Rantanen",
+      "spoken": "Mikko ran-tuh-nen",
+      "files": {
+        "surname.neutral": "samples/mikko-rantanen.surname.neutral.wav",
+        "surname.excited": "samples/mikko-rantanen.surname.excited.wav",
+        "demo.lead": "samples/mikko-rantanen.demo.goal.wav",
+        "demo.tail": "samples/mikko-rantanen.demo.save.wav",
+        "full.neutral": "samples/mikko-rantanen.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Kirill Kaprizov",
+      "spoken": "Kirill kah-pree-zoff",
+      "files": {
+        "surname.neutral": "samples/kirill-kaprizov.surname.neutral.wav",
+        "surname.excited": "samples/kirill-kaprizov.surname.excited.wav",
+        "demo.lead": "samples/kirill-kaprizov.demo.goal.wav",
+        "demo.tail": "samples/kirill-kaprizov.demo.save.wav",
+        "full.neutral": "samples/kirill-kaprizov.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Connor McDavid",
+      "spoken": "Connor McDavid",
+      "files": {
+        "surname.neutral": "samples/connor-mcdavid.surname.neutral.wav",
+        "surname.excited": "samples/connor-mcdavid.surname.excited.wav",
+        "demo.lead": "samples/connor-mcdavid.demo.goal.wav",
+        "demo.tail": "samples/connor-mcdavid.demo.save.wav",
+        "full.neutral": "samples/connor-mcdavid.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Leon Draisaitl",
+      "spoken": "Leon dry-sy-tul",
+      "files": {
+        "surname.neutral": "samples/leon-draisaitl.surname.neutral.wav",
+        "surname.excited": "samples/leon-draisaitl.surname.excited.wav",
+        "demo.lead": "samples/leon-draisaitl.demo.goal.wav",
+        "demo.tail": "samples/leon-draisaitl.demo.save.wav",
+        "full.neutral": "samples/leon-draisaitl.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Alexei Vasilevsky",
+      "spoken": "Alexei vas-ih-lef-skee",
+      "files": {
+        "surname.neutral": "samples/alexei-vasilevsky.surname.neutral.wav",
+        "surname.excited": "samples/alexei-vasilevsky.surname.excited.wav",
+        "demo.lead": "samples/alexei-vasilevsky.demo.goal.wav",
+        "demo.tail": "samples/alexei-vasilevsky.demo.save.wav",
+        "full.neutral": "samples/alexei-vasilevsky.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Luca Hischier",
+      "spoken": "Luca hish-ee-er",
+      "files": {
+        "surname.neutral": "samples/luca-hischier.surname.neutral.wav",
+        "surname.excited": "samples/luca-hischier.surname.excited.wav",
+        "demo.lead": "samples/luca-hischier.demo.goal.wav",
+        "demo.tail": "samples/luca-hischier.demo.save.wav",
+        "full.neutral": "samples/luca-hischier.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Denis Vasilevsky",
+      "spoken": "Denis vas-ih-lef-skee",
+      "files": {
+        "surname.neutral": "samples/denis-vasilevsky.surname.neutral.wav",
+        "surname.excited": "samples/denis-vasilevsky.surname.excited.wav",
+        "demo.lead": "samples/denis-vasilevsky.demo.goal.wav",
+        "demo.tail": "samples/denis-vasilevsky.demo.save.wav",
+        "full.neutral": "samples/denis-vasilevsky.full.neutral.wav"
+      }
+    },
+    {
+      "playerName": "Gustav Dahlin",
+      "spoken": "Gustav dah-leen",
+      "files": {
+        "surname.neutral": "samples/gustav-dahlin.surname.neutral.wav",
+        "surname.excited": "samples/gustav-dahlin.surname.excited.wav",
+        "demo.lead": "samples/gustav-dahlin.demo.goal.wav",
+        "demo.tail": "samples/gustav-dahlin.demo.save.wav",
+        "full.neutral": "samples/gustav-dahlin.full.neutral.wav"
+      }
+    }
+  ]
+}

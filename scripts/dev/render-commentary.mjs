@@ -126,7 +126,11 @@ if (!args.has('--stems')) {
   const dbPath = resolve(ROOT, '..', '..', '..', 'mods', 'nhl-ehm', 'database.json')
   const altDb = join(ROOT, 'mods', 'nhl-ehm', 'database.json')
   const path = existsSync(dbPath) ? dbPath : existsSync(altDb) ? altDb : null
-  const wanted = ['Söderblom', 'Nečas', 'Ekman-Larsson', 'Kaprizov', 'Dahlin', 'Pastrňák', 'Zibanejad', 'Draisaitl', 'Vasilevskiy', 'Hischier', 'Kotkaniemi', 'McDavid']
+  // The imported DB spells without diacritics ("Martin Necas"), so match on a
+  // folded surname; 'Ekman Larsson' is a two-word surname there.
+  const fold = (x) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const wanted = ['Soderblom', 'Necas', 'Larsson', 'Kaprizov', 'Dahlin', 'Pastrnak', 'Zibanejad', 'Draisaitl', 'Vasilevskiy', 'Vasilevsky', 'Hischier', 'Kotkaniemi', 'Barkov', 'Rantanen', 'McDavid'].map(fold)
+  const onlyFull = new Set(['oliver ekman larsson'])
   const found = []
   if (path) {
     const db = JSON.parse(readFileSync(path, 'utf8'))
@@ -135,7 +139,8 @@ if (!args.has('--stems')) {
       if (!o || typeof o !== 'object') return
       if (Array.isArray(o)) { for (const x of o) walk(x); return }
       if (typeof o.name === 'string' && typeof o.position === 'string' && !seen.has(o.name)) {
-        const hit = wanted.find((w) => o.name.split(/\s+/).pop() === w)
+        const last = fold(o.name.split(/\s+/).pop())
+        const hit = wanted.includes(last) && (last !== 'larsson' || onlyFull.has(fold(o.name)))
         if (hit) { seen.add(o.name); found.push({ id: o.externalId ?? o.name, name: o.name, nationality: o.nationality, pronunciation: o.pronunciation, externalId: o.externalId }) }
       }
       for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v)

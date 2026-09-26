@@ -144,13 +144,13 @@ export function ArenaTitle({ ctx }: { ctx: BroadcastContext }): JSX.Element {
         {ctx.arenaName && <div className="arena bc-caps">{ctx.arenaName}</div>}
         <div className="matchup">
           <div className="side">
-            <CrestView teamId={ctx.awayTeamId} abbr={ctx.awayAbbr} colors={ctx.awayColors} style={{ width: 84, height: 84 }} />
+            <CrestView teamId={ctx.awayTeamId} abbr={ctx.awayAbbr} colors={ctx.awayColors} className="bc-crest" style={{ width: 84, height: 84, fontSize: 24 }} />
             <div className="nm">{ctx.awayName}</div>
             <div className="rec bc-num">{ctx.away.record}</div>
           </div>
           <div className="at">@</div>
           <div className="side">
-            <CrestView teamId={ctx.homeTeamId} abbr={ctx.homeAbbr} colors={ctx.homeColors} style={{ width: 84, height: 84 }} />
+            <CrestView teamId={ctx.homeTeamId} abbr={ctx.homeAbbr} colors={ctx.homeColors} className="bc-crest" style={{ width: 84, height: 84, fontSize: 24 }} />
             <div className="nm">{ctx.homeName}</div>
             <div className="rec bc-num">{ctx.home.record}</div>
           </div>
@@ -184,7 +184,7 @@ export function StartingLineup({ ctx, side }: { ctx: BroadcastContext; side: 'ho
       <div className="bc-lineup bc-texture" style={{ '--bc-team': c.main } as CSSProperties}>
         <div className="hd">
           <CrestView teamId={side === 'home' ? ctx.homeTeamId : ctx.awayTeamId} abbr={side === 'home' ? ctx.homeAbbr : ctx.awayAbbr}
-            colors={side === 'home' ? ctx.homeColors : ctx.awayColors} style={{ width: 38, height: 38 }} />
+            colors={side === 'home' ? ctx.homeColors : ctx.awayColors} className="bc-crest" style={{ width: 38, height: 38, fontSize: 11 }} />
           <div>
             <div className="t">STARTING LINEUP</div>
             <div className="n">{side === 'home' ? ctx.homeName : ctx.awayName}</div>
@@ -247,7 +247,7 @@ export function GoalLowerThird(props: { ctx: BroadcastContext; cue: Extract<Over
       <div className="panel bc-texture" />
       <FaceCutout player={p} color={c.main} className="face" />
       <CrestView teamId={goal.side === 'home' ? ctx.homeTeamId : ctx.awayTeamId} abbr={goal.side === 'home' ? ctx.homeAbbr : ctx.awayAbbr}
-        colors={goal.side === 'home' ? ctx.homeColors : ctx.awayColors} className="crest" />
+        colors={goal.side === 'home' ? ctx.homeColors : ctx.awayColors} className="crest bc-crest" />
       <div className="body">
         <div className="numpos bc-num">
           <span className="n">{p?.jerseyNumber ?? '—'}</span>
@@ -350,7 +350,9 @@ export function PlayerTag(props: {
         const w = el.offsetWidth
         const h = el.offsetHeight
         const x = Math.max(6, Math.min(bounds.w - w - 6, next.x - w / 2))
-        const y = Math.max(6, Math.min(bounds.h - h - 6, next.y - h - 18))
+        // Big tags ride above the player; assist chips sit just below theirs so a
+        // goal-mouth scrum never stacks three graphics on one spot.
+        const y = Math.max(6, Math.min(bounds.h - h - 6, big ? next.y - h - 18 : next.y + 16))
         el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
         el.style.opacity = '1'
       } else if (el && !target) {
@@ -360,11 +362,11 @@ export function PlayerTag(props: {
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [projector, cue.playerId, bounds.w, bounds.h, props.fallback])
+  }, [projector, cue.playerId, bounds.w, bounds.h, props.fallback, big])
   if (!p) return null
   const num = p.jerseyNumber !== undefined ? `${p.position === 'G' ? 'G' : p.position}#${p.jerseyNumber}` : p.position
   return (
-    <div ref={ref} className={`bc-tag ${big ? '' : 'small'}`} style={{ opacity: 0, '--bc-team': c.main, '--bc-team2': c.alt } as CSSProperties}>
+    <div ref={ref} className={`bc-tag ${big ? '' : 'small'}`} style={{ opacity: 0, zIndex: big ? 3 : 1, '--bc-team': c.main, '--bc-team2': c.alt } as CSSProperties}>
       {big ? (
         <div className="inner">
           <FaceCutout player={p} color={c.main} className="face" />
@@ -424,7 +426,7 @@ export function BroadcastOverlayLayer(props: {
         }
         if (!node) return null
         return (
-          <motion.div key={cue.id} style={{ position: 'absolute', inset: 0 }} transition={ease} {...variant}>
+          <motion.div key={cue.id} style={{ position: 'absolute', inset: 0, zIndex: d.kind === 'playerTag' && d.role !== 'assist1' && d.role !== 'assist2' ? 3 : 1 }} transition={ease} {...variant}>
             {node}
           </motion.div>
         )

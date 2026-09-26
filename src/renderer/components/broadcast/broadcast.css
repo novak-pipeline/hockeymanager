@@ -256,7 +256,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at 50% 40%, rgba(10, 14, 24, 0.35), rgba(6, 8, 14, 0.82));
+  background: radial-gradient(ellipse at 50% 40%, rgba(14, 20, 34, 0.9), rgba(5, 7, 12, 0.97));
 }
 .bc-title {
   text-align: center;
@@ -416,3 +416,16 @@
 .bc-face { position: relative; display: flex; align-items: flex-end; justify-content: center; }
 .bc-face img { max-width: 100%; max-height: 100%; object-fit: contain; object-position: bottom; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45)); }
 .bc-face svg { width: 100%; height: 100%; }
+
+/* Crest fallback tile (no logo pack): a clean roundel, not a square label. */
+.bc-crest {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+.bc-lt .crest.bc-crest { font-size: 15px; }

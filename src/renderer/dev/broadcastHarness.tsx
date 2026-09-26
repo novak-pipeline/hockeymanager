@@ -16,6 +16,8 @@ import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
 import type { BroadcastContext, BroadcastStoryline } from '@engine/story/broadcastStorylines'
 import { MatchViewer } from '../MatchViewer'
+import { MatchTimeline } from '@render2d'
+import { absTime } from '../../render2d/timeline'
 import '../index.css'
 
 function Harness(): JSX.Element {
@@ -42,6 +44,12 @@ function Harness(): JSX.Element {
       c = { ...c, storylines: [...demo, ...c.storylines] }
     }
     try { localStorage.setItem('hockeyMatchRenderer', params.get('r') === '3d' ? '3d' : '2d') } catch { /* ignore */ }
+    // Expose goal positions (as scrubber fractions) for the screenshot script.
+    const tl = new MatchTimeline(g!.stream, (id) => g!.homePlayerIds.includes(id))
+    ;(window as unknown as { __bc: unknown }).__bc = {
+      goals: g!.stream.filter((e) => e.type === 'goal').map((e) => absTime(e.period, e.t) / tl.duration),
+      duration: tl.duration,
+    }
     return { game: g!, ctx: c }
   }, [])
   return (

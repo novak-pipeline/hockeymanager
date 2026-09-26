@@ -64,6 +64,7 @@ export const DEFAULT_WORD_OVERRIDES: Readonly<Record<string, string>> = {
   'Zibanejad': 'ZIB-uh-nuh-jad',
   'Draisaitl': 'DRY-sy-tul',
   'Vasilevskiy': 'vas-ih-LEF-skee',
+  'Vasilevsky': 'vas-ih-LEF-skee',
   'Hischier': 'HISH-ee-er',
   'Kotkaniemi': 'KOT-kuh-nee-EM-ee',
   'Barkov': 'BAR-koff',
@@ -77,6 +78,16 @@ export const DEFAULT_WORD_OVERRIDES: Readonly<Record<string, string>> = {
   'Hertl': 'HER-tul',
   'Voráček': 'VOR-uh-chek',
   'Šimek': 'SHIH-mek',
+}
+
+/**
+ * Whole-name defaults for names whose SURNAME is more than one word in the DB
+ * ("Oliver Ekman Larsson" is exported without its hyphen, so the last word alone
+ * would be read as his surname).
+ */
+export const DEFAULT_FULL_OVERRIDES: Readonly<Record<string, { full: string; surname: string }>> = {
+  'Oliver Ekman Larsson': { full: 'OL-ih-ver EK-mun LAR-son', surname: 'EK-mun LAR-son' },
+  'Oliver Ekman-Larsson': { full: 'OL-ih-ver EK-mun LAR-son', surname: 'EK-mun LAR-son' },
 }
 
 type Family = 'czsk' | 'nordic' | 'finnish' | 'russian' | 'german' | 'other'
@@ -211,7 +222,11 @@ export function spokenName(p: NameInput, file: PronunciationFile | null = null):
     file?.byName?.[p.name]
   let full: string
   let surname: string
-  if (explicit) {
+  const whole = explicit ? undefined : DEFAULT_FULL_OVERRIDES[p.name]
+  if (whole) {
+    full = respellingToSpeech(whole.full)
+    surname = respellingToSpeech(whole.surname)
+  } else if (explicit) {
     const words = explicit.trim().split(/\s+/)
     if (words.length === 1) {
       // A surname-only respelling: first name through the normal rules.

@@ -97,3 +97,13 @@ describe('pronunciation', () => {
     expect(k(a.hash)).not.toBe(k(b.hash))
   })
 })
+
+describe('pronunciation — names as the imported DB spells them', () => {
+  it('diacritic-free spellings and a two-word surname still resolve', () => {
+    expect(spokenName({ id: '1', name: 'Martin Necas', nationality: 'Czech Republic' }).surname).toBe('neh-chahs')
+    expect(spokenName({ id: '2', name: 'Andrei Vasilevsky', nationality: 'Russia' }).surname).toBe('vas-ih-lef-skee')
+    const oel = spokenName({ id: '3', name: 'Oliver Ekman Larsson', nationality: 'Sweden' })
+    expect(oel.surname).toBe('ek-mun lar-son')
+    expect(oel.full).toBe('ol-ih-ver ek-mun lar-son')
+  })
+})
