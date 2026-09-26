@@ -232,13 +232,21 @@ export function cameraTargetFor(
     carrierAngle?: number
     carrierWx?: number
     carrierWz?: number
+    /** Play-focus Z (across the ice) — broadcast tilts slightly toward it. */
+    puckWz?: number
   } = {}
 ): CameraTarget {
   switch (preset) {
     case 'broadcast': {
-      // Damped x-follow: camera and look-at both track puck x at 35% amplitude.
-      const fx = puckWx * 0.35
-      return { px: fx, py: 40, pz: -75, lx: fx, ly: 0, lz: 0 }
+      // The real "high home" game camera: mounted high in the stands at
+      // centre ice, well back from the glass, and it mostly PANS (the look-at
+      // tracks the play at 80%) while the body only trucks a little (30%).
+      // Paired with a long lens (cameraFovFor → 30°) this keeps the players
+      // big and the perspective honest instead of a wide, distorted shot.
+      // Geometry: near boards sit just above the bottom edge (no near-side
+      // crowd in frame), far boards ~quarter-height from the top.
+      const lz = 2 + (opts.puckWz ?? 0) * 0.25
+      return { px: puckWx * 0.3, py: 50, pz: -100, lx: puckWx * 0.8, ly: 0, lz }
     }
 
     case 'overhead': {
@@ -280,6 +288,32 @@ export function cameraTargetFor(
         lx: wx, ly: 1, lz: wz
       }
     }
+  }
+}
+
+/** Vertical field of view (degrees) per camera preset — broadcast is a long lens. */
+export function cameraFovFor(preset: CameraPreset): number {
+  switch (preset) {
+    case 'broadcast': return 30
+    case 'overhead': return 45
+    case 'endzone': return 50
+    case 'follow': return 55
+  }
+}
+
+/**
+ * Goal-celebration framing: the same broadcast side, lower and tighter on the
+ * scorer. Blended in by celebrationWeight (pose.ts) — never a hard cut.
+ */
+export function celebrationTarget(scorerWx: number, scorerWz: number): CameraTarget & { fov: number } {
+  return {
+    px: scorerWx * 0.85,
+    py: 24,
+    pz: Math.max(-100, scorerWz - 62),
+    lx: scorerWx,
+    ly: 3.2,
+    lz: scorerWz,
+    fov: 24,
   }
 }
 
