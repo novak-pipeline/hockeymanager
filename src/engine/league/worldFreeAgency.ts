@@ -11,6 +11,7 @@
 import type { Competition, Player, PlayerId, Team, TeamId } from '@domain'
 import { ratedOverall } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
+import { indexed, wageIndex } from './economy'
 
 export interface WorldSigning {
   playerId: PlayerId
@@ -28,9 +29,9 @@ export interface WorldSigning {
 /** Modest world-league contract scaled by ability and league strength. */
 function worldContract(ovr: number, strength: number, rng: Rng): { salary: number; years: number } {
   const base = 0.2 + Math.pow(Math.max(0, ovr - 40) / 50, 2) * 3.5 // €/$M, well below NHL
-  const salary = Math.round(base * strength * 1e6 * rng.float(0.85, 1.15))
+  const salary = Math.round(base * strength * 1e6 * rng.float(0.85, 1.15) * wageIndex())
   const years = rng.range(1, 2)
-  return { salary: Math.max(150_000, salary), years }
+  return { salary: Math.max(indexed(150_000), salary), years }
 }
 
 export function worldFreeAgencySweep(args: {

@@ -29,9 +29,15 @@
 import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
 import { ratedOverall } from '@engine/ratings/composites'
 import { deriveSeed, Rng } from '@engine/shared/rng'
+import { askModifierFor, indexed, wageIndex } from './economy'
 
-/** Cheapest legal contract; asks never fall below this. */
+/** Cheapest legal contract in BASE-YEAR dollars; asks never fall below the
+ *  indexed value ({@link leagueMinSalary}). */
 const LEAGUE_MIN_SALARY = 750_000
+/** Today's league minimum — the base minimum moved with the cap. */
+export const leagueMinSalary = (): number => indexed(LEAGUE_MIN_SALARY)
+/** Today's entry-level AAV (base $900k) — moved with the cap. */
+export const entryLevelSalary = (): number => indexed(900_000)
 /** Contracts below this are two-way deals (minor-league assignable). */
 const TWO_WAY_THRESHOLD = 1_100_000
 // No-trade protection is only earned on a real top-of-roster commitment.
@@ -176,8 +182,11 @@ export function askTerms(player: Player, year: number): { salary: number; years:
   if (player.age >= 33) m *= Math.max(0.6, 1 - 0.07 * (player.age - 32)) // veteran discount
   if (ovr >= 90) m *= 1.15 // star tax
   m *= rng.float(0.96, 1.04)
+  // The economy: base-year dollars moved with the cap, and the season he just
+  // had (a contract-year breakout, a ring, a slump) — see economy.ts.
+  m *= wageIndex() * askModifierFor(player)
 
-  const salary = Math.max(LEAGUE_MIN_SALARY, roundTo25k(m * 1e6))
+  const salary = Math.max(leagueMinSalary(), roundTo25k(m * 1e6))
   const years = askYears(player.age, ovr, rng)
   return { salary, years }
 }
@@ -251,7 +260,7 @@ export function termSecurityScore(
 export function qualifyingOffer(player: Player): number {
   const prior = player.contract.salary
   const pct = prior < 1_000_000 ? 1.1 : prior < 2_000_000 ? 1.05 : 1.0
-  return Math.max(LEAGUE_MIN_SALARY, roundTo25k(prior * pct))
+  return Math.max(leagueMinSalary(), roundTo25k(prior * pct))
 }
 
 /**
@@ -321,14 +330,14 @@ export function signPlayer(args: {
   // player who already holds one keeps it when he re-signs while still eligible.
   // Young players and cheap/short deals never carry one.
   const ntcEligible = player.age >= 27 || player.stats.length >= 7
-  const ntcWorthy = ntcEligible && salary >= NTC_MIN_SALARY && years >= NTC_MIN_YEARS
+  const ntcWorthy = ntcEligible && salary >= indexed(NTC_MIN_SALARY) && years >= NTC_MIN_YEARS
   const keepsExisting = ntcEligible && player.contract.noTradeClause
   player.contract = {
     salary,
     yearsRemaining: years,
     expiryYear: year + years,
     noTradeClause: ntcWorthy || keepsExisting,
-    twoWay: salary < TWO_WAY_THRESHOLD
+    twoWay: salary < indexed(TWO_WAY_THRESHOLD)
   }
   if (!onRoster) team.roster.push(player.id)
   team.finances.capUsed = prospective
@@ -401,6 +410,35 @@ function isKeeper(team: Team, player: Player, players: Map<PlayerId, Player>): b
 }
 
 /**
+ * Does THIS GM want his expiring UFA back? A position group below its minimum
+ * always does. Otherwise the player must still be a regular (at or above the
+ * club's weakest regular at his spot) — a loyal GM gives his own a few points
+ * of benefit of the doubt, a rebuilding one lets a 30-something walk unless he
+ * is loyal to a fault, and a young player with a future is kept.
+ */
+function personaWantsBack(
+  team: Team,
+  player: Player,
+  players: Map<PlayerId, Player>,
+  gm: { loyalty: number; capDiscipline: number },
+  posture: 'contend' | 'retool' | 'rebuild',
+): boolean {
+  const group = groupOf(player)
+  if (secureCount(team, players, group) < ROSTER_MINIMUMS[group]) return true
+  const ovr = playerOverall(player)
+  if (player.age <= 23 && ovr >= 48) return true
+  if (posture === 'rebuild' && player.age >= 30 && gm.loyalty < 0.7) return false
+  const n = group === 'G' ? 2 : group === 'D' ? 6 : 12
+  const others = team.roster
+    .map((id) => players.get(id))
+    .filter((p): p is Player => !!p && p.id !== player.id && groupOf(p) === group && p.contract.yearsRemaining > 0)
+    .map(playerOverall)
+    .sort((a, b) => b - a)
+  const bar = others[n - 1] ?? 0
+  return ovr >= bar - 4 * gm.loyalty - (posture === 'contend' ? 1 : 0)
+}
+
+/**
  * Resign stage: each AI club offers its expiring keepers their full ask, best
  * players first, while the new deal fits under the cap (the expiring player's
  * old salary comes off as the new one goes on). Players the club can't afford
@@ -413,6 +451,11 @@ export function aiResignDay(args: {
   userTeamId: TeamId
   year: number
   rng: Rng
+  /** LW-econ: the GM's character decides who is worth keeping (loyalty keeps
+   *  his own, capDiscipline keeps a cushion, a rebuild lets veterans walk).
+   *  Absent -> the original "keep anyone >= 55" rule. */
+  personaOf?: (teamId: TeamId) => { loyalty: number; capDiscipline: number }
+  postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
 }): { signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> } {
   const { teams, players, userTeamId, year, rng } = args
   const signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> = []
@@ -442,13 +485,28 @@ export function aiResignDay(args: {
         }
       } else {
         // Unrestricted: the club must both want him and win the negotiation.
-        if (!isKeeper(team, player, players)) continue
+        const wanted = args.personaOf
+          ? personaWantsBack(team, player, players, args.personaOf(team.id), args.postureOf?.(team.id) ?? 'retool')
+          : isKeeper(team, player, players)
+        if (!wanted) continue
         const ask = askTerms(player, year)
         if (!offerAcceptable(player, ask, ask, rng)) continue
       }
       const ask = askTerms(player, year)
       const prospective = capUsedFor(team, players) - player.contract.salary + ask.salary
       if (prospective > team.finances.salaryCap) continue
+      // A disciplined GM keeps a cushion — but never at the cost of his best.
+      if (args.personaOf) {
+        const gm = args.personaOf(team.id)
+        const cushion = team.finances.salaryCap * 0.03 * gm.capDiscipline
+        const topThree = team.roster
+          .map((id) => players.get(id))
+          .filter((p): p is Player => !!p)
+          .sort(byOverallDesc)
+          .slice(0, 3)
+          .some((p) => p.id === player.id)
+        if (!topThree && prospective > team.finances.salaryCap - cushion) continue
+      }
       signPlayer({ team, player, salary: ask.salary, years: ask.years, year, players })
       signings.push({ playerId: player.id, teamId: team.id, salary: ask.salary, years: ask.years })
     }
@@ -483,7 +541,12 @@ export function aiFreeAgencyDay(args: {
   rng: Rng
   faDay: number
   postureOf?: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
-}): { signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> } {
+  /** The living market (LW-econ). When supplied, clubs BID on talent by upgrade x
+   *  posture x their GM, and each player CHOOSES between competing offers
+   *  (money, term, a contender, a role). Absent -> the original deficit rule. */
+  market?: FaMarketContext
+}): { signings: FaSigning[] } {
+  if (args.market) return marketFreeAgencyDay({ ...args, market: args.market })
   const { teams, players, freeAgentIds, userTeamId, year, rng, faDay } = args
   const postureOf = args.postureOf ?? ((): 'retool' => 'retool')
   const signings: Array<{ playerId: PlayerId; teamId: TeamId; salary: number; years: number }> = []
@@ -510,7 +573,7 @@ export function aiFreeAgencyDay(args: {
 
     const ask = askTerms(player, year)
     const discount = Math.max(0.7, 1 - 0.05 * (faDay - decisionDay))
-    const salary = Math.max(LEAGUE_MIN_SALARY, roundTo25k(ask.salary * discount))
+    const salary = Math.max(leagueMinSalary(), roundTo25k(ask.salary * discount))
     const group = groupOf(player)
     const ovr = playerOverall(player)
 
@@ -528,7 +591,7 @@ export function aiFreeAgencyDay(args: {
         // aging vet, and no shopping at the top of the market. Cheap, short
         // stopgaps only.
         if (player.age >= 30 && ask.years >= 2) continue
-        if (salary >= REBUILD_MAX_UFA_AAV) continue
+        if (salary >= indexed(REBUILD_MAX_UFA_AAV)) continue
       }
       // Contenders chase the difference-makers — a nudge so the best available
       // gravitates to a club actually pushing for now.
@@ -573,4 +636,189 @@ export function initialPicks(args: {
     }
   }
   return picks
+}
+
+/* ─────────────────────── the living FA market (LW-econ) ─────────────────────── */
+
+/** What a club's front office brings to the July market. */
+export interface FaMarketContext {
+  /** GM axes the market reads (a GmPersona satisfies this). */
+  personaOf: (teamId: TeamId) => { aggression: number; capDiscipline: number; name: string }
+  postureOf: (teamId: TeamId) => 'contend' | 'retool' | 'rebuild'
+  /** 1 = strongest roster (a contender is a selling point to a veteran). */
+  strengthRankOf: (teamId: TeamId) => number
+  /** The club's cap floor — a club below it bids hard to get there. */
+  floorOf: (team: Team) => number
+}
+
+export interface FaSigning {
+  playerId: PlayerId
+  teamId: TeamId
+  salary: number
+  years: number
+  /** How many clubs bid (market only). */
+  suitors?: number
+  /** The factor that won him (market only). */
+  reason?: string
+}
+
+interface FaBid { team: Team; salary: number; years: number; upgrade: number; score: number }
+
+/** The weakest regular at a group, among players under contract beyond now. */
+function marketReplacementLevel(team: Team, players: Map<PlayerId, Player>, group: PositionGroup): number {
+  const n = group === 'G' ? 2 : group === 'D' ? 6 : 12
+  const ovrs = team.roster
+    .map((id) => players.get(id))
+    .filter((p): p is Player => !!p && groupOf(p) === group && p.contract.yearsRemaining > 0)
+    .map(playerOverall)
+    .sort((a, b) => b - a)
+  return ovrs[n - 1] ?? 0
+}
+
+/**
+ * July, alive. Each deciding free agent draws BIDS from every AI club that
+ * wants him — and wanting him is about what he adds: his overall over the
+ * club's weakest regular at his position, weighed by the club's window (a
+ * contender pays for the upgrade, a rebuilder only for youth or a stopgap), an
+ * empty roster slot, or a payroll under the floor. The GM shapes the bid: an
+ * aggressive one pays over the ask for a real upgrade, a disciplined one keeps
+ * a cushion under the ceiling. Then the PLAYER chooses — money (ambitious
+ * players), term (veterans), a contender (ring-chasers), a role (young players
+ * want ice time) — so the best offer on paper doesn't always win.
+ */
+function marketFreeAgencyDay(args: {
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  freeAgentIds: PlayerId[]
+  userTeamId: TeamId
+  year: number
+  rng: Rng
+  faDay: number
+  market: FaMarketContext
+}): { signings: FaSigning[] } {
+  const { teams, players, freeAgentIds, userTeamId, year, rng, faDay, market } = args
+  const signings: FaSigning[] = []
+  const rostered = new Set<PlayerId>()
+  for (const team of teams.values()) for (const id of team.roster) rostered.add(id)
+  const pool = freeAgentIds
+    .map((id) => players.get(id))
+    .filter((p): p is Player => p !== undefined && !rostered.has(p.id))
+    .sort(byOverallDesc)
+  const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world').sort(byId)
+  const nTeams = Math.max(2, aiTeams.length + 1)
+
+  for (let rank = 0; rank < pool.length; rank++) {
+    const player = pool[rank]!
+    const decisionDay = 1 + Math.floor(rank / FA_DECISIONS_PER_DAY)
+    if (decisionDay > faDay) continue
+    const ask = askTerms(player, year)
+    const discount = Math.max(0.7, 1 - 0.05 * (faDay - decisionDay))
+    const base = Math.max(leagueMinSalary(), roundTo25k(ask.salary * discount))
+    const group = groupOf(player)
+    const ovr = playerOverall(player)
+
+    const bids: FaBid[] = []
+    for (const team of aiTeams) {
+      if (team.roster.length >= MAX_ROSTER_SIZE) continue
+      const gm = market.personaOf(team.id)
+      const posture = market.postureOf(team.id)
+      const used = capUsedFor(team, players)
+      const room = team.finances.salaryCap - used
+      const underFloor = used < market.floorOf(team)
+      const deficit = ROSTER_TARGETS[group] - secureCount(team, players, group)
+      const upgrade = ovr - marketReplacementLevel(team, players, group)
+      if (posture === 'rebuild' && player.age >= 30 && ask.years >= 2 && !underFloor) continue
+      if (posture === 'rebuild' && base >= indexed(REBUILD_MAX_UFA_AAV) && player.age > 25) continue
+      const postureW = posture === 'contend' ? 1.35 : posture === 'retool' ? 1 : player.age <= 25 ? 0.9 : 0.45
+      let want = Math.max(0, upgrade) * postureW + (deficit > 0 ? 2 + deficit : 0) + (underFloor ? 4 : 0)
+      if (want <= 0.5) continue
+      // The bid: aggression pays over for a real upgrade; the floor pays to get there.
+      const over = 0.1 * gm.aggression * Math.min(1, Math.max(0, upgrade) / 6) + (underFloor ? 0.05 : 0)
+      const salary = roundTo25k(base * (1 + over))
+      // A disciplined GM keeps a cushion under the ceiling (never when under the floor).
+      const cushion = underFloor ? 0 : team.finances.salaryCap * 0.02 * gm.capDiscipline
+      if (salary > room - cushion) continue
+      const years = posture === 'rebuild' && player.age >= 30 ? 1 : ask.years
+      want += rng.float(0, 0.5)
+      bids.push({ team, salary, years, upgrade, score: want })
+    }
+    if (bids.length === 0) continue
+    // The player's choice, weighted by his personality and age.
+    const pers = player.personality
+    const wMoney = 0.45 + ((pers.ambition - 10.5) / 19) * 0.4
+    const wTerm = 0.2 + (player.age >= 30 ? 0.2 : 0) - ((pers.determination - 10.5) / 19) * 0.1
+    const wWin = 0.15 + (player.age >= 30 ? 0.2 : 0) + ((pers.ambition - 10.5) / 19) * 0.1
+    const wRole = player.age <= 27 ? 0.2 : 0.08
+    let best: FaBid | null = null
+    let bestU = -Infinity
+    let reason = 'the money'
+    for (const b of bids) {
+      const money = b.salary / Math.max(1, ask.salary)
+      const term = termSecurityScore(player, ask.years, b.years)
+      const win = 1 - (market.strengthRankOf(b.team.id) - 1) / (nTeams - 1)
+      const role = b.upgrade >= 4 ? 1 : b.upgrade >= 0 ? 0.6 : 0.25
+      // Clubs that want him most also sell hardest (a small pitch term).
+      const u = wMoney * money + wTerm * term + wWin * win + wRole * role + 0.01 * b.score + rng.float(0, 0.03)
+      if (u > bestU) {
+        bestU = u
+        best = b
+        const parts: Array<[number, string]> = [[wMoney * money, 'the money'], [wTerm * term, 'the term'], [wWin * win, 'a chance to win'], [wRole * role, 'the role']]
+        reason = parts.sort((x, y) => y[0] - x[0])[0]![1]
+      }
+    }
+    if (!best) continue
+    try {
+      signPlayer({ team: best.team, player, salary: best.salary, years: best.years, year, players })
+    } catch {
+      continue
+    }
+    signings.push({ playerId: player.id, teamId: best.team.id, salary: best.salary, years: best.years, suitors: bids.length, reason })
+  }
+  return { signings }
+}
+
+/**
+ * THE FLOOR BINDS. After the summer market, any AI club still under the cap
+ * floor signs the best free agents it can fit (a roster spot and the money),
+ * paying a one-year floor premium if that is what it takes. Real clubs below
+ * the lower limit must get there before the season; this is them doing it.
+ */
+export function aiFloorTopUp(args: {
+  teams: Map<TeamId, Team>
+  players: Map<PlayerId, Player>
+  freeAgentIds: PlayerId[]
+  userTeamId: TeamId
+  year: number
+  floorOf: (team: Team) => number
+}): { signings: FaSigning[] } {
+  const { teams, players, userTeamId, year } = args
+  const signings: FaSigning[] = []
+  const taken = new Set<string>()
+  const rostered = new Set<string>()
+  for (const t of teams.values()) for (const id of t.roster) rostered.add(id as string)
+  const pool = args.freeAgentIds
+    .map((id) => players.get(id))
+    .filter((p): p is Player => !!p && !rostered.has(p.id as string))
+    .sort(byOverallDesc)
+  const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world').sort(byId)
+  for (const team of aiTeams) {
+    for (let guard = 0; guard < 6; guard++) {
+      const used = capUsedFor(team, players)
+      const short = args.floorOf(team) - used
+      if (short <= 0 || team.roster.length >= 25) break
+      const room = team.finances.salaryCap - used
+      const cand = pool.find((p) => !taken.has(p.id as string) && askTerms(p, year).salary <= room)
+      if (!cand) break
+      taken.add(cand.id as string)
+      const ask = askTerms(cand, year)
+      const salary = Math.min(room, Math.max(ask.salary, roundTo25k(Math.min(short, ask.salary * 1.5))))
+      try {
+        signPlayer({ team, player: cand, salary, years: 1, year, players })
+      } catch {
+        continue
+      }
+      signings.push({ playerId: cand.id, teamId: team.id, salary, years: 1 })
+    }
+  }
+  return { signings }
 }

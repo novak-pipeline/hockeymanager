@@ -134,4 +134,11 @@ export interface League {
    * generated (non-mod) league. Teams referenced here live in LeagueData.teams.
    */
   competitions?: Competition[]
+  /**
+   * The league economy's anchor: the NHL ceiling the league OPENED with. Every
+   * price (asks, minimum, ELC, fair-salary curve) is quoted in that base year's
+   * dollars and moved by today's ceiling / baseCap (engine/league/economy.ts).
+   * Optional/additive — an older save anchors to the ceiling it loads with.
+   */
+  economy?: { baseCap: number }
 }

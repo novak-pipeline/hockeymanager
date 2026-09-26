@@ -36,6 +36,8 @@ import {
   type PlayoffsState,
   type Position,
   type ScheduledGame,
+  type DraftProspect,
+  type SeasonStats,
   type SquadStatus,
   type TradeStatus,
   type SeriesGameResult,
@@ -161,11 +163,17 @@ import {
 import {
   buildGmPersona,
   deriveClubPosture,
+  deriveLivePosture,
   personaPhilosophy,
+  scoutingDeptFor,
   type ClubPosture,
   type GmPersona,
+  type LivePosture,
+  type TableRead,
 } from '@engine/league/gmPersona'
-import { WorldTelemetry } from '@engine/league/worldTelemetry'
+import { generateLeagueDeal, type LeagueDeal, type MarketClub, type MarketWindow } from '@engine/league/aiMarket'
+import { WorldTelemetry, type AiTradeShape } from '@engine/league/worldTelemetry'
+import { indexed, setAskModifier, setWageIndex, wageIndex } from '@engine/league/economy'
 import {
   buildBoardMeeting,
   buildSeasonReviewScene,
@@ -367,7 +375,9 @@ import {
   type TentpolesState,
 } from '@engine/league/tentpoles'
 import {
+  capFloorFor,
   requiresWaivers as requiresWaiversRule,
+  aiFloorTopUp,
   aiFreeAgencyDay,
   aiResignDay,
   askTerms,
@@ -425,7 +435,7 @@ import {
   evaluateProposal,
   executeTrade,
   generateAiOffers,
-  generateAiAiTrade,
+  buyerProspects,
   pickValue,
   playerValue,
   rosterCapUsed,
@@ -1415,6 +1425,7 @@ export class Career {
     // snapshot below for loaded careers.
     this.worldSim = initWorldSimState(this.data.league.competitions ?? [])
     this.normalizeContracts() // #185: strip illegal NTCs (runs for new + loaded)
+    this.installEconomy() // wage index + performance-sensitive asks (economy.ts)
     this.playerCounter = this.computePlayerCounter()
     if (!restored) {
       for (const teamId of data.league.teams) this.standings.set(teamId, freshStanding(teamId))
@@ -6207,7 +6218,7 @@ export class Career {
         const cand = unemployed(grp)[0]
         if (!cand) break // nobody left on earth at this position
         cand.contract = {
-          salary: EMERGENCY_MIN_SALARY,
+          salary: indexed(EMERGENCY_MIN_SALARY),
           yearsRemaining: 1,
           expiryYear: this.year + 1,
           noTradeClause: false,
@@ -6465,22 +6476,10 @@ export class Career {
       // volume ramps toward the deadline into a real flurry (multiple deals can
       // land in a single day). Each attempt re-reads the updated rosters, so a
       // vet isn't traded twice and the market thins as pieces move.
+      // Talks open and close over days (two-phase) — see leagueMarketTick.
       const dl = this.deadlineDay - day
-      const aiTradeAttempts = dl === 0 ? 12 : dl >= 0 && dl <= 5 ? 7 : dl >= 0 && dl <= 20 ? 4 : 2
-      for (let attempt = 0; attempt < aiTradeAttempts; attempt++) {
-        const aiDeal = generateAiAiTrade({
-          day,
-          deadlineDay: this.deadlineDay,
-          userTeamId: this.userTeamId,
-          teams: this.data.teams,
-          players: this.data.players,
-          picks: this.picks,
-          rng: this.rngFor(7012, day, attempt),
-          postureOf,
-        })
-        if (!aiDeal) continue
-        this.executeAiAiDeal(aiDeal, day)
-      }
+      const attempts = dl <= 5 ? 5 : dl <= 20 ? 3 : 1.6
+      this.leagueMarketTick(dl <= 5 ? 'deadline' : 'inSeason', attempts, day)
     }
     this.currentDay = day
     if (this.phase === 'regularSeason') this.storyTickDay(day, outcomes)
@@ -6810,6 +6809,7 @@ export class Career {
 
   /** One phase-aware step: a match day, a playoff day, or an offseason stage. */
   step(): boolean {
+    this.installEconomy()
     if (this.phase === 'regularSeason') return this.advanceDay()
     if (this.phase === 'playoffs') return this.playPlayoffDay(false) !== undefined
     return this.advanceOffseason()
@@ -6844,6 +6844,7 @@ export class Career {
       userTeamId: this.userTeamId,
       year: this.year,
       rng: this.rngFor(8003),
+      ...this.resignPersonaCtx(),
     })
     if (ai.signings.length > 0) {
       this.pushNews(
@@ -8021,6 +8022,10 @@ export class Career {
         // offseason resume. Returning false halts advance() / step() cleanly.
         if (os.draft && os.draft.selections.length < os.draft.order.length) return false
         this.pushDraftRecap()
+        // The June checkpoint: GMs re-read their clubs, then the draft floor —
+        // the first summer trades (hockey trades, dumps, goalies) open talks.
+        this.commitPostures('summer')
+        this.leagueMarketTick('offseason', 14, this.currentDay)
         // E1: the call to your best pick, made from the floor.
         this.raisePostDraftCall()
         const rng = this.rngFor(8003)
@@ -8038,12 +8043,14 @@ export class Career {
         this.qualifyingOffers.clear()
         this.openQualifyingOffers()
         this.generateOfferSheets()
+        this.aiOfferSheets()
         const ai = aiResignDay({
           teams: this.data.teams,
           players: this.data.players,
           userTeamId: this.userTeamId,
           year: this.year,
           rng,
+          ...this.resignPersonaCtx(),
         })
         this.telemetry.season(this.year).resigns.ai += ai.signings.length
         if (ai.signings.length > 0) {
@@ -8213,6 +8220,13 @@ export class Career {
           // Competitive window shapes the market: rebuilders sign youth/stopgaps,
           // contenders chase the difference-makers.
           postureOf: (tid) => this.clubPostureFor(tid, faRanks).posture,
+          // LW-econ: clubs bid by upgrade x posture x GM; players choose.
+          market: {
+            personaOf: (tid) => this.gmPersonaFor(tid),
+            postureOf: (tid) => this.clubPostureFor(tid, faRanks).posture,
+            strengthRankOf: (tid) => faRanks.get(tid as string) ?? 16,
+            floorOf: (t) => capFloorFor(t.finances.salaryCap),
+          },
         })
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
         {
@@ -8302,12 +8316,17 @@ export class Career {
             // not just the ticker. Deliberately worded "land" (not "signs with"):
             // the inbox curation strips generic depth-signing noise, and a summer's
             // big ticket landing elsewhere is exactly the league news you want.
+            const gm = s.teamId === this.userTeamId ? null : this.gmPersonaFor(s.teamId)
+            const courted = s.suitors && s.suitors > 1
+              ? ` ${s.suitors} clubs made offers; his camp says it came down to ${s.reason ?? 'the money'}.`
+              : ''
             this.pushNews(
               'contract',
               `${t.name} land ${p.name}`,
-              `${t.name} have signed ${p.name} (${p.position}, ${p.age}) to a $${(s.salary / 1e6).toFixed(2)}M × ${s.years}-year deal — one of the summer's marquee names is off the board.`,
+              `${t.name} have signed ${p.name} (${p.position}, ${p.age}) to a $${(s.salary / 1e6).toFixed(2)}M × ${s.years}-year deal — one of the summer's marquee names is off the board.${courted}${gm ? ` ${gm.name} (${gm.styleLabel}) got his man.` : ''}`,
               { playerId: s.playerId as string, teamId: s.teamId as string }
             )
+            if (gm) this.telemetry.season(this.year).aiMoveStories++
             continue
           }
           // Mid-tier depth: keep the churny format (surfaces in the Feed/ticker,
@@ -8349,11 +8368,16 @@ export class Career {
           this.faShortlist.delete(pid)
           if (session && session.status !== 'signed') session.status = 'walked'
         }
+        // July trades: the summer market keeps talking (two-phase, closes later).
+        this.leagueMarketTick('offseason', 5, this.currentDay)
         for (const team of this.data.teams.values()) repairLines(team, this.data.players)
         if (os.faDay >= FA_WINDOW_DAYS) {
+          // Summer talks still open close (or die) before camp.
+          this.closeLeagueTalks(Infinity, this.currentDay, false)
           // Unanswered arbitration awards bind the club (cap permitting).
           for (const c of [...this.arbitrationCases]) this.acceptArbitration(c.playerId)
           for (const c of [...this.arbitrationCases]) this.walkAwayArbitration(c.playerId) // cap-blocked leftovers walk
+          this.enforceAiCapFloor()
           this.runWorldFreeAgency()
           // Nobody fills the GM's own roster but the GM — except when he has left
           // it illegal and the market is about to close behind him.
@@ -8442,7 +8466,7 @@ export class Career {
       // rights-only: leave him on his amateur team, untouched contract.
     } else {
       const elc = {
-        salary: 900000,
+        salary: indexed(900_000),
         yearsRemaining: 3,
         expiryYear: this.year + 1 + 3,
         noTradeClause: false,
@@ -8560,7 +8584,7 @@ export class Career {
       if (remaining.length === 0) return
       const choice =
         pick.ownerTeamId === this.userTeamId
-          ? remaining[0]
+          ? this.userAutoPick(remaining)
           : aiSelectProspect({
               remaining,
               rng: this.rngFor(8005, d.selections.length),
@@ -8591,14 +8615,65 @@ export class Career {
     this.makeSelection(choice.playerId)
   }
 
-  /** A club's private board variance on a prospect: a small, deterministic rank
-   *  nudge (±~2.5) per (team, prospect) so different AI orgs value the same kid
-   *  slightly differently instead of all sharing the public consensus board. */
+  /**
+   * "Sim entire draft" picks for the user from OUR BOARD (the staff consensus
+   * your scouts built), never from the true class order — delegating the draft
+   * must not out-scout your own department. Prospects your staff never ranked
+   * fall back to the public class order behind every ranked name.
+   */
+  private userAutoPick(remaining: DraftProspect[]): DraftProspect {
+    let board: Map<string, number>
+    try {
+      board = new Map(this.getDraftRankings().scoutBoard.map((r) => [r.playerId, r.rank]))
+    } catch {
+      board = new Map()
+    }
+    const key = (d: DraftProspect): number => board.get(d.playerId as string) ?? 10_000 + d.rank
+    return [...remaining].sort((a, b) => key(a) - key(b) || a.rank - b.rank)[0]!
+  }
+
+  /**
+   * AN AI CLUB DRAFTS OFF ITS OWN BOARD. The class order is close to the truth
+   * (true potential + production + a little noise); each club's board strays
+   * from it by its scouting department (a threadbare staff misjudges by a dozen
+   * slots, an elite one by two), is blind in one region (those kids are
+   * misread and usually undervalued), and leans with its GM: a risk-taker
+   * climbs on raw ceiling, an analytics GM on production. Returned as a rank
+   * nudge (+ = this club is higher on him). Deterministic per (club, prospect).
+   */
+  private draftBiasCache: { key: string; map: Map<string, number>; clubInfo: Map<string, { leagueAbbr: string; club: string }> } | null = null
+
   private teamDraftBias(teamId: TeamId, p: DraftProspect): number {
-    let h = 2166136261
-    const s = `${teamId as string}:${p.playerId as string}`
-    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) }
-    return (((h >>> 0) % 100000) / 100000 - 0.5) * 5
+    const cacheKey = `${this.year}|${this.offseason?.draft?.year ?? 0}`
+    if (this.draftBiasCache?.key !== cacheKey) {
+      this.draftBiasCache = { key: cacheKey, map: new Map(), clubInfo: this.worldClubInfoByPid() }
+    }
+    const memoKey = `${teamId as string}:${p.playerId as string}`
+    const memo = this.draftBiasCache.map.get(memoKey)
+    if (memo !== undefined) return memo
+    const hash = (salt: string): number => {
+      let h = 2166136261
+      const s = `${teamId as string}:${p.playerId as string}:${salt}`
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) }
+      return ((h >>> 0) % 100000) / 100000
+    }
+    // Approximate standard normal from two uniforms (Irwin–Hall, deterministic).
+    const normal = (hash('a') + hash('b') + hash('c') + hash('d') - 2) * Math.sqrt(3)
+    const dept = scoutingDeptFor(this.seed, teamId as string)
+    const player = this.data.players.get(asPlayerId(p.playerId as string))
+    const blind = player?.nationality !== undefined && player.nationality === dept.blindSpot
+    const sigma = (2 + 12 * (1 - dept.quality)) * (blind ? 1.5 : 1)
+    let bias = normal * sigma
+    if (blind) bias -= 3 + 5 * hash('blind')
+    if (player) {
+      const gm = this.gmPersonaFor(teamId)
+      const gap = Math.max(0, ratedPotential(player) - ratedOverall(player))
+      bias += (gm.riskTolerance - 0.5) * gap * 0.5
+      const prod = this.prospectProductionBonus(player, this.draftBiasCache.clubInfo.get(p.playerId as string)?.leagueAbbr)
+      bias += (gm.analyticsLean - 0.5) * prod * 0.8
+    }
+    this.draftBiasCache.map.set(memoKey, bias)
+    return bias
   }
 
   /**
@@ -9028,6 +9103,9 @@ export class Career {
         t.finances.budget = budgetForCap(t.finances.salaryCap)
       }
     }
+    // The economy moves with the ceiling: every ask, the fair-salary curve, the
+    // minimum and the entry-level deal are re-indexed to the new cap.
+    this.installEconomy()
     // Rebuild next season's schedule, preserving the weighted NHL format when the
     // league has a conference/division structure (else flat round-robins).
     const schedTeams = this.data.league.teams
@@ -9086,6 +9164,9 @@ export class Career {
     this.offseason = null
     this.currentDay = 0
     this.phase = 'regularSeason'
+    // Season-open checkpoint: every AI GM commits to a stance for the year.
+    this.pendingLeagueDeals = []
+    this.commitPostures('season')
     // Keep the market open + deep in-season (persists across seasons + AI shops it).
     this.stockFreeAgentMarket()
     // Reset press schedule for the new season.
@@ -9611,7 +9692,7 @@ export class Career {
     const comps = this.data.league.competitions
     if (!comps || comps.length === 0) return
     const elc = (): Player['contract'] => ({
-      salary: 900000, yearsRemaining: 3, expiryYear: this.year + 1 + 3, noTradeClause: false, twoWay: true,
+      salary: indexed(900_000), yearsRemaining: 3, expiryYear: this.year + 1 + 3, noTradeClause: false, twoWay: true,
     })
     const touchedAhl = new Set<TeamId>()
     const touchedNhl = new Set<TeamId>()
@@ -10452,7 +10533,7 @@ export class Career {
     if (!this.faPool.some((f) => (f as string) === playerId)) return { ok: false, message: 'he is no longer available' }
     const player = this.data.players.get(id)
     if (!player) return { ok: false, message: 'unknown player' }
-    const salary = 750_000
+    const salary = indexed(750_000)
     const capUsedNow = this.userCapUsed()
     if (capUsedNow + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'no cap room for even a minimum deal' }
@@ -11132,7 +11213,9 @@ export class Career {
 
   /** Draft-pick compensation owed for letting an offer-sheeted RFA walk, by AAV
    *  (NHL CBA tiers scaled to the $88M cap). Returns the rounds to surrender. */
-  private offerSheetComp(salary: number): number[] {
+  private offerSheetComp(rawSalary: number): number[] {
+    // Tiers are base-year dollars; the ladder rises with the cap (economy.ts).
+    const salary = rawSalary / wageIndex()
     if (salary <= 1_500_000) return []
     if (salary <= 2_400_000) return [3]
     if (salary <= 4_800_000) return [2]
@@ -11681,18 +11764,20 @@ export class Career {
       if (ovr < 68) continue
       // The late wave is rarer — it's the club that missed on someone else.
       if (late && !rng.chance(0.25)) continue
-      // Better players are likelier to draw a sheet; a 78+ stud always does.
-      const chance = Math.min(0.95, (ovr - 64) / 16)
-      if (ovr < 78 && !rng.chance(chance)) continue
       const ask = askTerms(p, this.year)
-      const salary = Math.round(ask.salary * 1.1) // rivals overpay to pry him loose
-      // A rival with the cap room to carry the deal (a full roster just clears a
-      // spot for him — handled on decline).
-      const suitor = rivals.find((t) => {
-        const capUsed = capUsedFor(t, this.data.players)
-        return capUsed + salary <= t.finances.salaryCap
-      })
-      if (!suitor) continue
+      // Sheets are RARE and AIMED (LW-econ): only an aggressive GM with the room
+      // tenders one, and the better the player the likelier — but never a
+      // certainty (it used to be: every 78+ RFA drew one, from whichever club
+      // happened to be first in the list).
+      const bidders = rivals
+        .map((t) => ({ t, gm: this.gmPersonaFor(t.id) }))
+        .filter(({ t, gm }) => gm.aggression >= 0.5 && capUsedFor(t, this.data.players) + ask.salary * 1.15 <= t.finances.salaryCap)
+      if (bidders.length === 0) continue
+      const hottest = bidders.sort((a, b) => b.gm.aggression - a.gm.aggression || (a.t.id < b.t.id ? -1 : 1))[0]!
+      const chance = Math.min(0.6, Math.max(0, (ovr - 66) / 22)) * (0.4 + hottest.gm.aggression)
+      if (!rng.chance(chance)) continue
+      const suitor = hottest.t
+      const salary = Math.round(ask.salary * (1.05 + 0.15 * hottest.gm.aggression)) // overpay to pry him loose
       // The real match window is 7 days; here it's the days you have left in
       // June. Let it run out and the decision gets made for you.
       const decideDay = Math.min(RESIGN_WINDOW_DAYS, this.resignDay + (late ? 2 : 3))
@@ -11707,6 +11792,90 @@ export class Career {
         `an unanswered sheet decides itself.`,
         { playerId: id as string, teamId: suitor.id as string }
       )
+    }
+  }
+
+  /**
+   * LEAGUE OFFER SHEETS (LW-econ). Rare — the real cap era has seen a handful
+   * change hands — and AIMED: an aggressive GM with room goes after a good RFA
+   * on a club that is cap-tight (the only place a sheet can actually work).
+   * The owner matches when it can fit him (a loyal GM almost always does);
+   * otherwise he walks and the suitor's OWN picks go back as compensation
+   * (no own picks, no sheet). At most one sheet a summer league-wide.
+   */
+  private aiOfferSheets(): void {
+    const rng = this.rngFor(8031, this.year)
+    const clubs = this.data.league.teams
+      .filter((t) => t !== this.userTeamId)
+      .map((t) => this.data.teams.get(t)!)
+      .filter((t) => t && t.tier !== 'ahl')
+    const targets: Array<{ owner: Team; p: Player; salary: number }> = []
+    for (const owner of clubs) {
+      const used = capUsedFor(owner, this.data.players)
+      for (const id of owner.roster) {
+        const p = this.data.players.get(id)
+        if (!p || p.contract.yearsRemaining > 0 || contractStatus(p) !== 'RFA' || ratedOverall(p) < 72) continue
+        const ask = askTerms(p, this.year)
+        // Cap-tight: re-signing him at a premium would push the owner past 97%.
+        if (used - p.contract.salary + ask.salary * 1.2 <= owner.finances.salaryCap * 0.97) continue
+        targets.push({ owner, p, salary: ask.salary })
+      }
+    }
+    if (targets.length === 0) return
+    targets.sort((a, b) => ratedOverall(b.p) - ratedOverall(a.p) || (a.p.id < b.p.id ? -1 : 1))
+    for (const tgt of targets.slice(0, 3)) {
+      if (!rng.chance(0.3)) continue
+      const suitors = clubs
+        .filter((t) => t.id !== tgt.owner.id && t.roster.length < ROSTER_HARD_CAP)
+        .map((t) => ({ t, gm: this.gmPersonaFor(t.id) }))
+        .filter(({ t, gm }) => gm.aggression >= 0.6 && capUsedFor(t, this.data.players) + tgt.salary * 1.3 <= t.finances.salaryCap)
+        .sort((a, b) => b.gm.aggression - a.gm.aggression || (a.t.id < b.t.id ? -1 : 1))
+      const s0 = suitors[0]
+      if (!s0) continue
+      const salary = Math.round((tgt.salary * (1.15 + 0.15 * s0.gm.aggression)) / 25_000) * 25_000
+      const years = Math.max(4, askTerms(tgt.p, this.year).years)
+      // Own-picks-only: the suitor must hold the compensation picks itself.
+      const slots = this.offerSheetCompSlots(salary)
+      const ownPicks = slots.map((slot) => this.picks.find((pk) =>
+        pk.year === slot.year && pk.round === slot.round && pk.originalTeamId === s0.t.id && pk.ownerTeamId === s0.t.id))
+      if (ownPicks.some((x) => x === undefined)) continue
+      const ownerGm = this.gmPersonaFor(tgt.owner.id)
+      const canFit = capUsedFor(tgt.owner, this.data.players) - tgt.p.contract.salary + salary <= tgt.owner.finances.salaryCap
+      const matchP = canFit ? 0.7 + 0.25 * ownerGm.loyalty : 0
+      const tele = this.telemetry.season(this.year)
+      tele.offerSheets.aiAi++
+      const comp = this.compLabel(slots.map((x) => x.round))
+      if (rng.chance(matchP)) {
+        signPlayer({ team: tgt.owner, player: tgt.p, salary, years, year: this.year, players: this.data.players })
+        this.pushNews('contract', `${tgt.owner.abbreviation} match ${s0.t.abbreviation}'s offer sheet for ${tgt.p.name}`,
+          `${s0.gm.name} (${s0.gm.styleLabel}) tried to pry ${tgt.p.name} loose from a cap-tight ${tgt.owner.name} with a ` +
+          `$${(salary / 1e6).toFixed(2)}M × ${years} offer sheet. ${ownerGm.name} matched — and the squeeze on his cap sheet just got tighter.`,
+          { playerId: tgt.p.id as string, teamId: tgt.owner.id as string })
+      } else {
+        tgt.owner.roster = tgt.owner.roster.filter((x) => x !== tgt.p.id)
+        repairLines(tgt.owner, this.data.players)
+        try {
+          signPlayer({ team: s0.t, player: tgt.p, salary, years, year: this.year, players: this.data.players })
+        } catch {
+          tgt.owner.roster.push(tgt.p.id)
+          repairLines(tgt.owner, this.data.players)
+          continue
+        }
+        for (const pk of ownPicks) if (pk) pk.ownerTeamId = tgt.owner.id
+        repairLines(s0.t, this.data.players)
+        tele.offerSheets.aiAiWalked++
+        recordAcquisition(this.chronicle, { playerId: tgt.p.id as string, teamId: s0.t.id as string, year: this.year, via: 'signing' })
+        this.transactionLedger = recordTransaction(this.transactionLedger, {
+          day: this.currentDay, year: this.year, kind: 'signing', teamIds: [s0.t.id as string, tgt.owner.id as string],
+          summary: `${s0.t.abbreviation} sign RFA ${tgt.p.name} to an offer sheet ($${(salary / 1e6).toFixed(2)}M × ${years}); ${tgt.owner.abbreviation} decline to match and receive ${comp}.`,
+        }).ledger
+        this.pushNews('contract', `OFFER SHEET: ${tgt.p.name} leaves ${tgt.owner.abbreviation} for ${s0.t.abbreviation}`,
+          `${s0.gm.name} (${s0.gm.styleLabel}) aimed an offer sheet at a cap-tight ${tgt.owner.name} and it landed: ` +
+          `$${(salary / 1e6).toFixed(2)}M × ${years} for ${tgt.p.name}. ${ownerGm.name} couldn't make the money work and takes ${comp} instead.`,
+          { playerId: tgt.p.id as string, teamId: s0.t.id as string, salience: 80 })
+      }
+      this.telemetry.season(this.year).aiMoveStories++
+      return // one a summer
     }
   }
 
@@ -13325,19 +13494,38 @@ export class Career {
       .reduce((h, s) => (h * 31 + charSum(s)) | 0, 11)
     const rng = this.rngFor(7011, this.currentDay, stableKey)
     const posture = this.clubPostureFor(partnerId)
+    const gm = this.gmPersonaFor(partnerId)
+    // THE AGM'S READ, NOT THE ANSWER (LW-econ). The builder used to dry-run the
+    // partner's real evaluation — shuffle assets until the chip said "accept",
+    // then send. Now your assistant GM reads the other GM through his own
+    // judgment: he misjudges this front office by a bias that is stable for the
+    // week (so the read is consistent while you work a deal) and larger for a
+    // weak AGM or a GM with an extreme temperament. Hard rules (a no-trade
+    // clause, the cap, a gutted position) are facts, and stay exact. The real
+    // answer only comes when you actually make the call (proposeTrade).
+    const agm = this.getTeamStaff(this.userTeamId as string).assistantGM
+    const judgment = Math.max(0, Math.min(100, agm?.judgment ?? 50))
+    const temperament = Math.abs(gm.aggression - 0.5) + Math.abs(gm.patience - 0.5)
+    const sigma = 6 + 22 * (1 - judgment / 100) + 12 * temperament
+    const weekRng = this.rngFor(7015, this.year, Math.floor(this.currentDay / 7), Career.pidNum(partnerId as string))
+    const misread = (weekRng.float(-1, 1) + weekRng.float(-1, 1)) * sigma
     const evaln = evaluateProposal({
       give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds, nonRosterIds,
-      relationship: this.relationshipWith(partnerId as string),
-      philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), posture.posture),
+      relationship: Math.max(0, Math.min(100, this.relationshipWith(partnerId as string) + misread)),
+      philosophy: personaPhilosophy(gm, posture.posture),
       context: {
         posture: posture.posture,
         deadlineProximity: Math.max(0, Math.min(1, 1 - Math.max(0, this.deadlineDay - this.currentDay) / 45)),
       },
     })
-    if (evaln.verdict === 'accept') return { partnerVerdict: 'accept', partnerLine: `${name} would likely accept this.` }
-    if (evaln.verdict === 'counter') return { partnerVerdict: 'counter', partnerLine: `${name} would want a bit more before saying yes.` }
+    const agmName = agm?.name ?? 'Your AGM'
+    const hedge = sigma >= 22
+      ? ` ${gm.name} is hard to read — I'd be guessing.`
+      : sigma >= 14 ? ` That's my read of ${gm.name}; I've been wrong before.` : ` I'd be surprised if I'm wrong about ${gm.name}.`
     if (evaln.verdict === 'reject' && evaln.counterAskValue <= 0) return { partnerVerdict: 'blocked', partnerLine: evaln.message }
-    return { partnerVerdict: 'reject', partnerLine: `${name} would reject this — the return falls short.` }
+    if (evaln.verdict === 'accept') return { partnerVerdict: 'accept', partnerLine: `${agmName}: ${name} likely take this.${hedge}` }
+    if (evaln.verdict === 'counter') return { partnerVerdict: 'counter', partnerLine: `${agmName}: it's a maybe — ${name} may want a bit more.${hedge}` }
+    return { partnerVerdict: 'reject', partnerLine: `${agmName}: long shot — I don't see ${name} saying yes to that.${hedge}` }
   }
 
   /**
@@ -14629,6 +14817,121 @@ export class Career {
     return persona
   }
 
+  /* ────────────────────────── the economy (wage index) ────────────────────────── */
+
+  /** The GM context re-signing reads (loyalty, cap discipline, the window). */
+  private resignPersonaCtx(): {
+    personaOf: (tid: TeamId) => { loyalty: number; capDiscipline: number }
+    postureOf: (tid: TeamId) => 'contend' | 'retool' | 'rebuild'
+  } {
+    const ranks = this.strengthRanks()
+    return {
+      personaOf: (tid) => this.gmPersonaFor(tid),
+      postureOf: (tid) => this.clubPostureFor(tid, ranks).posture,
+    }
+  }
+
+  /**
+   * THE FLOOR BINDS: before camp, an AI club still under the lower limit signs
+   * its way there from what's left on the market (see aiFloorTopUp). Ledger +
+   * telemetry; a quiet wire line when a club had to pay a premium to comply.
+   */
+  private enforceAiCapFloor(): void {
+    const res = aiFloorTopUp({
+      teams: this.data.teams,
+      players: this.data.players,
+      freeAgentIds: this.faPool,
+      userTeamId: this.userTeamId,
+      year: this.year,
+      floorOf: (t) => capFloorFor(t.finances.salaryCap),
+    })
+    if (res.signings.length === 0) return
+    const signed = new Set(res.signings.map((x) => x.playerId as string))
+    this.faPool = this.faPool.filter((id) => !signed.has(id as string))
+    this.telemetry.season(this.year).floorSignings += res.signings.length
+    for (const s of res.signings) {
+      const p = this.resolve(s.playerId)
+      const t = this.data.teams.get(s.teamId)!
+      this.lockerArrival(s.teamId, s.playerId)
+      recordAcquisition(this.chronicle, { playerId: s.playerId as string, teamId: s.teamId as string, year: this.year, via: 'signing' })
+      this.transactionLedger = recordTransaction(this.transactionLedger, {
+        day: this.currentDay,
+        year: this.year,
+        kind: 'signing',
+        teamIds: [s.teamId as string],
+        summary: `${t.abbreviation} sign ${p.position} ${p.name} ($${(s.salary / 1e6).toFixed(2)}M × 1y) to reach the cap floor.`,
+      }).ledger
+      repairLines(t, this.data.players)
+    }
+  }
+
+  /** The NHL ceiling this season (league-wide; read off the first NHL club). */
+  private leagueCeiling(): number {
+    for (const tid of this.data.league.teams) {
+      const cap = this.data.teams.get(tid)?.finances.salaryCap
+      if (cap && cap > 0) return cap
+    }
+    return 88e6
+  }
+
+  /**
+   * Install the wage index (today's ceiling / the ceiling the league opened
+   * with) and the performance-sensitive ask modifier for THIS career. The base
+   * ceiling is persisted on the league; an older save without one indexes from
+   * the ceiling it loads with (1.0 from here on). See economy.ts.
+   */
+  private installEconomy(): void {
+    const league = this.data.league
+    const cap = this.leagueCeiling()
+    if (!league.economy || !(league.economy.baseCap > 0)) league.economy = { baseCap: cap }
+    setWageIndex(cap / league.economy.baseCap)
+    setAskModifier((p) => this.askPerformanceFactor(p))
+  }
+
+  /**
+   * THE SEASON HE JUST HAD moves his price. A contract-year breakout (well
+   * above his own recent scoring pace) raises the ask; a slump lowers it; a
+   * ring or a major award in the last two seasons adds a premium. Bounded
+   * (0.85–1.3) so it colours the market without breaking it. Skaters read
+   * points per game; everyone reads honours.
+   */
+  private askPerformanceFactor(p: Player): number {
+    let m = 1
+    if (p.position !== 'G') {
+      const nhlLines = p.stats.filter((s) => s.league !== 'ahl' && s.gamesPlayed >= 20)
+      const ppgOf = (s: SeasonStats): number =>
+        (s.ev.goals + s.pp.goals + s.pk.goals + s.ev.assists + s.pp.assists + s.pk.assists) / s.gamesPlayed
+      const gpNow = this.gp.get(p.id) ?? 0
+      let latest: number | undefined
+      let prior: SeasonStats[]
+      if (gpNow >= 20) {
+        const t = this.totals.get(p.id)
+        latest = ((t?.goals ?? 0) + (t?.assists ?? 0)) / gpNow
+        prior = nhlLines.slice(-2)
+      } else {
+        const last = nhlLines[nhlLines.length - 1]
+        latest = last ? ppgOf(last) : undefined
+        prior = nhlLines.slice(-3, -1)
+      }
+      if (latest !== undefined && prior.length > 0) {
+        const base = prior.reduce((a, s) => a + ppgOf(s), 0) / prior.length
+        const ratio = latest / Math.max(0.15, base)
+        if (ratio > 1.2 && latest >= 0.45) m *= 1 + Math.min(0.22, 0.05 + (ratio - 1.2) * 0.5)
+        else if (ratio < 0.7 && base >= 0.4) m *= Math.max(0.88, 1 - (0.7 - ratio) * 0.4)
+      }
+    }
+    const pid = p.id as string
+    let cups = 0
+    let honours = 0
+    for (const a of this.recordsState.awards) {
+      if (a.playerId !== pid || a.year < this.year - 1) continue
+      if (a.award === 'Stanley Cup') cups++
+      else honours++
+    }
+    m *= 1 + Math.min(0.08, cups * 0.04) + Math.min(0.08, honours * 0.04)
+    return Math.max(0.85, Math.min(1.3, m))
+  }
+
   /** Where in the calendar a user trade lands, for the world-health telemetry. */
   private userTradeWindow(): 'inSeason' | 'deadlineDay' | 'offseason' {
     if (this.phase === 'offseason') return 'offseason'
@@ -14645,8 +14948,18 @@ export class Career {
     return new Map(strengths.map((e, i) => [e.tid, i + 1]))
   }
 
-  /** A club's competitive stance, derived live from roster shape + league rank. */
+  /**
+   * A club's competitive stance. The user's club keeps the plain roster read
+   * (it is advice, not a character). An AI club's stance is LIVE: roster
+   * strength blended with the table as the season matures, filtered through
+   * its GM (aggression → all in, patience → a sticky rebuild) and the stance
+   * he committed to at the last checkpoint (see commitPostures).
+   */
   clubPostureFor(teamId: TeamId, ranks?: Map<string, number>): ClubPosture {
+    return this.livePostureFor(teamId, ranks)
+  }
+
+  private livePostureFor(teamId: TeamId, ranks?: Map<string, number>): LivePosture {
     const teams = this.data.league.teams
     const strengthRank = (ranks ?? this.strengthRanks()).get(teamId as string) ?? Math.ceil(teams.length / 2)
     const team = this.data.teams.get(teamId)!
@@ -14655,7 +14968,281 @@ export class Career {
       .sort((a, b) => ratedOverall(b) - ratedOverall(a))
       .slice(0, 6)
     const coreAge = top6.length > 0 ? top6.reduce((s, p) => s + p.age, 0) / top6.length : 27
-    return deriveClubPosture({ coreAge, strengthRank, teamCount: teams.length })
+    if (teamId === this.userTeamId || !teams.includes(teamId)) {
+      return { ...deriveClubPosture({ coreAge, strengthRank, teamCount: teams.length }), score: 0 }
+    }
+    const reads = this.tableReads()
+    const persona = this.gmPersonaFor(teamId)
+    const table = reads.table.get(teamId as string)
+    return deriveLivePosture({
+      coreAge,
+      strengthRank,
+      teamCount: teams.length,
+      year: this.year,
+      persona,
+      ...(table ? { table } : {}),
+      ...(persona.postureMemory ? { memory: persona.postureMemory } : {}),
+      championInConference: reads.championConference !== null && (team.conferenceId as string | undefined) === reads.championConference,
+    })
+  }
+
+  /** Per-day cache of every club's projected table position. */
+  private tableReadCache: { key: string; table: Map<string, TableRead>; championConference: string | null } | null = null
+
+  /**
+   * Where every NHL club sits in its conference, projected to 82 games: the
+   * gap to the playoff line (the 8th-best pace, or the top half of a small
+   * conference) and to the conference leader. Only meaningful in the regular
+   * season; the reigning champion's conference is read off last year's result.
+   */
+  private tableReads(): { table: Map<string, TableRead>; championConference: string | null } {
+    const key = `${this.year}|${this.phase}|${this.currentDay}`
+    if (this.tableReadCache?.key === key) return this.tableReadCache
+    const table = new Map<string, TableRead>()
+    if (this.phase === 'regularSeason') {
+      const byConf = new Map<string, Array<{ id: string; pace: number; gp: number }>>()
+      for (const tid of this.data.league.teams) {
+        const t = this.data.teams.get(tid)
+        const st = this.standings.get(tid)
+        if (!t || !st) continue
+        const gp = st.gamesPlayed
+        const pace = gp > 0 ? (st.points / gp) * 82 : 0
+        const conf = (t.conferenceId as string | undefined) ?? 'league'
+        const list = byConf.get(conf) ?? []
+        list.push({ id: tid as string, pace, gp })
+        byConf.set(conf, list)
+      }
+      for (const list of byConf.values()) {
+        const paces = list.map((x) => x.pace).sort((a, b) => b - a)
+        const lineIdx = Math.min(paces.length - 1, Math.max(0, list.length >= 16 ? 7 : Math.floor(list.length / 2) - 1))
+        const line = paces[lineIdx] ?? 0
+        const lead = paces[0] ?? 0
+        for (const x of list) table.set(x.id, { gamesPlayed: x.gp, paceGap: x.pace - line, leaderGap: lead - x.pace })
+      }
+    }
+    const lastChamp = this.history[this.history.length - 1]?.championTeamId
+    const champTeam = lastChamp ? this.data.teams.get(asTeamId(lastChamp)) : undefined
+    const championConference = (champTeam?.conferenceId as string | undefined) ?? null
+    this.tableReadCache = { key, table, championConference }
+    return this.tableReadCache
+  }
+
+  /**
+   * A checkpoint: every AI GM re-reads his club and COMMITS to a stance (season
+   * open, deadline morning, the June window). The commitment is what makes a
+   * patient rebuild stick and an open window stay open. The notable flips — a
+   * club going all in, a contender turning seller — reach the wire as news with
+   * the GM's reasoning.
+   */
+  private commitPostures(when: 'season' | 'deadline' | 'summer'): void {
+    this.tableReadCache = null
+    const ranks = this.strengthRanks()
+    const flips: Array<{ tid: TeamId; from: string; live: LivePosture }> = []
+    for (const tid of this.data.league.teams) {
+      if (tid === this.userTeamId) continue
+      const persona = this.gmPersonaFor(tid)
+      const live = this.livePostureFor(tid, ranks)
+      const prev = persona.postureMemory
+      if (!prev || prev.posture !== live.posture) {
+        if (prev) flips.push({ tid, from: prev.posture, live })
+        persona.postureMemory = { posture: live.posture, since: this.year }
+      }
+    }
+    if (when === 'season') return
+    // Curated: the loudest few (all-in pushes and contenders turning seller first).
+    const loud = flips
+      .sort((a, b) => Number(b.live.personaDriven === 'allIn') - Number(a.live.personaDriven === 'allIn') ||
+        Number(b.from === 'contend') - Number(a.from === 'contend'))
+      .slice(0, 3)
+    for (const f of loud) {
+      const t = this.data.teams.get(f.tid)!
+      const gm = this.gmPersonaFor(f.tid)
+      const verb = f.live.posture === 'contend' ? (f.live.personaDriven === 'allIn' ? 'go all in' : 'turn buyers')
+        : f.live.posture === 'rebuild' ? 'turn sellers' : 'retool on the fly'
+      this.pushNews(
+        'trade',
+        `${t.name} ${verb}`,
+        `${gm.name} (${gm.styleLabel}) has changed course — ${f.live.reason}. Around the league, the phones ring accordingly.`,
+        { teamId: f.tid as string },
+      )
+      this.telemetry.season(this.year).aiMoveStories++
+    }
+  }
+
+  /* ────────────────────────── the league market (two-phase) ────────────────────────── */
+
+  /** AI-to-AI deals in TALKS: agreed in principle, not yet announced. The hook a
+   *  media/insider layer reads (see getLeagueTalks). Transient: a save loaded
+   *  mid-talks simply lets them lapse. */
+  private pendingLeagueDeals: Array<{
+    id: string
+    deal: LeagueDeal
+    openedTick: number
+    closeTick: number
+    openedDay: number
+    year: number
+    window: MarketWindow
+    /** The sim's truth, drawn when talks open: will this close (if still valid)? */
+    willClose: boolean
+  }> = []
+  private marketClock = 0
+  private leagueDealCounter = 0
+  /** Talks that died (most recent 40) — the "wrong" half of the insider hook. */
+  private lastFizzledTalks: Array<{ id: string; year: number; deal: LeagueDeal }> = []
+
+  /** AI NHL clubs as the market sees them: persona, live stance, strength. */
+  private marketClubs(): MarketClub[] {
+    const ranks = this.strengthRanks()
+    const out: MarketClub[] = []
+    for (const tid of this.data.league.teams) {
+      if (tid === this.userTeamId) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl') continue
+      out.push({
+        team,
+        persona: this.gmPersonaFor(tid),
+        posture: this.livePostureFor(tid, ranks).posture,
+        strengthRank: ranks.get(tid as string) ?? 16,
+      })
+    }
+    return out
+  }
+
+  /**
+   * One beat of the league market. First, talks whose time has come either
+   * close (still valid, and the truth drawn at opening says yes) or die. Then
+   * `attempts` new conversations are tried (a fractional attempt is a chance).
+   * Deadline day opens and closes everything the same day.
+   */
+  private leagueMarketTick(
+    window: MarketWindow,
+    attempts: number,
+    day: number,
+    opts: { deadlineDay?: boolean; closeAll?: boolean } = {},
+  ): void {
+    this.marketClock++
+    const tick = this.marketClock
+    const rng = this.rngFor(7212, this.year, tick)
+    // 1. Close (or kill) what's due.
+    this.closeLeagueTalks(opts.closeAll ? Infinity : tick, day, opts.deadlineDay === true)
+    // 2. Open new talks.
+    let n = Math.floor(attempts)
+    if (rng.chance(attempts - n)) n++
+    if (n <= 0) return
+    const clubs = this.marketClubs()
+    const floorOf = (t: Team): number => capFloorFor(t.finances.salaryCap)
+    const prospectsOf = (t: Team): Player[] => buyerProspects(t, this.data.teams, this.data.players)
+    const proximity = this.phase === 'regularSeason' ? Math.max(0, Math.min(1, 1 - (this.deadlineDay - day) / 30)) : 0
+    for (let i = 0; i < n; i++) {
+      const busy = new Set<string>()
+      for (const p of this.pendingLeagueDeals) {
+        for (const id of [...p.deal.playerIds, ...(p.deal.buyerPlayerIds ?? []), ...p.deal.prospectIds]) busy.add(id as string)
+      }
+      const deal = generateLeagueDeal({
+        window,
+        deadlineProximity: opts.deadlineDay ? 1 : proximity,
+        teams: this.data.teams,
+        clubs,
+        players: this.data.players,
+        picks: this.picks.filter((pk) => !this.pickInTalks(pk)),
+        rng: this.rngFor(7213, this.year, tick, i),
+        floorOf,
+        prospectsOf,
+        busy,
+      })
+      if (!deal) continue
+      const aggr = (this.gmPersonaFor(deal.sellerTeamId).aggression + this.gmPersonaFor(deal.buyerTeamId).aggression) / 2
+      const closeP = 0.78 + 0.16 * aggr
+      this.pendingLeagueDeals.push({
+        id: `lt${this.year}-${++this.leagueDealCounter}`,
+        deal,
+        openedTick: tick,
+        // Deadline day: agreed and announced within hours. Otherwise talks run
+        // one to three beats before the deal is announced (or dies).
+        closeTick: opts.deadlineDay ? tick : tick + 1 + rng.int(3),
+        openedDay: day,
+        year: this.year,
+        window,
+        willClose: rng.chance(closeP),
+      })
+    }
+    if (opts.deadlineDay) this.closeLeagueTalks(Infinity, day, true)
+  }
+
+  private pickInTalks(pk: DraftPick): boolean {
+    const same = (a: DraftPick): boolean => a.year === pk.year && a.round === pk.round && a.originalTeamId === pk.originalTeamId
+    return this.pendingLeagueDeals.some((p) => p.deal.picks.some(same) || (p.deal.sellerPicks ?? []).some(same))
+  }
+
+  /** Close every pending talk with closeTick ≤ `upTo`: announce it if it still
+   *  stands and the truth says yes; otherwise it dies quietly (the insider hook
+   *  keeps the record of what was in talks). */
+  private closeLeagueTalks(upTo: number, day: number, deadlineDay: boolean): void {
+    const due = this.pendingLeagueDeals.filter((p) => p.closeTick <= upTo)
+    if (due.length === 0) return
+    this.pendingLeagueDeals = this.pendingLeagueDeals.filter((p) => p.closeTick > upTo)
+    for (const p of due) {
+      if (!p.willClose || !this.leagueDealStillValid(p.deal)) {
+        this.lastFizzledTalks.push({ id: p.id, year: p.year, deal: p.deal })
+        if (this.lastFizzledTalks.length > 40) this.lastFizzledTalks.shift()
+        continue
+      }
+      this.executeAiAiDeal(p.deal, day, deadlineDay ? 'deadlineDay' : undefined)
+    }
+  }
+
+  /** Is the agreed deal still executable today? Every asset still where it was,
+   *  both rosters legal, both caps fit. */
+  private leagueDealStillValid(d: LeagueDeal): boolean {
+    const seller = this.data.teams.get(d.sellerTeamId)
+    const buyer = this.data.teams.get(d.buyerTeamId)
+    if (!seller || !buyer) return false
+    const onRoster = (t: Team, ids: PlayerId[]): boolean => ids.every((id) => t.roster.includes(id))
+    if (!onRoster(seller, d.playerIds) || !onRoster(buyer, d.buyerPlayerIds ?? [])) return false
+    const org = new Set(buyerProspects(buyer, this.data.teams, this.data.players).map((p) => p.id as string))
+    if (!d.prospectIds.every((id) => org.has(id as string))) return false
+    const owns = (owner: TeamId, pk: DraftPick): boolean => this.picks.some((x) =>
+      x.year === pk.year && x.round === pk.round && x.originalTeamId === pk.originalTeamId && x.ownerTeamId === owner)
+    if (!d.picks.every((pk) => owns(buyer.id, pk)) || !(d.sellerPicks ?? []).every((pk) => owns(seller.id, pk))) return false
+    const sal = (ids: PlayerId[]): number => ids.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
+    const toBuyer = sal(d.playerIds) - (d.retainedAmount ?? 0)
+    const toSeller = sal(d.buyerPlayerIds ?? [])
+    const sellerAfter = rosterCapUsed(seller, this.data.players) - sal(d.playerIds) + toSeller + (d.retainedAmount ?? 0)
+    const buyerAfter = rosterCapUsed(buyer, this.data.players) - toSeller + toBuyer
+    if (buyerAfter > buyer.finances.salaryCap || sellerAfter > seller.finances.salaryCap) return false
+    const sellerSize = seller.roster.length - d.playerIds.length + (d.buyerPlayerIds?.length ?? 0)
+    const buyerSize = buyer.roster.length + d.playerIds.length - (d.buyerPlayerIds?.length ?? 0)
+    return sellerSize <= 26 && buyerSize <= 26 && sellerSize >= 18
+  }
+
+  /**
+   * The insider hook (fact payloads, no prose): every AI-to-AI deal currently
+   * in talks, plus recent ones that died. `willClose` is the sim's truth — a
+   * reporter layer may read it (with its own reliability) to break deals early
+   * and sometimes wrongly. Nothing here is shown to the player directly.
+   */
+  getLeagueTalks(): {
+    inTalks: Array<{ id: string; shape: string; sellerTeamId: string; buyerTeamId: string; playerIds: string[]; summary: string; openedDay: number; beatsToClose: number; willClose: boolean; rationale: { seller: string; buyer: string } }>
+    fizzled: Array<{ id: string; year: number; summary: string; sellerTeamId: string; buyerTeamId: string }>
+  } {
+    return {
+      inTalks: this.pendingLeagueDeals.map((p) => ({
+        id: p.id,
+        shape: p.deal.shape,
+        sellerTeamId: p.deal.sellerTeamId as string,
+        buyerTeamId: p.deal.buyerTeamId as string,
+        playerIds: [...p.deal.playerIds, ...(p.deal.buyerPlayerIds ?? []), ...p.deal.prospectIds].map((id) => id as string),
+        summary: p.deal.summary,
+        openedDay: p.openedDay,
+        beatsToClose: Math.max(0, p.closeTick - this.marketClock),
+        willClose: p.willClose,
+        rationale: { ...p.deal.rationale },
+      })),
+      fizzled: this.lastFizzledTalks.map((f) => ({
+        id: f.id, year: f.year, summary: f.deal.summary,
+        sellerTeamId: f.deal.sellerTeamId as string, buyerTeamId: f.deal.buyerTeamId as string,
+      })),
+    }
   }
 
   /* ────────────────────────── preseason board meeting (M1) ────────────────────────── */
@@ -14780,11 +15367,11 @@ export class Career {
    * genuine roster piece — put it on your inbox. Shared by the daily rumour tick
    * and the deadline-day morning flurry so both read identically.
    */
-  private executeAiAiDeal(aiDeal: AiAiTradeResult, day: number, windowHint?: 'deadlineDay'): void {
+  private executeAiAiDeal(aiDeal: AiAiTradeResult & { shape?: AiTradeShape; rationale?: { seller: string; buyer: string } }, day: number, windowHint?: 'deadlineDay'): void {
     // Value of the piece changing hands — gates whether this reaches your inbox.
     const movedValue = Math.max(
       0,
-      ...aiDeal.playerIds.map((id) => playerValue(this.resolve(asPlayerId(id as string)))),
+      ...[...aiDeal.playerIds, ...(aiDeal.buyerPlayerIds ?? [])].map((id) => playerValue(this.resolve(asPlayerId(id as string)))),
     )
     executeTrade({
       teams: this.data.teams,
@@ -14792,8 +15379,8 @@ export class Career {
       teamA: aiDeal.sellerTeamId,
       teamB: aiDeal.buyerTeamId,
       aGivesPlayerIds: aiDeal.playerIds,
-      aGivesPicks: [],
-      bGivesPlayerIds: [],
+      aGivesPicks: aiDeal.sellerPicks ?? [],
+      bGivesPlayerIds: aiDeal.buyerPlayerIds ?? [],
       bGivesPicks: aiDeal.picks,
       allPicks: this.picks,
     })
@@ -14827,7 +15414,7 @@ export class Career {
     this.telemetry.trade(this.year, {
       aiAi: true,
       window: this.phase === 'offseason' ? 'offseason' : windowHint ?? (day === this.deadlineDay ? 'deadlineDay' : 'inSeason'),
-      shape: aiDeal.prospectIds.length > 0 ? 'prospectFor' : 'rental',
+      shape: aiDeal.shape ?? (aiDeal.prospectIds.length > 0 ? 'prospectFor' : 'rental'),
     })
     const txResult = recordTransaction(this.transactionLedger, {
       day,
@@ -14841,14 +15428,28 @@ export class Career {
       teamAId: aiDeal.sellerTeamId,
       teamBId: aiDeal.buyerTeamId,
       aGivesPlayerIds: aiDeal.playerIds,
-      aGivesPicks: [],
-      bGivesPlayerIds: [],
+      aGivesPicks: aiDeal.sellerPicks ?? [],
+      bGivesPlayerIds: [...(aiDeal.buyerPlayerIds ?? []), ...aiDeal.prospectIds],
       bGivesPicks: aiDeal.picks,
     })
     // Every deal is on the transactions ledger + ticker; only NOTABLE ones
     // (a genuine roster piece changing hands) reach your inbox, so the
     // deadline hums without burying your mail in depth-for-a-7th swaps.
-    if (movedValue >= 35) {
+    // A deal with a persona's reasoning attached (the league market) is written
+    // up with that reasoning — curated: a real roster piece, a goalie, or any
+    // dump/hockey trade of substance. The old template path stays for the rest.
+    if (aiDeal.rationale && (movedValue >= 30 || ((aiDeal.shape === 'goalie' || aiDeal.shape === 'capDump' || aiDeal.shape === 'hockey') && movedValue >= 18))) {
+      const seller = this.data.teams.get(aiDeal.sellerTeamId)!
+      const buyer = this.data.teams.get(aiDeal.buyerTeamId)!
+      const lead = aiDeal.shape === 'capDump' ? 'Cap dump' : aiDeal.shape === 'hockey' ? 'Hockey trade' : aiDeal.shape === 'goalie' ? 'Goalie trade' : 'Trade'
+      this.pushNews(
+        'trade',
+        `${lead}: ${buyer.abbreviation} ↔ ${seller.abbreviation}`,
+        `${aiDeal.summary} ${aiDeal.rationale.buyer.charAt(0).toUpperCase()}${aiDeal.rationale.buyer.slice(1)}; ${aiDeal.rationale.seller}.`,
+        { teamId: aiDeal.buyerTeamId as string },
+      )
+      this.telemetry.season(this.year).aiMoveStories++
+    } else if (movedValue >= 35) {
       const sellerGm = this.gmPersonaFor(aiDeal.sellerTeamId)
       const buyerGm = this.gmPersonaFor(aiDeal.buyerTeamId)
       // Deterministic framing variety so deadline day doesn't read like one
@@ -14935,24 +15536,11 @@ export class Career {
       }
     }
 
-    /* (B) Morning AI-to-AI flurry — populates the live wire immediately. */
-    const ranks = this.strengthRanks()
-    const postureOf = (tid: TeamId): 'contend' | 'retool' | 'rebuild' =>
-      this.clubPostureFor(tid, ranks).posture
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const aiDeal = generateAiAiTrade({
-        day,
-        deadlineDay: this.deadlineDay,
-        userTeamId: this.userTeamId,
-        teams: this.data.teams,
-        players: this.data.players,
-        picks: this.picks,
-        rng: this.rngFor(7112, attempt),
-        postureOf,
-      })
-      if (!aiDeal) continue
-      this.executeAiAiDeal(aiDeal, day, 'deadlineDay')
-    }
+    /* (B) Deadline morning: every GM re-reads the table and commits (buyers,
+     * sellers, the all-in), then the flurry — talks that close within hours,
+     * plus every deal still in talks from the run-up closes or dies today. */
+    this.commitPostures('deadline')
+    this.leagueMarketTick('deadline', 40, day, { deadlineDay: true, closeAll: true })
   }
 
   /** The league-wide "who's being shopped" board: every selling/retooling club's

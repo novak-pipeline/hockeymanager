@@ -33,6 +33,9 @@ export interface GmPersona {
   styleLabel: string
   /** Year he took the job (for tenure references). */
   sinceYear: number
+  /** The stance he committed to at the last checkpoint (optional — older saves
+   *  start with none and commit at the next checkpoint). */
+  postureMemory?: PostureMemory
 }
 
 /** A club's seasonal stance — recomputed from roster shape, not hand-set. */
@@ -158,4 +161,139 @@ export function personaPhilosophy(
   if (posture === 'contend') return p.aggression >= 0.4 ? 'WinNow' : 'Balanced'
   if (posture === 'rebuild') return p.pickHoarding >= 0.5 ? 'RebuildDraft' : 'RebuildProspects'
   return p.analyticsLean >= 0.6 || p.riskTolerance >= 0.6 ? 'FavorYoung' : 'Balanced'
+}
+
+/* ────────────────────────── the live posture (LW-econ) ────────────────────────── */
+
+/**
+ * A GM's remembered stance — the posture he committed to at the last checkpoint
+ * (season open, deadline morning, the June window) and the year he committed.
+ * Persisted on the persona so a patient rebuild does not flip back to "retool"
+ * the first week the club wins three straight.
+ */
+export interface PostureMemory {
+  posture: PostureKind
+  since: number
+}
+
+/** Where a club sits in the live table, projected over a full season. */
+export interface TableRead {
+  gamesPlayed: number
+  /** Projected points minus the projected conference playoff line (+ = in). */
+  paceGap: number
+  /** Projected points behind the conference leader (0 = leading). */
+  leaderGap: number
+}
+
+export interface LivePosture extends ClubPosture {
+  /** −1 (bottom-feeder) … +1 (juggernaut): the blended read the stance came from. */
+  score: number
+  /** The stance was pushed by the GM's character, not the numbers alone. */
+  personaDriven?: 'allIn' | 'patientRebuild' | 'stickyWindow'
+}
+
+const clamp1 = (v: number): number => Math.max(-1, Math.min(1, v))
+
+/**
+ * A club's stance read from BOTH its roster and the table, filtered through the
+ * GM who runs it. This replaces the strength-thirds formula for AI clubs: a
+ * third of the league is no longer contending by construction.
+ *
+ *  - Early season the roster read dominates; by the deadline the table does
+ *    (a club eight points clear of the line is a buyer whatever its paper rank).
+ *  - Aggression lowers the bar to "go for it" — and an aggressive GM sharing a
+ *    conference with the reigning champion goes all in from the bubble.
+ *  - Patience makes a rebuild sticky: a patient GM stays the course for at least
+ *    two seasons and until the club is genuinely good, an impatient one bails.
+ *  - A committed contender does not sell at the first slump (sticky window).
+ *
+ * Pure. Without `table` / `persona` / `memory` it reduces to a continuous
+ * version of the old thirds rule.
+ */
+export function deriveLivePosture(args: {
+  coreAge: number
+  strengthRank: number
+  teamCount: number
+  year: number
+  table?: TableRead
+  persona?: GmPersona
+  memory?: PostureMemory
+  /** The reigning champion plays in this club's conference. */
+  championInConference?: boolean
+}): LivePosture {
+  const n = Math.max(2, args.teamCount)
+  const strength = 1 - (2 * (args.strengthRank - 1)) / (n - 1)
+  const gp = args.table?.gamesPlayed ?? 0
+  const w = args.table ? Math.max(0, Math.min(0.75, gp / 60)) : 0
+  const tableScore = args.table ? clamp1(args.table.paceGap / 14) : 0
+  let score = (1 - w) * strength + w * tableScore
+  if (args.coreAge >= 30 && score < 0) score -= 0.1
+  score = clamp1(score)
+
+  const agg = args.persona?.aggression ?? 0.5
+  const pat = args.persona?.patience ?? 0.5
+  const contendAt = 0.34 - 0.2 * (agg - 0.5)
+  const rebuildAt = -0.34 + 0.12 * (pat - 0.5)
+  const mem = args.memory
+
+  let posture: PostureKind = score >= contendAt ? 'contend' : score <= rebuildAt ? 'rebuild' : 'retool'
+  let personaDriven: LivePosture['personaDriven']
+
+  // All in: an aggressive GM on the bubble, with the champion in his way (or
+  // within striking distance of the conference lead), pushes his chips in.
+  if (posture !== 'contend' && agg >= 0.65) {
+    const nearLead = args.table !== undefined && gp >= 30 && args.table.leaderGap <= 8
+    if ((args.championInConference || nearLead) && score >= contendAt - 0.14) {
+      posture = 'contend'
+      personaDriven = 'allIn'
+    }
+  }
+  // A patient rebuild stays a rebuild.
+  if (mem?.posture === 'rebuild' && posture !== 'rebuild' && args.persona) {
+    const minYears = pat >= 0.65 ? 2 : pat >= 0.4 ? 1 : 0
+    const exitAt = -0.22 + 0.2 * pat
+    if (args.year - mem.since < minYears ? score < 0.3 : score < exitAt) {
+      posture = 'rebuild'
+      personaDriven = 'patientRebuild'
+    }
+  }
+  // A committed contender does not sell at the first slump.
+  if (mem?.posture === 'contend' && posture !== 'contend' && args.persona && score >= contendAt - 0.16) {
+    posture = 'contend'
+    personaDriven = 'stickyWindow'
+  }
+
+  const t = args.table
+  const tableNote = t && gp >= 20
+    ? t.paceGap >= 0 ? `on pace to clear the playoff line by ${Math.round(t.paceGap)}` : `on pace to miss the playoffs by ${Math.round(-t.paceGap)}`
+    : null
+  let reason: string
+  if (personaDriven === 'allIn') reason = args.championInConference ? 'going all in to get past the champion' : 'close enough to the top to go all in'
+  else if (personaDriven === 'patientRebuild') reason = 'staying the course on the rebuild'
+  else if (personaDriven === 'stickyWindow') reason = 'the window is open and they are not blinking'
+  else if (posture === 'contend') reason = tableNote ?? (args.coreAge >= 30 ? 'a top roster with an aging core — the window is now' : 'a top roster in its prime')
+  else if (posture === 'rebuild') reason = tableNote ?? (args.coreAge >= 29 ? 'bottom-end strength and an old core — time to tear down' : 'bottom-end strength, accumulating young assets')
+  else reason = tableNote ?? (args.coreAge >= 31 ? 'mid-pack with an aging core — retooling on the fly' : 'mid-pack, keeping options open')
+  return { posture, reason, score, ...(personaDriven ? { personaDriven } : {}) }
+}
+
+/* ────────────────────────── AI scouting departments ────────────────────────── */
+
+/** Scouting regions a department can be thin in (nationality strings as the
+ *  database writes them). Canada is absent on purpose: every club covers the CHL. */
+export const SCOUTING_REGIONS = ['United States', 'Sweden', 'Finland', 'Russia', 'Czechia', 'Slovakia', 'Switzerland', 'Germany'] as const
+
+export interface ScoutingDept {
+  /** 0.3 (threadbare) … 0.95 (elite). Scales how far the club's board strays from truth. */
+  quality: number
+  /** A nation this staff barely covers — its prospects are misjudged (and usually undervalued). */
+  blindSpot: string
+}
+
+/** Deterministic per (seed, club): every AI club drafts off its OWN board. */
+export function scoutingDeptFor(seed: number, teamId: string): ScoutingDept {
+  const rng = new Rng(deriveSeed(seed, GM_NS + 7, hashId(teamId)))
+  const quality = Math.round(rng.float(0.3, 0.95) * 100) / 100
+  const blindSpot = SCOUTING_REGIONS[rng.int(SCOUTING_REGIONS.length)]!
+  return { quality, blindSpot }
 }
