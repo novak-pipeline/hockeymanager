@@ -1,0 +1,29 @@
+{
+  "$comment": "THE BOOTH — one place for the commentary voice identity. The offline stem build (scripts/dev/render-commentary.mjs) and the runtime name-clip renderer (src/renderer/lib/commentaryAudio.ts) both read this file, so a name is always spoken by the same engine + voice + style as the stems around it. Swapping engines = change `engine` and the per-speaker `voiceId`/`referenceSample`, then rebuild the stems. See docs/BROADCAST-PACKAGE.md.",
+  "version": 1,
+  "engine": "kokoro",
+  "model": "onnx-community/Kokoro-82M-v1.0-ONNX",
+  "dtype": "fp32",
+  "sampleRate": 24000,
+  "speakers": {
+    "pbp": {
+      "displayName": "Graham Whitlock",
+      "role": "Play-by-play",
+      "voiceId": "bm_george",
+      "rate": 1.1,
+      "referenceSample": null
+    },
+    "color": {
+      "displayName": "Dale Brennan",
+      "role": "Colour analyst",
+      "voiceId": "am_michael",
+      "rate": 1.04,
+      "referenceSample": null
+    }
+  },
+  "styles": {
+    "neutral": { "rateDelta": 0, "terminator": "." },
+    "excited": { "rateDelta": 0.08, "terminator": "!" },
+    "rising": { "rateDelta": 0.02, "terminator": "?" }
+  }
+}

@@ -212,6 +212,11 @@ export class SimClient {
     return this.send({ type: 'getPostgameReceipt' })
   }
 
+  /** Broadcast package: the watched game's pregame context. */
+  getBroadcastContext(): Promise<WorkerResponse> {
+    return this.send({ type: 'getBroadcastContext' })
+  }
+
   /* ── mutations ── */
 
   setLines(lines: LinesUpdate): Promise<WorkerResponse> {
