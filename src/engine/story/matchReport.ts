@@ -140,9 +140,9 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `The {us} were {deficit} down and looked it. Then they were not, and then they were in front — {ourGoals}-{theirGoals}, and the building found its voice somewhere in the second.` },
   /* ── collapses ── */
   { id: 'mr.blown.big', conditions: { won: false, minLead: 3 },
-    text: `A {lead}-goal lead, and none of it left at the horn. The {us} lose {theirGoals}-{ourGoals}, and this is the kind of night that follows a room around for a week.` },
+    text: `A {lead}-goal lead, and none of it left at the horn. The {us} lose {theirGoals}-{ourGoals}, and this is the kind of night that follows a team around for a week.` },
   { id: 'mr.blown', conditions: { won: false, minLead: 2 },
-    text: `The {us} led by {lead} and could not close it. {theirGoals}-{ourGoals} to the {them}, and every man in that room knows exactly which shift it turned on.` },
+    text: `The {us} led by {lead} and could not close it. {theirGoals}-{ourGoals} to the {them}, and every man on that bench knows exactly which shift it turned on.` },
   { id: 'mr.blown.b', conditions: { won: false, minLead: 2 },
     text: `Two-thirds of a good hockey game. The {us} were {lead} up and gave it back, and {theirGoals}-{ourGoals} is a scoreline that flatters nobody in that dressing room.` },
   /* ── the goalie ── */

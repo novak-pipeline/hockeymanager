@@ -483,8 +483,108 @@ const COLD_SPELL_POOL: ContentVariant[] = [
     text: `{name} has gone cold`,
     text2: `{n} games without a point for {name} — long enough that people have stopped calling it a bad week.` },
   { id: 'arc.cold.e',
-    text: `The chances are there; the points are not`,
+    text: `The chances are there for {name}; the points are not`,
     text2: `{name} is {n} games without a point. Watch the shifts and he looks fine, which is either reassuring or the most worrying part.` },
+]
+
+/** A drought ends. {n} = games it lasted. */
+const SLUMP_BROKEN_POOL: ContentVariant[] = [
+  { id: 'arc.unslump.a', text: `{name} ends {n}-game drought`,
+    text2: `{name} got on the scoresheet again after {n} games without a point.` },
+  { id: 'arc.unslump.b', text: `Finally: {name} back on the board`,
+    text2: `{n} games without a point, and then one. {name} will take it however it came.` },
+  { id: 'arc.unslump.c', text: `{name} breaks through after {n} quiet games`,
+    text2: `The drought is over for {name}. It lasted {n} games.` },
+  { id: 'arc.unslump.d', text: `{name} snaps his point drought`,
+    text2: `{name} had gone {n} games without a point. Not any more.` },
+  { id: 'arc.unslump.e', text: `The {n}-game wait is over for {name}`,
+    text2: `{name} finally found the scoresheet. The {team} will hope it opens something up.` },
+  { id: 'arc.unslump.long.a', conditions: { minN: 10 }, text: `{name} ends a {n}-game drought`,
+    text2: `{n} games is a long time for a player the {team} count on to score. {name} is back on the board.` },
+  { id: 'arc.unslump.long.b', conditions: { minN: 10 }, text: `Relief for {name}: {n} games, then a point`,
+    text2: `The longest stretch of {namePoss} season without a point is over at {n} games.` },
+  { id: 'arc.unslump.long.c', conditions: { minN: 10 }, text: `{name} off the schneid after {n} games`,
+    text2: `{name} had not registered a point in {n} games. He did tonight.` },
+]
+
+/** A player running well above his projection. {pace} {pct} */
+const BREAKOUT_POOL: ContentVariant[] = [
+  { id: 'arc.bo.a', text: `Breakout season: {name} on pace for {pace} points`,
+    text2: `{name} is running {pct}% ahead of what anyone projected. The {team} did not plan for this, and will not complain.` },
+  { id: 'arc.bo.b', text: `{name} is having the year of his career`,
+    text2: `On pace for {pace} points, well clear of the preseason number. Whether it holds is the question.` },
+  { id: 'arc.bo.c', text: `Nobody saw {name} coming`,
+    text2: `{name} is on a {pace}-point pace, {pct}% above his projection.` },
+  { id: 'arc.bo.d', text: `{namePoss} numbers keep climbing`,
+    text2: `A {pace}-point pace for {name}. He is making the preseason projection look silly.` },
+  { id: 'arc.bo.e', text: `{name} outrunning his projection`,
+    text2: `{pct}% above expectations and holding. {name} is on pace for {pace}.` },
+  { id: 'arc.bo.f', text: `Is {name} for real?`,
+    text2: `{name} is on pace for {pace} points. The underlying game suggests some of it is.` },
+  { id: 'arc.bo.g', text: `{name} forcing his way up the depth chart`,
+    text2: `On a {pace}-point pace, {name} is producing like a top-six player whatever the lineup card says.` },
+  { id: 'arc.bo.h', text: `Surprise of the season: {name}`,
+    text2: `{name} was projected well short of this. He is on pace for {pace} points.` },
+]
+
+/** A player running well below his projection. {pace} {expected} */
+const BUST_POOL: ContentVariant[] = [
+  { id: 'arc.bu.a', text: `{name} off to a costly slow start`,
+    text2: `{name} is on pace for {pace} points, well short of the {expected} expected of him.` },
+  { id: 'arc.bu.b', text: `Where is {namePoss} offence?`,
+    text2: `A {pace}-point pace for a player projected for {expected}. The {team} need more.` },
+  { id: 'arc.bu.c', text: `{name} not producing`,
+    text2: `{name} is tracking for {pace} points. The projection was {expected}.` },
+  { id: 'arc.bu.d', text: `Slow start for {name}`,
+    text2: `The points have not come for {name}: on pace for {pace}, against an expectation of {expected}.` },
+  { id: 'arc.bu.e', text: `{name} well off his pace`,
+    text2: `{name} was projected for {expected} points. At this rate he gets {pace}.` },
+  { id: 'arc.bu.f', text: `The {team} are waiting on {name}`,
+    text2: `{name} has not found his game yet. A {pace}-point pace from a man expected to put up {expected}.` },
+  { id: 'arc.bu.g', text: `Early questions about {name}`,
+    text2: `On pace for {pace} points. Nobody expected {name} to be this quiet.` },
+  { id: 'arc.bu.h', text: `{name} searching for his game`,
+    text2: `{name} is well behind his usual production — a {pace}-point pace against a projection of {expected}.` },
+]
+
+/** A club running well ahead of its projection. {name} {rank} {expected} {gap} */
+const CINDERELLA_POOL: ContentVariant[] = [
+  { id: 'arc.cin.a', text: `{name} beating all expectations`,
+    text2: `Projected {expected}, sitting {rank}. {name} are {gap} places ahead of where anyone had them.` },
+  { id: 'arc.cin.b', text: `{name} are for real, or close to it`,
+    text2: `{rank} in the league against a preseason projection of {expected}. It is getting harder to call it a hot start.` },
+  { id: 'arc.cin.c', text: `Nobody picked {name} to be here`,
+    text2: `The preseason consensus had them {expected}. They are {rank}.` },
+  { id: 'arc.cin.d', text: `{name} {gap} places ahead of schedule`,
+    text2: `{name} are {rank}, well clear of a projected {expected}.` },
+  { id: 'arc.cin.e', text: `Surprise package: {name}`,
+    text2: `{name} were supposed to be {expected}. They are {rank}, and nobody around the league is laughing.` },
+  { id: 'arc.cin.f', text: `{name} keep proving the projections wrong`,
+    text2: `{rank} in the standings, {gap} places better than forecast.` },
+  { id: 'arc.cin.g', text: `The {name} question: can it last?`,
+    text2: `Ranked {rank} after being projected {expected}. The schedule gets harder from here.` },
+  { id: 'arc.cin.h', text: `{name} outrunning their forecast`,
+    text2: `A projected {expected}-place team is sitting {rank}. At some point that stops being luck.` },
+]
+
+/** A club running well behind its projection. {name} {rank} {expected} {gap} */
+const COLLAPSE_TEAM_POOL: ContentVariant[] = [
+  { id: 'arc.col.a', text: `{name} in freefall — {gap} places below projection`,
+    text2: `{name} were projected around {expected} and sit {rank}. Something has gone wrong.` },
+  { id: 'arc.col.b', text: `What happened to {name}?`,
+    text2: `A preseason {expected} is now {rank}. {gap} places of daylight between the plan and the table.` },
+  { id: 'arc.col.c', text: `{name} well off the pace`,
+    text2: `{name} were meant to be {expected}. They are {rank}.` },
+  { id: 'arc.col.d', text: `Trouble for {name}: {rank} and sinking`,
+    text2: `The projection said {expected}. The standings say {rank}.` },
+  { id: 'arc.col.e', text: `{name} can't find their game`,
+    text2: `Ranked {rank} against a preseason {expected}. The questions are starting to get pointed.` },
+  { id: 'arc.col.f', text: `Where does it go from here for {name}?`,
+    text2: `{name} are {gap} places below where they were projected to be. There is time — but less every week.` },
+  { id: 'arc.col.g', text: `{name} sliding the wrong way`,
+    text2: `{rank} in the league. The preseason number was {expected}.` },
+  { id: 'arc.col.h', text: `{name} {gap} places behind the plan`,
+    text2: `{name} sit {rank}, a long way short of a projected {expected}.` },
 ]
 
 /** Slots every streak/slump frame may use. Possessives are built, never
@@ -540,7 +640,7 @@ function detectHotStreak(
       arc.resolution = summary
       if (streak >= 7) {
         const beat = streakBeat(
-          STREAK_SNAPPED_POOL, { n: streak }, `snap|${pid}|${inputs.year}`,
+          STREAK_SNAPPED_POOL, { n: streak }, `snap|${pid}|${inputs.year}|${inputs.day}`,
           slotsFor(name, streak, inputs.teamName(arc.actors.teamIds[0] ?? '')),
         )
         seeds.push({ category: 'league', headline: beat.headline, body: beat.body, playerId: pid, reach: 'ownClub' })
@@ -562,15 +662,21 @@ function detectHotStreak(
         (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
         (prevTension < TENSION_THRESHOLD_HIGH && arc.tension >= TENSION_THRESHOLD_HIGH)
       ) {
+        // The run lengthens: drawn from the same pool as the opening beat, keyed
+        // by its length so each rung reads differently. (It used to be one
+        // fixed sentence that called the player "they".)
+        const t = inputs.playerLines.find(pl => pl.playerId === pid)?.teamId ?? arc.actors.teamIds[0]
+        const beat = streakBeat(
+          HOT_STREAK_POOL, { n: streak }, `hot|${pid}|${inputs.year}|${streak}`,
+          slotsFor(name, streak, inputs.teamName(t ?? '')),
+        )
         seeds.push({
           category: 'league',
-          headline: `${name}'s heater hits ${streak} games`,
-          body: `${name} extended their point streak to ${streak} consecutive games. They have ${totals.points} points in ${totals.gamesPlayed} games this season.`,
+          headline: beat.headline,
+          body: `${beat.body} He has ${totals.points} points in ${totals.gamesPlayed} games this season.`,
           playerId: pid,
-          ...((): Partial<{ teamId: string }> => {
-            const t = inputs.playerLines.find(pl => pl.playerId === pid)?.teamId
-            return t !== undefined ? { teamId: t } : {}
-          })(),
+          ...(t !== undefined ? { teamId: t } : {}),
+          reach: 'ownClub',
         })
       }
     }
@@ -626,7 +732,7 @@ function detectHotStreak(
     const beat = streakBeat(
       HOT_STREAK_POOL,
       { n: streak, star: expected !== undefined && expected >= 0.55 },
-      `hot|${pl.playerId}|${inputs.year}`,
+      `hot|${pl.playerId}|${inputs.year}|${inputs.day}`,
       slotsFor(name, streak, inputs.teamName(pl.teamId)),
     )
     seeds.push({
@@ -675,12 +781,18 @@ function detectColdSpell(
       addBeat(arc, inputs.day, inputs.year, summary)
       arc.status = 'resolved'
       arc.resolution = summary
+      const beat = streakBeat(
+        SLUMP_BROKEN_POOL, { n: drought }, `unslump|${pid}|${inputs.year}|${inputs.day}`,
+        slotsFor(name, drought, inputs.teamName(arc.actors.teamIds[0] ?? '')),
+      )
       seeds.push({
         category: 'league',
-        headline: `${name} breaks out of ${drought}-game slump`,
-        body: `${name} finally registered a point today after going ${drought} straight games without one. The slump had raised questions about their form this season.`,
+        headline: beat.headline,
+        body: beat.body,
         playerId: pid,
         teamId: arc.actors.teamIds[0],
+        // A8: the league's slumps end every week; yours is mail.
+        reach: 'ownClub',
       })
     } else {
       const games = arc.beats.length + 1
@@ -694,12 +806,19 @@ function detectColdSpell(
         (prevTension < TENSION_THRESHOLD_MID && arc.tension >= TENSION_THRESHOLD_MID) ||
         (prevTension < TENSION_THRESHOLD_HIGH && arc.tension >= TENSION_THRESHOLD_HIGH)
       ) {
+        // The deepening drought draws from the same pool as its opening beat —
+        // keyed by length, so game 9 and game 12 are told differently.
+        const beat = streakBeat(
+          COLD_SPELL_POOL, { n: games }, `cold|${pid}|${inputs.year}|${games}`,
+          slotsFor(name, games, inputs.teamName(arc.actors.teamIds[0] ?? '')),
+        )
         seeds.push({
           category: 'league',
-          headline: `${name} in a ${games}-game slump`,
-          body: `${name} has gone ${games} consecutive games without a point. For a player expected to produce in the top 6, the drought is becoming a real concern.`,
+          headline: beat.headline,
+          body: beat.body,
           playerId: pid,
           teamId: arc.actors.teamIds[0],
+          reach: 'ownClub',
         })
       }
     }
@@ -740,7 +859,7 @@ function detectColdSpell(
 
     const name = inputs.playerName(pl.playerId)
     const beat = streakBeat(
-      COLD_SPELL_POOL, { n: drought }, `cold|${pl.playerId}|${inputs.year}`,
+      COLD_SPELL_POOL, { n: drought }, `cold|${pl.playerId}|${inputs.year}|${inputs.day}`,
       slotsFor(name, drought, inputs.teamName(pl.teamId)),
     )
     seeds.push({
@@ -901,12 +1020,19 @@ function detectBreakoutBust(
         status: 'building',
       }
       state.arcs.push(arc)
+      const beat = streakBeat(BREAKOUT_POOL, {}, `breakout|${pid}|${inputs.year}`, {
+        ...slotsFor(name, 0, teamId !== undefined ? inputs.teamName(teamId) : 'club'),
+        pace: String(Math.round(pace)),
+        pct: String(Math.round((pace / expectedSeason - 1) * 100)),
+      })
       seeds.push({
         category: 'league',
-        headline: `Breakout season: ${name} defying expectations`,
-        body: `${name} is on pace for ${Math.round(pace)} points, ${Math.round((pace / expectedSeason - 1) * 100)}% above preseason projections. Is this the real thing?`,
+        headline: beat.headline,
+        body: beat.body,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
+        // A8: a breakout elsewhere in the league is the Feed's story.
+        reach: 'ownClub',
       })
     } else if (pace <= expectedSeason * BUST_PACE_MULTIPLIER) {
       state.counter += 1
@@ -927,12 +1053,20 @@ function detectBreakoutBust(
         status: 'building',
       }
       state.arcs.push(arc)
+      const beat = streakBeat(BUST_POOL, {}, `bust|${pid}|${inputs.year}`, {
+        ...slotsFor(name, 0, teamId !== undefined ? inputs.teamName(teamId) : 'club'),
+        pace: String(Math.round(pace)),
+        expected: String(Math.round(expectedSeason)),
+      })
       seeds.push({
         category: 'league',
-        headline: `${name} off to a costly slow start`,
-        body: `${name} is on pace for only ${Math.round(pace)} points, far below the expected ${Math.round(expectedSeason)}. Questions are mounting.`,
+        headline: beat.headline,
+        body: beat.body,
         playerId: pid,
         ...(teamId !== undefined ? { teamId } : {}),
+        // A8: two dozen players league-wide start slowly every season. Yours
+        // is mail; the rest is the Feed's.
+        reach: 'ownClub',
       })
     }
   }
@@ -1088,7 +1222,13 @@ function detectMilestone(
 
 const OVERPERFORM_RANKS = 6   // ranked X spots above expected
 const UNDERPERFORM_RANKS = 6
-const CINDERELLA_DAYS_MIN = 10
+// ~12 games in. Before that the standings are noise, and a story that says a
+// club is "beating all expectations" on day 11 is a coin flip in a nice suit.
+const CINDERELLA_DAYS_MIN = 24
+// Hysteresis: a story OPENS two places past the line it CLOSES at, so a club
+// hovering at the boundary does not flap — the same team was announced as
+// "beating all expectations" four times in one autumn.
+const OPEN_MARGIN = 2
 
 function detectCinderellaCollapse(
   state: ArcsState,
@@ -1144,7 +1284,7 @@ function detectCinderellaCollapse(
           })
         }
       }
-    } else if (overperforming && inputs.day >= CINDERELLA_DAYS_MIN) {
+    } else if (sd.rank <= sd.expectedRank - OVERPERFORM_RANKS - OPEN_MARGIN && inputs.day >= CINDERELLA_DAYS_MIN) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -1163,12 +1303,13 @@ function detectCinderellaCollapse(
         status: 'building',
       }
       state.arcs.push(arc)
-      seeds.push({
-        category: 'league',
-        headline: `${name} beating all expectations`,
-        body: `${name} sit at rank ${sd.rank}, a full ${sd.expectedRank - sd.rank} spots above their preseason projection of ${sd.expectedRank}. Is this the real deal?`,
-        teamId: sd.teamId,
+      const beat = streakBeat(CINDERELLA_POOL, {}, `cind|${sd.teamId}|${inputs.year}|${inputs.day}`, {
+        name,
+        rank: ordinal(sd.rank),
+        expected: ordinal(sd.expectedRank),
+        gap: String(sd.expectedRank - sd.rank),
       })
+      seeds.push({ category: 'league', headline: beat.headline, body: beat.body, teamId: sd.teamId })
     }
 
     // Collapse.
@@ -1203,7 +1344,7 @@ function detectCinderellaCollapse(
           })
         }
       }
-    } else if (underperforming && inputs.day >= CINDERELLA_DAYS_MIN) {
+    } else if (sd.rank >= sd.expectedRank + UNDERPERFORM_RANKS + OPEN_MARGIN && inputs.day >= CINDERELLA_DAYS_MIN) {
       state.counter += 1
       const arc: Arc = {
         id: makeId(state.counter),
@@ -1222,12 +1363,13 @@ function detectCinderellaCollapse(
         status: 'building',
       }
       state.arcs.push(arc)
-      seeds.push({
-        category: 'league',
-        headline: `${name} in freefall — ${sd.rank - sd.expectedRank} places below projection`,
-        body: `${name} were projected to finish around ${sd.expectedRank} but sit at rank ${sd.rank}. Something has gone seriously wrong.`,
-        teamId: sd.teamId,
+      const beat = streakBeat(COLLAPSE_TEAM_POOL, {}, `coll|${sd.teamId}|${inputs.year}|${inputs.day}`, {
+        name,
+        rank: ordinal(sd.rank),
+        expected: ordinal(sd.expectedRank),
+        gap: String(sd.rank - sd.expectedRank),
       })
+      seeds.push({ category: 'league', headline: beat.headline, body: beat.body, teamId: sd.teamId })
     }
   }
 

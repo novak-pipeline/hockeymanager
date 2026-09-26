@@ -446,7 +446,8 @@ describe('breakoutSeason detector', () => {
       rng,
     })
     expect(state.arcs.filter(a => a.kind === 'breakoutSeason')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('breakout'))).toBe(true)
+    // Pooled headline; the beat is identified by its player and its reach.
+    expect(newsSeeds.some(s => s.playerId === 'p1' && s.reach === 'ownClub')).toBe(true)
   })
 
   it('creates bust arc when pace is below 0.55x expected', () => {
@@ -467,7 +468,7 @@ describe('breakoutSeason detector', () => {
       rng,
     })
     expect(state.arcs.filter(a => a.kind === 'bustWatch')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('slow') || s.headline.toLowerCase().includes('bust'))).toBe(true)
+    expect(newsSeeds.some(s => s.playerId === 'p1' && s.reach === 'ownClub')).toBe(true)
   })
 
   it('does not create arc below minimum games threshold', () => {
@@ -600,10 +601,25 @@ describe('milestoneWatch detector', () => {
 /* ─────────────────────────── cinderella / collapse ─────────────────────────── */
 
 describe('cinderellaTeam detector', () => {
-  it('creates arc when team is 6+ ranks above expected after day 10', () => {
+  it('creates arc when team is well above expected after the opening weeks', () => {
     const state = createInitialArcsState()
     const rng = makeRng()
     const { newsSeeds } = tickArcs({
+      state,
+      inputs: quietInputs({
+        day: 30,
+        standingsDelta: [{ teamId: 't1', rank: 2, prevRank: 3, expectedRank: 12 }],
+      }),
+      rng,
+    })
+    expect(state.arcs.filter(a => a.kind === 'cinderellaTeam')).toHaveLength(1)
+    expect(newsSeeds.some(s => s.teamId === 't1')).toBe(true)
+  })
+
+  it('does NOT create cinderella arc while the standings are still noise (under ~12 games)', () => {
+    const state = createInitialArcsState()
+    const rng = makeRng()
+    tickArcs({
       state,
       inputs: quietInputs({
         day: 15,
@@ -611,22 +627,24 @@ describe('cinderellaTeam detector', () => {
       }),
       rng,
     })
-    expect(state.arcs.filter(a => a.kind === 'cinderellaTeam')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('expectation') || s.headline.toLowerCase().includes('cinderella'))).toBe(true)
+    expect(state.arcs.filter(a => a.kind === 'cinderellaTeam')).toHaveLength(0)
   })
 
-  it('does NOT create cinderella arc before day 10', () => {
+  it('does not flap: a club hovering at the line is announced once, not every time it crosses', () => {
     const state = createInitialArcsState()
     const rng = makeRng()
-    tickArcs({
-      state,
-      inputs: quietInputs({
-        day: 5,
-        standingsDelta: [{ teamId: 't1', rank: 2, prevRank: 3, expectedRank: 12 }],
-      }),
-      rng,
-    })
-    expect(state.arcs.filter(a => a.kind === 'cinderellaTeam')).toHaveLength(0)
+    // Opens clearly ahead (2nd vs a projection of 12), then hovers at the line:
+    // 6th (inside the band) and 7th (just out) on alternate days.
+    for (let day = 30; day < 70; day++) {
+      const rank = day === 30 ? 2 : day % 2 === 0 ? 6 : 7
+      tickArcs({
+        state,
+        inputs: quietInputs({ day, standingsDelta: [{ teamId: 't1', rank, prevRank: rank, expectedRank: 12 }] }),
+        rng,
+      })
+    }
+    // One story, told once. Hovering by a place never re-opens it.
+    expect(state.arcs.filter(a => a.kind === 'cinderellaTeam')).toHaveLength(1)
   })
 
   it('resolves cinderella arc when team falls back to expected range', () => {
@@ -636,14 +654,14 @@ describe('cinderellaTeam detector', () => {
     // Create the arc.
     tickArcs({
       state,
-      inputs: quietInputs({ day: 15, standingsDelta: [{ teamId: 't1', rank: 2, prevRank: 3, expectedRank: 12 }] }),
+      inputs: quietInputs({ day: 30, standingsDelta: [{ teamId: 't1', rank: 2, prevRank: 3, expectedRank: 12 }] }),
       rng,
     })
 
     // Fall back.
     const { newsSeeds } = tickArcs({
       state,
-      inputs: quietInputs({ day: 16, standingsDelta: [{ teamId: 't1', rank: 9, prevRank: 2, expectedRank: 12 }] }),
+      inputs: quietInputs({ day: 31, standingsDelta: [{ teamId: 't1', rank: 9, prevRank: 2, expectedRank: 12 }] }),
       rng,
     })
 
@@ -654,19 +672,19 @@ describe('cinderellaTeam detector', () => {
 })
 
 describe('collapseTeam detector', () => {
-  it('creates arc when team is 6+ ranks below expected', () => {
+  it('creates arc when team is well below expected', () => {
     const state = createInitialArcsState()
     const rng = makeRng()
     const { newsSeeds } = tickArcs({
       state,
       inputs: quietInputs({
-        day: 15,
+        day: 30,
         standingsDelta: [{ teamId: 't2', rank: 25, prevRank: 20, expectedRank: 8 }],
       }),
       rng,
     })
     expect(state.arcs.filter(a => a.kind === 'collapseTeam')).toHaveLength(1)
-    expect(newsSeeds.some(s => s.headline.toLowerCase().includes('freefall') || s.headline.toLowerCase().includes('collapse'))).toBe(true)
+    expect(newsSeeds.some(s => s.teamId === 't2')).toBe(true)
   })
 })
 

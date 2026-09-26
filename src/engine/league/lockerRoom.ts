@@ -26,6 +26,8 @@
 import type { Player, Lines } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import { ratedOverall } from '@engine/ratings/composites'
+import { renderTemplate, type ContentVariant } from '@engine/story/contentEngine'
+import { pickStable } from '@engine/story/prose'
 
 /* ─────────────────────── public types ─────────────────────── */
 
@@ -94,6 +96,28 @@ const clamp = (v: number, lo: number, hi: number): number =>
  * same scale and blended with loyalty/determination — otherwise falls back to
  * the professionalism + loyalty + determination personality proxy.
  */
+/** A feud flaring up again. ctx: heat. slots: {a} {b} */
+const FEUD_FLARE_POOL: ContentVariant[] = [
+  { id: 'fd.s.a', conditions: { heat: 'simmer' }, text: `Tensions flare between {a} and {b}`,
+    text2: `Sources close to the dressing room report a heated exchange between {a} and {b}.` },
+  { id: 'fd.s.b', conditions: { heat: 'simmer' }, text: `Words exchanged: {a} and {b}`,
+    text2: `{a} and {b} had words at practice. Nobody is calling it serious yet.` },
+  { id: 'fd.s.c', conditions: { heat: 'simmer' }, text: `{a}, {b} not seeing eye to eye`,
+    text2: `There is some friction between {a} and {b}. The coaches are aware of it.` },
+  { id: 'fd.h.a', conditions: { heat: 'hot' }, text: `{a} and {b} at it again`,
+    text2: `Another flare-up between {a} and {b}. This is becoming a pattern.` },
+  { id: 'fd.h.b', conditions: { heat: 'hot' }, text: `The {a}–{b} problem isn't going away`,
+    text2: `{a} and {b} clashed again, and teammates are starting to pick sides.` },
+  { id: 'fd.h.c', conditions: { heat: 'hot' }, text: `Another row between {a} and {b}`,
+    text2: `It happened again: {a} and {b}, a raised voice, a room that went quiet.` },
+  { id: 'fd.b.a', conditions: { heat: 'boiling' }, text: `{a} and {b}: this has gone too far`,
+    text2: `The feud between {a} and {b} is now affecting the group. Something may have to give.` },
+  { id: 'fd.b.b', conditions: { heat: 'boiling' }, text: `Dressing-room rift: {a} vs {b}`,
+    text2: `{a} and {b} can barely share a bench. The staff are going to have to step in.` },
+  { id: 'fd.b.c', conditions: { heat: 'boiling' }, text: `{a}–{b} feud boils over`,
+    text2: `A serious blow-up between {a} and {b}. People around the team are worried about where this ends.` },
+]
+
 export function leadershipScore(p: Player): number {
   const { professionalism, loyalty, determination } = p.personality
   if (p.leadership !== undefined) {
@@ -466,10 +490,18 @@ export function tickLockerRoom(args: {
         const pa = rosterMap.get(feud.a)
         const pb = rosterMap.get(feud.b)
         if (pa && pb) {
+          // The same feud flares more than once in a season, and read as the same
+          // sentence each time. The words now follow how bad it has got.
+          const v = pickStable(
+            FEUD_FLARE_POOL,
+            { heat: feud.strength >= 75 ? 'boiling' : feud.strength >= 50 ? 'hot' : 'simmer' },
+            `feud|${feud.a}|${feud.b}|${day}`
+          )
+          const slots = { a: pa.name, b: pb.name }
           newsSeeds.push({
             category: 'league',
-            headline: `Tensions flare between ${pa.name} and ${pb.name}`,
-            body: `Sources close to the locker room report a heated exchange between ${pa.name} and ${pb.name}.`,
+            headline: v ? renderTemplate(v.text, slots) : `Tensions flare between ${pa.name} and ${pb.name}`,
+            body: v?.text2 ? renderTemplate(v.text2, slots) : `Sources close to the locker room report a heated exchange between ${pa.name} and ${pb.name}.`,
             playerId: feud.a,
           })
           arcSeeds.push({

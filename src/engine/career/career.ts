@@ -313,7 +313,33 @@ import {
   type ResidueFlag,
 } from './livingLedger'
 import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
-import { oneSentence, prosaicList, renderStable } from '@engine/story/prose'
+import { oneSentence, possessive, prosaicList, renderStable } from '@engine/story/prose'
+import { writeBeat } from '@engine/story/beatWriter'
+import {
+  ANNIVERSARY_POOL,
+  CEILING_POOL,
+  DELEGATED_MEETING_POOL,
+  FIGHT_LINE_POOL,
+  GAME_STORY_POOL,
+  GAMES_MILESTONE_POOL,
+  INJURY_POOL,
+  PLAYER_NIGHT_POOL,
+  RETURN_POOL,
+  SCOUT_DIGEST_POOL,
+  SCOUT_NOTE_POOL,
+  SCOUT_REPORT_POOL,
+  OFFER_TABLED_POOL,
+  INCOMING_OFFER_POOL,
+  AGM_PASS_POOL,
+  TRADE_SLOT_POOL,
+  UFA_SIGNING_POOL,
+  roleInWords,
+  injuryArea,
+  injuryBand,
+  injuryNoun,
+  moneyTotal,
+  moneyWords,
+} from '@engine/story/inboxBeats'
 import {
   speakTradeLine,
   talkPersona,
@@ -1067,6 +1093,12 @@ export class Career {
   private ledgerCounter = 0
   /** Content Engine no-repeat ledger (B4.5): nothing repeats verbatim in a season. */
   private contentLedger: ContentUse[] = []
+  /** Last day an anniversary beat ran (transient — at worst one extra after a load). */
+  private lastAnniversaryDay = -999
+  /** Men the coach has already been asked about this season (slump quotes), and
+   *  the day of the last one — both transient, reset at the new season. */
+  private readonly slumpQuoted = new Set<string>()
+  private lastSlumpQuoteDay = -999
   /** Feed Phase A: priors ledger + save-wide novelty memory (THE-FEED.md). */
   private storyPriors: StoryPriors | null = null
   /** The social feed — separate from inbox news so posts never crowd the
@@ -2170,9 +2202,25 @@ export class Career {
 
     for (const f of picked) {
       this.scoutReported.add(f.id)
+      const club = [...this.data.teams.values()].find((t) => t.roster.includes(f.p.id))
+      const head = writeBeat({
+        pool: SCOUT_REPORT_POOL,
+        ctx: { group: f.group, young: f.p.age <= 23 },
+        slots: {
+          name: f.p.name,
+          pos: f.p.position,
+          age: String(f.p.age),
+          role: roleInWords(ceilingRoleShort(this.scoutedCeilingOf(f.p), f.p.position)),
+          club: club?.abbreviation ?? 'free agent',
+        },
+        key: `sr|${f.id}|${this.year}`,
+        ledger: this.contentLedger,
+        year: this.year,
+        day: this.currentDay,
+      })
       this.pushNews(
         'scouting',
-        `Scout report: ${f.p.name}`,
+        head?.headline ?? `Scout report: ${f.p.name}`,
         `Our scouts have filed a full report on ${f.p.name} (${f.p.position}, age ${f.p.age}). ${f.reason}`,
         { playerId: f.id },
       )
@@ -2607,14 +2655,36 @@ export class Career {
         if (!isOwn && !isMajor) continue
         const teamAbbr = this.data.teams.get(this.teamOf(asPlayerId(pid)) ?? this.userTeamId)?.abbreviation ?? ''
         const noun = kind === 'g' ? 'career goal' : kind === 'p' ? 'career point' : kind === 'so' ? 'career shutout' : 'NHL game'
-        const headline =
-          kind === 'gp' ? `${p.name} plays his ${n.toLocaleString()}th NHL game`
-          : `${p.name} reaches ${n.toLocaleString()} ${noun}s`
-        const flavour = isMajor ? ' A milestone that puts him in rare company.' : ''
-        this.pushNews('milestone',
-          headline,
-          `${p.name} (${p.position}${teamAbbr ? `, ${teamAbbr}` : ''}) hit ${n.toLocaleString()} ${noun}s for his career.${flavour}`,
-          { playerId: pid })
+        if (kind === 'gp') {
+          // Ironman games: written from a pool (a veteran-heavy league crosses
+          // a thousand games a dozen times a season), and another club's man
+          // reaching one is the Feed's story, not the GM's mail (A8).
+          const written = writeBeat({
+            pool: GAMES_MILESTONE_POOL,
+            ctx: { n, own: isOwn },
+            slots: {
+              name: p.name,
+              n: n.toLocaleString(),
+              nth: `${n.toLocaleString()}th`,
+              pos: p.position,
+              team: teamAbbr || 'his club',
+            },
+            key: `gpm|${pid}|${n}`,
+            ledger: this.contentLedger,
+            year: this.year,
+            day: this.currentDay,
+          })
+          this.pushNews('milestone',
+            written?.headline ?? `${p.name} plays his ${n.toLocaleString()}th NHL game`,
+            written?.body ?? `${p.name} reached ${n.toLocaleString()} NHL games.`,
+            { playerId: pid, ...(isOwn ? {} : { reach: 'ownClub' as const }) })
+        } else {
+          const flavour = isMajor ? ' A milestone that puts him in rare company.' : ''
+          this.pushNews('milestone',
+            `${p.name} reaches ${n.toLocaleString()} ${noun}s`,
+            `${p.name} (${p.position}${teamAbbr ? `, ${teamAbbr}` : ''}) hit ${n.toLocaleString()} ${noun}s for his career.${flavour}`,
+            { playerId: pid })
+        }
         // The man himself posts (FEED-V2-1). A MAJOR milestone is relevant
         // whoever crossed it — that's the "league leaders" half of the scope
         // rule; minor ones ride the normal club/star filter.
@@ -3544,7 +3614,11 @@ export class Career {
         id: `pp${this.interactionCounter++}`,
         playerId: player.id as string,
         kind: e.promise,
-        text: chosen.outcome,
+        // "Your words, quoted back to you" — so the GM's own line, not the
+        // narrator's receipt. Storing the outcome made the rollover mail read
+        // "Last season you told him 'He believed you completely, which is the
+        // problem…'" — a sentence nobody said to anybody.
+        text: interaction.options.find((o) => o.id === chosen.id)?.label ?? chosen.outcome,
         year: this.year,
         day,
         ...(cur ? { baselineGp: cur.gamesPlayed } : {}),
@@ -4621,14 +4695,28 @@ export class Career {
       this.pushCoachQuote('losingStreak', { streakCount: userLoss }, quoteSeed)
     }
 
-    /* ── Coach quote: slumping star (user team skater with 5+ scoreless) ── */
-    // Fire once per player when they cross the 5-game threshold.
-    const SLUMP_THRESHOLD = 5
+    /* ── Coach quote: a slumping scorer ──
+     * The coach only gets asked about a drought that is actually a story: a
+     * man expected to produce (the same bar the league's cold-spell beat uses),
+     * a drought long enough to be unusual FOR HIM, once per man per season, and
+     * not more than one of these a fortnight. It used to fire at exactly five
+     * pointless games for every skater on the roster — 30-40 a season, most of
+     * them stay-at-home defencemen who go five games without a point every
+     * month, with the coach solemnly promising the goals would come. */
     for (const line of playerLines) {
       if (line.teamId !== (this.userTeamId as string)) continue
-      if (line.scorelessStreak !== SLUMP_THRESHOLD) continue // only on exactly crossing
       const p = this.data.players.get(asPlayerId(line.playerId))
       if (!p || p.position === 'G') continue
+      if (this.slumpQuoted.has(line.playerId)) continue
+      const expected = expectedPointsFor(overall(p.composites, p.position), p.position, p.role)
+      if (expected < 0.55) continue
+      // Roughly the length a drought has to reach before it is a <10% event for
+      // a player at his rate: ~8 games for a point-a-game man, ~10 for a 0.55.
+      const threshold = Math.max(8, Math.ceil(5.5 / expected))
+      if (line.scorelessStreak !== threshold) continue // only on exactly crossing
+      if (day - this.lastSlumpQuoteDay < 14) continue
+      this.slumpQuoted.add(line.playerId)
+      this.lastSlumpQuoteDay = day
       const quoteSeed = this.seed ^ Career.pidNum(line.playerId) ^ (day * 7)
       this.pushCoachQuote('slumpingStar', { playerName: p.name, streakCount: line.scorelessStreak }, quoteSeed)
     }
@@ -5357,13 +5445,8 @@ export class Career {
         const injury = injureNow(player, dayRng)
         const teamId = this.teamOf(pid)
         if (teamId === this.userTeamId) {
-          const games = `${injury.gamesRemaining} game${injury.gamesRemaining === 1 ? '' : 's'}`
-          this.pushNews(
-            'injury',
-            `${player.name} leaves the game — out ${games}`,
-            `${player.name} went down during the game and didn't return: a ${injury.description}. He's expected to miss ${games}.`,
-            { playerId: pid as string, teamId: teamId as string }
-          )
+          const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
+          this.pushInjuryNews(player, injury, true, this.data.teams.get(oppId)?.name ?? 'the opposition')
         }
       }
     }
@@ -5372,13 +5455,8 @@ export class Career {
       const p = this.resolve(inj.playerId)
       const teamId = this.teamOf(inj.playerId)
       if (teamId === this.userTeamId) {
-        const games = `${inj.injury.gamesRemaining} game${inj.injury.gamesRemaining === 1 ? '' : 's'}`
-        this.pushNews(
-          'injury',
-          `${p.name} out ${games}`,
-          `${p.name} suffered a ${inj.injury.description} and is expected to miss ${games}.`,
-          { playerId: inj.playerId as string, teamId: teamId as string }
-        )
+        const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
+        this.pushInjuryNews(p, inj.injury, false, this.data.teams.get(oppId)?.name ?? 'the opposition')
       }
     }
     const home = this.data.teams.get(res.homeTeamId)!
@@ -5391,6 +5469,61 @@ export class Career {
       applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id) })
     }
     return played
+  }
+
+  /** An injury to one of the user's players, written for the inbox. The
+   *  headline speaks the way clubs do (a body region, a timeline); the body
+   *  gives the diagnosis in words that sit in a sentence. */
+  private pushInjuryNews(p: Player, injury: NonNullable<Player['injuryStatus']>, inGame: boolean, oppName: string): void {
+    const n = injury.gamesRemaining
+    const games = `${n} game${n === 1 ? '' : 's'}`
+    const written = writeBeat({
+      pool: INJURY_POOL,
+      ctx: { band: injuryBand(n), inGame },
+      slots: {
+        name: p.name,
+        games,
+        // NHL games come roughly every other day.
+        weeks: String(Math.max(2, Math.round((n * 2.2) / 7))),
+        injury: injuryNoun(injury.description),
+        area: injuryArea(injury.kind),
+        opp: oppName,
+      },
+      key: `inj|${p.id as string}|${this.year}|${this.currentDay}`,
+      ledger: this.contentLedger,
+      year: this.year,
+      day: this.currentDay,
+    })
+    const headline = written?.headline ?? `${p.name} out ${games}`
+    const body = written?.body ?? `${p.name} has ${injuryNoun(injury.description)} and is expected to miss ${games}.`
+    this.pushNews('injury', headline.charAt(0).toUpperCase() + headline.slice(1), body.charAt(0).toUpperCase() + body.slice(1), {
+      playerId: p.id as string,
+      teamId: this.userTeamId as string,
+    })
+  }
+
+  /** Headline for a contract offer the GM has put out. A summer of free agency
+   *  wrote "Offer tabled to X" two dozen times; the terms and the agent carry
+   *  the variety now. */
+  private offerTabledHeadline(player: Player, salary: number, years: number, agentName: string): string {
+    const written = writeBeat({
+      pool: OFFER_TABLED_POOL,
+      ctx: {},
+      slots: {
+        name: player.name,
+        namePoss: possessive(player.name),
+        years: String(years),
+        term: `${years} year${years === 1 ? '' : 's'}`,
+        aav: moneyWords(salary),
+        total: moneyTotal(salary * years),
+        agent: agentName,
+      },
+      key: `ot|${player.id as string}|${this.year}|${this.currentDay}|${salary}`,
+      ledger: this.contentLedger,
+      year: this.year,
+      day: this.currentDay,
+    })
+    return written?.headline ?? `Offer tabled to ${player.name}`
   }
 
   private teamOf(id: PlayerId): TeamId | null {
@@ -5408,12 +5541,17 @@ export class Career {
       res.decidedBy === 'overtime' ? ' (OT)' : res.decidedBy === 'shootout' ? ' (SO)' : ''
     const outcome = us > them ? 'Win' : res.decidedBy === 'regulation' ? 'Loss' : 'OT loss'
     const opp = userIsHome ? away : home
-    this.pushNews(
+    // The result mail. Its headline and body are finished further down, once
+    // the night's story is known: a dramatic game gets its write-up here, in
+    // the mail the GM already opens, rather than as a second or third item.
+    const scoreline = `${away.name} ${res.awayGoals} @ ${home.name} ${res.homeGoals}${suffix}.`
+    const resultItem = this.pushNews(
       'result',
       `Day ${day}: ${outcome} ${us}-${them}${suffix} ${userIsHome ? 'vs' : '@'} ${opp.abbreviation}`,
-      `${away.name} ${res.awayGoals} @ ${home.name} ${res.homeGoals}${suffix}.`,
+      scoreline,
       { teamId: opp.id as string }
     )
+    const beatKey = gameId || `${this.year}|${day}|${opp.abbreviation}`
 
     /* ── Story beat: surface how the game actually went (comeback, blown lead,
      *    a goalie robbery or shelling) — the drama behind the final score. ── */
@@ -5434,7 +5572,34 @@ export class Career {
       }
     }
     const beat = detectGameStory({ goalByUser, won: us > them, goalie, userShots, oppShots })
-    if (beat) this.pushNews('result', beat.headline, beat.body, { teamId: opp.id as string })
+    const hi = Math.max(us, them)
+    const lo = Math.min(us, them)
+    if (beat) {
+      // A comeback, a collapse, a stolen game, a shelling: the story becomes
+      // the mail's headline. Written from the pool — the same collapse must
+      // not read identically eleven times a season.
+      const written = writeBeat({
+        pool: GAME_STORY_POOL,
+        ctx: { kind: beat.kind, ot: res.decidedBy !== 'regulation', playoff, deficit: beat.deficit, lead: beat.lead },
+        slots: {
+          us: this.userTeam.name,
+          opp: opp.name,
+          score: `${hi}-${lo}`,
+          deficit: String(beat.deficit),
+          lead: String(beat.lead),
+          goalie: goalie?.name ?? 'the goaltender',
+          saves: String(goalie?.saves ?? 0),
+          shotsAgainst: String(goalie?.shotsAgainst ?? 0),
+          goalsAgainst: String(goalie?.goalsAgainst ?? them),
+          oppShots: String(oppShots),
+        },
+        key: `gs|${beatKey}`,
+        ledger: this.contentLedger,
+        year: this.year,
+        day,
+      })
+      resultItem.headline = written?.headline ?? beat.headline
+    }
 
     /* ── Individual heroics: a hat trick, a big multi-point night, a shutout. ── */
     const userLines: PlayerGameLine[] = []
@@ -5453,7 +5618,40 @@ export class Career {
       })
     }
     const solo = detectPlayerStory(userLines)
-    if (solo) this.pushNews('result', solo.headline, solo.body, { playerId: solo.playerId, teamId: this.userTeamId as string })
+    if (solo) {
+      const l = solo.line
+      const written = writeBeat({
+        pool: PLAYER_NIGHT_POOL,
+        ctx: {
+          kind: solo.kind,
+          won: us > them,
+          playoff,
+          goals: l.goals,
+          saves: l.saves,
+          four: l.goals >= 4,
+          setup: l.goals === 0 && l.assists >= 3,
+        },
+        slots: {
+          name: l.name,
+          namePoss: possessive(l.name),
+          opp: opp.name,
+          score: `${hi}-${lo}`,
+          goals: String(l.goals),
+          assists: String(l.assists),
+          pts: String(l.goals + l.assists),
+          saves: String(l.saves),
+          shotsAgainst: String(l.shotsAgainst),
+        },
+        key: `pn|${beatKey}|${solo.playerId}`,
+        ledger: this.contentLedger,
+        year: this.year,
+        day,
+      })
+      this.pushNews('result', written?.headline ?? solo.headline, written?.body || solo.body, {
+        playerId: solo.playerId,
+        teamId: this.userTeamId as string,
+      })
+    }
 
     /* ── Gloves off: a fight in your game makes the recap. ── */
     // The `&&` collapses isEvent's type predicate back to boolean, so annotate
@@ -5469,12 +5667,9 @@ export class Career {
       const ours = userRoster.has(combatants[0].player as unknown as string) ? first : second
       const theirs = ours === first ? second : first
       fight = { ourId: ours.id as string, ourName: ours.name, theirName: theirs.name }
-      this.pushNews(
-        'result',
-        `Gloves off: ${ours.name} answers the bell`,
-        `Tempers boiled over against ${opp.name} — ${ours.name} and ${theirs.name} dropped the gloves and took fighting majors.`,
-        { playerId: ours.id as string, teamId: opp.id as string }
-      )
+      // A fight is colour, not news: it rides in the result mail (below)
+      // instead of taking a slot of its own — nineteen "Gloves off" items a
+      // season was one story told nineteen times.
     }
 
     /* ── Coach at the podium: every game gets a word (B6.2). A big win/bad loss
@@ -5568,6 +5763,23 @@ export class Career {
       day, res, gameId, playoff, home, away, userIsHome, userRoster, quote,
       storyline: moment?.storyline ?? null,
     })
+
+    /* ── The result mail's body: the scoreline, and — on a night worth talking
+     *    about — the same write-up the receipt carries. A shutout, a one-goal
+     *    game, extra time, a rout, a swing, a rare beat: those get a story.
+     *    An ordinary 4-2 keeps its plain line; not every night is an essay. ── */
+    const margin = Math.abs(us - them)
+    const report = this.lastReceipt?.matchReport ?? ''
+    const dramatic =
+      beat !== null || us === 0 || them === 0 || margin === 1 || margin >= 4 || res.decidedBy !== 'regulation'
+    const parts = [scoreline]
+    if (dramatic && report) parts.push(report)
+    if (fight) {
+      parts.push(
+        renderStable(FIGHT_LINE_POOL, {}, `fight|${beatKey}`, { ours: fight.ourName, theirs: fight.theirName, opp: opp.name })
+      )
+    }
+    resultItem.body = parts.filter(Boolean).join(' ')
   }
 
   /** Build the B6.2 postgame receipts for a finished user game: period
@@ -5616,7 +5828,13 @@ export class Career {
         const idx = Math.min(ev.period, periods) - 1
         if (onHome) homeByPeriod[idx]!++
         else awayByPeriod[idx]!++
-        const inPeriod = ev.period <= 3 ? ev.t - (ev.period - 1) * PERIOD_SECONDS_NHL : ev.t
+        // The event contract (domain/events.ts) says `t` is seconds WITHIN the
+        // period, and the quick sim — the default Continue path — emits exactly
+        // that; this line assumed absolute game seconds and printed "the winner
+        // at -33:-9 of the third" on the receipt and in the result mail. Only a
+        // t past the period's start can be absolute, so convert only then.
+        const periodStart = (ev.period - 1) * PERIOD_SECONDS_NHL
+        const inPeriod = ev.period <= 3 && ev.t >= periodStart ? ev.t - periodStart : ev.t
         const scorer = this.resolve(ev.scorer)
         tpGoals.push({
           period: ev.period,
@@ -5676,14 +5894,15 @@ export class Career {
     grades.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name))
 
     const stars = threeStars(rated)
-    const oppAbbr = (userIsHome ? away : home).abbreviation
     const userGoalie = rated.find((r) => r.isGoalie && userRoster.has(r.playerId))
     const oppGoalieLine = rated.find((r) => r.isGoalie && !userRoster.has(r.playerId))
     const firstStar = stars[0]
     const matchReport = buildMatchReport({
       gameId: args.gameId,
-      userAbbr: (userIsHome ? home : away).abbreviation,
-      oppAbbr,
+      // The write-up says "the {us} dug out of it": that wants a club's name,
+      // not a ticker code ("The FLA dug out of it").
+      userAbbr: (userIsHome ? home : away).name,
+      oppAbbr: (userIsHome ? away : home).name,
       won: us > them,
       playoff: args.playoff,
       decidedBy: res.decidedBy,
@@ -6256,12 +6475,26 @@ export class Career {
       if (this.teamOf(ret.id) !== this.userTeamId) continue
       const p = this.data.players.get(ret.id)
       if (!p) continue
-      this.pushNews(
-        'injury',
-        `${p.name} returns to the lineup`,
-        `${p.name} is cleared and available for selection. He's been out a while, so expect him to need ${ret.rustGames} game${ret.rustGames === 1 ? '' : 's'} to shake off the rust and round back into form.`,
-        { playerId: ret.id as string, teamId: this.userTeamId as string }
-      )
+      // A8: a man back from a day-to-day knock (no match rust) is squad-screen
+      // information, not mail. A real absence ending is.
+      if (ret.rustGames > 0) {
+        const rust = `${ret.rustGames} game${ret.rustGames === 1 ? '' : 's'}`
+        const written = writeBeat({
+          pool: RETURN_POOL,
+          ctx: { rusty: ret.rustGames >= 2 },
+          slots: { name: p.name, rust },
+          key: `ret|${ret.id as string}|${this.year}|${day}`,
+          ledger: this.contentLedger,
+          year: this.year,
+          day,
+        })
+        this.pushNews(
+          'injury',
+          written?.headline ?? `${p.name} cleared to play`,
+          written?.body ?? `${p.name} is cleared and available again.`,
+          { playerId: ret.id as string, teamId: this.userTeamId as string }
+        )
+      }
       // He posts about being back (FEED-V2-1).
       this.queueVoice({ kind: 'injuryReturn', playerId: ret.id as string, numbers: { rust: ret.rustGames }, relevant: true })
     }
@@ -6300,15 +6533,32 @@ export class Career {
     // LW6: anniversary callbacks — the world remembers its own history. At most
     // one per day, exact-day matches only, and only your club's durable moments.
     {
+      // Durable moments only: a Cup, a record, an award, a first goal, a
+      // milestone, a playoff series. A routine deadline trade a year on is not
+      // a memory — "1 year ago today: FLA trade 2026 R1 to BOS" nine times a
+      // season was the chronicle reading its own ledger aloud. And never two
+      // inside three weeks: an anniversary is only special if it is rare.
+      const DURABLE = new Set(['championship', 'recordBroken', 'award', 'milestone', 'playoffSeries', 'retirement'])
       const hits = chronicleAnniversaries(this.chronicle, this.year, day, { dayTolerance: 0 })
-        .filter((e) => e.userInvolved || e.kind === 'championship')
+        .filter((e) => (e.userInvolved || e.kind === 'championship') && DURABLE.has(e.kind))
       const hit = hits[0]
-      if (hit) {
+      if (hit && day - this.lastAnniversaryDay >= 21) {
+        this.lastAnniversaryDay = day
         const yearsAgo = this.year - hit.year
+        const what = hit.headline.replace(/[.!]+$/, '')
+        const written = writeBeat({
+          pool: ANNIVERSARY_POOL,
+          ctx: { kind: hit.kind, years: yearsAgo },
+          slots: { what, years: String(yearsAgo) },
+          key: `anniv|${this.year}|${day}`,
+          ledger: this.contentLedger,
+          year: this.year,
+          day,
+        })
         this.pushNews(
           'league',
-          `${yearsAgo} year${yearsAgo === 1 ? '' : 's'} ago today`,
-          `${hit.headline}. ${hit.kind === 'championship' ? 'Banners are forever.' : 'The chronicle keeps the receipts.'}`,
+          written?.headline ?? `A year ago today: ${what}`,
+          written?.body ?? `${what}.`,
           hit.teamIds[0] ? { teamId: hit.teamIds[0] } : {}
         )
       }
@@ -6402,14 +6652,32 @@ export class Career {
       })
       // Surface a few meaningful shifts to the inbox (own players first; only
       // well-scouted league players qualify, and cap to avoid flooding).
+      // Only a young man has a ceiling left to move. A 33-year-old's ceiling is
+      // his level, and "Doubts grow over Garnet Hathaway's ceiling" read as the
+      // scouts discovering that a veteran checker is a veteran checker.
       const ordered = shifts
+        .filter((s) => (this.data.players.get(asPlayerId(s.playerId))?.age ?? 99) <= 24)
         .filter((s) => s.ownOrg || knowledgeOf(this.scouting, s.playerId) >= 60)
         .sort((a, b) => Number(b.ownOrg) - Number(a.ownOrg))
-        .slice(0, 3)
+        .slice(0, 2)
       for (const s of ordered) {
         const p = this.data.players.get(asPlayerId(s.playerId))
         if (!p) continue
-        const { headline, body } = shiftHeadline(p.name, s)
+        const written = writeBeat({
+          pool: CEILING_POOL,
+          ctx: { dir: s.direction, own: s.ownOrg },
+          slots: {
+            name: p.name,
+            namePoss: possessive(p.name),
+            age: String(p.age),
+            role: roleInWords(ceilingRoleShort(this.scoutedCeilingOf(p), p.position)),
+          },
+          key: `ceil|${s.playerId}|${this.year}|${day}`,
+          ledger: this.contentLedger,
+          year: this.year,
+          day,
+        })
+        const { headline, body } = written ?? shiftHeadline(p.name, s)
         this.pushNews('scouting', headline, body, { playerId: s.playerId })
       }
     }
@@ -6450,9 +6718,25 @@ export class Career {
         this.tradeOffers.push(o)
         const partner = this.data.teams.get(o.partnerTeamId)!
         const gm = this.gmPersonaFor(o.partnerTeamId)
+        // The headline names what they want — the first question the GM has.
+        const wanted = o.userGivesPlayerIds.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+        const offered = o.userReceivesPlayerIds.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+          .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+        const pick = o.userGivesPicks[0]
+        const target = wanted?.name ?? (pick ? `${pick.year} ${pick.round === 1 ? 'first' : pick.round === 2 ? 'second' : pick.round === 3 ? 'third' : `round-${pick.round}`}-round pick` : 'a deal')
+        const offerHead = writeBeat({
+          pool: INCOMING_OFFER_POOL,
+          ctx: { swap: !!(wanted && offered), pickOnly: !wanted && !!pick },
+          slots: { club: partner.name, target, theirs: offered?.name ?? '' },
+          key: `io|${o.offerId}`,
+          ledger: this.contentLedger,
+          year: this.year,
+          day,
+        })
         this.pushNews(
           'trade',
-          `Trade offer from ${partner.abbreviation}`,
+          offerHead?.headline ?? `Trade offer from ${partner.abbreviation}`,
           `${gm.name} (${gm.styleLabel}) is on the phone: “${o.message}”`,
           { teamId: o.partnerTeamId as string }
         )
@@ -8292,10 +8576,22 @@ export class Career {
             // not just the ticker. Deliberately worded "land" (not "signs with"):
             // the inbox curation strips generic depth-signing noise, and a summer's
             // big ticket landing elsewhere is exactly the league news you want.
+            // Money in words a reporter would print ("$7.95 million"), not a
+            // spreadsheet cell ("$7.95M × 7-year").
+            const aav = moneyWords(s.salary)
+            const written = writeBeat({
+              pool: UFA_SIGNING_POOL,
+              ctx: { long: s.years >= 6 },
+              slots: { team: t.name, name: p.name, pos: p.position, age: String(p.age), years: String(s.years), term: `${s.years} year${s.years === 1 ? '' : 's'}`, aav, total: moneyTotal(s.salary * s.years) },
+              key: `ufa|${s.playerId as string}|${this.year}`,
+              ledger: this.contentLedger,
+              year: this.year,
+              day: this.currentDay,
+            })
             this.pushNews(
               'contract',
-              `${t.name} land ${p.name}`,
-              `${t.name} have signed ${p.name} (${p.position}, ${p.age}) to a $${(s.salary / 1e6).toFixed(2)}M × ${s.years}-year deal — one of the summer's marquee names is off the board.`,
+              written?.headline ?? `${t.name} land ${p.name}`,
+              written?.body ?? `${t.name} have signed ${p.name} (${p.position}, ${p.age}) for ${s.years} years at ${aav} a season.`,
               { playerId: s.playerId as string, teamId: s.teamId as string }
             )
             continue
@@ -9125,6 +9421,9 @@ export class Career {
     this.lastLottery = null
     this.pointStreaks.clear()
     this.scorelessStreaks.clear()
+    this.lastAnniversaryDay = -999
+    this.slumpQuoted.clear()
+    this.lastSlumpQuoteDay = -999
     this.losingStreaks.clear()
     this.prevRanks.clear()
     this.playoffBerthAnnounced = null
@@ -11470,8 +11769,8 @@ export class Career {
     this.resignOffers = this.resignOffers.filter((o) => o.playerId !== playerId)
     this.resignOffers.push({ playerId, salary, years, decideDay, status: 'pending' })
     const agent = agentFor(player)
-    this.pushNews('contract', `Offer tabled to ${player.name}`,
-      `$${(salary / 1e6).toFixed(2)}M × ${years} on the table for ${player.name}. ${agent.name} is taking it to his client — ` +
+    this.pushNews('contract', this.offerTabledHeadline(player, salary, years, agent.name),
+      `${years} year${years === 1 ? '' : 's'} at ${moneyWords(salary)} a season on the table for ${player.name}. ${agent.name} is taking it to his client — ` +
       `you'll have an answer inside a couple of days.`,
       { playerId })
     return { ok: true, message: `Tabled. ${agent.name} will come back to you by day ${decideDay} of the window.` }
@@ -12254,8 +12553,8 @@ export class Career {
     const agent = agentFor(player)
     this.pushNews(
       'contract',
-      `Offer tabled to ${player.name}`,
-      `You've put $${(salary / 1e6).toFixed(2)}M × ${years} on the table for ${player.name}. ` +
+      this.offerTabledHeadline(player, salary, years, agent.name),
+      `You've put ${years} year${years === 1 ? '' : 's'} at ${moneyWords(salary)} a season on the table for ${player.name}. ` +
       `${agent.name} says his client will weigh it${rivals > 0 ? ` against ${rivals} other club${rivals > 1 ? 's' : ''}` : ''} and get back to you.`,
       { playerId, teamId: this.userTeamId as string }
     )
@@ -14576,10 +14875,24 @@ export class Career {
     const clubs = [
       ...new Set(pending.map((o) => this.data.teams.get(o.partnerTeamId)?.abbreviation ?? '—')),
     ]
+    const passHead = writeBeat({
+      pool: AGM_PASS_POOL,
+      ctx: { many: pending.length > 1 },
+      slots: {
+        agm,
+        club: this.data.teams.get(pending[0]!.partnerTeamId)?.name ?? clubs[0] ?? 'the caller',
+        clubPoss: possessive(this.data.teams.get(pending[0]!.partnerTeamId)?.name ?? clubs[0] ?? 'the caller'),
+        n: String(pending.length),
+        clubs: prosaicList(clubs),
+      },
+      key: `ap|${this.year}|${this.currentDay}|${pending.map((o) => o.offerId).join(',')}`,
+      ledger: this.contentLedger,
+      year: this.year,
+      day: this.currentDay,
+    })
     const headline =
-      pending.length === 1
-        ? `${agm} passes on ${clubs[0]}'s offer`
-        : `${agm} passes on ${pending.length} offers`
+      passHead?.headline ??
+      (pending.length === 1 ? `${agm} passes on ${clubs[0]}'s offer` : `${agm} passes on ${pending.length} offers`)
     this.pushNews(
       'trade',
       headline,
@@ -15359,8 +15672,19 @@ export class Career {
       : `${us.name} ship ${outBest?.name ?? 'a veteran'} to ${partner.abbreviation}`
 
     // Rougher, has a take, uneven rhythm — the house voice, not a wire blurb.
+    // Where he slots is a claim about the lineup, so it follows his level: "a
+    // middle-six regular walks straight into the top of the lineup" was a
+    // sentence arguing with itself.
+    const slotLine = (p: Player): string => {
+      const ov = ratedOverall(p)
+      const key = `slot|${p.id as string}|${this.year}|${this.currentDay}`
+      if (ov >= 81) {
+        return renderStable(TRADE_SLOT_POOL, { tier: 'top' }, key, { name: p.name, caliber: caliber(p) })
+      }
+      return renderStable(TRADE_SLOT_POOL, { tier: 'mid' }, key, { name: p.name, caliber: caliber(p) })
+    }
     const lead = inBest && (!outBest || ratedOverall(inBest) >= ratedOverall(outBest))
-      ? `${us.abbreviation} got their guy. ${inBest.name} — ${caliber(inBest)} — walks straight into the top of the lineup.`
+      ? `${us.abbreviation} got their guy. ${slotLine(inBest)}`
       : outBest
         ? `${us.abbreviation} cashed in ${outBest.name}. ${caliber(outBest)}, and you can see the plan behind moving him.`
         : `${us.abbreviation} reshuffled the deck.`
@@ -15374,7 +15698,11 @@ export class Career {
       teamId: partnerId as string,
       ...(inBest ? { playerId: inBest.id as string } : {}),
       press: { byline: `${persona.name} — ${persona.outlet}`, kind: 'tradeColumn' },
-      salience: 85,
+      // A7: the column is commentary on news, not the news. The trade's own
+      // announcement (announceTrade) carries BREAKING when the deal earns it;
+      // at 85 the column wore the tag too — twice on one deal, and once on a
+      // swap for a middle-six forward.
+      salience: 70,
     })
   }
 
@@ -16965,7 +17293,7 @@ export class Career {
     const roster = team.roster.map((id) => this.resolve(id))
     team.tactics = profileToTactics(replacement.profile, roster, team.tactics)
     team.coachFit = coachFit(replacement.profile, roster)
-    this.pushNews(f.category, f.headline, `${f.body} ${replacement.name} takes the room.`, {
+    this.pushNews(f.category, f.headline, `${f.body} ${replacement.name} takes over behind the bench.`, {
       teamId: f.teamId,
       salience: 58,
     })
@@ -17481,12 +17809,7 @@ export class Career {
     if (!scene) return { applied: [], summary: 'No staff meeting is in session.' }
     const applied = this.applyStaffChoices(scene, delegatedChoices(scene))
     this.staffMeetingScene = null
-    this.pushNews(
-      'league',
-      'You left it to the staff',
-      applied.length ? `Your AGM ran the meeting: ${applied.join(' ')}` : 'Your AGM ran the meeting; nothing needed doing.',
-      { teamId: this.userTeamId as string }
-    )
+    this.pushDelegatedMeetingNews('staff', applied)
     return { applied, summary: `Delegated — ${applied.length} decision${applied.length === 1 ? '' : 's'} handled by staff.` }
   }
 
@@ -17551,13 +17874,42 @@ export class Career {
     if (!scene) return { applied: [], summary: 'No scout meeting is in session.' }
     const applied = this.applyScoutChoices(scene, delegatedScoutChoices(scene))
     this.scoutMeetingScene = null
-    this.pushNews(
-      'scouting',
-      'You left the board to the staff',
-      applied.length ? `Your Head of Scouting ran the meeting: ${applied.join(' ')}` : 'Your Head of Scouting ran the meeting; nothing needed doing.',
-      { press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutMeeting' } },
-    )
+    this.pushDelegatedMeetingNews('scout', applied)
     return { applied, summary: `Delegated — ${applied.length} decision${applied.length === 1 ? '' : 's'} handled by the staff.` }
+  }
+
+  /**
+   * The note a delegated meeting leaves on the GM's desk. The headline is the
+   * first thing the staff actually did — "You left it to the staff" eighteen
+   * times a season said only that a meeting happened. A meeting where nothing
+   * needed doing leaves no note at all (A8: the inbox reports what happened).
+   */
+  private pushDelegatedMeetingNews(meeting: 'staff' | 'scout', applied: string[]): void {
+    if (applied.length === 0) return
+    const first = applied[0]!.replace(/[.!]+$/, '')
+    const delegate = meeting === 'staff' ? 'Your AGM' : 'Your Head of Scouting'
+    const written = writeBeat({
+      pool: DELEGATED_MEETING_POOL,
+      ctx: { meeting, more: applied.length > 1 },
+      slots: {
+        first,
+        n: String(applied.length - 1),
+        total: String(applied.length),
+        delegate,
+      },
+      key: `dm|${meeting}|${this.year}|${this.currentDay}`,
+      ledger: this.contentLedger,
+      year: this.year,
+      day: this.currentDay,
+    })
+    const body = `${delegate} ran the meeting in your absence. ${applied.join(' ')}`
+    if (meeting === 'staff') {
+      this.pushNews('league', written?.headline ?? `Staff meeting: ${first}`, body, { teamId: this.userTeamId as string })
+    } else {
+      this.pushNews('scouting', written?.headline ?? `Scouting meeting: ${first}`, body, {
+        press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutMeeting' },
+      })
+    }
   }
 
   /** Auto-resolve a pending scout meeting with safe defaults (non-gated auto-sim past it). */
@@ -19329,7 +19681,31 @@ export class Career {
       ? ` Their cards are attached — make the calls here, or leave the queue to us.`
       : ` Nothing awaits your call in the Scouting Centre.`
     const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call.${callToAction}`
-    const item = this.pushNews('scouting', `Weekly scouting digest`, body, {
+    // A8: a week that produced no new name, and no card the GM has not already
+    // been shown, is not a briefing. The standing queue lives on the Scouting
+    // Centre; mailing it again every Sunday was the clutter.
+    const seenBefore = new Set(this.scoutDigestShown)
+    const unseenCards = cards.filter((c) => !seenBefore.has(c.playerId))
+    if (fresh.length === 0 && unseenCards.length === 0) return
+    // The headline carries the week: who was flagged. "Weekly scouting digest"
+    // thirty times a season told the GM nothing he needed to open it for.
+    const headNames = top.length > 0 ? top.map((r) => nameOf(r.playerId)) : unseenCards.map((c) => c.name)
+    const headCount = top.length > 0 ? fresh.length : unseenCards.length
+    const digestHead = writeBeat({
+      pool: SCOUT_DIGEST_POOL,
+      ctx: { count: Math.min(3, headCount), star: (top[0]?.grade ?? unseenCards[0]?.grade) === 'A+' },
+      slots: {
+        a: headNames[0] ?? '',
+        b: headNames[1] ?? '',
+        rest: String(Math.max(0, headCount - 2)),
+        total: String(headCount),
+      },
+      key: `digest|${this.year}|${day}`,
+      ledger: this.contentLedger,
+      year: this.year,
+      day,
+    })
+    const item = this.pushNews('scouting', digestHead?.headline ?? `Scouting week: ${headCount} new names`, body, {
       press: { byline: 'Head of Scouting — Recruitment', kind: 'scoutDigest' },
       ...(cards.length > 0 ? { prospects: cards } : {}),
     })
@@ -19388,9 +19764,20 @@ export class Career {
 
     const role = ceilingRoleShort(ourCeiling, p.position)
     const grade: ScoutRecommendation['grade'] = potStars >= 4.5 ? 'A+' : potStars >= 4 ? 'A' : potStars >= 3 ? 'B' : 'C'
-    const reason =
-      sleeper ? `Undervalued — our scout sees a ${role} ceiling the book is missing.`
-      : `${elig ? 'High-upside draft prospect' : 'High-upside prospect'} — projects as a ${role}.`
+    // The scout's note, in a scout's words. It used to read "High-upside
+    // prospect — projects as a Middle-six F" for every find — a UI chip in a
+    // sentence, and "high upside" stamped on third-pair defencemen. The band
+    // now follows the projection, and the note is stable per player (it is
+    // read back in every digest and on the Centre).
+    const roleWords = roleInWords(role)
+    const reason = sleeper
+      ? `Undervalued: our scout sees ${roleWords} where the public lists do not.`
+      : renderStable(
+          SCOUT_NOTE_POOL,
+          { band: potStars >= 4.5 ? 'elite' : potStars >= 3.5 ? 'high' : 'solid', draft: !!elig },
+          `note|${p.id as string}`,
+          { role: roleWords }
+        )
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)
     // No per-find inbox ping — finds are batched into the weekly scouting digest

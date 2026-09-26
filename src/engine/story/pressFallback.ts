@@ -20,6 +20,8 @@ import {
   type PressResultFact,
   type ScheduledReportFactSheet,
 } from './factSheet'
+import type { ContentVariant } from './contentEngine'
+import { pickStable, possessive, renderStable } from './prose'
 
 export interface FallbackArticle {
   headline: string
@@ -38,6 +40,14 @@ function stableHash(s: string): number {
     h |= 0
   }
   return Math.abs(h)
+}
+
+/** One of several equivalent phrasings, stable for this piece (team + date +
+ *  salt). A weekly column that runs twenty times a season in the same branch
+ *  cannot carry one fixed headline — "the league's most surprising story"
+ *  every Monday stops being a story. */
+function alt(sheet: PressFactSheet, salt: string, options: string[]): string {
+  return options[stableHash(`${sheet.team.abbr}|${sheet.year}|${sheet.day}|${salt}`) % options.length]!
 }
 
 /** Pick one element from a list using a stable numeric seed. */
@@ -145,19 +155,62 @@ function expectationBlurb(sheet: PressFactSheet): string | null {
   return `They're running exactly to projection, sitting ${ordinal(t.rank)} as expected.`
 }
 
+/**
+ * The storyline the league is watching, as a sentence. The arc summary is a
+ * label ("Marchand — 4 away from 200 career goals") and was dropped into the
+ * paragraph raw, with no full stop, so the next sentence ran straight on from
+ * it. A lead-in and a terminator make it prose.
+ */
 function topArcBlurb(sheet: PressFactSheet): string | null {
   const arc = sheet.topArcs[0]
-  return arc ? arc.summary : null
+  if (!arc) return null
+  const s = arc.summary.trim().replace(/[.!]+$/, '')
+  const lead = alt(sheet, 'arc', ['Worth watching: ', 'One to keep an eye on: ', 'Elsewhere, ', 'Also on the radar: '])
+  return `${lead}${s}.`
 }
+
+/**
+ * The mood line. It rides in most weekly and monthly pieces, so one sentence
+ * per band read identically a dozen times a season — and "the room" in every
+ * one of them. Several frames per band, only some of which say "room", keyed
+ * by the date so a week's pieces agree and consecutive weeks differ.
+ */
+const MOOD_POOL: ContentVariant[] = [
+  { id: 'mood.hot.a', conditions: { band: 'hot', cap: true }, text: `The room is running hot, spirits sky-high under the steady hand of captain {cap}.` },
+  { id: 'mood.hot.b', conditions: { band: 'hot', cap: true }, text: `Spirits are high, and {cap} has had a lot to do with that.` },
+  { id: 'mood.hot.c', conditions: { band: 'hot', cap: true }, text: `It is a loose, confident group right now, and {cap} is setting the tone.` },
+  { id: 'mood.hot.d', conditions: { band: 'hot' }, text: `The dressing room is as loose and confident as it has been all season.` },
+  { id: 'mood.hot.e', conditions: { band: 'hot' }, text: `This is a happy team. It shows in the way they play.` },
+  { id: 'mood.hot.f', conditions: { band: 'hot' }, text: `Confidence is not the problem around here.` },
+  { id: 'mood.good.a', conditions: { band: 'good', cap: true }, text: `{cap} has the group in a good place — spirits are up and they are pulling together.` },
+  { id: 'mood.good.b', conditions: { band: 'good', cap: true }, text: `By all accounts {cap} has them together. The mood is good.` },
+  { id: 'mood.good.c', conditions: { band: 'good', cap: true }, text: `The players say the right things, and {cap} is the one saying most of them.` },
+  { id: 'mood.good.d', conditions: { band: 'good' }, text: `The mood is upbeat — not euphoric, but a group that believes.` },
+  { id: 'mood.good.e', conditions: { band: 'good' }, text: `Spirits are decent. Nobody is panicking about anything.` },
+  { id: 'mood.good.f', conditions: { band: 'good' }, text: `It is a settled dressing room, which is worth more than it sounds.` },
+  { id: 'mood.flat.a', conditions: { band: 'flat', cap: true }, text: `{cap} has some work to do: the group feels a little flat right now.` },
+  { id: 'mood.flat.b', conditions: { band: 'flat', cap: true }, text: `The energy is not quite there, and {cap} knows it.` },
+  { id: 'mood.flat.c', conditions: { band: 'flat', cap: true }, text: `Things are a bit quiet in the dressing room. {cap} will be expected to change that.` },
+  { id: 'mood.flat.d', conditions: { band: 'flat' }, text: `The room reads flat — the energy just isn't there.` },
+  { id: 'mood.flat.e', conditions: { band: 'flat' }, text: `Nobody is unhappy, exactly. Nobody is much of anything.` },
+  { id: 'mood.flat.f', conditions: { band: 'flat' }, text: `The mood is flat, and it has been for a while.` },
+  { id: 'mood.low.a', conditions: { band: 'low', cap: true }, text: `The dressing room is in a difficult place, and a lot rides on {capPoss} leadership right now.` },
+  { id: 'mood.low.b', conditions: { band: 'low', cap: true }, text: `It is a tense group. {cap} has his hands full.` },
+  { id: 'mood.low.c', conditions: { band: 'low', cap: true }, text: `Morale is poor, and people are starting to look at {cap} for an answer.` },
+  { id: 'mood.low.d', conditions: { band: 'low' }, text: `The dressing room is in a difficult place — the mood has sunk about as low as it goes.` },
+  { id: 'mood.low.e', conditions: { band: 'low' }, text: `This is an unhappy team, and it is not hiding it well.` },
+  { id: 'mood.low.f', conditions: { band: 'low' }, text: `Morale is as low as it has been in a long time.` },
+]
 
 function moraleBlurb(sheet: PressFactSheet): string {
   const m = Math.round(sheet.lockerRoom.roomMorale)
   const cap = sheet.lockerRoom.captainName
   // Prose only — a beat writer describes the mood, he doesn't read out a 0–100 number.
-  if (m >= 80) return cap ? `The room is running hot, spirits sky-high under the steady hand of captain ${cap}.` : `The room's as loose and confident as it's been all season.`
-  if (m >= 60) return cap ? `${cap} has the room in a good place — spirits are up and the group is pulling together.` : `The mood in the room is upbeat — not euphoric, but a group that believes.`
-  if (m >= 40) return cap ? `${cap} has some work to do: the room feels a little flat right now.` : `The room reads flat — the energy just isn't there.`
-  return cap ? `The dressing room is in a difficult place, and a lot rides on ${cap}'s leadership right now.` : `The dressing room is in a difficult place — the mood has sunk about as low as it goes.`
+  const band = m >= 80 ? 'hot' : m >= 60 ? 'good' : m >= 40 ? 'flat' : 'low'
+  return renderStable(MOOD_POOL, { band, cap: !!cap }, `mood|${sheet.team.abbr}|${sheet.year}|${sheet.day}`, {
+    cap: cap ?? '',
+    capPoss: cap ? possessive(cap) : '',
+  })
 }
 
 function leaderBlurb(sheet: PressFactSheet): string | null {
@@ -242,10 +295,22 @@ const WEEKLY_BEAT: WeeklyTemplateFn[] = [
     const underExp = underPerforming(sheet)
 
     const headline = overExp
-      ? `${t.name} defying expectations at ${ordinal(t.rank)}`
+      ? alt(sheet, 'b1o', [
+          `${t.name} defying expectations at ${ordinal(t.rank)}`,
+          `${t.name} still ${ordinal(t.rank)}, still ahead of schedule`,
+          `A ${wins}–${losses} week keeps ${t.name} well ahead of the forecast`,
+        ])
       : underExp
-        ? `${t.name} stuck below the line: hard questions after a ${wins}–${losses} week`
-        : `${t.abbr} holds at ${ordinal(t.rank)} — ${wins}–${losses} through the week`
+        ? alt(sheet, 'b1u', [
+            `${t.name} stuck below the line: hard questions after a ${wins}–${losses} week`,
+            `${t.name} still searching after a ${wins}–${losses} week`,
+            `No turnaround yet: ${t.name} go ${wins}–${losses}`,
+          ])
+        : alt(sheet, 'b1m', [
+            `${t.abbr} holds at ${ordinal(t.rank)} — ${wins}–${losses} through the week`,
+            `${wins}–${losses} week leaves ${t.name} ${ordinal(t.rank)}`,
+            `${t.name} tread water at ${ordinal(t.rank)}`,
+          ])
 
     const projection = overExp
       ? 'still running ahead of what anyone predicted back in October'
@@ -284,10 +349,18 @@ const WEEKLY_BEAT: WeeklyTemplateFn[] = [
       : sheet.lockerRoom.roomMorale <= 45
         ? `Off-ice questions shadow a ${wins}–${losses} week for ${t.abbr}`
         : wins > losses
-          ? `${t.abbr} week in review: winning on the ice, steady in the room`
+          ? alt(sheet, 'b2w', [
+              `${t.abbr} week in review: winning on the ice, steady off it`,
+              `${t.abbr} week in review: ${wins}–${losses}, and a settled group`,
+              `A good week for ${t.abbr}, on the ice and around it`,
+            ])
           : wins < losses
-            ? `${t.abbr} week in review: results and room dynamics under scrutiny`
-            : `${t.abbr} week in review: results and room dynamics`
+            ? alt(sheet, 'b2l', [
+                `${t.abbr} week in review: results and dressing-room dynamics under scrutiny`,
+                `${t.abbr} week in review: a ${wins}–${losses} week and what it did to the mood`,
+                `Tough week for ${t.abbr}; how the group is taking it`,
+              ])
+            : `${t.abbr} week in review: results and dressing-room dynamics`
 
     const lede = `HARBOR CITY — Numbers tell part of the story. The ${t.name} are ${recordStr(sheet)} after a ${wins}–${losses} week. But a lot of what happens on the ice in this building starts long before puck drop.`
 
@@ -320,10 +393,23 @@ const WEEKLY_NATIONAL: WeeklyTemplateFn[] = [
     const { wins, losses } = recentRecord(sheet)
 
     const headline = overPerforming(sheet)
-      ? `${t.name}: the league's most surprising story`
+      ? alt(sheet, 'n1o', [
+          `${t.name}: the league's most surprising story`,
+          `I didn't see ${t.name} coming. Nobody did.`,
+          `${t.name} keep making the projections look silly`,
+          `Why I'm starting to believe in ${t.name}`,
+        ])
       : underPerforming(sheet)
-        ? `${t.name}'s early promise hasn't materialised — time to ask why`
-        : `${t.name} are exactly what they look like — a ${wins}–${losses} week confirms it`
+        ? alt(sheet, 'n1u', [
+            `${t.name} haven't delivered — time to ask why`,
+            `What is wrong with ${t.name}?`,
+            `${t.name} were supposed to be better than this`,
+          ])
+        : alt(sheet, 'n1m', [
+            `${t.name} are exactly what they look like — a ${wins}–${losses} week confirms it`,
+            `${t.name}: no surprises, for better and worse`,
+            `A ${wins}–${losses} week, and ${t.name} remain who we thought they were`,
+          ])
 
     const lede = `The ${t.name} are ${recordStr(sheet)}. A ${wins}–${losses} week. Make of that what you will — and I'll tell you what I make of it.`
 
@@ -334,7 +420,7 @@ const WEEKLY_NATIONAL: WeeklyTemplateFn[] = [
     const upLine = upNextBlurb(sheet)
 
     const midPara = expLine
-      ? `${expLine}${arcLine ? ` Meanwhile: ${arcLine}` : ''}`
+      ? `${expLine}${arcLine ? ` ${arcLine}` : ''}`
       : arcLine ?? ''
 
     const statPara = [leaderLine, rumorLine].filter(Boolean).join(' ')
@@ -372,7 +458,7 @@ const WEEKLY_NATIONAL: WeeklyTemplateFn[] = [
     const closePara = underPerforming(sheet)
       ? `The front office has decisions to make. What happens next will say a great deal about who this franchise wants to be.`
       : overPerforming(sheet)
-        ? `Credit where it's due. This team has outperformed the room's consensus — and in this league, that earns you a look.`
+        ? `Credit where it's due. This team has outperformed what the league expected of it — and in this league, that earns you a look.`
         : `This is a team that knows what it is. Whether that's enough remains the open question.`
 
     const paras = [lede, bodyPara, statPara, closePara].filter(Boolean)
@@ -494,14 +580,26 @@ const WEEKLY_HOMER: WeeklyTemplateFn[] = [
     const allLoss = losses === sheet.lastResults.length && sheet.lastResults.length > 0
 
     const headline = allLoss
-      ? `Rough week — but here's why I'm still a believer`
+      ? alt(sheet, 'h2a', [
+          `Rough week — but here's why I'm still a believer`,
+          `0-for-the-week. I'm still not jumping off the bandwagon.`,
+          `Bad week. Here's why I'm not panicking (much).`,
+        ])
       : wins >= losses
-        ? `Here's what I saw this week that the scoreboard doesn't show`
-        : `You want my honest take? We're closer than you think`
+        ? alt(sheet, 'h2w', [
+            `Here's what I saw this week that the scoreboard doesn't show`,
+            `The little things from this week that are going to matter`,
+            `${wins}–${losses}, and it was better than that`,
+          ])
+        : alt(sheet, 'h2l', [
+            `You want my honest take? We're closer than you think`,
+            `A ${wins}–${losses} week. Hear me out.`,
+            `Not the week we wanted, but look closer`,
+          ])
 
     const lede = allLoss
       ? `Alright, we went ${wins}–${losses}. I know. I watched every game. But I'm going to tell you something: I have seen this team fight, and I am not ready to write them off. Not even close. We're ${recordStr(sheet)}.`
-      : `The ${t.name} are ${recordStr(sheet)} after a ${wins}–${losses} week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter come the second half.`
+      : `The ${t.name} are ${recordStr(sheet)} after a ${wins}–${losses} week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter ${gamesPlayed(sheet) < 41 ? 'come the second half' : gamesPlayed(sheet) < 70 ? 'down the stretch' : 'come the playoffs'}.`
 
     const expLine = expectationBlurb(sheet)
     const arcLine = topArcBlurb(sheet)
@@ -988,6 +1086,76 @@ function userRankingBlurb(s: ScheduledReportFactSheet): string {
 
 /* ────────────────────────── POWER RANKINGS templates ────────────────────────── */
 
+/**
+ * Headline + lede for an in-season rankings piece: keyed to how far into the
+ * season we are (early / middle / stretch) and to the club on top, so fifteen
+ * editions a season do not share one headline.
+ * Slots: {top} {riser} {faller} {user} {rank}
+ */
+const RANKINGS_FRAME_POOL: ContentVariant[] = [
+  /* beat — measured */
+  { id: 'pr.b.early.a', conditions: { voice: 'beat', phase: 'early' }, text: `Power rankings: {top} set the early pace`, text2: `HARBOR CITY — Enough games are in the books to start sorting the contenders from the hot starts. Here is the updated order.` },
+  { id: 'pr.b.early.b', conditions: { voice: 'beat', phase: 'early' }, text: `Power rankings refresh: the league's pecking order after the early going`, text2: `HARBOR CITY — It is early, and some of this will not last. Here is where things stand.` },
+  { id: 'pr.b.early.c', conditions: { voice: 'beat', phase: 'early' }, text: `Early power rankings: {top} out in front`, text2: `HARBOR CITY — A few weeks in, the table is starting to mean something. Here is the order.` },
+  { id: 'pr.b.mid.a', conditions: { voice: 'beat', phase: 'mid' }, text: `Power rankings: {top} still the team to catch`, text2: `HARBOR CITY — We are deep enough into the season that the standings have stopped lying. Here is the updated order.` },
+  { id: 'pr.b.mid.b', conditions: { voice: 'beat', phase: 'mid' }, text: `Power rankings: {top} on top as the season turns`, text2: `HARBOR CITY — The middle of the season is where good teams separate. Some have. Here is the order.` },
+  { id: 'pr.b.mid.c', conditions: { voice: 'beat', phase: 'mid' }, text: `Midseason power rankings: {top} lead the way`, text2: `HARBOR CITY — Half a season is a real sample. Here is what it says.` },
+  { id: 'pr.b.late.a', conditions: { voice: 'beat', phase: 'late' }, text: `Power rankings: {top} lead into the stretch drive`, text2: `HARBOR CITY — The stretch run is here, and the order now matters. Here it is.` },
+  { id: 'pr.b.late.b', conditions: { voice: 'beat', phase: 'late' }, text: `Power rankings: the order heading for the playoffs`, text2: `HARBOR CITY — A handful of weeks left. Here is who looks ready for April.` },
+  { id: 'pr.b.late.c', conditions: { voice: 'beat', phase: 'late' }, text: `Late-season power rankings: {top} out front`, text2: `HARBOR CITY — Nobody is a hot start any more. This is who these teams are.` },
+  { id: 'pr.b.riser.a', conditions: { voice: 'beat', riser: true }, text: `Power rankings: {riser} climb as {top} hold No. 1`, text2: `HARBOR CITY — The top spot did not change hands this week; plenty below it did. Here is the order.` },
+  { id: 'pr.b.riser.b', conditions: { voice: 'beat', riser: true }, text: `Power rankings: {riser} on the move`, text2: `HARBOR CITY — One club made a real jump this week. Here is the full order.` },
+  { id: 'pr.b.riser.c', conditions: { voice: 'beat', riser: true }, text: `Power rankings: {top} stay first, {faller} slide`, text2: `HARBOR CITY — Movement in the middle of the table this week. Here is where everyone landed.` },
+  /* national — opinionated */
+  { id: 'pr.n.a', conditions: { voice: 'national' }, text: `Power rankings: the definitive list, explained`, text2: `Rankings are always a conversation. Here is mine — and I'll stand behind every line of it.` },
+  { id: 'pr.n.b', conditions: { voice: 'national' }, text: `My power rankings: {top} first, and it isn't close`, text2: `Somebody has to say it plainly. Here is my order.` },
+  { id: 'pr.n.c', conditions: { voice: 'national' }, text: `Power rankings: why I still believe in {top}`, text2: `The standings tell part of it. Here is the rest.` },
+  { id: 'pr.n.d', conditions: { voice: 'national' }, text: `Ranking the league: {top} at No. 1, and the rest of my list`, text2: `Every team, one order. Argue with it; that is what it is for.` },
+  { id: 'pr.n.pre.a', conditions: { voice: 'national', phase: 'pre' }, text: `Preseason power rankings: {top} start on top`, text2: `Nothing has been played, so this is a judgement of rosters, not results. Here is mine.` },
+  { id: 'pr.n.pre.b', conditions: { voice: 'national', phase: 'pre' }, text: `My preseason order: {top} first, and here is why`, text2: `Summer is over. Here is how I have the league before a puck drops.` },
+  { id: 'pr.n.pre.c', conditions: { voice: 'national', phase: 'pre' }, text: `Before the puck drops: ranking the league`, text2: `Projections, not records. Hold me to them in April.` },
+  { id: 'pr.n.late.a', conditions: { voice: 'national', phase: 'late' }, text: `Final stretch power rankings: who is built for April`, text2: `Regular-season points are nice. Here is who I trust when they stop being handed out.` },
+  { id: 'pr.n.late.b', conditions: { voice: 'national', phase: 'late' }, text: `Power rankings: {top} the favourite as the playoffs close in`, text2: `The race is nearly run. My order, with the playoffs in mind.` },
+  { id: 'pr.n.late.c', conditions: { voice: 'national', phase: 'late' }, text: `Power rankings with the playoff picture forming`, text2: `This is the edition that ages worst, so I will be brave about it.` },
+]
+
+/** The homer on the rankings. text = headline; text2 = "lede|closer". {team} {rank} */
+const HOMER_RANKINGS_POOL: ContentVariant[] = [
+  { id: 'prh.top.a', conditions: { band: 'top' }, text: `Power rankings are out — and the {team} are RIGHT THERE, folks!`, text2: `{rank} in the power rankings. Say it slowly. Let it sink in.|I'll take it. Every week.` },
+  { id: 'prh.top.b', conditions: { band: 'top' }, text: `Top five and climbing: the {team} are the real deal`, text2: `The experts have finally caught up. The {team} are {rank}.|Told you so. I'll keep telling you so.` },
+  { id: 'prh.top.c', conditions: { band: 'top' }, text: `Look who's near the top: YOUR {team}`, text2: `{rank}! I've been saying it since training camp and nobody listened.|Get used to this view.` },
+  { id: 'prh.top.late.a', conditions: { band: 'top', late: true }, text: `The {team} are {rank} with the playoffs in sight`, text2: `This is when it counts, and the {team} are right where they need to be.|Book the parade route. (Kidding. Mostly.)` },
+  { id: 'prh.top.late.b', conditions: { band: 'top', late: true }, text: `{rank} and ready: the {team} head for the stretch`, text2: `The rankings have the {team} {rank}. I've never felt better about a spring.|Let's go.` },
+  { id: 'prh.top.late.c', conditions: { band: 'top', late: true }, text: `Contenders. Say it. The {team} are contenders`, text2: `{rank} in the rankings this late in the season is not a fluke, folks.|April is going to be fun.` },
+  { id: 'prh.mid.a', conditions: { band: 'mid' }, text: `Power rankings: here's where YOUR {team} stand`, text2: `The rankings are out. The {team} come in at {rank}. Is it where we want to be? Not yet.|There's a lot of hockey left.` },
+  { id: 'prh.mid.b', conditions: { band: 'mid' }, text: `The {team} at {rank}? Underrated, and I'll die on that hill`, text2: `{rank}. The rankers don't watch every game. I do.|Mark my words.` },
+  { id: 'prh.mid.c', conditions: { band: 'mid' }, text: `{rank} in the rankings — the {team} are knocking on the door`, text2: `Middle of the pack, sure. But you've seen the way this team competes.|One good week changes everything.` },
+  { id: 'prh.mid.late.a', conditions: { band: 'mid', late: true }, text: `The {team} at {rank}: it's playoff-race time`, text2: `{rank} in the rankings with the stretch run on. Every game is a big game now.|Buckle up.` },
+  { id: 'prh.mid.late.b', conditions: { band: 'mid', late: true }, text: `Bubble watch: the {team} sit {rank}`, text2: `Not where I want them this late, but it's not over.|Every point matters from here.` },
+  { id: 'prh.mid.late.c', conditions: { band: 'mid', late: true }, text: `{rank} and fighting: the {team} in the race`, text2: `The rankings have them {rank}. The standings will have the final say.|Let's finish strong.` },
+  { id: 'prh.low.a', conditions: { band: 'low' }, text: `The {team} are {rank} in the rankings. I'm not panicking. (I'm panicking a little.)`, text2: `{rank}. I'm not going to pretend that's good.|Better days are coming. They have to be.` },
+  { id: 'prh.low.b', conditions: { band: 'low' }, text: `Power rankings: the {team} at {rank}, and that hurts`, text2: `I've watched every game. {rank} is fair, and I hate that it's fair.|Chin up. Somebody has to say it.` },
+  { id: 'prh.low.c', conditions: { band: 'low' }, text: `{rank}? Ugh. Here's where YOUR {team} stand`, text2: `The rankings are out and the {team} are {rank}. Not a fun read.|We've been here before. We got out of it before.` },
+]
+
+function inSeasonRankingsFrame(s: ScheduledReportFactSheet, voice: 'beat' | 'national'): { headline: string; lede: string } {
+  const gp = gamesPlayed(s)
+  const phase = gp === 0 ? 'pre' : gp < 20 ? 'early' : gp < 55 ? 'mid' : 'late'
+  const top = s.powerRankings[0]?.teamName ?? 'the leaders'
+  const riser = [...s.powerRankings].filter((r) => (r.delta ?? 0) >= 3).sort((a, b) => (b.delta ?? 0) - (a.delta ?? 0))[0]
+  const faller = [...s.powerRankings].filter((r) => (r.delta ?? 0) <= -2).sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))[0]
+  const v = pickStable(RANKINGS_FRAME_POOL, { voice, phase, riser: !!(riser && faller) }, `pr|${s.team.abbr}|${s.year}|${s.day}|${voice}`)
+  const slots = { top, riser: riser?.teamName ?? '', faller: faller?.teamName ?? '' }
+  return {
+    headline: v ? fillSlots(v.text, slots) : `Power rankings: ${top} on top`,
+    lede: v?.text2 ? fillSlots(v.text2, slots) : '',
+  }
+}
+
+function fillSlots(t: string, slots: Record<string, string>): string {
+  return t.replace(/\{(\w+)\}/g, (_m, k: string) => slots[k] ?? '')
+}
+
 const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
   (sheet) => {
     const s = asScheduled(sheet)
@@ -1004,8 +1172,9 @@ const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
   },
   (sheet) => {
     const s = asScheduled(sheet)
-    const headline = `Power rankings refresh: the league's pecking order after the early going`
-    const lede = `HARBOR CITY — Enough games are in the books to know who's for real and who isn't. Here is the updated order.`
+    // The phase of the season, and the club on top, are the story. The old
+    // headline said "after the early going" in February.
+    const { headline, lede } = inSeasonRankingsFrame(s, 'beat')
     const tableStr = rankingsSection(s, 8)
     const userBlurb = userRankingBlurb(s)
     const risers = s.powerRankings.filter((r) => (r.delta ?? 0) >= 2).slice(0, 2)
@@ -1025,8 +1194,7 @@ const POWER_RANKINGS_BEAT: TentpoleTemplateFn[] = [
 const POWER_RANKINGS_NATIONAL: TentpoleTemplateFn[] = [
   (sheet) => {
     const s = asScheduled(sheet)
-    const headline = `Power rankings: the definitive list, explained`
-    const lede = `Rankings are always a conversation. Here is mine — and I'll stand behind every line of it.`
+    const { headline, lede } = inSeasonRankingsFrame(s, 'national')
     const tableStr = rankingsSection(s, 8)
     const risers = s.powerRankings.filter((r) => (r.delta ?? 0) >= 2).slice(0, 2)
     const fallers = s.powerRankings.filter((r) => (r.delta ?? 0) <= -2).slice(0, 2)
@@ -1050,17 +1218,24 @@ const POWER_RANKINGS_HOMER: TentpoleTemplateFn[] = [
     const t = sheet.team
     const entry = s.powerRankings.find((r) => r.teamAbbr === t.abbr)
     const rankStr = entry ? ordinal(entry.rank) : ordinal(t.rank)
-    const headline = entry && entry.rank <= 5
-      ? `Power rankings are out — and the ${t.name} are RIGHT THERE, folks!`
-      : `Power rankings: here's where YOUR ${t.name} stand`
-    const lede = entry && entry.rank <= 5
-      ? `I've waited a long time to say this: the ${t.name} are ${rankStr} in the power rankings. Let that sink in.`
-      : `The rankings are out. The ${t.name} come in at ${rankStr}. Is it where we want to be? Not quite yet. But this is a process, and the process is working.`
+    // The homer's mood follows the number. He used to say "the process is
+    // working" from 29th and "we're just getting started" in March.
+    const rank = entry?.rank ?? t.rank
+    const band = rank <= 5 ? 'top' : rank <= Math.max(8, Math.ceil(s.powerRankings.length / 2)) ? 'mid' : 'low'
+    const gp = gamesPlayed(sheet)
+    const v = pickStable(
+      HOMER_RANKINGS_POOL,
+      { band, late: gp >= 55 },
+      `prh|${t.abbr}|${sheet.year}|${sheet.day}`
+    )
+    const slots = { team: t.name, rank: rankStr }
+    const headline = v ? fillSlots(v.text, slots) : `Power rankings: here's where YOUR ${t.name} stand`
+    const [lede, closer] = (v?.text2 ?? '|').split('|').map((x) => fillSlots(x, slots))
     const tableStr = rankingsSection(s, 6)
     const userBlurb = userRankingBlurb(s)
     return {
       headline,
-      body: [lede, tableStr, `${userBlurb} I'll take it. And we're just getting started.`].filter(Boolean).join('\n\n'),
+      body: [lede, tableStr, `${userBlurb} ${closer ?? ''}`.trim()].filter(Boolean).join('\n\n'),
       byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
     }
   },
@@ -1225,7 +1400,9 @@ const PLAYOFF_PREVIEW_BEAT: TentpoleTemplateFn[] = [
       : `Playoff preview: everything is on the line`
     const lede = `HARBOR CITY — ${roundStr} begins. The ${t.name} enter at ${recordStr(sheet)}.`
     const matchupLines = s.playoffMatchups.slice(0, 4).map(
-      (m) => `${ordinal(m.highSeed)} ${m.highSeed} vs. ${ordinal(m.lowSeed)} ${m.lowSeed}`
+      // highSeed/lowSeed are team NAMES. They were run through ordinal(), which
+      // printed "Florida Panthersth Florida Panthers vs. …" in every preview.
+      (m) => `${m.highSeed} vs. ${m.lowSeed}`
     )
     const matchupStr = matchupLines.length > 0 ? `Key matchups: ${matchupLines.join('; ')}.` : ''
     const arcLine = topArcBlurb(sheet) ?? ''
@@ -1545,6 +1722,14 @@ export function renderFallback(job: PressJob): FallbackArticle {
           ? 0
           : Math.min(templates.length - 1, 1 + (seed % Math.max(1, templates.length - 1)))
         return templates[idx]!(sheet, seed)
+      }
+      // The beat's second monthly template is a QUARTER-POLE piece ("the league
+      // after the first stretch … through the early going"). It was drawn for
+      // any month, so March could be the quarter pole. Only offer it then.
+      if (sheet.kind === 'monthlyReport' && persona === 'beat' && templates.length > 1) {
+        const gp = gamesPlayed(sheet)
+        const quarterPole = gp >= 15 && gp <= 30
+        return templates[quarterPole ? 1 : 0]!(sheet, seed)
       }
       return pick(templates, seed)(sheet, seed)
     }

@@ -13,8 +13,14 @@ export type GameStoryKind = 'comeback' | 'blownLead' | 'goalieRobbery' | 'goalie
 
 export interface GameStoryBeat {
   kind: GameStoryKind
+  /** Plain default wording. The career layer writes the inbox headline from
+   *  the authored pool (inboxBeats.GAME_STORY_POOL) using the numbers below;
+   *  this string is for callers without a ledger. */
   headline: string
   body: string
+  /** Largest deficit overcome / lead held — the pool's conditions read these. */
+  deficit: number
+  lead: number
 }
 
 export interface GameStoryInput {
@@ -56,7 +62,7 @@ export function detectGameStory(inp: GameStoryInput): GameStoryBeat | null {
   // 1. Comeback win — overcame a two-goal hole and won (by any route).
   if (inp.won && maxDeficit >= 2) {
     return {
-      kind: 'comeback',
+      kind: 'comeback', deficit: maxDeficit, lead: maxLead,
       headline: `Comeback! Down ${maxDeficit}, your club storms back to win`,
       body: `Trailing by ${maxDeficit}, the club dug in and rallied all the way back for the two points.`,
     }
@@ -65,7 +71,7 @@ export function detectGameStory(inp: GameStoryInput): GameStoryBeat | null {
   // 2. Blown lead — held a two-goal lead and lost it.
   if (!inp.won && maxLead >= 2) {
     return {
-      kind: 'blownLead',
+      kind: 'blownLead', deficit: maxDeficit, lead: maxLead,
       headline: `Collapse: a ${maxLead}-goal lead slips away`,
       body: `The club led by ${maxLead} and couldn't close it out, letting the game — and the points — get away.`,
     }
@@ -75,7 +81,7 @@ export function detectGameStory(inp: GameStoryInput): GameStoryBeat | null {
   // 3. Goalie robbery — won while badly outshot behind a huge night in net.
   if (inp.won && g && g.shotsAgainst >= 34 && g.saves / g.shotsAgainst >= 0.93 && inp.oppShots > inp.userShots + 6) {
     return {
-      kind: 'goalieRobbery',
+      kind: 'goalieRobbery', deficit: maxDeficit, lead: maxLead,
       headline: `${g.name} stole it — ${g.saves} saves`,
       body: `Under siege all night, ${g.name} turned aside ${g.saves} of ${g.shotsAgainst} shots to steal the two points.`,
     }
@@ -84,7 +90,7 @@ export function detectGameStory(inp: GameStoryInput): GameStoryBeat | null {
   // 4. Goalie shelled — lost a game the netminder never had a chance in.
   if (!inp.won && g && g.goalsAgainst >= 6) {
     return {
-      kind: 'goalieShelled',
+      kind: 'goalieShelled', deficit: maxDeficit, lead: maxLead,
       headline: `Rough night for ${g.name}`,
       body: `${g.name} was beaten ${g.goalsAgainst} times on ${g.shotsAgainst} shots — a night to forget between the pipes.`,
     }
@@ -100,6 +106,8 @@ export interface PlayerStoryBeat {
   playerId: string
   headline: string
   body: string
+  /** The line behind the beat, so the career layer can write it from the pool. */
+  line: PlayerGameLine
 }
 
 /** One player's line from a finished game, for spotting individual heroics. */
@@ -139,7 +147,7 @@ export function detectPlayerStory(lines: PlayerGameLine[]): PlayerStoryBeat | nu
     const tail = pts > hat.goals ? ` (${pts} points)` : ''
     return {
       kind: 'hatTrick',
-      playerId: hat.playerId,
+      playerId: hat.playerId, line: hat,
       headline: `${hat.name} nets ${label}!`,
       body: `${hat.name} lit the lamp ${hat.goals} times${tail} — the kind of night that ends up on the highlight reel.`,
     }
@@ -148,7 +156,7 @@ export function detectPlayerStory(lines: PlayerGameLine[]): PlayerStoryBeat | nu
     const pts = big.goals + big.assists
     return {
       kind: 'bigNight',
-      playerId: big.playerId,
+      playerId: big.playerId, line: big,
       headline: `${big.name} racks up a ${pts}-point night`,
       body: `${big.name} was all over the scoresheet: ${big.goals}G, ${big.assists}A.`,
     }
@@ -156,7 +164,7 @@ export function detectPlayerStory(lines: PlayerGameLine[]): PlayerStoryBeat | nu
   if (sho) {
     return {
       kind: 'shutout',
-      playerId: sho.playerId,
+      playerId: sho.playerId, line: sho,
       headline: `${sho.name} slams the door — ${sho.saves}-save shutout`,
       body: `${sho.name} turned aside all ${sho.shotsAgainst} shots for the clean sheet.`,
     }
