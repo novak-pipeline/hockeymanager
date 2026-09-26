@@ -351,6 +351,8 @@ export type WorkerRequestBody =
   | { type: 'getStaffMeeting' }
   | { type: 'submitStaffMeeting'; choices: Record<string, string> }
   | { type: 'delegateStaffMeeting' }
+  /** PHASE 0: staff-meeting Responsibilities (weekly / on demand / delegate). */
+  | { type: 'setStaffMeetingMode'; mode: 'weekly' | 'onDemand' | 'delegate' }
   | { type: 'getScoutMeeting' }
   | { type: 'submitScoutMeeting'; choices: Record<string, string> }
   | { type: 'delegateScoutMeeting' }

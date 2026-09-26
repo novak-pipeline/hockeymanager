@@ -117,17 +117,88 @@ describe('livingLedger — pure scheduler', () => {
     const { c } = makeCareer()
     const player = c.data.players.get(c.userTeam.roster[0])!
     const action = actionFor(player.id as string, player.name, 'shopped', 'quiet')
-    player.personality.temperament = 20
-    player.personality.ambition = 80
+    // Real 1–20 personality values (the scale generate.ts produces). These
+    // fixtures used to be 20/80/90 — impossible values that hid the 0–100 bug.
+    player.personality.temperament = 3
+    player.personality.ambition = 16
     const hot = reactionCopy({ kind: 'confrontation', action, player, escalation: 0, rng: new Rng(3) })
-    player.personality.temperament = 80
-    player.personality.professionalism = 90
+    player.personality.temperament = 16
+    player.personality.professionalism = 18
     const cool = reactionCopy({ kind: 'confrontation', action, player, escalation: 0, rng: new Rng(3) })
     expect(hot.message).not.toBe(cool.message)
     const again = reactionCopy({ kind: 'confrontation', action, player, escalation: 1, rng: new Rng(3) })
     expect(again.message).toContain('already')
     // Every confrontation offers the full response set (promise…dismissive).
     expect(hot.options?.map((o) => o.tone)).toEqual(['promise', 'supportive', 'firm', 'dismissive'])
+  })
+})
+
+describe('livingLedger — personality on the REAL 1–20 scale (PHASE 0)', () => {
+  // Generated personalities are 1–20. The thresholds were written for 0–100,
+  // so "hot-headed" was always true and "proud"/"professional" never were.
+  const shopped = (pid: string, name: string): WorldAction => actionFor(pid, name, 'shopped', 'open')
+
+  it('generated players are on 1–20 — and confrontation copy now varies across them', () => {
+    const { c } = makeCareer(91)
+    const ids = c.userTeam.roster.slice(0, 23)
+    const lines = new Set<string>()
+    for (const id of ids) {
+      const player = c.data.players.get(id)!
+      expect(player.personality.temperament).toBeGreaterThanOrEqual(1)
+      expect(player.personality.temperament).toBeLessThanOrEqual(20)
+      const copy = reactionCopy({ kind: 'confrontation', action: shopped(id as string, player.name), player, escalation: 0, rng: new Rng(5) })
+      lines.add(copy.message!)
+    }
+    // Before: every man got the same hot-headed "REPORTER" line.
+    expect(lines.size).toBeGreaterThanOrEqual(3)
+  })
+
+  it('a calm consummate pro does not storm in about a reporter', () => {
+    const { c } = makeCareer()
+    const player = c.data.players.get(c.userTeam.roster[1])!
+    Object.assign(player.personality, { temperament: 15, professionalism: 17, loyalty: 5, ambition: 8 })
+    const copy = reactionCopy({ kind: 'confrontation', action: shopped(player.id as string, player.name), player, escalation: 0, rng: new Rng(1) })
+    expect(copy.message).not.toContain('REPORTER')
+    expect(copy.message).toContain('asset')
+  })
+
+  it('a proud, short-fused vet storms in after ONE healthy scratch; an even-keeled one does not', () => {
+    const { c } = makeCareer()
+    const player = c.data.players.get(c.userTeam.roster[2])!
+    const act = actionFor(player.id as string, player.name, 'scratched', 'open')
+    let n = 0
+    Object.assign(player.personality, { temperament: 4, ambition: 17, professionalism: 8 })
+    const proud = scheduleReactions({ action: act, player, rng: new Rng(1), priorResidue: [], openThreads: 0, nextId: () => `r${n++}` })
+    expect(proud.reactions.some((r) => r.kind === 'confrontation')).toBe(true)
+    Object.assign(player.personality, { temperament: 14, ambition: 6, professionalism: 8 })
+    const calm = scheduleReactions({ action: act, player, rng: new Rng(1), priorResidue: [], openThreads: 0, nextId: () => `r${n++}` })
+    expect(calm.reactions.some((r) => r.kind === 'confrontation')).toBe(false)
+  })
+
+  it('the professional asks through his agent after a scratch (branch used to be unreachable)', () => {
+    const { c } = makeCareer()
+    const player = c.data.players.get(c.userTeam.roster[3])!
+    Object.assign(player.personality, { temperament: 15, ambition: 6, professionalism: 18 })
+    const act = actionFor(player.id as string, player.name, 'scratched', 'open')
+    let fired = 0
+    for (let seed = 1; seed <= 20; seed++) {
+      let n = 0
+      const r = scheduleReactions({ action: act, player, rng: new Rng(seed), priorResidue: [], openThreads: 0, nextId: () => `r${n++}` })
+      if (r.reactions.some((x) => x.kind === 'agentNote')) fired++
+    }
+    expect(fired).toBeGreaterThan(3)
+  })
+
+  it('a scratched man is at your door about the SCRATCH, not about being shopped', () => {
+    const { c } = makeCareer()
+    const player = c.data.players.get(c.userTeam.roster[4])!
+    for (const t of [3, 12, 18]) {
+      Object.assign(player.personality, { temperament: t, ambition: 15, professionalism: 15 })
+      const copy = reactionCopy({ kind: 'confrontation', action: actionFor(player.id as string, player.name, 'scratched', 'open'), player, escalation: 0, rng: new Rng(t) })
+      expect(copy.body).not.toMatch(/shopped/)
+      expect(copy.body).toMatch(/scratch/)
+      expect(copy.message).not.toMatch(/REPORTER|block|trade column/)
+    }
   })
 })
 

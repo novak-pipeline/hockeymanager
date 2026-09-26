@@ -145,6 +145,46 @@ describe('promises made in a scene are judged', () => {
     expect(pr.baselineToi).toBeDefined()
   })
 
+  // PHASE 0: the baseline and the verdict used to read `player.stats`, which is
+  // only written at rollover — mid-season every baseline was 0 GP / 0 TOI, so
+  // ANY ice at all "kept" the promise. They read the live accumulators now.
+  function promiseAfterRealGames(seed: number): { career: Career; c: any; pid: string; pr: any; perGame: number } {
+    const { career, c } = makeCareer(seed)
+    // Real games, real ice time — whatever the engine hands out.
+    for (let i = 0; i < 12; i++) career.advance(1)
+    const pid = c.userTeam.roster
+      .map((id: unknown) => id as string)
+      .find((id: string) => c.data.players.get(id).position !== 'G' && (c.gp.get(id) ?? 0) >= 5) as string
+    const gp0 = c.gp.get(pid)
+    const toi0 = c.totals.get(pid).toi
+    const iid = stage(c, 'ev.media.criticized-in-press', pid)
+    career.respondToInteraction(iid, 'defend')
+    const pr = c.playerPromises.find((p: any) => p.playerId === pid && p.kind === 'iceTime')
+    expect(pr).toBeDefined()
+    expect(pr.baselineGp).toBe(gp0)
+    expect(pr.baselineGp).toBeGreaterThan(0)
+    expect(pr.baselineToi).toBe(toi0)
+    return { career, c, pid, pr, perGame: toi0 / gp0 }
+  }
+  function playMore(c: any, pid: string, games: number, perGame: number): void {
+    c.gp.set(pid, (c.gp.get(pid) ?? 0) + games)
+    c.totals.get(pid).toi += Math.round(games * perGame)
+  }
+
+  it('ice-time promise: his minutes go up after the talk → KEPT', () => {
+    const { c, pid, pr, perGame } = promiseAfterRealGames(513)
+    playMore(c, pid, 6, perGame * 1.25)
+    c.evaluatePlayerPromises(pr.dueDay)
+    expect(pr.status).toBe('kept')
+  })
+
+  it('ice-time promise: his minutes stay where they were → BROKEN (was always "kept" off a 0 baseline)', () => {
+    const { c, pid, pr, perGame } = promiseAfterRealGames(514)
+    playMore(c, pid, 6, perGame * 0.97)
+    c.evaluatePlayerPromises(pr.dueDay)
+    expect(pr.status).toBe('broken')
+  })
+
   it('a promise made in the summer is about next season, and the rollover does not wave it through', () => {
     const { c } = makeCareer(512)
     c.phase = 'offseason'

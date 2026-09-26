@@ -170,7 +170,7 @@ describe('SimClient', () => {
       [() => client.exportSave('My save'), { type: 'exportSave', saveName: 'My save' }],
       [() => client.importSave({} as CareerSnapshot), { type: 'importSave' }],
     ]
-    for (const [invoke, expected] of calls) void invoke()
+    for (const [invoke] of calls) void invoke()
     expect(worker.sent).toHaveLength(calls.length)
     calls.forEach(([, expected], i) => {
       expect(worker.sent[i]).toMatchObject(expected)

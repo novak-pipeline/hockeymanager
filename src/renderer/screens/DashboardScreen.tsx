@@ -432,7 +432,7 @@ export function DashboardScreen(): JSX.Element {
           )}
 
           {/* Offseason: around the league — real signings/trades as they land */}
-          {d.phase === 'offseason' && <MarketPulse stageLabel={d.offseasonStageLabel} />}
+          {d.phase === 'offseason' && <MarketPulse {...(d.offseasonStageLabel !== undefined ? { stageLabel: d.offseasonStageLabel } : {})} />}
 
         </div>
       </div>
@@ -665,7 +665,7 @@ function BoardConfidenceChip(props: {
       className={chipClass}
       style={{ cursor: 'pointer', border: 'none' }}
       onClick={props.onNavigate}
-      title="View owner / board expectations"
+      title={board.mood ?? 'View owner / board expectations'}
     >
       Board: {board.confidenceLabel} · {board.statusLabel}
     </button>
@@ -1112,8 +1112,8 @@ function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNo
         {d.board && <BoardConfidenceChip board={d.board} onNavigate={() => nav.navigate('board')} />}
         <span className={`chip ${d.injuries.length === 0 ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {d.injuries.length === 0
-            ? (<><Icon size={12}><Icons.Health /></Icon> Healthy</>)
-            : (<><Icon size={12}><Icons.Injury /></Icon> {d.injuries.length} injured</>)}
+            ? (<><Icon size={14}><Icons.Health /></Icon> Healthy</>)
+            : (<><Icon size={14}><Icons.Injury /></Icon> {d.injuries.length} injured</>)}
         </span>
         {customize}
       </div>
@@ -1230,6 +1230,14 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
       {upcoming.length === 0 && (
         <div className="muted small" style={{ padding: '8px 10px' }}>A quiet stretch — the calendar has the full picture.</div>
       )}
+      {/* PHASE 0: the staff's info-only briefings live here now — reading them
+          aloud used to be a timed meeting that stopped Continue. */}
+      {(d.staffBrief ?? []).map((line, i) => (
+        <div key={`sb${i}`} style={{ ...rowStyle, fontSize: 12 }}>
+          <Icon size={14} color="var(--muted)" style={{ flexShrink: 0 }}><Icons.Pin /></Icon>
+          <div className="muted" style={{ flex: 1, minWidth: 0 }}>Staff: {line}</div>
+        </div>
+      ))}
       </div>
 
       <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6, flexShrink: 0 }} onClick={onOpenCalendar}>

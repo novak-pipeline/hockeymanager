@@ -466,6 +466,10 @@ export class SimClient {
     return this.send({ type: 'delegateStaffMeeting' })
   }
 
+  setStaffMeetingMode(mode: 'weekly' | 'onDemand' | 'delegate'): Promise<WorkerResponse> {
+    return this.send({ type: 'setStaffMeetingMode', mode })
+  }
+
   getScoutMeeting(): Promise<WorkerResponse> {
     return this.send({ type: 'getScoutMeeting' })
   }

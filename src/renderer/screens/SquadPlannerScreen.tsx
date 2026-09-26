@@ -63,7 +63,8 @@ function RolesTab(): JSX.Element {
     if (busy) return
     setBusy(true)
     try {
-      await client.setSquadStatus(playerId, status)
+      const res = await client.setSquadStatus(playerId, status)
+      if (res.type === 'error') toast(res.message, 'error')
       apply(await client.getRoleBoard())
     } finally { setBusy(false) }
   }

@@ -336,9 +336,9 @@ describe('Career — full year cycle', () => {
     const career = new Career(data, 21, data.league.teams[0])
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    // awards → draft
+    // awards → draft (PHASE 0: the awards stage is staged over dated beats)
     expect(career.getDashboard().phase).toBe('offseason')
-    career.advanceOffseason()
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason()
     const draft = career.getDraft()
     expect(draft).not.toBeNull()
     expect(draft!.board).toHaveLength(16 * 7) // 16 teams × 7 rounds
@@ -371,7 +371,7 @@ describe('Career — full year cycle', () => {
     const preDrafted = new Set(
       [...data.players.values()].filter((p) => p.nhlDrafted === true).map((p) => p.id as string)
     )
-    career.advanceOffseason() // awards → draft (builds the board)
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats) (builds the board)
     career.autoDraft() // conduct the (user-gated) draft, auto-picking for the user
     career.advanceOffseason() // draft → resign
 
@@ -566,7 +566,7 @@ describe('Career — story layer', () => {
     while (career.getDashboard().phase === 'playoffs') career.step()
 
     // awards stage just completed? No — offseason starts at awards; advance once.
-    career.advanceOffseason() // awards → draft (runs verdict/archive/tournament/lottery/combine)
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats) (runs verdict/archive/tournament/lottery/combine)
 
     const tp = career.getTentpoles()
     expect(tp.lottery).not.toBeNull()
@@ -616,7 +616,7 @@ describe('Career — story layer', () => {
 
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft (archives the season's trophies)
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats) (archives the season's trophies)
 
     const seasonAwards = career.getHistory().awards.filter((a) => a.year === firstYear)
     const names = new Set(seasonAwards.map((a) => a.award))
@@ -676,7 +676,7 @@ describe('Career — story layer', () => {
     const career = new Career(data, 96, userId)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft (lottery + combine + tournament done)
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats) (lottery + combine + tournament done)
 
     const snap = career.exportSnapshot('os', '2026-06-10T00:00:00.000Z')
     const restored = Career.fromSnapshot(JSON.parse(JSON.stringify(snap)))
@@ -930,7 +930,9 @@ describe('Career — persistence', () => {
     const data = generateLeague({ seed: 41 })
     const career = new Career(data, 41, data.league.teams[0])
     while (career.getDashboard().phase === 'regularSeason') career.step()
-    career.step() // one playoff day
+    // One playoff day (directly — a knocked-out club's Continue now sims the
+    // whole bracket in one press, PHASE 0).
+    ;(career as unknown as { playPlayoffDay(w: boolean): unknown }).playPlayoffDay(false)
     const restored = Career.fromSnapshot(
       JSON.parse(JSON.stringify(career.exportSnapshot('po', '2026-06-10T00:00:00.000Z')))
     )
@@ -1847,7 +1849,7 @@ describe('Career — wider-world quick-sim', () => {
     const career = new Career(data, 202, data.league.teams[0]!)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft (class built from real eligibles)
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats) (class built from real eligibles)
 
     const draft = career.getDraft()!
     // The board references real junior amateurs, not freshly-minted prospects.
@@ -1876,7 +1878,7 @@ describe('Career — wider-world quick-sim', () => {
     const career = new Career(data, 207, data.league.teams[0]!)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
 
     // simNextPick advances EXACTLY one selection when an AI team is on the clock…
     const d0 = career.getDraft()!
@@ -2387,7 +2389,7 @@ describe('Career — GM career', () => {
     const career = new Career(data, 66, userId)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign (dev camp opens)
     // Dev camp is a week now — presses walk its beats before the stage moves.
@@ -2514,7 +2516,7 @@ describe('Career — offer sheets', () => {
     const career = new Career(data, 41, userId)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign
 
@@ -2546,7 +2548,7 @@ describe('Career — offer sheets', () => {
     const career = new Career(data, 84, userId)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign
     for (let i = 0; i < 8 && career.getOffseason()!.stage !== 'freeAgency'; i++) {
@@ -2690,7 +2692,7 @@ describe('#164 FA standing offers — leading/contested/trailing read', () => {
     const career = new Career(data, 91, userId)
     while (career.getDashboard().phase === 'regularSeason') career.step()
     while (career.getDashboard().phase === 'playoffs') career.step()
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign
     for (let i = 0; i < 8 && career.getOffseason()!.stage !== 'freeAgency'; i++) {

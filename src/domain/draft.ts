@@ -46,4 +46,7 @@ export interface OffseasonState {
    *  days, offer sheets run a live match clock). Optional so saves written
    *  before the window existed load as day 0. */
   resignDay?: number
+  /** PHASE 0: which dated beat of the awards stage we are on (0/absent = not
+   *  yet run; 1 lottery, 2 combine, 3 awards night). Optional for saves. */
+  summerBeat?: number
 }

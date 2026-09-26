@@ -1,9 +1,9 @@
 import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
-import type { DashboardView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
-import { shouldHoldOverlay } from '@renderer/lib/cadence'
-import { routeContinue, type LastRoute } from '@engine/career/beatGates'
+import type { DashboardView, PostgameReceiptView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
+import { receiptWorthAStop, shouldHoldOverlay } from '@renderer/lib/cadence'
+import { routeContinue, sceneToOpen, type LastRoute } from '@engine/career/beatGates'
 import { listCareerSaves, loadCareer, saveCareer, type CareerSaveInfo } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
@@ -410,6 +410,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
    *  with the mail that streamed in, a trending headline, and the month calendar.
    *  Leaves the GM on whatever screen they were reading. A day with a user game
    *  gets the match-day frame first (B6.1) and postgame receipts after (B6.2). */
+  /** PHASE 0: consecutive quiet days rolled through on ONE Continue press. */
+  const rollRef = useRef(0)
+  /** PHASE 0: a routine result that did not hold its own stop — shown on the
+   *  next match-day frame instead ("Last game: …"). */
+  const lastReceiptRef = useRef<PostgameReceiptView | null>(null)
+  const advanceRef = useRef<(() => void) | null>(null)
   const advanceWithOverlay = useCallback((): void => {
     void (async () => {
       // B5: "the postgame screen is slow to load". Where the time actually goes
@@ -426,9 +432,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         perf.mark('matchDayPreview')
         if (pv.type === 'matchDayPreview' && pv.preview && pregameShownRef.current !== pv.preview.day) {
           pregameShownRef.current = pv.preview.day
+          const lastReceipt = lastReceiptRef.current
+          lastReceiptRef.current = null
           setProcessing({
             phase: 'pregame',
             pregame: pv.preview,
+            ...(lastReceipt ? { lastReceipt } : {}),
             nextGame: dashboard?.nextGame ?? null,
             incoming: [],
             ...(dashboard?.date ? { dateISO: dashboard.date } : {}),
@@ -465,6 +474,17 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       const receipt = receiptRaw && dash && receiptRaw.day === dash.day ? receiptRaw : null
       if (receipt) pregameShownRef.current = null
       const incoming = (inbox?.items ?? []).filter((i) => !beforeIds.has(i.id))
+      // PHASE 0: a real moment that ARRIVED on this advance (deadline day, a
+      // convened meeting, the boardroom, a trade offer worth your time) opens
+      // itself — the scene replaces the overlay. No signpost, no extra press.
+      const scene = sceneToOpen(dash, dashboard)
+      if (scene) {
+        rollRef.current = 0
+        setProcessing(null)
+        navigate(scene.screen, scene.params ?? {})
+        perf.done(!!receipt)
+        return
+      }
       // Feature the meatiest fresh story: a bylined press piece first, else the
       // most salient, else simply the first thing that landed.
       const trending = incoming.length
@@ -484,7 +504,28 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // first-of-its-kind story; or one the salience engine rates highly. Note
       // salience is set on very few items, so it widens the net rather than
       // defining it — league churn is filtered by category, not by score.
-      if (!shouldHoldOverlay(incoming, !!receipt)) { setProcessing(null); perf.done(false); return }
+      // PHASE 0: a routine result rides on the next match-day frame; only a
+      // result that is a story (or the season's last) holds its own stop.
+      const receiptStops = !!receipt && receiptWorthAStop(receipt, !dash?.nextGame)
+      if (!shouldHoldOverlay(incoming, receiptStops)) {
+        if (receipt) lastReceiptRef.current = receipt
+        perf.done(false)
+        // PHASE 0: Continue rolls straight through a quiet league day (nothing
+        // for you, no game of yours) to the next thing that matters — the
+        // match-day frame, a scene, a real story — like FM's Continue. Bounded,
+        // and never past a hard gate or out of the regular season.
+        const nextDec = dash ? routeContinue({ dashboard: dash, screen: 'dashboard', lastRoute: null }) : null
+        if (dash && dash.phase === 'regularSeason' && dash.day > 0 && nextDec?.kind === 'advance' && rollRef.current < 6) {
+          rollRef.current++
+          setTimeout(() => advanceRef.current?.(), 0)
+          return
+        }
+        rollRef.current = 0
+        setProcessing(null)
+        return
+      }
+      rollRef.current = 0
+      lastReceiptRef.current = null
 
       setProcessing({
         phase: 'done',
@@ -499,6 +540,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       perf.done(!!receipt)
     })()
   }, [client, dashboard?.nextGame, dashboard?.date, run])
+  advanceRef.current = advanceWithOverlay
 
   const actions = useMemo<ShellActions>(
     () => ({
@@ -520,6 +562,20 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           // the screen (auto-pick the draft; "let the coach name him").
           case 'hardGate':
             lastGateRouteRef.current = null
+            // PHASE 0: a hard gate that has a one-click fix offers it INLINE,
+            // once — no detour through a signposted screen unless you want it.
+            if (!decision.alreadyThere && decision.screen === 'leadership') {
+              if (window.confirm('No captain is named, and the season cannot open without one.\n\nOK — let the coach name him (the man the room follows).\nCancel — pick the C yourself.')) {
+                void run(() => client.nameCaptainByCoach())
+              } else navigate('leadership')
+              return
+            }
+            if (!decision.alreadyThere && decision.screen === 'squad') {
+              if (window.confirm(`${decision.message ?? 'You cannot dress a legal lineup.'}\n\nOK — let the AGM sign emergency cover.\nCancel — fix it yourself.`)) {
+                void run(() => client.signEmergencyCover())
+              } else navigate('squad')
+              return
+            }
             if (!decision.alreadyThere) navigate(decision.screen)
             else if (decision.screen === 'leadership')
               toast('Name a captain to open the season — pick the C on this screen.')
@@ -534,7 +590,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           // swallowed the advance and left camp stuck on Day 1).
           case 'spend':
             lastGateRouteRef.current = null
-            void run(() => client.continueGame())
+            void (async () => {
+              const res = await run(() => client.continueGame())
+              if (res === null) return
+              // Spending one beat can bring the next (cut day → the boardroom):
+              // it opens itself too.
+              const after = await client.getDashboard().catch(() => null)
+              const scene = after && after.type === 'dashboard' ? sceneToOpen(after.dashboard, dashboard) : null
+              if (scene && scene.screen !== nav.screen) navigate(scene.screen, scene.params ?? {})
+            })()
             return
           default:
             lastGateRouteRef.current = null
@@ -542,6 +606,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         // Normal day-advance: FM-style — pop the processing overlay that streams
         // the day's incoming mail, a trending headline, and the month calendar
         // WHILE the sim ticks, then leaves the GM where they were.
+        rollRef.current = 0
         advanceWithOverlay()
       },
       advanceDays: (days: number) => {

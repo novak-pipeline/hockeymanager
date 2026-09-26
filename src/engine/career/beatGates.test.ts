@@ -4,7 +4,7 @@
  * to render. Both used to leave Continue pressing forever with no escape.
  */
 import { describe, expect, it } from 'vitest'
-import { liveBeatGates, routeContinue, type GateFlags, type LastRoute } from './beatGates'
+import { liveBeatGates, routeContinue, sceneToOpen, type GateFlags, type LastRoute } from './beatGates'
 
 /** Press Continue `n` times from `screen`, following the law like the shell
  *  does, and report every distinct thing it decided to do. */
@@ -33,55 +33,36 @@ describe('beat gates — Continue never dead-ends', () => {
     expect(press({ continueLabel: 'Continue to Oct 12' }, 'dashboard', 3)).toEqual(['advance', 'advance', 'advance'])
   })
 
-  it('one gate live: first press walks you in, the second spends it', () => {
-    const d: GateFlags = { staffMeetingDue: true, continueLabel: 'Continue — staff meeting' }
-    expect(press(d, 'dashboard', 3)).toEqual([
-      'route:staffBriefing',
-      'spend:staffMeeting:attending',
-      'spend:staffMeeting:attending',
-    ])
+  // PHASE 0: Continue always advances. It never walks the GM into a room —
+  // a moment opens itself (sceneToOpen) — so it can never ping-pong either.
+  it('a live gate does not hijack Continue from the dashboard: it advances (the engine delegates)', () => {
+    const d: GateFlags = { staffMeetingDue: true, continueLabel: 'Continue to Nov 12' }
+    expect(press(d, 'dashboard', 3)).toEqual(['advance', 'advance', 'advance'])
   })
 
-  it('TWO gates live no longer ping-pong (the I1 softlock)', () => {
-    // The scout meeting and the scout digest were both up on day 7 of season
-    // one. Gate-by-gate routing sent the GM meeting → inbox → meeting → inbox
-    // forever, because each test only asked "am I on MY screen?".
-    const d: GateFlags = {
-      scoutMeetingDue: true,
-      scoutDigestPending: true,
-      scoutDigestNewsId: 'n1',
-      continueLabel: 'Continue — scout meeting',
-    }
-    const seq = press(d, 'dashboard', 6)
-    expect(seq[0]).toBe('route:scoutMeeting')
-    // Every press after the first one SPENDS — the sim ticks.
-    expect(seq.slice(1).every((s) => s.startsWith('spend:'))).toBe(true)
-    // And from the OTHER gate's screen it spends immediately rather than
-    // bouncing back to the first one.
+  it('standing in the room, Continue spends the beat (advances in place)', () => {
+    const d: GateFlags = { staffMeetingDue: true }
+    expect(press(d, 'staffBriefing', 2)).toEqual(['spend:staffMeeting:attending', 'spend:staffMeeting:attending'])
+  })
+
+  it('TWO gates live never ping-pong (the I1 softlock): every press moves time', () => {
+    const d: GateFlags = { scoutMeetingDue: true, scoutDigestPending: true, scoutDigestNewsId: 'n1' }
+    expect(press(d, 'dashboard', 4).every((x) => x === 'advance')).toBe(true)
     expect(press(d, 'inbox', 1)).toEqual(['spend:scoutDigest:attending'])
+    expect(press(d, 'scoutMeeting', 1)).toEqual(['spend:scoutMeeting:attending'])
   })
 
-  it('camp + boardroom (the imported-league lock) resolves in two presses', () => {
-    const d: GateFlags = { campPending: true, boardMeetingPending: true, continueLabel: 'Continue — training camp' }
-    const seq = press(d, 'dashboard', 4)
-    expect(seq).toEqual([
-      'route:trainingCamp',
-      'spend:trainingCamp:attending',
-      'spend:trainingCamp:attending',
-      'spend:trainingCamp:attending',
-    ])
-  })
-
-  it('a gate whose screen bounces the GM back is spent, not re-routed forever', () => {
-    // Dev camp armed with an empty invite list: the screen renders nothing and
-    // sends the GM to the dashboard, so he is never "attending".
-    const d: GateFlags = { devCampPending: true, continueLabel: 'Continue — development camp' }
-    expect(press(d, 'dashboard', 4, 'devCamp')).toEqual([
-      'route:devCamp',
-      'spend:devCamp:bounced',
-      'route:devCamp',
-      'spend:devCamp:bounced',
-    ])
+  it('a moment that ARRIVES opens itself; one already live (walked away from) does not reopen', () => {
+    const before: GateFlags = {}
+    expect(sceneToOpen({ deadlinePending: true }, before)).toEqual({ key: 'deadline', screen: 'deadlineDay' })
+    expect(sceneToOpen({ deadlinePending: true }, { deadlinePending: true })).toBeNull()
+    // Two arrive at once: the higher-priority room opens.
+    expect(sceneToOpen({ campPending: true, boardMeetingPending: true }, before)?.key).toBe('trainingCamp')
+    // Cut day spent → the boardroom arrives → it opens.
+    expect(sceneToOpen({ boardMeetingPending: true }, { campPending: true, boardMeetingPending: false })?.key).toBe('boardMeeting')
+    // The scout digest is mail, never a scene.
+    expect(sceneToOpen({ scoutDigestPending: true, scoutDigestNewsId: 'n9' }, before)).toBeNull()
+    expect(sceneToOpen(null, before)).toBeNull()
   })
 
   it('hard gates route to their own screen and say so when you are already there', () => {

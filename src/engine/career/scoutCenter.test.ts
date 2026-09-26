@@ -96,7 +96,9 @@ describe('scouting center — scout meeting', () => {
     const { c } = newCareer(2031)
     let meeting: any = null
     let guard = 0
-    while (c.phase === 'regularSeason' && guard++ < 90 && !meeting) {
+    // PHASE 0: convened only in the scouting windows (World Juniors, deadline
+    // week, the draft run-up) — the first one lands around the WJC.
+    while (c.phase === 'regularSeason' && guard++ < 220 && !meeting) {
       c.step()
       const m = c.getScoutMeeting()
       if (m) meeting = m

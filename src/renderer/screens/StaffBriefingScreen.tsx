@@ -1,5 +1,7 @@
 /**
- * The convened bi-weekly Staff Meeting — the interactive war-room.
+ * The convened Staff Meeting — the interactive war-room. PHASE 0: convened on
+ * EVENTS (a finding that needs the GM), not a bi-weekly timer; the GM sets how
+ * often in Responsibilities (the selector on this screen).
  *
  * Your staff read the live roster and table concrete proposals; you pick one
  * option per item and the engine applies the real consequence (a line move, a
@@ -35,6 +37,42 @@ function roleForTitle(title: string): VoiceRole {
   if (t.includes('assistant gm') || t.includes('general manager') || t.includes('agm')) return 'agm'
   if (t.includes('scout')) return 'scout'
   return 'coach'
+}
+
+type MeetingMode = 'weekly' | 'onDemand' | 'delegate'
+const MODE_LABEL: Record<MeetingMode, string> = {
+  onDemand: 'When something needs me',
+  weekly: 'Every week',
+  delegate: 'Let the AGM run them',
+}
+
+/** PHASE 0 — FM-style Responsibilities: how often the staff convene you. */
+function MeetingCadence(): JSX.Element | null {
+  const client = useClient()
+  const [mode, setMode] = useState<MeetingMode | null>(null)
+  useEffect(() => {
+    let alive = true
+    void client.getDashboard().then((r) => {
+      if (alive && r.type === 'dashboard') setMode(r.dashboard.staffMeetingMode ?? 'onDemand')
+    })
+    return () => { alive = false }
+  }, [client])
+  if (mode === null) return null
+  return (
+    <label className="row muted small" style={{ gap: 8, alignItems: 'center' }}>
+      Staff meetings:
+      <select
+        value={mode}
+        onChange={(e) => {
+          const next = e.target.value as MeetingMode
+          setMode(next)
+          void client.setStaffMeetingMode(next).then(() => toast(`Staff meetings: ${MODE_LABEL[next].toLowerCase()}.`, 'success'))
+        }}
+      >
+        {(Object.keys(MODE_LABEL) as MeetingMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+      </select>
+    </label>
+  )
 }
 
 export function StaffBriefingScreen(): JSX.Element {
@@ -104,6 +142,7 @@ export function StaffBriefingScreen(): JSX.Element {
     return (
       <section className="stack">
         <Notice kind="info">No staff meeting is in session right now.</Notice>
+        <MeetingCadence />
         <button className="btn btn-ghost" onClick={() => nav.navigate('dashboard')}>← Back</button>
       </section>
     )
@@ -117,6 +156,7 @@ export function StaffBriefingScreen(): JSX.Element {
             Staff Meeting
           </div>
           <h2 style={{ margin: '2px 0 4px', fontSize: 24, fontWeight: 800 }}>The coaches’ room</h2>
+          <MeetingCadence />
           <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
             <div className="muted" style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>{view.opening}</div>
             <button

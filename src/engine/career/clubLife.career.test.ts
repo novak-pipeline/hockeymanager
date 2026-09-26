@@ -41,7 +41,7 @@ describe('E1 — the post-draft call', () => {
     const data = generateLeague({ seed: 6101 })
     const career = new Career(data, 6101, data.league.teams[0]!)
     toOffseason(career)
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign; the call is made here
 
@@ -111,7 +111,7 @@ describe('E1 — the role conversation happens BEFORE he signs', () => {
     const career = new Career(data, 6105, data.league.teams[0]!)
     // Get to the open market, where a GM is actually recruiting.
     toOffseason(career)
-    career.advanceOffseason() // awards → draft
+    for (let i = 0; i < 6 && career.getOffseason()?.stage === 'awards'; i++) career.advanceOffseason() // awards → draft (PHASE 0: staged dated beats)
     career.autoDraft()
     career.advanceOffseason() // draft → resign
     let guard = 0

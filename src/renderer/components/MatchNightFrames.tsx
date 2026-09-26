@@ -70,8 +70,14 @@ export function PregameFrame({
   onWatch,
   onSimView,
   onClose,
+  lastResult,
+  onOpenLastBoxScore,
 }: {
   preview: MatchDayPreviewView
+  /** PHASE 0: the previous game's routine result, carried here instead of
+   *  holding its own stop (see cadence.receiptWorthAStop). */
+  lastResult?: PostgameReceiptView | null | undefined
+  onOpenLastBoxScore?: (() => void) | undefined
   busy: boolean
   onPlay: () => void
   /** Watch it on the ice — the 2D/3D renderer. */
@@ -101,6 +107,9 @@ export function PregameFrame({
           &times;
         </button>
       </div>
+
+      {/* PHASE 0: last game's result rides here when it did not earn its own stop */}
+      {lastResult && <LastResultStrip r={lastResult} onOpen={onOpenLastBoxScore} />}
 
       {/* storyline */}
       {(p.allTime || p.storyline) && (
@@ -150,6 +159,23 @@ export function PregameFrame({
           {busy ? 'Processing…' : 'Continue — play the game'}
         </button>
       </div>
+    </div>
+  )
+}
+
+/** One line for the previous game: score, W/L, first star, the report's lede. */
+function LastResultStrip({ r, onOpen }: { r: PostgameReceiptView; onOpen?: (() => void) | undefined }): JSX.Element {
+  const suffix = r.decidedBy === 'overtime' ? ' (OT)' : r.decidedBy === 'shootout' ? ' (SO)' : ''
+  const star = r.stars[0]
+  const lede = r.matchReport.split(/(?<=[.!?])\s/)[0] ?? ''
+  return (
+    <div className="card" style={{ padding: '8px 12px', fontSize: 12.5, lineHeight: 1.5, display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <span style={label}>Last game</span>
+      <span style={{ fontWeight: 800 }}>{r.awayAbbr} {r.awayGoals} @ {r.homeAbbr} {r.homeGoals}{suffix}</span>
+      <span style={{ fontWeight: 800, color: r.won ? 'var(--green, #4ade80)' : 'var(--red, #f87171)' }}>{r.won ? 'W' : 'L'}</span>
+      {star && <span className="muted">★ {star.name} ({star.statLine})</span>}
+      {lede && <span className="muted" style={{ flexBasis: '100%' }}>{lede}</span>}
+      {onOpen && <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={onOpen}>Box score</button>}
     </div>
   )
 }
