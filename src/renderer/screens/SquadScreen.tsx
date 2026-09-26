@@ -4,7 +4,7 @@ import type { SquadRowView, ArchetypeInfo } from '../../engine/career/views'
 import type { SquadStatus } from '../../domain/player'
 import { PlayerLink } from '../components/NavContext'
 import { OverallStars, StarsLegend } from '../components/Stars'
-import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor, playerRoleLabel } from '../components/format'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
@@ -495,8 +495,8 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                         {colView === 'general' && (
                           <>
                             <SortTh label="OVR" sortKey="overall" {...sharedSortProps} align="right" title="Ability, as your staff grade him (5 stars = elite)" />
-                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} align="right" title="Condition — how fresh he is right now" />
-                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} align="right" title="Morale — how happy he is at the club" />
+                            <SortTh label="Cond" sortKey="condition" {...sharedSortProps} title="Condition — how fresh he is right now" />
+                            <SortTh label="Mor" sortKey="morale" {...sharedSortProps} title="Morale — how happy he is at the club" />
                             <th title="Recent form trend">Form</th>
                             <th title="Injury status">Inj</th>
                           </>
@@ -579,7 +579,7 @@ export function SquadScreen(props: { teamId?: string } = {}): JSX.Element {
                             <td>
                               <span className="chip" style={{ fontSize: 11 }}>{row.lineLabel}</span>
                               {row.role && (
-                                <span className="muted small" style={{ marginLeft: 6 }}>{row.role}</span>
+                                <span className="muted small" style={{ marginLeft: 6 }}>{playerRoleLabel(row.role)}</span>
                               )}
                             </td>
                             {colView === 'general' && (

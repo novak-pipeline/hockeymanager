@@ -233,6 +233,18 @@ a:hover { text-decoration: underline; }
   cursor: default;
 }
 
+/* Press state (UI polish): every button acknowledges the click with a 1px
+ * settle, the way a physical key does. Hover existed; press did not, so a
+ * click on a slow worker round-trip felt like it had missed. */
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+  transition-duration: 40ms;
+}
+.btn .ui-icon { margin-inline: -1px; }
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled) { transform: none; }
+}
+
 /* violet primary */
 .btn-primary {
   background: var(--violet);

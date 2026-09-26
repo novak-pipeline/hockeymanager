@@ -439,7 +439,7 @@ function WatchListPanel({ data, onUnwatch, onNote }: {
           <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Milestone /></Icon></div>
           <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 4 }}>Nobody on it yet — and that is the point.</div>
           Right-click any player in the game and choose <b>Watch this player</b>, or hit
-          <b> ☆ Watch</b> on his profile. A pin is an instruction, not a bookmark: your scouts
+          <b> Watch</b> on his profile. A pin is an instruction, not a bookmark: your scouts
           give watched players the front of their day whatever their brief says, and a watched
           man's file never goes stale. That bandwidth comes out of your regional coverage, so
           pin the names you actually intend to act on.
@@ -1252,7 +1252,8 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
                           className="btn btn-ghost btn-sm" style={{ padding: '0 5px', color: r.watched ? 'var(--accent, #f5b301)' : 'var(--muted)' }}
                           title={r.watched ? 'On your watch list — click to remove' : 'Add to your watch list'}
                           onClick={() => onToggleWatch(r.playerId)}
-                        >{r.watched ? '★' : '☆'}</button>
+                         aria-label={r.watched ? 'Remove from watch list' : 'Add to watch list'}
+                        ><Icon size={16}>{r.watched ? <Icons.Watch weight="fill" /> : <Icons.Watch />}</Icon></button>
                       </td>
                       <td>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -1288,7 +1289,7 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
               <span className="muted small">Page {page + 1} of {pages}</span>
               <button type="button" className="btn btn-sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Next →</button>
               <span className="muted small" style={{ marginLeft: 'auto' }}>
-                ☆ pins him to your watch list · <b>Scout ▾</b> sends a named scout at him · right-click for the full menu.
+                The eye pins him to your watch list · <b>Scout ▾</b> sends a named scout at him · right-click for the full menu.
               </span>
             </div>
           </>

@@ -21,7 +21,7 @@ import type { PracticeFocus } from '../../worker/protocol'
 import type { AgmRankedPlayerView, SquadRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import type { ScreenId } from '../components/NavContext'
-import { OverallStars } from '../components/Stars'
+import { OverallStars, PotentialStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
@@ -61,11 +61,6 @@ type TeamTab =
   | 'teamPlanner'
 
 /* ── tier color mapping ── */
-const TIER_COLOR: Record<'nhl' | 'reserve' | 'prospect', string> = {
-  nhl:     'var(--violet-h)',
-  reserve: 'var(--muted)',
-  prospect: 'var(--green)',
-}
 
 /** Where a player sits in the org → colour + short tag. NHL / AHL / elsewhere. */
 function locationStyle(location?: string): { color: string; tag: string } {
@@ -75,12 +70,6 @@ function locationStyle(location?: string): { color: string; tag: string } {
   return { color: 'var(--amber, #f59e0b)', tag: loc.slice(0, 3) }
 }
 
-/** Fog-friendly star string from a 0–99 judged rating (no raw numbers shown),
- *  on the canonical NHL-calibrated star scale. */
-function starStr(judged0to99: number): string {
-  const n = Math.max(1, Math.min(5, Math.round(overallToStars(judged0to99))))
-  return '★'.repeat(n) + '☆'.repeat(5 - n)
-}
 
 const FOCUS_LABELS: Record<PracticeFocus, string> = {
   balanced:    'Balanced',
@@ -392,9 +381,9 @@ function TopProspectsTable(props: { rows: AgmRankedPlayerView[] }): JSX.Element 
                     <td className="num">{p.age}</td>
                     <td><span style={{ fontSize: 10, fontWeight: 800, color: loc.color }}>{loc.tag}</span></td>
                     <td className="num">
-                      <span style={{ color: TIER_COLOR[p.tier], letterSpacing: -1 }}>{starStr(p.judgedOverall)}</span>
+                      <OverallStars value={p.judgedOverall} />
                     </td>
-                    <td className="num muted" style={{ letterSpacing: -1 }}>{starStr(p.judgedPotential)}</td>
+                    <td className="num"><PotentialStars stars={overallToStars(p.judgedPotential)} /></td>
                   </tr>
                   )
                 })}
@@ -459,7 +448,7 @@ function DepthColumn(props: {
               style={{ marginLeft: 'auto', color: 'var(--muted)', letterSpacing: -1 }}
               title="Scouted projection"
             >
-              {starStr(p.judgedOverall)}
+              <OverallStars value={p.judgedOverall} />
             </span>
           </div>
           )

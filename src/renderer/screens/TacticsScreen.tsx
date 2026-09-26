@@ -1,5 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
-import { overallToStars } from '../../engine/ratings/composites'
+import { OverallStars } from '../components/Stars'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type { SquadView, StaffMeetingSummaryView } from '../../worker/protocol'
 import type {
@@ -149,22 +149,7 @@ function synergyWord(score: number): string {
 
 /* ── Star rating (0–5, half-steps) on the canonical NHL-calibrated scale ── */
 function StarRating({ value }: { value: number }): JSX.Element {
-  const stars = overallToStars(value)
-  const color =
-    stars >= 4.5 ? 'var(--success)' :
-    stars >= 3.5 ? 'var(--accent)' :
-    stars >= 2.5 ? 'var(--accent2)' :
-    'var(--muted)'
-  const full = Math.floor(stars)
-  const half = stars - full >= 0.5
-  const empty = 5 - full - (half ? 1 : 0)
-  return (
-    <span style={{ color, fontSize: 11, letterSpacing: -1, lineHeight: 1, whiteSpace: 'nowrap' }} title={`${stars}/5`}>
-      {'★'.repeat(full)}
-      {half ? '½' : ''}
-      {'☆'.repeat(empty)}
-    </span>
-  )
+  return <OverallStars value={value} size={11} />
 }
 
 /**

@@ -94,7 +94,7 @@ function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.E
         borderRadius: '50%',
         // Tinted by the category (UI polish): a grey disc with a grey glyph read
         // as "nothing here"; the tint makes the category the row's identity.
-        background: `color-mix(in srgb, ${meta.color} 16%, var(--bg2))`,
+        background: `color-mix(in srgb, ${meta.color} 22%, var(--bg2))`,
         border: `1px solid color-mix(in srgb, ${meta.color} 30%, transparent)`,
         display: 'flex',
         alignItems: 'center',
@@ -102,7 +102,7 @@ function CategoryCircle(props: { category: NewsCategory; size?: number }): JSX.E
         flexShrink: 0,
       }}
     >
-      <CategoryIcon category={category} size={Math.round(size * 0.5)} color={meta.color} />
+      <CategoryIcon category={category} size={Math.round(size * 0.56)} color={meta.color} />
     </div>
   )
 }

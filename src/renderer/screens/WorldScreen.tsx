@@ -5,6 +5,7 @@
  * getCompetitions (League.competitions). Empty when the active DB is NHL-only.
  */
 import { useMemo, useState } from 'react'
+import { PotentialStars, StarRating } from '../components/Stars'
 import type { CompetitionNotableView, CompetitionView, NationView, WorldJuniorsView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -29,15 +30,8 @@ function hex(n: number): string {
 }
 
 /** Compact ★ rating (handles halves). */
-function Stars({ value }: { value: number }): JSX.Element {
-  const full = Math.floor(value)
-  const half = value - full >= 0.5
-  return (
-    <span title={`${value}/5`} style={{ color: 'var(--accent2, #e0b341)', whiteSpace: 'nowrap' }}>
-      {'★'.repeat(full)}{half ? '½' : ''}
-      <span style={{ color: 'var(--line)' }}>{'★'.repeat(5 - full - (half ? 1 : 0))}</span>
-    </span>
-  )
+function Stars({ value, potential }: { value: number; potential?: boolean }): JSX.Element {
+  return potential ? <PotentialStars stars={value} /> : <StarRating value={value} />
 }
 
 function StrengthBar({ pct }: { pct: number }): JSX.Element {
@@ -84,7 +78,7 @@ function NotableTable({ rows, showAge, hideRatings }: { rows: CompetitionNotable
             <td style={{ textAlign: 'center' }}>{p.position}</td>
             {showAge && <td style={{ textAlign: 'center' }}>{p.age}</td>}
             {!hideRatings && <td><Stars value={p.currentStars} /></td>}
-            {!hideRatings && <td><Stars value={p.potentialStars} /></td>}
+            {!hideRatings && <td><Stars value={p.potentialStars} potential /></td>}
           </tr>
         ))}
       </tbody>

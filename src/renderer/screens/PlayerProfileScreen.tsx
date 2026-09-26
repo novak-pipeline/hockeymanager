@@ -33,7 +33,7 @@ import type {
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
 import { useNav, TeamLink, PlayerLink } from '../components/NavContext'
-import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor, playerRoleLabel } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
@@ -1164,7 +1164,7 @@ function TabProfile({
           <Panel title="Role & Duty">
             <div className="pp-role-row">
               <StarRating stars={5} size={11} />
-              <span className="pp-role-name">{d.position}{d.role ? ` · ${d.role}` : ''}</span>
+              <span className="pp-role-name">{d.position}{d.role ? ` · ${playerRoleLabel(d.role)}` : ''}</span>
             </div>
             {d.archetype && (
               <>
@@ -1501,7 +1501,7 @@ function TabPositions({ d }: { d: PlayerProfileView }): JSX.Element {
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
             <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
               <span className="muted small" style={{ width: 80 }}>Role</span>
-              <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{d.role}</span>
+              <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{playerRoleLabel(d.role)}</span>
             </div>
             <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
               <span className="muted small" style={{ width: 80 }}>Shot</span>
