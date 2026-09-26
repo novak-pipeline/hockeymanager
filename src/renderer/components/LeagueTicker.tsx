@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ScoreboardView, LeagueWireView, InboxView } from '../../engine/career/views'
+import { Icons } from './icons'
+import { Icon } from './primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useNav } from './NavContext'
 
@@ -108,8 +110,8 @@ export function LeagueTicker(): JSX.Element {
             {MODE_LABEL[m]}
           </button>
         ))}
-        <button className="ticker-hide" onClick={() => setOn(false)} title="Hide the ticker">
-          ✕
+        <button className="ticker-hide" onClick={() => setOn(false)} title="Hide the ticker" aria-label="Hide the ticker">
+          <Icon size={14}><Icons.Close /></Icon>
         </button>
       </div>
       <div className="ticker-viewport">

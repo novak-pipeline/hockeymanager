@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Trophy } from 'lucide-react'
 import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
 import type { OfferSheetRowView, ResignRowView, CampInviteRow, SquadRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -287,7 +286,7 @@ function StageStepper(props: { stage: OffseasonView['stage']; stageLabel: string
                       : 'var(--muted)',
                 }}
               >
-                {past ? <Icon size={14}><Check /></Icon> : i + 1}
+                {past ? <Icon size={14}><Icons.Tick /></Icon> : i + 1}
               </div>
               <span
                 style={{
@@ -372,7 +371,7 @@ function AwardsPanel(props: { view: OffseasonView }): JSX.Element {
             fontSize: 16,
           }}
         >
-          <Icon size={24} color="var(--accent2)"><Trophy /></Icon>
+          <Icon size={24} color="var(--accent2)"><Icons.Trophy /></Icon>
           {view.championTeamName} — {view.year} Champions
         </div>
       )}

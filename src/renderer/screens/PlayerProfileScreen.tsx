@@ -33,11 +33,11 @@ import type {
 import { RADAR_AXES } from '../../engine/career/views'
 import type { SquadView } from '../../engine/career/views'
 import { useNav, TeamLink, PlayerLink } from '../components/NavContext'
-import { fmtMoney, fmtToi, moraleWord, moraleColor } from '../components/format'
+import { fmtMoney, fmtToi, moraleWord, moraleColor, playerRoleLabel } from '../components/format'
 import { FlagIcon } from '../components/FlagIcon'
-import { CalendarDays, Check, X } from 'lucide-react'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
+import { StarRating as SharedStarRating } from '../components/Stars'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { overallToStars } from '../../engine/ratings/composites'
@@ -327,70 +327,14 @@ function TrendArrow({
   )
 }
 
-/** Renders a 5-star display supporting half-stars (★ / ½★ / ☆). */
-function StarRating({
-  stars,
-  fogged = false,
-  size = 20,
-}: {
-  stars: number
-  fogged?: boolean
-  size?: number
-}): JSX.Element {
-  const filled = Math.floor(stars)
-  const half = stars - filled >= 0.5
-  return (
-    <span
-      title={fogged ? 'Approximate rating' : `${stars}/5`}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 1, opacity: fogged ? 0.65 : 1 }}
-    >
-      {Array.from({ length: 5 }, (_, i) => {
-        if (i < filled) {
-          return (
-            <span key={i} style={{ fontSize: size, color: 'var(--accent2)', lineHeight: 1 }}>★</span>
-          )
-        }
-        if (i === filled && half) {
-          /* Half-star: overlay a clipped full star on an empty star. */
-          return (
-            <span key={i} style={{ fontSize: size, position: 'relative', display: 'inline-block', lineHeight: 1, color: 'var(--line)' }}>
-              ★
-              <span style={{
-                position: 'absolute', left: 0, top: 0, width: '50%', overflow: 'hidden',
-                color: 'var(--accent2)', display: 'inline-block',
-              }}>★</span>
-            </span>
-          )
-        }
-        return (
-          <span key={i} style={{ fontSize: size, color: 'var(--line)', lineHeight: 1 }}>★</span>
-        )
-      })}
-    </span>
-  )
+/** Ability stars (solid) — delegates to the shared SVG renderer in components/Stars. */
+function StarRating({ stars, hi, size = 20 }: { stars: number; hi?: number; size?: number }): JSX.Element {
+  return <SharedStarRating value={stars} size={size} {...(hi !== undefined ? { hi } : {})} />
 }
 
-function PotentialStars({ count }: { count: number }): JSX.Element {
-  // Render halves like StarRating so the POTENTIAL tile and the "Our ceiling"
-  // row (which both bind the same number) never disagree visually.
-  const filled = Math.floor(count)
-  const half = count - filled >= 0.5
-  return (
-    <span title={`${count}/5 potential`} style={{ letterSpacing: 2 }}>
-      {Array.from({ length: 5 }, (_, i) => {
-        if (i < filled) return <span key={i} style={{ color: 'var(--accent2)', fontSize: 13 }}>★</span>
-        if (i === filled && half) {
-          return (
-            <span key={i} style={{ fontSize: 13, position: 'relative', display: 'inline-block', lineHeight: 1, color: 'var(--line)' }}>
-              ★
-              <span style={{ position: 'absolute', left: 0, top: 0, width: '50%', overflow: 'hidden', color: 'var(--accent2)', display: 'inline-block' }}>★</span>
-            </span>
-          )
-        }
-        return <span key={i} style={{ color: 'var(--line)', fontSize: 13 }}>★</span>
-      })}
-    </span>
-  )
+/** Potential stars (outlined) — a ceiling, never mistaken for ability. */
+function PotentialStars({ count, hi, size = 14 }: { count: number; hi?: number; size?: number }): JSX.Element {
+  return <SharedStarRating value={count} kind="potential" size={size} {...(hi !== undefined ? { hi } : {})} />
 }
 
 /** FM-style condition heart: green → yellow → orange → red as fitness drops. */
@@ -793,7 +737,7 @@ function InterviewPanel({
         {scheduledDate ? (
           <div className="row" style={{ alignItems: 'center', gap: 'var(--sp-2)' }}>
             <span className="chip" style={{ background: 'rgba(108,92,231,0.18)', color: 'var(--violet-h)', fontWeight: 700 }}>
-              <Icon size={14}><CalendarDays /></Icon> Interview scheduled
+              <Icon size={14}><Icons.CalendarBooked /></Icon> Interview scheduled
             </span>
             <span className="muted small">{fmtDate(scheduledDate)} — your staff will file a report to your inbox.</span>
           </div>
@@ -962,7 +906,7 @@ function CompareControl({
             ))}
           </select>
           {selected && (
-            <button className="btn btn-ghost btn-sm" onClick={handleClear} title="Clear comparison"><Icon size={14}><X /></Icon></button>
+            <button className="btn btn-ghost btn-sm" onClick={handleClear} title="Clear comparison"><Icon size={14}><Icons.Close /></Icon></button>
           )}
         </div>
 
@@ -1153,11 +1097,7 @@ function TabProfile({
             <div className="pp-band-label">Current Ability</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {d.scouted && !d.scouted.exact ? (
-                <>
-                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={15} />
-                  <span className="muted small">–</span>
-                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={15} />
-                </>
+                <StarRating stars={overallToStars(d.scouted.overallLo)} hi={overallToStars(d.scouted.overallHi)} size={17} />
               ) : (
                 <StarRating stars={overallToStars(d.overall)} size={17} />
               )}
@@ -1167,7 +1107,7 @@ function TabProfile({
           <div className="pp-ability">
             <div className="pp-band-label">Potential Ability</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <StarRating stars={d.potentialStars} fogged={!!(d.scouted && !d.scouted.exact)} size={17} />
+              <PotentialStars count={d.potentialStars} size={17} />
               <TrendArrow trend={d.potentialTrend} title={d.potentialTrend === 'up' ? 'Ceiling trending up' : 'Ceiling trending down'} />
             </div>
             {d.potentialBand.hi > d.potentialBand.lo && (
@@ -1224,7 +1164,7 @@ function TabProfile({
           <Panel title="Role & Duty">
             <div className="pp-role-row">
               <StarRating stars={5} size={11} />
-              <span className="pp-role-name">{d.position}{d.role ? ` · ${d.role}` : ''}</span>
+              <span className="pp-role-name">{d.position}{d.role ? ` · ${playerRoleLabel(d.role)}` : ''}</span>
             </div>
             {d.archetype && (
               <>
@@ -1329,13 +1269,13 @@ function TabProfile({
               <div>
                 <div className="pp-pros-head">Pros</div>
                 {d.scoutVerdict && d.scoutVerdict.pros.length > 0
-                  ? d.scoutVerdict.pros.map((p) => <div key={p} className="pp-pro"><Icon size={14} color="var(--green)"><Check /></Icon> {p}</div>)
+                  ? d.scoutVerdict.pros.map((p) => <div key={p} className="pp-pro"><Icon size={14} color="var(--green)"><Icons.Tick /></Icon> {p}</div>)
                   : <div className="muted small" style={{ padding: '4px 0' }}>—</div>}
               </div>
               <div>
                 <div className="pp-cons-head">Cons</div>
                 {d.scoutVerdict && d.scoutVerdict.cons.length > 0
-                  ? d.scoutVerdict.cons.map((c) => <div key={c} className="pp-con"><Icon size={14} color="var(--red)"><X /></Icon> {c}</div>)
+                  ? d.scoutVerdict.cons.map((c) => <div key={c} className="pp-con"><Icon size={14} color="var(--red)"><Icons.Close /></Icon> {c}</div>)
                   : <div className="muted small" style={{ padding: '4px 0' }}>—</div>}
               </div>
             </div>
@@ -1561,7 +1501,7 @@ function TabPositions({ d }: { d: PlayerProfileView }): JSX.Element {
           <div className="stack" style={{ gap: 'var(--sp-3)' }}>
             <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
               <span className="muted small" style={{ width: 80 }}>Role</span>
-              <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{d.role}</span>
+              <span className="chip chip-accent" style={{ fontSize: 13, padding: '4px 14px' }}>{playerRoleLabel(d.role)}</span>
             </div>
             <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
               <span className="muted small" style={{ width: 80 }}>Shot</span>
@@ -2156,17 +2096,13 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
           <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
             <VerdictTile label="CURRENT">
               {d.scouted && !d.scouted.exact ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <StarRating stars={overallToStars(d.scouted.overallLo)} fogged size={16} />
-                  <span className="muted small">–</span>
-                  <StarRating stars={overallToStars(d.scouted.overallHi)} fogged size={16} />
-                </div>
+                <StarRating stars={overallToStars(d.scouted.overallLo)} hi={overallToStars(d.scouted.overallHi)} size={18} />
               ) : (
                 <StarRating stars={overallToStars(d.overall)} size={18} />
               )}
             </VerdictTile>
             <VerdictTile label="POTENTIAL">
-              <PotentialStars count={d.potentialStars} />
+              <PotentialStars count={d.potentialStars} size={18} />
             </VerdictTile>
             <VerdictTile label="PROJECTION" accent={projectionColor}>
               <span style={{ fontWeight: 700, fontSize: 13, color: projectionColor }}>
@@ -2262,7 +2198,7 @@ function TabScout({ d, client }: { d: PlayerProfileView; client: ReturnType<type
               {d.analystPotentialStars !== undefined && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                   <span className="muted" style={{ fontSize: 11 }}>Their ceiling:</span>
-                  <StarRating stars={d.analystPotentialStars} size={13} />
+                  <PotentialStars count={d.analystPotentialStars} size={13} />
                 </div>
               )}
               <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text)' }}>
@@ -2514,7 +2450,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
                 else { bumpRefresh(); refetch() }
               })
             }}
-          >{d.watched ? '★ Watching' : '☆ Watch'}</button>
+          >{d.watched ? <><Icon size={14}><Icons.Watch /></Icon> Watching</> : <><Icon size={14}><Icons.Watch /></Icon> Watch</>}</button>
           <PlayerRoleControl d={d} client={client} onChanged={refetch} />
           {hasPrevNext && (
             <button
@@ -2523,7 +2459,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               title="Previous player on roster"
               aria-label="Previous player"
             >
-              ◄
+              <Icon size={14}><Icons.ChevronLeft /></Icon>
             </button>
           )}
           {hasPrevNext && (
@@ -2533,7 +2469,7 @@ export function PlayerProfileScreen(props: { playerId: string }): JSX.Element {
               title="Next player on roster"
               aria-label="Next player"
             >
-              ►
+              <Icon size={14}><Icons.ChevronRight /></Icon>
             </button>
           )}
           <button className="btn btn-ghost small" onClick={() => nav.navigate('squad')}>← Squad</button>

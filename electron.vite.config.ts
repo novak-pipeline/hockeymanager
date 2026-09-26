@@ -59,6 +59,12 @@ export default defineConfig({
           : {})
       }
     },
+    // Workers are module workers (`new Worker(url, { type: 'module' })`) and the
+    // voice worker (voice.worker.ts) lazy-imports kokoro-js, which makes its build
+    // code-split. Vite's default worker format is 'iife', which cannot code-split,
+    // so `electron-vite build` failed outright ("Invalid value 'iife' for option
+    // 'worker.format'"). ES workers are what the runtime already asks for.
+    worker: { format: 'es' },
     plugins: [react()]
   }
 })

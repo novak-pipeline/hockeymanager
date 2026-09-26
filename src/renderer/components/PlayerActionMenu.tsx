@@ -113,7 +113,7 @@ export function PlayerActionMenu(): JSX.Element | null {
               () => client.toggleWatchPlayer(playerId),
               profile?.watched ? `${name} removed from your watch list.` : `${name} added to your watch list.`,
             )}
-          >{profile?.watched ? '★ Stop watching' : '☆ Watch this player'}</button>
+          >{profile?.watched ? 'Stop watching' : 'Watch this player'}</button>
           {own && (
             <>
               <button className="menu-item" style={itemStyle} onClick={() => go('negotiation')}>

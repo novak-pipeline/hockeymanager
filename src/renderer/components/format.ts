@@ -111,3 +111,25 @@ export function crestColor(teamId: string): string {
   }
   return `hsl(${hash % 360} 45% 36%)`
 }
+
+/**
+ * Tactical player role (a `PlayerRole` key such as `stayAtHomeD`) -> the words a
+ * coach would say. The roster used to print the raw camelCase key
+ * ("powerForward", "stayAtHomeD") straight into the table. Unknown strings pass
+ * through untouched, so an already-human label is never mangled.
+ */
+const PLAYER_ROLE_WORDS: Record<string, string> = {
+  sniper: 'Sniper',
+  playmaker: 'Playmaker',
+  twoWay: 'Two-way',
+  powerForward: 'Power forward',
+  enforcer: 'Enforcer',
+  offensiveD: 'Offensive D',
+  shutdownD: 'Shutdown D',
+  stayAtHomeD: 'Stay-at-home D',
+  starter: 'Starter',
+  backup: 'Backup',
+}
+export function playerRoleLabel(role: string): string {
+  return PLAYER_ROLE_WORDS[role] ?? role
+}

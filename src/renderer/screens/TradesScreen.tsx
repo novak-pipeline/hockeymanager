@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check } from 'lucide-react'
 import type { TentpoleView, TradeEvaluation, TradesView } from '../../worker/protocol'
 import type {
   PickAssetView,
@@ -30,9 +29,7 @@ import { toast } from '../components/store'
 function OvrLabel({ badge }: { badge: PlayerBadge }): JSX.Element | null {
   if (badge.scouted && !badge.scouted.exact) {
     return (
-      <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
-        <OverallStars value={Math.round((badge.scouted.overallLo + badge.scouted.overallHi) / 2)} />
-      </span>
+      <OverallStars value={badge.overall} lo={badge.scouted.overallLo} hi={badge.scouted.overallHi} />
     )
   }
   if (!badge.scouted) return null
@@ -454,7 +451,7 @@ function EvalPanel(props: {
             marginBottom: 12,
           }}
         >
-          <Icon size={20} color="var(--success)"><Check /></Icon>
+          <Icon size={20} color="var(--success)"><Icons.Check /></Icon>
           <span style={{ color: 'var(--success)', fontWeight: 700, fontSize: 15 }}>
             Trade accepted!
           </span>
@@ -1063,9 +1060,7 @@ function ProposeTab(props: {
                               {p.scouted.exact
                                 ? <OverallStars value={p.overall} />
                                 : (
-                                  <span style={{ opacity: 0.6 }} title="Fog-of-war estimate">
-                                    <OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} />
-                                  </span>
+                                  <OverallStars value={p.overall} lo={p.scouted.overallLo} hi={p.scouted.overallHi} />
                                 )}
                             </span>
                           )}
@@ -1503,9 +1498,7 @@ function BlockCard(props: {
           </button>
           {r.overall !== undefined && (
             r.scouted && !r.scouted.exact
-              ? <span style={{ opacity: 0.6 }} title="Your scouts are still working on him">
-                  <OverallStars value={Math.round((r.scouted.overallLo + r.scouted.overallHi) / 2)} />
-                </span>
+              ? <OverallStars value={r.overall} lo={r.scouted.overallLo} hi={r.scouted.overallHi} />
               : <OverallStars value={r.overall} />
           )}
           {isYours && (

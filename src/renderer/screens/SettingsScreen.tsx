@@ -3,7 +3,7 @@
  * writer model selection, and feature toggles.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Check, Newspaper } from 'lucide-react'
+import { Icons } from '../components/icons'
 import { Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { getPressSettings, setPressSettings } from '../lib/press'
@@ -140,7 +140,7 @@ export function SettingsScreen(): JSX.Element {
               >
                 <span style={{ width: 14, height: 14, borderRadius: 4, background: opt.swatch, boxShadow: '0 0 0 1px rgba(0,0,0,0.3)' }} />
                 {opt.label}
-                {active && <Icon size={14} color="var(--violet-h)"><Check /></Icon>}
+                {active && <Icon size={14} color="var(--violet-h)"><Icons.Tick /></Icon>}
               </button>
             )
           })}
@@ -151,7 +151,7 @@ export function SettingsScreen(): JSX.Element {
       <Panel>
         <div className="stack">
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-2)' }}>
-            <Icon size={18} color="var(--violet-h)"><Newspaper /></Icon>
+            <Icon size={18} color="var(--violet-h)"><Icons.News /></Icon>
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Press Pass</div>
               <div className="muted small">AI-written articles from the press corps — bring your own Anthropic API key.</div>

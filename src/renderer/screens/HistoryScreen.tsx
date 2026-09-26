@@ -1,9 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ComponentType } from 'react'
-import {
-  Trophy, Medal, Star, Flame, Shield, ShieldCheck, Sparkles, Landmark,
-  type LucideProps,
-} from 'lucide-react'
+import type { AppIcon } from '../components/icons'
 import type { HistoryView } from '../../worker/protocol'
 import type { FranchiseHistoryView } from '@engine/career/views'
 import type { AwardRecord, LegendRecord, RecordEntry, SeasonArchive } from '@engine/story/records'
@@ -89,7 +85,7 @@ export function HistoryScreen(): JSX.Element {
         style={{ borderBottom: `1px solid ${GOLD_BORDER}`, paddingBottom: 'var(--sp-3)' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-          <Icon size={24} color="var(--amber)"><Trophy /></Icon>
+          <Icon size={24} color="var(--amber)"><Icons.Trophy /></Icon>
           <div>
             <h1
               className="screen-title"
@@ -397,7 +393,7 @@ function SeasonRow(props: { season: SeasonArchive }): JSX.Element {
       <td>
         {season.championName ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon size={14} color="var(--amber)"><Trophy /></Icon>
+            <Icon size={14} color="var(--amber)"><Icons.Trophy /></Icon>
             <span style={{ color: GOLD, fontWeight: 600 }}>{season.championName}</span>
           </span>
         ) : (
@@ -409,7 +405,7 @@ function SeasonRow(props: { season: SeasonArchive }): JSX.Element {
       <td>
         {season.presidentsTeamName ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon size={14} color="var(--cyan)"><Medal /></Icon>
+            <Icon size={14} color="var(--cyan)"><Icons.Award /></Icon>
             <span style={{ color: 'var(--cyan)', fontSize: 12 }}>{season.presidentsTeamName}</span>
           </span>
         ) : (
@@ -461,17 +457,17 @@ function LeaderCell(props: { entry: RecordEntry | null }): JSX.Element {
    AWARDS TAB
    ═══════════════════════════════════════════════════════════════ */
 
-const AWARD_ICONS: Record<string, ComponentType<LucideProps>> = {
-  MVP:           Star,
-  'Top Scorer':  Flame,
-  'Best Goalie': Shield,
-  'Top Rookie':  Sparkles,
-  'Best Defender': ShieldCheck,
-  Champion:      Trophy,
+const AWARD_ICONS: Record<string, AppIcon> = {
+  MVP:           Icons.Star,
+  'Top Scorer':  Icons.Hot,
+  'Best Goalie': Icons.Shield,
+  'Top Rookie':  Icons.Sparkle,
+  'Best Defender': Icons.Health,
+  Champion:      Icons.Trophy,
 }
 
-function awardIcon(award: string): ComponentType<LucideProps> {
-  return AWARD_ICONS[award] ?? Medal
+function awardIcon(award: string): AppIcon {
+  return AWARD_ICONS[award] ?? Icons.Award
 }
 
 function AwardsTab(props: { awards: AwardRecord[] }): JSX.Element {
@@ -617,7 +613,7 @@ function LegendsTab(props: { legends: LegendRecord[] }): JSX.Element {
             letterSpacing: 0.8,
           }}
         >
-          <Icon size={14}><Landmark /></Icon>
+          <Icon size={14}><Icons.Board /></Icon>
           <span>{hofCount} Hall of Fame inductee{hofCount !== 1 ? 's' : ''}</span>
         </div>
       )}
@@ -699,7 +695,7 @@ function LegendCard(props: { legend: LegendRecord }): JSX.Element {
               flexShrink: 0,
             }}
           >
-            <Icon size={14}><Landmark /></Icon> HoF
+            <Icon size={14}><Icons.Board /></Icon> HoF
           </span>
         )}
       </div>

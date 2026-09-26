@@ -6,6 +6,7 @@
  * younger talent that's on the radar but not yet draft-eligible.
  */
 import { useMemo, useState } from 'react'
+import { PotentialStars, StarRating } from '../components/Stars'
 import type { DraftRankRowView, DraftRankingsView, ScoutBoardRowView } from '../../engine/career/views'
 import { PlayerLink, TeamLink } from '../components/NavContext'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
@@ -64,15 +65,8 @@ const PHASE_BLURB: Record<DraftRankingsView['phase'], string> = {
   final: 'The final pre-draft consensus, weighting production and readiness.',
 }
 
-function Stars({ value }: { value: number }): JSX.Element {
-  const full = Math.floor(value)
-  const half = value - full >= 0.5
-  return (
-    <span title={`${value}/5`} style={{ color: 'var(--accent2, #e0b341)', whiteSpace: 'nowrap' }}>
-      {'★'.repeat(full)}{half ? '½' : ''}
-      <span style={{ color: 'var(--line)' }}>{'★'.repeat(5 - full - (half ? 1 : 0))}</span>
-    </span>
-  )
+function Stars({ value, potential }: { value: number; potential?: boolean }): JSX.Element {
+  return potential ? <PotentialStars stars={value} /> : <StarRating value={value} />
 }
 
 export function DraftRankingsScreen(): JSX.Element {
@@ -232,7 +226,7 @@ export function DraftRankingsScreen(): JSX.Element {
                   <td className="muted">{p.nation}</td>
                   <td className="muted">{p.leagueAbbr}</td>
                   <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
-                  <td><Stars value={p.potentialStars} /></td>
+                  <td><Stars value={p.potentialStars} potential /></td>
                 </tr>
               ))}
             </tbody>
@@ -331,7 +325,7 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
               <td className="muted" title={p.teamName || p.teamAbbr}><TeamLink teamId={p.teamId} name={p.teamName || p.teamAbbr} /></td>
               <td>
                 {p.seen
-                  ? <Stars value={p.potentialStars} />
+                  ? <Stars value={p.potentialStars} potential />
                   : <span className="muted" style={{ fontSize: 11 }} title="Nobody in your building has watched him — there is no read to show">no read</span>}
               </td>
             </tr>

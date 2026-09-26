@@ -1,29 +1,15 @@
 import { useMemo, useState } from 'react'
-import { Check, Dices } from 'lucide-react'
+import { Icons } from '../components/icons'
 import type { DraftView, TentpoleView } from '../../worker/protocol'
 import type { CombineRowView, DraftAdviceView, DraftPickRowView, ProspectRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
-import { OverallStars } from '../components/Stars'
+import { OverallStars, PotentialStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
-
-// ─── potential stars ───────────────────────────────────────────────────────────
-
-function PotentialStars(props: { stars: number }): JSX.Element {
-  return (
-    <span style={{ color: 'var(--accent2)', letterSpacing: 1, fontSize: 13 }}>
-      {Array.from({ length: 5 }, (_, i) => (
-        <span key={i} style={{ opacity: i < props.stars ? 1 : 0.2 }}>
-          ★
-        </span>
-      ))}
-    </span>
-  )
-}
 
 // ─── draft board ──────────────────────────────────────────────────────────────
 
@@ -212,7 +198,7 @@ function BestAvailable(props: {
                 </td>
                 <td className="num">
                   {p.scouted && !p.scouted.exact
-                    ? <span style={{ opacity: 0.6 }} title="Fog-of-war estimate"><OverallStars value={Math.round((p.scouted.overallLo + p.scouted.overallHi) / 2)} /></span>
+                    ? <OverallStars value={p.overall} lo={p.scouted.overallLo} hi={p.scouted.overallHi} />
                     : <OverallStars value={p.overall} />}
                 </td>
                 <td>
@@ -283,7 +269,7 @@ function ClockStrip(props: { data: DraftView }): JSX.Element {
           fontWeight: 700,
         }}
       >
-        <Icon size={14}><Check /></Icon> {data.year} Draft complete
+        <Icon size={14}><Icons.Tick /></Icon> {data.year} Draft complete
       </div>
     )
   }
@@ -354,7 +340,7 @@ function LotteryBanner(props: { lottery: NonNullable<TentpoleView['lottery']> })
       }}
     >
       <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-        <Icon size={18} color="var(--amber)"><Dices /></Icon>
+        <Icon size={18} color="var(--amber)"><Icons.Dice /></Icon>
         <span
           style={{
             fontWeight: 700,

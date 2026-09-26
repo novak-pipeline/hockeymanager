@@ -24,8 +24,11 @@ and `src/renderer/components/`.
 `Meter` (animated fill), `Sparkline` (dependency-free SVG).
 
 ### Icon system (`src/renderer/components/icons.tsx`)
-Semantic vocabulary over `lucide-react` — `Icons.*` and `CategoryIcon` / `categoryColor`
-for news categories. Screens never import raw lucide names or use emoji-as-iconography.
+Semantic vocabulary over `@phosphor-icons/react` — `Icons.*` and `CategoryIcon` / `categoryColor`
+for news categories. Screens never import Phosphor directly or use emoji-as-iconography.
+Content icons are **duotone**, chrome (chevrons/ticks/close) **bold**, the nav rail
+duotone at rest and **fill** when active. Full mapping: `docs/graphics/UI-POLISH.md`.
+(Replaced lucide-react 2026-09 — the GM judged the thin outline set "worse than emojis".)
 
 ### Motion layer (`index.css`)
 Keyframe utilities (`.anim-fade/rise/scale/pop`, `.stagger`), `.skeleton` shimmer,
@@ -39,13 +42,12 @@ Both pure-JS, no native postinstall, pinned to an EXACT version, installed with
 
 | Package | Version | Purpose |
 |---|---|---|
-| `lucide-react` | `1.24.0` | SVG icon set (replaces emoji iconography) |
+| `@phosphor-icons/react` | `2.1.10` | SVG icon set, 6 weights (replaced `lucide-react` 1.24.0, since removed) |
 | `framer-motion` | `12.42.2` | animation/transition primitives |
 
 Notes:
-- lucide-react ships types via the legacy `typings` field with no `exports` map, which
-  TS "Bundler" resolution misses. A type shim at `src/renderer/types/lucide-react.d.ts`
-  redirects the bare import to the real declaration file (no tsconfig change).
+- Phosphor is imported per icon (`@phosphor-icons/react/dist/csr/<Name>`), never via
+  the barrel, which would pull ~1,500 components into the dev server and vitest graph.
 - The install raced against a timed-out first attempt (Windows `EPERM`/`ENOTEMPTY` during
   npm cleanup); packages extracted fully but `package.json` wasn't written, so the two
   deps were added to `package.json` by hand. **`package-lock.json` may need one

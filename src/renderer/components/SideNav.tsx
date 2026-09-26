@@ -29,7 +29,7 @@ export function SideNav(props: { dashboard: DashboardView | null }): JSX.Element
                 onClick={() => nav.navigate(item.screen)}
                 title={item.label}
               >
-                <NavIcon name={item.icon} />
+                <NavIcon name={item.icon} active={active} />
                 <span className="sidebar-label">{item.label}</span>
                 {item.badge === 'unread' && unread > 0 && (
                   <span className="sidebar-badge">{unread > 9 ? '9+' : unread}</span>

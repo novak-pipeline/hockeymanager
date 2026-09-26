@@ -7,6 +7,7 @@
  * the GM hire and release scouts.
  */
 import { useEffect, useRef, useState } from 'react'
+import { PotentialStars, StarRating } from '../components/Stars'
 import type { ScoutingView, WorkerResponse } from '../../worker/protocol'
 import type {
   ScoutCardView, ScoutCoverageRow, ScoutFindView, ScoutingBriefingView,
@@ -20,7 +21,7 @@ import { FlagIcon } from '../components/FlagIcon'
 import { ScoutGlobe, type GlobeNation } from '../components/ScoutGlobe'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
-import type { LucideIcon } from 'lucide-react'
+import type { AppIcon } from '../components/icons'
 import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
@@ -411,16 +412,12 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
   )
 }
 
-/** Fog-aware star cell: a dash where the department has no read to give. */
+/** Fog-aware star cell: dashed "?" stars where the department has no read to give. */
 function ReadStars({ value, accent }: { value: number | null; accent?: boolean }): JSX.Element {
   if (value === null) {
-    return <span className="muted" style={{ fontSize: 11 }} title="Your scouts have not seen enough of him to hold an opinion">—</span>
+    return <StarRating value={0} unknown kind={accent ? 'potential' : 'ability'} title="Your scouts have not seen enough of him to hold an opinion" />
   }
-  return (
-    <span style={{ color: accent ? 'var(--accent, #f5b301)' : 'var(--muted)', letterSpacing: 1, fontSize: 12 }}>
-      {stars5(value) || '–'}
-    </span>
-  )
+  return accent ? <PotentialStars stars={value} /> : <StarRating value={value} />
 }
 
 /**
@@ -442,7 +439,7 @@ function WatchListPanel({ data, onUnwatch, onNote }: {
           <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Milestone /></Icon></div>
           <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 4 }}>Nobody on it yet — and that is the point.</div>
           Right-click any player in the game and choose <b>Watch this player</b>, or hit
-          <b> ☆ Watch</b> on his profile. A pin is an instruction, not a bookmark: your scouts
+          <b> Watch</b> on his profile. A pin is an instruction, not a bookmark: your scouts
           give watched players the front of their day whatever their brief says, and a watched
           man's file never goes stale. That bandwidth comes out of your regional coverage, so
           pin the names you actually intend to act on.
@@ -591,8 +588,8 @@ function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
-        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(find.currentStars) || '–'}</div></div>
-        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(find.potentialStars) || '–'}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div><StarRating value={find.currentStars} /></div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div><PotentialStars stars={find.potentialStars} /></div></div>
       </div>
       <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{find.reason}</div>
       {find.fitNotes && find.fitNotes.length > 0 && (
@@ -684,8 +681,8 @@ function ReportCard({ find }: { find: ScoutFindView }): JSX.Element {
           <div style={{ fontWeight: 900, fontSize: 30, color, lineHeight: 1 }} title={`The scout's grade — his reasons are spelled out below`}>{f.grade}</div>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-5)', margin: '10px 0' }}>
-          <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div style={{ color: 'var(--muted)', letterSpacing: 1 }}>{stars5(f.currentStars) || '–'}</div></div>
-          <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div style={{ color: 'var(--accent, #f5b301)', letterSpacing: 1 }}>{stars5(f.potentialStars) || '–'}</div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div><StarRating value={f.currentStars} /></div></div>
+          <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div><PotentialStars stars={f.potentialStars} /></div></div>
           <div><div className="muted" style={{ fontSize: 10 }}>KNOWLEDGE</div><div style={{ fontWeight: 700 }}>{f.knowledge}%</div></div>
         </div>
         <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>{f.reason}</div>
@@ -1255,7 +1252,8 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
                           className="btn btn-ghost btn-sm" style={{ padding: '0 5px', color: r.watched ? 'var(--accent, #f5b301)' : 'var(--muted)' }}
                           title={r.watched ? 'On your watch list — click to remove' : 'Add to your watch list'}
                           onClick={() => onToggleWatch(r.playerId)}
-                        >{r.watched ? '★' : '☆'}</button>
+                         aria-label={r.watched ? 'Remove from watch list' : 'Add to watch list'}
+                        ><Icon size={16}>{r.watched ? <Icons.Watch weight="fill" /> : <Icons.Watch />}</Icon></button>
                       </td>
                       <td>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -1291,7 +1289,7 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
               <span className="muted small">Page {page + 1} of {pages}</span>
               <button type="button" className="btn btn-sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Next →</button>
               <span className="muted small" style={{ marginLeft: 'auto' }}>
-                ☆ pins him to your watch list · <b>Scout ▾</b> sends a named scout at him · right-click for the full menu.
+                The eye pins him to your watch list · <b>Scout ▾</b> sends a named scout at him · right-click for the full menu.
               </span>
             </div>
           </>
@@ -1333,7 +1331,7 @@ function ScoutPickerCell({ playerId, scouts, onPick }: {
 interface FocusDef {
   key: string
   target: ScoutTarget
-  icon: LucideIcon
+  icon: AppIcon
   label: string
   desc: string
   /** Nation the focus maps to (drives specialist fit), if any. */
