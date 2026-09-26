@@ -179,6 +179,12 @@ if (!args.has('--stems')) {
   }
 }
 
+// Real names stay out of git (fictional-by-default DB rule): the sample list goes
+// next to the gitignored sample audio, not into the committed manifest.
+if (manifest.sampleNames) {
+  writeFileSync(join(OUT, 'samples', 'index.json'), JSON.stringify(manifest.sampleNames, null, 2) + '\n')
+  delete manifest.sampleNames
+}
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 const ratio = audioSec / (synthMs / 1000)
 console.log(`[booth] done: ${audioSec.toFixed(1)}s of audio in ${(synthMs / 1000).toFixed(1)}s (${ratio.toFixed(2)}× realtime)`)

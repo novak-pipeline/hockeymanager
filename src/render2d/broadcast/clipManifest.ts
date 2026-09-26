@@ -31,6 +31,7 @@ export interface ClipManifest {
   format: 'wav' | 'ogg' | 'mp3'
   clips: Record<string, ClipManifestEntry>
   /** Proof-of-concept name clips rendered with the stems (not used at runtime). */
+  /** Written to samples/index.json (gitignored), never the committed manifest. */
   sampleNames?: Array<{ playerName: string; spoken: string; files: Record<string, string> }>
 }
 
