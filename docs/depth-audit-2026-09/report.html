@@ -260,6 +260,30 @@ footer{margin-top:60px;padding-top:14px;border-top:1px solid var(--line);font-si
     <div class="epics">
       <div class="epic"><span class="t">Renew the world</span><span class="pill">M – L</span><span class="d">Yearly youth intake with per-nation names and quality, junior age-out, world-league playoffs, champions and archived seasons. Without this, the real-roster import turns into a generic world after about three drafts.</span></div>
       <div class="epic"><span class="t">AI clubs as characters</span><span class="pill">M</span><span class="d">GM personas drive AI trades, free agency, drafting and re-signing. AI scouting departments with blind spots. Offseason and hockey trades, AI GM firings, contenders loading up to beat the leader, and AI players who want out.</span></div>
+      <div class="epic"><span class="t">World Juniors and best-on-best</span><span class="pill own">you asked</span><span class="d">Every December and January your prospects, and everyone else's, play for their countries. Draft stock swings, scouts converge on the tournament, a golden goal becomes a story, and injuries happen that you can't control. Olympics and 4 Nations years pull stars away mid-season. This makes scouting and youth a world stage, not just a view of your own club.</span></div>
+      <div class="epic"><span class="t">Hockey soul</span><span class="pill own">you asked</span><span class="d">Things only this sport has:
+        <ul class="tight">
+          <li>Expansion drafts with protection lists, and rare relocations.</li>
+          <li>Outdoor games.</li>
+          <li>Cup traditions: beards, the handshake line, the Conn Smythe, each player's day with the Cup.</li>
+          <li>The CHL, NCAA and Europe pathway battle, plus the "Russian factor".</li>
+          <li>Revenge games.</li>
+          <li>Line nicknames when chemistry clicks.</li>
+          <li>Goalie volatility and crease confidence.</li>
+          <li>The code: answering a dirty hit, Player Safety hearings.</li>
+          <li>The emergency backup goalie.</li>
+          <li>Market pressure scaled by city.</li>
+          <li>Grey-area cap moves like the LTIR playoff trick, with backlash.</li>
+        </ul></span></div>
+      <div class="epic"><span class="t">Borrowed from the greats</span><span class="pill own">you asked</span><span class="d">
+        <ul class="tight">
+          <li>Nemesis rivals: GMs and players with history (Shadow of Mordor).</li>
+          <li>A storyteller that paces drama across the season (RimWorld).</li>
+          <li>Events that leave lasting traits on people, like "clutch" after an OT winner (Wildermyth).</li>
+          <li>A browsable almanac with Hall of Fame ballots (OOTP).</li>
+          <li>Legacy players and dynasties (Crusader Kings).</li>
+          <li>Decisions made during the game at intermissions (Motorsport Manager).</li>
+        </ul></span></div>
       <div class="epic"><span class="t">The league as storyteller</span><span class="pill">M</span><span class="d">Dynasty, drought and hangover detectors, trade retrospectives, people events in the chronicle (trade requests, feuds, captaincy), and pundit relationships that actually tilt coverage and board mood.</span></div>
     </div>
   </div>
@@ -284,16 +308,30 @@ footer{margin-top:60px;padding-top:14px;border-top:1px solid var(--line);font-si
     <div class="dec"><div class="s ok">Settled</div><div class="q">Fun outweighs realism</div><p>Realism serves the fun. Penalties only for exploit patterns, always telegraphed, forgiving, never a lockout.</p></div>
     <div class="dec"><div class="s ok">Settled</div><div class="q">No "click here for event"</div><p>Continue always advances. Real moments open on their own; everything else goes to the briefing or inbox.</p></div>
     <div class="dec"><div class="s ok">Settled</div><div class="q">The board at three moments</div><p>Preseason expectations, the deadline checkpoint, the season verdict. Its mood is a line of prose in between.</p></div>
-    <div class="dec"><div class="s ask">Your call</div><div class="q">Voice off by default for 1.0?</div><p>Recommended. It runs slower than real time on your machine and can't keep voices consistent. The code stays behind a flag, and pre-rendered lines for tentpole moments are possible later.</p></div>
-    <div class="dec"><div class="s ask">Your call</div><div class="q">AI writer off by default too?</div><p>Recommended. Given thin facts it writes lines like "I'm glad the GM heard me", and authored, context-varied lines do better at no cost. If the model returns later, it should be to understand what you type to characters, not to decorate cards.</p></div>
-    <div class="dec"><div class="s ask">Your call</div><div class="q">Lift the "no new mechanics" rule</div><p>Phase 1 adds real state (a happiness ledger, trust, a development ledger). That breaks the narrative doc's non-goal, and the new state is what the depth needs.</p></div>
-    <div class="dec"><div class="s ask">Your call</div><div class="q">Bring main up to date</div><p>main is 140 commits behind improve-loop, which gave one agent a stale copy. I'd fast-forward it after today's merges are green.</p></div>
+    <div class="dec"><div class="s ok">Approved · done</div><div class="q">Voice off by default for 1.0</div><p>Recommended. It runs slower than real time on your machine and can't keep voices consistent. The code stays behind a flag, and pre-rendered lines for tentpole moments are possible later.</p></div>
+    <div class="dec"><div class="s ok">Approved · done</div><div class="q">AI writer off by default</div><p>Recommended. Given thin facts it writes lines like "I'm glad the GM heard me", and authored, context-varied lines do better at no cost. If the model returns later, it should be to understand what you type to characters, not to decorate cards.</p></div>
+    <div class="dec"><div class="s ok">Approved · done</div><div class="q">"No new mechanics" rule lifted</div><p>Phase 1 adds real state (a happiness ledger, trust, a development ledger). That breaks the narrative doc's non-goal, and the new state is what the depth needs.</p></div>
+    <div class="dec"><div class="s ok">Approved · after merges</div><div class="q">Bring main up to date</div><p>main is 140 commits behind improve-loop, which gave one agent a stale copy. I'd fast-forward it after today's merges are green.</p></div>
   </div>
 </section>
 
 <section>
   <div class="sec-head">
-    <div class="eyebrow">06 · How we'll know</div>
+    <div class="eyebrow">06 · Outside inspiration</div>
+    <h2>What other manager games teach</h2>
+    <p>These are design lessons only, no code. openfootmanager is GPL and FMMLoader is non-commercial, so we take ideas, not code.</p>
+  </div>
+  <div class="decisions">
+    <div class="dec"><div class="q">The Kevin Toms test</div><p>The 1982 original sold half a million copies with two numbers per player. Every week you made a decision, saw the result, and felt the consequence. Every week of The Show should pass that test.</p></div>
+    <div class="dec"><div class="q">A depth dial</div><p>"The world is data you author, and the depth is a dial you set" (openfootmanager). Extend Relaxed, Standard and Hardcore into how much you manage yourself and how much you delegate.</p></div>
+    <div class="dec"><div class="q">What FM players build for themselves</div><p>FMSuperScout adds growth-since-snapshot charts, squad succession by position, role ratings, a 3-way compare, an intake radar and shareable cards. That's close to a checklist for Phases 1 and 2.</p></div>
+    <div class="dec"><div class="q">A built-in mod manager</div><p>FM needs a separate tool (FMMLoader) to install mods safely. Ours can be in the game: drag and drop, restore points, profiles for rosters, facepacks and logos.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">07 · How we'll know</div>
     <h2>Measured gates, not feel</h2>
     <p>The autopilot and the loop harness already exist. Each phase closes against numbers.</p>
   </div>
