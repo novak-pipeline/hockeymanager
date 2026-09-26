@@ -326,6 +326,7 @@ Output locations:
   not copied): `src/renderer/public/commentary/samples/`
   - `<name>.surname.neutral.wav` and `<name>.surname.excited.wav`: both intonations
   - `<name>.full.neutral.wav`: the introduction form
+  - `samples/index.json`: which player each file is (gitignored, since it contains real names)
   - `<name>.demo.goal.wav` ("Kaprizov! … shoots, and scores!") and
     `<name>.demo.save.wav` ("Big save, … Kaprizov!"): stitched exactly as the
     scheduler plays them
